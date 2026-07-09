@@ -70,8 +70,14 @@ run_selftest_x3() {
     port="$((8900 + i + ($$ % 50)))"
     ok=true
     MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$session" MOSH_SERVICE_PORT="$port" "$BIN" --selftest >"$log" 2>&1 || ok=false
-    n="$(grep -Eo '[0-9]+ checks passed, [0-9]+ failed' "$log" | tail -1 | grep -Eo '^[0-9]+' || printf -- '-1')"
-    failed="$(grep -Eo '[0-9]+ checks passed, [0-9]+ failed' "$log" | tail -1 | grep -Eo '[0-9]+ failed' | grep -Eo '^[0-9]+' || printf -- '-1')"
+    summary="$(grep -Eo '([0-9]+/)?[0-9]+ checks passed, [0-9]+ failed' "$log" | tail -1 || true)"
+    if [[ "$summary" =~ ^([0-9]+/)?([0-9]+)[[:space:]]checks[[:space:]]passed,[[:space:]]([0-9]+)[[:space:]]failed$ ]]; then
+      n="${BASH_REMATCH[2]}"
+      failed="${BASH_REMATCH[3]}"
+    else
+      n="-1"
+      failed="-1"
+    fi
     asserts="$(grep -c 'JUCE Assertion' "$log" 2>/dev/null || true)"
     [[ "$ok" == true && "$failed" == "0" && "$asserts" == "0" && "$n" != "-1" ]] || all_ok=false
     rows+=("$(jq -nc --argjson run "$i" --argjson ok "$ok" --argjson checks "$n" --argjson failed "$failed" --argjson asserts "${asserts:-0}" --arg log "$(safe_tail "$log" 900)" '{run:$run, ok:$ok, checks:$checks, failed:$failed, asserts:$asserts, log:$log}')")

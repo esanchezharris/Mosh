@@ -4446,6 +4446,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
+        mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");
         mosh::setEnvVar ("DEEPSEEK_BASE_URL", "https://api.deepseek.test");
         mosh::setEnvVar ("DEEPSEEK_MODEL", "deepseek-test");
         mosh::setEnvVar ("DEEPSEEK_API_KEY", "sk-test-deepseek");
@@ -4483,6 +4484,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto noProv = BrainProxy::chat (var (Array<var>{}), juce::String());
         check (! (bool) noProv.getProperty ("ok", true),
                "brain: chat() with no provider returns { ok:false } (no crash, no network)");
+        mosh::unsetEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG");
 
         // Native speech: probe availability + lifecycle without requesting permission.
        #if JUCE_MAC
