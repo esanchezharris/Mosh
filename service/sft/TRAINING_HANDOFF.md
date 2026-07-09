@@ -10,11 +10,13 @@ Everything lives under `service/sft/`. The mix is `s2-mix-v4` (§P8, 12,889 rows
 ## Check status (safe, read-only)
 ```sh
 cd <repo>/service/sft
-echo "done: $(cat .adapters/a3b-r4.done)/12889"          # cumulative iters
-pgrep -fl "mlx_lm lora" >/dev/null && echo "training ALIVE" || echo "training not running"
-kill -0 $(cat .adapters/a3b-r4.watchdog.pid) 2>/dev/null && echo "watchdog ALIVE" || echo "watchdog DOWN"
-tail -3 .adapters/a3b-r4.train.log | tr '\r' '\n' | grep -v Calculating   # latest iter/val
+./monitor-r4.sh
 ```
+
+`monitor-r4.sh` is the canonical thread-safe status surface. It always reads the live
+runtime path in the detached worktree, reports `done/12889`, training + watchdog
+liveness, the latest train/val line, gate status, and the action required. It is
+read-only while the run is in flight.
 
 ## Working alongside it (Codex or any agent) — the ONE rule
 The Mac runs **one MLX GPU job at a time**: this training owns the GPU + port 8080.
@@ -48,16 +50,20 @@ rm -f ~/Library/LaunchAgents/com.mosh.r4-watchdog.plist
 Boot-resume log: `/tmp/watchdog-r4-boot.log` (+ `/tmp/com.mosh.r4-watchdog.{out,err}`).
 
 ## When training COMPLETES (`.done` = 12889, watchdog logs "COMPLETE")
-Run the gate read. It's the **same procedure as `service/sft/GATE_READ_r3.md`**, with
-`a3b-r3` → `a3b-r4` everywhere (adapter `.adapters/a3b-r4`, fused `.fused/a3b-r4`). In
-short: fuse → shard-4 weight-check (shard4 ≠ base, shard1 = base) → serve the FUSED dir
-+ identity probe → run §C (frozen300) + §A (evalA, apply the amendment exclusions:
-mock-broken `build_skeleton_from_clip`/`sketch_beatbox` + raw-`\b1\d{3}\b`-id utterances)
-+ §B (`evalV2Grounded.mts --model <fused-path> --no-think` — the `--model` flag is
-REQUIRED or it hits the cloud). Gate (§P8): agg §A+§C ≥0.75 · floor ≥0.5 measurable ·
-§B ≥85%. **Expectations:** `split_clip` should now clear (the offset fix); `set_render_param`
-is a best-effort n=1 item that may stay a named exception — report honestly, don't spin.
-Record the result in `docs/bench/PROGRAM_STAGE1_2026-07.md` §R.
+`monitor-r4.sh` auto-hands off to `run-gate-r4.sh` the first time it sees completion
+with no live MLX process and no completed gate status. You can also invoke it directly:
+```sh
+cd <repo>/service/sft
+./run-gate-r4.sh
+```
+
+The explicit runbook is `service/sft/GATE_READ_r4.md`. It fuses the adapter,
+weight-checks the fused shards, serves the fused dir, runs §C + §A + §B, and records
+status in `.adapters/a3b-r4.gate.status` plus the raw log in
+`.adapters/a3b-r4.gate.log`. Gate (§P8): agg §A+§C ≥0.75 · floor ≥0.5 measurable ·
+§B ≥85%. **Expectations:** `split_clip` should now clear (the offset fix);
+`set_render_param` is a best-effort n=1 item that may stay a named exception — report
+honestly, don't spin. Record the result in `docs/bench/PROGRAM_STAGE1_2026-07.md` §R.
 
 ## If it crashes repeatedly (watchdog log shows many "crash #N")
 The recipe is fine (r3 ran it clean). Frequent OOMs = heavy concurrent GPU use — close
