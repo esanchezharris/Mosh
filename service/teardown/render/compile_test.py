@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Golden + contract test for the §9 Recipe→MoshOps compiler.
 
-stdlib + pydantic only, no engine:  python3 service/teardown/render/compile_test.py
+stdlib + pydantic + numpy only, no engine:  python3 service/teardown/render/compile_test.py
 (exit 0 = all pass). Asserts the exact emitted command list for a representative
 Recipe (the golden), the engine-deferred `unresolved` entries, key/sig parsing, the
 drum-vs-audio track-type rule, graceful empty/partial handling, and determinism x3.
