@@ -12,12 +12,17 @@
 # `--unidiff-zero` keeps one-line dependency patches possible without embedding
 # whitespace-only context lines that make `git diff --check` fail in this repo.
 
-if(DEFINED PATCHES)
+if(DEFINED PATCH_MANIFEST)
+    if(NOT EXISTS "${PATCH_MANIFEST}")
+        message(FATAL_ERROR "apply-tracktion-patch.cmake: PATCH_MANIFEST does not exist: ${PATCH_MANIFEST}")
+    endif()
+    file(STRINGS "${PATCH_MANIFEST}" patches)
+elseif(DEFINED PATCHES)
     set(patches ${PATCHES})
 elseif(DEFINED PATCH)
     set(patches ${PATCH})
 else()
-    message(FATAL_ERROR "apply-tracktion-patch.cmake: -DPATCHES=<files> is required")
+    message(FATAL_ERROR "apply-tracktion-patch.cmake: -DPATCH_MANIFEST=<file> or -DPATCHES=<files> is required")
 endif()
 
 find_package(Git REQUIRED)

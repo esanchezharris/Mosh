@@ -24,6 +24,11 @@ set(MOSH_TRACKTION_PATCHES
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0001-tracktion-createNewItemID-scan-all-caches.patch"
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0002-juce-headless-vst3-adopt-description-scan-host.patch"
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0003-tracktion-parameter-set-without-nested-undo.patch")
+set(MOSH_TRACKTION_PATCH_MANIFEST "${CMAKE_BINARY_DIR}/mosh-tracktion-patches.txt")
+file(WRITE "${MOSH_TRACKTION_PATCH_MANIFEST}" "")
+foreach(patch IN LISTS MOSH_TRACKTION_PATCHES)
+    file(APPEND "${MOSH_TRACKTION_PATCH_MANIFEST}" "${patch}\n")
+endforeach()
 FetchContent_Declare(tracktion_engine
     GIT_REPOSITORY      https://github.com/Tracktion/tracktion_engine.git
     GIT_TAG             2877b621f2fbee564d0696a616b86bf8ba8c8ab0
@@ -34,7 +39,7 @@ FetchContent_Declare(tracktion_engine
     # git (reverse-check to skip when already applied, else apply). Runs in the
     # tracktion source dir on a fresh fetch. Replaces a `bash -c "git apply ..."`,
     # which broke on Windows where bash resolves to WSL and cannot open a C:/ path.
-    PATCH_COMMAND       ${CMAKE_COMMAND} "-DPATCHES=${MOSH_TRACKTION_PATCHES}" -P ${CMAKE_CURRENT_LIST_DIR}/apply-tracktion-patch.cmake)
+    PATCH_COMMAND       ${CMAKE_COMMAND} "-DPATCH_MANIFEST=${MOSH_TRACKTION_PATCH_MANIFEST}" -P ${CMAKE_CURRENT_LIST_DIR}/apply-tracktion-patch.cmake)
 FetchContent_MakeAvailable(tracktion_engine)
 
 # ── Catch2 (tests) ──────────────────────────────────────────────────────────
