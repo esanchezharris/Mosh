@@ -13,10 +13,12 @@
 //
 //   cd ui && npx tsx scripts/assembleMix.mts --base ../service/sft/.sft-data/s1-bt \
 //     [--synth ../service/sft/.sft-data/synth] [--out ../service/sft/.sft-data/s2-mix] \
+//     [--assist ../service/sft/assist_demonstrations.jsonl] \
+//     [--evaluator-sidecar ../service/sft/.sft-data/s2-mix/evaluator_sidecar.jsonl] \
 //     [--cap 2000] [--seed 1]
 
 import { createHash } from "node:crypto";
-import { appendFileSync, copyFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { isHuhRow, isPopulateClassRow, oversampleRare, rowCommandNames, seededSample, type ChatRow } from "../src/sft/mixAssembly";
@@ -25,6 +27,10 @@ import { argFlag } from "./lib/realEngine.mts";
 const base = resolve(argFlag("base") ?? join("..", "service", "sft", ".sft-data", "s1-bt"));
 const synthDir = resolve(argFlag("synth") ?? join("..", "service", "sft", ".sft-data", "synth"));
 const outDir = resolve(argFlag("out") ?? join("..", "service", "sft", ".sft-data", "s2-mix"));
+const assistArg = argFlag("assist");
+const assistPath = assistArg ? resolve(assistArg) : undefined;
+const evaluatorSidecarArg = argFlag("evaluator-sidecar");
+const evaluatorSidecar = evaluatorSidecarArg ? resolve(evaluatorSidecarArg) : undefined;
 const cap = Number(argFlag("cap", "2000"));
 // Post-dedupe HUH cap (defensive; r1's real HUH level was ~1.1% post-dedupe).
 const huhCap = Number(argFlag("huh-cap", "900"));
@@ -44,6 +50,7 @@ const huhLines: string[] = [];
 const perCommand: Record<string, number> = {};
 const sources: Record<string, number> = {};
 let input = 0, deduped = 0, written = 0;
+let assistRowsSeen = 0, assistRowsWritten = 0;
 let buffer: string[] = [];
 
 function flush(): void {
@@ -71,6 +78,25 @@ async function ingest(path: string, label: string): Promise<void> {
     if (buffer.length >= 5000) flush();
   }
   sources[label] = n;
+}
+
+async function ingestAssist(path: string): Promise<void> {
+  let n = 0;
+  let kept = 0;
+  const rl = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    input++; n++; assistRowsSeen++;
+    const h = createHash("sha256").update(line).digest("hex");
+    if (seen.has(h)) { deduped++; continue; }
+    seen.add(h);
+    countRow(JSON.parse(line) as ChatRow);
+    buffer.push(line);
+    written++; kept++; assistRowsWritten++;
+    if (buffer.length >= 5000) flush();
+  }
+  sources[`assist/${basename(path)}`] = n;
+  console.log(`assist demos: ${n} in -> ${kept} train row(s)`);
 }
 
 await ingest(join(base, "train.jsonl"), join(basename(base), "train.jsonl"));
@@ -109,6 +135,12 @@ if (osFactor > 1) {
   console.log(`oversampled ${k} rare-command rows ×${osFactor} (+${extraLines.length} rows) across ${Object.keys(boosted).length} commands`);
 }
 
+if (assistPath) {
+  if (!existsSync(assistPath)) throw new Error(`--assist not found: ${assistPath}`);
+  await ingestAssist(assistPath);
+  flush();
+}
+
 copyFileSync(join(base, "valid.jsonl"), join(outDir, "valid.jsonl"));
 
 const fileSha = (p: string) => {
@@ -120,6 +152,9 @@ const fileSha = (p: string) => {
 };
 const manifest = {
   base, synthDir, populateCap: cap, huhCap, oversample: { below: osBelow, factor: osFactor, boosted }, seed, sources,
+  assist_demo_rows: assistRowsWritten,
+  assist_demo_source: assistPath ? { path: assistPath, sha256: fileSha(assistPath), rowsSeen: assistRowsSeen, rowsWritten: assistRowsWritten } : null,
+  evaluator_sidecar: evaluatorSidecar ? { path: evaluatorSidecar, exists: existsSync(evaluatorSidecar), sha256: existsSync(evaluatorSidecar) ? fileSha(evaluatorSidecar) : null } : null,
   stats: { input, deduped, populateSeen: populateLines.length, populateKept: keptPopulate.length, huhSeen: huhLines.length, huhKept: keptHuh.length, output: written, perCommand },
   sha256: { "train.jsonl": fileSha(trainPath), "valid.jsonl": fileSha(join(outDir, "valid.jsonl")) },
 };
