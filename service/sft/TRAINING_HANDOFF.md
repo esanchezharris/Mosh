@@ -1,0 +1,58 @@
+# Cycle-3 (a3b-r4) training — handoff / protection guide
+
+**The training is a detached OS process (watchdog PPID = 1). It does NOT depend on any
+Claude/Codex session.** A Claude usage-limit hit, closing the editor, or ending the
+session does **not** touch it. Closing the laptop lid just *suspends + resumes* it
+(hibernatemode 3). Only a **full reboot/shutdown** stops it — see "After a reboot".
+
+Everything lives under `service/sft/`. The mix is `s2-mix-v4` (§P8, 12,889 rows).
+
+## Check status (safe, read-only)
+```sh
+cd <repo>/service/sft
+echo "done: $(cat .adapters/a3b-r4.done)/12889"          # cumulative iters
+pgrep -fl "mlx_lm lora" >/dev/null && echo "training ALIVE" || echo "training not running"
+kill -0 $(cat .adapters/a3b-r4.watchdog.pid) 2>/dev/null && echo "watchdog ALIVE" || echo "watchdog DOWN"
+tail -3 .adapters/a3b-r4.train.log | tr '\r' '\n' | grep -v Calculating   # latest iter/val
+```
+
+## Working alongside it (Codex or any agent) — the ONE rule
+The Mac runs **one MLX GPU job at a time**: this training owns the GPU + port 8080.
+So while it runs, do **not**: start another `mlx_lm` process, run the generative
+service/SA3, or `Mosh --selftest` with SA3 on. Everything else is fine — code edits,
+`npm` builds/tests, `git`, the C++ build, running the app UI. Transient GPU contention
+(e.g. Ableton) is expected; the watchdog auto-recovers from the OOMs it causes.
+
+## After a reboot (the only thing that kills it)
+The nohup'd watchdog dies on shutdown. Restart it — it reads `.done` and continues
+from the last checkpoint, losing nothing:
+```sh
+cd <repo>/service/sft
+nohup ./watchdog-r4.sh > /tmp/watchdog-r4.log 2>&1 & disown
+```
+(`watchdog-r4.sh` refuses if an mlx proc is already running, so double-launch is safe.)
+
+### Optional: auto-resume on boot (survive reboots without lifting a finger)
+Install a LaunchAgent (removable any time with `launchctl bootout`):
+```sh
+# writes ~/Library/LaunchAgents/com.mosh.r4-watchdog.plist, RunAtLoad only (no KeepAlive
+# → won't loop after the run completes). Ask before doing this — it's a login-item.
+```
+(Not installed by default — the manual one-liner above is usually enough.)
+
+## When training COMPLETES (`.done` = 12889, watchdog logs "COMPLETE")
+Run the gate read. It's the **same procedure as `service/sft/GATE_READ_r3.md`**, with
+`a3b-r3` → `a3b-r4` everywhere (adapter `.adapters/a3b-r4`, fused `.fused/a3b-r4`). In
+short: fuse → shard-4 weight-check (shard4 ≠ base, shard1 = base) → serve the FUSED dir
++ identity probe → run §C (frozen300) + §A (evalA, apply the amendment exclusions:
+mock-broken `build_skeleton_from_clip`/`sketch_beatbox` + raw-`\b1\d{3}\b`-id utterances)
++ §B (`evalV2Grounded.mts --model <fused-path> --no-think` — the `--model` flag is
+REQUIRED or it hits the cloud). Gate (§P8): agg §A+§C ≥0.75 · floor ≥0.5 measurable ·
+§B ≥85%. **Expectations:** `split_clip` should now clear (the offset fix); `set_render_param`
+is a best-effort n=1 item that may stay a named exception — report honestly, don't spin.
+Record the result in `docs/bench/PROGRAM_STAGE1_2026-07.md` §R.
+
+## If it crashes repeatedly (watchdog log shows many "crash #N")
+The recipe is fine (r3 ran it clean). Frequent OOMs = heavy concurrent GPU use — close
+Ableton/GPU apps, or the watchdog gives up after 30 crashes. Do NOT trim seq/layers
+(deviates from the §P8 pre-registration).
