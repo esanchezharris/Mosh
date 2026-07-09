@@ -139,14 +139,25 @@ run_py_tests() {
   # Run any test_*.py / *_test.py under dirs that this branch touched (relay/, service/).
   local changed; changed="$( ( cd "$WT" && git diff --name-only "$BASE...HEAD" 2>/dev/null ) || true )"
   echo "$changed" | grep -qE '^(relay|service)/' || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
-  local found=0 ok=true log; log="$(mktemp)"
+  local found=0 ok=true failed_tests="" log; log="$(mktemp)"
   local t
   for t in $( cd "$WT" && git ls-files 'relay/*test*.py' 'relay/test_*.py' 'service/**/*_test.py' 'service/scripts/*test*.py' 2>/dev/null | sort -u ); do
     found=1
-    ( cd "$WT" && python3 "$t" ) >>"$log" 2>&1 || ok=false
+    printf '\n=== PYTEST_FILE %s ===\n' "$t" >>"$log"
+    if ( cd "$WT" && python3 "$t" ) >>"$log" 2>&1; then
+      printf '=== PYTEST_PASS %s ===\n' "$t" >>"$log"
+    else
+      ok=false
+      failed_tests="$failed_tests $t"
+      printf '=== PYTEST_FAIL %s ===\n' "$t" >>"$log"
+    fi
   done
   if [ "$found" = 0 ]; then emit_step "py_tests" true '{"detail":"no py tests found for touched dirs"}'
-  else emit_step "py_tests" "$ok" "$(jq -nc --arg log "$(safe_tail "$log" 800)" '{log:$log}')"; fi
+  else
+    [ "$ok" = true ] || printf '\nFAILED_TESTS%s\n' "$failed_tests" >>"$log"
+    emit_step "py_tests" "$ok" "$(jq -nc --arg log "$(safe_tail "$log" 1000)" --arg failed "$failed_tests" \
+      '{log:$log, failed_tests:($failed|split(" ")|map(select(length>0)))}')"
+  fi
   rm -f "$log"
 }
 
