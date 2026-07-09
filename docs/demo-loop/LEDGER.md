@@ -583,3 +583,52 @@ Queue decision:
 - AL-010 was not started because PR #260 has not been merged or owner-cleared,
   and cloud installed-app proof remains blocked.
 - Outcome: `IDLE` after recording the pass.
+
+## 2026-07-09 09:49 PDT / 2026-07-09 UTC - pass-008 PR #260 owner clearance attempt
+
+Mode: live, bounded to the pasted follow-up queue. No Codex threads were created
+or archived. No PRs were merged. The old auto-loop workflow remains stopped.
+
+PR #260 / AL-011:
+
+- PR: <https://github.com/zeke431/ClaudeMosh/pull/260>
+- Expected head: `e9e74debd4eeba4963e9ac7814963d4ecd861dc6`.
+- Owner clearance recorded and PR moved out of draft:
+  <https://github.com/zeke431/ClaudeMosh/pull/260#issuecomment-4927433228>
+- Accepted for this PR: Cloudflare Durable Object relay proof is sufficient as
+  blob-capable cloud proof while the original Supabase relay remains
+  inactive/NXDOMAIN.
+- Accepted for this PR: native dependency-patch risk is human-cleared, subject
+  to one final local gate and expected-head check.
+
+Final gate:
+
+- Passed: `cmake --build build-macos-arm64 --parallel 4`.
+- Passed: `build-macos-arm64/tests/MoshTests_artefacts/Debug/MoshTests "[multiplayer]"`
+  with `93` assertions in `20` test cases.
+- Passed: `ctest --test-dir build-macos-arm64 --output-on-failure`.
+- Blocked: full app `--selftest` x3 did not pass. The first run from a clean
+  ad-hoc-signed `/tmp` app bundle failed `AL-009: Save-As render-artifact
+  consolidation + portability` with `18` checks and `9` failures after
+  `http://127.0.0.1:8770/health` refused the render-service health request.
+- Evidence log: `/tmp/pr260-final-selftest-1-20260709T164411Z.log`.
+- Gate comment:
+  <https://github.com/zeke431/ClaudeMosh/pull/260#issuecomment-4927518708>
+
+Relay decision:
+
+- Keep the Cloudflare relay
+  `https://mosh-mp-relay-demo.emiliosanchezharris.workers.dev` as the accepted
+  `MOSH_RELAY_URL` fallback for demo proof.
+- Do not bake it in as the default relay in this PR. Making it the default
+  should be a separate explicit deployment/runtime decision after PR #260's
+  local native gate is clean.
+
+Queue decision:
+
+- PR #260 remains open and ready at the expected head, but is classified
+  `needs-gate` until the AL-009/render-service selftest failure is fixed or
+  explicitly owner-cleared as non-blocking.
+- AL-010 was not started because PR #260 did not merge and the native gate is
+  still blocking.
+- Outcome: `IDLE` after recording the blocked merge attempt.
