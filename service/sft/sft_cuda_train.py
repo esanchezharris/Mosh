@@ -5,8 +5,8 @@ mlx-lm (the local Mac trainer) is Apple-Silicon only, so a rented NVIDIA box use
 this trl + peft trainer instead. It consumes the SAME chat-format JSONL the mlx
 lane produces (`npm run build-sft` → train.jsonl / valid.jsonl with {"messages":[…]})
 so nothing about the dataset changes — only the trainer. Run ON the box after
-setup-sft-cuda.sh. Result (adapter) is then served OpenAI-compatible with vLLM and
-the eval points OPENAI_BASE_URL at it (see service/sft/README.md).
+setup-sft-cuda.sh. Result (adapter) is then served OpenAI-compatible with
+serve_openai.py and the eval points OPENAI_BASE_URL at it (see service/sft/README.md).
 
 JSON result to stdout; training chatter to stderr."""
 import argparse
@@ -55,6 +55,27 @@ def inject_generation_tags(template: str) -> str:
     return template
 
 
+def linear_target_modules(model) -> list[str]:
+    import torch
+
+    linear_types = {torch.nn.Linear}
+    try:
+        from bitsandbytes.nn import Linear4bit
+        linear_types.add(Linear4bit)
+    except Exception:
+        pass
+
+    names = set()
+    for name, module in model.named_modules():
+        if not name or name.endswith("lm_head"):
+            continue
+        if type(module) in linear_types:
+            names.add(name.rsplit(".", 1)[-1])
+    if not names:
+        raise ValueError("no linear target modules found for LoRA")
+    return sorted(names)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True, help="dir with train.jsonl / valid.jsonl")
@@ -72,10 +93,14 @@ def main():
     # still clip their tail, which is harmless: the fair metric only needs a short
     # pattern's worth of notes).
     ap.add_argument("--max-seq-len", type=int, default=4096)
+    ap.add_argument("--last-layers", type=int, default=0, help="apply LoRA to only the last N transformer layers")
+    ap.add_argument("--layers-to-transform", default="", help="comma-separated layer indices to LoRA; overrides --last-layers")
+    ap.add_argument("--layers-pattern", default=None, help="PEFT layers_pattern for layer-restricted LoRA, e.g. layers")
     ap.add_argument("--4bit", dest="bit4", action="store_true", help="QLoRA (fits a 40GB card); omit on 80GB for bf16 LoRA")
     ap.add_argument("--no-assistant-loss", action="store_true", help="train on the full sequence instead of assistant turns only")
     ap.add_argument("--no-grad-ckpt", action="store_true", help="disable gradient checkpointing (faster; fine on 80GB)")
     ap.add_argument("--save-steps", type=int, default=0, help="checkpoint every N steps (0 = only at end; set >0 so SSH drops can't lose work)")
+    ap.add_argument("--resume-from-checkpoint", default="", help="resume from a saved checkpoint dir under the adapter output")
     a = ap.parse_args()
 
     import torch
@@ -121,8 +146,53 @@ def main():
     # transformers 5.x renamed torch_dtype -> dtype; passing the old name is silently
     # ignored and the model loads in fp32 (2x memory -> OOM). Use dtype.
     model = AutoModelForCausalLM.from_pretrained(a.model, quantization_config=quant, dtype=dtype, device_map="auto")
+    if a.layers_to_transform and a.last_layers:
+        print(json.dumps({"ok": False, "error": "use either --layers-to-transform or --last-layers, not both"}))
+        sys.exit(1)
 
-    peft_cfg = LoraConfig(r=a.lora_r, lora_alpha=a.lora_r * 2, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM", target_modules="all-linear")
+    layers_to_transform = None
+    if a.layers_to_transform:
+        try:
+            layers_to_transform = [int(x) for x in a.layers_to_transform.split(",") if x.strip()]
+        except ValueError:
+            print(json.dumps({"ok": False, "error": "invalid --layers-to-transform; expected comma-separated integers"}))
+            sys.exit(1)
+    elif a.last_layers:
+        hidden_layers = getattr(model.config, "num_hidden_layers", None)
+        if hidden_layers is None:
+            print(json.dumps({"ok": False, "error": "model config has no num_hidden_layers; pass --layers-to-transform explicitly"}))
+            sys.exit(1)
+        if a.last_layers < 1 or a.last_layers > hidden_layers:
+            print(json.dumps({"ok": False, "error": f"--last-layers must be between 1 and {hidden_layers}"}))
+            sys.exit(1)
+        layers_to_transform = list(range(hidden_layers - a.last_layers, hidden_layers))
+        if a.layers_pattern is None:
+            a.layers_pattern = "layers"
+
+    peft_kwargs = {}
+    if layers_to_transform is not None:
+        peft_kwargs["layers_to_transform"] = layers_to_transform
+    if a.layers_pattern is not None:
+        peft_kwargs["layers_pattern"] = a.layers_pattern
+
+    target_modules = "all-linear"
+    if layers_to_transform is not None:
+        try:
+            target_modules = linear_target_modules(model)
+        except ValueError as e:
+            print(json.dumps({"ok": False, "error": str(e)}))
+            sys.exit(1)
+        log(f"layer-restricted LoRA targets: type={type(target_modules).__name__} names={','.join(target_modules)}")
+
+    peft_cfg = LoraConfig(
+        r=a.lora_r,
+        lora_alpha=a.lora_r * 2,
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=target_modules,
+        **peft_kwargs,
+    )
 
     cfg = SFTConfig(
         output_dir=a.out,
@@ -150,8 +220,11 @@ def main():
 
     trainer = SFTTrainer(model=model, args=cfg, train_dataset=ds["train"], peft_config=peft_cfg, processing_class=tok)
     log("starting training…")
+    resume_path = a.resume_from_checkpoint.strip() or None
+    if resume_path:
+        log(f"resuming from checkpoint: {resume_path}")
     t0 = time.time()
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_path)
     trainer.save_model(a.out)
     tok.save_pretrained(a.out)
     dur = round(time.time() - t0, 1)
@@ -161,7 +234,9 @@ def main():
         "dataset_manifest_sha256": manifest_hash(a.data),
         "config": {"epochs": a.epochs, "max_steps": a.max_steps, "batch_size": a.batch_size, "grad_accum": a.grad_accum,
                    "lr": a.lr, "lora_r": a.lora_r, "max_seq_len": a.max_seq_len, "qlora_4bit": a.bit4,
-                   "assistant_only_loss": not a.no_assistant_loss},
+                   "assistant_only_loss": not a.no_assistant_loss, "last_layers": a.last_layers,
+                   "layers_to_transform": layers_to_transform, "layers_pattern": a.layers_pattern,
+                   "resume_from_checkpoint": resume_path},
         "seconds": dur,
     }
     with open(os.path.join(a.out, "sft_run.json"), "w") as f:
