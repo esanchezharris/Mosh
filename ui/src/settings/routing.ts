@@ -6,7 +6,7 @@
 // existing MoshOps commands (set_audio_device / set_track_input) — one mutation
 // path, no new commands, no audio concepts leaking across the seam.
 
-import type { AudioDevices, WaveInput, Track } from "../types";
+import type { AudioDevices, WaveInput, MidiInput, Track } from "../types";
 
 export type DeviceOption = { value: string; label: string };
 
@@ -36,6 +36,22 @@ export function waveInputOptions(inputs: WaveInput[] | null): DeviceOption[] {
     ...inputs.map((wi) => ({
       value: wi.deviceID,
       label: wi.enabled ? wi.name : `${wi.name} (disabled)`,
+    })),
+  ];
+}
+
+// CTL-001 — per-instrument-track MIDI-input choices (v2 inspector). Same shape as
+// waveInputOptions: leads with "None" (empty deviceID) so a track can clear its MIDI
+// input, disabled devices stay selectable but flagged. Choosing rides the same
+// set_track_input command (the deviceID-keyed "explicitly-chosen input", RTG-001).
+export function midiInputOptions(inputs: MidiInput[] | null): DeviceOption[] {
+  const none: DeviceOption = { value: "", label: "None" };
+  if (!inputs || inputs.length === 0) return [none];
+  return [
+    none,
+    ...inputs.map((mi) => ({
+      value: mi.deviceID,
+      label: mi.enabled ? mi.name : `${mi.name} (disabled)`,
     })),
   ];
 }

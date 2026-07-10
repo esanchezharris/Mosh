@@ -6,12 +6,14 @@
 // seam) — only Mix/MIDI/Takes are small v2 surfaces. Deep editors (piano-roll, drum,
 // automation) open as floating overlays from here.
 
+import { useEffect } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
+import { midiInputOptions, currentTrackInput } from "../../settings/routing";
 import type { Clip, Track } from "../../types";
 
 export function Inspector() {
@@ -80,7 +82,31 @@ function MixTab({ track }: { track: Track }) {
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
+      {track.isInstrument && <MidiInputField track={track} />}
     </div>
+  );
+}
+
+// CTL-001 — per-instrument-track live MIDI-input picker. An instrument track (one
+// hosting a synth) receives live MIDI from a controller; this surfaces the read-only
+// list_midi_inputs enumeration and routes the choice through the existing
+// set_track_input command (the deviceID-keyed "explicitly-chosen input", RTG-001 —
+// which arm_track honours for MIDI). No new mutation command.
+function MidiInputField({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const midiInputs = useStore((s) => s.midiInputs);
+  const loadMidiInputs = useStore((s) => s.loadMidiInputs);
+  useEffect(() => { void loadMidiInputs(); }, [loadMidiInputs]);
+  const opts = midiInputOptions(midiInputs);
+  return (
+    <label className="v2-field">
+      <span>MIDI in</span>
+      <select className="btn ghost" data-testid="v2-midi-input"
+        aria-label={`MIDI input for ${track.name}`} value={currentTrackInput(track)}
+        onChange={(e) => void exec("set_track_input", { trackId: track.id, deviceID: e.target.value })}>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
 }
 

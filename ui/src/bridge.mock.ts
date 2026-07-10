@@ -159,6 +159,13 @@ const MOCK_WAVE_INPUTS = [
   { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
   { deviceID: "in-5", name: "Input 5", enabled: false, isStereoPair: false },
 ];
+// CTL-001 — mock MIDI inputs so the v2 inspector's per-instrument MIDI-input picker
+// has real choices and set_track_input can route one (list_midi_inputs enumeration).
+const MOCK_MIDI_INPUTS = [
+  { deviceID: "midi-akai", name: "Akai MPK Mini", alias: "Akai MPK Mini", enabled: true, monitor: "automatic" as const },
+  { deviceID: "midi-iac", name: "IAC Driver Bus 1", alias: "IAC Driver Bus 1", enabled: true, monitor: "automatic" as const },
+  { deviceID: "midi-launchkey", name: "Launchkey 49", alias: "Launchkey 49", enabled: false, monitor: "off" as const },
+];
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 function scheduleMock(callback: () => void, delayMs: number) {
   globalThis.setTimeout(callback, delayMs);
@@ -176,7 +183,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
@@ -1056,6 +1063,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
+    case "list_midi_inputs": return ok(command, { inputs: MOCK_MIDI_INPUTS, audioEnabled: true });
     case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
 
     // ── settings / export / command log (topbar utilities) ───────────────────
@@ -1081,8 +1089,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t) return err(command, "no track");
       const deviceID = str(args.deviceID);
       if (deviceID) {
-        const wi = MOCK_WAVE_INPUTS.find((w) => w.deviceID === deviceID);
-        t.input = { deviceID, name: wi?.name };
+        // The chosen input may be a wave OR a MIDI device (CTL-001 instrument tracks) —
+        // both are the deviceID-keyed "explicitly-chosen input". Resolve its name from
+        // whichever enumeration owns it so the picker reflects a readable label.
+        const dev = MOCK_WAVE_INPUTS.find((w) => w.deviceID === deviceID)
+          ?? MOCK_MIDI_INPUTS.find((m) => m.deviceID === deviceID);
+        t.input = { deviceID, name: dev?.name };
       } else {
         delete t.input;
       }
