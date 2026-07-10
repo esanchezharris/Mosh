@@ -17,14 +17,18 @@ include(FetchContent)
 # guaranteeing a matched JUCE/Tracktion pair. Disable its example targets.
 set(TE_ADD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
-# MOSH PATCH (engine fix): Edit::createNewItemID() must scan ALL EditItem caches, not
-# just track + clip — otherwise an ID held only by a live plugin (automatableEditItemCache,
-# e.g. one reconstructed on reload or outliving its removal via the undo stack) can be
-# reused, tripping the EditItemCache::addItem jassert and silently overwriting the
-# itemID->item map in release builds. See patches/. NB: re-pinning tracktion (GIT_TAG)
-# requires re-rolling this patch against the new revision.
-set(MOSH_TRACKTION_PATCH
-    "${CMAKE_CURRENT_LIST_DIR}/../patches/0001-tracktion-createNewItemID-scan-all-caches.patch")
+# MOSH PATCHES: local correctness fixes carried on top of the pinned Tracktion/JUCE
+# source. See patches/. NB: re-pinning tracktion (GIT_TAG) requires re-rolling these
+# patches against the new revision.
+set(MOSH_TRACKTION_PATCHES
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0001-tracktion-createNewItemID-scan-all-caches.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0002-juce-headless-vst3-adopt-description-scan-host.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0003-tracktion-parameter-set-without-nested-undo.patch")
+set(MOSH_TRACKTION_PATCH_MANIFEST "${CMAKE_BINARY_DIR}/mosh-tracktion-patches.txt")
+file(WRITE "${MOSH_TRACKTION_PATCH_MANIFEST}" "")
+foreach(patch IN LISTS MOSH_TRACKTION_PATCHES)
+    file(APPEND "${MOSH_TRACKTION_PATCH_MANIFEST}" "${patch}\n")
+endforeach()
 FetchContent_Declare(tracktion_engine
     GIT_REPOSITORY      https://github.com/Tracktion/tracktion_engine.git
     GIT_TAG             2877b621f2fbee564d0696a616b86bf8ba8c8ab0
@@ -35,7 +39,7 @@ FetchContent_Declare(tracktion_engine
     # git (reverse-check to skip when already applied, else apply). Runs in the
     # tracktion source dir on a fresh fetch. Replaces a `bash -c "git apply ..."`,
     # which broke on Windows where bash resolves to WSL and cannot open a C:/ path.
-    PATCH_COMMAND       ${CMAKE_COMMAND} -DPATCH=${MOSH_TRACKTION_PATCH} -P ${CMAKE_CURRENT_LIST_DIR}/apply-tracktion-patch.cmake)
+    PATCH_COMMAND       ${CMAKE_COMMAND} "-DPATCH_MANIFEST=${MOSH_TRACKTION_PATCH_MANIFEST}" -P ${CMAKE_CURRENT_LIST_DIR}/apply-tracktion-patch.cmake)
 FetchContent_MakeAvailable(tracktion_engine)
 
 # ── Catch2 (tests) ──────────────────────────────────────────────────────────
@@ -67,4 +71,3 @@ if (MOSH_ENABLE_ANIRA)
     target_link_libraries(mosh_neural_backends INTERFACE anira::anira)
     target_compile_definitions(mosh_neural_backends INTERFACE MOSH_HAVE_ANIRA=1)
 endif()
-

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <juce_core/juce_core.h>
 #include "training/TrainerRegistry.h"
 
@@ -40,13 +41,39 @@ juce::var runFakeTrainer (const juce::File& serviceDir,
         return {};
     }
 
-    if (! proc.waitForProcessToFinish (120000))
+    juce::MemoryOutputStream captured;
+    auto drainOutput = [&]
     {
-        error = "python trainer timed out";
-        return {};
+        char buffer[4096];
+
+        for (;;)
+        {
+            const auto bytesRead = proc.readProcessOutput (buffer, (int) sizeof (buffer));
+            if (bytesRead <= 0)
+                break;
+
+            captured.write (buffer, static_cast<std::size_t> (bytesRead));
+        }
+    };
+
+    const auto startMs = juce::Time::getMillisecondCounter();
+    while (proc.isRunning())
+    {
+        drainOutput();
+
+        if (juce::Time::getMillisecondCounter() - startMs >= 120000u)
+        {
+            proc.kill();
+            drainOutput();
+            error = "python trainer timed out";
+            return {};
+        }
+
+        juce::Thread::sleep (5);
     }
 
-    auto output = proc.readAllProcessOutput().trim();
+    drainOutput();
+    auto output = captured.toString().trim();
     if (output.isEmpty())
     {
         error = "python trainer produced no output";
