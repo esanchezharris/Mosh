@@ -75,25 +75,45 @@ if [ -d "$DEPS_TRK" ] && al_trk_healthy "$DEPS_TRK"; then
   fi
 fi
 
-# Warm the CPM cache if absent (and, when no blessed clone was found, let FetchContent
-# populate + PATCH the tracktion source into <cache>/_fc/).
-if [ ! -d "$CACHE" ] || [ -z "$TRK" ]; then
-  MAIN="$(al_main_worktree)"; [ -n "$MAIN" ] || al_die "could not resolve the main worktree"
-  al_log "warming dep cache at $CACHE via MAIN worktree configure: $MAIN (first run downloads JUCE+tracktion — long)…"
-  ( cd "$MAIN" && cmake --preset macos-arm64-release -DCPM_SOURCE_CACHE="$CACHE" \
-      ${TRK:+-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$TRK"} )
+# Next best: a clone FetchContent already populated (+ PATCHed, at populate time) for
+# some earlier configure. Candidates: a prior run of this script ($CACHE/_fc — see the
+# pinned warm below) or a per-checkout fc dir from CMakeLists.txt's dev-Mac default
+# ($WORK/fc/<srcdir-basename>-<sha1[0:12]>). Never adopt an in-tree .cpm-cache/_fc —
+# that's the iCloud-evictable location this script exists to escape.
+if [ -z "$TRK" ]; then
+  for c in "$CACHE/_fc/tracktion_engine-src" "$WORK"/fc/*/tracktion_engine-src; do
+    [ -d "$c" ] && al_trk_healthy "$c" && { TRK="$c"; break; }
+  done
 fi
 
-# No blessed clone: adopt the cache-populated one. With CPM_SOURCE_CACHE set,
-# FetchContent's base is redirected INTO the cache, so the source lands at
-# <cache>/_fc/<name>-src — NOT the default build-dir _deps/ location.
+# Warm the CPM cache if absent (and, when no clone was found anywhere, have FetchContent
+# populate + PATCH the tracktion source). The tracktion landing spot is governed by
+# FETCHCONTENT_BASE_DIR, NOT CPM_SOURCE_CACHE — tracktion is fetched via raw
+# FetchContent (cmake/Dependencies.cmake), and CMakeLists.txt's FETCHCONTENT_BASE_DIR
+# default has moved (in-tree .cpm-cache/_fc historically; $WORK/fc/<key> on dev Macs
+# since 5c1fe8dd) — so PIN it to $CACHE/_fc explicitly (-D wins over both defaults);
+# the adoption below then matches by construction. Only pinned when we still need the
+# clone: with TRK resolved the warm just fills the CPM cache, and MAIN's fc base is
+# left alone (a shared FETCHCONTENT_BASE_DIR across checkout builds is the juceaide
+# cross-dir CMakeCache error — one warm configure owning $CACHE/_fc is fine, and later
+# seeds adopt the populated clone above instead of re-warming).
+if [ ! -d "$CACHE" ] || [ -z "$TRK" ]; then
+  MAIN="$(al_main_worktree)"; [ -n "$MAIN" ] || al_die "could not resolve the main worktree"
+  cfgextra=()
+  if [ -n "$TRK" ]; then cfgextra+=("-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$TRK")
+  else cfgextra+=("-DFETCHCONTENT_BASE_DIR=$CACHE/_fc"); fi
+  al_log "warming dep cache at $CACHE via MAIN worktree configure: $MAIN (first run downloads JUCE+tracktion — long)…"
+  ( cd "$MAIN" && cmake --preset macos-arm64-release -DCPM_SOURCE_CACHE="$CACHE" "${cfgextra[@]}" )
+fi
+
+# Still no clone before the warm: adopt the one the pinned warm just populated.
 if [ -z "$TRK" ]; then
   for c in "$CACHE/_fc/tracktion_engine-src" "$CACHE/_fc/tracktion-src"; do
     [ -d "$c" ] && { TRK="$c"; break; }
   done
   [ -n "$TRK" ] || TRK="$(find "$CACHE/_fc" -maxdepth 1 -type d -iname '*tracktion*-src' 2>/dev/null | head -1 || true)"
 fi
-[ -n "$TRK" ] && [ -d "$TRK" ] || al_die "could not locate a tracktion source (looked at $DEPS_TRK and $CACHE/_fc)"
+[ -n "$TRK" ] && [ -d "$TRK" ] || al_die "could not locate a tracktion source (looked at $DEPS_TRK, $WORK/fc/*/ and $CACHE/_fc)"
 al_trk_healthy "$TRK" || al_die "tracktion source at $TRK fails the eviction probe (JUCEModuleSupport.cmake unreadable)"
 
 cat > "$AL_ENV" <<EOF
