@@ -61,6 +61,19 @@ def test_probe_request_overrides_key_and_bpm_only() -> None:
     assert probe["postProcess"] == main_request["postProcess"]
 
 
+def test_probe_request_uses_alternate_source_with_tagged_slug() -> None:
+    from asserted_proof_ace_probe import build_probe_request
+
+    main = {"params": {"keyscale": "", "src_audio": "asserted-proof/opening/ace-step-cover/source-padded-10s.wav"}, "requestSha256": "a" * 64}
+    src = "asserted-proof/opening/ace-step-cover/source-fx-padded-10s.wav"
+    request = build_probe_request(main, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.7}, use_mlx_dit=False, src_audio_rel=src, src_tag="fx")
+    assert request["params"]["src_audio"] == src
+    assert request["variant"].endswith("-fx")
+    default = build_probe_request(main, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.7}, use_mlx_dit=False)
+    assert request["requestSha256"] != default["requestSha256"]
+    assert default["params"]["src_audio"].endswith("source-padded-10s.wav")
+
+
 def test_probe_request_hashes_differ_per_key_and_bpm() -> None:
     main_request = _request()
     b_major = build_probe_request(main_request, keyscale="B major", bpm=138)

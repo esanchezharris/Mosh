@@ -61,7 +61,7 @@ def probe_slug(keyscale: str, bpm: int | None, *, overrides: dict | None = None)
     return slug
 
 
-def build_probe_request(main_request: dict, *, keyscale: str, bpm: int | None, seed: int = PROBE_SEED, param_overrides: dict | None = None, use_mlx_dit: bool = True) -> dict:
+def build_probe_request(main_request: dict, *, keyscale: str, bpm: int | None, seed: int = PROBE_SEED, param_overrides: dict | None = None, use_mlx_dit: bool = True, src_audio_rel: str | None = None, src_tag: str = "") -> dict:
     request = json.loads(json.dumps(main_request))
     for volatile in ("requestSha256", "createdAt", "updatedAt"):
         request.pop(volatile, None)
@@ -70,6 +70,8 @@ def build_probe_request(main_request: dict, *, keyscale: str, bpm: int | None, s
         request["params"]["bpm"] = int(bpm)
     for name, value in (param_overrides or {}).items():
         request["params"][name] = value
+    if src_audio_rel is not None:  # alternate source (e.g. an FX/auto-tuned vocal) — provenance in slug + hash
+        request["params"]["src_audio"] = src_audio_rel
     request["seeds"] = [int(seed)]
     slug = probe_slug(keyscale, bpm, overrides=param_overrides)
     if not use_mlx_dit:
@@ -77,6 +79,8 @@ def build_probe_request(main_request: dict, *, keyscale: str, bpm: int | None, s
         # acestep/models/mlx/) — strength probes pin the torch sampler and say so.
         request["useMlxDit"] = False
         slug = f"{slug}-torch"
+    if src_tag:
+        slug = f"{slug}-{src_tag}"
     request["variant"] = f"probe-{slug}"
     request["variantOf"] = str(main_request["requestSha256"])
     request["requestSha256"] = request_sha256(request)
@@ -115,7 +119,7 @@ def _evaluate_probe(probe_dir: Path, plan: dict, raw_clip_f0: list) -> dict:
     return evaluation
 
 
-def run_key_probes(paths: Paths, *, keys: list[str], bpm: int | None, bpm_note: str = "", cover_noise: list[float] | None = None, evaluate: bool = True, use_mlx_dit: bool = True) -> Path:
+def run_key_probes(paths: Paths, *, keys: list[str], bpm: int | None, bpm_note: str = "", cover_noise: list[float] | None = None, evaluate: bool = True, use_mlx_dit: bool = True, src_audio_rel: str | None = None, src_tag: str = "") -> Path:
     ace_dir = ace_dir_for(paths)
     if not (ace_dir / "request.json").is_file():
         raise RuntimeError("run ace-cover-spike first — probes derive from the lane's pinned request")
@@ -128,7 +132,7 @@ def run_key_probes(paths: Paths, *, keys: list[str], bpm: int | None, bpm_note: 
     entries = []
     for keyscale in keys:
         for overrides in overrides_grid:
-            built = build_probe_request(main_request, keyscale=keyscale, bpm=bpm, param_overrides=overrides, use_mlx_dit=use_mlx_dit)
+            built = build_probe_request(main_request, keyscale=keyscale, bpm=bpm, param_overrides=overrides, use_mlx_dit=use_mlx_dit, src_audio_rel=src_audio_rel, src_tag=src_tag)
             slug = built["variant"].removeprefix("probe-")
             probe_dir = probes_dir / slug
             probe_dir.mkdir(exist_ok=True)
@@ -164,12 +168,13 @@ def run_key_probes(paths: Paths, *, keys: list[str], bpm: int | None, bpm_note: 
                 }
             )
     dump_json(
-        probes_dir / "probes.json",
+        probes_dir / ("probes.json" if not src_tag else f"probes-{src_tag}.json"),
         {
             "version": 2,
             "updatedAt": _now_iso(),
             "purpose": "owner names the winning config by ear; the chosen config becomes the next full round",
             "bpmNote": bpm_note,
+            "srcTag": src_tag,
             "probes": entries,
         },
     )

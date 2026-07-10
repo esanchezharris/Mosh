@@ -61,6 +61,22 @@ def test_build_overrides_key_bpm_and_pins_single_seed() -> None:
     assert request["seeds"] == [4099]
 
 
+def test_build_uses_alternate_source_with_tagged_slug() -> None:
+    src = "asserted-proof/opening/ace-step-cover/source-fx-padded-10s.wav"
+    request = _build(src_audio_rel=src, src_tag="fx")
+    assert request["params"]["src_audio"] == src
+    assert "-fx-" in request["variant"] or request["variant"].endswith("-fx")
+    # A different source audio must change the fingerprint and the slug vs the default source.
+    assert request["requestSha256"] != _build()["requestSha256"]
+    assert request["variant"] != _build()["variant"]
+
+
+def test_build_default_source_is_unchanged_when_no_override() -> None:
+    request = _build()
+    assert request["params"]["src_audio"].endswith("source-padded-10s.wav")
+    assert "-fx" not in request["variant"]
+
+
 def test_build_hash_is_window_sensitive_and_records_provenance() -> None:
     base = _build(n_max=0.7)
     other = _build(n_max=0.5)

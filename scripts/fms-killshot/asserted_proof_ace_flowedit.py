@@ -68,6 +68,8 @@ def build_flow_edit_request(
     n_max: float,
     n_avg: int = 1,
     seed: int = FLOW_EDIT_SEED,
+    src_audio_rel: str | None = None,
+    src_tag: str = "",
 ) -> dict:
     request = json.loads(json.dumps(main_request))
     for volatile in ("requestSha256", "createdAt", "updatedAt"):
@@ -76,6 +78,8 @@ def build_flow_edit_request(
     params["keyscale"] = keyscale
     if bpm is not None:
         params["bpm"] = int(bpm)
+    if src_audio_rel is not None:  # alternate source (e.g. an FX/auto-tuned vocal) — provenance in the slug + hash
+        params["src_audio"] = src_audio_rel
     params["lyrics"] = target_lyrics  # V_tar condition (the asserted words)
     params["flow_edit_morph"] = True
     params["flow_edit_source_caption"] = params.get("caption", "")  # same caption -> edit only the lyric direction
@@ -86,6 +90,8 @@ def build_flow_edit_request(
     request["seeds"] = [int(seed)]
     request["useMlxDit"] = False  # the MLX DiT has no flow-edit
     slug = flow_edit_slug(keyscale, bpm, n_min, n_max)
+    if src_tag:
+        slug = f"{slug}-{src_tag}"
     request["variant"] = f"probe-{slug}"
     request["variantOf"] = str(main_request["requestSha256"])
     request["requestSha256"] = request_sha256(request)
@@ -102,6 +108,8 @@ def run_flow_edit_probes(
     windows: list[tuple[float, float]],
     n_avg: int = 1,
     evaluate: bool = True,
+    src_audio_rel: str | None = None,
+    src_tag: str = "",
 ) -> Path:
     ace_dir = ace_dir_for(paths)
     if not (ace_dir / "request.json").is_file():
@@ -122,6 +130,8 @@ def run_flow_edit_probes(
             n_min=n_min,
             n_max=n_max,
             n_avg=n_avg,
+            src_audio_rel=src_audio_rel,
+            src_tag=src_tag,
         )
         slug = built["variant"].removeprefix("probe-")
         probe_dir = probes_dir / slug
@@ -157,11 +167,13 @@ def run_flow_edit_probes(
                 "eval": evaluation,
             }
         )
+    listing = "flowedit-probes.json" if not src_tag else f"flowedit-probes-{src_tag}.json"
     dump_json(
-        probes_dir / "flowedit-probes.json",
+        probes_dir / listing,
         {
             "version": 1,
             "updatedAt": _now_iso(),
+            "srcTag": src_tag,
             "purpose": "flow-edit keeps the take's melody/voice and morphs only the lyric direction over [n_min,n_max]; owner ear picks the window",
             "sourceLyrics": source_lyrics,
             "targetLyrics": target_lyrics,

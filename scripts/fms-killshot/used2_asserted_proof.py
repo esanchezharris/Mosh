@@ -15,6 +15,27 @@ from asserted_proof_voicebox import build_voicebox_cloned_guide  # noqa: E402
 DEFAULT_ROOT = Path("~/mosh-fms-ksb/used2").expanduser()
 
 
+def _build_alt_padded_source(ace_dir: Path, full_take: str, tag: str) -> tuple[str, str]:
+    """Slice the opening window from an alternate full take and pad it to match
+    the lane's source spec (e.g. an FX/auto-tuned vocal). Returns (root-relative
+    padded path, tag). ffmpeg -y makes it deterministic/idempotent."""
+    import json as _json
+
+    from asserted_proof_runtime import run as _run
+
+    request = _json.loads((ace_dir / "request.json").read_text())
+    window, pad = request["sourceWindow"], request["pad"]
+    tag = tag or "alt"
+    padded = ace_dir / f"source-{tag}-padded-10s.wav"
+    _run([
+        "ffmpeg", "-y", "-ss", str(window["absoluteStartS"]), "-to", str(window["absoluteEndS"]),
+        "-i", str(Path(full_take).expanduser().resolve()),
+        "-af", str(pad["filter"]), "-ar", str(pad["sampleRate"]), "-ac", str(pad["channels"]),
+        "-c:a", str(pad["codec"]), str(padded),
+    ])
+    return f"asserted-proof/opening/ace-step-cover/{padded.name}", tag
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build and review provenance-safe Used2 asserted-word re-sing proofs")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="Used2 artifact root")
@@ -41,6 +62,8 @@ def main() -> int:
     probe_parser.add_argument("--bpm-note", default="")
     probe_parser.add_argument("--cover-noise", action="append", type=float, default=None, help="cover_noise_strength value, repeatable (0=pure noise, 1=closest to source)")
     probe_parser.add_argument("--torch-dit", action="store_true", help="run the torch DiT instead of MLX (required for cover-noise: the MLX sampler ignores it)")
+    probe_parser.add_argument("--src-audio", default=None, help="full-take WAV to slice+pad as an alternate source (e.g. an FX/auto-tuned vocal)")
+    probe_parser.add_argument("--src-tag", default="", help="short slug tag for the alternate source, e.g. 'fx'")
     subparsers.add_parser("ace-cover-hybrid", help="melody-correct the A/B arm-B render onto the take's measured per-syllable MIDI")
     flowedit_parser = subparsers.add_parser("ace-cover-flowedit", help="flow-edit probes: keep the take's audio, morph only the lyric direction over [n_min,n_max]")
     flowedit_parser.add_argument("--key", default="B major", help="keyscale (default: B major, the evidence front-runner)")
@@ -48,6 +71,8 @@ def main() -> int:
     flowedit_parser.add_argument("--window", action="append", required=True, help="edit sub-window 'n_min:n_max', repeatable (e.g. --window 0.0:0.7 --window 0.3:0.7)")
     flowedit_parser.add_argument("--n-avg", type=int, default=1)
     flowedit_parser.add_argument("--source-lyrics", default=None, help="V_src lyrics; defaults to the raw take's ASR transcript")
+    flowedit_parser.add_argument("--src-audio", default=None, help="full-take WAV to slice+pad as an alternate source (e.g. an FX/auto-tuned vocal)")
+    flowedit_parser.add_argument("--src-tag", default="", help="short slug tag for the alternate source, e.g. 'fx'")
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -141,8 +166,12 @@ def main() -> int:
                 for spec in args.window:
                     lo, hi = spec.split(":")
                     windows.append((float(lo), float(hi)))
-                probes_dir = run_flow_edit_probes(paths, source_lyrics=source_lyrics, target_lyrics=target_lyrics, keyscale=args.key, bpm=args.bpm, windows=windows, n_avg=args.n_avg)
-                for entry in _json.loads((probes_dir / "flowedit-probes.json").read_text())["probes"]:
+                src_audio_rel, src_tag = None, args.src_tag
+                if args.src_audio:
+                    src_audio_rel, src_tag = _build_alt_padded_source(ace_dir, args.src_audio, args.src_tag)
+                probes_dir = run_flow_edit_probes(paths, source_lyrics=source_lyrics, target_lyrics=target_lyrics, keyscale=args.key, bpm=args.bpm, windows=windows, n_avg=args.n_avg, src_audio_rel=src_audio_rel, src_tag=src_tag)
+                listing = "flowedit-probes.json" if not src_tag else f"flowedit-probes-{src_tag}.json"
+                for entry in _json.loads((probes_dir / listing).read_text())["probes"]:
                     line = f"flow-edit {entry['slug']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}"
                     evaluation = entry.get("eval")
                     if evaluation and evaluation.get("lexical"):
@@ -150,12 +179,17 @@ def main() -> int:
                         line += f"\n    words {lex['hits']}/16 hits {lex['misses']} miss | contour corr {con['contourCorrelation']} | pitch {con['medianAbsPitchErrorSemitones']}st | register {con['registerOffsetSemitones']}st"
                     print(line)
             case "ace-cover-probe":
-                from asserted_proof_ace_probe import run_key_probes
-
-                probes_dir = run_key_probes(paths, keys=args.key, bpm=args.bpm, bpm_note=args.bpm_note, cover_noise=args.cover_noise, use_mlx_dit=not args.torch_dit)
                 import json as _json
 
-                for entry in _json.loads((probes_dir / "probes.json").read_text())["probes"]:
+                from asserted_proof_ace_cover import ace_dir_for
+                from asserted_proof_ace_probe import run_key_probes
+
+                src_audio_rel, src_tag = None, args.src_tag
+                if args.src_audio:
+                    src_audio_rel, src_tag = _build_alt_padded_source(ace_dir_for(paths), args.src_audio, args.src_tag)
+                probes_dir = run_key_probes(paths, keys=args.key, bpm=args.bpm, bpm_note=args.bpm_note, cover_noise=args.cover_noise, use_mlx_dit=not args.torch_dit, src_audio_rel=src_audio_rel, src_tag=src_tag)
+                listing = "probes.json" if not src_tag else f"probes-{src_tag}.json"
+                for entry in _json.loads((probes_dir / listing).read_text())["probes"]:
                     line = f"probe {entry['slug']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}"
                     evaluation = entry.get("eval")
                     if evaluation and evaluation.get("lexical"):
