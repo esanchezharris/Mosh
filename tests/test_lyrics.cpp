@@ -205,6 +205,7 @@ TEST_CASE ("asserted lyric lines persist as renderable words separate from take 
     REQUIRE (back[ids::status].toString() == "asserted");
     REQUIRE (back[ids::lyricText].toString() == "hold the flame");
     REQUIRE_FALSE (back.hasProperty (ids::lyricScore));
+}
 
 TEST_CASE ("extraction provenance (lyricOrigin + lyricHeard) persists and stays out of the fingerprint", "[lyrics][extract]")
 {
