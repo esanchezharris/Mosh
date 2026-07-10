@@ -98,8 +98,13 @@ namespace
 
         void apply (float v)
         {
-            if (isPan) plugin.setPan (v);
-            else       plugin.setVolumeDb (v);
+            auto& state = plugin.state;
+            if (isPan)
+                state.setProperty (te::IDs::pan, juce::jlimit (-1.0f, 1.0f, v), nullptr);
+            else
+                state.setProperty (te::IDs::volume, te::decibelsToVolumeFaderPosition (v), nullptr);
+
+            plugin.restorePluginStateFromValueTree (state);
         }
 
         te::VolumeAndPanPlugin& plugin;
