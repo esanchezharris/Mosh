@@ -1,0 +1,237 @@
+{
+  "recipe_id": "wtf",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "wtf",
+    "url": "",
+    "title": "wtf",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "eed0d9df6f1c4c63e6de2fd51c255a9a9e8bc3e0f2698f8c3b68600c297b4285"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 6.857142857142857,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "wtf",
+      "role": "808",
+      "label": "wtf",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 74,
+            "start_beats": 0.0,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 74,
+            "start_beats": 0.5,
+            "duration_beats": 1.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 72,
+            "start_beats": 2.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 72,
+            "start_beats": 3.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 4.0,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 61,
+            "start_beats": 4.5,
+            "duration_beats": 1.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 64,
+            "start_beats": 6.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 66,
+            "start_beats": 7.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 74,
+            "start_beats": 8.0,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 66,
+            "start_beats": 8.5,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 66,
+            "start_beats": 9.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 61,
+            "start_beats": 10.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 11.0,
+            "duration_beats": 2.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 13.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 14.0,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 60,
+            "start_beats": 14.5,
+            "duration_beats": 0.5,
+            "velocity": 108
+          },
+          {
+            "pitch": 66,
+            "start_beats": 15.0,
+            "duration_beats": 1.0,
+            "velocity": 108
+          }
+        ],
+        "note_count": 17,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 4.0,
+        "onset_grid": "8th",
+        "density": 4.25,
+        "syncopation": 0.2353,
+        "contour": [
+          0,
+          -1,
+          0,
+          -1,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          0,
+          -1,
+          -1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "register_band": "mid",
+        "harmonic_function": "root-candidate"
+      },
+      "bass": {
+        "sustain_ratio": 1.0,
+        "glides": [],
+        "kick_alignment": 0.0,
+        "root_follows": false,
+        "root_element_id": null
+      },
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

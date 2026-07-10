@@ -194,7 +194,8 @@ bool GenerativeJobManager::ensureServiceRunning()
     String env;
     for (auto* key : { "MOSH_ENABLE_SA3", "SA3_MLX_DIR", "COLORRACK_DATA", "SA3_SECONDS",
                        "SA3_STEPS", "MOSH_SA3_QA", "MOSH_JUDGES_PY", "MOSH_QA_TIMEOUT",
-                       "MOSH_SERVICE_HOST", "MOSH_SERVICE_PORT" })
+                       "MOSH_SERVICE_HOST", "MOSH_SERVICE_PORT", "MOSH_SERVICE_PYTHON",
+                       "MOSH_RECIPE_LIBRARY", "MOSH_PALETTE_MANIFEST" })
         if (auto v = SystemStats::getEnvironmentVariable (key, {}); v.isNotEmpty())
             env << key << "=" << v.quoted() << " ";
 
@@ -206,7 +207,7 @@ bool GenerativeJobManager::ensureServiceRunning()
     if (started)
     {
         spawnedByUs = true;
-        for (int i = 0; i < 60; ++i)     // up to ~12s for warmup
+        for (int i = 0; i < 150; ++i)    // up to ~30s for warmup
         {
             Thread::sleep (200);
             adoptPortFromHandshake();     // C3 — switch to the actual bound port if it differs
@@ -358,6 +359,20 @@ juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, doubl
     URL url = URL (baseUrl + "/sketch").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (60000)
+                    .withExtraHeaders ("Content-Type: application/json");
+    if (auto s = url.createInputStream (opts))
+        return JSON::parse (s->readEntireStreamAsString());
+    return {};
+}
+
+juce::var GenerativeJobManager::generateBeatRecipe (const juce::var& args)
+{
+    if (! ensureServiceRunning())
+        return {};
+
+    URL url = URL (baseUrl + "/generate_recipe").withPOSTData (JSON::toString (args));
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                    .withConnectionTimeoutMs (30000)
                     .withExtraHeaders ("Content-Type: application/json");
     if (auto s = url.createInputStream (opts))
         return JSON::parse (s->readEntireStreamAsString());

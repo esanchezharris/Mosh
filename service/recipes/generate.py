@@ -1139,11 +1139,14 @@ def _main(argv=None) -> int:
     ap.add_argument("--tempo", type=float, default=0.0)
     ap.add_argument("--key", default="")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--library-dir", default=LIB_DIR)
+    ap.add_argument("--palette-manifest", default="")
     ap.add_argument("--emit", choices=["recipe", "program"], default="recipe")
     ns = ap.parse_args(argv)
     req = {k: v for k, v in (("mood", ns.mood), ("tempo", ns.tempo or None), ("key", ns.key or None))
            if v}
-    rec, prov = generate(req, seed=ns.seed)
+    palette = load_palette(ns.palette_manifest) if ns.palette_manifest else None
+    rec, prov = generate(req, library_dir=ns.library_dir, seed=ns.seed, palette=palette)
     if ns.emit == "program":
         from teardown.render.compile import compile_recipe
         print(json.dumps(compile_recipe(rec).to_dict(), indent=2))
