@@ -171,8 +171,9 @@ with tempfile.TemporaryDirectory() as td:
     check("single-element library keeps melodic ingredient roles",
           {"808", "pad"}.issubset(ingredient_roles), str(sorted(ingredient_roles)))
     check("single-element provenance records per-role drum sources",
-          ingredient_prov.sources.get("drums") == "per-role"
-          and ingredient_prov.sources.get("drums.snare") == "snare_ing",
+          ingredient_prov.sources.get("drums") == "kick_ing"
+          and ingredient_prov.sources.get("drums_fill_snare") == "snare_ing"
+          and ingredient_prov.sources.get("drums_fill_hat") == "hat_ing",
           str(ingredient_prov.sources))
 
 # ── the recombined beat compiles to a runnable program (assign_sample+add_midi_clip) ──
@@ -616,10 +617,15 @@ check("fake-swing (drift survivors) is rejected by the metric-position rule",
       G._swing_offset(drift_srv, [float(n.start_beats) for n in wrongtempo.midi.notes],
                       0.25) is None)
 
+# The grid floor exists to reject WRONG-TEMPO TRANSCRIPTIONS (see the checks above) —
+# MIDI-pack ingests (platform "local-midi") have intentional timing by construction
+# (snare/hat ROLLS are off-16th by design), so the corpus-wide ZERO invariant scopes
+# to transcribed sources. Bind-time floors below still guard what generation USES.
 lib_offgrid = [(r.source.video_id, e.role.value) for r in library for e in r.elements
-               if e.midi.notes and not G._grid_ok(e)]
-check("library carries ZERO below-floor elements post grid-repair", not lib_offgrid,
-      str(lib_offgrid[:3]))
+               if e.midi.notes and not G._grid_ok(e)
+               and getattr(r.source, "platform", "") != "local-midi"]
+check("library carries ZERO below-floor elements post grid-repair (transcribed sources)",
+      not lib_offgrid, str(lib_offgrid[:3]))
 
 offgrid_pad = _mini_rec("offgridpad", [R.Element(role="pad", midi=R.Midi(notes=[
     R.NoteEvent(pitch=60 + (i % 4), start_beats=round(i * 1.337, 6), duration_beats=1.0)
