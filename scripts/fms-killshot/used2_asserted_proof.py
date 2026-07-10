@@ -42,6 +42,12 @@ def main() -> int:
     probe_parser.add_argument("--cover-noise", action="append", type=float, default=None, help="cover_noise_strength value, repeatable (0=pure noise, 1=closest to source)")
     probe_parser.add_argument("--torch-dit", action="store_true", help="run the torch DiT instead of MLX (required for cover-noise: the MLX sampler ignores it)")
     subparsers.add_parser("ace-cover-hybrid", help="melody-correct the A/B arm-B render onto the take's measured per-syllable MIDI")
+    flowedit_parser = subparsers.add_parser("ace-cover-flowedit", help="flow-edit probes: keep the take's audio, morph only the lyric direction over [n_min,n_max]")
+    flowedit_parser.add_argument("--key", default="B major", help="keyscale (default: B major, the evidence front-runner)")
+    flowedit_parser.add_argument("--bpm", type=int, default=138)
+    flowedit_parser.add_argument("--window", action="append", required=True, help="edit sub-window 'n_min:n_max', repeatable (e.g. --window 0.0:0.7 --window 0.3:0.7)")
+    flowedit_parser.add_argument("--n-avg", type=int, default=1)
+    flowedit_parser.add_argument("--source-lyrics", default=None, help="V_src lyrics; defaults to the raw take's ASR transcript")
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -114,6 +120,35 @@ def main() -> int:
                 (metadata_path).write_text(_json.dumps(metadata, indent=2), encoding="utf-8")
                 write_receipt(hybrid_dir / "receipt.json", {"source": source, "sourceF0": source_f0, "output": output, "metadata": metadata_path})
                 print(f"hybrid ({metadata['correctedSegments']} segments corrected, {metadata['skippedUnvoiced']} unvoiced, {metadata['skippedSmallShift']} small) -> http://127.0.0.1:8189/used2/asserted-proof/opening/ace-step-cover/hybrid/round1-4099-melody-corrected.wav")
+            case "ace-cover-flowedit":
+                import json as _json
+
+                from asserted_proof_ace_cover import ace_dir_for
+                from asserted_proof_ace_flowedit import run_flow_edit_probes
+
+                ace_dir = ace_dir_for(paths)
+                if not (ace_dir / "request.json").is_file():
+                    raise RuntimeError("run ace-cover-spike first")
+                target_lyrics = _json.loads((ace_dir / "request.json").read_text())["params"]["lyrics"]
+                source_lyrics = args.source_lyrics
+                if source_lyrics is None:
+                    raw_asr_path = ace_dir / "ab/round1-4099-raw-asr.json"
+                    if not raw_asr_path.is_file():
+                        raise RuntimeError("no raw-take ASR at ab/round1-4099-raw-asr.json — run ace-cover-ab first, or pass --source-lyrics")
+                    raw_asr = _json.loads(raw_asr_path.read_text())
+                    source_lyrics = " ".join(str(word.get("word", "")).strip() for word in raw_asr.get("words", [])).strip()
+                windows = []
+                for spec in args.window:
+                    lo, hi = spec.split(":")
+                    windows.append((float(lo), float(hi)))
+                probes_dir = run_flow_edit_probes(paths, source_lyrics=source_lyrics, target_lyrics=target_lyrics, keyscale=args.key, bpm=args.bpm, windows=windows, n_avg=args.n_avg)
+                for entry in _json.loads((probes_dir / "flowedit-probes.json").read_text())["probes"]:
+                    line = f"flow-edit {entry['slug']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}"
+                    evaluation = entry.get("eval")
+                    if evaluation and evaluation.get("lexical"):
+                        lex, con = evaluation["lexical"], evaluation["contour"]
+                        line += f"\n    words {lex['hits']}/16 hits {lex['misses']} miss | contour corr {con['contourCorrelation']} | pitch {con['medianAbsPitchErrorSemitones']}st | register {con['registerOffsetSemitones']}st"
+                    print(line)
             case "ace-cover-probe":
                 from asserted_proof_ace_probe import run_key_probes
 
