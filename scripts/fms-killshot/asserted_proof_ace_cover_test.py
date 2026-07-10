@@ -247,6 +247,10 @@ def _seed_lane(ace_dir: Path, seed: int, request_path: Path, raw_slice: Path, ra
     write_receipt(files["receipt"], lane)
 
 
+def _write_min_manifest(opening: Path) -> None:
+    (opening / "manifest.json").write_text(json.dumps({"files": {}}))
+
+
 def _spike_dirs(tmp_path: Path) -> tuple[Path, Path, Path]:
     root = tmp_path / "used2"
     opening = root / "asserted-proof/opening"
@@ -481,6 +485,29 @@ def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> N
     assert manifest_hash in section  # verdict binding embeds the spike manifest hash
     assert "seed-271" not in section  # invalid candidates get no card
     assert "yeah" in section  # lexical chip content
+
+
+def test_melody_round_banner_appears_only_when_the_menu_exists(tmp_path: Path) -> None:
+    from asserted_proof_page import _melody_round_banner
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    assert _melody_round_banner(root / "asserted-proof") == ""
+    (ace_dir / "melody-round.html").write_text("<h1>menu</h1>")
+    banner = _melody_round_banner(root / "asserted-proof")
+    assert "opening/ace-step-cover/melody-round.html" in banner
+    assert "melody" in banner.lower()
+
+
+def test_build_page_puts_the_menu_banner_above_the_first_card(tmp_path: Path) -> None:
+    from asserted_proof_page import build_page
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    _write_min_manifest(opening)
+    (ace_dir / "melody-round.html").write_text("<h1>menu</h1>")
+    page = build_page(root / "asserted-proof").read_text(encoding="utf-8")
+    assert "opening/ace-step-cover/melody-round.html" in page
+    # The banner must sit above the opening evidence rail, not buried in the spike section.
+    assert page.index("melody-round.html") < page.index("class='rail'")
 
 
 def test_page_section_links_the_listening_menu_only_when_present(tmp_path: Path) -> None:
