@@ -29,6 +29,11 @@ def main() -> int:
     voicebox_parser.add_argument("--base-url", default="http://127.0.0.1:17494")
     voicebox_parser.add_argument("--profile-id", required=True)
     subparsers.add_parser("review", help="refresh the static review page")
+    ace_parser = subparsers.add_parser("ace-cover-spike", help="generate + evaluate the eight pinned ACE-Step cover seeds for the opening")
+    ace_parser.add_argument("--dry-run", action="store_true", help="print guards and the seed plan without generating")
+    stop_parser = subparsers.add_parser("ace-cover-stop", help="declare the ACE cover lane blocked (validated against owner verdicts)")
+    stop_parser.add_argument("--reason", choices=("lexical", "prosody"), required=True)
+    stop_parser.add_argument("--rationale", required=True)
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -61,6 +66,19 @@ def main() -> int:
                 print(f"Voicebox lexical pivot -> {guide}")
             case "review":
                 print(f"review -> {build_page(paths.output)}")
+            case "ace-cover-spike":
+                from asserted_proof_ace_cover import run_ace_cover_spike
+
+                ace_dir = run_ace_cover_spike(paths, dry_run=args.dry_run)
+                if not args.dry_run:
+                    build_page(paths.output)
+                print(f"ace cover spike -> {ace_dir}")
+            case "ace-cover-stop":
+                from asserted_proof_ace_cover import ace_dir_for, declare_stop
+
+                status_path = declare_stop(ace_dir_for(paths), args.reason, args.rationale)
+                build_page(paths.output)
+                print(f"ace cover lane stopped -> {status_path}")
             case "expand-first-half":
                 verdict_path = args.verdict.expanduser().resolve() if args.verdict else paths.opening / "owner-verdict.json"
                 outputs = expand_first_half(paths, verdict_path, allow_close_diagnostic=args.allow_close_diagnostic)
