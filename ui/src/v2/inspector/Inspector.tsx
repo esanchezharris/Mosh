@@ -27,6 +27,7 @@ export function Inspector() {
     ? snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
     : undefined;
   const isMidi = clip?.type === "midi";
+  const isWave = clip?.type === "wave";
   const hasTakes = (clip?.numTakes ?? 0) > 1;
 
   const tabs: { id: InspectorTab; label: string }[] = [
@@ -35,6 +36,7 @@ export function Inspector() {
     { id: "gen", label: "Gen" },
     { id: "lyrics", label: "Lyrics" },
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
+    ...(isWave ? [{ id: "warp" as const, label: "Warp" }] : []),
     ...(hasTakes ? [{ id: "takes" as const, label: "Takes" }] : []),
   ];
   const active = tabs.some((t) => t.id === tab) ? tab : "mix";
@@ -54,6 +56,7 @@ export function Inspector() {
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
         {active === "lyrics" && <LyricPanel track={track} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
+        {active === "warp" && clip && <WarpTab clip={clip} />}
         {active === "takes" && clip && <TakesTab clip={clip} />}
       </div>
     </section>
@@ -93,6 +96,34 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
         ? <button className="v2-btn primary" data-testid="v2-open-drumgrid" onClick={() => useDrumWindow.getState().open(clip.id)}>Open drum grid</button>
         : <button className="v2-btn primary" data-testid="v2-open-pianoroll" onClick={() => openPianoRoll(clip.id)}>Open piano-roll</button>}
       <button className="v2-btn" onClick={() => void exec("quantize_notes", { clipId: clip.id, division: "1/16", strength: 1 })}>Quantize 1/16</button>
+    </div>
+  );
+}
+
+// Audio warp (auto-tempo): a wave clip re-anchors in beats and time-stretches to follow
+// the tempo map. The stretch algorithms the engine compiles in are SoundTouch (native
+// cmdSetClipWarp validates the name and falls back to the default if unavailable). The
+// toggle enables/disables warp; the mode select re-warps with a new algorithm and is
+// inert until warp is on (stretchMode only matters, and is only carried, while warping).
+const STRETCH_MODES = ["SoundTouch (Better)", "SoundTouch (Normal)"] as const;
+
+function WarpTab({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const on = !!clip.autoTempo;
+  const mode = clip.stretchMode ?? STRETCH_MODES[0];
+  return (
+    <div className="v2-mix v2-warp">
+      <div className="v2-mix-btns">
+        <button className={on ? "on" : ""} aria-pressed={on} data-testid="v2-warp-toggle"
+          onClick={() => void exec("set_clip_warp", { clipId: clip.id, autoTempo: !on })}>Warp</button>
+      </div>
+      <label className="v2-field">
+        <span>Stretch</span>
+        <select aria-label="Stretch mode" data-testid="v2-warp-mode" value={mode} disabled={!on}
+          onChange={(e) => void exec("set_clip_warp", { clipId: clip.id, autoTempo: true, mode: e.target.value })}>
+          {STRETCH_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </label>
     </div>
   );
 }
