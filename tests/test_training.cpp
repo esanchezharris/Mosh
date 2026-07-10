@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <juce_core/juce_core.h>
+#include <juce_cryptography/juce_cryptography.h>
 #include "training/TrainerRegistry.h"
 
 namespace
@@ -158,6 +159,54 @@ TEST_CASE ("[smoke] trainer imports a local source, builds corpus, trains fake a
     auto state = registry.snapshot();
     REQUIRE (state.isObject());
     REQUIRE (state.getProperty ("activeAdapterId", juce::var()).toString() == trainer.getProperty ("adapter_id", juce::var()).toString());
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("sha256File (via buildCorpus manifest): streamed hash equals a full-read reference hash", "[training]")
+{
+    auto root = makeTempRoot();
+    auto sessionDir = root.getChildFile ("session");
+    sessionDir.createDirectory();
+    mosh::TrainerRegistry registry (sessionDir);
+    juce::String error;
+
+    // Large enough to span many 64-byte SHA-256 blocks -- a single tiny file
+    // wouldn't exercise a chunked/streamed read path.
+    juce::String content;
+    for (int i = 0; i < 5000; ++i)
+        content << "mosh-training-corpus-line-" << i << "\n";
+    auto sourceFile = writeDummyFile (root.getChildFile ("bigsource.wav"), content);
+
+    // Reference hash computed the OLD way (full read into one MemoryBlock, then
+    // hash that block) -- independent of TrainerRegistry::sha256File's own
+    // implementation, so this is a real equivalence check, not a tautology.
+    juce::MemoryBlock wholeFile;
+    REQUIRE (sourceFile.loadFileAsData (wholeFile));
+    const auto referenceHash = juce::SHA256 (wholeFile.getData(), wholeFile.getSize()).toHexString();
+
+    auto* importArgs = new juce::DynamicObject();
+    importArgs->setProperty ("title", "Big Beat");
+    importArgs->setProperty ("creator", "Producer");
+    importArgs->setProperty ("sourceUrl", "https://example.invalid/big");
+    importArgs->setProperty ("localPath", sourceFile.getFullPathName());
+    importArgs->setProperty ("userClaimedLicense", "user-granted");
+    importArgs->setProperty ("proofOfRights", "user claim");
+    importArgs->setProperty ("approvedForTraining", true);
+    auto imported = registry.importSource (juce::var (importArgs), error);
+    REQUIRE (error.isEmpty());
+
+    auto bundle = registry.buildCorpus (juce::var (new juce::DynamicObject()), error);
+    REQUIRE (error.isEmpty());
+    auto manifestFile = juce::File (bundle.getProperty ("manifestPath", juce::var()).toString());
+    REQUIRE (manifestFile.existsAsFile());
+    auto manifest = juce::JSON::parse (manifestFile.loadFileAsString());
+    REQUIRE (manifest.isObject());
+    auto sources = manifest.getProperty ("sources", juce::var());
+    REQUIRE (sources.size() == 1);
+    auto actualHash = sources[0].getProperty ("sha256", juce::var()).toString();
+    REQUIRE (actualHash.isNotEmpty());
+    REQUIRE (actualHash == referenceHash);
 
     root.deleteRecursively();
 }
