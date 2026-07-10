@@ -298,3 +298,50 @@ Registered 2026-07-07 **before any Cycle-3 training**. P7's one-retry allowance 
 | r4 CUDA run | ✅ 2026-07-09 | 12889/12889 in 4h59m32s; r4 recipe knobs mirrored (s2-mix-v4, lr 1e-5, seq 4096, last-16-layer LoRA, assistant-only loss). |
 | r4 gate read | ❌ MISS 2026-07-09 | agg(A,C)=0.8891 ✓ · §B=0.9189 ✓ · measurable floors miss: `split_clip 0.0`, `assign_sample 0.33`, `load_drum_kit 0.33`, `set_track_type 0.42` (build_skeleton/sketch_beatbox 0.0 were pre-excluded mock-broken rows; their `window` harness bug is since fixed by #275). Full read: [GATE_READ_a3b-r4-cuda.md](../../service/sft/GATE_READ_a3b-r4-cuda.md) (reconstructed — original lost to iCloud git corruption). |
 | r4 disposition | 📦 2026-07-09 | Pod terminated after adapter archival (`~/AI/adapters/a3b-r4-cuda-pull`, adapter sha256 `2f29b655…` verified vs pod). Owner decision: **fix-first, then informed r5** — land harness fixes, rerun the gate surfaces on the SAME adapter, fold only surviving model-caused misses into r5. Plan: [R4_CUDA_GATE_MISS_FIX_PLAN_2026-07-09.md](R4_CUDA_GATE_MISS_FIX_PLAN_2026-07-09.md). |
+| r4 gate RERUN (same adapter, fixed harness) | ✅ 2026-07-10 | Fix-first executed: P0 #275 + P1 #283 + mock length-fidelity #286 (found mid-rerun, amendment 5) + 2 repaired degenerate split fixtures. Archived adapter (sha `2f29b655…`) re-served on pod `8300s0vr5qas70`; **split_clip 0.0→0.833 ✓ and set_track_type 0.42→0.500 ✓ (harness-caused); assign_sample/load_drum_kit hold at 0.333 ✗ (model-caused)**; frozen300 0.989, agg 0.919, §B 0.892 — all context bars hold. Full record + pre-registered amendments: [R4_RERUN_AMENDMENT.md](../../service/sft/R4_RERUN_AMENDMENT.md). |
+
+---
+
+## §P9 — r5 pre-registration (informed by the fixed-harness rerun)
+
+Registered 2026-07-10 **before any r5 training**.
+
+**Context carried in:** the r4-cuda adapter, re-read through the fixed harness,
+misses ONLY `assign_sample` (0.333 — deferrals on fully-explicit asks) and
+`load_drum_kit` (0.333 — deferrals + dropped `set_track_type`+`load_drum_kit`
+pairing + one `load_builtin` misroute). Every other §P8 leg holds or clears
+(split_clip 0.833; set_track_type 0.500; agg 0.919; §B 0.892; frozen300 0.989).
+The r3-era "clip-relative emission" mechanism is REFUTED (it was the mock's
+hardcoded clip length) — no coordinate rows are added.
+
+**Mix — `s2-mix-v5` (train sha `3c4e2e8b2ecc3562…`, 12,994 rows):** `s2-mix-v4`
+VERBATIM (12,889) + 15 assist-demonstration rows (Codex-staged, shape-validated)
++ the engine-validated **drum-sampler batch** (90: 48 `assign_sample`
+deferral-suppression / 21 `load_drum_kit` solo / 21 paired
+`set_track_type`+`load_drum_kit`; `genDrumSampler.mts` PR #287, 90/90
+gradeApply-clean vs the P1-carrying build-233 binary, 0 drops). valid = v4's
+1,650 VERBATIM. Length-filtered (0 dropped). Codex's 9
+`a3b-r4-cuda_next_run_examples` shape-rows are superseded by the 90-row batch.
+Prep manifest: `.sft-data/s2-mix-v5-prep/manifest.json`.
+
+**Recipe (fixed BEFORE the run — the r4-CUDA lane verbatim):** RunPod A100 80GB
+(pod `8300s0vr5qas70`, reused from the rerun; bootstrap validated), bf16 LoRA on
+`Qwen/Qwen3-30B-A3B-Instruct-2507` via `sft_cuda_train.py` — batch 1 · **iters
+12,994** (1.0 epoch of v5) · lr 1e-5 · lora-r 16 · last-16-layers · seq 4096 ·
+assistant-only loss · grad-checkpoint → `.adapters/a3b-r5-cuda`. Projected ≈5h
+at r4's ~1.39s/iter · ≈$7. Chosen over the local MLX seat deliberately: same
+lane as the r4 read (comparability) at 1/14th the wall-clock.
+
+**⛳ Gate — re-registered VERBATIM (unchanged):** aggregate §A+§C ≥ 0.75 ·
+per-command floor ≥ 0.5 on the measurable set · §B grounded ≥ 85%. **ONE clean
+read, no retry.** Floor sources: `diag_floor4` (split_clip) + the evalA 210-row
+core (all other families; the 55-row clip extension remains lost — disclosed in
+the rerun amendment). All reads through the post-#286 harness.
+
+**Honest caveats (registered up front):** (1) the corrective batch's utterance
+grid is narrow (6 track names × ~20 phrasings); if the deferral habit on these
+two families survives r5, the next lever is intent-level (ACK vs DEFER prior),
+not more rows. (2) evalA floor families are n=3–6 — one row flips a floor;
+reads are reported with counts, not just rates. (3) The base is the bf16 HF
+model (CUDA lane), not the 4-bit MLX base named in §P8's local recipe — same as
+the r4-cuda read this run is compared against.
