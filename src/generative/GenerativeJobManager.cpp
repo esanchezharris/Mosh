@@ -14,6 +14,12 @@ namespace
     File serviceStateDir()  { return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"); }
     File servicePidFile()   { return serviceStateDir().getChildFile ("service.pid"); }
     File servicePortFile()  { return serviceStateDir().getChildFile ("service.port"); }
+    int portFromBaseUrl (const String& baseUrl)
+    {
+        if (const auto colon = baseUrl.lastIndexOfChar (':'); colon >= 0)
+            return baseUrl.substring (colon + 1).getIntValue();
+        return 0;
+    }
 
     void setEnvVar (const char* k, const String& v)
     {
@@ -101,9 +107,10 @@ void GenerativeJobManager::reapStaleService()
     const int pid = toks.size() > 0 ? toks[0].getIntValue() : 0;
     const int stalePort = toks.size() > 1 ? toks[1].getIntValue() : 0;
     const int targetPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "8770").getIntValue();
+    const int adoptedPort = portFromBaseUrl (baseUrl);
 
     if (pid > 0
-        && (stalePort == 0 || stalePort == targetPort)
+        && (stalePort == 0 || stalePort == targetPort || stalePort == adoptedPort)
         && isLiveMoshService (pid))
     {
         killPid (pid);
@@ -240,9 +247,9 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
     return r.getProperty ("jobId", var()).toString();
 }
 
-juce::var GenerativeJobManager::jobStatus (const juce::String& jobId)
+juce::var GenerativeJobManager::jobStatus (const juce::String& jobId, int connectMs)
 {
-    return httpGet ("/status?jobId=" + jobId);
+    return httpGet ("/status?jobId=" + jobId, connectMs);
 }
 
 void GenerativeJobManager::cancelJob (const juce::String& jobId)

@@ -37,7 +37,7 @@ public:
                             const juce::File& manifest, const juce::var& params);
 
     /** Poll a job's status: { ok, status, progress, outputWav, manifest }. */
-    juce::var jobStatus (const juce::String& jobId);
+    juce::var jobStatus (const juce::String& jobId, int connectMs = 3000);
     void cancelJob (const juce::String& jobId);
 
     /** Audio->MIDI transcription via Basic Pitch (POST /transcribe). SYNCHRONOUS —
