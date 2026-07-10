@@ -1,0 +1,44 @@
+diff --git a/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.cpp b/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.cpp
+index 174aee61be4..8b4df8d1194 100644
+--- a/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.cpp
++++ b/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.cpp
+@@ -1384 +1384 @@ juce::String AutomatableParameter::getFullName() const
+-void AutomatableParameter::setParameterValue (float value, bool isFollowingCurve)
++void AutomatableParameter::setParameterValue (float value, bool isFollowingCurve, bool useUndoManager)
+@@ -1440 +1440,2 @@ void AutomatableParameter::setParameterValue (float value, bool isFollowingCurve
+-                            curve.movePoint (*this, 0, curve.getPointTime (0), value, false, &ed.getUndoManager());
++                            curve.movePoint (*this, 0, curve.getPointTime (0), value, false,
++                                             useUndoManager ? &ed.getUndoManager() : nullptr);
+@@ -1448 +1449,4 @@ void AutomatableParameter::setParameterValue (float value, bool isFollowingCurve
+-                attachedValue->setValue (value);
++                if (useUndoManager)
++                    attachedValue->setValue (value);
++                else
++                    attachedValue->handleAsyncUpdate();
+@@ -1478,0 +1483,17 @@ void AutomatableParameter::setParameter (float value, juce::NotificationType nt)
++void AutomatableParameter::setParameterWithoutUndo (float value, juce::NotificationType nt)
++{
++    currentParameterValue = value;
++    setParameterValue (value, false, false);
++
++    if (nt != juce::dontSendNotification)
++    {
++        jassert (nt != juce::sendNotificationAsync); // Async notifications not yet supported
++        TRACKTION_ASSERT_MESSAGE_THREAD
++        listeners.call (&Listener::parameterChanged, *this, currentValue);
++        getEdit().getParameterChangeHandler().parameterChanged (*this, false);
++
++        if (attachedValue != nullptr)
++            attachedValue->handleAsyncUpdate();
++    }
++}
++
+diff --git a/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.h b/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.h
+index 3a6871b7224..9abf35da289 100644
+--- a/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.h
++++ b/modules/tracktion_engine/model/automation/tracktion_AutomatableParameter.h
+@@ -79,0 +80 @@ public:
++    void setParameterWithoutUndo (float value, juce::NotificationType);
+@@ -270 +271 @@ protected:
+-    void setParameterValue (float value, bool isFollowingCurve);
++    void setParameterValue (float value, bool isFollowingCurve, bool useUndoManager = true);

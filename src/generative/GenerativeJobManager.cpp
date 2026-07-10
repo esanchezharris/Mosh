@@ -7,6 +7,8 @@ using namespace juce;
 
 namespace
 {
+    constexpr int serviceDiscardedOutputStreams = 0;
+
     // Stable, spawner-agnostic handshake locations in the Mosh app-data dir (matches
     // MoshEngine's session base) so a FRESH launch can find a PRIOR run's service.
     File serviceStateDir()  { return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"); }
@@ -177,12 +179,12 @@ bool GenerativeJobManager::ensureServiceRunning()
     bool started = false;
 #if JUCE_WINDOWS
     if (auto py = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PYTHON", {}); py.isNotEmpty())
-        started = serviceProcess.start (StringArray { py, script.getFullPathName() });
+        started = serviceProcess.start (StringArray { py, script.getFullPathName() }, serviceDiscardedOutputStreams);
     else
     {
-        started = serviceProcess.start (StringArray { "py", "-3", script.getFullPathName() });
+        started = serviceProcess.start (StringArray { "py", "-3", script.getFullPathName() }, serviceDiscardedOutputStreams);
         if (! started)
-            started = serviceProcess.start (StringArray { "python", script.getFullPathName() });
+            started = serviceProcess.start (StringArray { "python", script.getFullPathName() }, serviceDiscardedOutputStreams);
     }
 #else
     // Launch via run.sh (it selects the MLX venv python when MOSH_ENABLE_SA3=1),
@@ -199,7 +201,7 @@ bool GenerativeJobManager::ensureServiceRunning()
     String shell = runSh.existsAsFile()
         ? (env + "exec /bin/bash " + runSh.getFullPathName().quoted())
         : (env + "exec python3 " + script.getFullPathName().quoted());
-    started = serviceProcess.start (StringArray { "/bin/sh", "-c", shell });
+    started = serviceProcess.start (StringArray { "/bin/sh", "-c", shell }, serviceDiscardedOutputStreams);
 #endif
     if (started)
     {
