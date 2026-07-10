@@ -65,6 +65,20 @@ def pronounce(tokens_path: Path, output: Path) -> None:
     _dump(output, pronunciations)
 
 
+def estimate_key_from_audio(audio: Path, output: Path) -> None:
+    sys.path.insert(0, str(HERE))
+    import librosa
+    import numpy as np
+    from asserted_proof_key import estimate_key
+
+    samples, sample_rate = librosa.load(str(audio), sr=22050, mono=True)
+    chroma = librosa.feature.chroma_cqt(y=samples, sr=sample_rate)
+    result = estimate_key(np.mean(chroma, axis=1).tolist())
+    result["source"] = "librosa-chroma-cqt"
+    result["audio"] = str(audio)
+    _dump(output, result)
+
+
 def extract_f0(audio: Path, output: Path) -> None:
     sys.path.insert(0, str(BRIDGE))
     import numpy as np
@@ -92,6 +106,9 @@ def main() -> int:
     f0_parser = subparsers.add_parser("f0", help="extract raw RMVPE F0")
     f0_parser.add_argument("audio", type=Path)
     f0_parser.add_argument("output", type=Path)
+    key_parser = subparsers.add_parser("key", help="estimate key via librosa chroma + Krumhansl-Schmuckler")
+    key_parser.add_argument("audio", type=Path)
+    key_parser.add_argument("output", type=Path)
     args = parser.parse_args()
     try:
         match args.command:
@@ -101,6 +118,8 @@ def main() -> int:
                 pronounce(args.tokens, args.output)
             case "f0":
                 extract_f0(args.audio, args.output)
+            case "key":
+                estimate_key_from_audio(args.audio, args.output)
             case unreachable:
                 raise WorkerError(f"unknown command: {unreachable}")
     except WorkerError as error:
