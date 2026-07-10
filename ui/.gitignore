@@ -17,3 +17,5 @@ dist
 /playwright/.cache
 
 companion-dist
+# playwright visual gate — commit the baselines under visual/, ignore run output
+/visual-results

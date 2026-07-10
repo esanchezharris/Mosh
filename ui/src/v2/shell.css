@@ -12,6 +12,7 @@
   --v2-lane-h: 64px;
   --v2-ribbon-h: 40px;
   --v2-ruler-h: 24px;
+  --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
   --v2-radius: 16px;
   --v2-radius-sm: 10px;
   --v2-gap: 14px;
@@ -48,6 +49,51 @@
   --v2-rec: #ff3b5c;
   --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* ── type scale (PR-2.3) — role-named; values = the de-facto size clusters so adoption is a no-op ── */
+  --v2-fs-2xs: 9px;
+  --v2-fs-xs: 10px;
+  --v2-fs-sm: 11px;
+  --v2-fs-base: 13px;
+  --v2-fs-md: 15px;
+  --v2-fs-lg: 17px;
+  --v2-fs-xl: 20px;
+  --v2-fs-display: 40px;
+  --v2-tracking-caps: 0.14em;   /* the recurring uppercase-label treatment */
+
+  /* ── spacing scale (PR-2.3) — 8-step; stray 5/7/9px round to neighbours at adoption ── */
+  --v2-space-1: 2px;
+  --v2-space-2: 4px;
+  --v2-space-3: 6px;
+  --v2-space-4: 8px;
+  --v2-space-5: 10px;
+  --v2-space-6: 12px;
+  --v2-space-7: 16px;
+  --v2-space-8: 24px;
+
+  /* ── radius scale (PR-2.3). Legacy --v2-radius (16) / --v2-radius-sm (10) kept as-is;
+       the de-facto 7/9/11px live on until PR-2.6 handles them as documented normalisations. ── */
+  --v2-radius-xs: 4px;
+  --v2-radius-md: 8px;
+  --v2-radius-lg: 12px;
+  --v2-radius-pill: 999px;
+
+  /* ── semantic role aliases (PR-2.4) — Option-A: v2 maps roles onto its own palette; a
+       future 4-skin bridge remaps these per [data-skin] with zero consumer edits. Accent
+       roles reference the theme-aware --v2-* tokens (so they track dark↔light for free);
+       status values are exact literals (verified against consumers, NOT derived — e.g.
+       --status-danger-text is #ffb3c1, which is NOT any color-mix of --v2-rec). The two
+       reds are kept DISTINCT (--v2-rec vs --status-danger-glow) rather than collapsed. ── */
+  --accent: var(--v2-accent);
+  --accent-ink: var(--v2-accent-ink);
+  --accent-soft: var(--v2-accent-soft);
+  --status-rec: var(--v2-rec);
+  --status-danger: var(--v2-rec);
+  --status-danger-glow: rgb(255, 71, 106);   /* the 2nd red (rec-arm glow, errbar) — not --v2-rec */
+  --status-danger-text: #ffb3c1;             /* exact; NOT a mix of --v2-rec */
+  --status-ok: #3fe06a;
+  --status-warn: #ffd45c;
+  --status-off: var(--v2-faint);
 
   /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
        avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
@@ -125,7 +171,7 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 14px;
-  height: 64px;
+  height: var(--v2-topbar-h);
   padding: 0 4px;
   margin: 12px 14px 0;
 }
@@ -174,7 +220,7 @@
   box-shadow: 0 0 22px var(--v2-accent-soft);
 }
 .v2-tbtn.play { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
-.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px rgba(255, 71, 106, 0.3); }
+.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px color-mix(in srgb, var(--status-danger-glow) 30%, transparent); }
 .v2-tbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
 
 .v2-readout {
@@ -467,10 +513,10 @@
 /* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
    lime glow on the track icon + a faint inner glow on the lane, so each track lights up
    with its own audio while playing — alongside Moshi reacting to the master spectrum. */
-.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) rgba(204, 255, 54, calc(var(--lvl, 0) * 0.9)); }
-.v2-lhead.sel .v2-licon { border-color: rgba(204, 255, 54, 0.34); background: rgba(204, 255, 54, 0.12); color: var(--v2-text); }
+.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 90%), transparent); }
+.v2-lhead.sel .v2-licon { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--v2-text); }
 .v2-lane { transition: box-shadow 90ms linear; }
-.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 rgba(204, 255, 54, calc(var(--lvl, 0) * 0.85)), inset 0 0 38px rgba(204, 255, 54, calc(var(--lvl, 0) * 0.13)); }
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 85%), transparent), inset 0 0 38px color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 13%), transparent); }
 @media (prefers-reduced-motion: reduce) {
   .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
 }
@@ -528,11 +574,11 @@
   color: var(--v2-text); font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 7px; cursor: pointer;
 }
 .v2-clipmenu button:hover { background: var(--v2-accent-soft); }
-.v2-clipmenu button.danger:hover { background: rgba(255, 59, 92, 0.16); color: #ffb3c1; }
+.v2-clipmenu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 16%, transparent); color: var(--status-danger-text); }
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
 .v2-clip.wave { background: var(--v2-clip-wave); }
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
-.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: rgba(204, 255, 54, 0.3); }
+.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
 /* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
 .v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
@@ -706,7 +752,7 @@
   position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; background: linear-gradient(to top, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0));
 }
-.v2-pcard-meta .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #3fe06a; box-shadow: 0 0 7px #3fe06a; }
+.v2-pcard-meta .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
 .v2-pcard-meta .dot.off { background: rgba(255, 255, 255, 0.4); box-shadow: none; }
 .v2-pcard-meta .nm { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 /* live audio-level bars — PresenceMeter drives scaleY on each span when audio is present */
@@ -1015,7 +1061,7 @@
 .v2-shell .v2-dock-body .modal-list { max-height: none !important; overflow: auto; }
 
 /* error + drop overlay (reuse legacy semantics, restyled) */
-.v2-errbar { margin: 0 14px; padding: 7px 14px; background: rgba(255, 71, 106, 0.14); color: #ffb3c1; border: 1px solid rgba(255, 71, 106, 0.4); border-radius: 10px; font-size: 12px; }
+.v2-errbar { margin: 0 14px; padding: 7px 14px; background: color-mix(in srgb, var(--status-danger-glow) 14%, transparent); color: var(--status-danger-text); border: 1px solid color-mix(in srgb, var(--status-danger-glow) 40%, transparent); border-radius: 10px; font-size: 12px; }
 .v2-drop { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(5, 8, 20, 0.7); color: var(--v2-accent); font-size: 16px; border: 2px dashed var(--v2-accent); border-radius: var(--v2-radius); }
 
 /* agent-change toast — self-dismissing, with an Undo grace window (hover to pause) */
@@ -1027,7 +1073,7 @@
   animation: v2-toast-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .v2-toast.out { animation: v2-toast-out 240ms ease forwards; }
-.v2-toast.err { border-color: rgba(255, 59, 92, 0.45); }
+.v2-toast.err { border-color: color-mix(in srgb, var(--status-danger) 45%, transparent); }
 .v2-toast-dot { color: var(--v2-accent); }
 .v2-toast.err .v2-toast-dot { color: var(--v2-rec); }
 .v2-toast-text { color: var(--v2-dim); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1055,7 +1101,7 @@
      which is the only consumer of these rules now. ───────────────────────────────── */
 .v2-pb-search { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0;
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 10px; padding: 0 10px; height: 40px; }
-.v2-pb-search:focus-within { border-color: rgba(204, 255, 54, 0.55); }
+.v2-pb-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .v2-pb-search-label {
   color: var(--v2-faint);
   font-size: 10px;
@@ -1213,9 +1259,9 @@
   letter-spacing: 0.02em;
 }
 .v2-flow-rhyme.st-perfect { color: var(--v2-accent); border-color: var(--v2-accent-soft); }
-.v2-flow-rhyme.st-slant   { color: #ffd45c; }
+.v2-flow-rhyme.st-slant   { color: var(--status-warn); }
 .v2-flow-rhyme.st-anchor  { color: var(--v2-text); }
-.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: rgba(255, 59, 92, 0.4); }
+.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: color-mix(in srgb, var(--status-danger) 40%, transparent); }
 .v2-flow-rhyme.st-free    { color: var(--v2-faint); }
 
 /* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
