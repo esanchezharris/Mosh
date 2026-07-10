@@ -6,14 +6,21 @@ import { useStore } from "../store";
 import { nativeMenuPresent } from "../bridge";
 import type { CommandResult } from "../types";
 
+const bridgeMock = vi.hoisted(() => ({
+  eventHandlers: new Map<string, (raw: unknown) => void>(),
+}));
+
 vi.mock("../bridge", async () => {
   const actual = await vi.importActual<typeof import("../bridge")>("../bridge");
   return {
     ...actual,
-    onEvent: vi.fn(() => () => {}),
+    onEvent: vi.fn((type: string, cb: (raw: unknown) => void) => {
+      bridgeMock.eventHandlers.set(type, cb);
+      return () => bridgeMock.eventHandlers.delete(type);
+    }),
     nativeMenuPresent: vi.fn(() => false),
-    pickFiles: vi.fn(),
-    pickSaveFile: vi.fn(),
+    pickFiles: vi.fn(async () => ({ ok: true, files: ["/picked/open.mosh"] })),
+    pickSaveFile: vi.fn(async () => ({ ok: true, file: "/picked/save.mosh" })),
   };
 });
 
@@ -31,6 +38,7 @@ describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     execCalls.length = 0;
+    bridgeMock.eventHandlers.clear();
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -130,5 +138,42 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
+  });
+
+  it("dispatches Record through the app action dispatcher", () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "R", bubbles: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "record" } });
+  });
+
+  it("dispatches Duplicate through the app action dispatcher", () => {
+    useStore.setState({ selection: new Set(["clip-1"]) });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "D", metaKey: true, bubbles: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "duplicate_clip", args: { clipId: "clip-1" } });
+  });
+
+  it("preserves native menu open_project file payloads", () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      bridgeMock.eventHandlers.get("mosh_menu")?.({ action: "open_project", file: "/recent/native.mosh" });
+    });
+
+    expect(execCalls).toContainEqual({ command: "open_project", args: { file: "/recent/native.mosh" } });
   });
 });

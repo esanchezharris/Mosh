@@ -19,8 +19,9 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { pickFiles } from "../bridge";
+import { pickFiles, pickSaveFile } from "../bridge";
 import { useStore, type Peaks } from "../store";
+import { runAction } from "../menuActions";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { commitClipDrag } from "./clipDrag";
@@ -47,6 +48,8 @@ import { liveFeel, liveGestureTable } from "../interaction/config";
 // Modifier state from a pointer/keyboard event, in the resolver's shape.
 const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
   ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!e.metaKey, ctrl: !!e.ctrlKey });
+
+const actionCtx = () => ({ store: useStore.getState(), pickFiles, pickSaveFile });
 
 // Height of a clip's header strip (the label bar) — the y-band that classifies as
 // clip.header. Only matters where a preset distinguishes header vs body (Ableton).
@@ -168,14 +171,14 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
       loopAnchor.current = sec;
       capturePointer(e.currentTarget, e.pointerId);
     } else if (click === EA.SEEK) {
-      void exec("set_transport", { position: snapWithFeel(sec) });
+      void runAction("seek", actionCtx(), { position: snapWithFeel(sec) });
     }
   };
   const onRulerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (loopAnchor.current == null || e.buttons === 0) return; // buttons===0 → stray hover after a lost/cancelled capture
     const sec = Math.max(0, pxToSec(contentX(e.clientX, e.currentTarget)));
     const a = Math.min(loopAnchor.current, sec), b = Math.max(loopAnchor.current, sec);
-    void exec("set_transport", { loop: true, loopStart: a, loopEnd: b });
+    void runAction("loop_region", actionCtx(), { loopStart: a, loopEnd: b });
   };
   const onRulerUp = () => { loopAnchor.current = null; };
 

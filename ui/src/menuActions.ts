@@ -6,6 +6,7 @@
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
 import type { ActionId } from "./keymap";
+import type { Snapshot } from "./types";
 
 export type { ActionId };
 
@@ -19,7 +20,10 @@ export interface ActionStore {
   pasteClipboard: () => Promise<void>;
   clearSelection: () => void;
   selection: Set<string>;
-  transport: { playing: boolean };
+  transport: { playing: boolean; position?: number };
+  snapshot?: Snapshot | null;
+  clipboard?: unknown;
+  setTool?: (tool: "move" | "split" | "range") => void;
   // open clip-editor modals — Delete is suppressed on the arrangement while either
   // is set (the editor owns Delete then). Optional so test fakes can omit them.
   editingClipId?: string | null;
@@ -30,6 +34,14 @@ export interface ActionCtx {
   store: ActionStore;
   pickFiles: (opts?: { multiple?: boolean; filters?: string; title?: string }) => Promise<{ ok: boolean; files: string[] }>;
   pickSaveFile: (opts?: { filters?: string; title?: string; defaultName?: string }) => Promise<{ ok: boolean; file: string }>;
+}
+
+export interface RunActionOptions {
+  file?: string;
+  index?: number;
+  position?: number;
+  loopStart?: number;
+  loopEnd?: number;
 }
 
 // Audio export formats the backend understands; the rest infer to WAV.
@@ -43,7 +55,7 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
 /** Dispatch a logical action. `opts.file` lets `open_project` open a known path without
  *  popping the picker; `opts.index` selects which entry `open_recent` reopens (0 = newest).
  *  Returns a promise so callers can await structural changes. */
-export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: string; index?: number } = {}): Promise<void> {
+export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOptions = {}): Promise<void> {
   const { store } = ctx;
   switch (id) {
     case "new_project":
@@ -122,6 +134,52 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: { file?: str
 
     case "play_pause":
       await store.exec("set_transport", { action: "toggle" });
+      return;
+    case "record":
+      await store.exec("set_transport", { action: "record" });
+      return;
+    case "to_start":
+      await store.exec("set_transport", { action: "to_start" });
+      return;
+    case "to_end":
+      await store.exec("set_transport", { action: "to_end" });
+      return;
+    case "duplicate":
+      for (const clipId of [...store.selection]) await store.exec("duplicate_clip", { clipId });
+      return;
+    case "group": {
+      const selected = new Set(store.selection);
+      const trackIds = store.snapshot?.tracks
+        .filter((track) => !track.isGroup && track.clips.some((clip) => selected.has(clip.id)))
+        .map((track) => track.id) ?? [];
+      if (trackIds.length) await store.exec("create_group_track", { trackIds });
+      return;
+    }
+    case "split": {
+      const position = opts.position ?? store.transport.position;
+      if (typeof position !== "number") return;
+      for (const track of store.snapshot?.tracks ?? [])
+        for (const clip of track.clips)
+          if (store.selection.has(clip.id) && clip.start < position && position < clip.start + clip.length)
+            await store.exec("split_clip", { clipId: clip.id, time: position });
+      return;
+    }
+    case "tool_move":
+      store.setTool?.("move");
+      return;
+    case "tool_split":
+      store.setTool?.("split");
+      return;
+    case "tool_range":
+      store.setTool?.("range");
+      return;
+    case "seek":
+      if (typeof opts.position === "number")
+        await store.exec("set_transport", { position: opts.position });
+      return;
+    case "loop_region":
+      if (typeof opts.loopStart === "number" && typeof opts.loopEnd === "number")
+        await store.exec("set_transport", { loop: true, loopStart: opts.loopStart, loopEnd: opts.loopEnd });
       return;
   }
 }
