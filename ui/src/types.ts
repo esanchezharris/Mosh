@@ -79,6 +79,8 @@ export type LyricLine = {
   hasScore?: boolean;           // FMS Phase-3 — line carries a persisted lyricScore (take flow)
   asserted?: boolean;
   singable?: boolean;
+  origin?: string;              // extraction provenance: sung|partial|mixed|generated|edited
+  hasHeard?: boolean;           // line carries a persisted lyricHeard blob (raw ASR words)
 };
 export type LyricSheet = {
   id: string;

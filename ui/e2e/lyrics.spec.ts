@@ -220,6 +220,10 @@ test("right-click a wave take → Build flow from this take → an editable grid
   // The grid editor: a confirm bar + per-line editable syllable counts (no text input yet).
   await expect(page.getByTestId("skeleton-confirm-bar")).toBeVisible();
   await expect(page.getByTestId("skeleton-line-0")).toBeVisible();
+  // Extraction (pipeline correction): the line the take REALLY sang lands verbatim with
+  // the "sung" provenance badge — his words survive, visibly.
+  await expect(page.getByTestId("lyric-origin-2")).toHaveAttribute("data-origin", "sung");
+  await expect(page.getByTestId("lyric-line-2")).toContainText("♪ sung");
   const before = (await page.getByTestId("skel-count-0").textContent()) ?? "";
   await page.getByTestId("skel-inc-0").click();   // nudge the syllable target up
   await expect(page.getByTestId("skel-count-0")).not.toHaveText(before);
@@ -260,8 +264,8 @@ test("sing mode: build a flow → + Sing → guide render → accept", async ({ 
   await singBtn.click();
 
   // SingControls: flow coverage from the take + the locked-to-self enrollment copy.
-  await expect(gen.getByTestId("sing-flow")).toContainText("2/2");
-  await expect(gen.getByTestId("sing-asserted")).toContainText("1/2");
+  await expect(gen.getByTestId("sing-flow")).toContainText("3/3");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("1/3");
   await expect(gen.getByTestId("sing-voice")).toContainText("not enrolled");
 
   await gen.getByTestId("gen-render").click();
@@ -320,8 +324,10 @@ test("sing partial flow: a hand-added line shows as skipped, scored lines still 
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
-  await expect(gen.getByTestId("sing-flow")).toContainText("2/3");
-  await expect(gen.getByTestId("sing-asserted")).toContainText("2/3");
+  // Merged fixture: 2 fillable + the extraction-parity sung line (scored) + the
+  // hand-added line (unscored) = 4 lines; two accepted lines are asserted.
+  await expect(gen.getByTestId("sing-flow")).toContainText("3/4");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("2/4");
   await expect(gen.getByTestId("sing-skip-hint")).toContainText("1 line");
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");

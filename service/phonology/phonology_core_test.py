@@ -175,5 +175,29 @@ check("internal_rhyme_pairs finds money~sunny (indices 0,1)", (0, 1) in pairs, s
 check("internal_rhyme_pairs excludes the non-rhyming 'today'", (0, 2) not in pairs and (1, 2) not in pairs, str(pairs))
 check("internal_rhyme_pairs is deterministic", core.internal_rhyme_pairs(line, "slant") == pairs)
 
+# ── 12. Syllabify phones (FMS sung-render fix): split a word's ARPAbet into per-syllable
+# phone groups so a multi-slot word PROGRESSES ("gon"→"na") instead of re-articulating the
+# whole word on every slot. Onset-maximal for singletons; a cluster keeps its last consonant
+# as the next syllable's onset. LOSSLESS: the groups concatenate back to the input. ────────
+check("syllabify(cat=K AE1 T) == one group (1 syllable)",
+      core.syllabify_phones(["K", "AE1", "T"]) == [["K", "AE1", "T"]])
+check("syllabify(gonna=G AA1 N AH0) == [[G,AA1],[N,AH0]] (single consonant → next onset)",
+      core.syllabify_phones(["G", "AA1", "N", "AH0"]) == [["G", "AA1"], ["N", "AH0"]])
+check("syllabify(table=T EY1 B AH0 L) == [[T,EY1],[B,AH0,L]]",
+      core.syllabify_phones(["T", "EY1", "B", "AH0", "L"]) == [["T", "EY1"], ["B", "AH0", "L"]])
+check("syllabify(again=AH0 G EH1 N) == [[AH0],[G,EH1,N]]",
+      core.syllabify_phones(["AH0", "G", "EH1", "N"]) == [["AH0"], ["G", "EH1", "N"]])
+check("syllabify(winter=W IH1 N T ER0) splits the cluster [[W,IH1,N],[T,ER0]] (last consonant → onset)",
+      core.syllabify_phones(["W", "IH1", "N", "T", "ER0"]) == [["W", "IH1", "N"], ["T", "ER0"]])
+check("syllabify(empty) == []", core.syllabify_phones([]) == [])
+check("syllabify(no-vowel gibberish) == one group, never crashes",
+      core.syllabify_phones(["ZZ", "QX"]) == [["ZZ", "QX"]])
+_banana = ["B", "AH0", "N", "AE1", "N", "AH0"]
+check("syllabify is LOSSLESS (groups concatenate back to input)",
+      [p for g in core.syllabify_phones(_banana) for p in g] == _banana)
+check("syllabify group count == syllable count",
+      len(core.syllabify_phones(_banana)) == core.syllable_count_phones(_banana))
+check("syllabify is deterministic", core.syllabify_phones(_banana) == core.syllabify_phones(_banana))
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
