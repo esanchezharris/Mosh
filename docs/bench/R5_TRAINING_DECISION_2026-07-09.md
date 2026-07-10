@@ -153,3 +153,23 @@ cd service/sft
 Run `./run-gate-r4.sh` only when the monitor reports completion and
 `action: run-gate-read`. If r4 passes, hold `s2-mix-v5-prep` as optional future
 data. If r4 misses, use this prepared r5 candidate as the obvious next run base.
+
+
+## Addendum — 2026-07-09 (post-r4-gate, consolidation session)
+
+The `continue-r4` decision above completed its course: r4 finished on the CUDA lane
+(12889/12889) and its §P8 gate was read — **MISS on measurable per-command floors**
+(aggregate + §B passed). See `GATE_READ_a3b-r4-cuda.md`.
+
+**Owner decision (2026-07-09): fix-first, then informed r5.**
+
+1. Land the harness/runtime fixes (P0 `window` bug — landed as PR #275; P1 split-point
+   normalization — open).
+2. Rerun the gate surfaces against the archived `a3b-r4-cuda` adapter
+   (`~/AI/adapters/a3b-r4-cuda-pull`) — a short rented-pod serve, no retraining.
+3. Launch r5 only with rows targeting misses that survive as genuinely model-caused
+   (candidates staged at `service/sft/a3b-r4-cuda_next_run_examples.*`, on top of the
+   prepared `s2-mix-v5-prep`).
+
+The RunPod pod `gc3v0gpji7xskt` was terminated after checksum-verified adapter
+archival; the local MLX seat remains free until the informed r5 launch.
