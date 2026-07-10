@@ -29,6 +29,19 @@ find_program(_ditto ditto)
 if (NOT _ditto)
     message(FATAL_ERROR "RefreshMacBundleMetadata: ditto is required")
 endif()
+find_program(_xattr xattr)
+
+function(_mosh_clear_bundle_xattrs _path)
+    if (_xattr AND EXISTS "${_path}")
+        execute_process(COMMAND "${_xattr}" -cr "${_path}"
+                        RESULT_VARIABLE _xattr_result
+                        OUTPUT_QUIET
+                        ERROR_QUIET)
+        if (_xattr_result)
+            message(WARNING "RefreshMacBundleMetadata: could not clear xattrs for '${_path}'")
+        endif()
+    endif()
+endfunction()
 
 set(_tmp_parent "$ENV{TMPDIR}")
 if (NOT _tmp_parent)
@@ -39,6 +52,7 @@ set(_signing_bundle "${_tmp_parent}/MoshRefreshBundleMetadata-${_tmp_token}.app"
 set(_restore_bundle "${BUNDLE}.restore-${_tmp_token}")
 file(REMOVE_RECURSE "${_signing_bundle}")
 file(REMOVE_RECURSE "${_restore_bundle}")
+_mosh_clear_bundle_xattrs ("${BUNDLE}")
 
 execute_process(COMMAND "${_ditto}" --norsrc --noextattr "${BUNDLE}" "${_signing_bundle}"
                 RESULT_VARIABLE _copy_to_tmp_result
@@ -49,6 +63,7 @@ if (_copy_to_tmp_result)
         "RefreshMacBundleMetadata: clean bundle copy failed for '${BUNDLE}'\n"
         "${_copy_to_tmp_out}${_copy_to_tmp_err}")
 endif()
+_mosh_clear_bundle_xattrs ("${_signing_bundle}")
 
 execute_process(COMMAND /usr/bin/codesign --force --deep --sign - "${_signing_bundle}"
                 RESULT_VARIABLE _sign_result
@@ -83,8 +98,10 @@ if (_copy_back_result)
         "RefreshMacBundleMetadata: signed bundle restore failed for '${BUNDLE}'\n"
         "${_copy_back_out}${_copy_back_err}")
 endif()
+_mosh_clear_bundle_xattrs ("${_restore_bundle}")
 file(REMOVE_RECURSE "${BUNDLE}")
 file(RENAME "${_restore_bundle}" "${BUNDLE}")
+_mosh_clear_bundle_xattrs ("${BUNDLE}")
 
 execute_process(COMMAND /usr/bin/codesign --verify --deep --strict --verbose=2 "${BUNDLE}"
                 RESULT_VARIABLE _verify_result
