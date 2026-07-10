@@ -8,6 +8,7 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
+    test_drum_pattern.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
     test_migrations.cpp
