@@ -1,6 +1,6 @@
 # Consolidation ledger — 2026-07-09 (Codex → Claude transition)
 
-One session cleared the entire Codex-era backlog: every open PR resolved, every branch
+One session cleared the entire Codex-era backlog: every open PR resolved to zero, every branch
 dispositioned, the corrupted git store rebuilt, the r4 training cycle honestly closed,
 and the r5 fix-first pipeline advanced through P1. Runbook for repeating this:
 [CONSOLIDATION_LOOP.md](CONSOLIDATION_LOOP.md).
@@ -26,8 +26,8 @@ and the r5 fix-first pipeline advanced through P1. Runbook for repeating this:
 | #197 | r7 recipe corpus promotion (+24.7k) | **MERGED** | recipe goldens ×3 · bundle parity fixed · teardown suites ×4 · selftest 1195×3 · below-floor invariant scoped to transcribed sources (local-midi rolls are off-grid by design) |
 | #176 | GRPO rungs | **CLOSED** per the 2026-07-01 RL freeze; branch preserved as tag `archive/funny-mendel-grpo-rungs` |
 | #272 | Docs-only r5 carve | **CLOSED** — content already on main in newer form |
-| #277 | Rescued transform-backend commit | **PARKED** — venv-seam conformance red + starter-model semantics = owner call (see PR comment) |
-| #281 | Non-44.1k re-imagine staging fix | **PARKED** — 17 days stale vs the rebuilt pipeline; revive checklist on the PR |
+| #277 | Rescued transform-backend commit | **MERGED** (owner: fix + land, no starter models) — kept the managed model-dir migration + adapter resolution; dropped StarterRave seeding, the out-of-tree env home, and the run.sh auto-install. Gate from a pure archive extraction: venv_locations ×3 ✓, bundle ✓, pinned-off available()==False, default available()==True |
+| #281 | Non-44.1k re-imagine staging fix | **CLOSED — already fixed on main**: `stageWavRegionAt44k` landed verbatim via the #233 recut; 48 kHz end-to-end repro renders ready with the staged input at 44100/16 |
 | #278 | r4 close-out docs | **MERGED** (authored this session) |
 | P1 split normalization | fix/split-clip-normalization | **MERGED** (authored this session) | RED-proven, 5/5 vitest, selftest 1199/1199 ×3 |
 
@@ -72,3 +72,14 @@ and the r5 fix-first pipeline advanced through P1. Runbook for repeating this:
   three gate worktrees, non-iCloud build dirs.
 - 385 iCloud " 2" conflict copies cleaned from source dirs (368 identical removed,
   17 differing quarantined to the rescue dir).
+
+## Addendum (same day, post-ledger)
+
+- Both parked PRs resolved by owner decision: #277 merged scoped, #281 closed as already-fixed
+  (proofs on the PRs). **Open-PR count: 0.**
+- Two more root causes unearthed while landing them: (1) the rebuilt store's shared
+  `core.worktree` bled the Documents checkout into the gate worktrees' git view — fixed by
+  scoping it via `extensions.worktreeConfig` (per-worktree config); (2) four orphaned
+  Codex-plugin **codegraph/OMO watcher daemons** were still running and renaming files to
+  `"name 2.ext"` on non-iCloud paths — killed; they also plausibly contributed to the
+  original `.git` carnage alongside iCloud.
