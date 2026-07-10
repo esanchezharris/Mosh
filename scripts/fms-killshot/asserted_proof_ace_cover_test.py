@@ -416,6 +416,60 @@ def test_preview_server_routes_ace_cover_verdicts() -> None:
     assert ace_verdict_seed("/used2/asserted-proof/api/verdict/ace-cover/not-a-seed") is None
 
 
+def test_page_section_is_empty_before_the_spike_runs(tmp_path: Path) -> None:
+    from asserted_proof_page import _ace_cover_section
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    (ace_dir / "ledger.json").unlink(missing_ok=True)
+    assert _ace_cover_section(root / "asserted-proof") == ""
+
+
+def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> None:
+    from asserted_proof_ace_cover import regenerate_ace_manifest as regen
+    from asserted_proof_page import _ace_cover_section
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    _seed_lane(ace_dir, 7, ace_dir / "request.json", opening / "raw.wav", ace_dir / "raw-clip-f0.json")
+    # Give seed 7 a real eval payload so the card can show lexical chips.
+    evaluation = _evaluation("seed-7")
+    evaluation["seed"] = 7
+    evaluation["lexical"]["perWord"] = [{"index": 0, "text": "yeah", "cls": "hit", "heard": "yeah", "similarity": 1.0, "mismatchKind": None}]
+    seed_paths(ace_dir, 7)["eval"].write_text(json.dumps(evaluation))
+    (ace_dir / f"seed-7-asr.json").write_text(json.dumps({"ok": True, "words": [{"word": "yeah"}]}))
+    # Receipt was written before the eval/asr contents changed — refresh it.
+    _relane = _seed_lane  # keep names readable
+    files = seed_paths(ace_dir, 7)
+    write_receipt(files["receipt"], {
+        "request": ace_dir / "request.json", "rawSlice": opening / "raw.wav", "rawClipF0": ace_dir / "raw-clip-f0.json",
+        "output": files["opening"], "asr": files["asr"], "align": files["align"], "renderedF0": files["f0"], "eval": files["eval"],
+        "full": files["full"], "paddedSource": ace_dir / "source-padded-10s.wav",
+    })
+    manifest = regen(ace_dir, opening, path_root=root)
+    import hashlib
+
+    manifest_hash = hashlib.sha256((ace_dir / "manifest.json").read_bytes()).hexdigest()
+    ledger = {
+        "version": 1,
+        "requestSha256": request_sha256(_request()),
+        "manifestSha256": manifest_hash,
+        "candidates": [
+            {"candidateId": "seed-7", "seed": 7, "rank": 1, "status": "shortlisted", "autoStatus": "shortlisted", "gates": {}, "shortlistFailures": [], "invalidReasons": [],
+             "lexical": {"hits": 16, "nearMisses": 0, "substitutions": 0, "misses": 0}, "metrics": {"medianAttackErrorMs": 30.0, "silenceBleedMs": 20.0, "medianAbsPitchErrorSemitones": 0.5, "registerOffsetSemitones": 0.1, "voicedOverlap": 0.9, "contourCorrelation": 0.9, "longestOctaveErrorMs": 0.0, "p95AttackErrorMs": 50.0, "envelopeCorrelation": 0.8}, "verdict": None},
+            {"candidateId": "seed-271", "seed": 271, "rank": None, "status": "invalid", "autoStatus": "invalid", "gates": {}, "shortlistFailures": [], "invalidReasons": ["generation failed: boom"], "lexical": {}, "metrics": {}, "verdict": None},
+        ],
+        "legacy": {},
+    }
+    (ace_dir / "ledger.json").write_text(json.dumps(ledger))
+    section = _ace_cover_section(root / "asserted-proof")
+    assert "Local model spike" in section or "Local Model Spike" in section
+    assert "seed-7-opening.wav" in section  # playable candidate
+    assert "seed 7" in section.lower()
+    assert "/api/verdict/ace-cover/7" in section
+    assert manifest_hash in section  # verdict binding embeds the spike manifest hash
+    assert "seed-271" not in section  # invalid candidates get no card
+    assert "yeah" in section  # lexical chip content
+
+
 def test_declare_stop_prosody_requires_lexical_floor_met(tmp_path: Path) -> None:
     ace_dir = _stop_fixture(tmp_path, [{"seed": 7, "verdict": "fail", "classification": "timing"}], lexical_floor=False)
     with pytest.raises(RuntimeError, match="lexical"):

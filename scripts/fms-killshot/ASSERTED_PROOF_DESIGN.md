@@ -41,6 +41,7 @@ An audio-lab proof sheet, not a product dashboard. The page uses charcoal record
 - `MetricStrip`: compact mono key/value cells with threshold context.
 - `MappingTable`: asserted word, absolute span, syllable phones, pitch, and provenance.
 - `VerdictPanel`: verdict controls, failure classification, notes, durable local save status, and JSON download fallback.
+- `CandidateCard` (Local Model Spike): rank + effective status + provenance kicker, seed title, playable-or-quarantined audio (hash-checked against the spike's own manifest, never the opening manifest), heard transcript with per-word lexical chips (hit/near-miss/substitution/miss), a metric strip whose failing shortlist gates render in the fail token, and a per-candidate VerdictPanel bound to the spike manifest hash. Only the three highest-ranked current candidates get cards; invalid candidates never render. Metrics never imply owner approval; a lane stop renders as a fail-ruled banner.
 
 ## 6. Motion And Accessibility
 

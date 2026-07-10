@@ -97,6 +97,126 @@ def _expansion_sections(output_dir: Path) -> str:
     return "<section class='expansions'><div class='section-heading'><div class='kicker'>Known-first-half system test</div><h2>Beyond the opening.</h2><p>These are diagnostic expansions after a close verdict, not accepted masters.</p></div>" + "".join(sections) + "</section>"
 
 
+def _ace_candidate_chips(evaluation: dict) -> str:
+    chips = []
+    for entry in (evaluation.get("lexical") or {}).get("perWord", []):
+        title = f"heard: {entry.get('heard')}" if entry.get("heard") else "not heard"
+        chips.append(f"<span class='chip {html.escape(str(entry.get('cls')))}' title='{html.escape(title)}'>{html.escape(str(entry.get('text')))}</span>")
+    return "".join(chips)
+
+
+def _ace_metric_cells(candidate: dict) -> str:
+    failures = set(candidate.get("shortlistFailures", []))
+    cells = (
+        ("Attack median", candidate["metrics"].get("medianAttackErrorMs"), "ms", "medianAttack"),
+        ("Attack p95", candidate["metrics"].get("p95AttackErrorMs"), "ms", "p95Attack"),
+        ("Silence bleed", candidate["metrics"].get("silenceBleedMs"), "ms", "silenceBleed"),
+        ("Pitch median", candidate["metrics"].get("medianAbsPitchErrorSemitones"), "st", "medianPitch"),
+        ("Register offset", candidate["metrics"].get("registerOffsetSemitones"), "st", None),
+        ("Octave error", candidate["metrics"].get("longestOctaveErrorMs"), "ms", "octaveRun"),
+        ("Voiced overlap", candidate["metrics"].get("voicedOverlap"), "", "voicedOverlap"),
+        ("Contour corr", candidate["metrics"].get("contourCorrelation"), "", None),
+        ("Envelope corr", candidate["metrics"].get("envelopeCorrelation"), "", None),
+    )
+    rendered = []
+    for label, value, unit, gate in cells:
+        shown = "pending" if value is None else f"{value}{(' ' + unit) if unit else ''}"
+        failed = " fail" if gate in failures else ""
+        rendered.append(f"<div class='{failed.strip()}'><span>{html.escape(label)}</span><strong>{html.escape(str(shown))}</strong></div>")
+    return "".join(rendered)
+
+
+def _ace_cover_section(output_dir: Path) -> str:
+    ace_dir = output_dir / "opening/ace-step-cover"
+    ledger_path, manifest_path, request_path = ace_dir / "ledger.json", ace_dir / "manifest.json", ace_dir / "request.json"
+    if not (ledger_path.is_file() and manifest_path.is_file() and request_path.is_file()):
+        return ""
+    ledger, manifest, request = _load(ledger_path), _load(manifest_path), _load(request_path)
+    manifest_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    lane_note = ""
+    lane_status_path = ace_dir / "lane-status.json"
+    if lane_status_path.is_file():
+        lane = _load(lane_status_path)
+        lane_note = f"<p class='lane-blocked'>Lane stopped: <strong>{html.escape(str(lane.get('status')))}</strong> — {html.escape(str(lane.get('rationale', '')))}</p>"
+    ranked = sorted((entry for entry in ledger.get("candidates", []) if entry.get("rank") in (1, 2, 3)), key=lambda entry: entry["rank"])
+    total = len(ledger.get("candidates", []))
+    raw_card = _audio_card("R", "Raw opening reference", "The owner take this cover must preserve — timing and register truth.", output_dir / "opening/raw.wav", "opening/raw.wav", "rawSlice", manifest, True)
+    cards = []
+    for candidate in ranked:
+        seed = candidate.get("seed")
+        wav = ace_dir / f"seed-{seed}-opening.wav"
+        wav_current = _current(wav, f"seed{seed}Opening", manifest)
+        player = (
+            f"<audio controls preload='metadata' src='opening/ace-step-cover/seed-{seed}-opening.wav'></audio>"
+            if wav_current
+            else "<div class='quarantine'>Quarantined: an artifact hash does not match the current spike manifest.</div>"
+        )
+        evaluation_path = ace_dir / f"seed-{seed}-eval.json"
+        chips = ""
+        heard = ""
+        if _current(evaluation_path, f"seed{seed}Eval", manifest):
+            evaluation = _load(evaluation_path)
+            chips = _ace_candidate_chips(evaluation)
+        asr_path = ace_dir / f"seed-{seed}-asr.json"
+        if _current(asr_path, f"seed{seed}Asr", manifest):
+            asr = _load(asr_path)
+            heard = " ".join(str(word.get("word", "")).strip() for word in asr.get("words", []))
+        provenance = " · imported ad-hoc" if candidate.get("provenance") == "imported-ad-hoc" else ""
+        verdict = candidate.get("verdict") or {}
+        cards.append(
+            f"""<article class='cand-card'>
+        <div class='clip-head'><div><div class='kicker'>Rank {candidate['rank']} · {html.escape(str(candidate.get('status')))}{provenance}</div><h3>Seed {seed}</h3></div>
+        <div class='clip-stats'>lexical {candidate['lexical'].get('hits', '?')}/16 hits · {candidate['lexical'].get('nearMisses', '?')} near · {candidate['lexical'].get('misses', '?')} miss</div></div>
+        {player}
+        <details><summary>Heard transcript</summary><p>{html.escape(heard) or 'pending'}</p><div class='chips'>{chips}</div></details>
+        <section class='metrics lane-metrics' aria-label='Seed {seed} diagnostics'>{_ace_metric_cells(candidate)}</section>
+        <div class='cand-verdict' data-seed='{seed}' data-endpoint='/used2/asserted-proof/api/verdict/ace-cover/{seed}'>
+          <div class='eyebrow'>Owner verdict · metrics never imply approval</div>
+          <div class='actions'><button data-v='pass'>Pass</button><button data-v='close but revise'>Close but revise</button><button data-v='fail'>Fail</button></div>
+          <label><span class='eyebrow'>Failure class</span><select class='cls'><option value=''>Not classified</option><option>words</option><option>timing</option><option>pitch/register</option><option>voice/timbre</option></select></label>
+          <label><span class='eyebrow'>Notes</span><textarea class='notes' placeholder='What did you hear?'>{html.escape(str(verdict.get('notes', '')))}</textarea></label>
+          <p class='verdict-status' role='status' aria-live='polite'>No verdict saved for this candidate.</p>
+          <div class='commit-actions'><button class='save'>Save verdict</button></div>
+        </div>
+      </article>"""
+        )
+    section = f"""<section class='ace-cover'>
+<style>
+.ace-cover{{margin-top:64px;padding-top:48px;border-top:1px solid var(--rule)}}
+.chips{{margin-top:8px}} .chip{{display:inline-block;padding:2px 8px;margin:2px;border-radius:999px;font:600 11px 'IBM Plex Mono',Menlo,monospace}}
+.chip.hit{{background:rgba(139,191,118,.15);color:var(--pass)}} .chip.near_miss{{background:rgba(242,169,59,.15);color:var(--accent)}} .chip.substitution,.chip.miss{{background:rgba(224,107,85,.15);color:var(--fail)}}
+.cand-card{{margin-top:24px;padding:24px;background:var(--surface);border-radius:var(--r)}} .cand-card audio{{margin-top:12px}}
+.cand-verdict{{margin-top:16px;padding:16px;background:var(--inset);border-radius:8px}}
+.lane-blocked{{margin:16px 0;padding:12px 16px;border:1px solid var(--fail);border-radius:8px;color:var(--fail);font:600 12px 'IBM Plex Mono',Menlo,monospace}}
+.metrics div.fail strong{{color:var(--fail)}}
+</style>
+<div class='section-heading'><div class='kicker'>Local model spike · ACE-Step 1.5 turbo cover</div><h2>Same take, asserted words.</h2><p>The raw take supplies structure, the sixteen asserted words supply lyrics. ASR and contour metrics rank candidates; only your ear passes one.</p></div>
+{lane_note}
+<div class='rail'>{raw_card}</div>
+<section class='assertion'><div class='kicker'>Asserted text · target lyrics</div><p>{html.escape(str(request.get('assertedText', '')))}</p></section>
+{''.join(cards) if cards else "<p class='empty'>No current ranked candidates yet — run ace-cover-spike.</p>"}
+<p class='clip-stats'>{len(ranked)} of {total} evaluated candidates shown; the full ranking lives in ledger.json.</p>
+<script>
+const aceManifestSha256='{manifest_hash}';
+document.querySelectorAll('.cand-verdict').forEach(panel=>{{
+  const endpoint=panel.dataset.endpoint; const seed=Number(panel.dataset.seed);
+  let verdict=''; const buttons=[...panel.querySelectorAll('[data-v]')];
+  const status=panel.querySelector('.verdict-status'); const cls=panel.querySelector('.cls'); const notes=panel.querySelector('.notes');
+  const setStatus=(message,state='')=>{{status.textContent=message;status.className=`verdict-status ${{state}}`;}};
+  buttons.forEach(button=>button.addEventListener('click',()=>{{verdict=button.dataset.v;buttons.forEach(item=>item.classList.toggle('selected',item===button));setStatus('Verdict selected. Save it to record the listen.');}}));
+  fetch(endpoint,{{cache:'no-store'}}).then(response=>response.ok?response.json():null).then(payload=>{{if(payload&&payload.manifestSha256===aceManifestSha256){{verdict=payload.verdict||'';cls.value=payload.classification||'';notes.value=payload.notes||'';buttons.forEach(item=>item.classList.toggle('selected',item.dataset.v===verdict));setStatus(`Saved ${{payload.verdict}} for this candidate.`,'saved');}}}}).catch(()=>{{}});
+  panel.querySelector('.save').addEventListener('click',async()=>{{
+    if(!verdict){{setStatus('Choose pass, close but revise, or fail first.','error');return;}}
+    const payload={{clip:'ace-cover',seed,verdict,classification:cls.value,notes:notes.value,createdAt:new Date().toISOString(),manifestSha256:aceManifestSha256}};
+    try{{const response=await fetch(endpoint,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not save verdict.');setStatus(`Saved ${{verdict}} for this candidate.`,'saved');}}
+    catch(error){{setStatus(error.message||'Could not save verdict.','error');}}
+  }});
+}});
+</script>
+</section>"""
+    return section
+
+
 def build_page(output_dir: Path) -> Path:
     opening = output_dir / "opening"
     plan = _load(opening / "asserted-render-plan.json")
@@ -128,6 +248,7 @@ def build_page(output_dir: Path) -> Path:
         _audio_card("05", "Prior localized SoulX repair", "Historical diagnostic that changed only the in-the-night phrase. It remains available for comparison, not acceptance.", opening / "guide-word-repair-local.wav", "opening/guide-word-repair-local.wav", "localRepairGuide", manifest, inputs_current),
     ]
     expansions = _expansion_sections(output_dir) if _owner_passes_current_manifest(opening) else ""
+    ace_cover = _ace_cover_section(output_dir)
     page = f"""<!doctype html>
 <html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>Used2 asserted re-sing proof</title><meta name='description' content='Provenance-safe opening re-sing proof for Used2.'><link rel='icon' href='data:,'>
@@ -149,7 +270,7 @@ header{{display:grid;grid-template-columns:1.4fr .6fr;gap:32px;align-items:end;p
 <section class='rail'>{''.join(cards)}</section>
 	<section class='metrics lane-metrics' aria-label='Voicebox cloned lexical diagnostics'>{voicebox_metrics_html}</section>
 <section class='mapping'><table><caption>Word to syllable mapping</caption><thead><tr><th>Word</th><th>Absolute span</th><th>Phones</th><th>MIDI</th><th>Pitch source</th></tr></thead><tbody>{''.join(mapping_rows)}</tbody></table></section>
-{expansions}
+{ace_cover}{expansions}
 <section class='verdict'><h2>Owner-ear gate</h2><div class='actions'><button data-verdict='pass'>Pass</button><button data-verdict='close but revise'>Close but revise</button><button data-verdict='fail'>Fail</button></div><label><span class='eyebrow'>Failure class</span><select id='classification'><option value=''>Not classified</option><option>words</option><option>timing</option><option>pitch/register</option><option>voice/timbre</option></select></label><label><span class='eyebrow'>Notes</span><textarea id='notes' placeholder='What changed when you heard it?'></textarea></label><p class='verdict-status' id='verdict-status' role='status' aria-live='polite'>No verdict saved for this render.</p><div class='commit-actions'><button class='save' id='save'>Save verdict</button><button id='download'>Download JSON</button></div></section>
 </main><script>
 const manifestSha256='{hashlib.sha256((opening / 'manifest.json').read_bytes()).hexdigest()}';
