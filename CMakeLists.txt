@@ -210,7 +210,8 @@ if (MOSH_BUILD_APP)
         # the Mosh target ONLY fires when Mosh relinks, so up-to-date / UI-only / deploy
         # builds would ship an UNPATCHED bundle (this is exactly how a TCC-crashing
         # /Applications/Mosh.app shipped). MoshFixInfoPlist (ALL, always-run) is the
-        # backstop that closes that gap.
+        # injection-only backstop; MoshRefreshBundleMetadata below performs the final
+        # inject + ad-hoc sign after resource staging.
         set(MOSH_INJECT_PLIST_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/InjectInfoPlistKeys.cmake")
         add_custom_command(TARGET Mosh POST_BUILD
             COMMAND ${CMAKE_COMMAND}
@@ -275,6 +276,23 @@ if (MOSH_BUILD_APP)
         include(cmake/BuildUI.cmake)
         # Phone companion controller page (served by RemoteCompanionServer at /web).
         include(cmake/BuildCompanion.cmake)
+    endif()
+
+    if (APPLE)
+        add_custom_target(MoshRefreshBundleMetadata ALL
+            COMMAND ${CMAKE_COMMAND}
+                    -DBUNDLE=$<TARGET_BUNDLE_DIR:Mosh>
+                    -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    -P "${CMAKE_SOURCE_DIR}/cmake/RefreshMacBundleMetadata.cmake"
+            COMMENT "Refreshing macOS bundle Info.plist and ad-hoc signature"
+            VERBATIM)
+        add_dependencies(MoshRefreshBundleMetadata Mosh MoshFixInfoPlist)
+        if (TARGET MoshStageUI)
+            add_dependencies(MoshRefreshBundleMetadata MoshStageUI)
+        endif()
+        if (TARGET MoshStageCompanion)
+            add_dependencies(MoshRefreshBundleMetadata MoshStageCompanion)
+        endif()
     endif()
 endif()
 
