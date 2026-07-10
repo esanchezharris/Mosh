@@ -437,10 +437,9 @@ def ensure_key_estimate(ace_dir: Path, opening_dir: Path, prompt_wav: Path) -> d
     return evidence
 
 
-def _finalize_candidate_audio(ace_dir: Path, plan: dict, seed: int, source_wav: Path, *, trim: bool) -> dict:
+def _finalize_candidate_audio(plan: dict, files: dict[str, Path], source_wav: Path, *, trim: bool) -> dict:
     """source -> pre-enforcement trim (rawTrim, the honest model output in clip
     domain) -> silence-enforced opening (what is auditioned + evaluated)."""
-    files = seed_paths(ace_dir, seed)
     clip_duration = float(plan["clip"]["end"]) - float(plan["clip"]["start"])
     if trim:
         convert_audio(source_wav, files["rawTrim"], start=0.0, duration=clip_duration)
@@ -481,8 +480,7 @@ def _register_legacy(opening_dir: Path, path_root: Path) -> dict:
     return {"note": "pre-spike ad-hoc artifacts, registered for provenance only", "unattributed": entries}
 
 
-def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, provenance: str, request_hash: str | None, raw_clip_f0: list, imported_source: Path | None = None) -> dict:
-    files = seed_paths(ace_dir, seed)
+def _evaluate_candidate_audio(paths: Paths, ace_dir: Path, plan: dict, files: dict[str, Path], *, candidate_id: str, raw_clip_f0: list, request_path: Path, receipt_extra: dict[str, Path], extra_fields: dict) -> dict:
     opening_wav = files["opening"]
     expected_words = [str(word["text"]) for word in plan["words"]]
     duration_s: float | None = None
@@ -534,7 +532,7 @@ def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, proven
         audio_metrics = None
 
     evaluation = evaluate_candidate(
-        candidate_id=f"seed-{seed}",
+        candidate_id=candidate_id,
         plan=plan,
         lexical=lexical,
         contour=compare_f0_contours(raw_clip_f0, cand_f0) if cand_f0 is not None else None,
@@ -542,15 +540,13 @@ def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, proven
         audio_metrics=audio_metrics,
         duration_s=duration_s,
     )
-    evaluation["seed"] = seed
-    evaluation["provenance"] = provenance
-    evaluation["requestSha256"] = request_hash
+    evaluation.update(extra_fields)
     evaluation["files"] = {key: files[key].name for key in ("full", "opening", "asr", "align", "f0", "eval") if files[key].is_file() or key != "full"}
     evaluation["generatedAt"] = _now_iso()
     dump_json(files["eval"], evaluation)
 
     receipt_files = {
-        "request": ace_dir / "request.json",
+        "request": request_path,
         "rawSlice": paths.opening / "raw.wav",
         "rawClipF0": ace_dir / "raw-clip-f0.json",
         "output": opening_wav,
@@ -560,13 +556,28 @@ def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, proven
         "renderedF0": files["f0"],
         "eval": files["eval"],
     }
-    if imported_source is not None:
-        receipt_files["importedSource"] = imported_source
-    else:
-        receipt_files["full"] = files["full"]
-        receipt_files["paddedSource"] = ace_dir / "source-padded-10s.wav"
+    receipt_files.update(receipt_extra)
     write_receipt(files["receipt"], receipt_files)
     return evaluation
+
+
+def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, provenance: str, request_hash: str | None, raw_clip_f0: list, imported_source: Path | None = None) -> dict:
+    files = seed_paths(ace_dir, seed)
+    if imported_source is not None:
+        receipt_extra: dict[str, Path] = {"importedSource": imported_source}
+    else:
+        receipt_extra = {"full": files["full"], "paddedSource": ace_dir / "source-padded-10s.wav"}
+    return _evaluate_candidate_audio(
+        paths,
+        ace_dir,
+        plan,
+        files,
+        candidate_id=f"seed-{seed}",
+        raw_clip_f0=raw_clip_f0,
+        request_path=ace_dir / "request.json",
+        receipt_extra=receipt_extra,
+        extra_fields={"seed": seed, "provenance": provenance, "requestSha256": request_hash},
+    )
 
 
 def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
@@ -627,12 +638,12 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
                 continue
             files = seed_paths(ace_dir, seed)
             shutil.move(entry["audioPath"], files["full"])
-            _finalize_candidate_audio(ace_dir, plan, seed, files["full"], trim=True)
+            _finalize_candidate_audio(plan, files, files["full"], trim=True)
 
     if not seed42_current and not legacy_seed42.is_file():
         raise RuntimeError(f"seed-42 import source missing: {legacy_seed42}")
     if not seed42_current:
-        _finalize_candidate_audio(ace_dir, plan, 42, legacy_seed42, trim=False)
+        _finalize_candidate_audio(plan, seed42_files, legacy_seed42, trim=False)
 
     raw_clip_f0 = load_json(ace_dir / "raw-clip-f0.json")
     failed_seeds = {failure["seed"] for failure in generation_failures}

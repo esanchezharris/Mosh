@@ -34,6 +34,7 @@ def main() -> int:
     stop_parser = subparsers.add_parser("ace-cover-stop", help="declare the ACE cover lane blocked (validated against owner verdicts)")
     stop_parser.add_argument("--reason", choices=("lexical", "prosody"), required=True)
     stop_parser.add_argument("--rationale", required=True)
+    subparsers.add_parser("ace-cover-ab", help="A/B the current round's rank-1 candidate against seed-4099 regenerated under the round-1 config")
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -79,6 +80,12 @@ def main() -> int:
                 status_path = declare_stop(ace_dir_for(paths), args.reason, args.rationale)
                 build_page(paths.output)
                 print(f"ace cover lane stopped -> {status_path}")
+            case "ace-cover-ab":
+                from asserted_proof_ace_ab import run_ace_cover_ab
+
+                ab_dir = run_ace_cover_ab(paths)
+                build_page(paths.output)
+                print(f"ace cover A/B -> {ab_dir}")
             case "expand-first-half":
                 verdict_path = args.verdict.expanduser().resolve() if args.verdict else paths.opening / "owner-verdict.json"
                 outputs = expand_first_half(paths, verdict_path, allow_close_diagnostic=args.allow_close_diagnostic)

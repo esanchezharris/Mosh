@@ -49,6 +49,32 @@ def save_ace_cover_verdict(verdict: dict, manifest_path: Path, seed: int, destin
     return verdict
 
 
+AB_WINNERS = {"A", "B", "neither"}
+
+
+def validate_ab_verdict(verdict: dict, manifest_path: Path) -> None:
+    if verdict.get("clip") != "ace-cover-ab":
+        raise RuntimeError("verdict must target the ace-cover-ab comparison")
+    if verdict.get("winner") not in AB_WINNERS:
+        raise RuntimeError("ab verdict winner must be A, B, or neither")
+    if not isinstance(verdict.get("notes", ""), str) or len(verdict.get("notes", "")) > 4000:
+        raise RuntimeError("owner verdict notes must be text no longer than 4000 characters")
+    if not isinstance(verdict.get("createdAt"), str) or not verdict["createdAt"]:
+        raise RuntimeError("owner verdict must include createdAt")
+    current = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    if verdict.get("manifestSha256") != current:
+        raise RuntimeError("owner verdict approved a different artifact manifest")
+
+
+def save_ab_verdict(verdict: dict, manifest_path: Path, destination: Path) -> dict:
+    validate_ab_verdict(verdict, manifest_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_text(json.dumps(verdict, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(destination)
+    return verdict
+
+
 def save_review_verdict(verdict: dict, manifest_path: Path, destination: Path) -> dict:
     validate_review_verdict(verdict, manifest_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

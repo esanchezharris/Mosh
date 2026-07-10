@@ -126,6 +126,71 @@ def _ace_metric_cells(candidate: dict) -> str:
     return "".join(rendered)
 
 
+def _ab_arm_card(letter: str, arm: dict, label_key: str, ab_manifest: dict, output_dir: Path) -> str:
+    audio_rel = str(arm.get("audio", ""))
+    audio_path = output_dir / audio_rel
+    if _current(audio_path, label_key, ab_manifest):
+        player = f"<audio controls preload='metadata' src='{html.escape(audio_rel)}'></audio>"
+    else:
+        player = "<div class='quarantine'>Quarantined: this arm's audio does not match the A/B manifest.</div>"
+    lexical = arm.get("lexical") or {}
+    metrics = arm.get("metrics") or {}
+    stats = (
+        f"lexical {lexical.get('hits', '?')}/16 hits · {lexical.get('misses', '?')} miss · "
+        f"pitch {metrics.get('medianAbsPitchErrorSemitones', '?')} st · register {metrics.get('registerOffsetSemitones', '?')} st · "
+        f"bleed(pre) {metrics.get('silenceBleedMs', '?')} ms"
+    )
+    return (
+        f"<article class='cand-card ab-arm'><div class='clip-head'><div><div class='kicker'>Arm {letter}</div>"
+        f"<h3>{html.escape(str(arm.get('label', '')))}</h3></div><div class='clip-stats'>{html.escape(stats)}</div></div>{player}</article>"
+    )
+
+
+def _ab_section(output_dir: Path) -> str:
+    ab_dir = output_dir / "opening/ace-step-cover/ab"
+    summary_path, manifest_path = ab_dir / "ab.json", ab_dir / "manifest.json"
+    if not (summary_path.is_file() and manifest_path.is_file()):
+        return ""
+    summary, ab_manifest = _load(summary_path), _load(manifest_path)
+    ab_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    reproduction = summary.get("round1TranscriptReproduction") or {}
+    repro_text = (
+        "Arm B reproduced the round-1 transcript exactly — same render."
+        if reproduction.get("reproduced")
+        else f"Arm B did NOT reproduce the round-1 transcript verbatim (similarity {reproduction.get('sequenceRatio')}) — treat it as a fresh draw under the round-1 config."
+    )
+    cards = _ab_arm_card("A", summary.get("armA") or {}, "armAOpening", ab_manifest, output_dir) + _ab_arm_card("B", summary.get("armB") or {}, "armBOpening", ab_manifest, output_dir)
+    return f"""<article class='cand-card ab-block'>
+<div class='section-heading'><div><div class='kicker'>A/B · which arm carries forward?</div><h3>{html.escape(str(summary.get('question', '')))}</h3></div></div>
+<p class='clip-stats'>{html.escape(repro_text)}</p>
+{cards}
+<div class='cand-verdict ab-verdict' data-endpoint='/used2/asserted-proof/api/verdict/ace-cover-ab'>
+  <div class='eyebrow'>Owner A/B verdict · metrics never imply approval</div>
+  <div class='actions'><button data-w='A'>A wins</button><button data-w='B'>B wins</button><button data-w='neither'>Neither</button></div>
+  <label><span class='eyebrow'>Notes</span><textarea class='notes' placeholder='What decided it?'></textarea></label>
+  <p class='verdict-status' role='status' aria-live='polite'>No A/B verdict saved.</p>
+  <div class='commit-actions'><button class='save'>Save A/B verdict</button></div>
+</div>
+<script>
+(()=>{{
+  const panel=document.querySelector('.ab-verdict'); if(!panel)return;
+  const abManifestSha256='{ab_hash}'; const endpoint=panel.dataset.endpoint;
+  let winner=''; const buttons=[...panel.querySelectorAll('[data-w]')];
+  const status=panel.querySelector('.verdict-status'); const notes=panel.querySelector('.notes');
+  const setStatus=(message,state='')=>{{status.textContent=message;status.className=`verdict-status ${{state}}`;}};
+  buttons.forEach(button=>button.addEventListener('click',()=>{{winner=button.dataset.w;buttons.forEach(item=>item.classList.toggle('selected',item===button));setStatus('Winner selected. Save it to record the listen.');}}));
+  fetch(endpoint,{{cache:'no-store'}}).then(response=>response.ok?response.json():null).then(payload=>{{if(payload&&payload.manifestSha256===abManifestSha256){{winner=payload.winner||'';notes.value=payload.notes||'';buttons.forEach(item=>item.classList.toggle('selected',item.dataset.w===winner));setStatus(`Saved: ${{payload.winner}} wins.`,'saved');}}}}).catch(()=>{{}});
+  panel.querySelector('.save').addEventListener('click',async()=>{{
+    if(!winner){{setStatus('Choose A, B, or neither first.','error');return;}}
+    const payload={{clip:'ace-cover-ab',winner,notes:notes.value,createdAt:new Date().toISOString(),manifestSha256:abManifestSha256}};
+    try{{const response=await fetch(endpoint,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(payload)}});const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not save verdict.');setStatus(`Saved: ${{winner}} wins.`,'saved');}}
+    catch(error){{setStatus(error.message||'Could not save verdict.','error');}}
+  }});
+}})();
+</script>
+</article>"""
+
+
 def _ace_cover_section(output_dir: Path) -> str:
     ace_dir = output_dir / "opening/ace-step-cover"
     ledger_path, manifest_path, request_path = ace_dir / "ledger.json", ace_dir / "manifest.json", ace_dir / "request.json"
@@ -195,6 +260,7 @@ def _ace_cover_section(output_dir: Path) -> str:
 <div class='rail'>{raw_card}</div>
 <section class='assertion'><div class='kicker'>Asserted text · target lyrics</div><p>{html.escape(str(request.get('assertedText', '')))}</p></section>
 {''.join(cards) if cards else "<p class='empty'>No current ranked candidates yet — run ace-cover-spike.</p>"}
+{_ab_section(output_dir)}
 <p class='clip-stats'>{len(ranked)} of {total} evaluated candidates shown; the full ranking lives in ledger.json.</p>
 <script>
 const aceManifestSha256='{manifest_hash}';

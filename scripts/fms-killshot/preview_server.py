@@ -13,10 +13,11 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from asserted_proof_verdict import save_ace_cover_verdict, save_review_verdict
+from asserted_proof_verdict import save_ab_verdict, save_ace_cover_verdict, save_review_verdict
 
 URL_PREFIX = "/used2/asserted-proof"
 VERDICT_ENDPOINT = URL_PREFIX + "/api/verdict/opening"
+AB_VERDICT_ENDPOINT = URL_PREFIX + "/api/verdict/ace-cover-ab"
 ACE_VERDICT_RE = re.compile("^" + re.escape(URL_PREFIX) + r"/api/verdict/ace-cover/(\d{1,10})$")
 ACE_COVER_DIR = "opening/ace-step-cover"
 MAX_VERDICT_BYTES = 16 * 1024
@@ -25,6 +26,10 @@ MAX_VERDICT_BYTES = 16 * 1024
 def ace_verdict_seed(path: str) -> int | None:
     match = ACE_VERDICT_RE.match(urlsplit(path).path)
     return int(match.group(1)) if match else None
+
+
+def is_ab_verdict_path(path: str) -> bool:
+    return urlsplit(path).path == AB_VERDICT_ENDPOINT
 
 
 def load_current_verdict(verdict_path: Path, manifest_path: Path) -> tuple[int, dict]:
@@ -54,13 +59,23 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         ace_dir = Path.cwd() / ACE_COVER_DIR
         return ace_dir / f"verdicts/seed-{seed}-verdict.json", ace_dir / "manifest.json", ace_dir / f"seed-{seed}-eval.json"
 
+    def _ab_paths(self) -> tuple[Path, Path, Path]:
+        ab_dir = Path.cwd() / ACE_COVER_DIR / "ab"
+        return ab_dir / "ab-verdict.json", ab_dir / "manifest.json", ab_dir / "ab.json"
+
     def do_GET(self) -> None:
         request_path = urlsplit(self.path).path
         seed = ace_verdict_seed(self.path)
-        if request_path != VERDICT_ENDPOINT and seed is None:
+        is_ab = is_ab_verdict_path(self.path)
+        if request_path != VERDICT_ENDPOINT and seed is None and not is_ab:
             super().do_GET()
             return
-        if seed is None:
+        if is_ab:
+            verdict_path, manifest_path, summary_path = self._ab_paths()
+            if not manifest_path.is_file() or not summary_path.is_file():
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "no ace-cover A/B on disk"})
+                return
+        elif seed is None:
             verdict_path, manifest_path = Path.cwd() / "opening/owner-verdict.json", Path.cwd() / "opening/manifest.json"
         else:
             verdict_path, manifest_path, evaluation_path = self._ace_paths(seed)
@@ -77,7 +92,8 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         request_path = urlsplit(self.path).path
         seed = ace_verdict_seed(self.path)
-        if request_path != VERDICT_ENDPOINT and seed is None:
+        is_ab = is_ab_verdict_path(self.path)
+        if request_path != VERDICT_ENDPOINT and seed is None and not is_ab:
             self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         try:
@@ -92,7 +108,13 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise RuntimeError("owner verdict must be a JSON object")
-            if seed is None:
+            if is_ab:
+                verdict_path, manifest_path, summary_path = self._ab_paths()
+                if not manifest_path.is_file() or not summary_path.is_file():
+                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "no ace-cover A/B on disk"})
+                    return
+                save_ab_verdict(payload, manifest_path, verdict_path)
+            elif seed is None:
                 save_review_verdict(
                     payload,
                     Path.cwd() / "opening/manifest.json",
