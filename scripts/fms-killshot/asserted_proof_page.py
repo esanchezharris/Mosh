@@ -46,7 +46,7 @@ def _melody_round_banner(output_dir: Path) -> str:
         "<a class='menu-banner' href='opening/ace-step-cover/melody-round.html'>"
         "<span class='kicker'>Listen · this round</span>"
         "<strong>Melody-adherence menu →</strong>"
-        "<span>Raw take vs the strength sweep (0.7 / 0.5 / 0.3) and the hybrid. Diagnostics only.</span>"
+        "<span>Raw take vs this round's melody-locked candidates. Diagnostics only — your ear decides.</span>"
         "</a>"
     )
 
