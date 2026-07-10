@@ -1283,12 +1283,21 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
-            # A garbled or non-object body must NOT clobber the rights registry: reject
-            # it with 400 and leave the on-disk registry untouched.
-            if getattr(self, "_json_malformed", False) or not isinstance(data, dict):
+            # A garbled, empty, or registry-less body must NOT clobber the rights
+            # registry: reject it with 400 and leave the on-disk registry untouched.
+            # An empty POST body (Content-Length 0) decodes to {} with
+            # _json_malformed=False, same as a well-formed object missing the
+            # "registry" key entirely -- both must be rejected explicitly rather
+            # than silently defaulting to {} (which would wipe the registry). A
+            # body that spells out "registry": {} still clears it, on purpose.
+            if (
+                getattr(self, "_json_malformed", False)
+                or not isinstance(data, dict)
+                or "registry" not in data
+            ):
                 self._send(400, {"ok": False, "error": "malformed JSON body"})
                 return
-            registry = data.get("registry", {})
+            registry = data.get("registry")
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
                 return
