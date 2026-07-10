@@ -22,8 +22,9 @@
     {
       "name": "fms-ksb",
       "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb && exec /usr/bin/python3 -m http.server 8189 --bind 127.0.0.1"],
-      "port": 8189
+      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb && exec /usr/bin/python3 -m http.server 8191 --bind 127.0.0.1"],
+      "port": 8191,
+      "autoPort": false
     },
     {
       "name": "asserted-proof",
