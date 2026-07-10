@@ -324,8 +324,10 @@ test("sing partial flow: a hand-added line shows as skipped, scored lines still 
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
-  await expect(gen.getByTestId("sing-flow")).toContainText("2/3");
-  await expect(gen.getByTestId("sing-asserted")).toContainText("2/3");
+  // Merged fixture: 2 fillable + the extraction-parity sung line (scored) + the
+  // hand-added line (unscored) = 4 lines; two accepted lines are asserted.
+  await expect(gen.getByTestId("sing-flow")).toContainText("3/4");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("2/4");
   await expect(gen.getByTestId("sing-skip-hint")).toContainText("1 line");
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");
