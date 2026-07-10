@@ -25,6 +25,8 @@ sys.path.insert(0, str(HERE))
 
 from asserted_proof_cover_lexical import normalize_asr_word, score_lexical  # noqa: E402
 from asserted_proof_cover_metrics import attack_errors_from_alignment, compare_f0_contours, effective_status, evaluate_candidate, ranking_key  # noqa: E402
+from asserted_proof_cover_post import enforce_silence_wav, keep_windows_from_plan  # noqa: E402
+from asserted_proof_key import estimate_key, pitch_class_histogram_from_f0  # noqa: E402
 from asserted_proof_metrics import compare_audio  # noqa: E402
 from asserted_proof_plan import build_manifest  # noqa: E402
 from asserted_proof_provenance import receipt_is_current, write_receipt  # noqa: E402
@@ -40,14 +42,26 @@ LEGACY_DIR_NAME = "ace-step-spike"
 CHECKPOINT_NAME = "acestep-v15-turbo"
 COVER_INSTRUCTION = "Generate audio semantic tokens based on the given conditions:"
 OPENING_LYRICS = "[Verse]\nYeah we used to fight like invincible\nBut in the night we got hella close yeah"
+TRANSCRIBE_PY = Path("~/Library/Mosh/venvs/transcribe/bin/python").expanduser()
 
 PINNED_SEEDS = (7, 42, 73, 271, 509, 911, 2027, 4099)
 IMPORTED_SEEDS = frozenset({42})
 GENERATED_SEEDS = tuple(seed for seed in PINNED_SEEDS if seed not in IMPORTED_SEEDS)
 
-SEED_RECEIPT_LABELS = frozenset({"request", "rawSlice", "rawClipF0", "output", "asr", "align", "renderedF0", "eval"})
+SEED_RECEIPT_LABELS = frozenset({"request", "rawSlice", "rawClipF0", "output", "rawTrim", "asr", "align", "renderedF0", "eval"})
 IMPORTED_RECEIPT_LABELS = SEED_RECEIPT_LABELS | {"importedSource"}
 MIN_FREE_DISK_BYTES = 8 * 1024**3
+
+# The auditioned guide's silence structure comes from the raw take's measured
+# word spans; changing any of this regenerates + re-evaluates everything.
+POST_PROCESS: dict = {
+    "silenceEnforcement": {
+        "source": "plan-word-spans",
+        "prePadS": 0.06,
+        "postPadS": 0.12,
+        "fadeS": 0.01,
+    }
+}
 
 
 def _now_iso() -> str:
@@ -62,6 +76,7 @@ def seed_paths(ace_dir: Path, seed: int) -> dict[str, Path]:
     return {
         "full": ace_dir / f"seed-{seed}-full.wav",
         "opening": ace_dir / f"seed-{seed}-opening.wav",
+        "rawTrim": ace_dir / f"seed-{seed}-opening-raw.wav",
         "asr": ace_dir / f"seed-{seed}-asr.json",
         "align": ace_dir / f"seed-{seed}-align.json",
         "f0": ace_dir / f"seed-{seed}-f0.json",
@@ -87,7 +102,7 @@ def validate_lyrics_against_plan(lyrics_text: str, plan: dict) -> None:
         raise RuntimeError(f"lyrics do not match the asserted words: lyrics='{' '.join(actual)}' asserted='{' '.join(expected)}'")
 
 
-def pinned_params(*, src_audio_rel: str, lyrics: str) -> dict:
+def pinned_params(*, src_audio_rel: str, lyrics: str, keyscale: str = "") -> dict:
     return {
         "task_type": "cover",
         "instruction": COVER_INSTRUCTION,  # the dataclass default is the text2music instruction; nothing auto-swaps it for explicit cover
@@ -96,6 +111,7 @@ def pinned_params(*, src_audio_rel: str, lyrics: str) -> dict:
         "audio_codes": "",
         "caption": "",
         "lyrics": lyrics,
+        "keyscale": keyscale,  # conditions the DiT metadata block even for cover; "" serializes as N/A
         "vocal_language": "en",
         "duration": -1.0,  # cover locks duration to the source
         "inference_steps": 8,
@@ -108,12 +124,12 @@ def pinned_params(*, src_audio_rel: str, lyrics: str) -> dict:
     }
 
 
-def build_ace_request(*, plan: dict, lyrics_text: str, source_hashes: dict, ace_git_rev: str, checkpoint: dict, seeds: list[int]) -> dict:
+def build_ace_request(*, plan: dict, lyrics_text: str, source_hashes: dict, ace_git_rev: str, checkpoint: dict, seeds: list[int], keyscale: str = "") -> dict:
     validate_lyrics_against_plan(lyrics_text, plan)
     clip_start, clip_end = float(plan["clip"]["start"]), float(plan["clip"]["end"])
     duration = round(clip_end - clip_start, 4)
     request = {
-        "version": 1,
+        "version": 2,
         "assertedText": " ".join(str(word["text"]) for word in plan["words"]),
         "lyrics": lyrics_text,
         "lyricsSha256": hashlib.sha256(lyrics_text.encode("utf-8")).hexdigest(),
@@ -123,7 +139,8 @@ def build_ace_request(*, plan: dict, lyrics_text: str, source_hashes: dict, ace_
         "trim": {"startS": 0.0, "durationS": duration, "sampleRate": 24000, "channels": 1, "codec": "pcm_s16le", "tool": "ffmpeg"},
         "aceRuntime": {"rootEnv": "ACE_STEP_MAC_DIR", "gitRev": ace_git_rev, "pythonRelPath": ".venv/bin/python"},
         "checkpoint": checkpoint,
-        "params": pinned_params(src_audio_rel=str(source_hashes["paddedSource"]["path"]), lyrics=lyrics_text),
+        "params": pinned_params(src_audio_rel=str(source_hashes["paddedSource"]["path"]), lyrics=lyrics_text, keyscale=keyscale),
+        "postProcess": {"silenceEnforcement": dict(POST_PROCESS["silenceEnforcement"])},
         "seeds": [int(seed) for seed in seeds],
     }
     request["requestSha256"] = request_sha256(request)
@@ -212,6 +229,7 @@ def candidate_summaries(evaluations: list[dict], verdicts: dict[str, dict], curr
                     "medianAttackErrorMs": attack.get("medianAttackErrorMs"),
                     "p95AttackErrorMs": attack.get("p95AttackErrorMs"),
                     "silenceBleedMs": audio.get("silenceBleedMs"),
+                    "postEnforcementSilenceBleedMs": audio.get("postEnforcementSilenceBleedMs"),
                     "envelopeCorrelation": audio.get("envelopeCorrelation"),
                     "medianAbsPitchErrorSemitones": contour.get("medianAbsPitchErrorSemitones"),
                     "registerOffsetSemitones": contour.get("registerOffsetSemitones"),
@@ -243,6 +261,8 @@ def regenerate_ace_manifest(ace_dir: Path, opening_dir: Path, *, path_root: Path
         candidates[f"seed{seed}Align"] = files["align"]
         candidates[f"seed{seed}F0"] = files["f0"]
         candidates[f"seed{seed}Eval"] = files["eval"]
+        if files["rawTrim"].is_file():
+            candidates[f"seed{seed}OpeningRaw"] = files["rawTrim"]
         if files["full"].is_file():
             candidates[f"seed{seed}Full"] = files["full"]
     manifest = build_manifest({label: path for label, path in candidates.items() if path.is_file()}, path_root=path_root)
@@ -362,10 +382,10 @@ def _guards(paths: Paths, plan: dict) -> None:
     free = shutil.disk_usage(str(paths.root)).free
     if free < MIN_FREE_DISK_BYTES:
         problems.append(f"free disk {free / 1024**3:.1f} GiB below the 8 GiB floor")
-    for label, path in (("raw opening slice", paths.opening / "raw.wav"), ("render plan", paths.opening / "asserted-render-plan.json")):
+    for label, path in (("raw opening slice", paths.opening / "raw.wav"), ("render plan", paths.opening / "asserted-render-plan.json"), ("full-song reference", paths.prompt_wav)):
         if not path.is_file():
             problems.append(f"{label} missing: {path}")
-    for label, path in (("whisper venv", WHISPER_PY), ("skeleton venv", SKELETON_PY), ("SoulX venv", SOULX_PY)):
+    for label, path in (("whisper venv", WHISPER_PY), ("skeleton venv", SKELETON_PY), ("SoulX venv", SOULX_PY), ("transcribe venv", TRANSCRIBE_PY)):
         if not path.is_file():
             problems.append(f"{label} missing: {path}")
     legacy_lyrics = paths.opening / LEGACY_DIR_NAME / "lyrics.txt"
@@ -384,6 +404,51 @@ def ensure_raw_clip_f0(ace_dir: Path, opening_dir: Path) -> Path:
     run([str(SOULX_PY), str(WORKER), "f0", str(opening_dir / "raw.wav"), str(output)], cwd=BRIDGE)
     write_receipt(receipt, {"rawSlice": opening_dir / "raw.wav", "output": output})
     return output
+
+
+def ensure_key_estimate(ace_dir: Path, opening_dir: Path, prompt_wav: Path) -> dict:
+    """Two independent estimators share one Krumhansl-Schmuckler scorer: the raw
+    take's melody histogram and the full-song chroma. Agreement pins the winner;
+    on disagreement the full-mix chroma wins (harmonic context) but both are
+    recorded. Informational file — NOT part of the request hash; only the pinned
+    keyscale string in params is."""
+    output = ace_dir / "key-estimate.json"
+    receipt = ace_dir / "key-estimate-receipt.json"
+    if receipt_is_current(receipt, frozenset({"rawClipF0", "promptAudio", "output"})):
+        return load_json(output)
+    melody = estimate_key(pitch_class_histogram_from_f0(load_json(ace_dir / "raw-clip-f0.json")))
+    melody["source"] = "melody-rmvpe-histogram"
+    chroma_output = ace_dir / "key-estimate-chroma.json"
+    run([str(TRANSCRIBE_PY), str(WORKER), "key", str(prompt_wav), str(chroma_output)])
+    chroma = load_json(chroma_output)
+    if not melody.get("ok") and not chroma.get("ok"):
+        raise RuntimeError("key estimation failed on both the melody and chroma paths")
+    agree = bool(melody.get("ok") and chroma.get("ok") and melody["best"]["keyscale"] == chroma["best"]["keyscale"])
+    winner = chroma if chroma.get("ok") else melody
+    evidence = {
+        "version": 1,
+        "melody": melody,
+        "chroma": chroma,
+        "agree": agree,
+        "pinned": {"keyscale": winner["best"]["keyscale"], "rule": "estimators-agree" if agree else "chroma-preferred"},
+    }
+    dump_json(output, evidence)
+    write_receipt(receipt, {"rawClipF0": ace_dir / "raw-clip-f0.json", "promptAudio": prompt_wav, "chroma": chroma_output, "output": output})
+    return evidence
+
+
+def _finalize_candidate_audio(ace_dir: Path, plan: dict, seed: int, source_wav: Path, *, trim: bool) -> dict:
+    """source -> pre-enforcement trim (rawTrim, the honest model output in clip
+    domain) -> silence-enforced opening (what is auditioned + evaluated)."""
+    files = seed_paths(ace_dir, seed)
+    clip_duration = float(plan["clip"]["end"]) - float(plan["clip"]["start"])
+    if trim:
+        convert_audio(source_wav, files["rawTrim"], start=0.0, duration=clip_duration)
+    else:
+        shutil.copyfile(source_wav, files["rawTrim"])
+    enforcement = POST_PROCESS["silenceEnforcement"]
+    windows = keep_windows_from_plan(plan, pre_pad_s=enforcement["prePadS"], post_pad_s=enforcement["postPadS"])
+    return enforce_silence_wav(files["rawTrim"], files["opening"], windows, fade_s=enforcement["fadeS"])
 
 
 def _ensure_padded_source(ace_dir: Path, opening_dir: Path) -> Path:
@@ -459,6 +524,12 @@ def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, proven
     try:
         audio_metrics = compare_audio(plan, paths.opening / "raw.wav", opening_wav, cand_f0 or [])
         audio_metrics["lane"] = "ace-step-turbo-cover"
+        # The enforced file's bleed is ~0 by construction; the recorded gate
+        # signal stays the PRE-enforcement bleed so the metric keeps
+        # discriminating model quality.
+        audio_metrics["postEnforcementSilenceBleedMs"] = audio_metrics["silenceBleedMs"]
+        pre_gate = compare_audio(plan, paths.opening / "raw.wav", files["rawTrim"], cand_f0 or [])
+        audio_metrics["silenceBleedMs"] = pre_gate["silenceBleedMs"]
     except (RuntimeError, OSError, wave.Error, EOFError):
         audio_metrics = None
 
@@ -483,6 +554,7 @@ def _evaluate_seed(paths: Paths, ace_dir: Path, plan: dict, seed: int, *, proven
         "rawSlice": paths.opening / "raw.wav",
         "rawClipF0": ace_dir / "raw-clip-f0.json",
         "output": opening_wav,
+        "rawTrim": files["rawTrim"],
         "asr": files["asr"],
         "align": files["align"],
         "renderedF0": files["f0"],
@@ -509,6 +581,8 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
         lyrics_path.write_text(OPENING_LYRICS, encoding="utf-8")
 
     padded = _ensure_padded_source(ace_dir, opening_dir)
+    ensure_raw_clip_f0(ace_dir, opening_dir)
+    key_evidence = ensure_key_estimate(ace_dir, opening_dir, paths.prompt_wav)
     source_hashes = build_manifest(
         {"rawSlice": opening_dir / "raw.wav", "renderPlan": opening_dir / "asserted-render-plan.json", "paddedSource": padded},
         path_root=paths.root,
@@ -520,6 +594,7 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
         ace_git_rev=_git_rev(ACE_ROOT),
         checkpoint=_checkpoint_identity(),
         seeds=list(PINNED_SEEDS),
+        keyscale=str(key_evidence["pinned"]["keyscale"]),
     )
     request, request_changed = write_request_if_changed(ace_dir / "request.json", request, now_iso=_now_iso())
     current_hash = request["requestSha256"]
@@ -533,6 +608,7 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
 
     if dry_run:
         print(f"request {'CHANGED' if request_changed else 'unchanged'} requestSha256={current_hash}")
+        print(f"pinned keyscale: {request['params']['keyscale']} ({key_evidence['pinned']['rule']})")
         print(f"seeds to generate: {work or 'none'}")
         print(f"seed 42 import: {'current' if seed42_current else f'will import from {legacy_seed42}'}")
         return ace_dir
@@ -544,7 +620,6 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
         run([str(ACE_PY), str(ACE_WORKER), "--request", str(ace_dir / "worker-request.json"), "--output", str(ace_dir / "worker-result.json")], cwd=ACE_ROOT, timeout=7200)
         worker_result = load_json(ace_dir / "worker-result.json")
         results_by_seed = {int(entry["seed"]): entry for entry in worker_result.get("results", [])}
-        clip_duration = float(plan["clip"]["end"]) - float(plan["clip"]["start"])
         for seed in work:
             entry = results_by_seed.get(seed)
             if not entry or not entry.get("ok"):
@@ -552,14 +627,14 @@ def run_ace_cover_spike(paths: Paths, *, dry_run: bool = False) -> Path:
                 continue
             files = seed_paths(ace_dir, seed)
             shutil.move(entry["audioPath"], files["full"])
-            convert_audio(files["full"], files["opening"], start=0.0, duration=clip_duration)
+            _finalize_candidate_audio(ace_dir, plan, seed, files["full"], trim=True)
 
     if not seed42_current and not legacy_seed42.is_file():
         raise RuntimeError(f"seed-42 import source missing: {legacy_seed42}")
     if not seed42_current:
-        shutil.copyfile(legacy_seed42, seed42_files["opening"])
+        _finalize_candidate_audio(ace_dir, plan, 42, legacy_seed42, trim=False)
 
-    raw_clip_f0 = load_json(ensure_raw_clip_f0(ace_dir, opening_dir))
+    raw_clip_f0 = load_json(ace_dir / "raw-clip-f0.json")
     failed_seeds = {failure["seed"] for failure in generation_failures}
     evaluations: list[dict] = []
     for seed in PINNED_SEEDS:

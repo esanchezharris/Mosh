@@ -126,6 +126,7 @@ def _request() -> dict:
         ace_git_rev="6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0",
         checkpoint={"name": "acestep-v15-turbo", "model": {"bytes": 1, "sha256": "d" * 64}, "config": {"bytes": 2, "sha256": "e" * 64}, "vae": {"bytes": 3, "sha256": "f" * 64}},
         seeds=list(PINNED_SEEDS),
+        keyscale="B minor",
     )
 
 
@@ -146,6 +147,12 @@ def test_request_hash_is_stable_and_param_sensitive() -> None:
     relyriced = _request()
     relyriced["lyrics"] = relyriced["lyrics"].replace("hella", "really")
     assert request_sha256(relyriced) != request_sha256(first)
+    rekeyed = _request()
+    rekeyed["params"]["keyscale"] = "F# minor"
+    assert request_sha256(rekeyed) != request_sha256(first)
+    regated = _request()
+    regated["postProcess"]["silenceEnforcement"]["prePadS"] = 0.2
+    assert request_sha256(regated) != request_sha256(first)
     # Volatile fields never affect the hash.
     stamped = _request()
     stamped["createdAt"], stamped["updatedAt"], stamped["requestSha256"] = "2026-07-09T00:00:00Z", "2026-07-10T00:00:00Z", "x" * 64
@@ -170,6 +177,12 @@ def test_request_pins_the_verified_cover_params() -> None:
     assert params["cover_noise_strength"] == 0.0
     assert params["thinking"] is False
     assert params["vocal_language"] == "en"
+    assert params["keyscale"] == "B minor"
+    enforcement = _request()["postProcess"]["silenceEnforcement"]
+    assert enforcement["source"] == "plan-word-spans"
+    assert enforcement["prePadS"] == 0.06
+    assert enforcement["postPadS"] == 0.12
+    assert enforcement["fadeS"] == 0.01
 
 
 def test_worker_request_absolutizes_src_audio(tmp_path: Path) -> None:
@@ -215,12 +228,13 @@ def _seed_lane(ace_dir: Path, seed: int, request_path: Path, raw_slice: Path, ra
         "rawSlice": raw_slice,
         "rawClipF0": raw_f0,
         "output": files["opening"],
+        "rawTrim": files["rawTrim"],
         "asr": files["asr"],
         "align": files["align"],
         "renderedF0": files["f0"],
         "eval": files["eval"],
     }
-    for key in ("opening", "asr", "align", "f0", "eval"):
+    for key in ("opening", "rawTrim", "asr", "align", "f0", "eval"):
         files[key].write_text(f"seed-{seed}-{key}")
     if imported:
         imported_source = ace_dir / "imported-seed-42-source.wav"
@@ -440,7 +454,7 @@ def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> N
     files = seed_paths(ace_dir, 7)
     write_receipt(files["receipt"], {
         "request": ace_dir / "request.json", "rawSlice": opening / "raw.wav", "rawClipF0": ace_dir / "raw-clip-f0.json",
-        "output": files["opening"], "asr": files["asr"], "align": files["align"], "renderedF0": files["f0"], "eval": files["eval"],
+        "output": files["opening"], "rawTrim": files["rawTrim"], "asr": files["asr"], "align": files["align"], "renderedF0": files["f0"], "eval": files["eval"],
         "full": files["full"], "paddedSource": ace_dir / "source-padded-10s.wav",
     })
     manifest = regen(ace_dir, opening, path_root=root)

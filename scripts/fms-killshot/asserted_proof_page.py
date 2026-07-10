@@ -110,7 +110,7 @@ def _ace_metric_cells(candidate: dict) -> str:
     cells = (
         ("Attack median", candidate["metrics"].get("medianAttackErrorMs"), "ms", "medianAttack"),
         ("Attack p95", candidate["metrics"].get("p95AttackErrorMs"), "ms", "p95Attack"),
-        ("Silence bleed", candidate["metrics"].get("silenceBleedMs"), "ms", "silenceBleed"),
+        ("Silence bleed (pre-gate)", candidate["metrics"].get("silenceBleedMs"), "ms", "silenceBleed"),
         ("Pitch median", candidate["metrics"].get("medianAbsPitchErrorSemitones"), "st", "medianPitch"),
         ("Register offset", candidate["metrics"].get("registerOffsetSemitones"), "st", None),
         ("Octave error", candidate["metrics"].get("longestOctaveErrorMs"), "ms", "octaveRun"),
