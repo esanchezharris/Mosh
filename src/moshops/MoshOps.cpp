@@ -1054,9 +1054,32 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
         line = mosh::LyricLine::create (juce::Uuid().toString(), lineIndex, role);
         lines.appendChild (line, &undoManager());
     }
-    if (args.hasProperty ("text"))            line.setProperty (ids::lyricText,            args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("text"))
+    {
+        // A hand edit on a VERBATIM-sung line demotes its provenance to "edited" —
+        // we never claim an edited line as exactly what the producer sang.
+        if (line[ids::lyricOrigin].toString() == "sung"
+            && args.getProperty ("text", var()).toString() != line[ids::lyricText].toString())
+            line.setProperty (ids::lyricOrigin, "edited", &undoManager());
+        line.setProperty (ids::lyricText, args.getProperty ("text", var()), &undoManager());
+    }
     if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
-    if (args.hasProperty ("seedText"))        line.setProperty (ids::lyricSeedText,        args.getProperty ("seedText", var()), &undoManager());
+    if (args.hasProperty ("seedText"))
+    {
+        // The LyricPanel editor commits hand edits as seedText (review find): on a line
+        // whose text is already finalized (sung/accepted), a differing seed edit IS the
+        // new effective lyric — mirror it into lyricText so the edit takes effect, and
+        // demote a verbatim-"sung" line to "edited" (never claim it verbatim-his again).
+        const auto newSeed = args.getProperty ("seedText", var()).toString();
+        if (line[ids::lyricText].toString().isNotEmpty()
+            && newSeed != line[ids::lyricText].toString())
+        {
+            if (line[ids::lyricOrigin].toString() == "sung")
+                line.setProperty (ids::lyricOrigin, "edited", &undoManager());
+            line.setProperty (ids::lyricText, newSeed, &undoManager());
+        }
+        line.setProperty (ids::lyricSeedText, args.getProperty ("seedText", var()), &undoManager());
+    }
     if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
     if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
     if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
@@ -1175,6 +1198,11 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
         // sing drawer shows how many lines carry a flow from the take.
         lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
+        // Extraction provenance: the sung-vs-generated distinction for the UI; the heard
+        // blob itself stays out of the snapshot (a boolean, like hasScore).
+        if (l.hasProperty (ids::lyricOrigin))
+            lo->setProperty ("origin", l[ids::lyricOrigin].toString());
+        lo->setProperty ("hasHeard", l.hasProperty (ids::lyricHeard));
         // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
         if (l.hasProperty (ids::lyricAnalysis))
         {
@@ -1373,6 +1401,29 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
     node.setProperty (ids::status, "asserted", &undoManager());
     node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
+    // Provenance (honest by construction): "mixed" only when a heard-kept word actually
+    // SURVIVES in the accepted text (review find: the blob alone proves what the take
+    // said, not what this proposal kept — a regenerated line that dropped his anchors
+    // must land "generated").
+    {
+        bool heardKept = false;
+        if (node.hasProperty (ids::lyricHeard))
+        {
+            auto tokens = juce::StringArray::fromTokens (chosen.toLowerCase(), " \t", {});
+            for (auto& t : tokens)
+                t = t.trimCharactersAtStart (".,!?'\"-").trimCharactersAtEnd (".,!?'\"-");
+            auto hb = juce::JSON::parse (node[ids::lyricHeard].toString());
+            if (auto* ws = hb.getProperty ("words", var()).getArray())
+                for (auto& w : *ws)
+                    if ((bool) w.getProperty ("kept", false)
+                        && tokens.contains (w.getProperty ("word", var()).toString()
+                                                .toLowerCase()
+                                                .trimCharactersAtStart (".,!?'\"-")
+                                                .trimCharactersAtEnd (".,!?'\"-")))
+                    { heardKept = true; break; }
+        }
+        node.setProperty (ids::lyricOrigin, heardKept ? "mixed" : "generated", &undoManager());
+    }
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
 
@@ -1680,6 +1731,7 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
         auto container = mosh::LyricSheet::lines (sheet);
         const auto scoresVar = spec.getProperty ("lineScores", var());  // Stage 1: aligned 1:1 with lines
+        const auto heardVar  = spec.getProperty ("lineHeard", var());   // extraction: aligned 1:1 with lines
         int li = 0;
         for (auto& lv : *linesVar.getArray())
         {
@@ -1691,12 +1743,36 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
             line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
             line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
-            line.setProperty (ids::status,              "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+            // Lyric EXTRACTION (pipeline correction 2026-07-04): a line the producer REALLY
+            // sang lands VERBATIM — text + gapless seed + status "seed" (already done: the
+            // generation loop skips it and rhyme-anchors on it) + origin "sung". A partly-
+            // real line keeps the grid editor (status "skeleton") with his words as seed
+            // anchors, origin "partial". Wordless lines = the pre-correction behavior.
+            const auto sungText = lv.getProperty ("text", var()).toString();
+            const auto lvOrigin = lv.getProperty ("origin", var()).toString();
+            if (sungText.isNotEmpty() && lvOrigin == "sung")
+            {
+                line.setProperty (ids::lyricText,     sungText, nullptr);
+                line.setProperty (ids::lyricSeedText, sungText, nullptr);   // gapless ⇒ not fillable
+                line.setProperty (ids::status,        "seed", nullptr);
+                line.setProperty (ids::lyricOrigin,   "sung", nullptr);
+            }
+            else
+            {
+                line.setProperty (ids::status, "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+                if (lvOrigin == "partial")
+                    line.setProperty (ids::lyricOrigin, "partial", nullptr);
+            }
             // Phase-3 Stage 1: persist the render-ready score blob (articulation slots +
             // melisma segments) with its line — the Stage-2 SoulX adapter authors the
             // target score from this. Absent from older/degraded specs ⇒ simply no blob.
             if (scoresVar.isArray() && li < scoresVar.size() && scoresVar[li].isObject())
                 line.setProperty (ids::lyricScore, juce::JSON::toString (scoresVar[li], true), nullptr);
+            // Everything the take was HEARD to say (kept AND rejected, with slot hints) —
+            // persisted for future splice boundaries + correction seeds; raw ASR is never
+            // discarded anymore.
+            if (heardVar.isArray() && li < heardVar.size() && heardVar[li].isObject())
+                line.setProperty (ids::lyricHeard, juce::JSON::toString (heardVar[li], true), nullptr);
             ++li;
             container.appendChild (line, nullptr);
         }

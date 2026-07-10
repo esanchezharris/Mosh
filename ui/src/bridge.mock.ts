@@ -709,6 +709,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         line = { index: idx, role: str(args.role, "verse"), seedText: "", text: "", syllableTarget: 0, syllableTol: 1, stress: "", rhymeGroup: "", rhymeStrictness: "", locked: false, sectionId: "", status: "empty" };
         lines.push(line);
       }
+      // Native parity: an edit that changes the effective lyric of a verbatim "sung"
+      // line demotes it to "edited"; a seed edit on a finalized line mirrors into text.
+      if (args.text != null && line.origin === "sung" && str(args.text, line.text) !== line.text)
+        line.origin = "edited";
+      if (args.seedText != null && line.text.trim() && str(args.seedText, "") !== line.text) {
+        if (line.origin === "sung") line.origin = "edited";
+        line.text = str(args.seedText, line.text);
+      }
       if (args.text != null) line.text = str(args.text, line.text);
       if (args.role != null) line.role = str(args.role, line.role);
       if (args.seedText != null) line.seedText = str(args.seedText, line.seedText);
@@ -783,6 +791,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       l.text = p.text;
       l.status = "asserted";
+      // Native parity (approximation — the mock has no heard blob): a line whose take
+      // anchors fed the proposal lands "mixed", otherwise "generated".
+      l.origin = l.origin === "partial" ? "mixed" : "generated";
       delete l.proposals;
       refreshSingable(l);
       mockCorpusLines += 1; // §7 — auto-accumulate the accepted line into the voice corpus
@@ -1340,14 +1351,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           index, role: "verse", seedText: Array.from({ length: target }).fill("___").join(" "),
           text: "", syllableTarget: target, syllableTol: 1, stress, rhymeGroup: rg,
           rhymeStrictness: "", locked: false, sectionId: "", status: "skeleton",
-          hasScore: true, asserted: false, singable: false,
+          hasScore: true,   // Stage 1 lands the take's lyricScore with each skeleton line
+          asserted: false, singable: false, hasHeard: false,
         });
+        // Extraction parity: one line the take REALLY sang lands verbatim (native sets
+        // text + gapless seed + status "seed" + origin "sung" — the loop skips it).
+        const sung: LyricLine = {
+          index: 2, role: "verse", seedText: "hold the flame", text: "hold the flame",
+          syllableTarget: 3, syllableTol: 1, stress: "XxX", rhymeGroup: "A",
+          rhymeStrictness: "", locked: false, sectionId: "", status: "seed",
+          hasScore: true, hasHeard: true, origin: "sung",
+        };
         trk.lyricSheet = {
           id: `ls-${trk.id}`, grid: "1/8", language: "en", topic: "", mood: "",
           explicit: "allow", rhymeStrictness: "slant", styleBias: false, specVersion: 1,
-          lines: [mk(0, 4, "A", "XxxX"), mk(1, 3, "B", "XxX")],
+          lines: [mk(0, 4, "A", "XxxX"), mk(1, 3, "B", "XxX"), sung],
         };
-        emit("skeleton_status", { clipId, state: "done", lineCount: 2 });
+        emit("skeleton_status", { clipId, state: "done", lineCount: 3 });
         invalidate();
       }, 400);
       return ok(command, { status: "started" });

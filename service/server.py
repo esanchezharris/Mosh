@@ -904,10 +904,12 @@ class Handler(BaseHTTPRequestHandler):
                 words = None
                 wh_py = _whisper_py()
                 if env and bool(data.get("asr", True)) and os.path.isfile(wh_py):
-                    # v4 "ASR counts, DSP times": GENEROUS decode (model `small`, the KS-B
-                    # validated config); words consumed UNGATED as counts+timestamps only,
-                    # never as lyrics (the 0.6-confidence lyric-anchor gate lives in
-                    # /mumble_spec and is untouched).
+                    # Generous decode (model `small`, the KS-B validated config). The SAME
+                    # word list feeds two consumers: the v4 syllable budgets (start/end/syl,
+                    # ungated) AND — pipeline correction 2026-07-04 — lyric EXTRACTION
+                    # (word/confidence): his real words must be detected and PRESERVED,
+                    # never overwritten by generation. The 0.6-confidence lyric-anchor gate
+                    # in /mumble_spec is untouched.
                     cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
                     try:
                         proc = subprocess.run([wh_py, cli, input_wav, "small"],
@@ -922,7 +924,9 @@ class Handler(BaseHTTPRequestHandler):
                                 if not any(ch.isalpha() for ch in c):
                                     continue
                                 try:  # one malformed word must not discard the rest
-                                    ws.append({"start": float(w["start"]), "end": float(w["end"]),
+                                    ws.append({"word": str(w.get("word", "")).strip(),
+                                               "start": float(w["start"]), "end": float(w["end"]),
+                                               "confidence": float(w.get("confidence", 0) or 0),
                                                "syl": pron.syllables(c) or 1})
                                 except (KeyError, TypeError, ValueError):
                                     continue
@@ -932,7 +936,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, skel.build_skeleton_spec(
                     notes, f0=f0, bpm=bpm, time_sig=(int(ts[0]), int(ts[1])), grid=grid,
                     topic=str(data.get("topic", "")), mood=str(data.get("mood", "")),
-                    env=env, words=words))
+                    env=env, words=words,
+                    extract_lyrics=bool(data.get("extract", True)),
+                    extract_use_llm=bool(data.get("extractLlm", True))))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"skeleton spec error: {e}"})
         elif path == "/sketch":

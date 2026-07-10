@@ -74,13 +74,18 @@ else
 
   # 3. Install torch + torchfcpe. `setuptools<81` for the pkg_resources trap (numba et al.),
   #    same as the transcribe/whisper venvs. FCPE bundles its model weights (no separate fetch).
-  say "installing torch + torchfcpe (may take a few minutes — pulls torch) …"
+  #    Also: pronouncing (cmudict) + g2p-en (OOV/slang pronunciation) + uroman (romanizer for
+  #    MMS_FA forced alignment) — the FMS sung-render chain (align.py + soulx score author)
+  #    needs real phonemes on this venv, or OOV words fall back to "ah-ah" and align can't romanize.
+  say "installing torch + torchfcpe + phoneme/alignment deps (may take a few minutes) …"
   if command -v uv >/dev/null 2>&1; then
-    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet torch torchaudio torchfcpe "setuptools<81"
+    VIRTUAL_ENV="$VENV" uv pip install --python "$PYBIN" --quiet torch torchaudio torchfcpe pronouncing g2p-en uroman "setuptools<81"
   else
     "$PYBIN" -m pip install --quiet --upgrade pip "setuptools<81"
-    "$PYBIN" -m pip install --quiet torch torchaudio torchfcpe
+    "$PYBIN" -m pip install --quiet torch torchaudio torchfcpe pronouncing g2p-en uroman
   fi
+  # g2p-en needs the nltk POS-tagger + cmudict data at runtime (same as the phonology venv).
+  "$PYBIN" -m nltk.downloader -q averaged_perceptron_tagger averaged_perceptron_tagger_eng cmudict >/dev/null 2>&1 || true
 
   # 4. Validate the fresh install.
   venv_ok || fail "the venv cannot import torchfcpe — install failed; inspect $VENV"

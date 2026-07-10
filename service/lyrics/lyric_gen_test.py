@@ -120,5 +120,28 @@ res2 = core.complete(spec2, backend="fake")
 p2 = res2["lines"][0]["proposals"][0]
 check("grid 1/8 ⇒ inferred ~8-syllable target", abs(p2["syllables"] - 8) <= 2, p2["text"])
 
+# ── 10. EXTRACTION pins (pipeline correction 2026-07-04): his words survive the loop ──
+# An extracted verbatim line (text set, gapless seed — how build_skeleton_from_clip lands
+# a "sung" line) must be SKIPPED by complete() and must ANCHOR its rhyme group; a partial
+# line regenerates but keeps every heard anchor word.
+spec3 = {"grid": "1/16", "rhymeStrictness": "slant", "topic": "", "mood": "",
+         "lines": [
+             {"index": 0, "role": "verse", "seedText": "cold nights taught me how to hold the flame",
+              "text": "cold nights taught me how to hold the flame",
+              "syllableTarget": 9, "syllableTol": 1, "rhymeGroup": "A", "locked": False},
+             {"index": 1, "role": "verse", "seedText": "they ___ me ___ ___",
+              "text": "", "syllableTarget": 8, "syllableTol": 1, "rhymeGroup": "A", "locked": False},
+         ]}
+res3 = core.complete(spec3, backend="fake")
+out_idx = [l["index"] for l in res3["lines"]]
+check("extracted verbatim line is SKIPPED (never regenerated)", 0 not in out_idx, str(out_idx))
+gap_line = res3["lines"][out_idx.index(1)]
+props3 = gap_line["proposals"]
+check("gap line still generates", len(props3) >= 1)
+check("partial line keeps every heard anchor word",
+      all(w in props3[0]["text"].split() for w in ("they", "me")), props3[0]["text"])
+check("gap line rhymes against the EXTRACTED line's end word (group A anchored by 'flame')",
+      bool(props3[0].get("passes")), str(props3[0]))
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
