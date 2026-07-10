@@ -159,6 +159,12 @@ const MOCK_WAVE_INPUTS = [
   { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
   { deviceID: "in-5", name: "Input 5", enabled: false, isStereoPair: false },
 ];
+// RTG-002 — hardware output destinations (so the per-track output picker has real
+// device choices and set_track_output's deviceID form can stick in dev/e2e).
+const MOCK_OUTPUT_DEVICES = [
+  { deviceID: "out-1-2", name: "MacBook Pro Speakers", enabled: true },
+  { deviceID: "out-3-4", name: "External Headphones", enabled: true },
+];
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 function scheduleMock(callback: () => void, delayMs: number) {
   globalThis.setTimeout(callback, delayMs);
@@ -378,6 +384,24 @@ function ensureInstrument(t: Track, drum: boolean): void {
   t.isInstrument = t.plugins.some((p) => p.isInstrument);
 }
 function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
+
+// RTG-002 — does `track`'s output chain (transitively) already feed into targetId?
+// Mirrors the native TrackOutput::feedsInto cycle guard so set_track_output can
+// reject a routing that would loop. Walks route-into-track hops with a seen guard.
+function outputFeedsInto(track: Track, targetId: string): boolean {
+  const seen = new Set<string>();
+  let cur: Track | undefined = track;
+  while (cur) {
+    const out = cur.output;
+    if (!out || !out.isTrack || !out.destId) return false;
+    if (out.destId === targetId) return true;
+    if (seen.has(cur.id)) return false;
+    seen.add(cur.id);
+    const nextId: string = out.destId;
+    cur = snapshot.tracks.find((tr) => tr.id === nextId);
+  }
+  return false;
+}
 
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
@@ -1056,7 +1080,45 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
-    case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
+    case "list_track_outputs": return ok(command, {
+      outputs: MOCK_OUTPUT_DEVICES,
+      tracks: snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn).map((t) => ({ id: t.id, name: t.name })),
+      audioEnabled: true,
+    });
+    case "set_track_output": {
+      // RTG-002 — an Edit mutation (undoable). Three destination forms mirror the
+      // native cmdSetTrackOutput: destTrackId (implicit submix), deviceID (hardware
+      // out), or output:"default" (reset). Cycle + self rejection match the backend.
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t) return err(command, "no track");
+      if (typeof args.destTrackId === "string") {
+        const destId = str(args.destTrackId);
+        const dest = snapshot.tracks.find((tr) => tr.id === destId);
+        if (!dest) return err(command, "no destination track: " + destId);
+        if (dest.id === t.id) return err(command, "a track cannot output to itself");
+        if (outputFeedsInto(dest, t.id)) return err(command, "routing would create a cycle");
+        pushUndo();
+        t.output = { isTrack: true, destId, name: dest.name };
+        invalidate();
+        return ok(command, { trackId: t.id, destTrackId: destId });
+      }
+      if (typeof args.deviceID === "string") {
+        const deviceID = str(args.deviceID);
+        if (!deviceID) return err(command, "empty 'deviceID'");
+        const dev = MOCK_OUTPUT_DEVICES.find((d) => d.deviceID === deviceID);
+        pushUndo();
+        t.output = { isTrack: false, deviceID, name: dev?.name ?? deviceID };
+        invalidate();
+        return ok(command, { trackId: t.id, deviceID });
+      }
+      if (str(args.output) === "default") {
+        pushUndo();
+        delete t.output;
+        invalidate();
+        return ok(command, { trackId: t.id, output: "default" });
+      }
+      return err(command, "expected 'destTrackId', 'deviceID', or output:'default'");
+    }
 
     // ── settings / export / command log (topbar utilities) ───────────────────
     case "list_audio_devices": return ok(command, {
