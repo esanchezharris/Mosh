@@ -1383,6 +1383,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 }
         check (planted, "lyricScore fixture planted on the line");
 
+        auto draftRender = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (! ok (draftRender), "sing render rejects scored draft text until asserted");
+        check (draftRender.getProperty ("error", var()).toString().contains ("asserted words"),
+               "scored draft text returns asserted-words error");
+        check (! ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "___ the flame" }}))),
+               "assert_lyric_line rejects unresolved gaps");
+        check (ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }}))),
+               "assert_lyric_line ok");
+        check (ok (cmd (ops, "undo")), "undo (assert_lyric_line) ok");
+        auto undoneAssertRender = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (! ok (undoneAssertRender), "undoing assertion makes sing render reject again");
+        check (ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }}))),
+               "assert_lyric_line ok after undo");
+
         // Full loop: render (fake sing) → HIT on identical re-render → lyric edit = MISS.
         auto s1 = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
         check (ok (s1), "sing render ok (fake legato-beep backend)");
@@ -1400,6 +1414,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (s2["data"].getProperty ("cache", var()).toString() == "hit", "identical sing re-render is a cache HIT");
 
         cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "hold the cold gold flame" }}));
+        auto draftAfterEdit = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
+        check (! ok (draftAfterEdit), "editing asserted words returns line to draft state");
+        check (ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }}))),
+               "assert_lyric_line ok after edit");
         auto s3 = cmd (ops, "render_layer", objN ({{ "clipId", vcid }, { "wait", true }}));
         check (s3["data"].getProperty ("cache", var()).toString() == "miss", "lyric edit changes the sing fingerprint (cache MISS)");
     }

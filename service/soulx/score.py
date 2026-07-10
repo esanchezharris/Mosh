@@ -18,7 +18,7 @@ Word→slot reconciliation policy (v0, deterministic, never inventing):
   LAST slot evenly (every word stays sung — intelligibility first);
 - leftover slots → held continuations of the last word (the take had more
   articulations than the text: hold, don't drop);
-- `___` gap tokens sing the placeholder "la" (a vocalization, never an invented word);
+- unresolved `___` gap tokens are never authored for sing render;
 - slot gaps ≥ 10 ms between words → <SP> rests; gaps INSIDE one word's allocation are
   legato-bridged (the previous segment extends — a singer holds through, and the
   timeline stays take-aligned so the render lands on the source clip's grid).
@@ -57,11 +57,18 @@ def _phoneme(word: str, syl: int) -> str:
 
 
 def _display_and_phoneme(word: str):
-    """Singable form of a token: `___` gaps become the placeholder "la"; returns
-    (display, en_-phoneme) with the AH1-per-syllable fallback for unknown words."""
-    display = "la" if word.strip("_") == "" else word
+    display = word
     syl = max(1, _pron().syllables(_clean(display)) or 1)
     return display, _phoneme(display, syl)
+
+
+def _asserted_text(line: dict) -> str:
+    text = str(line.get("text", "") or "").strip()
+    if not line.get("asserted") or not text or "___" in text:
+        return ""
+    if not any(ch.isalnum() for ch in text):
+        return ""
+    return text
 
 
 def _word_units(words: List[str], slots: List[dict]):
@@ -95,9 +102,9 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
     own timeline (leading/inter-line gaps are <SP> rests), so the rendered WAV lands
     aligned with the source clip."""
     scored = [ln for ln in (lines or [])
-              if isinstance(ln.get("score"), dict) and ln["score"].get("slots")]
+              if isinstance(ln.get("score"), dict) and ln["score"].get("slots") and _asserted_text(ln)]
     if not scored:
-        return {"ok": False, "error": "no_scored_lines",
+        return {"ok": False, "error": "no_asserted_scored_lines",
                 "linesUsed": 0, "linesSkipped": len(lines or [])}
 
     text_t, phon_t, pitch_t, type_t, dur_t = [], [], [], [], []
@@ -118,7 +125,7 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
 
     for ln in scored:
         slots = sorted(ln["score"]["slots"], key=lambda s: float(s.get("start", 0.0)))
-        raw_words = [w for w in str(ln.get("text", "") or "").split() if w]
+        raw_words = [w for w in _asserted_text(ln).split() if w]
         words = raw_words or ["la"]
         for unit_word, unit_slots in _word_units(words, slots):
             u_start = float(unit_slots[0]["start"])
