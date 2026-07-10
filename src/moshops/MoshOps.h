@@ -232,6 +232,7 @@ private:
     juce::var cmdClearAutomation        (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
+    juce::var cmdAddDrumPattern (const juce::var& args);  // DRM-002: whole grid, one command
     juce::var cmdTranscribeClip (const juce::var& args);  // audio->MIDI (Basic Pitch)
     juce::var cmdSketchBeatbox  (const juce::var& args);  // Sketch P0: beatbox->drum MoshOps
     juce::var cmdGenerateBeatRecipe (const juce::var& args);

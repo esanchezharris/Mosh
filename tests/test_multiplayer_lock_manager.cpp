@@ -29,6 +29,8 @@ TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][l
     REQUIRE (LockManager::classify ("reorder_plugin")   == Scope::Track);
     REQUIRE (LockManager::classify ("add_midi_clip")    == Scope::Track);
     REQUIRE (LockManager::classify ("paste_clip")       == Scope::Track);
+    // DRM-002: composite — can create clips AND mutate track instrument/type.
+    REQUIRE (LockManager::classify ("add_drum_pattern") == Scope::Track);
 }
 
 TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
