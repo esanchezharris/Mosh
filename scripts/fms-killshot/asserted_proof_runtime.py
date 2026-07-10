@@ -96,14 +96,16 @@ def read_envelope(path: Path, hop_s: float = 0.01) -> list[float]:
     return core.energy_envelope(mono, sample_rate, hop_ms=hop_s * 1000.0)
 
 
-def convert_audio(source: Path, output: Path, *, start: float | None = None, duration: float | None = None) -> None:
+def convert_audio(source: Path, output: Path, *, start: float | None = None, duration: float | None = None, channels: int = 1, sample_rate: int = 24000, pad_to_s: float | None = None) -> None:
     command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
     if start is not None:
         command.extend(["-ss", str(start)])
     command.extend(["-i", str(source)])
     if duration is not None:
         command.extend(["-t", str(duration)])
-    command.extend(["-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(output)])
+    if pad_to_s is not None:
+        command.extend(["-af", f"apad=whole_dur={pad_to_s}"])
+    command.extend(["-ac", str(channels), "-ar", str(sample_rate), "-c:a", "pcm_s16le", str(output)])
     output.parent.mkdir(parents=True, exist_ok=True)
     run(command)
 
