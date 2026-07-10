@@ -105,3 +105,5 @@ timeouts and progress output. `evalA` and `§B` used the normal repo surfaces.
 gate surfaces against this same `a3b-r4-cuda` adapter (now archived locally), and only
 fold new SFT rows into r5 for misses that survive as genuinely model-caused. Recorded
 in `docs/bench/R5_TRAINING_DECISION_2026-07-09.md` (addendum) and PROGRAM_STAGE1 §R.
+
+> **2026-07-10 addendum:** the fixed-harness RERUN of this read (same adapter, sha-verified) cleared split_clip (0.833) and set_track_type (0.500) as harness-caused; assign_sample/load_drum_kit remain model-caused → informed r5 (§P9). Full record: [R4_RERUN_AMENDMENT.md](R4_RERUN_AMENDMENT.md).
