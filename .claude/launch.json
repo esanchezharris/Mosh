@@ -26,6 +26,13 @@
       "port": 8189
     },
     {
+      "name": "asserted-proof",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/Documents/ClaudeMosh/.claude/worktrees/used2-ace-step-cover-spike-be9519 && exec /Users/emiliosanchez-harris/.pyenv/versions/3.12.9/bin/python3 scripts/fms-killshot/preview_server.py --port 8189"],
+      "port": 8189,
+      "autoPort": false
+    },
+    {
       "name": "fms-hybrid",
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb/hybrid-demo && exec /usr/bin/python3 -m http.server 8190 --bind 127.0.0.1"],
