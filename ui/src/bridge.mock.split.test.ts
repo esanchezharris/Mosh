@@ -68,3 +68,20 @@ describe("split_clip point normalization", () => {
     expect(String(r.error)).toContain("99");
   });
 });
+
+describe("add_midi_clip length fidelity", () => {
+  beforeEach(() => __resetMockForTests());
+
+  // The backend honors `length` in seconds (MoshOps cmdAddMidiClip:
+  // insertMIDIClip({start, start+length})). The mock hardcoding length=4 made the
+  // evalA split_clip fixtures ({start:4,length:8} → intended [4,12]) reject the
+  // model's correct absolute split at 8 — a mock-fidelity bug, not a model miss.
+  it("honors the length argument so an inside split at 8 on [4,12] succeeds", async () => {
+    const s = await mockSnapshot<Snapshot>();
+    const add = await exec("add_midi_clip", { trackId: s.tracks[0].id, start: 4, length: 8 });
+    expect(add.ok).toBe(true);
+    const clipId = (add.data as { clipId: string }).clipId;
+    const r = await exec("split_clip", { clipId, time: 8 });
+    expect(r.ok).toBe(true);
+  });
+});
