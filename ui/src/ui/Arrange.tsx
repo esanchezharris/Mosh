@@ -21,7 +21,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { pickFiles } from "../bridge";
 import { useStore, type Peaks } from "../store";
-import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
+import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep, activeGridDivision } from "../time";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import { commitClipDrag } from "./clipDrag";
 import { useDrumWindow } from "./dock/useFloatingWindow";
@@ -78,6 +78,7 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
   const setTimeRange = useStore((s) => s.setTimeRange);
   const expandedTracks = useStore((s) => s.expandedTracks);
   const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
+  const gridMode = useStore((s) => s.gridMode);
 
   const headersRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -125,9 +126,9 @@ export function Arrange({ snapshot }: { snapshot: Snapshot }) {
     const f = liveFeel();
     if (!st.snap || f.snapStrength <= 0) return raw;
     const snapped = snapTime(raw);
-    const cell = snapStep(meterAt(map, raw), st.snapDivision);
+    const cell = snapStep(meterAt(map, raw), activeGridDivision(meterAt(map, raw), pxPerSec, gridMode, st.snapDivision));
     return magneticSnap(raw, snapped, cell, f.snapStrength);
-  }, [snapTime, map]);
+  }, [snapTime, map, pxPerSec, gridMode]);
 
   // Drag-to-arrange: a sample dragged from the browser lands as a clip on the
   // dropped track at the dropped position (snapped). import_clip already takes

@@ -140,6 +140,9 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
 }
 .v2-proj-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--v2-ground-dim); }
+.v2-grid-ctl { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.v2-grid-ctl .v2-chip { min-width: 0; }
+.v2-grid-ctl .v2-chip-toggle.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
 .v2-chip {
   appearance: none; background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line);
   color: var(--v2-ground-dim); font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 999px;
@@ -474,7 +477,11 @@
 @media (prefers-reduced-motion: reduce) {
   .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
 }
-.v2-lmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.v2-lmeta {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  opacity: calc(1 - var(--mix-morph, 0)); transform: translateX(calc(var(--mix-morph, 0) * -6px));
+  transition: opacity 140ms linear, transform 140ms linear;
+}
 .v2-lrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .v2-lname { display: block; font-size: 13px; color: var(--v2-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v2-ltype {
@@ -497,6 +504,15 @@
 }
 .v2-ms button.on.m { background: var(--mute, #ffb454); color: #1a1206; border-color: transparent; }
 .v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+.v2-lmix {
+  display: flex; flex-direction: column; gap: 4px; width: 88px; min-width: 88px;
+  opacity: var(--mix-morph, 0); transform: translateX(calc((1 - var(--mix-morph, 0)) * 10px));
+  pointer-events: none; transition: opacity 140ms linear, transform 140ms linear;
+}
+.v2-lmix.active { pointer-events: auto; }
+.v2-lmix input[type="range"] {
+  width: 100%; height: 14px; margin: 0; accent-color: var(--v2-accent);
+}
 
 /* lane content */
 .v2-lane {
@@ -504,6 +520,8 @@
   border-bottom: 1px solid var(--v2-line);
   background:
     repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--v2-line) calc(var(--beat-px, 40px) - 1px), var(--v2-line) var(--beat-px, 40px));
+  opacity: calc(1 - (var(--mix-morph, 0) * 0.06));
+  transition: opacity 140ms linear, box-shadow 90ms linear, background 140ms linear;
 }
 .v2-clip {
   position: absolute; top: 8px; bottom: 8px; border-radius: 8px; overflow: hidden;
@@ -530,6 +548,12 @@
 .v2-clipmenu button:hover { background: var(--v2-accent-soft); }
 .v2-clipmenu button.danger:hover { background: rgba(255, 59, 92, 0.16); color: #ffb3c1; }
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
+.v2-clipmenu-head {
+  padding: 3px 10px 2px; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-faint);
+}
+.v2-clipmenu-grid { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 5px 3px; }
+.v2-clipmenu-grid button { width: auto; padding: 6px 8px; font-size: 11px; }
+.v2-clipmenu button[aria-pressed="true"] { background: var(--v2-accent-soft); color: var(--v2-accent); }
 .v2-clip.wave { background: var(--v2-clip-wave); }
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
 .v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: rgba(204, 255, 54, 0.3); }
@@ -725,18 +749,17 @@
 .v2-composer {
   position: relative;
   justify-self: center; width: min(860px, 100%);   /* narrow + centered under the arrangement
-     (grid items ignore margin:auto — center via justify-self) */
+  (grid items ignore margin:auto — center via justify-self) */
   display: flex; align-items: stretch; gap: 12px; padding: 10px 12px;
-  background: linear-gradient(180deg, rgba(33, 33, 36, 0.98), rgba(24, 24, 27, 0.98));
-  border: 1px solid var(--v2-line); border-radius: 16px;
+  background: rgba(27, 27, 30, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px;
   box-shadow: var(--v2-glow);
+  overflow: visible;
 }
-.v2-composer-side { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
-/* Moshi face at the composer's left (the concept's personality cue). The composer is a
-   dark panel, so the mark flips to light petals + dark face regardless of theme. */
+.v2-composer-sticker { position: absolute; left: -10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .v2-composer-face { flex: 0 0 auto; --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface); --v2-mark-rim: rgba(0, 0, 0, 0.28); }
 .v2-composer .spark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--v2-accent-soft); color: var(--v2-accent); font-size: 16px; }
-.v2-composer-plus { flex: 0 0 auto; position: relative; }
+.v2-composer-plus { flex: 0 0 auto; position: relative; margin-left: 24px; }
 .v2-shell .v2-composer-plus .fo-trigger {
   width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
   background: var(--v2-surface-sunken); color: var(--v2-accent); border: 1px solid var(--v2-line); cursor: pointer;

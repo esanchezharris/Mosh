@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { MidiNote } from "../types";
-import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
+import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats, activeGridDivision } from "../time";
 import { DrumSequencer } from "./DrumSequencer";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
 
@@ -27,8 +27,10 @@ export function PianoRoll() {
   const close = useStore((s) => s.closePianoRoll);
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
+  const pxPerSec = useStore((s) => s.pxPerSec);
   const snap = useStore((s) => s.snap);
   const snapDivision = useStore((s) => s.snapDivision);
+  const gridMode = useStore((s) => s.gridMode);
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
@@ -103,7 +105,8 @@ export function PianoRoll() {
   if (!editingClipId || !clip) return null;
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
-  const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
+  const gridDivision = activeGridDivision(m, pxPerSec, gridMode, snapDivision);
+  const stepBeats = snap ? snapStepBeats(m, gridDivision) : 0;
   const snapBeat = (b: number) => (stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k);
   const clipBeats = Math.max(8, clip.length / beatSeconds(m));
@@ -212,7 +215,7 @@ export function PianoRoll() {
             </label>
           )}
           {mode === "piano" && (
-            <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
+            <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, gridDivision) })}>Quantize {gridDivision === "bar" ? "Bar" : gridDivision}</button>
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>

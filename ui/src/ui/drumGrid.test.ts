@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  DRUM_LANES, STEPS, stepBeats, laneIndexForPitch,
+  DRUM_LANES, STEPS, STEP_OPTIONS, stepBeats, laneIndexForPitch,
   cellForNote, buildGrid, cycleVelocity,
   swingOffsetBeats, stepStartBeats, velocityFromFraction,
 } from "./drumGrid";
@@ -87,12 +87,19 @@ describe("pattern length (configurable step count)", () => {
     expect(stepBeats(4, 8)).toBeCloseTo(0.5, 10);
     expect(stepBeats(4, 16)).toBeCloseTo(0.25, 10);
     expect(stepBeats(4, 32)).toBeCloseTo(0.125, 10);
+    expect(stepBeats(4, 12)).toBeCloseTo(1 / 3, 10);
+    expect(stepBeats(4, 24)).toBeCloseTo(1 / 6, 10);
     expect(stepBeats(4)).toBeCloseTo(0.25, 10); // default 16 unchanged
   });
   it("buildGrid honours the step count (row width)", () => {
     expect(buildGrid([], 4, 8)[0]).toHaveLength(8);
     expect(buildGrid([], 4, 32)[0]).toHaveLength(32);
+    expect(buildGrid([], 4, 12)[0]).toHaveLength(12);
+    expect(buildGrid([], 4, 24)[0]).toHaveLength(24);
     expect(buildGrid([], 4)[0]).toHaveLength(STEPS);
+  });
+  it("exposes triplet-friendly length options", () => {
+    expect(STEP_OPTIONS).toEqual(expect.arrayContaining([12, 24]));
   });
   it("cellForNote maps within a 32-step pattern", () => {
     const sb = stepBeats(4, 32); // 0.125

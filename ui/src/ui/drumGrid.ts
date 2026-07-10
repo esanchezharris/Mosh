@@ -28,7 +28,7 @@ export const DRUM_LANES: DrumLane[] = [
 // Default pattern length: one bar at sixteenth resolution.
 export const STEPS = 16;
 // Pattern lengths the UI offers (steps).
-export const STEP_OPTIONS = [8, 16, 32] as const;
+export const STEP_OPTIONS = [8, 12, 16, 24, 32] as const;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 

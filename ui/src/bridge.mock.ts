@@ -840,6 +840,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.startSeconds, num(args.start, 0)), 4);
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
+    case "import_clip_data": {
+      const name = str(args.name);
+      const dataBase64 = str(args.dataBase64);
+      if (!name) return err(command, "missing 'name'");
+      if (!dataBase64) return err(command, "missing 'dataBase64'");
+      const t = findTrack(str(args.trackId)) ?? snapshot.tracks[0];
+      if (!t) return err(command, "no track");
+      pushUndo();
+      const c = waveClip(name.replace(/\.[^.]+$/, ""), num(args.start, snapshot.transport.position), 4);
+      t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
+    }
     case "move_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo(); f.clip.start = Math.max(0, num(args.start, f.clip.start));

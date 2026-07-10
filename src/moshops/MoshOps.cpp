@@ -5196,7 +5196,15 @@ juce::var MoshOps::cmdImportTrainingSource (const juce::var& args)
     String error;
     auto src = trainerRegistry.importSource (args, error);
     if (! error.isEmpty()) return errResult ("import_training_source", error);
-    logLine ("import_training_source", args, true, {}, false);
+    auto* logObject = new DynamicObject();
+    if (auto* input = args.getDynamicObject())
+        for (int i = 0; i < input->getProperties().size(); ++i)
+        {
+            const auto name = input->getProperties().getName (i);
+            if (name != Identifier ("notes"))
+                logObject->setProperty (name, input->getProperty (name));
+        }
+    logLine ("import_training_source", var (logObject), true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("import_training_source", src);
 }

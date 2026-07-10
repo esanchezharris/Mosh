@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
+import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
 import type { Snapshot } from "../types";
@@ -20,6 +20,10 @@ function projectName(editFile: string): string {
 
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
+  const gridMode = useStore((s) => s.gridMode);
+  const setGridMode = useStore((s) => s.setGridMode);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
   const t = useStore((s) => s.transport);
   const agentBusy = useStore((s) => s.agentBusy);
   const mpCreate = useStore((s) => s.mpCreateSession);
@@ -68,6 +72,16 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
               data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
               onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}>♩</button>
+            <div className="v2-grid-ctl" role="group" aria-label="Grid mode">
+              <button className={`v2-chip v2-chip-toggle${gridMode === "fixed" ? " on" : ""}`} aria-pressed={gridMode === "fixed"} title="Fixed grid"
+                onClick={() => setGridMode("fixed")}>Fixed</button>
+              <button className={`v2-chip v2-chip-toggle${gridMode === "adaptive" ? " on" : ""}`} aria-pressed={gridMode === "adaptive"} title="Adaptive grid"
+                onClick={() => setGridMode("adaptive")}>Adaptive</button>
+              <select className="v2-chip" aria-label="Grid division" value={snapDivision}
+                onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}>
+                {SNAP_DIVISIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
           </div>
         </div>
       </div>

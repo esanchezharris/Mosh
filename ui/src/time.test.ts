@@ -6,6 +6,8 @@ import {
   barSeconds,
   snapStep,
   snapStepBeats,
+  adaptiveGridDivision,
+  activeGridDivision,
   secondsToBBS,
   tempoMapFrom,
   segAt,
@@ -65,7 +67,9 @@ describe("snapStep / snapStepBeats", () => {
   it("subdivisions in seconds at 120 bpm", () => {
     expect(snapStep(m44, "1/4")).toBeCloseTo(0.5, 9);
     expect(snapStep(m44, "1/8")).toBeCloseTo(0.25, 9);
+    expect(snapStep(m44, "1/8T")).toBeCloseTo(1 / 6, 9);
     expect(snapStep(m44, "1/16")).toBeCloseTo(0.125, 9);
+    expect(snapStep(m44, "1/16T")).toBeCloseTo(1 / 12, 9);
     expect(snapStep(m44, "1/32")).toBeCloseTo(0.0625, 9);
   });
   it("every division yields a positive step in both meters", () => {
@@ -142,6 +146,10 @@ describe("snapTimeMap (constant tempo)", () => {
     expect(snapTimeMap(map, 1.1, "bar")).toBeCloseTo(2.0, 9);
     expect(snapTimeMap(map, 0.9, "bar")).toBeCloseTo(0.0, 9);
   });
+  it("handles triplet divisions", () => {
+    expect(snapTimeMap(map, 0.13, "1/8T")).toBeCloseTo(1 / 6, 9);
+    expect(snapTimeMap(map, 0.20, "1/16T")).toBeCloseTo(1 / 6, 9);
+  });
   it("never returns a negative time", () => {
     expect(snapTimeMap(map, -3, "1/4")).toBeGreaterThanOrEqual(0);
   });
@@ -169,5 +177,17 @@ describe("gridLines", () => {
     const { bars, beats, marks } = gridLines(map, 0, 100000, 50);
     expect(bars.length + beats.length).toBeLessThanOrEqual(50);
     expect(Array.isArray(marks)).toBe(true);
+  });
+});
+
+describe("adaptive grid selection", () => {
+  it("chooses the finest readable division", () => {
+    expect(adaptiveGridDivision(m44, 400)).toBe("1/32");
+    expect(adaptiveGridDivision(m44, 80)).toBe("1/8T");
+    expect(adaptiveGridDivision(m44, 30)).toBe("1/4");
+  });
+  it("resolves fixed versus adaptive modes", () => {
+    expect(activeGridDivision(m44, 80, "fixed", "1/16")).toBe("1/16");
+    expect(activeGridDivision(m44, 80, "adaptive", "1/16")).toBe("1/8T");
   });
 });

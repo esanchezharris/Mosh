@@ -47,6 +47,27 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
   const addStep = (li: number, si: number, velocity = 100) =>
     void exec("add_note", { clipId: clip.id, pitch: DRUM_LANES[li].pitch, start: stepStartBeats(si, sb, swing), length: sb, velocity });
 
+  const applySwing = async () => {
+    const notes = grid.flatMap((row, li) =>
+      row.flatMap((cell, si) => {
+        if (!cell.on) return [];
+        const start = stepStartBeats(si, sb, swing);
+        const clipNote = clip.notes?.[cell.noteIndex];
+        if (!clipNote) return [];
+        return Math.abs(clipNote.start - start) < 1e-6
+          ? []
+          : [{ noteIndex: cell.noteIndex, start, pitch: DRUM_LANES[li].pitch }];
+      }),
+    );
+    if (notes.length === 0) return;
+    await exec("batch_begin", { name: "Apply swing" });
+    try {
+      for (const note of notes) await exec("set_note", { clipId: clip.id, noteIndex: note.noteIndex, start: note.start, pitch: note.pitch });
+    } finally {
+      await exec("batch_end", {});
+    }
+  };
+
   const onCell = (li: number, si: number, shift: boolean) => {
     const cell = grid[li][si];
     if (!cell.on) addStep(li, si);
@@ -90,7 +111,7 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
         <span className="spacer" />
         <label className="dr-ctl tc">Steps
           <select aria-label="Pattern length (steps)" value={steps} onChange={(e) => setSteps(Number(e.target.value))}>
-            {STEP_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            {STEP_OPTIONS.map((n) => <option key={n} value={n}>{n === 12 || n === 24 ? `${n} (triplet)` : n}</option>)}
           </select>
         </label>
         <label className="dr-ctl tc">Swing
@@ -98,6 +119,7 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
             onChange={(e) => setSwing(Number(e.target.value))} style={{ accentColor: "var(--lime)" }} />
           <span>{Math.round(swing * 100)}%</span>
         </label>
+        <button className="btn" onClick={() => void applySwing()}>Apply Swing</button>
         <div className="seg" role="group" aria-label="Sequencer view">
           <button className="btn" aria-pressed={view === "roll"} onClick={() => setView("roll")}>Roll</button>
           <button className="btn" aria-pressed={view === "graph"} onClick={() => setView("graph")}>Graph</button>

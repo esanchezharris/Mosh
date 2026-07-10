@@ -12,7 +12,7 @@ import type {
 import { versionBannerError } from "./types";
 import { isTrackPatch, applyTrackPatch } from "./snapshotPatch";
 import type { RemoteStatus } from "./bridge";
-import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
+import { type GridMode, type SnapDiv, activeGridDivision, meterAt, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
 // Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
 // changes into the video room; the room couples back to the seam only via mp_send_signal.
@@ -55,6 +55,8 @@ type State = {
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
+  gridMode: GridMode;
+  mixMorph: number;
   selection: Set<string>;
   peaks: Record<string, Peaks>;
 
@@ -126,6 +128,8 @@ type State = {
   setTool: (t: Tool) => void;
   setSnap: (b: boolean) => void;
   setSnapDivision: (d: SnapDiv) => void;
+  setGridMode: (mode: GridMode) => void;
+  setMixMorph: (value: number) => void;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   snapTime: (t: number) => number;
@@ -226,6 +230,8 @@ export const useStore = create<State>((set, get) => ({
   tool: "move",
   snap: true,
   snapDivision: "1/4",
+  gridMode: "fixed",
+  mixMorph: 0,
   selection: new Set<string>(),
   peaks: {},
   timeRange: null,
@@ -469,6 +475,8 @@ export const useStore = create<State>((set, get) => ({
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d }),
+  setGridMode: (mode) => set({ gridMode: mode }),
+  setMixMorph: (value) => set({ mixMorph: Math.max(0, Math.min(1, value)) }),
   select: (ids, additive = false) => {
     set((s) => {
       const next = new Set(additive ? s.selection : []);
@@ -480,11 +488,12 @@ export const useStore = create<State>((set, get) => ({
   clearSelection: () => { set({ selection: new Set<string>() }); void get().syncActiveTrack(); },
   setTimeRange: (r) => set({ timeRange: r }),
   snapTime: (t) => {
-    const { snap, snapDivision, snapshot } = get();
+    const { snap, snapDivision, gridMode, pxPerSec, snapshot } = get();
     if (!snap) return t;
     // SES-001 — snap over the piecewise tempo map (the grid restarts at every
     // tempo/meter change; constant-tempo sessions behave exactly as before).
-    return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision);
+    const map = tempoMapFrom(snapshot?.session);
+    return snapTimeMap(map, t, activeGridDivision(meterAt(map, t), pxPerSec, gridMode, snapDivision));
   },
 
   ensurePeaks: (clipId) => {

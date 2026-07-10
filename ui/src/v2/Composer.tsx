@@ -11,20 +11,13 @@ import { MoshMark } from "./MoshMark";
 
 export function Composer() {
   const snapshot = useStore((s) => s.snapshot);
-  // A narrow, centered prompt bar. The bar carries a small STATIC Moshi face as the send
-  // cue (personality without a second WebGL canvas) — the live, "maximized" Moshi lives in
-  // the always-on right rail, which is his only animated mount.
   return (
     <div className="v2-composer" data-testid="v2-composer">
-      <div className="v2-composer-side">
+      <div className="v2-composer-sticker">
         <MoshMark size={26} className="v2-composer-face" />
-        {snapshot && <div className="v2-composer-plus"><FileOptions snapshot={snapshot} /></div>}
       </div>
+      {snapshot && <div className="v2-composer-plus"><FileOptions snapshot={snapshot} /></div>}
       <div className="v2-composer-host">
-        <div className="v2-composer-copy" aria-hidden="true">
-          <span className="v2-composer-kicker">Ask Moshi</span>
-          <span className="v2-composer-hint">Voice or text for arrangement moves, takes, and quick fixes.</span>
-        </div>
         <AgentComposer />
       </div>
     </div>

@@ -1140,7 +1140,9 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .training-pop .pop-row { flex-direction: column; align-items: stretch; gap: 4px; }
 .training-pop .pop-row span { color: var(--bone-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
 .training-pop .pop-row input,
-.training-pop .pop-row select { width: 100%; min-width: 0; }
+.training-pop .pop-row select,
+.training-pop .pop-row textarea { width: 100%; min-width: 0; }
+.training-pop .pop-row textarea { resize: vertical; }
 .training-pop .pop-note { line-height: 1.35; }
 .training-pop .training-blocker-list {
   margin: 4px 0 0 16px;

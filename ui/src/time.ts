@@ -5,14 +5,19 @@
 // a tempo map is a later wave. Positions on the command surface stay in seconds
 // (the swappable seam); musical time is a pure view-side derivation.
 
-export type SnapDiv = "bar" | "1/4" | "1/8" | "1/16" | "1/32";
-export const SNAP_DIVISIONS: SnapDiv[] = ["bar", "1/4", "1/8", "1/16", "1/32"];
+export type SnapDiv = "bar" | "1/4" | "1/8T" | "1/8" | "1/16T" | "1/16" | "1/32";
+export type GridMode = "fixed" | "adaptive";
+export const SNAP_DIVISIONS: SnapDiv[] = ["bar", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"];
+export const ADAPTIVE_GRID_DIVISIONS: SnapDiv[] = ["1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4", "bar"];
+export const ADAPTIVE_GRID_MIN_PX = 12;
 
 export type Meter = { tempo: number; num: number; den: number };
 
 const QUARTERS: Record<Exclude<SnapDiv, "bar">, number> = {
   "1/4": 1,
+  "1/8T": 1 / 3,
   "1/8": 0.5,
+  "1/16T": 1 / 6,
   "1/16": 0.25,
   "1/32": 0.125,
 };
@@ -45,6 +50,23 @@ export function snapStep(m: Meter, division: SnapDiv): number {
 /** Grid step in beats (denominator-notes) for a snap resolution. */
 export function snapStepBeats(m: Meter, division: SnapDiv): number {
   return snapStep(m, division) / beatSeconds(m);
+}
+
+export function adaptiveGridDivision(m: Meter, pxPerSec: number, minPx = ADAPTIVE_GRID_MIN_PX): SnapDiv {
+  for (const division of ADAPTIVE_GRID_DIVISIONS) {
+    if (snapStep(m, division) * pxPerSec >= minPx) return division;
+  }
+  return "bar";
+}
+
+export function activeGridDivision(
+  m: Meter,
+  pxPerSec: number,
+  mode: GridMode,
+  fixed: SnapDiv,
+  minPx = ADAPTIVE_GRID_MIN_PX,
+): SnapDiv {
+  return mode === "adaptive" ? adaptiveGridDivision(m, pxPerSec, minPx) : fixed;
 }
 
 /** Format a time (seconds) as bars.beats.sixteenths (1-based). */

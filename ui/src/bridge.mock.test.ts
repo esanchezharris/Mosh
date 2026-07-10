@@ -20,7 +20,6 @@ const MOCK = path.join(SRC, "bridge.mock.ts");
 const ALLOWLIST = new Set<string>([
   // Live-only data with no dev-mock state to mutate (UI degrades gracefully):
   "rescan_plugins",
-  "import_clip_data", // dev imports via the import_clip path; bytes-over-bridge is native-only
   // A3 crash recovery is a native-only flow (no crash journal in the in-memory dev mock):
   "recover_session",
   "discard_recovery",
@@ -31,6 +30,30 @@ const ALLOWLIST = new Set<string>([
   // (create_group_track is dispatched by the configurable keymap's GROUP action and
   //  now has a real mock case — so it's intentionally NOT allowlisted.)
 ]);
+
+describe("bridge.mock bytes-over-bridge import", () => {
+  it("adds a named wave clip at the requested position", async () => {
+    __resetMockForTests();
+    const before = await mockSnapshot<Snapshot>();
+    const track = before.tracks[0];
+    if (!track) throw new Error("seed session has no track");
+
+    const result = await mockExecute<CommandResult<{ clipId: string }>>({
+      command: "import_clip_data",
+      args: {
+        name: "real-drop.wav",
+        dataBase64: "UklGRg==",
+        trackId: track.id,
+        start: 3.5,
+      },
+    });
+    const after = await mockSnapshot<Snapshot>();
+    const imported = after.tracks[0]?.clips.find((clip) => clip.id === result.data?.clipId);
+
+    expect(result.ok).toBe(true);
+    expect(imported).toMatchObject({ name: "real-drop", type: "wave", start: 3.5 });
+  });
+});
 
 function listSourceFiles(dir: string): string[] {
   const out: string[] = [];

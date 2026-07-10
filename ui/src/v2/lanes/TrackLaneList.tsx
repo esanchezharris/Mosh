@@ -21,6 +21,8 @@ const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
+  const mixMorph = useStore((s) => s.mixMorph);
+  const setMixMorph = useStore((s) => s.setMixMorph);
   const exec = useStore((s) => s.exec);
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
@@ -58,6 +60,18 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
     ro.observe(el);
     return () => ro.disconnect();
   }, [fit]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.altKey || e.ctrlKey)) return;
+      e.preventDefault();
+      const delta = Math.max(-0.12, Math.min(0.12, -e.deltaY * 0.0018));
+      setMixMorph(useStore.getState().mixMorph + delta);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [setMixMorph]);
 
   // Shell reactivity (#10): each lane glows with its OWN live audio level while playing,
   // in concert with Moshi (who reacts to the master spectrum). Driven imperatively from
@@ -122,7 +136,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         style={{ "--v2-stage-h": `calc(var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
-          <div className="v2-tl">
+          <div className="v2-tl" style={{ "--mix-morph": mixMorph } as React.CSSProperties} data-mix-morph={mixMorph.toFixed(2)}>
             {/* ruler row (now the top row) */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
@@ -177,6 +191,7 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const mixMorph = useStore((s) => s.mixMorph);
   const instrument = track.plugins?.find((p) => p.isInstrument)?.name;
   const preset = instrument ?? (track.type === "drum" ? "Drums" : "Audio");
   const typeLabel = TYPE_LABEL[track.type] ?? "Track";
@@ -217,6 +232,14 @@ function TrackLaneHeader({ track }: { track: Track }) {
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
+      </span>
+      <span className={`v2-lmix${mixMorph > 0.01 ? " active" : ""}`} style={{ opacity: mixMorph }} aria-hidden={mixMorph <= 0.01} onPointerDown={(e) => e.stopPropagation()}>
+        <input className="v2-pan" type="range" min={-1} max={1} step={0.01} value={track.pan ?? 0}
+          title={`Pan ${(track.pan ?? 0).toFixed(2)}`} aria-label={`Pan ${track.name}`} tabIndex={mixMorph > 0.01 ? 0 : -1} disabled={mixMorph <= 0.01}
+          onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
+        <input className="v2-fader" type="range" min={-48} max={6} step={0.5} value={track.volumeDb ?? 0}
+          title={`Volume ${(track.volumeDb ?? 0).toFixed(1)} dB`} aria-label={`Volume ${track.name}`} tabIndex={mixMorph > 0.01 ? 0 : -1} disabled={mixMorph <= 0.01}
+          onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
       </span>
     </div>
   );

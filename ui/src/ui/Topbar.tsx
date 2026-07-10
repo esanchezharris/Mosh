@@ -150,6 +150,8 @@ export function Toolbar() {
   const setSnap = useStore((s) => s.setSnap);
   const snapDivision = useStore((s) => s.snapDivision);
   const setSnapDivision = useStore((s) => s.setSnapDivision);
+  const gridMode = useStore((s) => s.gridMode);
+  const setGridMode = useStore((s) => s.setGridMode);
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -176,8 +178,12 @@ export function Toolbar() {
       <div className="group">
         <button className={`btn${snap ? " on" : ""}`} aria-pressed={snap} data-state={snap ? "on" : "off"}
           onClick={() => setSnap(!snap)}>Snap</button>
+        <div className="seg" role="group" aria-label="Grid mode">
+          <button className={`btn${gridMode === "fixed" ? " on" : ""}`} aria-pressed={gridMode === "fixed"} onClick={() => setGridMode("fixed")}>Fixed</button>
+          <button className={`btn${gridMode === "adaptive" ? " on" : ""}`} aria-pressed={gridMode === "adaptive"} onClick={() => setGridMode("adaptive")}>Adaptive</button>
+        </div>
         <select className="btn ghost" value={snapDivision} onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}>
-          {SNAP_DIVISIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+          {SNAP_DIVISIONS.map((d) => <option key={d} value={d}>{d === "1/8T" ? "1/8T" : d === "1/16T" ? "1/16T" : d}</option>)}
         </select>
       </div>
       <div className="sep" />

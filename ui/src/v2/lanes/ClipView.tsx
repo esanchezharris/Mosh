@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
-import { beatSeconds } from "../../time";
+import { beatSeconds, meterAt, tempoMapFrom, snapStepBeats, activeGridDivision } from "../../time";
 import { meterOf } from "../timeline/geom";
 import { EditorAction as EA, type Mods } from "../../interaction/actions";
 import { resolveGesture } from "../../interaction/gestures";
@@ -164,13 +164,20 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />
       <div className="v2-trim r" style={{ width: edgeGrab }} />
-      {menu && <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} onClose={() => setMenu(null)} />}
+      {menu && <ClipMenu clip={clip} snapshot={snapshot} x={menu.x} y={menu.y} time={menu.time} onClose={() => setMenu(null)} />}
     </div>
   );
 }
 
-function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: number; time: number; onClose: () => void }) {
+function ClipMenu({ clip, snapshot, x, y, time, onClose }: { clip: Clip; snapshot: Snapshot; x: number; y: number; time: number; onClose: () => void }) {
   const exec = useStore((s) => s.exec);
+  const pxPerSec = useStore((s) => s.pxPerSec);
+  const gridMode = useStore((s) => s.gridMode);
+  const setGridMode = useStore((s) => s.setGridMode);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
+  const m = meterAt(tempoMapFrom(snapshot.session), clip.start);
+  const activeDivision = activeGridDivision(m, pxPerSec, gridMode, snapDivision);
   useEffect(() => {
     const close = () => onClose();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -182,6 +189,23 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
     <div className="v2-clipmenu" role="menu" data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
       <button role="menuitem" onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>Split here</button>
       <button role="menuitem" onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+      {clip.type === "midi" && (
+        <>
+          <div className="v2-clipmenu-sep" />
+          <div className="v2-clipmenu-head">Grid</div>
+          <button role="menuitem" aria-pressed={gridMode === "fixed"} onClick={() => run(() => setGridMode("fixed"))}>Fixed grid</button>
+          <button role="menuitem" aria-pressed={gridMode === "adaptive"} onClick={() => run(() => setGridMode("adaptive"))}>Adaptive grid</button>
+          <div className="v2-clipmenu-grid">
+            {(["bar", "1/4", "1/8", "1/8T", "1/16", "1/16T"] as const).map((div) => (
+              <button key={div} role="menuitem" aria-pressed={snapDivision === div}
+                onClick={() => run(() => { setSnapDivision(div); setGridMode("fixed"); })}>{div}</button>
+            ))}
+          </div>
+          <button role="menuitem" onClick={() => run(() => void exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, activeDivision), strength: 1 }))}>
+            Quantize current grid
+          </button>
+        </>
+      )}
       {clip.type === "wave" && (
         <button role="menuitem" onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
       )}

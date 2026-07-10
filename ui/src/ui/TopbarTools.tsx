@@ -194,6 +194,9 @@ export function TrainingTool({
   const [localPath, setLocalPath] = useState("");
   const [userClaimedLicense, setUserClaimedLicense] = useState("");
   const [proofOfRights, setProofOfRights] = useState("");
+  const [notes, setNotes] = useState("");
+  const [interviewStep, setInterviewStep] = useState(0);
+  const [interviewAnswers, setInterviewAnswers] = useState(["", "", "", "", ""]);
   const [bundlePath, setBundlePath] = useState("");
   const [lastJobId, setLastJobId] = useState("");
   const sources = training?.sources ?? [];
@@ -203,6 +206,17 @@ export function TrainingTool({
   const readyToBuild = sources.length > 0 && blockedSources.length === 0;
   const blockedReasons = blockedSources.map((s) => `${s.source_id}: ${s.blocked_reason || "Blocked"}`);
   const missingSourceInput = localPath.trim().length === 0 && sourceUrl.trim().length === 0;
+  const interviewPrompts = [
+    "What sound are we working backward from?",
+    "Which roles or instruments make that sound happen?",
+    "What timing, groove, or swing details matter?",
+    "Which commands or actions should recreate it?",
+    "What source facts, credits, and rights notes belong here?",
+  ];
+  const interviewSummary = interviewAnswers
+    .map((answer, index) => answer.trim() ? `${interviewPrompts[index]} ${answer.trim()}` : "")
+    .filter(Boolean)
+    .join("\n");
   const sourceStatus = (s: TrainingState["sources"][number]) => {
     if (s.eligible) return "Ready for training";
     switch (s.blocked_reason) {
@@ -237,6 +251,12 @@ export function TrainingTool({
     && userClaimedLicense.trim().length > 0
     && proofOfRights.trim().length > 0
     && (localPath.trim().length > 0 || sourceUrl.trim().length > 0);
+  const interviewAnswer = interviewAnswers[interviewStep] ?? "";
+  const setInterviewAnswer = (value: string) => {
+    const next = interviewAnswers.slice();
+    next[interviewStep] = value;
+    setInterviewAnswers(next);
+  };
 
     const addSource = async () => {
       const r = await exec("import_training_source", {
@@ -246,12 +266,14 @@ export function TrainingTool({
       localPath,
       userClaimedLicense,
       proofOfRights,
+      notes,
       });
       if (r.ok) {
-      setTitle(""); setCreator(""); setSourceUrl(""); setLocalPath(""); setUserClaimedLicense(""); setProofOfRights("");
+      setTitle(""); setCreator(""); setSourceUrl(""); setLocalPath(""); setUserClaimedLicense(""); setProofOfRights(""); setNotes(""); setInterviewStep(0); setInterviewAnswers(["", "", "", "", ""]);
         await refresh();
       }
     };
+  const useInterviewNotes = () => setNotes(interviewSummary);
   const buildCorpus = async () => {
     const r = await exec("build_training_corpus", {});
     if (r.ok) {
@@ -290,6 +312,17 @@ export function TrainingTool({
           <div className="pop-head">Type-Beat Training</div>
           <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
           <div className="pop-group">
+            <div className="pop-label">Teach backwards</div>
+            <div className="pop-note">Answer the questions in reverse, then turn them into provenance notes.</div>
+            <label className="pop-row"><span>Prompt</span><input value={interviewPrompts[interviewStep]} readOnly /></label>
+            <label className="pop-row"><span>Answer</span><textarea rows={3} value={interviewAnswer} onChange={(e) => setInterviewAnswer(e.target.value)} /></label>
+            <div className="pop-actions">
+              <button className="btn" disabled={interviewStep === 0} onClick={() => setInterviewStep((n) => Math.max(0, n - 1))}>Back</button>
+              <button className="btn" disabled={interviewStep >= interviewPrompts.length - 1} onClick={() => setInterviewStep((n) => Math.min(interviewPrompts.length - 1, n + 1))}>Next</button>
+              <button className="btn" disabled={!interviewSummary} onClick={useInterviewNotes}>Use notes</button>
+            </div>
+          </div>
+          <div className="pop-group">
             <div className="pop-label">Add source</div>
             <label className="pop-row"><span>Beat title</span><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Track/beat name" /></label>
             <label className="pop-row"><span>Creator</span><input value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="Creator/artist name" /></label>
@@ -304,6 +337,7 @@ export function TrainingTool({
             </div>
             <label className="pop-row"><span>License claim</span><input value={userClaimedLicense} onChange={(e) => setUserClaimedLicense(e.target.value)} placeholder="Paste your rights claim text" /></label>
             <label className="pop-row"><span>Rights proof</span><input value={proofOfRights} onChange={(e) => setProofOfRights(e.target.value)} placeholder="link + proof note" /></label>
+            <label className="pop-row"><span>Source notes</span><textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="tutorials, samples, credits, rights notes" /></label>
             {!canAddSource && missingSourceInput && <div className="pop-note">Add a source URL or a local file.</div>}
             {!canAddSource && userClaimedLicense.trim().length === 0 && <div className="pop-note">Add your claimed license text.</div>}
             {!canAddSource && proofOfRights.trim().length === 0 && <div className="pop-note">Add rights proof text.</div>}
