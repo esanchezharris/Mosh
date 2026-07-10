@@ -437,7 +437,6 @@ def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> N
     seed_paths(ace_dir, 7)["eval"].write_text(json.dumps(evaluation))
     (ace_dir / f"seed-7-asr.json").write_text(json.dumps({"ok": True, "words": [{"word": "yeah"}]}))
     # Receipt was written before the eval/asr contents changed — refresh it.
-    _relane = _seed_lane  # keep names readable
     files = seed_paths(ace_dir, 7)
     write_receipt(files["receipt"], {
         "request": ace_dir / "request.json", "rawSlice": opening / "raw.wav", "rawClipF0": ace_dir / "raw-clip-f0.json",
