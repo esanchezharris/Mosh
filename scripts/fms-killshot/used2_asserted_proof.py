@@ -35,6 +35,10 @@ def main() -> int:
     stop_parser.add_argument("--reason", choices=("lexical", "prosody"), required=True)
     stop_parser.add_argument("--rationale", required=True)
     subparsers.add_parser("ace-cover-ab", help="A/B the current round's rank-1 candidate against seed-4099 regenerated under the round-1 config")
+    probe_parser = subparsers.add_parser("ace-cover-probe", help="ear probes: seed-4099 under candidate key/bpm configs; the owner names the key")
+    probe_parser.add_argument("--key", action="append", required=True, help="candidate keyscale, repeatable (e.g. --key 'D major' --key 'B major')")
+    probe_parser.add_argument("--bpm", type=int, default=None)
+    probe_parser.add_argument("--bpm-note", default="")
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -86,6 +90,14 @@ def main() -> int:
                 ab_dir = run_ace_cover_ab(paths)
                 build_page(paths.output)
                 print(f"ace cover A/B -> {ab_dir}")
+            case "ace-cover-probe":
+                from asserted_proof_ace_probe import run_key_probes
+
+                probes_dir = run_key_probes(paths, keys=args.key, bpm=args.bpm, bpm_note=args.bpm_note)
+                import json as _json
+
+                for entry in _json.loads((probes_dir / "probes.json").read_text())["probes"]:
+                    print(f"probe {entry['keyscale']} @ {entry['bpm']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}")
             case "expand-first-half":
                 verdict_path = args.verdict.expanduser().resolve() if args.verdict else paths.opening / "owner-verdict.json"
                 outputs = expand_first_half(paths, verdict_path, allow_close_diagnostic=args.allow_close_diagnostic)
