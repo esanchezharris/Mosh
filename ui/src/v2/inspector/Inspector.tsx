@@ -80,6 +80,49 @@ function MixTab({ track }: { track: Track }) {
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
+      <SendsSection track={track} />
+    </div>
+  );
+}
+
+// Sends / returns — the per-track door to aux buses. Create a reverb/delay return
+// bus, send this track to it, and ride the send level. Every mutation is a MoshOps
+// command (create_bus / add_send / set_send_level / remove_send) — no UI-local state.
+function SendsSection({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const buses = useStore((s) => s.snapshot?.buses) ?? [];
+  const sends = track.sends ?? [];
+  return (
+    <div className="v2-sends" data-testid="v2-sends">
+      <div className="v2-sends-head">
+        <span>Sends</span>
+        <button className="v2-btn" data-testid="v2-add-bus" onClick={() => void exec("create_bus", {})}>+ Bus</button>
+      </div>
+      {buses.length === 0 && (
+        <div className="v2-sends-empty">No buses yet — add one to send this track to a reverb/delay return.</div>
+      )}
+      {buses.map((b) => {
+        if (b.trackId === track.id) return null; // a return track doesn't send to itself
+        const send = sends.find((s) => s.bus === b.bus);
+        return (
+          <div key={b.bus} className="v2-send-row" data-testid={`v2-send-${b.bus}`}>
+            <span className="v2-send-name" title={b.name}>{b.name}</span>
+            {send ? (
+              <>
+                <input type="range" min={-60} max={6} step={0.5} value={send.db}
+                  aria-label={`${b.name} send level`}
+                  onChange={(e) => void exec("set_send_level", { trackId: track.id, bus: b.bus, db: Number(e.target.value) })} />
+                <span className="v2-val">{send.db.toFixed(1)}</span>
+                <button className="v2-btn icon" title={`Remove ${b.name} send`} aria-label={`Remove ${b.name} send`}
+                  onClick={() => void exec("remove_send", { trackId: track.id, bus: b.bus })}>×</button>
+              </>
+            ) : (
+              <button className="v2-btn" data-testid={`v2-add-send-${b.bus}`}
+                onClick={() => void exec("add_send", { trackId: track.id, bus: b.bus, db: 0 })}>Add</button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
