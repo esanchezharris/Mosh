@@ -73,11 +73,6 @@ export default defineConfig(({ mode, command }) => {
     plugins,
     base: "./",
     build: { outDir: "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
-    optimizeDeps: {
-      entries: ["index.html", "src/companion/index.html"],
-      noDiscovery: true,
-      include: [],
-    },
     server: { port: 5173, strictPort: true },
   };
 });
