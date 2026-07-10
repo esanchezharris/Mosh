@@ -19,6 +19,7 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
     test_training.cpp
+    test_webbridge_resource_guard.cpp
     test_rt_guard.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
@@ -26,6 +27,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)
