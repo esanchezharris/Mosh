@@ -898,8 +898,17 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "split_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
-      const t = num(args.time);
-      if (t <= f.clip.start || t >= f.clip.start + f.clip.length) return err(command, "split point outside clip");
+      // P1 split normalization (native parity): absolute wins when strictly inside;
+      // else a clip-relative resolution (start + t) is accepted; edges/outside error.
+      const tReq = num(args.time);
+      const s0 = f.clip.start, s1 = f.clip.start + f.clip.length, EPS = 1e-6;
+      const insideClip = (x: number) => x > s0 + EPS && x < s1 - EPS;
+      let t = tReq;
+      if (!insideClip(t)) {
+        const rel = s0 + tReq;
+        if (insideClip(rel)) t = rel;
+        else return err(command, `split point outside clip: time ${tReq} (relative candidate ${rel}) not strictly inside [${s0}, ${s1}]`);
+      }
       pushUndo();
       const right = waveClip(f.clip.name, t, f.clip.start + f.clip.length - t);
       right.offset = f.clip.offset + (t - f.clip.start);

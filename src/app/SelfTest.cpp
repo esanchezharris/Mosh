@@ -630,6 +630,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
       check (ok (cmd (ops, "split_clip", var (a))), "split_clip ok"); }
     check (trackClips (firstTrack (ops)) == 2, "split produced 2 clips");
 
+    // P1 split-point normalization: the left child spans [2.0, 2.5] — a request of 0.25
+    // is outside absolutely but resolves clip-relatively to 2.25 (must split); the exact
+    // start and a far-outside value must ERROR (not silently no-op).
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 0.25);
+      check (ok (cmd (ops, "split_clip", var (a))), "split_clip clip-relative time resolves"); }
+    check (trackClips (firstTrack (ops)) == 3, "relative split produced 3 clips");
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 2.0);
+      check (! ok (cmd (ops, "split_clip", var (a))), "split at exact clip start errors"); }
+    { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("time", 99.0);
+      check (! ok (cmd (ops, "split_clip", var (a))), "split far outside clip errors"); }
+
     // mixer: volume / pan / mute / solo
     { auto* a = new DynamicObject(); a->setProperty ("trackId", tid); a->setProperty ("db", -6.0);
       check (ok (cmd (ops, "set_track_volume", var (a))), "set_track_volume ok"); }

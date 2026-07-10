@@ -3461,7 +3461,29 @@ juce::var MoshOps::cmdSplitClip (const juce::var& args)
     auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack());
     if (clipTrack == nullptr) return errResult ("split_clip", "clip not on a clip track");
 
-    const double at = (double) args.getProperty ("time", 0.0);
+    // Split-point normalization (r4 gate-miss fix plan P1): agents and utterances mix
+    // ABSOLUTE and CLIP-RELATIVE times ("split at 8s" on a clip spanning [4,12] can mean
+    // t=8 or start+8). Absolute wins when it lands strictly inside; otherwise a value
+    // that resolves inside as start+t is treated as clip-relative. Exact edges and
+    // truly-outside values error with the resolved point + range (previously Tracktion's
+    // splitClip silently no-opped and we returned ok with no newClipId).
+    const double reqAt = (double) args.getProperty ("time", 0.0);
+    const double cStart = clip->getPosition().getStart().inSeconds();
+    const double cEnd   = clip->getPosition().getEnd().inSeconds();
+    constexpr double kSplitEps = 1.0e-6;
+    const auto insideClip = [&] (double x) { return x > cStart + kSplitEps && x < cEnd - kSplitEps; };
+    double at = reqAt;
+    if (! insideClip (at))
+    {
+        if (const double rel = cStart + reqAt; insideClip (rel))
+            at = rel;
+        else
+            return errResult ("split_clip",
+                "split point outside clip: time " + juce::String (reqAt, 3)
+                + " (relative candidate " + juce::String (cStart + reqAt, 3)
+                + ") not strictly inside [" + juce::String (cStart, 3) + ", "
+                + juce::String (cEnd, 3) + "]");
+    }
     beginTxn ("split_clip");
     auto* newClip = clipTrack->splitClip (*clip, tracktion::TimePosition::fromSeconds (at));
 
