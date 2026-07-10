@@ -35,8 +35,54 @@ def _cli_path() -> str:
     return os.path.join(os.path.dirname(__file__), "..", "transform", "transform_cli.py")
 
 
+def _venv_python(base_dir: str) -> str:
+    return os.path.join(base_dir, "Scripts", "python.exe") if os.name == "nt" else os.path.join(base_dir, "bin", "python")
+
+
+def _venvs_root() -> str:
+    explicit = os.environ.get("MOSH_VENVS_DIR", "").strip()
+    if explicit:
+        return explicit
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip() or os.path.expanduser("~")
+        return os.path.join(base, "Mosh", "venvs")
+    return os.path.join(os.path.expanduser("~"), "Library", "Mosh", "venvs")
+
+
+def _models_root() -> str:
+    explicit = os.environ.get("MOSH_MODELS_DIR", "").strip()
+    if explicit:
+        return explicit
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip() or os.path.expanduser("~")
+        return os.path.join(base, "Mosh", "models")
+    return os.path.join(os.path.expanduser("~"), "Library", "Mosh", "models")
+
+
+def _transform_py() -> str:
+    env = os.environ.get("TRANSFORM_PY", "").strip()
+    if env:
+        return env
+    managed = _venv_python(os.path.join(_venvs_root(), "transform"))
+    if os.path.isfile(managed):
+        return managed
+    legacy = _venv_python(os.path.join(os.path.dirname(__file__), "..", "transform", ".venv"))
+    if os.path.isfile(legacy):
+        return legacy
+    return managed
+
+
 def _model_dir() -> str:
-    return os.environ.get("RAVE_MODEL_DIR", "")
+    env = os.environ.get("RAVE_MODEL_DIR", "").strip()
+    if env:
+        return env
+    managed = os.path.join(_models_root(), "transform")
+    if os.path.isdir(managed):
+        return managed
+    legacy = os.path.expanduser("~/AI/rave-models")
+    if os.path.isdir(legacy):
+        return legacy
+    return managed
 
 
 def installed_targets() -> list:
@@ -55,7 +101,7 @@ def available() -> bool:
     deterministic selftest so locally-present RAVE models can't change its outcome."""
     if os.environ.get("MOSH_ENABLE_TRANSFORM", "1") == "0":
         return False
-    py = os.environ.get("TRANSFORM_PY", "")
+    py = _transform_py()
     return bool(py and os.path.exists(py) and installed_targets())
 
 
@@ -155,10 +201,14 @@ def _render_real(input_wav: str, output_wav: str, params: dict) -> dict:
     target = str(params.get("target", "") or "")
     strength = float(params.get("strength", 65.0))
     seed = int(params.get("seed", 0))
-    py = os.environ.get("TRANSFORM_PY", "")
+    py = _transform_py()
+    model_dir = _model_dir()
+    env = dict(os.environ)
+    env["TRANSFORM_PY"] = py
+    env["RAVE_MODEL_DIR"] = model_dir
     proc = subprocess.run(
         [py, _cli_path(), input_wav, output_wav, target, str(strength), str(seed)],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=300, env=env,
     )
     res = {}
     out = (proc.stdout or "").strip()

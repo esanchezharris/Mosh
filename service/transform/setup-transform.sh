@@ -18,10 +18,6 @@
 # adapter falls back to the deterministic FAKE transform (Route B) and the rest of Mosh
 # is unaffected — exactly the SA3 posture.
 #
-# Bring your own RAVE models: drop <target>.ts files into RAVE_MODEL_DIR (default
-# ~/AI/rave-models). Pretrained models live on the ACIDS releases / HuggingFace
-# (e.g. vintage.ts, percussion.ts, darbouka.ts). The file stem is the `target` name.
-#
 # Idempotent + cheap to re-run: a healthy venv just re-validates (no installer runs);
 # pass --reinstall to force the full install/top-up path.
 set -euo pipefail
@@ -41,6 +37,9 @@ VENVS_ROOT="${MOSH_VENVS_DIR:-$HOME/Library/Mosh/venvs}"
 VENV="$VENVS_ROOT/transform"
 PYBIN="$VENV/bin/python"
 LEGACY_VENV="$HERE/.venv"
+MODELS_ROOT="${MOSH_MODELS_DIR:-$HOME/Library/Mosh/models}"
+LEGACY_MODEL_DIR="${RAVE_MODEL_DIR_LEGACY:-$HOME/AI/rave-models}"
+RAVE_MODEL_DIR="${RAVE_MODEL_DIR:-$MODELS_ROOT/transform}"
 
 # Sanity: the venv must import torch + torchaudio.
 venv_ok() {
@@ -92,25 +91,33 @@ else
   say "venv ✓ (torch + torchaudio importable)"
 fi
 
-# 5. Model dir (bring your own .ts RAVE models).
-RAVE_MODEL_DIR="${RAVE_MODEL_DIR:-$HOME/AI/rave-models}"
 mkdir -p "$RAVE_MODEL_DIR"
 NMODELS=$(find "$RAVE_MODEL_DIR" -maxdepth 1 -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$NMODELS" == "0" && -d "$LEGACY_MODEL_DIR" ]]; then
+  LEGACY_COUNT=$(find "$LEGACY_MODEL_DIR" -maxdepth 1 -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "$LEGACY_COUNT" != "0" ]]; then
+    say "migrating $LEGACY_COUNT legacy RAVE model(s) from $LEGACY_MODEL_DIR ..."
+    for model in "$LEGACY_MODEL_DIR"/*.ts; do
+      [[ -f "$model" ]] || continue
+      cp -n "$model" "$RAVE_MODEL_DIR/" 2>/dev/null || true
+    done
+    NMODELS=$(find "$RAVE_MODEL_DIR" -maxdepth 1 -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
+  fi
+fi
+
+[[ "$NMODELS" == "0" ]] && say "  (drop <target>.ts RAVE models here — the file stem is the target name)"
+
 say "model dir = $RAVE_MODEL_DIR ($NMODELS RAVE .ts model(s) found)"
 [[ "$NMODELS" == "0" ]] && say "  (drop <target>.ts RAVE models here — the file stem is the target name)"
 
-# 6. Persist the resolved paths so run.sh / the service find them with no exports.
 ENVFILE="$HERE/.transform.env"
 cat > "$ENVFILE" <<EOF
-# Written by service/transform/setup-transform.sh — sourced by run.sh. Safe to delete
-# (the transform adapter falls back to the deterministic fake transform, Route B).
 export TRANSFORM_PY="$PYBIN"
 export RAVE_MODEL_DIR="$RAVE_MODEL_DIR"
 EOF
 say "wrote $ENVFILE"
 
-# 7. Drop a legacy in-tree venv once the new location validates — it was the
-#    iCloud-corruption vector and only wastes sync bandwidth now.
+
 if [[ -d "$LEGACY_VENV" && "$LEGACY_VENV" != "$VENV" ]]; then
   rm -rf "$LEGACY_VENV"
   say "removed legacy in-tree venv $LEGACY_VENV (superseded by $VENV)"
