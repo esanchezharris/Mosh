@@ -17,9 +17,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# The spike is local-only: every checkpoint (turbo DiT, VAE, Qwen embedding) is
+# already cached. Force HuggingFace fully offline BEFORE any ACE/HF import — a
+# model-load network check via hf_xet has no timeout and hung the worker for 70+
+# minutes with no compute. Offline mode uses the cache and never touches the net.
+for _key, _val in (("HF_HUB_OFFLINE", "1"), ("TRANSFORMERS_OFFLINE", "1"), ("HF_HUB_DISABLE_XET", "1"), ("HF_HUB_DISABLE_TELEMETRY", "1")):
+    os.environ.setdefault(_key, _val)
 
 REQUIRED_TOP_LEVEL = ("version", "aceRoot", "expectedGitRev", "configPath", "device", "saveDir", "audioFormat", "seeds", "params")
 
