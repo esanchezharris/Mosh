@@ -8,9 +8,7 @@ VERDICTS = {"pass", "close but revise", "fail"}
 CLASSIFICATIONS = {"", "words", "timing", "pitch/register", "voice/timbre"}
 
 
-def validate_review_verdict(verdict: dict, manifest_path: Path) -> None:
-    if verdict.get("clip") != "opening":
-        raise RuntimeError("owner verdict must target the opening proof")
+def _validate_verdict_fields(verdict: dict, manifest_path: Path) -> None:
     if verdict.get("verdict") not in VERDICTS:
         raise RuntimeError("owner verdict must be pass, close but revise, or fail")
     if verdict.get("classification", "") not in CLASSIFICATIONS:
@@ -22,6 +20,33 @@ def validate_review_verdict(verdict: dict, manifest_path: Path) -> None:
     current = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     if verdict.get("manifestSha256") != current:
         raise RuntimeError("owner verdict approved a different artifact manifest")
+
+
+def validate_review_verdict(verdict: dict, manifest_path: Path) -> None:
+    if verdict.get("clip") != "opening":
+        raise RuntimeError("owner verdict must target the opening proof")
+    _validate_verdict_fields(verdict, manifest_path)
+
+
+def validate_ace_cover_verdict(verdict: dict, manifest_path: Path, seed: int) -> None:
+    if verdict.get("clip") != "ace-cover":
+        raise RuntimeError("candidate verdict must target the ace-cover lane")
+    try:
+        verdict_seed = int(verdict.get("seed"))
+    except (TypeError, ValueError):
+        raise RuntimeError("candidate verdict must carry an integer seed") from None
+    if verdict_seed != int(seed):
+        raise RuntimeError(f"candidate verdict seed {verdict.get('seed')} does not match the target seed {seed}")
+    _validate_verdict_fields(verdict, manifest_path)
+
+
+def save_ace_cover_verdict(verdict: dict, manifest_path: Path, seed: int, destination: Path) -> dict:
+    validate_ace_cover_verdict(verdict, manifest_path, seed)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_text(json.dumps(verdict, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(destination)
+    return verdict
 
 
 def save_review_verdict(verdict: dict, manifest_path: Path, destination: Path) -> dict:

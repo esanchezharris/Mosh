@@ -6,17 +6,25 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import shutil
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from asserted_proof_verdict import save_review_verdict
+from asserted_proof_verdict import save_ace_cover_verdict, save_review_verdict
 
 URL_PREFIX = "/used2/asserted-proof"
 VERDICT_ENDPOINT = URL_PREFIX + "/api/verdict/opening"
+ACE_VERDICT_RE = re.compile("^" + re.escape(URL_PREFIX) + r"/api/verdict/ace-cover/(\d{1,10})$")
+ACE_COVER_DIR = "opening/ace-step-cover"
 MAX_VERDICT_BYTES = 16 * 1024
+
+
+def ace_verdict_seed(path: str) -> int | None:
+    match = ACE_VERDICT_RE.match(urlsplit(path).path)
+    return int(match.group(1)) if match else None
 
 
 def load_current_verdict(verdict_path: Path, manifest_path: Path) -> tuple[int, dict]:
@@ -42,19 +50,34 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _ace_paths(self, seed: int) -> tuple[Path, Path, Path]:
+        ace_dir = Path.cwd() / ACE_COVER_DIR
+        return ace_dir / f"verdicts/seed-{seed}-verdict.json", ace_dir / "manifest.json", ace_dir / f"seed-{seed}-eval.json"
+
     def do_GET(self) -> None:
-        if urlsplit(self.path).path != VERDICT_ENDPOINT:
+        request_path = urlsplit(self.path).path
+        seed = ace_verdict_seed(self.path)
+        if request_path != VERDICT_ENDPOINT and seed is None:
             super().do_GET()
             return
+        if seed is None:
+            verdict_path, manifest_path = Path.cwd() / "opening/owner-verdict.json", Path.cwd() / "opening/manifest.json"
+        else:
+            verdict_path, manifest_path, evaluation_path = self._ace_paths(seed)
+            if not manifest_path.is_file() or not evaluation_path.is_file():
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "unknown ace-cover candidate"})
+                return
         try:
-            status, payload = load_current_verdict(Path.cwd() / "opening/owner-verdict.json", Path.cwd() / "opening/manifest.json")
+            status, payload = load_current_verdict(verdict_path, manifest_path)
         except (OSError, json.JSONDecodeError):
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "saved verdict is unreadable"})
             return
         self._send_json(HTTPStatus(status), payload)
 
     def do_POST(self) -> None:
-        if urlsplit(self.path).path != VERDICT_ENDPOINT:
+        request_path = urlsplit(self.path).path
+        seed = ace_verdict_seed(self.path)
+        if request_path != VERDICT_ENDPOINT and seed is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         try:
@@ -69,11 +92,18 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise RuntimeError("owner verdict must be a JSON object")
-            save_review_verdict(
-                payload,
-                Path.cwd() / "opening/manifest.json",
-                Path.cwd() / "opening/owner-verdict.json",
-            )
+            if seed is None:
+                save_review_verdict(
+                    payload,
+                    Path.cwd() / "opening/manifest.json",
+                    Path.cwd() / "opening/owner-verdict.json",
+                )
+            else:
+                verdict_path, manifest_path, evaluation_path = self._ace_paths(seed)
+                if not manifest_path.is_file() or not evaluation_path.is_file():
+                    self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "unknown ace-cover candidate"})
+                    return
+                save_ace_cover_verdict(payload, manifest_path, seed, verdict_path)
         except (json.JSONDecodeError, OSError, RuntimeError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})
             return

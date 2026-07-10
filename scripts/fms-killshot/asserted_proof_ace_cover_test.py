@@ -363,6 +363,59 @@ def test_declare_stop_lexical_rejects_when_a_pass_exists(tmp_path: Path) -> None
         declare_stop(ace_dir, "lexical", "should not stop")
 
 
+def test_ace_cover_verdict_binds_to_manifest_and_seed(tmp_path: Path) -> None:
+    import hashlib
+
+    from asserted_proof_verdict import save_ace_cover_verdict, validate_ace_cover_verdict
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"version": 1, "files": {}}))
+    current = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    verdict = {"clip": "ace-cover", "seed": 73, "verdict": "fail", "classification": "words", "notes": "mushy", "createdAt": "2026-07-10T00:00:00Z", "manifestSha256": current}
+    validate_ace_cover_verdict(verdict, manifest_path, 73)  # must not raise
+
+    with pytest.raises(RuntimeError, match="manifest"):
+        validate_ace_cover_verdict({**verdict, "manifestSha256": "0" * 64}, manifest_path, 73)
+    with pytest.raises(RuntimeError, match="seed"):
+        validate_ace_cover_verdict(verdict, manifest_path, 7)
+    with pytest.raises(RuntimeError, match="ace-cover"):
+        validate_ace_cover_verdict({**verdict, "clip": "opening"}, manifest_path, 73)
+    with pytest.raises(RuntimeError, match="verdict"):
+        validate_ace_cover_verdict({**verdict, "verdict": "meh"}, manifest_path, 73)
+
+    destination = tmp_path / "verdicts/seed-73-verdict.json"
+    saved = save_ace_cover_verdict(verdict, manifest_path, 73, destination)
+    assert saved == verdict
+    assert json.loads(destination.read_text()) == verdict
+    # A stale save is rejected and does not clobber the good verdict.
+    manifest_path.write_text(json.dumps({"version": 2, "files": {}}))
+    with pytest.raises(RuntimeError, match="manifest"):
+        save_ace_cover_verdict(verdict, manifest_path, 73, destination)
+    assert json.loads(destination.read_text()) == verdict
+
+
+def test_stale_candidate_verdicts_are_filtered(tmp_path: Path) -> None:
+    from asserted_proof_ace_cover import load_current_candidate_verdicts
+
+    ace_dir = tmp_path
+    verdict_dir = ace_dir / "verdicts"
+    verdict_dir.mkdir()
+    (verdict_dir / "seed-7-verdict.json").write_text(json.dumps({"seed": 7, "verdict": "pass", "manifestSha256": "a" * 64}))
+    (verdict_dir / "seed-73-verdict.json").write_text(json.dumps({"seed": 73, "verdict": "fail", "manifestSha256": "b" * 64}))
+    verdicts = load_current_candidate_verdicts(ace_dir, "a" * 64)
+    assert set(verdicts) == {"seed-7"}
+
+
+def test_preview_server_routes_ace_cover_verdicts() -> None:
+    from preview_server import ace_verdict_seed
+
+    assert ace_verdict_seed("/used2/asserted-proof/api/verdict/ace-cover/73") == 73
+    assert ace_verdict_seed("/used2/asserted-proof/api/verdict/ace-cover/73?x=1") == 73
+    assert ace_verdict_seed("/used2/asserted-proof/api/verdict/opening") is None
+    assert ace_verdict_seed("/used2/asserted-proof/api/verdict/ace-cover/") is None
+    assert ace_verdict_seed("/used2/asserted-proof/api/verdict/ace-cover/not-a-seed") is None
+
+
 def test_declare_stop_prosody_requires_lexical_floor_met(tmp_path: Path) -> None:
     ace_dir = _stop_fixture(tmp_path, [{"seed": 7, "verdict": "fail", "classification": "timing"}], lexical_floor=False)
     with pytest.raises(RuntimeError, match="lexical"):
