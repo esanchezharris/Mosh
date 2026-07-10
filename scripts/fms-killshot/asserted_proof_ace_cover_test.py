@@ -483,6 +483,24 @@ def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> N
     assert "yeah" in section  # lexical chip content
 
 
+def test_page_section_links_the_listening_menu_only_when_present(tmp_path: Path) -> None:
+    from asserted_proof_ace_cover import regenerate_ace_manifest as regen
+    from asserted_proof_page import _ace_cover_section
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    regen(ace_dir, opening, path_root=root)
+    import hashlib
+
+    manifest_hash = hashlib.sha256((ace_dir / "manifest.json").read_bytes()).hexdigest()
+    ledger = {"version": 1, "requestSha256": request_sha256(_request()), "manifestSha256": manifest_hash, "candidates": [], "legacy": {}}
+    (ace_dir / "ledger.json").write_text(json.dumps(ledger))
+    without_menu = _ace_cover_section(root / "asserted-proof")
+    assert "melody-round.html" not in without_menu
+    (ace_dir / "melody-round.html").write_text("<h1>menu</h1>")
+    with_menu = _ace_cover_section(root / "asserted-proof")
+    assert "opening/ace-step-cover/melody-round.html" in with_menu
+
+
 def test_declare_stop_prosody_requires_lexical_floor_met(tmp_path: Path) -> None:
     ace_dir = _stop_fixture(tmp_path, [{"seed": 7, "verdict": "fail", "classification": "timing"}], lexical_floor=False)
     with pytest.raises(RuntimeError, match="lexical"):

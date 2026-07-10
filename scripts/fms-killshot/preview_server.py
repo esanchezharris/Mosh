@@ -65,6 +65,14 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         request_path = urlsplit(self.path).path
+        if request_path == "/":
+            # The review page lives under URL_PREFIX; a bare-root open (e.g. the
+            # IDE preview panel) should land there instead of the fail-closed 404.
+            self.send_response(HTTPStatus.FOUND)
+            self.send_header("Location", URL_PREFIX + "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         seed = ace_verdict_seed(self.path)
         is_ab = is_ab_verdict_path(self.path)
         if request_path != VERDICT_ENDPOINT and seed is None and not is_ab:

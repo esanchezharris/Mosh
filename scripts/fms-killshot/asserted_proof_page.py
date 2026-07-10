@@ -203,6 +203,9 @@ def _ace_cover_section(output_dir: Path) -> str:
     if lane_status_path.is_file():
         lane = _load(lane_status_path)
         lane_note = f"<p class='lane-blocked'>Lane stopped: <strong>{html.escape(str(lane.get('status')))}</strong> — {html.escape(str(lane.get('rationale', '')))}</p>"
+    menu_note = ""
+    if (ace_dir / "melody-round.html").is_file():
+        menu_note = "<p class='clip-stats'>Ear diagnostics: <a href='opening/ace-step-cover/melody-round.html'>melody-round listening menu</a> — probes rank by numbers, never verdictable.</p>"
     ranked = sorted((entry for entry in ledger.get("candidates", []) if entry.get("rank") in (1, 2, 3)), key=lambda entry: entry["rank"])
     total = len(ledger.get("candidates", []))
     raw_card = _audio_card("R", "Raw opening reference", "The owner take this cover must preserve — timing and register truth.", output_dir / "opening/raw.wav", "opening/raw.wav", "rawSlice", manifest, True)
@@ -257,6 +260,7 @@ def _ace_cover_section(output_dir: Path) -> str:
 </style>
 <div class='section-heading'><div class='kicker'>Local model spike · ACE-Step 1.5 turbo cover</div><h2>Same take, asserted words.</h2><p>The raw take supplies structure, the sixteen asserted words supply lyrics. ASR and contour metrics rank candidates; only your ear passes one.</p></div>
 {lane_note}
+{menu_note}
 <div class='rail'>{raw_card}</div>
 <section class='assertion'><div class='kicker'>Asserted text · target lyrics</div><p>{html.escape(str(request.get('assertedText', '')))}</p></section>
 {''.join(cards) if cards else "<p class='empty'>No current ranked candidates yet — run ace-cover-spike.</p>"}
