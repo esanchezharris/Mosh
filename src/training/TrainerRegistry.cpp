@@ -252,20 +252,28 @@ var TrainerRegistry::importSource (const var& args, String& error)
     o->setProperty ("updated_at", utcNow());
 
     bool replaced = false;
+    int landedIndex = -1;
     for (int i = 0; i < sources.size(); ++i)
     {
         if (sources.getReference (i).getProperty ("source_id", var()).toString() == sid)
         {
             sources.set (i, var (o));
             replaced = true;
+            landedIndex = i;
             break;
         }
     }
     if (! replaced)
+    {
         sources.add (var (o));
+        landedIndex = sources.size() - 1;
+    }
     reg.getDynamicObject()->setProperty ("sources", sources);
     saveRegistry (reg);
-    return sourceSummary (var (o), sources.size() - 1, true);
+    // AL-013 — landedIndex is the slot the record actually occupies: for a fresh
+    // import that's the newly-appended last slot, but for a replacement it is the
+    // EXISTING slot found above, which is not necessarily sources.size()-1.
+    return sourceSummary (var (o), landedIndex, true);
 }
 
 var TrainerRegistry::approveSource (const String& sourceId, bool approved, String& error)
