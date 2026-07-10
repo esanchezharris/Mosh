@@ -1279,7 +1279,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const seed = Array.isArray(args.notes)
         ? (args.notes as Array<Record<string, unknown>>).map((n, k) => ({ i: k, pitch: num(n.pitch, 60), start: num(n.start, 0), length: num(n.length, 0.5), velocity: num(n.velocity, 100) }))
         : [];
-      const c: Clip = { id: nextClipId(), name: "midi", type: "midi", start: num(args.start, snapshot.transport.position), length: 4, offset: 0, hasRenderLayer: false, notes: seed };
+      // Backend fidelity: cmdAddMidiClip honors `length` in seconds (insertMIDIClip
+      // {start, start+length}); the hardcoded 4 here rejected legal splits on the
+      // evalA {start:4,length:8} fixtures. Default stays 4 (backend default is 2.0;
+      // aligning it would churn geometry in unrelated mock tests — tracked separately).
+      const c: Clip = { id: nextClipId(), name: "midi", type: "midi", start: num(args.start, snapshot.transport.position), length: num(args.length, 4), offset: 0, hasRenderLayer: false, notes: seed };
       t.clips.push(c); invalidate(); return ok(command, { clipId: c.id });
     }
     case "add_note": {
