@@ -86,3 +86,18 @@ describe("scoreExample / scoreReply — fair note population", () => {
     expect(s.score).toBe(0);
   });
 });
+
+describe("buildExamplePrompt — catalog variant threading", () => {
+  it("substitutes an explicit catalog into the system prompt; default stays the full catalog", async () => {
+    const { buildExamplePrompt } = await import("./metric");
+    const sys = (msgs: { role: string; content: string }[]) => msgs.find((m) => m.role === "system")!.content;
+
+    const pruned = await buildExamplePrompt("Rules:", POP_EXAMPLE, "CATALOG_SENTINEL");
+    expect(sys(pruned)).toContain("CATALOG_SENTINEL");
+    expect(sys(pruned)).not.toContain("analyze_lyrics(");
+
+    const full = await buildExamplePrompt("Rules:", POP_EXAMPLE);
+    expect(sys(full)).toContain("analyze_lyrics(");
+    expect(sys(full)).not.toContain("CATALOG_SENTINEL");
+  });
+});

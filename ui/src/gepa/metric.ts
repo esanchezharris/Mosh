@@ -94,11 +94,13 @@ export function fairRecall(gold: string[], got: string[]): number {
 }
 
 /** Score one example: set up its start state, render the candidate `rules` +
- *  snapshot to the brain, then grade the emitted commands. */
+ *  snapshot to the brain, then grade the emitted commands. `catalog` swaps the
+ *  command catalog in the prompt (small-model-mode arm); omitted = full catalog. */
 export async function scoreExample(
   rules: string,
   ex: EvalExample,
   callBrain: CallBrain,
+  catalog?: string,
 ): Promise<ExampleScore> {
   __resetMockForTests();
   await mockExecute<CommandResult>({ command: "new_project", args: {} });
@@ -109,7 +111,7 @@ export async function scoreExample(
   let content = "";
   try {
     content = await callBrain([
-      { role: "system", content: buildSystemPrompt(rules, snapshotBefore) },
+      { role: "system", content: buildSystemPrompt(rules, snapshotBefore, catalog) },
       { role: "user", content: ex.utterance },
     ]);
   } catch { content = ""; }
@@ -143,14 +145,14 @@ export async function scoreExample(
 // score model replies WITHOUT a live endpoint. Same verifier, same numbers.
 
 /** The system+user messages for an example (what a served model would receive). */
-export async function buildExamplePrompt(rules: string, ex: EvalExample): Promise<{ role: string; content: string }[]> {
+export async function buildExamplePrompt(rules: string, ex: EvalExample, catalog?: string): Promise<{ role: string; content: string }[]> {
   __resetMockForTests();
   await mockExecute<CommandResult>({ command: "new_project", args: {} });
   const env = new Map<string, string>();
   await runBound(ex.startCommands, env);
   const snap = await mockSnapshot<Snapshot>();
   return [
-    { role: "system", content: buildSystemPrompt(rules, snap) },
+    { role: "system", content: buildSystemPrompt(rules, snap, catalog) },
     { role: "user", content: ex.utterance },
   ];
 }
@@ -184,9 +186,9 @@ export async function scoreReply(ex: EvalExample, content: string): Promise<Exam
 export type EvalReport = { mean: number; deferrals: number; perExample: ExampleScore[] };
 
 /** Score `rules` across all examples; returns the mean + per-example detail. */
-export async function evaluate(rules: string, examples: EvalExample[], callBrain: CallBrain): Promise<EvalReport> {
+export async function evaluate(rules: string, examples: EvalExample[], callBrain: CallBrain, catalog?: string): Promise<EvalReport> {
   const perExample: ExampleScore[] = [];
-  for (const ex of examples) perExample.push(await scoreExample(rules, ex, callBrain));
+  for (const ex of examples) perExample.push(await scoreExample(rules, ex, callBrain, catalog));
   const mean = perExample.length ? perExample.reduce((s, e) => s + e.score, 0) / perExample.length : 0;
   const deferrals = perExample.filter((e) => e.deferred).length;
   return { mean, deferrals, perExample };
