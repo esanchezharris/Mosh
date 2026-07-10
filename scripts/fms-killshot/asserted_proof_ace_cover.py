@@ -177,6 +177,7 @@ def build_worker_request(request: dict, *, root: Path, seeds: list[int], save_di
         "expectedGitRev": str(request["aceRuntime"]["gitRev"]),
         "configPath": str(request["checkpoint"]["name"]),
         "device": "auto",
+        "useMlxDit": bool(request.get("useMlxDit", True)),
         "saveDir": str(save_dir),
         "audioFormat": "wav",
         "seeds": [int(seed) for seed in seeds],

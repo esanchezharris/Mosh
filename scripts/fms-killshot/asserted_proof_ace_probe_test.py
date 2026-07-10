@@ -16,6 +16,37 @@ def test_probe_slug_is_filesystem_safe() -> None:
     assert probe_slug("D major", None) == "d-major"
 
 
+def test_probe_slug_carries_param_overrides() -> None:
+    assert probe_slug("B major", 138, overrides={"cover_noise_strength": 0.85}) == "b-major-138-cns85"
+    assert probe_slug("B major", 138, overrides={"cover_noise_strength": 0.3}) == "b-major-138-cns30"
+    assert probe_slug("B major", 138, overrides={"guidance_scale": 2.0}) == "b-major-138-guidance-scale-2-0"
+
+
+def test_probe_request_param_overrides_are_hash_sensitive() -> None:
+    main_request = _request()
+    low = build_probe_request(main_request, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.3})
+    high = build_probe_request(main_request, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.85})
+    plain = build_probe_request(main_request, keyscale="B major", bpm=138)
+    assert low["params"]["cover_noise_strength"] == 0.3
+    assert high["params"]["cover_noise_strength"] == 0.85
+    assert plain["params"]["cover_noise_strength"] == 0.0  # lane default untouched
+    assert len({low["requestSha256"], high["requestSha256"], plain["requestSha256"]}) == 3
+    assert low["variant"] == "probe-b-major-138-cns30"
+
+
+def test_probe_request_can_pin_the_torch_dit_backend() -> None:
+    # The MLX DiT silently ignores cover_noise_strength (zero occurrences in
+    # acestep/models/mlx/) — strength probes must run the torch sampler and
+    # record that honestly in the hash and slug.
+    main_request = _request()
+    torch_probe = build_probe_request(main_request, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.5}, use_mlx_dit=False)
+    mlx_probe = build_probe_request(main_request, keyscale="B major", bpm=138, param_overrides={"cover_noise_strength": 0.5})
+    assert torch_probe["useMlxDit"] is False
+    assert "useMlxDit" not in mlx_probe or mlx_probe.get("useMlxDit") is True
+    assert torch_probe["requestSha256"] != mlx_probe["requestSha256"]
+    assert torch_probe["variant"].endswith("-torch")
+
+
 def test_probe_request_overrides_key_and_bpm_only() -> None:
     main_request = _request()  # pinned "B minor", no bpm
     probe = build_probe_request(main_request, keyscale="D major", bpm=138)

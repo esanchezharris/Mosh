@@ -35,10 +35,13 @@ def main() -> int:
     stop_parser.add_argument("--reason", choices=("lexical", "prosody"), required=True)
     stop_parser.add_argument("--rationale", required=True)
     subparsers.add_parser("ace-cover-ab", help="A/B the current round's rank-1 candidate against seed-4099 regenerated under the round-1 config")
-    probe_parser = subparsers.add_parser("ace-cover-probe", help="ear probes: seed-4099 under candidate key/bpm configs; the owner names the key")
+    probe_parser = subparsers.add_parser("ace-cover-probe", help="ear probes: seed-4099 under candidate key/bpm/strength configs")
     probe_parser.add_argument("--key", action="append", required=True, help="candidate keyscale, repeatable (e.g. --key 'D major' --key 'B major')")
     probe_parser.add_argument("--bpm", type=int, default=None)
     probe_parser.add_argument("--bpm-note", default="")
+    probe_parser.add_argument("--cover-noise", action="append", type=float, default=None, help="cover_noise_strength value, repeatable (0=pure noise, 1=closest to source)")
+    probe_parser.add_argument("--torch-dit", action="store_true", help="run the torch DiT instead of MLX (required for cover-noise: the MLX sampler ignores it)")
+    subparsers.add_parser("ace-cover-hybrid", help="melody-correct the A/B arm-B render onto the take's measured per-syllable MIDI")
     expand_parser = subparsers.add_parser("expand-first-half", help="render middle, Truman lead, and continuous first half after owner pass")
     expand_parser.add_argument("--verdict", type=Path, help="opening pass verdict JSON; defaults to the verdict saved by the review page")
     expand_parser.add_argument("--allow-close-diagnostic", action="store_true", help="diagnostically expand a current close-but-revise verdict without treating it as a pass")
@@ -90,14 +93,40 @@ def main() -> int:
                 ab_dir = run_ace_cover_ab(paths)
                 build_page(paths.output)
                 print(f"ace cover A/B -> {ab_dir}")
+            case "ace-cover-hybrid":
+                import json as _json
+
+                from asserted_proof_ace_cover import ace_dir_for
+                from asserted_proof_melody_correct import melody_correct_wav
+                from asserted_proof_provenance import write_receipt
+
+                ace_dir = ace_dir_for(paths)
+                source = ace_dir / "ab/round1-4099-opening.wav"
+                source_f0 = ace_dir / "ab/round1-4099-f0.json"
+                if not source.is_file() or not source_f0.is_file():
+                    raise RuntimeError("run ace-cover-ab first — the hybrid corrects arm B")
+                plan = _json.loads((paths.opening / "asserted-render-plan.json").read_text())
+                hybrid_dir = ace_dir / "hybrid"
+                output = hybrid_dir / "round1-4099-melody-corrected.wav"
+                metadata = melody_correct_wav(source, plan, _json.loads(source_f0.read_text()), output)
+                metadata_path = hybrid_dir / "round1-4099-melody-corrected.json"
+                metadata["sourceRel"] = "opening/ace-step-cover/ab/round1-4099-opening.wav"
+                (metadata_path).write_text(_json.dumps(metadata, indent=2), encoding="utf-8")
+                write_receipt(hybrid_dir / "receipt.json", {"source": source, "sourceF0": source_f0, "output": output, "metadata": metadata_path})
+                print(f"hybrid ({metadata['correctedSegments']} segments corrected, {metadata['skippedUnvoiced']} unvoiced, {metadata['skippedSmallShift']} small) -> http://127.0.0.1:8189/used2/asserted-proof/opening/ace-step-cover/hybrid/round1-4099-melody-corrected.wav")
             case "ace-cover-probe":
                 from asserted_proof_ace_probe import run_key_probes
 
-                probes_dir = run_key_probes(paths, keys=args.key, bpm=args.bpm, bpm_note=args.bpm_note)
+                probes_dir = run_key_probes(paths, keys=args.key, bpm=args.bpm, bpm_note=args.bpm_note, cover_noise=args.cover_noise, use_mlx_dit=not args.torch_dit)
                 import json as _json
 
                 for entry in _json.loads((probes_dir / "probes.json").read_text())["probes"]:
-                    print(f"probe {entry['keyscale']} @ {entry['bpm']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}")
+                    line = f"probe {entry['slug']} -> http://127.0.0.1:8189/used2/asserted-proof/{entry['audio']}"
+                    evaluation = entry.get("eval")
+                    if evaluation and evaluation.get("lexical"):
+                        lex, con = evaluation["lexical"], evaluation["contour"]
+                        line += f"\n    words {lex['hits']}/16 hits {lex['misses']} miss | contour corr {con['contourCorrelation']} | pitch {con['medianAbsPitchErrorSemitones']}st | register {con['registerOffsetSemitones']}st"
+                    print(line)
             case "expand-first-half":
                 verdict_path = args.verdict.expanduser().resolve() if args.verdict else paths.opening / "owner-verdict.json"
                 outputs = expand_first_half(paths, verdict_path, allow_close_diagnostic=args.allow_close_diagnostic)

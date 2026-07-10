@@ -59,7 +59,12 @@ def _generate(request: dict) -> dict:
     from acestep.inference import GenerationConfig, GenerationParams, generate_music
 
     handler = AceStepHandler()
-    status, ok = handler.initialize_service(project_root=str(ace_root), config_path=str(request["configPath"]), device=str(request["device"]))
+    status, ok = handler.initialize_service(
+        project_root=str(ace_root),
+        config_path=str(request["configPath"]),
+        device=str(request["device"]),
+        use_mlx_dit=bool(request.get("useMlxDit", True)),
+    )
     if not ok:
         raise RuntimeError(f"initialize_service failed: {status}")
     save_dir = Path(request["saveDir"])
