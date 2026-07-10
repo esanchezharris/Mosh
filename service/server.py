@@ -667,12 +667,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_json(self) -> dict:
+        # _json_malformed lets a route distinguish a garbled body from a legitimately
+        # empty one (both otherwise return {}); routes that mutate on the body (e.g.
+        # /training/import-registry) reject the former with 400 instead of applying {}.
+        self._json_malformed = False
         n = int(self.headers.get("Content-Length", 0))
         if n <= 0:
             return {}
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
+            self._json_malformed = True
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
@@ -1278,6 +1283,11 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
+            # A garbled or non-object body must NOT clobber the rights registry: reject
+            # it with 400 and leave the on-disk registry untouched.
+            if getattr(self, "_json_malformed", False) or not isinstance(data, dict):
+                self._send(400, {"ok": False, "error": "malformed JSON body"})
+                return
             registry = data.get("registry", {})
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
