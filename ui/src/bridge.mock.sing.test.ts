@@ -92,10 +92,12 @@ describe("mock sing render layer (FMS Phase-3)", () => {
     expect((await exec("complete_lyrics", { trackId: track.id })).ok).toBe(true);
     expect((await exec("accept_lyric_proposal", { trackId: track.id, lineIndex: 0, proposalIndex: 0 })).ok).toBe(true);
     expect((await exec("accept_lyric_proposal", { trackId: track.id, lineIndex: 1, proposalIndex: 0 })).ok).toBe(true);
-    expect((await exec("set_lyric_line", { trackId: track.id, lineIndex: 2, seedText: "typed later" })).ok).toBe(true);
+    expect((await exec("set_lyric_line", { trackId: track.id, lineIndex: 3, seedText: "typed later" })).ok).toBe(true);
     const lines = (await snap()).tracks.find((t) => t.id === track.id)!.lyricSheet!.lines;
-    expect(lines.map((l) => Boolean(l.hasScore))).toEqual([true, true, false]);
-    expect(lines.map((l) => Boolean(l.singable))).toEqual([true, true, false]);
+    // Merged fixture: skeleton lands 2 fillable lines + the extraction-parity "sung"
+    // line (scored, seed status, not asserted); the hand-added line is index 3.
+    expect(lines.map((l) => Boolean(l.hasScore))).toEqual([true, true, true, false]);
+    expect(lines.map((l) => Boolean(l.singable))).toEqual([true, true, false, false]);
 
     expect((await exec("create_render_layer", { clipId, adapter: "soulx", mode: "sing" })).ok).toBe(true);
     expect((await exec("render_layer", { clipId })).ok).toBe(true);

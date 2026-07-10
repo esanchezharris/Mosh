@@ -34,7 +34,7 @@ describe("mock MoshOps runtime replay", () => {
 
       const after = await mockSnapshot<Snapshot>();
       const track = after.tracks.find((t) => t.clips.some((c) => c.id === clipId));
-      expect(track?.lyricSheet?.lines.map((l) => l.status)).toEqual(["skeleton", "skeleton"]);
+      expect(track?.lyricSheet?.lines.map((l) => l.status)).toEqual(["skeleton", "skeleton", "seed"]);
     });
   });
 
