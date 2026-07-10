@@ -16,6 +16,8 @@
 
 import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
+import { parseDrumPattern } from "./ui/drumPatternUtil";
+import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
@@ -1291,6 +1293,49 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.notes.push({ i: f.clip.notes.length, pitch: num(args.pitch, 60), start: num(args.start, 0), length: num(args.length, 0.5), velocity: num(args.velocity, 100) });
       reindexNotes(f.clip); invalidate(); return ok(command);
+    }
+    case "add_drum_pattern": {
+      // DRM-002 — lay a whole drum grid in ONE undoable step (mirrors the native
+      // handler exactly): validate + parse BEFORE mutating; clipId → per-lane
+      // replace; instrument-less target → drum type + kit; wave-audio target →
+      // error; start defaults to 0.0 (the NATIVE add_midi_clip default — not the
+      // mock's transport-position divergence above).
+      const parsed = parseDrumPattern(args.pattern, num(args.stepsPerBar, 16), num(args.bars, 0), num(args.velocity, 100));
+      if (!parsed.ok) return err(command, parsed.error);
+      const beatsPerBar = snapshot.session.timeSigNumerator ?? 4;
+      const sb = stepBeats(beatsPerBar, parsed.stepsPerBar);
+      const mkNotes = () => parsed.steps.map((s, k) => ({ i: k, pitch: s.pitch, start: s.step * sb, length: sb, velocity: s.velocity }));
+
+      if (str(args.clipId)) {
+        const f = findClip(str(args.clipId));
+        if (!f || f.clip.type !== "midi" || !f.clip.notes) return err(command, "no midi clip with that id");
+        pushUndo();
+        const lanes = new Set(parsed.lanePitches);
+        f.clip.notes = f.clip.notes.filter((n) => !lanes.has(n.pitch)).concat(mkNotes());
+        reindexNotes(f.clip);
+        invalidate();
+        return ok(command, { clipId: f.clip.id, trackId: f.track.id, noteCount: f.clip.notes.length, steps: parsed.totalSteps, bars: parsed.bars });
+      }
+
+      let t = str(args.trackId) ? findTrack(str(args.trackId)) : null;
+      if (str(args.trackId) && !t) return err(command, "no track with that id");
+      if (t && t.clips.some((c) => c.type === "wave"))
+        return err(command, "track holds wave audio — a drum sampler would silence it; use a drum track");
+      pushUndo();
+      if (!t) {
+        t = { id: nextTrackId(), index: snapshot.tracks.length, name: "Drums", type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [] };
+        ensureInstrument(t, true);
+        snapshot.tracks.push(t);
+      } else if (!(t.plugins ?? []).some((p) => p.isInstrument)) {
+        t.type = "drum";
+        ensureInstrument(t, true);
+      }
+      const beatSec = (4 / (snapshot.session.timeSigDenominator ?? 4)) * (60 / snapshot.session.tempo);
+      const notes = mkNotes();
+      const c: Clip = { id: nextClipId(), name: str(args.name, "Drums"), type: "midi", start: num(args.start, 0), length: parsed.bars * beatsPerBar * beatSec, offset: 0, hasRenderLayer: false, notes };
+      t.clips.push(c);
+      invalidate();
+      return ok(command, { clipId: c.id, trackId: t.id, noteCount: notes.length, steps: parsed.totalSteps, bars: parsed.bars });
     }
     case "transcribe_clip": {
       // Audio→MIDI (Basic Pitch) — async like the native path: emit working now, then
