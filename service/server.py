@@ -680,6 +680,10 @@ class Handler(BaseHTTPRequestHandler):
         definitive 400/413 (a non-numeric or oversized Content-Length); do_POST
         must stop when it sees None.
         """
+        # _json_malformed lets a route distinguish a garbled body from a legitimately
+        # empty one (both otherwise return {}); routes that mutate on the body (e.g.
+        # /training/import-registry) reject the former with 400 instead of applying {}.
+        self._json_malformed = False
         try:
             n = int(self.headers.get("Content-Length", 0))
         except (TypeError, ValueError):
@@ -695,6 +699,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
+            self._json_malformed = True
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
@@ -1302,7 +1307,21 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
-            registry = data.get("registry", {})
+            # A garbled, empty, or registry-less body must NOT clobber the rights
+            # registry: reject it with 400 and leave the on-disk registry untouched.
+            # An empty POST body (Content-Length 0) decodes to {} with
+            # _json_malformed=False, same as a well-formed object missing the
+            # "registry" key entirely -- both must be rejected explicitly rather
+            # than silently defaulting to {} (which would wipe the registry). A
+            # body that spells out "registry": {} still clears it, on purpose.
+            if (
+                getattr(self, "_json_malformed", False)
+                or not isinstance(data, dict)
+                or "registry" not in data
+            ):
+                self._send(400, {"ok": False, "error": "malformed JSON body"})
+                return
+            registry = data.get("registry")
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
                 return
