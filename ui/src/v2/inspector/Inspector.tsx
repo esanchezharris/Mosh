@@ -6,12 +6,14 @@
 // seam) — only Mix/MIDI/Takes are small v2 surfaces. Deep editors (piano-roll, drum,
 // automation) open as floating overlays from here.
 
+import { useEffect } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
+import { trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
 import type { Clip, Track } from "../../types";
 
 export function Inspector() {
@@ -76,6 +78,7 @@ function MixTab({ track }: { track: Track }) {
           onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
+      <OutputField track={track} />
       <div className="v2-mix-btns">
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
@@ -124,6 +127,35 @@ function SendsSection({ track }: { track: Track }) {
         );
       })}
     </div>
+  );
+}
+
+// RTG-002 — per-track output routing. The destination list comes from the
+// read-only list_track_outputs enumeration (loaded on mount, lazy + no-op when
+// not native); the change rides the existing set_track_output command. One
+// mutation path, no new command — just an option list + a decoded patch.
+function OutputField({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const loadRouting = useStore((s) => s.loadRouting);
+  const trackOutputs = useStore((s) => s.trackOutputs);
+  useEffect(() => { void loadRouting(); }, [loadRouting]);
+
+  const opts = trackOutputOptions(trackOutputs, track.id);
+  const cur = currentTrackOutput(track);
+  // A persisted-but-unlisted destination (e.g. a missing device) still shows its
+  // stored name so the picker never silently drops the choice.
+  const options = opts.some((o) => o.value === cur)
+    ? opts
+    : [...opts, { value: cur, label: track.output?.name ?? cur }];
+
+  return (
+    <label className="v2-field">
+      <span>Out</span>
+      <select aria-label={`Output for ${track.name}`} value={cur}
+        onChange={(e) => void exec("set_track_output", trackOutputPatch(e.target.value, track.id))}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
 }
 
