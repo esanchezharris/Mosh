@@ -49,11 +49,16 @@ from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
 from training.corpus_bundle import build_corpus_bundle  # noqa: E402
-from training.rights import load_registry, save_registry, write_json  # noqa: E402
+from training.rights import load_registry, read_json_object, save_registry, write_json  # noqa: E402
 from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
+# Upper bound on a POST body — a defensive cap so a bogus or hostile
+# Content-Length can't drive an unbounded rfile.read() (hang / huge alloc).
+# POST payloads here are small JSON control messages (audio moves as file
+# paths, never inline), so 64 MiB is generous headroom.
+MAX_BODY_BYTES = 64 * 1024 * 1024
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SERVICE_DIR)
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
@@ -405,24 +410,35 @@ def _training_state_path() -> str:
 
 
 def _load_training_state() -> dict:
-    data = {}
-    try:
-        with open(_training_state_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    # MISSING state initialises normally; a CORRUPT / non-object file is reported
+    # invalid (stateError surfaced) instead of silently returning bare defaults that
+    # the next save would overwrite the evidence with (AL-015).
+    data, error = read_json_object(_training_state_path())
     data.setdefault("activeAdapterId", "")
     data.setdefault("activeAdapterPath", "")
     data.setdefault("activeCorpusHash", "")
     data.setdefault("jobs", [])
     data.setdefault("adapters", [])
+    if error:
+        data["stateError"] = error
     return data
 
 
 def _save_training_state(state: dict) -> None:
-    write_json(_training_state_path(), state)
+    path = _training_state_path()
+    # A missing file is fine to (re)create, but a CORRUPT / non-object state file holds
+    # diagnostic evidence — preserve it as a .corrupt sidecar rather than silently
+    # overwriting it (AL-015). The transient stateError flag is never persisted.
+    _, error = read_json_object(path)
+    if error and os.path.exists(path):
+        backup = path + ".corrupt"
+        if not os.path.exists(backup):
+            try:
+                os.replace(path, backup)
+            except OSError:
+                pass
+    payload = {k: v for k, v in state.items() if k != "stateError"}
+    write_json(path, payload)
 
 
 def _record_training_job(job: dict) -> None:
@@ -666,13 +682,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict:
-        n = int(self.headers.get("Content-Length", 0))
+    def _read_json(self):
+        """Parse the POST body as JSON.
+
+        Returns a dict on success — or {} for an empty or malformed-JSON body,
+        which callers already treat as "no fields" and 400 on the missing args
+        (PR #297). Returns None when the request was already answered here with a
+        definitive 400/413 (a non-numeric or oversized Content-Length); do_POST
+        must stop when it sees None.
+        """
+        # _json_malformed lets a route distinguish a garbled body from a legitimately
+        # empty one (both otherwise return {}); routes that mutate on the body (e.g.
+        # /training/import-registry) reject the former with 400 instead of applying {}.
+        self._json_malformed = False
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
         if n <= 0:
             return {}
+        if n > MAX_BODY_BYTES:
+            # Reject BEFORE reading — never allocate/hang on a huge claimed length.
+            self._send(413, {"ok": False,
+                             "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"})
+            return None
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
+            self._json_malformed = True
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
@@ -791,6 +829,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
+        if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
+            return
         if path == "/submit":
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
@@ -1278,7 +1318,21 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
-            registry = data.get("registry", {})
+            # A garbled, empty, or registry-less body must NOT clobber the rights
+            # registry: reject it with 400 and leave the on-disk registry untouched.
+            # An empty POST body (Content-Length 0) decodes to {} with
+            # _json_malformed=False, same as a well-formed object missing the
+            # "registry" key entirely -- both must be rejected explicitly rather
+            # than silently defaulting to {} (which would wipe the registry). A
+            # body that spells out "registry": {} still clears it, on purpose.
+            if (
+                getattr(self, "_json_malformed", False)
+                or not isinstance(data, dict)
+                or "registry" not in data
+            ):
+                self._send(400, {"ok": False, "error": "malformed JSON body"})
+                return
+            registry = data.get("registry")
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
                 return

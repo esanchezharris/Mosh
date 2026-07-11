@@ -12,15 +12,28 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def read_json(path: str | os.PathLike[str]) -> dict[str, Any]:
+def read_json_object(path: str | os.PathLike[str]) -> tuple[dict[str, Any], str | None]:
+    """Read a JSON object, distinguishing MISSING from CORRUPT / non-object.
+
+    Returns ``(data, error)``. A MISSING file yields ``({}, None)`` so callers
+    initialise normally; unparseable JSON or a valid-but-non-object payload yields
+    ``({}, diagnostic)`` so the caller can SURFACE the problem instead of silently
+    dropping it (and, in the state loaders, avoid overwriting the evidence).
+    """
     p = Path(path)
     if not p.exists():
-        return {}
+        return {}, None
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    except Exception as exc:
+        return {}, f"corrupt state at {p.name}: {exc}"
+    if not isinstance(data, dict):
+        return {}, f"invalid state at {p.name}: expected object, got {type(data).__name__}"
+    return data, None
+
+
+def read_json(path: str | os.PathLike[str]) -> dict[str, Any]:
+    return read_json_object(path)[0]
 
 
 def write_json(path: str | os.PathLike[str], payload: dict[str, Any]) -> None:
@@ -115,13 +128,18 @@ def eligible_for_training(source: dict[str, Any], now: datetime | None = None) -
 
 
 def load_registry(path: str | os.PathLike[str]) -> dict[str, Any]:
-    data = read_json(path)
+    data, error = read_json_object(path)
     sources = data.get("sources", [])
     if not isinstance(sources, list):
         sources = []
     data["sources"] = [normalize_source(s) for s in sources if isinstance(s, dict)]
     data.setdefault("version", 1)
     data.setdefault("updated_at", utc_now())
+    if error:
+        # CORRUPT / non-object registry: surface the diagnostic instead of silently
+        # presenting an empty registry (the caller reports it; save_registry rebuilds
+        # a clean payload so this transient flag is never persisted).
+        data["stateError"] = error
     return data
 
 

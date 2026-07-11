@@ -21,8 +21,40 @@ if (APPLE)
 endif()
 
 # Keep a single CPM/FetchContent cache so re-configures don't re-download.
-set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpm-cache" CACHE PATH "CPM dep cache")
-set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.cpm-cache/_fc" CACHE PATH "")
+#
+# Developer Macs: the cache MUST default OUTSIDE the source tree. ~/Documents is
+# iCloud-synced, and iCloud EVICTS file content ("dataless" files that stat at full
+# size but read 0 bytes) — a rotted in-tree .cpm-cache/_fc/tracktion_engine-src broke
+# every fresh configure with 'Unknown CMake command "juce_add_modules"'. Diagnosis:
+# docs/2026-07-10-cpm-cache-icloud-eviction.md. Explicit -D overrides always win over
+# these CACHE defaults (auto-loop's gate.sh passes -DCPM_SOURCE_CACHE /
+# -DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE from ~/.mosh-auto-loop/auto-loop.env).
+if(APPLE AND NOT "$ENV{CI}")
+    # Same non-iCloud root as scripts/auto-loop/seed-cache.sh and run-mosh.sh.
+    if(DEFINED ENV{MOSH_WORK_DIR})
+        set(_mosh_work "$ENV{MOSH_WORK_DIR}")
+    else()
+        set(_mosh_work "$ENV{HOME}/Library/Mosh/work")
+    endif()
+    set(CPM_SOURCE_CACHE "${_mosh_work}/cpm-cache" CACHE PATH "CPM dep cache")
+    # The SOURCE cache is shareable across checkouts; FETCHCONTENT_BASE_DIR is NOT
+    # (juceaide cross-dir CMakeCache error — see seed-cache.sh), so _fc keeps the
+    # in-tree default's per-checkout granularity via a source-dir key.
+    get_filename_component(_mosh_src_name "${CMAKE_SOURCE_DIR}" NAME)
+    string(SHA1 _mosh_src_key "${CMAKE_SOURCE_DIR}")
+    string(SUBSTRING "${_mosh_src_key}" 0 12 _mosh_src_key)
+    set(FETCHCONTENT_BASE_DIR "${_mosh_work}/fc/${_mosh_src_name}-${_mosh_src_key}" CACHE PATH "")
+    unset(_mosh_work)
+    unset(_mosh_src_name)
+    unset(_mosh_src_key)
+else()
+    # GitHub runners set CI=true and cache the in-tree path (.github/workflows/
+    # {ci,linux-ci}.yml); Windows/Linux have no iCloud — all keep the in-source default.
+    set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpm-cache" CACHE PATH "CPM dep cache")
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.cpm-cache/_fc" CACHE PATH "")
+endif()
+message(STATUS "Mosh deps: CPM_SOURCE_CACHE=${CPM_SOURCE_CACHE}")
+message(STATUS "Mosh deps: FETCHCONTENT_BASE_DIR=${FETCHCONTENT_BASE_DIR}")
 
 option(MOSH_BUILD_APP "Build the standalone JUCE app" ON)
 option(MOSH_BUILD_UI "Build the React/Vite UI bundle as part of CMake" ON)
@@ -89,6 +121,9 @@ if (MOSH_BUILD_APP)
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp
+        # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
+        # serveUiResource); split out so it's testable without juce_gui_extra.
+        src/webview/UiResourcePathGuard.cpp
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp

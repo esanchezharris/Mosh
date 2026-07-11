@@ -2624,6 +2624,33 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
               if (std::abs (s - std::round (s)) > 0.02) allOnGrid = false; }
           check (allOnGrid, "quantize_notes snaps every note onto the beat grid"); }
 
+        // Regression: setStartAndLength() triggers tracktion's synchronous MidiList
+        // re-sort, so walking seq.getNote(i) LIVE during the mutation loop can skip a
+        // note that gets sorted past an already-visited index. beats 0.6/0.7 with
+        // division=1.0/strength=1.0 reproduce it deterministically: quantizing 0.6 ->
+        // 1.0 crosses the still-unquantized note at 0.7, so under the old live-index
+        // loop the second note is silently left un-quantized (and "moved" undercounts).
+        {
+            const auto qt = cmd (ops, "create_track", args1 ("name", "QuantizeReorder"))["data"].getProperty ("trackId", var()).toString();
+            auto* qc = new DynamicObject(); qc->setProperty ("trackId", qt);
+            const auto qClip = cmd (ops, "add_midi_clip", var (qc))["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", qClip }, { "pitch", 64 }, { "start", 0.6 }, { "length", 0.5 }, { "velocity", 90 }}))), "quantize-reorder fixture: note A (0.6) added");
+            check (ok (cmd (ops, "add_note", objN ({{ "clipId", qClip }, { "pitch", 65 }, { "start", 0.7 }, { "length", 0.5 }, { "velocity", 90 }}))), "quantize-reorder fixture: note B (0.7) added");
+
+            auto qResult = cmd (ops, "quantize_notes", objN ({{ "clipId", qClip }, { "division", 1.0 }, { "strength", 1.0 }}));
+            check (ok (qResult), "quantize_notes (reorder fixture) ok");
+            check ((int) qResult["data"].getProperty ("moved", -1) == 2, "quantize_notes moves BOTH reordered notes, not just the first (moved==2)");
+
+            auto qns = clipNotes (qClip);
+            bool bothOnGrid = qns.size() == 2;
+            if (auto* arr = qns.getArray())
+                for (auto& n : *arr) {
+                    const double s = (double) n.getProperty ("start", -1.0);
+                    if (std::abs (s - std::round (s)) > 0.02) bothOnGrid = false;
+                }
+            check (bothOnGrid, "quantize_notes: a note reordered mid-loop is not silently skipped (both land on-grid)");
+        }
+
         const int before = clipNotes (mClip).size();
         check (ok (cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}))), "remove_note ok");
         check (clipNotes (mClip).size() == before - 1, "remove_note removes a note");

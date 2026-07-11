@@ -6,7 +6,7 @@ import {
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
-  WaveInput, TrackOutputs,
+  WaveInput, MidiInput, TrackOutputs,
   PluginCounts,
 } from "./types";
 import { versionBannerError } from "./types";
@@ -57,6 +57,10 @@ type State = {
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
   selection: Set<string>;
   peaks: Record<string, Peaks>;
+  // The audio source each cached peaks array was fetched for (clipId → sourceFile).
+  // Peaks are keyed on it so an in-place repoint (applyRenderInPlace / relink_clip keep
+  // the clip id but swap sourceFile) invalidates the stale waveform instead of showing it.
+  peaksSourceKey: Record<string, string>;
 
   // ARR-010 — the active edit time-range (UI-local; set by the Range tool, sent
   // to the backend only via delete_time_range). null when no range is drawn.
@@ -81,6 +85,7 @@ type State = {
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
+  midiInputs: MidiInput[] | null;          // CTL-001 MIDI-input choices (on-demand, lazy)
   trackOutputs: TrackOutputs | null;       // RTG-002 output destinations (on-demand, lazy)
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
@@ -158,6 +163,7 @@ type State = {
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
+  loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
   setLab: (b: boolean) => void;
 
   view: View;
@@ -228,6 +234,7 @@ export const useStore = create<State>((set, get) => ({
   snapDivision: "1/4",
   selection: new Set<string>(),
   peaks: {},
+  peaksSourceKey: {},
   timeRange: null,
   selectedTrackId: null,
   expandedTracks: new Set(),
@@ -247,6 +254,7 @@ export const useStore = create<State>((set, get) => ({
   remoteStatus: null,
   audioDevices: null,
   waveInputs: null,
+  midiInputs: null,
   trackOutputs: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   spectrum: { bands: [], level: 0, flux: 0 },
@@ -281,6 +289,22 @@ export const useStore = create<State>((set, get) => ({
         const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
         return exists ? {} : { selectedTrackId: snap.tracks[0]?.id ?? null };
       });
+      // Prune stale render-quality readouts (judge scores). A clip keeps its qa only while its
+      // render layer is still a LIVE render; once the layer is removed, reset, or rejected
+      // (reverted to "dirty"/"error") the score is dead and must not linger.
+      set((s) => {
+        if (Object.keys(s.qaByClip).length === 0) return {};
+        const live = new Set<string>();
+        for (const t of snap.tracks) for (const c of t.clips) {
+          const rl = c.renderLayer;
+          if (rl && rl.status !== "dirty" && rl.status !== "error") live.add(c.id);
+        }
+        const stale = Object.keys(s.qaByClip).filter((id) => !live.has(id));
+        if (stale.length === 0) return {};
+        const qaByClip = { ...s.qaByClip };
+        for (const id of stale) delete qaByClip[id];
+        return { qaByClip };
+      });
       for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
     } catch (e) {
       set({ lastError: String(e) });
@@ -290,6 +314,14 @@ export const useStore = create<State>((set, get) => ({
   exec: async (command, args = {}) => {
     const res = await executeCommand<CommandResult>({ command, args });
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
+    else {
+      // A success clears a stale transient error — but never the persistent version
+      // banner (a newer-file refusal / schema mismatch), which refresh() re-derives and
+      // which must survive until the underlying condition is gone.
+      const snap = get().snapshot;
+      const banner = snap ? versionBannerError(snap) : null;
+      if (get().lastError !== banner) set({ lastError: banner });
+    }
     return res;
   },
 
@@ -352,9 +384,23 @@ export const useStore = create<State>((set, get) => ({
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
       } else if (ev.type === "layer_status") {
-        const p = ev.payload as { clipId?: string; qa?: RenderQA };
-        if (p?.clipId && p.qa)
-          set((s) => ({ qaByClip: { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA } }));
+        const p = ev.payload as { clipId?: string; qa?: RenderQA; status?: string };
+        if (p?.clipId) {
+          // A render resolves here (ready / error / cache-hit — anything but the "rendering"
+          // submit tick). Clear its progress entry (the leak: it was only ever spread-added)
+          // and land the quality readout.
+          const terminal = p.status !== "rendering";
+          set((s) => {
+            const patch: Partial<State> = {};
+            if (p.qa) patch.qaByClip = { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA };
+            if (terminal && p.clipId! in s.renderProgress) {
+              const renderProgress = { ...s.renderProgress };
+              delete renderProgress[p.clipId!];
+              patch.renderProgress = renderProgress;
+            }
+            return patch;
+          });
+        }
         void get().refresh();
       } else if (ev.type === "mp_state") {
         // MP-001 — session + roster + lock table (the native poll loop pushes the
@@ -488,13 +534,21 @@ export const useStore = create<State>((set, get) => ({
   },
 
   ensurePeaks: (clipId) => {
-    if (get().peaks[clipId]) return;
+    // Key the cache on the clip's CURRENT source: an in-place repoint (applyRenderInPlace /
+    // relink_clip) keeps the id but swaps sourceFile, so a plain "have peaks for this id?"
+    // short-circuit would keep drawing the pre-render waveform forever. Re-fetch on mismatch.
+    const clip = get().snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    const srcKey = clip?.sourceFile ?? "";
+    if (get().peaks[clipId] && get().peaksSourceKey[clipId] === srcKey) return;
     void executeCommand<CommandResult<{ peaks: Peaks }>>({
       command: "get_clip_peaks",
       args: { clipId, buckets: 800 },
     }).then((res) => {
       if (res.ok && res.data)
-        set((s) => ({ peaks: { ...s.peaks, [clipId]: res.data!.peaks } }));
+        set((s) => ({
+          peaks: { ...s.peaks, [clipId]: res.data!.peaks },
+          peaksSourceKey: { ...s.peaksSourceKey, [clipId]: srcKey },
+        }));
     });
   },
 
@@ -672,6 +726,16 @@ export const useStore = create<State>((set, get) => ({
       command: "list_track_outputs", args: {},
     });
     if (to.ok && to.data) set({ trackOutputs: to.data });
+  },
+
+  // CTL-001 — enumerate live MIDI inputs on demand (the v2 inspector's per-instrument
+  // MIDI-input picker fetches this when it mounts). Read-only, like loadRouting.
+  loadMidiInputs: async () => {
+    if (!isNative()) return;
+    const res = await executeCommand<CommandResult<{ inputs: MidiInput[] }>>({
+      command: "list_midi_inputs", args: {},
+    });
+    if (res.ok && res.data) set({ midiInputs: res.data.inputs });
   },
   setLab: (b) => set({ labMode: b }),
 

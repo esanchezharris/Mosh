@@ -314,6 +314,9 @@ export type Track = {
 
 // RTG-001/002 — routing enumerations (read-only, on-demand like AudioDevices).
 export type WaveInput = { deviceID: string; name: string; enabled: boolean; isStereoPair: boolean };
+// CTL-001 — MIDI-input enumeration (read-only, on-demand like WaveInput). Feeds the
+// per-instrument-track MIDI-input picker in the v2 inspector (list_midi_inputs).
+export type MidiInput = { deviceID: string; name: string; alias: string; enabled: boolean; monitor: "off" | "on" | "automatic" };
 export type TrackOutputs = {
   outputs: { deviceID: string; name: string; enabled: boolean }[];
   tracks: { id: string; name: string }[];

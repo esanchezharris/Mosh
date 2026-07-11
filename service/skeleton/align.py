@@ -191,7 +191,13 @@ def lines_from_aligned(aligned_words, line_word_counts, f0=None, bpm: float = 12
         for word, start, end in spans:
             words.append(word)
             slots.extend(slots_for_word(start, end, _syl(word), f0=f0))
-        lines.append({"text": " ".join(words),
+        # asserted=True: forced alignment is fed KNOWN words (extraction / calibrate truth),
+        # so the resulting lines ARE the confirmed lyric to sing. score.author_score's #274
+        # gate only authors an asserted line, and this function's contract is to "feed
+        # author_score unchanged" — so the aligned lines must carry the flag or they'd be
+        # silently dropped (KeyError'd) at author time. (A future production caller that wants
+        # the human-confirm gate would attach unconfirmed candidate lyrics elsewhere.)
+        lines.append({"text": " ".join(words), "asserted": True,
                       "score": {"v": 1, "algo": algo, "bar": bar, "bpm": bpm,
                                 "timeSig": [4, 4], "grid": grid, "clamped": False, "slots": slots}})
     return lines
