@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "DrumPattern.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -915,6 +916,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "clear_automation")        return cmdClearAutomation (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "add_drum_pattern")  return cmdAddDrumPattern (args);
     if (name == "transcribe_clip")   return cmdTranscribeClip (args);
     if (name == "sketch_beatbox")    return cmdSketchBeatbox (args);
     if (name == "generate_beat_recipe") return cmdGenerateBeatRecipe (args);
@@ -2799,6 +2801,11 @@ juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& arg
     {
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
             return logicalid::track (t->state);
+        // Track-scoped composites may target via clipId only (add_drum_pattern) —
+        // resolve through the clip so a peer's track lock still guards them.
+        if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+            if (auto* tr = c->getTrack())
+                return logicalid::track (tr->state);
         return {};   // unresolvable target -> empty key allows; the command itself will error
     }
 
@@ -5157,6 +5164,131 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     logLine ("add_midi_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_midi_clip", var (data));
+}
+
+// DRM-002 — add_drum_pattern: a whole drum grid in ONE undoable command. The DSL
+// parser (DrumPattern.h) is mirrored 1:1 by ui/src/ui/drumPatternUtil.ts, and the
+// mock case in bridge.mock.ts mirrors THIS handler's semantics + error strings.
+// Policy (owner-approved design, docs/superpowers/specs/2026-07-10-add-drum-pattern-design.md):
+// clipId → per-lane replace (only the lanes named in the pattern are cleared, then
+// re-laid); else a new clip lands on trackId (omitted → new "Drums" drum track).
+// Instrument-less target → trackType "drum" + kit in the SAME transaction (the
+// DRM-001 posture: the pattern must be audible, and specifically as DRUMS, not
+// 4OSC); instrument present → untouched (melodic-808 / custom kits keep working);
+// wave-audio target → error (a front-of-chain sampler clears the track buffer).
+juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
+{
+    // Literal per-arg reads: the agent-catalog contract test regex-matches these.
+    const auto pattern     = args.getProperty ("pattern", var());
+    const auto trackId     = args.getProperty ("trackId", var()).toString();
+    const auto clipId      = args.getProperty ("clipId", var()).toString();
+    const int  stepsPerBar = (int) args.getProperty ("stepsPerBar", 16);
+    const int  bars        = (int) args.getProperty ("bars", 0);
+    const int  velocity    = (int) args.getProperty ("velocity", 100);
+    const double start     = (double) args.getProperty ("start", 0.0);
+    const auto clipName    = args.getProperty ("name", "Drums").toString();
+
+    // Validate + parse + resolve the target BEFORE the transaction: every error
+    // path below leaves no empty undo step (the cmdLoadDrumKit discipline).
+    const auto parsed = parseDrumPattern (pattern, stepsPerBar, bars, velocity);
+    if (! parsed.ok)
+        return errResult ("add_drum_pattern", parsed.error);
+    const auto laneHasPitch = [&parsed] (int pitch)
+    {
+        for (int p : parsed.lanePitches) if (p == pitch) return true;
+        return false;
+    };
+
+    te::MidiClip* targetClip = nullptr;
+    te::AudioTrack* track = nullptr;
+    if (clipId.isNotEmpty())
+    {
+        targetClip = dynamic_cast<te::MidiClip*> (findClip (clipId));
+        if (targetClip == nullptr)
+            return errResult ("add_drum_pattern", "no midi clip with that id");
+    }
+    else if (trackId.isNotEmpty())
+    {
+        track = findTrack (trackId);
+        if (track == nullptr)
+            return errResult ("add_drum_pattern", "no track with that id");
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                return errResult ("add_drum_pattern",
+                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio — a drum sampler would silence it; use a drum track")));
+    }
+
+    beginTxn ("add_drum_pattern");
+    juce::String outClipId, outTrackId;
+    int noteCount = 0;
+    auto& ts = eng.edit().tempoSequence;
+
+    if (targetClip != nullptr)
+    {
+        // Per-lane replace: drop ONLY the named lanes' notes (descending keeps
+        // indices valid — the cmdAssignSample pad-removal idiom), then re-lay.
+        auto& seq = targetClip->getSequence();
+        for (int i = seq.getNumNotes(); --i >= 0;)
+            if (auto* n = seq.getNote (i))
+                if (laneHasPitch (n->getNoteNumber()))
+                    seq.removeNote (*n, &undoManager());
+
+        const int beatsPerBar = ts.getTimeSigAt (targetClip->getPosition().getStart()).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = targetClip->itemID.toString();
+        if (auto* tr = targetClip->getTrack())
+            outTrackId = tr->itemID.toString();
+    }
+    else
+    {
+        if (track == nullptr)
+        {
+            track = createAudioTrack ("Drums");
+            if (track == nullptr) return errResult ("add_drum_pattern", "no track");
+            track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        else if (! trackHasInstrument (*track))
+        {
+            if (track->state.getProperty (ids::trackType, "audio").toString() != "drum")
+                track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        // else: the track's instrument choice is respected (raw-pitch lanes can
+        // drive an assign_sample'd melodic 808 or a custom pad map).
+
+        const auto startTime = tracktion::TimePosition::fromSeconds (start);
+        const int beatsPerBar = ts.getTimeSigAt (startTime).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        const auto endTime = ts.toTime (tracktion::BeatPosition::fromBeats (
+            ts.toBeats (startTime).inBeats() + (double) parsed.bars * beatsPerBar));
+        auto clip = track->insertMIDIClip (clipName, { startTime, endTime }, nullptr);
+        if (clip == nullptr) return errResult ("add_drum_pattern", "insertMIDIClip failed");
+
+        auto& seq = clip->getSequence();
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = clip->itemID.toString();
+        outTrackId = track->itemID.toString();
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", outClipId);
+    data->setProperty ("trackId", outTrackId);
+    data->setProperty ("noteCount", noteCount);
+    data->setProperty ("steps", parsed.totalSteps);
+    data->setProperty ("bars", parsed.bars);
+    logLine ("add_drum_pattern", args, true, {}, true);
+    emitSnapshotInvalidated();
+    if (targetClip != nullptr)
+        reactiveTouch (outClipId);   // add_note parity: a re-laid pattern re-fires a live re-imagine
+    return okResult ("add_drum_pattern", var (data));
 }
 
 // Audio -> MIDI: transcribe a wave clip with Basic Pitch (out-of-process, via the

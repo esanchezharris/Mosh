@@ -13,7 +13,7 @@ import type { Snapshot } from "../types";
 // else is corrective: single-shot + validator-retry, latency-bound.
 export const TASTE_COMMANDS = new Set<string>([
   // populate-class
-  "add_note", "set_note", "quantize_notes",
+  "add_note", "set_note", "quantize_notes", "add_drum_pattern",
   // re-imagine parameters
   "create_render_layer", "set_render_param", "render_layer",
   // arrangement

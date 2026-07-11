@@ -2191,6 +2191,210 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         beatFile.deleteFile();
     }
 
+    // --- DRM-002: add_drum_pattern — a whole drum grid in ONE undoable command ---
+    // Parser semantics (DSL chars, tiling, aliases, errors) are pinned hermetically by
+    // tests/test_drum_pattern.cpp ⇄ ui drumPatternUtil.test.ts; THIS section pins the
+    // COMMAND semantics: landing geometry, track policy (auto-fix to drum / instrument
+    // untouched / wave-audio rejection), per-lane replace, and undo atomicity.
+    section ("add_drum_pattern (DRM-002)");
+    {
+        auto clipById = [&] (const String& cid) -> var {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray())
+                for (auto& tr : *tracks)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips)
+                            if (c.getProperty ("id", var()).toString() == cid) return c;
+            return {};
+        };
+        // Count a clip's notes on a pitch, optionally pinned to a beat and/or velocity.
+        auto pitchCount = [] (const var& clip, int pitch, double atBeat = -1.0, int vel = -1) {
+            int n = 0;
+            if (auto* notes = clip.getProperty ("notes", var()).getArray())
+                for (auto& nn : *notes)
+                    if ((int) nn.getProperty ("pitch", -1) == pitch
+                        && (atBeat < 0.0 || std::abs ((double) nn.getProperty ("start", -1.0) - atBeat) < 1e-6)
+                        && (vel < 0 || (int) nn.getProperty ("velocity", -1) == vel))
+                        ++n;
+            return n;
+        };
+        auto totalNotes = [] (const var& clip) {
+            if (auto* notes = clip.getProperty ("notes", var()).getArray()) return notes->size();
+            return 0;
+        };
+        auto trackCount = [&] () {
+            auto snap = ops.snapshot();
+            if (auto* tracks = snap["tracks"].getArray()) return tracks->size();
+            return 0;
+        };
+        auto hasPluginType = [&] (const String& tid, const String& type) {
+            auto trk = trackById (tid);
+            if (auto* arr = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == type) return true;
+            return false;
+        };
+
+        // Pin the tempo/meter the geometry checks below assume.
+        cmd (ops, "set_tempo", args1 ("bpm", 120.0));
+        cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 4 }}));
+
+        // (1) flat-string form, no trackId → new Drums drum track + populated clip.
+        const int tracksBefore = trackCount();
+        auto r = cmd (ops, "add_drum_pattern", args1 ("pattern",
+            "kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x."));
+        check (ok (r), "add_drum_pattern (flat string, no trackId) ok");
+        const auto dpTrack = r["data"].getProperty ("trackId", var()).toString();
+        const auto dpClip  = r["data"].getProperty ("clipId", var()).toString();
+        check ((int) r["data"].getProperty ("noteCount", -1) == 14, "pattern lands 14 notes (4 kick + 2 snare + 8 hat)");
+        check ((int) r["data"].getProperty ("steps", -1) == 16, "pattern reports 16 steps");
+        check ((int) r["data"].getProperty ("bars", -1) == 1, "pattern reports 1 bar");
+
+        // (2) the created track is a working drum track.
+        {
+            auto trk = trackById (dpTrack);
+            check (trk.getProperty ("name", var()).toString() == "Drums", "created track is named Drums");
+            check (trk.getProperty ("type", var()).toString() == "drum", "created track is type drum");
+            check ((bool) trk.getProperty ("isInstrument", false), "created track hosts an instrument (kit)");
+        }
+        check (trackCount() == tracksBefore + 1, "exactly one track was created");
+
+        // (3)+(4) clip geometry + drum-sequencer note positions.
+        {
+            auto c = clipById (dpClip);
+            check (std::abs ((double) c.getProperty ("start", -1.0)) < 1e-3, "clip starts at 0 s (native default, not playhead)");
+            check (std::abs ((double) c.getProperty ("length", -1.0) - 2.0) < 1e-2, "clip spans 1 bar (2.0 s at 120 BPM 4/4)");
+            check (pitchCount (c, 36, 0.0) == 1, "kick lands at beat 0");
+            check (pitchCount (c, 38, 1.0) == 1, "snare lands at beat 1.0 (step 4 of 16)");
+            check (pitchCount (c, 42, -1.0, 100) == 8, "8 hats at velocity 100");
+        }
+
+        // (5) 'X' accent + start (seconds) honored.
+        {
+            auto ra = cmd (ops, "add_drum_pattern", objN ({{ "pattern", "kick: X...x..." }, { "stepsPerBar", 8 }, { "start", 4.0 }}));
+            check (ok (ra), "accent pattern ok");
+            auto c = clipById (ra["data"].getProperty ("clipId", var()).toString());
+            check (pitchCount (c, 36, 0.0, 127) == 1, "'X' accent lands velocity 127");
+            check (pitchCount (c, 36, 2.0, 100) == 1, "'x' lands the default velocity 100");
+            check (std::abs ((double) c.getProperty ("start", -1.0) - 4.0) < 1e-3, "start (seconds) honored");
+        }
+
+        // (6) object-form ≡ string-form.
+        {
+            auto ro = cmd (ops, "add_drum_pattern", args1 ("pattern",
+                objN ({{ "kick", "x...x...x...x..." }, { "snare", "....x.......x..." }, { "hat", "x.x.x.x.x.x.x.x." }})));
+            check (ok (ro) && (int) ro["data"].getProperty ("noteCount", -1) == 14, "object-form pattern lands the same 14 notes");
+        }
+
+        // (7) tiling + (8) raw-pitch lanes.
+        {
+            auto rt = cmd (ops, "add_drum_pattern", args1 ("pattern", "hat: x."));
+            check (ok (rt) && (int) rt["data"].getProperty ("noteCount", -1) == 8, "short lane tiles (\"x.\" = 8th hats)");
+            auto rp = cmd (ops, "add_drum_pattern", args1 ("pattern", "47: x..............."));
+            check (ok (rp) && pitchCount (clipById (rp["data"].getProperty ("clipId", var()).toString()), 47, 0.0) == 1,
+                   "raw-pitch lane lands pitch 47");
+        }
+
+        // (9)+(10)+(11a) clipId per-lane replace, all-rest clear, undo restoring exactly.
+        {
+            cmd (ops, "add_note", objN ({{ "clipId", dpClip }, { "pitch", 45 }, { "start", 0.5 }, { "length", 0.25 }, { "velocity", 100 }}));
+            const int beforeTotal = totalNotes (clipById (dpClip));   // 15
+
+            auto rr = cmd (ops, "add_drum_pattern", objN ({{ "clipId", dpClip }, { "pattern", "kick: x.x.x.x.x.x.x.x." }}));
+            check (ok (rr), "clipId per-lane replace ok");
+            auto after = clipById (dpClip);
+            check (pitchCount (after, 36) == 8, "kick lane replaced (4 -> 8 hits)");
+            check (pitchCount (after, 38) == 2 && pitchCount (after, 42) == 8, "snare + hats untouched by the kick replace");
+            check (pitchCount (after, 45) == 1, "manually-added tom survives the replace");
+
+            check (ok (cmd (ops, "undo")), "undo (per-lane replace) ok");
+            auto undone = clipById (dpClip);
+            check (pitchCount (undone, 36) == 4 && totalNotes (undone) == beforeTotal,
+                   "one undo restores the replaced lane AND the note count exactly");
+
+            auto rc = cmd (ops, "add_drum_pattern", objN ({{ "clipId", dpClip }, { "pattern", "snare: ................" }}));
+            check (ok (rc), "all-rest lane ok");
+            auto cleared = clipById (dpClip);
+            check (pitchCount (cleared, 38) == 0, "all-rest lane cleared the snares");
+            check (pitchCount (cleared, 36) == 4 && pitchCount (cleared, 42) == 8, "other lanes untouched by the clear");
+            cmd (ops, "undo");   // restore for later sections
+        }
+
+        // (11b) undo after the create path removes track+clip+kit in ONE step.
+        {
+            const int n0 = trackCount();
+            cmd (ops, "add_drum_pattern", args1 ("pattern", "kick: x..."));
+            check (trackCount() == n0 + 1, "create path adds one track");
+            check (ok (cmd (ops, "undo")), "undo (create path) ok");
+            check (trackCount() == n0, "one undo removes track+clip+kit (single transaction)");
+        }
+
+        // (12) a track that already has an instrument is left untouched (melodic-808 safe).
+        {
+            auto mel = cmd (ops, "create_track", args1 ("name", "Mel808"))["data"].getProperty ("trackId", var()).toString();
+            cmd (ops, "add_midi_clip", objN ({{ "trackId", mel }, { "length", 1.0 }}));   // DRM-001 loads 4OSC
+            check (hasPluginType (mel, "4osc"), "precondition: track carries a (non-sampler) instrument");
+            auto rm = cmd (ops, "add_drum_pattern", objN ({{ "trackId", mel }, { "pattern", "36: x..." }}));
+            check (ok (rm), "pattern on an instrument-bearing track ok");
+            check (trackById (mel).getProperty ("type", var()).toString() == "audio", "instrument-bearing track type NOT flipped");
+            check (hasPluginType (mel, "4osc") && ! hasPluginType (mel, "sampler"),
+                   "existing instrument untouched (no sampler clobber)");
+        }
+
+        // (13) instrument-less audio track → drum type + kit, one undo reverts both.
+        {
+            auto plain = cmd (ops, "create_track", args1 ("name", "PlainBeat"))["data"].getProperty ("trackId", var()).toString();
+            auto rp2 = cmd (ops, "add_drum_pattern", objN ({{ "trackId", plain }, { "pattern", "kick: x...x...x...x..." }}));
+            check (ok (rp2), "pattern on an instrument-less audio track ok");
+            check (trackById (plain).getProperty ("type", var()).toString() == "drum", "instrument-less track flipped to drum");
+            check ((bool) trackById (plain).getProperty ("isInstrument", false), "kit auto-loaded (DRM-001 posture)");
+            check (ok (cmd (ops, "undo")), "undo (auto-fix path) ok");
+            check (trackById (plain).getProperty ("type", var()).toString() == "audio"
+                   && ! (bool) trackById (plain).getProperty ("isInstrument", true),
+                   "one undo reverts type flip + kit + clip together");
+        }
+
+        // (14) a track holding wave audio is rejected (a sampler would silence it).
+        String waveClipId;
+        {
+            auto wav = cmd (ops, "create_track", args1 ("name", "WaveBeat"))["data"].getProperty ("trackId", var()).toString();
+            waveClipId = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wav }, { "seconds", 0.5 }, { "freq", 220.0 }}))["data"]
+                             .getProperty ("clipId", var()).toString();
+            auto rw = cmd (ops, "add_drum_pattern", objN ({{ "trackId", wav }, { "pattern", "kick: x..." }}));
+            check (! ok (rw), "pattern on a wave-audio track is rejected");
+            check (rw.getProperty ("error", var()).toString().contains ("wave"), "error names the wave-audio conflict");
+        }
+
+        // (15) error matrix — all fail closed, pre-transaction (no stray tracks).
+        {
+            const int n0 = trackCount();
+            auto kick = args1 ("pattern", "kick: x...");
+            auto fails = [&] (const juce::var& args, const char* what) { check (! ok (cmd (ops, "add_drum_pattern", args)), what); };
+            fails (objN ({{ "pattern", "kick: x..." }, { "stepsPerBar", 0 }}),  "stepsPerBar 0 rejected");
+            fails (objN ({{ "pattern", "kick: x..." }, { "bars", 20 }}),        "bars 20 rejected");
+            fails (objN ({{ "pattern", "kick: x..." }, { "velocity", 0 }}),     "velocity 0 rejected");
+            fails (args1 ("pattern", "kick: x..q"),                             "bad step char rejected");
+            fails (args1 ("pattern", "cowbell: x..."),                          "unknown lane rejected");
+            fails (objN ({{ "pattern", "kick: xxxxxxxxxxxxxxxxx" }, { "bars", 1 }}), "17-step lane into 1 explicit bar rejected");
+            fails (juce::var (new DynamicObject()),                             "missing pattern rejected");
+            fails (objN ({{ "pattern", "kick: x..." }, { "trackId", "nope" }}), "unknown trackId rejected");
+            fails (objN ({{ "pattern", "kick: x..." }, { "clipId", waveClipId }}), "clipId of a wave clip rejected");
+            check (trackCount() == n0, "failed calls create no stray tracks (validation is pre-transaction)");
+            juce::ignoreUnused (kick);
+        }
+
+        // (16) 3/4 meter: numerator-relative steps + bar-sized clip. Restore 4/4 after.
+        {
+            cmd (ops, "set_time_signature", objN ({{ "numerator", 3 }, { "denominator", 4 }}));
+            auto r34 = cmd (ops, "add_drum_pattern", args1 ("pattern", "kick: ....x..........."));
+            check (ok (r34), "3/4 pattern ok");
+            auto c = clipById (r34["data"].getProperty ("clipId", var()).toString());
+            check (pitchCount (c, 36, 0.75) == 1, "in 3/4, step 4 of 16 lands at beat 0.75");
+            check (std::abs ((double) c.getProperty ("length", -1.0) - 1.5) < 1e-2, "3/4 bar spans 1.5 s at 120 BPM");
+            cmd (ops, "set_time_signature", objN ({{ "numerator", 4 }, { "denominator", 4 }}));   // hermeticity
+        }
+    }
+
     // --- Stage 5 (SA3): the real StableAudio3Adapter - GATED on MOSH_SELFTEST_SA3 ---
     // (separate from MOSH_ENABLE_SA3, which now defaults on: real model + judge QA is
     //  ~30s, too heavy for the default --selftest. Opt in explicitly to exercise it.)
