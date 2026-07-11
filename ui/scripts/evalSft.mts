@@ -15,6 +15,7 @@ import { resolve, dirname, join } from "node:path";
 import { evaluate, buildExamplePrompt, scoreReply } from "../src/gepa/metric";
 import { DEFAULT_RULES } from "../src/agent/brainCore";
 import { RULES_WITH_EXAMPLES } from "../src/agent/fewshot";
+import { SMALL_MODEL_RULES, SMALL_MODEL_RULES_WITH_EXAMPLES, smallModelCatalogPrompt } from "../src/agent/smallModel";
 import type { EvalExample } from "../src/gepa/evalset";
 import type { ChatMessage } from "../src/harvest/genTurns";
 
@@ -50,9 +51,46 @@ if (!cfg) { console.error(`Unknown provider "${provider}"`); process.exit(1); }
 const model = flag("model") || cfg.model;
 const key = env[cfg.keyVar] || "local"; // local mlx server needs no real key
 const tag = flag("tag", "eval") as string;
-// --rules examples → append the worked-example bank (mirrors moshiBench's flag; the
-// few-shot arm of the substrate gate evals through the same prompt as the bench lever).
-const RULES = flag("rules") === "examples" ? RULES_WITH_EXAMPLES : DEFAULT_RULES;
+// --rules selects the prompt ARM: rules block + (optionally) a swapped command
+// catalog. "plain"/"default" = the production prompt; "examples" = the few-shot
+// bank (mirrors moshiBench's flag); "pruned"/"pruned-examples" = small-model mode
+// (docs/bench/SMALL_MODEL_MODE_2026-07.md). Unknown values are a HARD ERROR — a
+// typo silently running the control arm would invalidate a whole A/B run.
+const ARMS: Record<string, { rules: string; catalog?: string }> = {
+  default: { rules: DEFAULT_RULES },
+  plain: { rules: DEFAULT_RULES },
+  examples: { rules: RULES_WITH_EXAMPLES },
+  pruned: { rules: SMALL_MODEL_RULES, catalog: smallModelCatalogPrompt() },
+  "pruned-examples": { rules: SMALL_MODEL_RULES_WITH_EXAMPLES, catalog: smallModelCatalogPrompt() },
+};
+const rulesArm = flag("rules", "default") as string;
+const arm = ARMS[rulesArm];
+if (!arm) { console.error(`Unknown --rules "${rulesArm}" (expected ${Object.keys(ARMS).join(" | ")})`); process.exit(1); }
+const RULES = arm.rules;
+const CATALOG = arm.catalog;
+
+// Per-family rollup for eval sets with `evalA#<command>#<i>`-style ids (the
+// per-command floor surface). Corpus-hash ids (frozen300) don't match → omitted.
+function perFamilyRollup(perExample: { id: string; score: number; deferred: boolean }[]): Record<string, { n: number; mean: number; deferrals: number }> {
+  const fams = new Map<string, { n: number; sum: number; deferrals: number }>();
+  for (const e of perExample) {
+    const m = /^evalA#([a-z_]+)#/.exec(e.id);
+    if (!m) continue;
+    const f = fams.get(m[1]) ?? { n: 0, sum: 0, deferrals: 0 };
+    f.n++; f.sum += e.score; if (e.deferred) f.deferrals++;
+    fams.set(m[1], f);
+  }
+  return Object.fromEntries(
+    [...fams].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, { n: v.n, mean: v.sum / v.n, deferrals: v.deferrals }]),
+  );
+}
+function printPerFamily(perFamily: Record<string, { n: number; mean: number; deferrals: number }>): void {
+  const rows = Object.entries(perFamily);
+  if (rows.length === 0) return;
+  console.log(`\nper-family (worst first):`);
+  rows.sort((a, b) => a[1].mean - b[1].mean);
+  for (const [name, f] of rows) console.log(`  ${name.padEnd(26)} mean ${f.mean.toFixed(3)}  n=${f.n}  deferrals=${f.deferrals}`);
+}
 const evalPath = flag("eval");
 if (!evalPath || !existsSync(evalPath)) { console.error(`--eval <test.eval.jsonl> required (got ${evalPath})`); process.exit(1); }
 
@@ -72,7 +110,7 @@ if (nCap > 0 && examples.length > nCap) {
 const dumpPath = flag("dump");
 if (dumpPath) {
   const fd = openSync(dumpPath, "w");
-  for (const ex of examples) writeSync(fd, JSON.stringify({ id: ex.id, messages: await buildExamplePrompt(RULES, ex) }) + "\n");
+  for (const ex of examples) writeSync(fd, JSON.stringify({ id: ex.id, messages: await buildExamplePrompt(RULES, ex, CATALOG) }) + "\n");
   closeSync(fd);
   console.log(`dumped ${examples.length} prompts → ${dumpPath}`);
   process.exit(0);
@@ -85,13 +123,15 @@ if (repliesPath) {
   for (const ex of examples) perExample.push(await scoreReply(ex, replies.get(ex.id) ?? ""));
   const mean = perExample.length ? perExample.reduce((s, e) => s + e.score, 0) / perExample.length : 0;
   const deferrals = perExample.filter((e) => e.deferred).length;
-  const out = { tag, mode: "offline", examples: examples.length, cleanApply: mean, deferrals, perExample };
+  const perFamily = perFamilyRollup(perExample);
+  const out = { tag, mode: "offline", rules: rulesArm, examples: examples.length, cleanApply: mean, deferrals, ...(Object.keys(perFamily).length ? { perFamily } : {}), perExample };
   // next to the EVAL set (matching the live path + this file's header), not the
   // replies file — in the dump-remotely/score-locally flow they're in different dirs.
   const outPath = join(dirname(evalPath), `eval_results.${tag}.json`);
   writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");
   console.log(`================= EVAL RESULT =================`);
   console.log(`[${tag}] clean-apply score : ${mean.toFixed(3)}  (${deferrals} deferral(s) / ${examples.length})`);
+  printPerFamily(perFamily);
   console.log(`wrote ${outPath}`);
   process.exit(0);
 }
@@ -127,16 +167,18 @@ const callBrain = async (messages: ChatMessage[]): Promise<string> => {
   finally { clearTimeout(to); }
 };
 
-console.log(`▶ eval-sft [${tag}] — provider=${provider} model=${model} base=${cfg.url}`);
+console.log(`▶ eval-sft [${tag}] — provider=${provider} model=${model} base=${cfg.url} rules=${rulesArm}`);
 console.log(`  ${examples.length} eval task(s) from ${evalPath}\n`);
 
-const report = await evaluate(RULES, examples, callBrain);
-const out = { tag, provider, model, baseUrl: cfg.url, examples: examples.length, cleanApply: report.mean, deferrals: report.deferrals, calls, perExample: report.perExample };
+const report = await evaluate(RULES, examples, callBrain, CATALOG);
+const perFamily = perFamilyRollup(report.perExample);
+const out = { tag, provider, model, baseUrl: cfg.url, rules: rulesArm, examples: examples.length, cleanApply: report.mean, deferrals: report.deferrals, calls, ...(Object.keys(perFamily).length ? { perFamily } : {}), perExample: report.perExample };
 const outPath = join(dirname(evalPath), `eval_results.${tag}.json`);
 writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");
 
 console.log("================= EVAL RESULT =================");
 console.log(`[${tag}] clean-apply score : ${report.mean.toFixed(3)}  (${report.deferrals} deferral(s) / ${examples.length})`);
 console.log(`LLM calls               : ${calls}`);
+printPerFamily(perFamily);
 console.log(`\nwrote ${outPath}`);
 console.log(`\n(run with --tag baseline against the cloud brain, then --tag finetuned against the local mlx server, over the SAME --eval file, to get the DoD comparison.)`);

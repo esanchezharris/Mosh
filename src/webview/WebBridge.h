@@ -75,6 +75,9 @@ public:
     static juce::var appInfo();
 
 private:
+    static bool isSafeUiResourcePath (const juce::String& url);
+    static bool isSafeUiResourcePath (const juce::File& uiDir, const juce::String& url);
+
     juce::WebBrowserComponent::Resource serveUiResource (const juce::String& url);
 
     CommandHandler    commandHandler;

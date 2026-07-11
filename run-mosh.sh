@@ -292,8 +292,10 @@ build_anira() {
   local dir="$ROOT/build-anira"
   if [ ! -f "$dir/CMakeCache.txt" ]; then
     echo "configuring anira build (first run downloads LibTorch — long)…"
+    # Cache OUTSIDE the source tree — iCloud evicts content under ~/Documents
+    # (docs/2026-07-10-cpm-cache-icloud-eviction.md); matches the CMakeLists default.
     cmake -S "$ROOT" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="$ROOT/.cpm-cache" \
+      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="${MOSH_WORK_DIR:-$HOME/Library/Mosh/work}/cpm-cache" \
       ${FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE:+-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE"}
   fi
   echo "building Mosh (anira → $dir)…"

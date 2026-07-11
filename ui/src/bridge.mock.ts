@@ -181,6 +181,20 @@ const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
 
+// AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
+// silently report success: for a MUTATING command that means the dev/e2e UI looks like
+// it worked while nothing changed, hiding real UI-test gaps (paste_clip is the canonical
+// example). The `default` case therefore ERRORS on any unmodeled command, EXCEPT the ones
+// below — intentional native-only / read-only passthroughs the dev UI degrades around
+// gracefully (these mirror the non-mutating entries of bridge.mock.test.ts's ALLOWLIST;
+// give any of them a real case when dev-mode fidelity matters).
+const DEFAULT_OK = new Set([
+  "rescan_plugins",    // live plugin scan — no dev-mock catalog to mutate
+  "import_clip_data",  // bytes-over-bridge is native-only; dev imports via import_clip
+  "recover_session",   // A3 crash recovery — native-only (no dev-mock crash journal)
+  "discard_recovery",  // "
+]);
+
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
 // it non-empty for unknown words.
@@ -522,6 +536,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       if (action === "to_end") {
         snapshot.transport = { ...t, position: snapshot.session.length ?? 16 };
+        emit("transport", snapshot.transport);
+        return ok(command);
+      }
+      if (action === "to_start") {
+        snapshot.transport = { ...t, position: 0 };
         emit("transport", snapshot.transport);
         return ok(command);
       }
@@ -1647,7 +1666,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
 
     default:
-      return ok(command);
+      // Fail-closed (AL-017): only the intentional passthroughs no-op-succeed; any other
+      // unmodeled command (crucially, a mutating one) surfaces as an error so the drift is
+      // loud instead of a silent fake success.
+      return DEFAULT_OK.has(command)
+        ? ok(command)
+        : err(command, `unhandled command in dev-mock: ${command}`);
   }
 }
 

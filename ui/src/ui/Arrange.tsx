@@ -486,7 +486,8 @@ function ClipBlock({
   const transcribing = useStore((s) => !!s.transcribing[clip.id]);
   // Right-click → Convert to MIDI menu (wave clips only). Cursor-positioned.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, ensurePeaks]);
+  // clip.sourceFile is a dep so an in-place repoint (re-imagine / relink) re-fetches the waveform.
+  useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, clip.sourceFile, ensurePeaks]);
 
   // Optimistic preview during a drag; cleared when committed props arrive.
   const [preview, setPreview] = useState<Pos | null>(null);

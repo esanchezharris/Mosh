@@ -54,6 +54,11 @@ from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
+# Upper bound on a POST body — a defensive cap so a bogus or hostile
+# Content-Length can't drive an unbounded rfile.read() (hang / huge alloc).
+# POST payloads here are small JSON control messages (audio moves as file
+# paths, never inline), so 64 MiB is generous headroom.
+MAX_BODY_BYTES = 64 * 1024 * 1024
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SERVICE_DIR)
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
@@ -666,14 +671,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict:
+    def _read_json(self):
+        """Parse the POST body as JSON.
+
+        Returns a dict on success — or {} for an empty or malformed-JSON body,
+        which callers already treat as "no fields" and 400 on the missing args
+        (PR #297). Returns None when the request was already answered here with a
+        definitive 400/413 (a non-numeric or oversized Content-Length); do_POST
+        must stop when it sees None.
+        """
         # _json_malformed lets a route distinguish a garbled body from a legitimately
         # empty one (both otherwise return {}); routes that mutate on the body (e.g.
         # /training/import-registry) reject the former with 400 instead of applying {}.
         self._json_malformed = False
-        n = int(self.headers.get("Content-Length", 0))
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
         if n <= 0:
             return {}
+        if n > MAX_BODY_BYTES:
+            # Reject BEFORE reading — never allocate/hang on a huge claimed length.
+            self._send(413, {"ok": False,
+                             "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"})
+            return None
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
@@ -796,6 +818,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
+        if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
+            return
         if path == "/submit":
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
