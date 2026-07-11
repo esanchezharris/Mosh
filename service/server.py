@@ -49,7 +49,7 @@ from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
 from training.corpus_bundle import build_corpus_bundle  # noqa: E402
-from training.rights import load_registry, save_registry, write_json  # noqa: E402
+from training.rights import load_registry, read_json_object, save_registry, write_json  # noqa: E402
 from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
@@ -410,24 +410,35 @@ def _training_state_path() -> str:
 
 
 def _load_training_state() -> dict:
-    data = {}
-    try:
-        with open(_training_state_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    # MISSING state initialises normally; a CORRUPT / non-object file is reported
+    # invalid (stateError surfaced) instead of silently returning bare defaults that
+    # the next save would overwrite the evidence with (AL-015).
+    data, error = read_json_object(_training_state_path())
     data.setdefault("activeAdapterId", "")
     data.setdefault("activeAdapterPath", "")
     data.setdefault("activeCorpusHash", "")
     data.setdefault("jobs", [])
     data.setdefault("adapters", [])
+    if error:
+        data["stateError"] = error
     return data
 
 
 def _save_training_state(state: dict) -> None:
-    write_json(_training_state_path(), state)
+    path = _training_state_path()
+    # A missing file is fine to (re)create, but a CORRUPT / non-object state file holds
+    # diagnostic evidence — preserve it as a .corrupt sidecar rather than silently
+    # overwriting it (AL-015). The transient stateError flag is never persisted.
+    _, error = read_json_object(path)
+    if error and os.path.exists(path):
+        backup = path + ".corrupt"
+        if not os.path.exists(backup):
+            try:
+                os.replace(path, backup)
+            except OSError:
+                pass
+    payload = {k: v for k, v in state.items() if k != "stateError"}
+    write_json(path, payload)
 
 
 def _record_training_job(job: dict) -> None:
