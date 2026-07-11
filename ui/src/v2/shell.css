@@ -671,6 +671,14 @@
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
 }
 .v2-mix-btns button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* sends / returns — a small aux-bus panel inside the Mix tab */
+.v2-sends { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--v2-line); }
+.v2-sends-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--v2-dim); }
+.v2-sends-empty { font-size: 11px; color: var(--v2-faint); }
+.v2-send-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.v2-send-name { flex: 0 0 auto; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); }
+.v2-send-row input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-send-row .v2-btn { flex: 0 0 auto; }
 .v2-takes { display: flex; flex-direction: column; gap: 6px; }
 .v2-take {
   display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px;

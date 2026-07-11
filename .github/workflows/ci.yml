@@ -131,8 +131,9 @@ jobs:
         run: git config --global url."https://github.com/".insteadOf "git@github.com:"
 
       - name: Restore dep cache (CPM packages + patched tracktion/JUCE source)
-        # CMakeLists.txt pins CPM_SOURCE_CACHE=<repo>/.cpm-cache and
-        # FETCHCONTENT_BASE_DIR=<repo>/.cpm-cache/_fc, so this ONE dir holds every
+        # Because runners set CI=true, CMakeLists.txt pins CPM_SOURCE_CACHE=
+        # <repo>/.cpm-cache and FETCHCONTENT_BASE_DIR=<repo>/.cpm-cache/_fc (developer
+        # Macs default OUTSIDE the tree — iCloud eviction), so this ONE dir holds every
         # fetched source (Catch2 + tracktion_engine + its recursive JUCE submodule,
         # already patched). Restore-only here; a poison-resistant save runs at the end
         # (only when the recursive JUCE checkout is complete).
