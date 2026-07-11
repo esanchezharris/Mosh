@@ -1025,6 +1025,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
 
+    // Audio warp (auto-tempo): the clip follows the tempo map + time-stretches (SoundTouch).
+    // Wave clips only; `autoTempo` is required (mirrors cmdSetClipWarp). Enabling with no
+    // mode defaults to SoundTouch (Better). `stretchMode` is carried on the clip ONLY while
+    // warp is on, matching the native snapshot serialiser. Undoable.
+    case "set_clip_warp": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "not an audio clip");
+      if (!("autoTempo" in args)) return err(command, "missing 'autoTempo'");
+      pushUndo();
+      const on = Boolean(args.autoTempo);
+      f.clip.autoTempo = on;
+      if (on) f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
+      else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
+      invalidate();
+      return ok(command, { clipId: f.clip.id, autoTempo: on, stretchMode: f.clip.stretchMode });
+    }
+
     // ── recording transport + take lanes (comp tree) ─────────────────────────
     // No audio I/O in the browser dev mock, so "recording" is simulated against
     // session state: arming flags the track; stop_recording lands a take on each
