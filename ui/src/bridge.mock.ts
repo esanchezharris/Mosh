@@ -651,6 +651,58 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+
+    // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
+    // A "bus" is an integer; the return is an instrument-free audio track carrying
+    // an aux-return (isReturn/returnBus). Sends are post-fader entries on a track's
+    // sends[], routed purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
+    case "create_bus": {
+      pushUndo();
+      const used = new Set((snapshot.buses ?? []).map((b) => b.bus));
+      let bus = 0; while (used.has(bus)) bus++;
+      const name = str(args.name) || `Bus ${bus + 1}`;
+      const rt: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name, type: "audio",
+        volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        isReturn: true, returnBus: bus,
+      };
+      snapshot.tracks.push(rt);
+      (snapshot.buses ??= []).push({ bus, name, trackId: rt.id });
+      invalidate();
+      return ok(command, { busNumber: bus, trackId: rt.id, name });
+    }
+    case "add_send": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const bus = num(args.bus, -1);
+      if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
+      if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
+      pushUndo();
+      (t.sends ??= []).push({ bus, db: Math.max(-60, Math.min(6, num(args.db, 0))), mute: false });
+      invalidate();
+      return ok(command, { bus });
+    }
+    case "set_send_level": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.db = Math.max(-100, Math.min(6, num(args.db, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "remove_send": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const i = (t.sends ?? []).findIndex((x) => x.bus === num(args.bus, -1));
+      if (i < 0) return err(command, "no send to that bus");
+      pushUndo();
+      t.sends!.splice(i, 1);
+      invalidate();
+      return ok(command);
+    }
+
     case "create_section": {
       pushUndo();
       const start = num(args.startBeat, 0);
