@@ -395,3 +395,17 @@ archived r4-cuda adapter (sha `2f29b655…`) on the repaired file BEFORE judging
 r5 deltas**, so the r5 report separates fixture recovery from model gains. The
 §A "45 raw-engine-id utterances" exclusion amendment is RETIRED for the
 210-row core — all 210 rows are measurable on the post-fix file.
+
+### §P9 result — r5 gate read (2026-07-10): **PASS**
+
+| r5 step | status | notes |
+|---|---|---|
+| r5 CUDA run | ✅ 2026-07-10 | 12,994/12,994 in 5h58m59s; train_loss 0.06349 (r4: 0.06465), mean_token_accuracy 0.9743. Recipe = §P9 verbatim. Adapter sha256 `76f8db52…`, archived `~/AI/adapters/a3b-r5-cuda-pull`. |
+| r5 gate read | ✅ **PASS** 2026-07-10 | **One clean read.** diag_floor4 0.895 · evalA 0.9357 · frozen300 0.977 · **agg(A,C)=0.9563 ✓** · **§B=0.8919 ✓**. **Target floors cleared: `assign_sample` 0.333→0.667 ✓, `load_drum_kit` 0.333→0.750 ✓** (`set_track_type` also 0.500→0.750); every measurable evalA family ≥ 0.5. Full read: [GATE_READ_a3b-r5-cuda.md](../../service/sft/GATE_READ_a3b-r5-cuda.md). |
+| r5 disposition | 📦 2026-07-10 | Pod `szln5r26qdy66j` terminated after adapter archival (sha-verified Mac↔pod). r5 is the new best A3B adapter — clears the §P9 gate r4 missed on the same lane. ≈$8.6 total. |
+
+**Honest deltas vs r4 (not gating, tracked):** §B `negativeDeferRate 0.45→0.40`
+(r5 defers less — the intended direction; grounded clean-apply held identical at
+0.8919). frozen300 `0.989→0.977` (trivial). §B ran against a **faithful rebuild**
+of the P1-carrying binary (the pre-registered `build-233` dir had been deleted by
+a stray build-clean; the rebuild's HEAD carries P1 as a verified ancestor).
