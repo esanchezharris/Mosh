@@ -525,6 +525,11 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 
 /* misc */
 .error-bar { padding: 7px 14px; background: var(--danger-deep); color: var(--danger); font-size: 12px; border-bottom: 1px solid var(--danger-line); }
+/* G13 — missing-media banner: inline relink chips per missing clip. */
+.error-bar.missing-media { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.missing-media-list { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.missing-media-relink { font: inherit; color: var(--danger); background: transparent; border: 1px solid var(--danger-line); border-radius: 4px; padding: 1px 8px; cursor: pointer; }
+.missing-media-relink:hover { background: var(--danger-line); color: var(--bone, #f4ede1); }
 .boot { display: grid; place-items: center; height: 100%; color: var(--bone-dim); gap: 6px; }
 .empty-hint { padding: 28px; color: var(--bone-dim); font-size: 13px; }
 
