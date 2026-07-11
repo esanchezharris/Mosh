@@ -1,0 +1,9 @@
+{"id":"a3b-r4-cuda-next-run#assign-sample-kick-id","sourceId":"a3b-r4-cuda-next-run:assign_sample","goldCommandNames":["assign_sample"]}
+{"id":"a3b-r4-cuda-next-run#assign-sample-lead-name","sourceId":"a3b-r4-cuda-next-run:assign_sample","goldCommandNames":["assign_sample"]}
+{"id":"a3b-r4-cuda-next-run#assign-sample-lead-id","sourceId":"a3b-r4-cuda-next-run:assign_sample","goldCommandNames":["assign_sample"]}
+{"id":"a3b-r4-cuda-next-run#load-kit-kick-name","sourceId":"a3b-r4-cuda-next-run:load_drum_kit","goldCommandNames":["load_drum_kit"]}
+{"id":"a3b-r4-cuda-next-run#load-kit-kick-id","sourceId":"a3b-r4-cuda-next-run:load_drum_kit","goldCommandNames":["load_drum_kit"]}
+{"id":"a3b-r4-cuda-next-run#load-kit-builtins","sourceId":"a3b-r4-cuda-next-run:load_drum_kit","goldCommandNames":["load_drum_kit"]}
+{"id":"a3b-r4-cuda-next-run#set-type-keys-id","sourceId":"a3b-r4-cuda-next-run:set_track_type","goldCommandNames":["set_track_type"]}
+{"id":"a3b-r4-cuda-next-run#set-type-keys-kit-id","sourceId":"a3b-r4-cuda-next-run:set_track_type","goldCommandNames":["set_track_type","load_drum_kit"]}
+{"id":"a3b-r4-cuda-next-run#set-type-midi-track","sourceId":"a3b-r4-cuda-next-run:set_track_type","goldCommandNames":["set_track_type","load_drum_kit"]}

@@ -58,9 +58,11 @@ export async function maybeEscalate(
     first: { say: reply.say ?? null, intent: reply.intent ?? null, commands },
     n: 4,
   };
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   try {
-    const timeout = new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new Error("escalate timeout")), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+    const timeout = new Promise<never>((_, rej) => {
+      timeoutId = setTimeout(() => rej(new Error("escalate timeout")), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    });
     const r = (await Promise.race([deps.escalate(payload), timeout])) as EscalateResponse;
     const top = r?.candidates?.[0];
     if (!r?.ok || r.degraded || !top || !Array.isArray(top.commands) || top.commands.length === 0) return null;
@@ -72,6 +74,8 @@ export async function maybeEscalate(
     };
   } catch {
     return null; // degrade silently — the single-shot reply stands
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 

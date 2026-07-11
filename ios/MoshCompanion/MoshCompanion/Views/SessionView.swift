@@ -22,17 +22,12 @@ struct ControllerView: View {
 
     private var controllerSurface: some View {
         ZStack {
-            ControllerPalette.ink.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 16) {
+            ControllerPalette.page.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 12) {
                 chrome
                 header
-                statusStrip
-
-                if store.controllerMode == .capture {
-                    captureControls
-                } else {
-                    judgmentControls
-                }
+                recordingPad
+                scrubNavigator
 
                 Spacer(minLength: 0)
                 footer
@@ -66,19 +61,29 @@ struct ControllerView: View {
             #endif
         }
         .font(.system(size: 19, weight: .bold))
-        .foregroundStyle(ControllerPalette.bone.opacity(0.86))
+        .foregroundStyle(ControllerPalette.ink.opacity(0.82))
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(store.controllerMode == .capture ? "CAPTURE" : "JUDGMENT")
-                .font(.system(size: 30, weight: .black, design: .rounded))
-                .foregroundStyle(ControllerPalette.lime)
-            Spacer()
-            Text(positionText)
-                .font(.system(.title3, design: .monospaced).weight(.semibold))
-                .foregroundStyle(ControllerPalette.bone)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(sessionTitle)
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(ControllerPalette.lime)
+                Spacer()
+                Text(positionText)
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(ControllerPalette.bone)
+            }
+
+            statusStrip
         }
+        .padding(16)
+        .background(ControllerPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(ControllerPalette.ink.opacity(0.22), lineWidth: 1)
+        )
     }
 
     private var statusStrip: some View {
@@ -93,41 +98,59 @@ struct ControllerView: View {
         .minimumScaleFactor(0.75)
     }
 
-    private var captureControls: some View {
-        VStack(spacing: 14) {
-            Button {
-                Task { await store.runControllerEvent(.takeMark) }
-            } label: {
-                Label("MARK", systemImage: "flag.fill")
-                    .frame(maxWidth: .infinity, minHeight: 168)
-            }
-            .buttonStyle(ControllerButtonStyle(kind: .primary))
-            .disabled(!store.canSendCommands)
-            .accessibilityIdentifier("controller.\(ControllerEvent.takeMark.rawValue)")
-
-            Button {
-                Task { await store.runControllerEvent(.transportToggle) }
-            } label: {
-                Label(store.transport?.playing == true ? "PAUSE" : "PLAY", systemImage: store.transport?.playing == true ? "pause.fill" : "play.fill")
-                    .frame(maxWidth: .infinity, minHeight: 84)
-            }
-            .buttonStyle(ControllerButtonStyle(kind: .secondary))
-            .disabled(!store.canSendCommands)
-        }
-    }
-
-    private var judgmentControls: some View {
+    private var recordingPad: some View {
         VStack(spacing: 14) {
             HStack(spacing: 12) {
-                controllerButton("KEEP", icon: "checkmark.circle.fill", event: .takeKeep, kind: .primary)
+                controllerButton("KEEP", subtitle: "commit take", icon: "checkmark.circle.fill", event: .takeKeep, kind: .keep, minHeight: 136)
                     .disabled(!store.canSendCommands || store.controller.take?.canKeep != true)
-                controllerButton("REDO", icon: "arrow.counterclockwise.circle.fill", event: .takeRedo, kind: .danger)
+                controllerButton("REDO", subtitle: "try again", icon: "arrow.counterclockwise.circle.fill", event: .takeRedo, kind: .again, minHeight: 136)
                     .disabled(!store.canSendCommands)
             }
 
-            controllerButton("LISTEN", icon: "speaker.wave.2.fill", event: .takeListen, kind: .secondary)
-                .disabled(!store.canSendCommands || store.controller.take?.exists != true)
+            HStack(spacing: 12) {
+                controllerButton("HEAR IT", subtitle: "play back", icon: "speaker.wave.2.fill", event: .takeListen, kind: .hear, minHeight: 108)
+                    .disabled(!store.canSendCommands || store.controller.take?.exists != true)
+                controllerButton("MARKER", subtitle: "flag moment", icon: "flag.fill", event: .takeMark, kind: .marker, minHeight: 108)
+                    .disabled(!store.canSendCommands)
+            }
 
+            HStack(spacing: 12) {
+                Button {
+                    Task { await store.runPutMeIn() }
+                } label: {
+                    tileLabel("PUT ME IN", subtitle: "record", icon: "record.circle", minHeight: 54, compact: true)
+                }
+                .buttonStyle(ControllerButtonStyle(kind: .record))
+                .disabled(!store.canSendCommands)
+                .accessibilityIdentifier("controller.PUT_ME_IN")
+
+                Button {
+                    Task { await store.runControllerEvent(.transportToggle) }
+                } label: {
+                    tileLabel(
+                        store.transport?.playing == true ? "STOP" : "PLAY",
+                        subtitle: store.transport?.playing == true ? "pause transport" : "roll",
+                        icon: store.transport?.playing == true ? "stop.fill" : "play.fill",
+                        minHeight: 54,
+                        compact: true
+                    )
+                }
+                .buttonStyle(ControllerButtonStyle(kind: .transport))
+                    .disabled(!store.canSendCommands)
+                .accessibilityIdentifier("controller.\(ControllerEvent.transportToggle.rawValue)")
+            }
+        }
+        .padding(12)
+        .background(ControllerPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(ControllerPalette.ink.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: ControllerPalette.ink.opacity(0.18), radius: 18, x: 0, y: 12)
+    }
+
+    private var scrubNavigator: some View {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 Slider(
                     value: $scrubPosition,
@@ -146,10 +169,11 @@ struct ControllerView: View {
                     Text(timeText(maxScrubPosition))
                 }
                 .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(ControllerPalette.bone.opacity(0.68))
+                .foregroundStyle(ControllerPalette.ink.opacity(0.62))
             }
-            .padding(.top, 8)
         }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     private var footer: some View {
@@ -172,7 +196,7 @@ struct ControllerView: View {
             if let detail = connectionDetail {
                 Text(detail)
                     .font(.system(.footnote, design: .rounded))
-                    .foregroundStyle(ControllerPalette.bone.opacity(0.52))
+                    .foregroundStyle(ControllerPalette.ink.opacity(0.56))
                     .lineLimit(2)
             }
 
@@ -184,22 +208,43 @@ struct ControllerView: View {
             } else if let receipt = store.receipts.first {
                 Text(receipt)
                     .font(.system(.footnote, design: .rounded))
-                    .foregroundStyle(ControllerPalette.bone.opacity(0.52))
+                    .foregroundStyle(ControllerPalette.ink.opacity(0.56))
                     .lineLimit(1)
             }
         }
         .padding(.top, 4)
     }
 
-    private func controllerButton(_ title: String, icon: String, event: ControllerEvent, kind: ControllerButtonStyle.Kind) -> some View {
+    private func controllerButton(_ title: String, subtitle: String, icon: String, event: ControllerEvent, kind: ControllerButtonStyle.Kind, minHeight: CGFloat) -> some View {
         Button {
             Task { await store.runControllerEvent(event) }
         } label: {
-            Label(title, systemImage: icon)
-                .frame(maxWidth: .infinity, minHeight: 92)
+            tileLabel(title, subtitle: subtitle, icon: icon, minHeight: minHeight)
         }
         .buttonStyle(ControllerButtonStyle(kind: kind))
         .accessibilityIdentifier("controller.\(event.rawValue)")
+    }
+
+    private func tileLabel(_ title: String, subtitle: String, icon: String, minHeight: CGFloat, compact: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 4 : 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: compact ? 16 : 22, weight: .black))
+                Spacer(minLength: 0)
+            }
+            Spacer(minLength: compact ? 0 : 4)
+            Text(title)
+                .font(.system(size: compact ? (title == "PUT ME IN" ? 17 : 20) : (title == "PUT ME IN" ? 22 : 28), weight: .black, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.74)
+            Text(subtitle.uppercased())
+                .font(.system(size: compact ? 9 : 11, weight: .heavy, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .opacity(0.72)
+        }
+        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .bottomLeading)
+        .padding(compact ? 10 : 14)
     }
 
     private func statusPill(_ text: String, systemImage: String, color: Color) -> some View {
@@ -219,6 +264,16 @@ struct ControllerView: View {
 
     private var positionText: String {
         timeText(store.transport?.position ?? 0)
+    }
+
+    private var sessionTitle: String {
+        if store.transport?.recording == true {
+            return "RECORDING"
+        }
+        if store.transport?.playing == true {
+            return "PLAYING"
+        }
+        return "READY"
     }
 
     private func timeText(_ position: Double) -> String {
@@ -290,25 +345,32 @@ struct ControllerView: View {
 }
 
 private enum ControllerPalette {
+    static let page = Color(red: 238 / 255, green: 230 / 255, blue: 214 / 255)
     static let ink = Color(red: 11 / 255, green: 11 / 255, blue: 11 / 255)
+    static let panel = Color(red: 20 / 255, green: 22 / 255, blue: 22 / 255)
+    static let raised = Color(red: 35 / 255, green: 38 / 255, blue: 38 / 255)
+    static let line = Color(red: 72 / 255, green: 76 / 255, blue: 74 / 255)
     static let lime = Color(red: 204 / 255, green: 255 / 255, blue: 35 / 255)
     static let bone = Color(red: 246 / 255, green: 242 / 255, blue: 235 / 255)
+    static let gold = Color(red: 255 / 255, green: 202 / 255, blue: 82 / 255)
     static let red = Color(red: 255 / 255, green: 82 / 255, blue: 82 / 255)
+    static let rust = Color(red: 226 / 255, green: 91 / 255, blue: 62 / 255)
 }
 
 private struct ControllerButtonStyle: ButtonStyle {
     enum Kind {
-        case primary
-        case secondary
-        case danger
+        case keep
+        case again
+        case hear
+        case marker
+        case record
+        case transport
     }
 
     let kind: Kind
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.title2, design: .rounded).weight(.black))
-            .labelStyle(.titleAndIcon)
             .foregroundStyle(foreground)
             .background(background.opacity(configuration.isPressed ? 0.78 : 1.0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
@@ -321,32 +383,44 @@ private struct ControllerButtonStyle: ButtonStyle {
 
     private var background: Color {
         switch kind {
-        case .primary:
+        case .keep:
             return ControllerPalette.lime
-        case .secondary:
-            return ControllerPalette.bone.opacity(0.14)
-        case .danger:
-            return ControllerPalette.red.opacity(0.92)
+        case .again:
+            return ControllerPalette.rust
+        case .hear:
+            return ControllerPalette.raised
+        case .marker:
+            return ControllerPalette.gold
+        case .record:
+            return ControllerPalette.panel
+        case .transport:
+            return ControllerPalette.bone.opacity(0.16)
         }
     }
 
     private var foreground: Color {
         switch kind {
-        case .primary, .danger:
+        case .keep, .again, .marker:
             return ControllerPalette.ink
-        case .secondary:
+        case .hear, .record, .transport:
             return ControllerPalette.bone
         }
     }
 
     private var border: Color {
         switch kind {
-        case .primary:
+        case .keep:
             return ControllerPalette.lime
-        case .secondary:
+        case .again:
+            return ControllerPalette.rust
+        case .hear:
+            return ControllerPalette.line
+        case .marker:
+            return ControllerPalette.gold
+        case .record:
+            return ControllerPalette.lime.opacity(0.46)
+        case .transport:
             return ControllerPalette.bone.opacity(0.28)
-        case .danger:
-            return ControllerPalette.red
         }
     }
 }

@@ -65,10 +65,12 @@ function moshiBrain(env: Record<string, string>): Plugin {
 // Single-file build: viteSingleFile inlines ALL JS + CSS into one self-contained
 // index.html — load-bearing for the JUCE WebView (its resource scheme won't run
 // external module scripts). base: "./" keeps refs origin-free. 03 / 06 §1.
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), ""); // "" → load ALL keys incl. unprefixed; SERVER-SIDE only, never bundled
+  const plugins: Plugin[] = [react(), moshiBrain(env)];
+  if (command === "build") plugins.splice(1, 0, viteSingleFile());
   return {
-    plugins: [react(), viteSingleFile(), moshiBrain(env)],
+    plugins,
     base: "./",
     build: { outDir: "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
     server: { port: 5173, strictPort: true },

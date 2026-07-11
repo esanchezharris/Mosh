@@ -164,7 +164,7 @@ fi
 bundle_service() {                              # $1 = installed app
   local DEST="$1" SVC="$1/Contents/Resources/service"
   echo "bundling service → ${SVC#$ROOT/}"
-  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform"
+  rm -rf "$SVC"; mkdir -p "$SVC/transcribe" "$SVC/sketch" "$SVC/transform" "$SVC/teardown/render"
   # Top-level modules imported (transitively) by the bundled dirs below. brain_client
   # is needed by lyrics/core.py + bestofn/runtime.py; coverage (→ stitch) by the
   # generative adapters. Missing any of these = ModuleNotFoundError → route 500 in the
@@ -180,9 +180,11 @@ bundle_service() {                              # $1 = installed app
   # `compiler` = the prompt compiler (/compile_render, imported in-process by server.py);
   # its real-LLM path lazy-imports brain_client (bundled separately) and degrades to the
   # deterministic fake when that's absent, so the fake path works whole-dir on its own.
-  for d in adapters colors sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras; do
+  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
+  cp "$ROOT/service/teardown/recipe.py" "$SVC/teardown/"
+  cp "$ROOT/service/teardown/render/compile.py" "$SVC/teardown/render/"
   cp "$ROOT/service/transcribe/transcribe_cli.py" \
      "$ROOT/service/transcribe/setup-transcribe.sh" "$SVC/transcribe/"
   cp "$ROOT/service/sketch/beatbox_cli.py" \
@@ -195,6 +197,7 @@ bundle_service() {                              # $1 = installed app
      "$ROOT/service/transform/setup-transform.sh" "$SVC/transform/" 2>/dev/null || true
   # Machine-local venv pointers (gitignored). Absent ones fall back to run.sh defaults.
   [ -f "$ROOT/service/.sa3.env" ] && cp "$ROOT/service/.sa3.env" "$SVC/.sa3.env"
+  [ -f "$ROOT/service/.recipe.env" ] && cp "$ROOT/service/.recipe.env" "$SVC/.recipe.env"
   [ -f "$ROOT/service/transcribe/.transcribe.env" ] && cp "$ROOT/service/transcribe/.transcribe.env" "$SVC/transcribe/.transcribe.env"
   [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
   [ -f "$ROOT/service/transform/.transform.env" ] && cp "$ROOT/service/transform/.transform.env" "$SVC/transform/.transform.env"
@@ -289,8 +292,10 @@ build_anira() {
   local dir="$ROOT/build-anira"
   if [ ! -f "$dir/CMakeCache.txt" ]; then
     echo "configuring anira build (first run downloads LibTorch — long)…"
+    # Cache OUTSIDE the source tree — iCloud evicts content under ~/Documents
+    # (docs/2026-07-10-cpm-cache-icloud-eviction.md); matches the CMakeLists default.
     cmake -S "$ROOT" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="$ROOT/.cpm-cache" \
+      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="${MOSH_WORK_DIR:-$HOME/Library/Mosh/work}/cpm-cache" \
       ${FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE:+-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE"}
   fi
   echo "building Mosh (anira → $dir)…"

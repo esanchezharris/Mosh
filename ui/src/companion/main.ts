@@ -13,6 +13,7 @@ const BTN_META: Record<Button, { label: string; sub: string; cls: string }> = {
   keep: { label: "KEEP", sub: "stash · roll again", cls: "keep" },
   again: { label: "AGAIN", sub: "redo the take", cls: "again" },
   hear: { label: "HEAR IT", sub: "play back", cls: "hear" },
+  marker: { label: "MARKER", sub: "flag this moment", cls: "marker" },
   stop: { label: "STOP", sub: "", cls: "stop" },
 };
 

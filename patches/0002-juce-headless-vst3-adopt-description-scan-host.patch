@@ -1,0 +1,7 @@
+diff --git a/modules/juce/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp b/modules/juce/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
+index b03f8cb120..86cfdfbae1 100644
+--- a/modules/juce/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
++++ b/modules/juce/modules/juce_audio_processors_headless/format_types/juce_VST3PluginFormatHeadless.cpp
+@@ -85,1 +85,1 @@
+-        VSTComSmartPtr host { new VST3HostContextHeadless(), IncrementRef::yes };
++        VSTComSmartPtr host { new VST3HostContextHeadless(), IncrementRef::no };

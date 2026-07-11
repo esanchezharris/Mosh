@@ -16,7 +16,10 @@ function makeStore(over: Partial<ActionStore> = {}) {
     pasteClipboard: vi.fn(async () => {}),
     clearSelection: vi.fn(),
     selection: new Set<string>(),
-    transport: { playing: false },
+    transport: { playing: false, position: 1.5 },
+    snapshot: null,
+    clipboard: null,
+    setTool: vi.fn(),
     ...over,
   };
   return { store, execCalls };
@@ -137,5 +140,72 @@ describe("runAction — transport", () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("play_pause", ctx);
     expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+  });
+
+  it("record/to_start/to_end keep their transport payloads", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("record", ctx);
+    await runAction("to_start", ctx);
+    await runAction("to_end", ctx);
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "to_start" } },
+      { command: "set_transport", args: { action: "to_end" } },
+    ]);
+  });
+
+  it("seek and loop_region preserve ruler set_transport payloads", async () => {
+    const { ctx, execCalls } = makeCtx();
+    await runAction("seek", ctx, { position: 2.25 });
+    await runAction("loop_region", ctx, { loopStart: 1, loopEnd: 4 });
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { position: 2.25 } },
+      { command: "set_transport", args: { loop: true, loopStart: 1, loopEnd: 4 } },
+    ]);
+  });
+});
+
+describe("runAction — arrangement shortcuts", () => {
+  it("duplicate duplicates every selected clip", async () => {
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c2"]) });
+    await runAction("duplicate", ctx);
+    expect(execCalls).toEqual([
+      { command: "duplicate_clip", args: { clipId: "c1" } },
+      { command: "duplicate_clip", args: { clipId: "c2" } },
+    ]);
+  });
+
+  it("group collects selected clips' track ids without grouped tracks", async () => {
+    const snapshot = {
+      tracks: [
+        { id: "t1", isGroup: false, clips: [{ id: "c1", start: 0, length: 1 }] },
+        { id: "t2", isGroup: true, clips: [{ id: "c2", start: 0, length: 1 }] },
+        { id: "t3", isGroup: false, clips: [{ id: "c3", start: 0, length: 1 }] },
+      ],
+    } as unknown as import("./types").Snapshot;
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c2", "c3"]), snapshot });
+    await runAction("group", ctx);
+    expect(execCalls).toEqual([{ command: "create_group_track", args: { trackIds: ["t1", "t3"] } }]);
+  });
+
+  it("split only splits selected clips crossing the playhead", async () => {
+    const snapshot = {
+      tracks: [
+        { id: "t1", isGroup: false, clips: [{ id: "c1", start: 0, length: 2 }, { id: "c2", start: 3, length: 1 }] },
+      ],
+    } as unknown as import("./types").Snapshot;
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c2"]), transport: { playing: false, position: 1 }, snapshot });
+    await runAction("split", ctx);
+    expect(execCalls).toEqual([{ command: "split_clip", args: { clipId: "c1", time: 1 } }]);
+  });
+
+  it("tool actions route through the store tool setter", async () => {
+    const { ctx, store } = makeCtx();
+    await runAction("tool_move", ctx);
+    await runAction("tool_split", ctx);
+    await runAction("tool_range", ctx);
+    expect(store.setTool).toHaveBeenNthCalledWith(1, "move");
+    expect(store.setTool).toHaveBeenNthCalledWith(2, "split");
+    expect(store.setTool).toHaveBeenNthCalledWith(3, "range");
   });
 });

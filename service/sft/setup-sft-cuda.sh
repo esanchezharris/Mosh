@@ -27,7 +27,9 @@ print(f"  transformers {transformers.__version__} | trl {trl.__version__} | peft
 PYCHK
 
 echo "✓ box ready. Next (on the box):"
+echo "    ./launch-r4-cuda.sh"
+echo "  or a short smoke:"
 echo "    python sft_cuda_train.py --data ./sft-v2 --out ./adapter --max-steps 600 --batch-size 8 \\"
-echo "        --no-assistant-loss --no-grad-ckpt --save-steps 200   # 80GB bf16 LoRA, ~1hr"
+echo "        --no-grad-ckpt --save-steps 200"
 echo "  then serve OpenAI-compatible (stdlib shim, no vllm):"
-echo "    python serve_openai.py --base Qwen/Qwen3-4B-Instruct-2507 --adapter ./adapter --port 8000"
+echo "    python serve_openai.py --base Qwen/Qwen3-30B-A3B-Instruct-2507 --adapter ./adapter --port 8000"

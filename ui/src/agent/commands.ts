@@ -1,5 +1,5 @@
 // The curated tool catalog Moshi's brain is allowed to call. It deliberately
-// exposes a high-value, low-blast-radius subset (~63 of the ~147 MoshOps commands) — no
+// exposes a high-value, low-blast-radius subset (~64 of the ~148 MoshOps commands) — no
 // project IO, device settings, scans, or anything that could lose the user's work.
 // Each entry feeds two consumers: (1) the LLM system prompt (so the brain knows
 // what it can do), and (2) client-side validation, so a malformed or unknown
@@ -50,6 +50,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
   { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", false, "beats: 1=1/4, 0.5=1/8, 0.25=1/16"), N("strength", false, "0-1")] },
+  { command: "add_drum_pattern", desc: "Lay a whole drum grid in ONE undoable step from lane strings — 'x' hit, 'X' accent, '.'/'-' rest, '|' cosmetic; lanes kick/snare/clap/hat/openhat/lowtom/midtom/crash or a raw MIDI pitch; short lanes tile (\"x.\" = 8th hats)", args: [S("pattern", true, 'lane map: "kick: x...x...x...x...; snare: ....x.......x..."'), S("trackId", false, "target track — omit to create a new Drums track"), S("clipId", false, "existing MIDI clip: replaces ONLY the lanes named (trackId ignored)"), N("stepsPerBar", false, "1-64, default 16"), N("bars", false, "1-16, default fits the longest lane"), N("velocity", false, "1-127 for 'x' hits, default 100"), N("start", false, "seconds — new-clip position")] },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
@@ -78,6 +79,12 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_track_solo", desc: "Solo/unsolo a track", args: [S("trackId"), B("solo")] },
   { command: "set_master_volume", desc: "Set the master volume in dB", args: [N("db")] },
   { command: "set_master_pan", desc: "Set the master pan (-1 left … 1 right)", args: [N("pan")] },
+
+  // ── sends / returns / aux buses ───────────────────────────────────────────
+  { command: "create_bus", desc: "Create an aux/return bus (a reverb/delay return track) — routes any track's send into it", args: [S("name", false, "bus name, e.g. 'Reverb'")] },
+  { command: "add_send", desc: "Add a post-fader send from a track to a bus (bus number from the snapshot's buses[])", args: [S("trackId"), N("bus", true, "the bus number"), N("db", false, "send level in dB, -60…6")] },
+  { command: "set_send_level", desc: "Set a track's send level to a bus in dB", args: [S("trackId"), N("bus"), N("db")] },
+  { command: "remove_send", desc: "Remove a track's send to a bus", args: [S("trackId"), N("bus")] },
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
@@ -115,6 +122,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
+  { command: "assert_lyric_line", desc: "Assert final words for one lyric line before sing render", args: [S("trackId"), N("lineIndex"), S("text", false)] },
   { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
   { command: "build_skeleton_from_clip", desc: "Turn a hummed/mumbled wave take into an editable rhythmic flow skeleton (syllable grid + stress, no words) on the clip's track — the producer confirms the grid, then 'Finish gaps' writes the words", args: [S("clipId"), S("grid", false), B("wait", false)] },
 ];
@@ -168,6 +176,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
     case "add_note": return `Added a note`;
+    case "add_drum_pattern": return `Laid a drum pattern`;
     case "remove_note": return `Removed a note`;
     case "set_note": return `Edited a note`;
     case "quantize_notes": return `Quantized notes${a.division != null ? ` (${a.division}-beat grid)` : ""}`;
@@ -191,6 +200,10 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_track_solo": return a.solo ? `Soloed a track` : `Unsoloed a track`;
     case "set_master_volume": return `Set master volume to ${a.db} dB`;
     case "set_master_pan": return `Set master pan to ${a.pan}`;
+    case "create_bus": return `Created a ${a.name ? `"${a.name}" ` : ""}bus`;
+    case "add_send": return `Added a send to bus ${a.bus}`;
+    case "set_send_level": return `Set send to bus ${a.bus} to ${a.db} dB`;
+    case "remove_send": return `Removed a send to bus ${a.bus}`;
     case "load_builtin": return `Added ${a.type}`;
     case "set_track_type": return a.type === "drum" ? `Made it a drum track` : `Made it an audio track`;
     case "load_drum_kit": return `Loaded the drum kit`;

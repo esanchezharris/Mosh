@@ -105,9 +105,10 @@ public:
         const bool demoGui = commandLine.contains ("--demo3")
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
+        const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
         const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || goldenSelfTest || commandLine.contains ("--selftest");
-        const bool noAudio = headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
+        const bool noAudio = envNoAudio || headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)

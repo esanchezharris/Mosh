@@ -4,6 +4,11 @@ namespace mosh
 {
 using namespace juce;
 
+namespace
+{
+    constexpr int serviceDiscardedOutputStreams = 0;
+}
+
 TrainingJobManager::TrainingJobManager()
 {
     const auto host = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_HOST", "127.0.0.1");
@@ -74,12 +79,12 @@ bool TrainingJobManager::ensureServiceRunning()
     bool started = false;
 #if JUCE_WINDOWS
     if (auto py = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PYTHON", {}); py.isNotEmpty())
-        started = serviceProcess.start (StringArray { py, script.getFullPathName() });
+        started = serviceProcess.start (StringArray { py, script.getFullPathName() }, serviceDiscardedOutputStreams);
     else
     {
-        started = serviceProcess.start (StringArray { "py", "-3", script.getFullPathName() });
+        started = serviceProcess.start (StringArray { "py", "-3", script.getFullPathName() }, serviceDiscardedOutputStreams);
         if (! started)
-            started = serviceProcess.start (StringArray { "python", script.getFullPathName() });
+            started = serviceProcess.start (StringArray { "python", script.getFullPathName() }, serviceDiscardedOutputStreams);
     }
 #else
     auto runSh = script.getParentDirectory().getChildFile ("run.sh");
@@ -93,7 +98,7 @@ bool TrainingJobManager::ensureServiceRunning()
     String shell = runSh.existsAsFile()
         ? (env + "exec /bin/bash " + runSh.getFullPathName().quoted())
         : (env + "exec python3 " + script.getFullPathName().quoted());
-    started = serviceProcess.start (StringArray { "/bin/sh", "-c", shell });
+    started = serviceProcess.start (StringArray { "/bin/sh", "-c", shell }, serviceDiscardedOutputStreams);
 #endif
     if (started)
     {
@@ -131,4 +136,3 @@ void TrainingJobManager::cancelJob (const String& jobId)
 }
 
 } // namespace mosh
-

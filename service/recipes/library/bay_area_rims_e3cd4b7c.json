@@ -1,0 +1,168 @@
+{
+  "recipe_id": "bay_area_rims",
+  "schema_version": "2.0",
+  "source": {
+    "platform": "local-midi",
+    "video_id": "bay_area_rims",
+    "url": "",
+    "title": "Bay Area Rims",
+    "channel": "",
+    "duration_s": 0.0,
+    "license": "unknown",
+    "retrieved_at": null,
+    "content_hash": "e3cd4b7c8786fc6b01d2c6ad59e2315f47f596ba3369d79d8e1a44b53d6d1807"
+  },
+  "meta": {
+    "daw": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "tempo_bpm": {
+      "value": 140,
+      "confidence": 0.75,
+      "evidence": [
+        "ingest-midi --bpm"
+      ]
+    },
+    "key": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": []
+    },
+    "time_signature": {
+      "value": "4/4",
+      "confidence": 0.6,
+      "evidence": []
+    }
+  },
+  "arrangement": {
+    "sections": [
+      {
+        "name": "loop",
+        "start_s": 0.0,
+        "end_s": 12.0,
+        "confidence": 0.5
+      }
+    ]
+  },
+  "elements": [
+    {
+      "element_id": "bay_area_rims",
+      "role": "perc",
+      "label": "Bay Area Rims",
+      "audio_ref": null,
+      "midi": {
+        "status": "extracted",
+        "midi_ref": null,
+        "notes": [
+          {
+            "pitch": 60,
+            "start_beats": 2.5,
+            "duration_beats": 0.010417,
+            "velocity": 102
+          },
+          {
+            "pitch": 60,
+            "start_beats": 2.75,
+            "duration_beats": 0.010417,
+            "velocity": 105
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.5,
+            "duration_beats": 0.010417,
+            "velocity": 102
+          },
+          {
+            "pitch": 60,
+            "start_beats": 10.75,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          },
+          {
+            "pitch": 60,
+            "start_beats": 18.5,
+            "duration_beats": 0.010417,
+            "velocity": 102
+          },
+          {
+            "pitch": 60,
+            "start_beats": 18.75,
+            "duration_beats": 0.010417,
+            "velocity": 105
+          },
+          {
+            "pitch": 60,
+            "start_beats": 26.5,
+            "duration_beats": 0.010417,
+            "velocity": 102
+          },
+          {
+            "pitch": 60,
+            "start_beats": 26.75,
+            "duration_beats": 0.010417,
+            "velocity": 106
+          }
+        ],
+        "note_count": 8,
+        "confidence": 1.0
+      },
+      "sample_match": {
+        "status": "none",
+        "matched_path": null,
+        "distance": 0.0,
+        "alternates": []
+      },
+      "synth_patch": {
+        "status": "unknown",
+        "plugin": {
+          "name": null,
+          "available_locally": false
+        },
+        "params": {},
+        "match": null,
+        "substitute": null
+      },
+      "onsets": [],
+      "motif": {
+        "bars": 7.0,
+        "onset_grid": "16th",
+        "density": 1.1429,
+        "syncopation": 1.0,
+        "contour": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "register_band": "perc",
+        "harmonic_function": ""
+      },
+      "bass": null,
+      "evidence": [],
+      "confidence": 1.0
+    }
+  ],
+  "unresolved": [],
+  "reconstruction_class": "deterministic",
+  "yield": {
+    "predicted": {
+      "drums": 0.0,
+      "midi": 1.0,
+      "synth": 0.0,
+      "arrangement": 0.5,
+      "overall": 0.65
+    },
+    "actual": {
+      "drums": 0.0,
+      "midi": 0.0,
+      "synth": 0.0,
+      "arrangement": 0.0,
+      "overall": 0.0
+    }
+  }
+}

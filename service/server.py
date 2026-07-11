@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # On Windows a JUCE GUI parent may launch this service with stdout/stderr pipes
@@ -49,12 +50,18 @@ from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
 from training.corpus_bundle import build_corpus_bundle  # noqa: E402
-from training.rights import load_registry, save_registry, write_json  # noqa: E402
+from training.rights import load_registry, read_json_object, save_registry, write_json  # noqa: E402
 from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
+# Upper bound on a POST body — a defensive cap so a bogus or hostile
+# Content-Length can't drive an unbounded rfile.read() (hang / huge alloc).
+# POST payloads here are small JSON control messages (audio moves as file
+# paths, never inline), so 64 MiB is generous headroom.
+MAX_BODY_BYTES = 64 * 1024 * 1024
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.dirname(SERVICE_DIR)
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
 TRAINING_ENABLED = lora_trainer_adapter.available()
 
@@ -96,6 +103,24 @@ def _venv_py(env_var: str, name: str) -> str:
     if os.path.isfile(conventional):
         return conventional
     return venv_python(os.path.join(SERVICE_DIR, name, ".venv"), is_windows)
+
+
+def _resolve_path(path: str, *, directory: bool) -> str:
+    if not path:
+        return path
+    candidates = [path]
+    if not os.path.isabs(path):
+        candidates.extend([
+            os.path.join(REPO_DIR, path),
+            os.path.join(SERVICE_DIR, path),
+        ])
+    for candidate in candidates:
+        resolved = os.path.abspath(candidate)
+        if directory and os.path.isdir(resolved):
+            return resolved
+        if not directory and os.path.isfile(resolved):
+            return resolved
+    return path
 
 
 def _basic_pitch_py() -> str:
@@ -316,6 +341,55 @@ def _training_descriptor() -> dict:
     }
 
 
+def _generate_recipe_payload(data: dict) -> dict:
+    from recipes import generate as gen  # noqa: PLC0415
+    from teardown import recipe as recipe_model  # noqa: PLC0415
+    from teardown.render.compile import compile_recipe  # noqa: PLC0415
+
+    request = data.get("request", {})
+    if not isinstance(request, dict):
+        request = {}
+    request = dict(request)
+    for key in ("mood", "genre", "key", "lead"):
+        if key in data:
+            request[key] = data[key]
+    if "tempo" in data:
+        request["tempo"] = data["tempo"]
+
+    try:
+        seed = int(data.get("seed", 0) or 0)
+    except (TypeError, ValueError):
+        seed = 0
+
+    library_dir = str(data.get("libraryDir", data.get("library_dir", "")) or "").strip()
+    if not library_dir:
+        library_dir = os.environ.get("MOSH_RECIPE_LIBRARY", "").strip() or gen.LIB_DIR
+    library_dir = _resolve_path(library_dir, directory=True)
+    if not os.path.isdir(library_dir):
+        raise RuntimeError(f"recipe library missing: {library_dir}")
+
+    palette_manifest = str(data.get("paletteManifest", data.get("palette_manifest", "")) or "").strip()
+    if not palette_manifest:
+        palette_manifest = os.environ.get("MOSH_PALETTE_MANIFEST", "").strip()
+    palette_manifest = _resolve_path(palette_manifest, directory=False)
+    palette = gen.load_palette(palette_manifest) if palette_manifest else None
+
+    rec, prov = gen.generate(request, library_dir=library_dir, seed=seed, palette=palette)
+    compiled = compile_recipe(rec).to_dict()
+    return {
+        "ok": True,
+        "recipeId": rec.recipe_id,
+        "request": request,
+        "libraryDir": library_dir,
+        "paletteManifest": palette_manifest,
+        "recipe": json.loads(recipe_model.to_json(rec)),
+        "program": compiled,
+        "provenance": asdict(prov),
+        "commandCount": len(compiled.get("commands", [])),
+        "unresolvedCount": len(compiled.get("unresolved", [])),
+    }
+
+
 _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 _job_q: "queue.PriorityQueue" = queue.PriorityQueue()
@@ -339,24 +413,35 @@ def _training_state_path() -> str:
 
 
 def _load_training_state() -> dict:
-    data = {}
-    try:
-        with open(_training_state_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    # MISSING state initialises normally; a CORRUPT / non-object file is reported
+    # invalid (stateError surfaced) instead of silently returning bare defaults that
+    # the next save would overwrite the evidence with (AL-015).
+    data, error = read_json_object(_training_state_path())
     data.setdefault("activeAdapterId", "")
     data.setdefault("activeAdapterPath", "")
     data.setdefault("activeCorpusHash", "")
     data.setdefault("jobs", [])
     data.setdefault("adapters", [])
+    if error:
+        data["stateError"] = error
     return data
 
 
 def _save_training_state(state: dict) -> None:
-    write_json(_training_state_path(), state)
+    path = _training_state_path()
+    # A missing file is fine to (re)create, but a CORRUPT / non-object state file holds
+    # diagnostic evidence — preserve it as a .corrupt sidecar rather than silently
+    # overwriting it (AL-015). The transient stateError flag is never persisted.
+    _, error = read_json_object(path)
+    if error and os.path.exists(path):
+        backup = path + ".corrupt"
+        if not os.path.exists(backup):
+            try:
+                os.replace(path, backup)
+            except OSError:
+                pass
+    payload = {k: v for k, v in state.items() if k != "stateError"}
+    write_json(path, payload)
 
 
 def _record_training_job(job: dict) -> None:
@@ -600,13 +685,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict:
-        n = int(self.headers.get("Content-Length", 0))
+    def _read_json(self):
+        """Parse the POST body as JSON.
+
+        Returns a dict on success — or {} for an empty or malformed-JSON body,
+        which callers already treat as "no fields" and 400 on the missing args
+        (PR #297). Returns None when the request was already answered here with a
+        definitive 400/413 (a non-numeric or oversized Content-Length); do_POST
+        must stop when it sees None.
+        """
+        # _json_malformed lets a route distinguish a garbled body from a legitimately
+        # empty one (both otherwise return {}); routes that mutate on the body (e.g.
+        # /training/import-registry) reject the former with 400 instead of applying {}.
+        self._json_malformed = False
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
         if n <= 0:
             return {}
+        if n > MAX_BODY_BYTES:
+            # Reject BEFORE reading — never allocate/hang on a huge claimed length.
+            self._send(413, {"ok": False,
+                             "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"})
+            return None
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
+            self._json_malformed = True
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
@@ -735,6 +842,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
+        if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
+            return
         if path == "/submit":
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
@@ -945,10 +1054,12 @@ class Handler(BaseHTTPRequestHandler):
                 words = None
                 wh_py = _whisper_py()
                 if env and bool(data.get("asr", True)) and os.path.isfile(wh_py):
-                    # v4 "ASR counts, DSP times": GENEROUS decode (model `small`, the KS-B
-                    # validated config); words consumed UNGATED as counts+timestamps only,
-                    # never as lyrics (the 0.6-confidence lyric-anchor gate lives in
-                    # /mumble_spec and is untouched).
+                    # Generous decode (model `small`, the KS-B validated config). The SAME
+                    # word list feeds two consumers: the v4 syllable budgets (start/end/syl,
+                    # ungated) AND — pipeline correction 2026-07-04 — lyric EXTRACTION
+                    # (word/confidence): his real words must be detected and PRESERVED,
+                    # never overwritten by generation. The 0.6-confidence lyric-anchor gate
+                    # in /mumble_spec is untouched.
                     cli = os.path.join(SERVICE_DIR, "whisper", "whisper_cli.py")
                     try:
                         proc = subprocess.run([wh_py, cli, input_wav, "small"],
@@ -963,7 +1074,9 @@ class Handler(BaseHTTPRequestHandler):
                                 if not any(ch.isalpha() for ch in c):
                                     continue
                                 try:  # one malformed word must not discard the rest
-                                    ws.append({"start": float(w["start"]), "end": float(w["end"]),
+                                    ws.append({"word": str(w.get("word", "")).strip(),
+                                               "start": float(w["start"]), "end": float(w["end"]),
+                                               "confidence": float(w.get("confidence", 0) or 0),
                                                "syl": pron.syllables(c) or 1})
                                 except (KeyError, TypeError, ValueError):
                                     continue
@@ -973,7 +1086,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, skel.build_skeleton_spec(
                     notes, f0=f0, bpm=bpm, time_sig=(int(ts[0]), int(ts[1])), grid=grid,
                     topic=str(data.get("topic", "")), mood=str(data.get("mood", "")),
-                    env=env, words=words))
+                    env=env, words=words,
+                    extract_lyrics=bool(data.get("extract", True)),
+                    extract_use_llm=bool(data.get("extractLlm", True))))
             except Exception as e:  # noqa: BLE001
                 self._send(500, {"ok": False, "error": f"skeleton spec error: {e}"})
         elif path == "/sketch":
@@ -1019,6 +1134,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"ok": False, "error": f"sketch failed: {tail or 'no output'}"})
                 return
             self._send(200 if payload.get("ok") else 500, payload)
+        elif path == "/generate_recipe":
+            try:
+                self._send(200, _generate_recipe_payload(data))
+            except RuntimeError as e:
+                self._send(400, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"recipe generation error: {e}"})
         elif path == "/get_rhymes":
             # Phonology rhyme search (Finish-My-Song rung 1). Fast + deterministic; no
             # LLM. Prefer the dedicated phonology venv (so the precise cmudict path works
@@ -1237,7 +1359,21 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
-            registry = data.get("registry", {})
+            # A garbled, empty, or registry-less body must NOT clobber the rights
+            # registry: reject it with 400 and leave the on-disk registry untouched.
+            # An empty POST body (Content-Length 0) decodes to {} with
+            # _json_malformed=False, same as a well-formed object missing the
+            # "registry" key entirely -- both must be rejected explicitly rather
+            # than silently defaulting to {} (which would wipe the registry). A
+            # body that spells out "registry": {} still clears it, on purpose.
+            if (
+                getattr(self, "_json_malformed", False)
+                or not isinstance(data, dict)
+                or "registry" not in data
+            ):
+                self._send(400, {"ok": False, "error": "malformed JSON body"})
+                return
+            registry = data.get("registry")
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
                 return

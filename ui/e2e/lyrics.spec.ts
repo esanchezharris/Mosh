@@ -89,7 +89,7 @@ test("Finish gaps generates ranked proposals; accept commits one", async ({ page
   await expect(props.getByTestId(/lyric-prop-0-/)).not.toHaveCount(0);
   // accept the top proposal → it commits into the line and the proposals clear
   await page.getByTestId("lyric-accept-0-0").click();
-  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "asserted");
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
@@ -115,7 +115,7 @@ test("suggest line shows an inline ghost; Tab accepts it", async ({ page }) => {
   await expect(page.getByTestId("lyric-proposals-0")).toHaveCount(0);
   // Tab accepts the ghost → it commits into the line and the ghost is gone.
   await page.getByTestId("ghost-text-0").press("Tab");
-  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("lyric-line-0")).toHaveAttribute("data-status", "asserted");
   await expect(page.getByTestId("ghost-line-0")).toHaveCount(0);
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
@@ -220,6 +220,10 @@ test("right-click a wave take → Build flow from this take → an editable grid
   // The grid editor: a confirm bar + per-line editable syllable counts (no text input yet).
   await expect(page.getByTestId("skeleton-confirm-bar")).toBeVisible();
   await expect(page.getByTestId("skeleton-line-0")).toBeVisible();
+  // Extraction (pipeline correction): the line the take REALLY sang lands verbatim with
+  // the "sung" provenance badge — his words survive, visibly.
+  await expect(page.getByTestId("lyric-origin-2")).toHaveAttribute("data-origin", "sung");
+  await expect(page.getByTestId("lyric-line-2")).toContainText("♪ sung");
   const before = (await page.getByTestId("skel-count-0").textContent()) ?? "";
   await page.getByTestId("skel-inc-0").click();   // nudge the syllable target up
   await expect(page.getByTestId("skel-count-0")).not.toHaveText(before);
@@ -247,6 +251,10 @@ test("sing mode: build a flow → + Sing → guide render → accept", async ({ 
   await page.getByTestId("v2-track-header").nth(2).click();
   await page.getByTestId("v2-insp-tab-lyrics").click();
   await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  await page.getByTestId("skeleton-confirm").click();
+  await page.getByTestId("lyric-finish").click();
+  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+  await page.getByTestId("lyric-accept-0-0").click();
 
   // The Gen tab offers "+ Sing" only once the track carries a lyric sheet.
   await page.getByTestId("v2-insp-tab-gen").click();
@@ -256,7 +264,8 @@ test("sing mode: build a flow → + Sing → guide render → accept", async ({ 
   await singBtn.click();
 
   // SingControls: flow coverage from the take + the locked-to-self enrollment copy.
-  await expect(gen.getByTestId("sing-flow")).toContainText("2/2");
+  await expect(gen.getByTestId("sing-flow")).toContainText("3/3");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("1/3");
   await expect(gen.getByTestId("sing-voice")).toContainText("not enrolled");
 
   await gen.getByTestId("gen-render").click();
@@ -277,18 +286,20 @@ test("sing without a sheet is not offered (+ Sing hidden)", async ({ page }) => 
 });
 
 test("sing on a typed sheet (no take flow): 0-coverage copy + Render disabled", async ({ page }) => {
-  // A hand-written sheet has no lyricScore blobs — the real backend rejects the render
-  // outright (no_scored_lines), so the UI must not offer a guaranteed-doomed Render.
   await bootV2(page);
   await page.getByTestId("v2-track-header").nth(2).click();      // Keys — owns the "chords" wave clip
   await page.getByTestId("v2-insp-tab-lyrics").click();
   await page.getByTestId("lyric-create").click();
   await page.getByTestId("lyric-add-line").click();
+  await page.getByTestId("lyric-line-0").getByLabel("line 1", { exact: true }).fill("typed by hand no take");
+  await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click();
+  await page.getByTestId("lyric-assert-0").click();
 
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
   await expect(gen.getByTestId("sing-flow")).toContainText("0/1");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("0/1");
   await expect(gen.getByText("No flow yet")).toBeVisible();
   await expect(gen.getByTestId("gen-render")).toBeDisabled();
 });
@@ -302,12 +313,21 @@ test("sing partial flow: a hand-added line shows as skipped, scored lines still 
   await page.getByTestId("v2-track-header").nth(2).click();
   await page.getByTestId("v2-insp-tab-lyrics").click();
   await expect(page.getByTestId("lyric-panel")).toHaveAttribute("data-has-sheet", "true");
+  await page.getByTestId("skeleton-confirm").click();
+  await page.getByTestId("lyric-finish").click();
+  await expect(page.getByTestId("lyric-proposals-0")).toBeVisible();
+  await page.getByTestId("lyric-accept-0-0").click();
+  await expect(page.getByTestId("lyric-proposals-1")).toBeVisible();
+  await page.getByTestId("lyric-accept-1-0").click();
   await page.getByTestId("lyric-add-line").click();              // typed-later line — no take flow
 
   await page.getByTestId("v2-insp-tab-gen").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
-  await expect(gen.getByTestId("sing-flow")).toContainText("2/3");
+  // Merged fixture: 2 fillable + the extraction-parity sung line (scored) + the
+  // hand-added line (unscored) = 4 lines; two accepted lines are asserted.
+  await expect(gen.getByTestId("sing-flow")).toContainText("3/4");
+  await expect(gen.getByTestId("sing-asserted")).toContainText("2/4");
   await expect(gen.getByTestId("sing-skip-hint")).toContainText("1 line");
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");

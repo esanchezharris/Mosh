@@ -47,6 +47,32 @@ def syllable_count_phones(phones: Sequence[str]) -> int:
     return sum(1 for p in phones if _is_vowel(p))
 
 
+def syllabify_phones(phones: Sequence[str]) -> List[List[str]]:
+    """Split a word's ARPAbet phones into per-syllable phone groups (one vowel each).
+
+    LOSSLESS — the groups concatenate back to the input — so a multi-slot sung word can
+    PROGRESS syllable by syllable ("gon"→"na") instead of re-articulating the whole word
+    on every note. Boundary rule: an intervocalic consonant cluster keeps its LAST consonant
+    as the onset of the following syllable (onset-maximal for a singleton; "win|ter" for a
+    cluster). A word with no vowel (gibberish/unpronounceable) returns one group and never
+    crashes; empty input returns []."""
+    ph = list(phones)
+    if not ph:
+        return []
+    vidx = [i for i, p in enumerate(ph) if _is_vowel(p)]
+    if not vidx:
+        return [ph]
+    cuts = []
+    for a, b in zip(vidx, vidx[1:]):
+        cuts.append(b - 1 if b - a > 1 else b)   # ≥1 consonant between → last one starts next syllable
+    groups, start = [], 0
+    for c in cuts:
+        groups.append(ph[start:c])
+        start = c
+    groups.append(ph[start:])
+    return groups
+
+
 def stress_contour_phones(phones: Sequence[str]) -> str:
     """Per-syllable contour: 'X' for primary/secondary (1/2), 'x' for unstressed (0)."""
     out = []

@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "DrumPattern.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -40,6 +41,29 @@ namespace
     // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
     const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
 
+    bool lyricTextIsCompleteForSing (const juce::String& text)
+    {
+        const auto t = text.trim();
+        if (t.isEmpty() || t.contains ("___"))
+            return false;
+        for (auto p = t.getCharPointer(); ! p.isEmpty(); ++p)
+            if (juce::CharacterFunctions::isLetterOrDigit (*p))
+                return true;
+        return false;
+    }
+
+    bool lyricLineIsAssertedForSing (const juce::ValueTree& line)
+    {
+        return line.hasProperty (ids::lyricScore)
+            && line[ids::status].toString() == "asserted"
+            && lyricTextIsCompleteForSing (line[ids::lyricText].toString());
+    }
+
+    juce::String noAssertedWordsToSingMessage()
+    {
+        return juce::String (juce::CharPointer_UTF8 ("no asserted words to sing \xe2\x80\x94 assert the lyric line first"));
+    }
+
     // Phase 3 — a one-shot lambda timer used for the per-clip reactive-render debounce. Calls fn ONCE
     // after the delay (it stops itself first), so each reactiveTouch just restarts it (coalescing a
     // burst of edits into a single re-render). Fires on the message thread (juce::Timer's thread).
@@ -58,11 +82,10 @@ namespace
     // command logged undoable:true. A bare ValueTree write through the UndoManager would
     // record the property change, but on undo Tracktion deliberately refreshes only the
     // CachedValue and does NOT push the value back into the parameter's currentValue (the
-    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the *setter* must
-    // run on both perform and undo. This UndoableAction does exactly that: it captures the
-    // prior value and replays the proper setter on perform/undo/redo, keeping the live
-    // parameter (and snapshot) in sync at every step. One undo system: it lives inside the
-    // edit's UndoManager transaction, grouped with the command's beginNewTransaction.
+    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the parameter must
+    // be replayed on perform/undo/redo, but without nesting another UndoManager action
+    // while JUCE is already inside this UndoableAction. Tracktion's Mosh patch exposes
+    // setParameterWithoutUndo for that replay path.
     struct SetFaderValueAction final : public juce::UndoableAction
     {
         SetFaderValueAction (te::VolumeAndPanPlugin& p, bool panNotVol, float newValue)
@@ -75,8 +98,20 @@ namespace
 
         void apply (float v)
         {
-            if (isPan) plugin.setPan (v);
-            else       plugin.setVolumeDb (v);
+            if (isPan)
+            {
+                if (v >= -0.005f && v <= 0.005f)
+                    v = 0.0f;
+
+                plugin.panParam->setParameterWithoutUndo (juce::jlimit (-1.0f, 1.0f, v),
+                                                          juce::sendNotification);
+            }
+            else
+            {
+                plugin.volParam->setParameterWithoutUndo (juce::jlimit (0.0f, 1.0f,
+                                                                         te::decibelsToVolumeFaderPosition (v)),
+                                                          juce::sendNotification);
+            }
         }
 
         te::VolumeAndPanPlugin& plugin;
@@ -184,6 +219,97 @@ namespace
         return juce::var (o);
     }
 
+    bool isGeneratedRecipeCommandAllowed (const juce::String& name)
+    {
+        return name == "set_tempo"
+            || name == "set_key"
+            || name == "set_time_signature"
+            || name == "create_track"
+            || name == "assign_sample"
+            || name == "add_midi_clip"
+            || name == "import_clip";
+    }
+
+    bool generatedRecipeRefName (const juce::String& value, juce::String& name)
+    {
+        if (value.startsWith ("${") && value.endsWithChar ('}') && value.length() > 3)
+        {
+            name = value.substring (2, value.length() - 1);
+            return name.isNotEmpty();
+        }
+        return false;
+    }
+
+    juce::var resolveGeneratedRecipeRefs (const juce::var& value, const juce::NamedValueSet& refs,
+                                          juce::StringArray& missing)
+    {
+        if (value.isString())
+        {
+            juce::String name;
+            const auto s = value.toString();
+            if (generatedRecipeRefName (s, name))
+            {
+                if (const auto* found = refs.getVarPointer (juce::Identifier (name)))
+                    return *found;
+                missing.add (s);
+            }
+            return value;
+        }
+
+        if (auto* arr = value.getArray())
+        {
+            juce::Array<juce::var> out;
+            for (auto& item : *arr)
+                out.add (resolveGeneratedRecipeRefs (item, refs, missing));
+            return juce::var (out);
+        }
+
+        if (auto* obj = value.getDynamicObject())
+        {
+            auto* out = new juce::DynamicObject();
+            auto& props = obj->getProperties();
+            for (int i = 0; i < props.size(); ++i)
+            {
+                const auto name = props.getName (i);
+                out->setProperty (name, resolveGeneratedRecipeRefs (props.getValueAt (i), refs, missing));
+            }
+            return juce::var (out);
+        }
+
+        return value;
+    }
+
+    void captureGeneratedRecipeRefs (const juce::var& call, const juce::var& result,
+                                     juce::NamedValueSet& refs)
+    {
+        auto data = result.getProperty ("data", juce::var());
+        if (! data.isObject())
+            return;
+
+        auto capture = call.getProperty ("capture", juce::var());
+        if (auto* obj = capture.getDynamicObject())
+        {
+            auto& props = obj->getProperties();
+            for (int i = 0; i < props.size(); ++i)
+            {
+                const auto name = props.getName (i);
+                auto value = data.getProperty (props.getValueAt (i).toString(), juce::var());
+                if (! value.isVoid())
+                    refs.set (name, value);
+            }
+        }
+
+        const auto bind = call.getProperty ("bind", juce::var()).toString();
+        if (bind.isNotEmpty())
+        {
+            auto value = data.getProperty ("trackId", juce::var());
+            if (value.isVoid()) value = data.getProperty ("clipId", juce::var());
+            if (value.isVoid()) value = data.getProperty ("id", juce::var());
+            if (! value.isVoid())
+                refs.set (juce::Identifier (bind), value);
+        }
+    }
+
     // DRM-001 — the bundled default drum kit. Each pad is a synthesised one-shot
     // (resources/drumkits/mosh-kit, generated by generate_kit.py) mapped to the GM
     // percussion pitch the UI drum sequencer uses (ui/src/ui/drumGrid.ts →
@@ -266,6 +392,8 @@ namespace
         return {};
     }
 
+    constexpr int kCommandLogInspectorMaxEntries = 500;
+
     bool looksLikeCommandLogRecord (const juce::String& line)
     {
         const auto t = line.trim();
@@ -277,6 +405,22 @@ namespace
                && t.contains ("\"ok\"")
                && t.contains ("\"undoable\"");
     }
+
+    juce::var makeCommandLogInspectorEntry (const juce::var& parsed)
+    {
+        if (! parsed.isObject())
+            return {};
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("ts",       parsed.getProperty ("ts", juce::var()));
+        o->setProperty ("seq",      parsed.getProperty ("seq", juce::var()));
+        o->setProperty ("command",  parsed.getProperty ("command", juce::var()));
+        o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
+        o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+        if (parsed.hasProperty ("error"))
+            o->setProperty ("error", parsed.getProperty ("error", juce::var()));
+        return juce::var (o);
+    }
 }
 
 MoshOps::MoshOps (MoshEngine& engineToUse)
@@ -284,6 +428,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
       trainerRegistry (engineToUse.sessionDir())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
@@ -293,26 +438,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     // message thread) to apply peer commits, feed the lock guard, and push presence
     // to the WebView. No relay echo: a remote apply repaints locally only.
     mpSession_ = std::make_unique<MultiplayerSession> (
-        [this] (const juce::var& msg)
-        {
-            // P4 — fetch any by-hash stems this commit references (into the local
-            // edit's audio/by-hash/, so the relative refs resolve), then apply.
-            auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
-            if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
-                for (auto& a : *arr)
-                {
-                    const auto h = a.getProperty ("hash", var()).toString();
-                    const auto e = a.getProperty ("ext", var()).toString();
-                    if (h.isEmpty()) continue;
-                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                        mpSession_->downloadBlob (h, e, dest);
-                }
-            if (trackcommit::apply (eng.edit(), msg.getProperty ("blob", var()).toString()).ok)
-            {
-                eng.markDirty();
-                emitSnapshotInvalidated();
-            }
-        },
+        [this] (const juce::var& msg) { applyMultiplayerCommitMessage (msg); },
         [this] (const juce::String& type, juce::var payload) { emit (type, payload); },
         [this] (bool active, const juce::String& self, const std::map<juce::String, juce::String>& locks)
         {
@@ -324,12 +450,108 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
         [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
 }
 
+void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
+{
+    applyMultiplayerCommitMessage (msg);
+}
+
+void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
+{
+    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
+    if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
+        for (auto& a : *arr)
+        {
+            const auto h = a.getProperty ("hash", var()).toString();
+            const auto e = a.getProperty ("ext", var()).toString();
+            if (h.isEmpty()) continue;
+            if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                mpSession_->downloadBlob (h, e, dest);
+        }
+
+    auto* applyArgs = new DynamicObject();
+    applyArgs->setProperty ("blob", msg.getProperty ("blob", var()));
+    auto* command = new DynamicObject();
+    command->setProperty ("command", "apply_remote_track");
+    command->setProperty ("args", var (applyArgs));
+    auto applied = execute (var (command));
+    if ((bool) applied.getProperty ("ok", false))
+        emitSnapshotInvalidated();
+}
+
 MoshOps::~MoshOps()
 {
     stopTimer();
-    unregisterAllMeterClients();
+    unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
+                                        // masterClient is a separate registration (see below)
+    // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
+    // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
+    // (moshOps.reset() precedes engine.reset()), so if a playback context is still
+    // live here (quit-while-playing), its master LevelMeasurer keeps a raw pointer to
+    // masterClient — which is about to be freed with the rest of `this`. The audio
+    // thread would then write through that dangling pointer on the next block. Mirror
+    // the addClient bookkeeping (lastSeenContext tracks exactly the context we last
+    // registered with, and is nulled out everywhere the context is freed) to remove it
+    // here while the context — and `this` — are both still valid.
+    if (lastSeenContext != nullptr)
+    {
+        lastSeenContext->masterLevels.removeClient (masterClient);
+        lastSeenContext = nullptr;
+    }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
+}
+
+void MoshOps::invalidateCommandLogCache()
+{
+    const juce::ScopedLock sl (commandLogCacheLock_);
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = -1;
+    commandLogPath_.clear();
+    commandLogCachePrimed_ = false;
+}
+
+void MoshOps::refreshCommandLogCacheIfNeeded (const juce::File& file)
+{
+    const auto filePath = file.getFullPathName();
+    const auto fileBytes = file.existsAsFile() ? file.getSize() : 0;
+    const juce::ScopedLock sl (commandLogCacheLock_);
+
+    if (commandLogCachePrimed_ && commandLogPath_ == filePath && commandLogBytes_ == fileBytes)
+        return;
+
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = fileBytes;
+    commandLogPath_ = filePath;
+    commandLogCachePrimed_ = true;
+
+    if (! file.existsAsFile())
+        return;
+
+    if (auto stream = file.createInputStream())
+    {
+        while (! stream->isExhausted())
+        {
+            const auto line = stream->readNextLine().trim();
+            if (! looksLikeCommandLogRecord (line))
+                continue;
+
+            ++commandLogTotal_;
+
+            juce::var parsed;
+            if (juce::JSON::parse (line, parsed).failed())
+                continue;
+
+            auto entry = makeCommandLogInspectorEntry (parsed);
+            if (! entry.isObject())
+                continue;
+
+            commandLogRecentEntries_.add (entry);
+            if (commandLogRecentEntries_.size() > kCommandLogInspectorMaxEntries)
+                commandLogRecentEntries_.remove (0);
+        }
+    }
 }
 
 // ── Metering helpers (Wave 9) ────────────────────────────────────────────────
@@ -611,6 +833,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "regenerate_lyric")     return cmdRegenerateLyric (args);
     if (name == "cancel_lyric_job")     return cmdCancelLyricJob (args);
     if (name == "accept_lyric_proposal") return cmdAcceptLyricProposal (args);
+    if (name == "assert_lyric_line")    return cmdAssertLyricLine (args);
     if (name == "reject_lyric_proposal") return cmdRejectLyricProposal (args);
     if (name == "analyze_lyrics")       return cmdAnalyzeLyrics (args);
     if (name == "get_lyric_corpus_stats") return cmdGetLyricCorpusStats (args);
@@ -698,8 +921,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "clear_automation")        return cmdClearAutomation (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "add_drum_pattern")  return cmdAddDrumPattern (args);
     if (name == "transcribe_clip")   return cmdTranscribeClip (args);
     if (name == "sketch_beatbox")    return cmdSketchBeatbox (args);
+    if (name == "generate_beat_recipe") return cmdGenerateBeatRecipe (args);
     if (name == "add_note")          return cmdAddNote (args);
     if (name == "remove_note")       return cmdRemoveNote (args);
     if (name == "set_note")          return cmdSetNote (args);
@@ -1025,9 +1250,32 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
         line = mosh::LyricLine::create (juce::Uuid().toString(), lineIndex, role);
         lines.appendChild (line, &undoManager());
     }
-    if (args.hasProperty ("text"))            line.setProperty (ids::lyricText,            args.getProperty ("text", var()), &undoManager());
+    if (args.hasProperty ("text"))
+    {
+        // A hand edit on a VERBATIM-sung line demotes its provenance to "edited" —
+        // we never claim an edited line as exactly what the producer sang.
+        if (line[ids::lyricOrigin].toString() == "sung"
+            && args.getProperty ("text", var()).toString() != line[ids::lyricText].toString())
+            line.setProperty (ids::lyricOrigin, "edited", &undoManager());
+        line.setProperty (ids::lyricText, args.getProperty ("text", var()), &undoManager());
+    }
     if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
-    if (args.hasProperty ("seedText"))        line.setProperty (ids::lyricSeedText,        args.getProperty ("seedText", var()), &undoManager());
+    if (args.hasProperty ("seedText"))
+    {
+        // The LyricPanel editor commits hand edits as seedText (review find): on a line
+        // whose text is already finalized (sung/accepted), a differing seed edit IS the
+        // new effective lyric — mirror it into lyricText so the edit takes effect, and
+        // demote a verbatim-"sung" line to "edited" (never claim it verbatim-his again).
+        const auto newSeed = args.getProperty ("seedText", var()).toString();
+        if (line[ids::lyricText].toString().isNotEmpty()
+            && newSeed != line[ids::lyricText].toString())
+        {
+            if (line[ids::lyricOrigin].toString() == "sung")
+                line.setProperty (ids::lyricOrigin, "edited", &undoManager());
+            line.setProperty (ids::lyricText, newSeed, &undoManager());
+        }
+        line.setProperty (ids::lyricSeedText, args.getProperty ("seedText", var()), &undoManager());
+    }
     if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
     if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
     if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
@@ -1040,7 +1288,9 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
     // but must stay `skeleton` while the producer edits the grid (the +/- syllable stepper
     // goes through here) — confirm_skeleton does the skeleton→seed flip. (NOTE: `proposed` is
     // L2's "has proposals" status — distinct — so it's NOT preserved here.)
-    if (line[ids::status].toString() != "skeleton"
+    const bool contentEdited = args.hasProperty ("text") || args.hasProperty ("seedText");
+    if (contentEdited
+        && line[ids::status].toString() != "skeleton"
         && (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty()))
         line.setProperty (ids::status, "seed", &undoManager());
 
@@ -1129,6 +1379,10 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
         lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
         lo->setProperty ("status",          l[ids::status].toString());
+        const bool asserted = l[ids::status].toString() == "asserted"
+                              && lyricTextIsCompleteForSing (l[ids::lyricText].toString());
+        lo->setProperty ("asserted", asserted);
+        lo->setProperty ("singable", lyricLineIsAssertedForSing (l));
         // L2 — transient ranked proposals (a JSON blob; absent ⇒ none) + regen counter.
         if (l.hasProperty (ids::lyricProposals))
         {
@@ -1140,6 +1394,11 @@ juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
         // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
         // sing drawer shows how many lines carry a flow from the take.
         lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
+        // Extraction provenance: the sung-vs-generated distinction for the UI; the heard
+        // blob itself stays out of the snapshot (a boolean, like hasScore).
+        if (l.hasProperty (ids::lyricOrigin))
+            lo->setProperty ("origin", l[ids::lyricOrigin].toString());
+        lo->setProperty ("hasHeard", l.hasProperty (ids::lyricHeard));
         // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
         if (l.hasProperty (ids::lyricAnalysis))
         {
@@ -1331,11 +1590,36 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     if (! props.isArray() || proposalIndex < 0 || proposalIndex >= props.size())
         return errResult ("accept_lyric_proposal", "no proposal at that index");
     const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
+    if (! lyricTextIsCompleteForSing (chosen))
+        return errResult ("accept_lyric_proposal", "proposal has unresolved words");
 
     beginTxn ("accept_lyric_proposal");
     node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
-    node.setProperty (ids::status, "accepted", &undoManager());
+    node.setProperty (ids::status, "asserted", &undoManager());
     node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
+    // Provenance (honest by construction): "mixed" only when a heard-kept word actually
+    // SURVIVES in the accepted text (review find: the blob alone proves what the take
+    // said, not what this proposal kept — a regenerated line that dropped his anchors
+    // must land "generated").
+    {
+        bool heardKept = false;
+        if (node.hasProperty (ids::lyricHeard))
+        {
+            auto tokens = juce::StringArray::fromTokens (chosen.toLowerCase(), " \t", {});
+            for (auto& t : tokens)
+                t = t.trimCharactersAtStart (".,!?'\"-").trimCharactersAtEnd (".,!?'\"-");
+            auto hb = juce::JSON::parse (node[ids::lyricHeard].toString());
+            if (auto* ws = hb.getProperty ("words", var()).getArray())
+                for (auto& w : *ws)
+                    if ((bool) w.getProperty ("kept", false)
+                        && tokens.contains (w.getProperty ("word", var()).toString()
+                                                .toLowerCase()
+                                                .trimCharactersAtStart (".,!?'\"-")
+                                                .trimCharactersAtEnd (".,!?'\"-")))
+                    { heardKept = true; break; }
+        }
+        node.setProperty (ids::lyricOrigin, heardKept ? "mixed" : "generated", &undoManager());
+    }
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
 
@@ -1358,6 +1642,34 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
 
     auto* d = new DynamicObject(); d->setProperty ("text", chosen);
     return okResult ("accept_lyric_proposal", var (d));
+}
+
+juce::var MoshOps::cmdAssertLyricLine (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
+    auto* t = findTrack (trackId);
+    if (t == nullptr) return errResult ("assert_lyric_line", "no track: " + trackId);
+    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
+    if (! sheet.isValid()) return errResult ("assert_lyric_line", "track has no lyric sheet");
+    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
+    if (! node.isValid()) return errResult ("assert_lyric_line", "no line at index " + juce::String (lineIndex));
+
+    const auto assertedText = args.hasProperty ("text")
+        ? args.getProperty ("text", var()).toString()
+        : node[ids::lyricText].toString();
+    if (! lyricTextIsCompleteForSing (assertedText))
+        return errResult ("assert_lyric_line", "line needs complete words before it can be asserted");
+
+    beginTxn ("assert_lyric_line");
+    node.setProperty (ids::lyricText, assertedText.trim(), &undoManager());
+    node.setProperty (ids::status, "asserted", &undoManager());
+    node.removeProperty (ids::lyricProposals, nullptr);
+    logLine ("assert_lyric_line", args, true, {}, true);
+    emitSnapshotInvalidated();
+
+    auto* d = new DynamicObject(); d->setProperty ("text", assertedText.trim());
+    return okResult ("assert_lyric_line", var (d));
 }
 
 juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
@@ -1615,6 +1927,7 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
         auto container = mosh::LyricSheet::lines (sheet);
         const auto scoresVar = spec.getProperty ("lineScores", var());  // Stage 1: aligned 1:1 with lines
+        const auto heardVar  = spec.getProperty ("lineHeard", var());   // extraction: aligned 1:1 with lines
         int li = 0;
         for (auto& lv : *linesVar.getArray())
         {
@@ -1626,12 +1939,36 @@ juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
             line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
             line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
             line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
-            line.setProperty (ids::status,              "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+            // Lyric EXTRACTION (pipeline correction 2026-07-04): a line the producer REALLY
+            // sang lands VERBATIM — text + gapless seed + status "seed" (already done: the
+            // generation loop skips it and rhyme-anchors on it) + origin "sung". A partly-
+            // real line keeps the grid editor (status "skeleton") with his words as seed
+            // anchors, origin "partial". Wordless lines = the pre-correction behavior.
+            const auto sungText = lv.getProperty ("text", var()).toString();
+            const auto lvOrigin = lv.getProperty ("origin", var()).toString();
+            if (sungText.isNotEmpty() && lvOrigin == "sung")
+            {
+                line.setProperty (ids::lyricText,     sungText, nullptr);
+                line.setProperty (ids::lyricSeedText, sungText, nullptr);   // gapless ⇒ not fillable
+                line.setProperty (ids::status,        "seed", nullptr);
+                line.setProperty (ids::lyricOrigin,   "sung", nullptr);
+            }
+            else
+            {
+                line.setProperty (ids::status, "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
+                if (lvOrigin == "partial")
+                    line.setProperty (ids::lyricOrigin, "partial", nullptr);
+            }
             // Phase-3 Stage 1: persist the render-ready score blob (articulation slots +
             // melisma segments) with its line — the Stage-2 SoulX adapter authors the
             // target score from this. Absent from older/degraded specs ⇒ simply no blob.
             if (scoresVar.isArray() && li < scoresVar.size() && scoresVar[li].isObject())
                 line.setProperty (ids::lyricScore, juce::JSON::toString (scoresVar[li], true), nullptr);
+            // Everything the take was HEARD to say (kept AND rejected, with slot hints) —
+            // persisted for future splice boundaries + correction seeds; raw ASR is never
+            // discarded anymore.
+            if (heardVar.isArray() && li < heardVar.size() && heardVar[li].isObject())
+                line.setProperty (ids::lyricHeard, juce::JSON::toString (heardVar[li], true), nullptr);
             ++li;
             container.appendChild (line, nullptr);
         }
@@ -2473,6 +2810,11 @@ juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& arg
     {
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
             return logicalid::track (t->state);
+        // Track-scoped composites may target via clipId only (add_drum_pattern) —
+        // resolve through the clip so a peer's track lock still guards them.
+        if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+            if (auto* tr = c->getTrack())
+                return logicalid::track (tr->state);
         return {};   // unresolvable target -> empty key allows; the command itself will error
     }
 
@@ -3069,6 +3411,7 @@ juce::var MoshOps::cmdReload (const juce::var& args)
         return errResult ("reload", refusal);
     }
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine ("reload", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("reload");
@@ -3149,7 +3492,29 @@ juce::var MoshOps::cmdSplitClip (const juce::var& args)
     auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack());
     if (clipTrack == nullptr) return errResult ("split_clip", "clip not on a clip track");
 
-    const double at = (double) args.getProperty ("time", 0.0);
+    // Split-point normalization (r4 gate-miss fix plan P1): agents and utterances mix
+    // ABSOLUTE and CLIP-RELATIVE times ("split at 8s" on a clip spanning [4,12] can mean
+    // t=8 or start+8). Absolute wins when it lands strictly inside; otherwise a value
+    // that resolves inside as start+t is treated as clip-relative. Exact edges and
+    // truly-outside values error with the resolved point + range (previously Tracktion's
+    // splitClip silently no-opped and we returned ok with no newClipId).
+    const double reqAt = (double) args.getProperty ("time", 0.0);
+    const double cStart = clip->getPosition().getStart().inSeconds();
+    const double cEnd   = clip->getPosition().getEnd().inSeconds();
+    constexpr double kSplitEps = 1.0e-6;
+    const auto insideClip = [&] (double x) { return x > cStart + kSplitEps && x < cEnd - kSplitEps; };
+    double at = reqAt;
+    if (! insideClip (at))
+    {
+        if (const double rel = cStart + reqAt; insideClip (rel))
+            at = rel;
+        else
+            return errResult ("split_clip",
+                "split point outside clip: time " + juce::String (reqAt, 3)
+                + " (relative candidate " + juce::String (cStart + reqAt, 3)
+                + ") not strictly inside [" + juce::String (cStart, 3) + ", "
+                + juce::String (cEnd, 3) + "]");
+    }
     beginTxn ("split_clip");
     auto* newClip = clipTrack->splitClip (*clip, tracktion::TimePosition::fromSeconds (at));
 
@@ -4810,6 +5175,131 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     return okResult ("add_midi_clip", var (data));
 }
 
+// DRM-002 — add_drum_pattern: a whole drum grid in ONE undoable command. The DSL
+// parser (DrumPattern.h) is mirrored 1:1 by ui/src/ui/drumPatternUtil.ts, and the
+// mock case in bridge.mock.ts mirrors THIS handler's semantics + error strings.
+// Policy (owner-approved design, docs/superpowers/specs/2026-07-10-add-drum-pattern-design.md):
+// clipId → per-lane replace (only the lanes named in the pattern are cleared, then
+// re-laid); else a new clip lands on trackId (omitted → new "Drums" drum track).
+// Instrument-less target → trackType "drum" + kit in the SAME transaction (the
+// DRM-001 posture: the pattern must be audible, and specifically as DRUMS, not
+// 4OSC); instrument present → untouched (melodic-808 / custom kits keep working);
+// wave-audio target → error (a front-of-chain sampler clears the track buffer).
+juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
+{
+    // Literal per-arg reads: the agent-catalog contract test regex-matches these.
+    const auto pattern     = args.getProperty ("pattern", var());
+    const auto trackId     = args.getProperty ("trackId", var()).toString();
+    const auto clipId      = args.getProperty ("clipId", var()).toString();
+    const int  stepsPerBar = (int) args.getProperty ("stepsPerBar", 16);
+    const int  bars        = (int) args.getProperty ("bars", 0);
+    const int  velocity    = (int) args.getProperty ("velocity", 100);
+    const double start     = (double) args.getProperty ("start", 0.0);
+    const auto clipName    = args.getProperty ("name", "Drums").toString();
+
+    // Validate + parse + resolve the target BEFORE the transaction: every error
+    // path below leaves no empty undo step (the cmdLoadDrumKit discipline).
+    const auto parsed = parseDrumPattern (pattern, stepsPerBar, bars, velocity);
+    if (! parsed.ok)
+        return errResult ("add_drum_pattern", parsed.error);
+    const auto laneHasPitch = [&parsed] (int pitch)
+    {
+        for (int p : parsed.lanePitches) if (p == pitch) return true;
+        return false;
+    };
+
+    te::MidiClip* targetClip = nullptr;
+    te::AudioTrack* track = nullptr;
+    if (clipId.isNotEmpty())
+    {
+        targetClip = dynamic_cast<te::MidiClip*> (findClip (clipId));
+        if (targetClip == nullptr)
+            return errResult ("add_drum_pattern", "no midi clip with that id");
+    }
+    else if (trackId.isNotEmpty())
+    {
+        track = findTrack (trackId);
+        if (track == nullptr)
+            return errResult ("add_drum_pattern", "no track with that id");
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                return errResult ("add_drum_pattern",
+                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio — a drum sampler would silence it; use a drum track")));
+    }
+
+    beginTxn ("add_drum_pattern");
+    juce::String outClipId, outTrackId;
+    int noteCount = 0;
+    auto& ts = eng.edit().tempoSequence;
+
+    if (targetClip != nullptr)
+    {
+        // Per-lane replace: drop ONLY the named lanes' notes (descending keeps
+        // indices valid — the cmdAssignSample pad-removal idiom), then re-lay.
+        auto& seq = targetClip->getSequence();
+        for (int i = seq.getNumNotes(); --i >= 0;)
+            if (auto* n = seq.getNote (i))
+                if (laneHasPitch (n->getNoteNumber()))
+                    seq.removeNote (*n, &undoManager());
+
+        const int beatsPerBar = ts.getTimeSigAt (targetClip->getPosition().getStart()).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = targetClip->itemID.toString();
+        if (auto* tr = targetClip->getTrack())
+            outTrackId = tr->itemID.toString();
+    }
+    else
+    {
+        if (track == nullptr)
+        {
+            track = createAudioTrack ("Drums");
+            if (track == nullptr) return errResult ("add_drum_pattern", "no track");
+            track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        else if (! trackHasInstrument (*track))
+        {
+            if (track->state.getProperty (ids::trackType, "audio").toString() != "drum")
+                track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        // else: the track's instrument choice is respected (raw-pitch lanes can
+        // drive an assign_sample'd melodic 808 or a custom pad map).
+
+        const auto startTime = tracktion::TimePosition::fromSeconds (start);
+        const int beatsPerBar = ts.getTimeSigAt (startTime).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        const auto endTime = ts.toTime (tracktion::BeatPosition::fromBeats (
+            ts.toBeats (startTime).inBeats() + (double) parsed.bars * beatsPerBar));
+        auto clip = track->insertMIDIClip (clipName, { startTime, endTime }, nullptr);
+        if (clip == nullptr) return errResult ("add_drum_pattern", "insertMIDIClip failed");
+
+        auto& seq = clip->getSequence();
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = clip->itemID.toString();
+        outTrackId = track->itemID.toString();
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", outClipId);
+    data->setProperty ("trackId", outTrackId);
+    data->setProperty ("noteCount", noteCount);
+    data->setProperty ("steps", parsed.totalSteps);
+    data->setProperty ("bars", parsed.bars);
+    logLine ("add_drum_pattern", args, true, {}, true);
+    emitSnapshotInvalidated();
+    if (targetClip != nullptr)
+        reactiveTouch (outClipId);   // add_note parity: a re-laid pattern re-fires a live re-imagine
+    return okResult ("add_drum_pattern", var (data));
+}
+
 // Audio -> MIDI: transcribe a wave clip with Basic Pitch (out-of-process, via the
 // service /transcribe). ASYNC — inference is ~1-3s, so we run it off the message
 // thread and emit transcribe_status {working|done|error}; on success the result is
@@ -5096,6 +5586,118 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
     return okResult ("sketch_beatbox", var (data));
 }
 
+juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
+{
+    auto* body = new DynamicObject();
+    if (args.hasProperty ("mood")) body->setProperty ("mood", args.getProperty ("mood", var()));
+    if (args.hasProperty ("tempo")) body->setProperty ("tempo", args.getProperty ("tempo", var()));
+    if (args.hasProperty ("key")) body->setProperty ("key", args.getProperty ("key", var()));
+    if (args.hasProperty ("seed")) body->setProperty ("seed", args.getProperty ("seed", var()));
+    if (args.hasProperty ("lead")) body->setProperty ("lead", args.getProperty ("lead", var()));
+    if (args.hasProperty ("libraryDir")) body->setProperty ("libraryDir", args.getProperty ("libraryDir", var()));
+    if (args.hasProperty ("paletteManifest")) body->setProperty ("paletteManifest", args.getProperty ("paletteManifest", var()));
+
+    auto generated = jobManager.generateBeatRecipe (var (body));
+    if (! generated.isObject() || ! (bool) generated.getProperty ("ok", false))
+    {
+        const auto msg = generated.isObject()
+            ? generated.getProperty ("error", var ("recipe generation service unavailable")).toString()
+            : juce::String ("recipe generation service unavailable");
+        logLine ("generate_beat_recipe", args, false, msg, false);
+        return errResult ("generate_beat_recipe", msg);
+    }
+
+    auto program = generated.getProperty ("program", var());
+    auto commands = program.getProperty ("commands", var());
+    if (! commands.isArray() || commands.size() == 0)
+    {
+        logLine ("generate_beat_recipe", args, false, "empty generated program", false);
+        return errResult ("generate_beat_recipe", "empty generated program");
+    }
+
+    const bool ownBatch = ! inBatch;
+    if (ownBatch)
+    {
+        undoManager().beginNewTransaction ("generate_beat_recipe");
+        inBatch = true;
+    }
+
+    juce::NamedValueSet refs;
+    juce::Array<var> applied;
+    juce::String failure;
+    int appliedCount = 0;
+
+    for (auto& call : *commands.getArray())
+    {
+        const auto name = call.getProperty ("command", var()).toString();
+        if (! isGeneratedRecipeCommandAllowed (name))
+        {
+            failure = "generated program contains disallowed command: " + name;
+            break;
+        }
+
+        juce::StringArray missing;
+        auto resolvedArgs = resolveGeneratedRecipeRefs (call.getProperty ("args", var (new DynamicObject())),
+                                                        refs, missing);
+        if (! missing.isEmpty())
+        {
+            failure = "generated program has unbound ref " + missing.joinIntoString (", ");
+            break;
+        }
+
+        auto* step = new DynamicObject();
+        step->setProperty ("command", name);
+        step->setProperty ("args", resolvedArgs);
+        auto stepResult = execute (var (step));
+        const bool ok = (bool) stepResult.getProperty ("ok", false);
+
+        auto* record = new DynamicObject();
+        record->setProperty ("command", name);
+        record->setProperty ("args", resolvedArgs);
+        record->setProperty ("ok", ok);
+        if (! ok)
+            record->setProperty ("error", stepResult.getProperty ("error", var()).toString());
+        applied.add (var (record));
+
+        if (! ok)
+        {
+            failure = name + ": " + stepResult.getProperty ("error", var ("failed")).toString();
+            break;
+        }
+
+        captureGeneratedRecipeRefs (call, stepResult, refs);
+        ++appliedCount;
+    }
+
+    if (ownBatch)
+        inBatch = false;
+
+    if (failure.isNotEmpty())
+    {
+        if (ownBatch && appliedCount > 0)
+        {
+            undoManager().undo();
+            eng.markDirty();
+            emitSnapshotInvalidated();
+        }
+        logLine ("generate_beat_recipe", args, false, failure, false);
+        return errResult ("generate_beat_recipe", failure);
+    }
+
+    logLine ("generate_beat_recipe", args, true, {}, false);
+    emitSnapshotInvalidated();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "done");
+    data->setProperty ("recipeId", generated.getProperty ("recipeId", var()));
+    data->setProperty ("commandCount", commands.size());
+    data->setProperty ("appliedCount", appliedCount);
+    data->setProperty ("unresolved", program.getProperty ("unresolved", var (Array<var>{})));
+    data->setProperty ("provenance", generated.getProperty ("provenance", var()));
+    data->setProperty ("applied", var (applied));
+    return okResult ("generate_beat_recipe", var (data));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Wave 4 — MIDI note editing (piano-roll). Notes are addressed in BEATS within
 // the clip's sequence; the index is the position in getNotes() for the current
@@ -5177,9 +5779,17 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     beginTxn ("quantize_notes");
     int moved = 0;
+    // Snapshot the note pointers ONCE before mutating: setStartAndLength() writes
+    // IDs::b, which triggers tracktion's synchronous re-sort of the live MidiList
+    // (the same hazard MidiList::moveAllBeatPositions/rescale guard against by
+    // binding getNotes() once). Walking seq.getNote(i) live means a note that gets
+    // re-sorted past an already-visited index is silently skipped; iterating a
+    // fixed local list avoids that.
+    juce::Array<te::MidiNote*> notes;
     for (int i = 0; i < seq.getNumNotes(); ++i)
+        notes.add (seq.getNote (i));
+    for (auto* note : notes)
     {
-        auto* note = seq.getNote (i);
         const double start = note->getStartBeat().inBeats();
         const double q = std::round (start / division) * division;
         const double next = start + (q - start) * strength;
@@ -5846,6 +6456,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
                                                 : juce::ValueTree();
         if (! sheet.isValid())
             return errResult ("render_layer", "sing needs a lyric sheet on the clip's track (build a flow from a take first)");
+        auto lines = mosh::LyricSheet::lines (sheet);
+        int singableLines = 0;
+        for (int i = 0; i < lines.getNumChildren(); ++i)
+            if (lyricLineIsAssertedForSing (lines.getChild (i)))
+                ++singableLines;
+        if (singableLines == 0)
+            return errResult ("render_layer", noAssertedWordsToSingMessage());
     }
 
     // Phase 3 — snapshot the reactive epoch at submit; finalizeRender drops a result whose epoch the
@@ -5964,21 +6581,19 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         for (int i = 0; i < lines.getNumChildren(); ++i)
         {
             auto l = lines.getChild (i);
+            if (! lyricLineIsAssertedForSing (l))
+                continue;
             auto* lo = new DynamicObject();
-            const auto text = l[ids::lyricText].toString().isNotEmpty()
-                                  ? l[ids::lyricText].toString()
-                                  : l[ids::lyricSeedText].toString();
-            lo->setProperty ("text", text);
-            if (l.hasProperty (ids::lyricScore))
-            {
-                // Guard the parse like the file's other transient JSON blobs (lyricProposals,
-                // lyricAnalysis) — a corrupt persisted blob must be excluded, not sent as null.
-                const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
-                if (parsed.isObject())
-                    lo->setProperty ("score", parsed);
-            }
+            lo->setProperty ("text", l[ids::lyricText].toString());
+            const auto parsed = juce::JSON::parse (l[ids::lyricScore].toString());
+            if (! parsed.isObject())
+                continue;
+            lo->setProperty ("score", parsed);
+            lo->setProperty ("asserted", true);
             arr.add (var (lo));
         }
+        if (arr.isEmpty())
+            return errResult ("render_layer", noAssertedWordsToSingMessage());
         singLines = var (arr);
         const auto singJson = juce::JSON::toString (singLines, true);
         const auto singSig = juce::MD5 (singJson.toRawUTF8(), (size_t) singJson.getNumBytesAsUTF8()).toHexString();
@@ -6100,10 +6715,31 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         const int waitTimeoutMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
             "MOSH_RENDER_WAIT_TIMEOUT_MS", defaultWaitMs).getIntValue());
         const int maxPolls = juce::jmax (1, waitTimeoutMs / 50);
+        const int statusConnectMs = adapter == "soulx" ? 350 : 1000;
+        const int healthConnectMs = 250;
+        const int maxSilentStatusPolls = adapter == "soulx" ? 3 : 5;
+        int silentStatusPolls = 0;
         juce::String lastErr;
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
-            auto st = jobManager.jobStatus (jobId);
+            auto st = jobManager.jobStatus (jobId, statusConnectMs);
+            const bool statusReachable = st.isObject();
+            if (! statusReachable)
+            {
+                ++silentStatusPolls;
+                if (output.existsAsFile() && manifest.existsAsFile())
+                    break;
+                if (silentStatusPolls >= maxSilentStatusPolls && ! jobManager.isHealthy (healthConnectMs))
+                {
+                    lastErr = "generative service stopped answering /status and /health while waiting for "
+                              + adapter + " render " + jobId;
+                    break;
+                }
+                juce::Thread::sleep (50);
+                continue;
+            }
+
+            silentStatusPolls = 0;
             const auto status = st.getProperty ("status", var()).toString();
             if (const auto err = st.getProperty ("error", var()).toString(); err.isNotEmpty()) lastErr = err;
             emit ("layer_render_progress", [&] { auto* o = new DynamicObject();
@@ -6129,12 +6765,34 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     // soulx's real SSH backend runs up to 900s — poll long enough that a legitimate
     // slow render isn't abandoned as a false 'error' while the job completes unseen.
     const int asyncPolls = node[ids::modelAdapter].toString() == "soulx" ? 9600 : 1800;
-    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls, submitEpoch]
+    const auto asyncAdapter = node[ids::modelAdapter].toString();
+    std::thread ([this, clipId, jobId, output, manifest, fp, asyncPolls, submitEpoch, asyncAdapter]
     {
+        const int statusConnectMs = asyncAdapter == "soulx" ? 350 : 1000;
+        const int healthConnectMs = 250;
+        const int maxSilentStatusPolls = asyncAdapter == "soulx" ? 3 : 5;
+        int silentStatusPolls = 0;
         juce::String lastErr;
         for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
-            auto st = jobManager.jobStatus (jobId);
+            auto st = jobManager.jobStatus (jobId, statusConnectMs);
+            const bool statusReachable = st.isObject();
+            if (! statusReachable)
+            {
+                ++silentStatusPolls;
+                if (output.existsAsFile() && manifest.existsAsFile())
+                    break;
+                if (silentStatusPolls >= maxSilentStatusPolls && ! jobManager.isHealthy (healthConnectMs))
+                {
+                    lastErr = "generative service stopped answering /status and /health while waiting for "
+                              + asyncAdapter + " render " + jobId;
+                    break;
+                }
+                juce::Thread::sleep (100);
+                continue;
+            }
+
+            silentStatusPolls = 0;
             const auto status = st.getProperty ("status", juce::var()).toString();
             const auto progress = st.getProperty ("progress", 0.0);
             if (const auto err = st.getProperty ("error", juce::var()).toString(); err.isNotEmpty()) lastErr = err;
@@ -6847,13 +7505,18 @@ juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
     juce::String path = args.getProperty ("path", var()).toString();
     if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
     bool loaded = false;
+    juce::String loadError;   // AL-022 — surfaced below when the best-effort load fails
     if (path.isNotEmpty())
         if (auto* r = asRave (plugin.get()))
+        {
             loaded = r->loadModelFromFile (juce::File (path));
+            if (! loaded) loadError = r->lastLoadError();
+        }
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("modelLoaded", loaded);
+    if (! loaded && loadError.isNotEmpty()) data->setProperty ("lastError", loadError);
     logLine ("add_rave_insert", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_rave_insert", var (data));
@@ -6886,7 +7549,15 @@ juce::var MoshOps::cmdLoadRaveModel (const juce::var& args)
     const bool ok = r->loadModelFromFile (juce::File (path));
     logLine ("load_rave_model", args, ok, ok ? juce::String() : juce::String ("load failed"), false);
     emitSnapshotInvalidated();
-    if (! ok) return errResult ("load_rave_model", "could not load model: " + path);
+    if (! ok)
+    {
+        // AL-022 — append the engine's diagnostic (exception message / failure
+        // reason) to the error, when one was captured. Additive: the base
+        // message is unchanged when there is no diagnostic to add.
+        const auto detail = r->lastLoadError();
+        return errResult ("load_rave_model", "could not load model: " + path
+            + (detail.isNotEmpty() ? (" (" + detail + ")") : juce::String()));
+    }
     auto* data = new DynamicObject();
     data->setProperty ("applied", true);
     data->setProperty ("describe", r->describe());
@@ -7624,60 +8295,28 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
     // Modelled on cmdListAudioDevices / cmdListPlugins: returns okResult directly.
     int limit = (int) args.getProperty ("limit", 50);
     if (limit <= 0) limit = 50;
-    if (limit > 500) limit = 500;                    // clamp to a sane max
+    if (limit > kCommandLogInspectorMaxEntries) limit = kCommandLogInspectorMaxEntries;
 
     const auto file = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    refreshCommandLogCacheIfNeeded (file);
 
-    Array<var> entries;
-    int total = 0;
-
-    if (file.existsAsFile())
-    {
-        if (auto stream = file.createInputStream())
-        {
-            juce::StringArray recentLines;
-
-            while (! stream->isExhausted())
-            {
-                const auto line = stream->readNextLine().trim();
-                if (! looksLikeCommandLogRecord (line))
-                    continue;
-
-                ++total;
-                recentLines.add (line);
-                if (recentLines.size() > limit)
-                    recentLines.remove (0);
-            }
-
-            for (auto& line : recentLines)
-            {
-                var parsed;
-                if (JSON::parse (line, parsed).failed() || ! parsed.isObject())
-                    continue;
-
-                auto* o = new DynamicObject();
-                o->setProperty ("ts",       parsed.getProperty ("ts", var()));
-                o->setProperty ("seq",      parsed.getProperty ("seq", var()));
-                o->setProperty ("command",  parsed.getProperty ("command", var()));
-                o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
-                o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
-                if (parsed.hasProperty ("error"))
-                    o->setProperty ("error", parsed.getProperty ("error", var()));
-                entries.add (var (o));
-            }
-        }
-    }
-
-    // Most-recent-first, limited to the last `limit` entries.
     Array<var> recent;
-    for (int i = entries.size() - 1; i >= 0 && recent.size() < limit; --i)
-        recent.add (entries.getReference (i));
+    int total = 0;
+    double logBytes = 0.0;
+    {
+        const juce::ScopedLock sl (commandLogCacheLock_);
+        total = (int) commandLogTotal_;
+        logBytes = (double) juce::jmax<juce::int64> (commandLogBytes_, 0);
+
+        for (int i = commandLogRecentEntries_.size() - 1; i >= 0 && recent.size() < limit; --i)
+            recent.add (commandLogRecentEntries_.getReference (i));
+    }
 
     auto* data = new DynamicObject();
     data->setProperty ("entries", recent);
     data->setProperty ("total", total);
     data->setProperty ("limit", limit);
-    data->setProperty ("logBytes", file.existsAsFile() ? (double) file.getSize() : 0.0);
+    data->setProperty ("logBytes", logBytes);
     return okResult ("get_command_log", var (data));
 }
 
@@ -7831,6 +8470,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -7855,6 +8495,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     }
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8995,7 +9636,35 @@ void MoshOps::logLine (const juce::String& command, const juce::var& args,
     o->setProperty ("ok", ok);
     if (error.isNotEmpty()) o->setProperty ("error", error);
     o->setProperty ("undoable", undoable);
-    logFile.appendText (JSON::toString (var (o), true) + "\n");
+    const auto record = var (o);
+    const auto line = JSON::toString (record, true);
+    const auto filePath = logFile.getFullPathName();
+    const auto fileBytesBefore = logFile.existsAsFile() ? logFile.getSize() : 0;
+    logFile.appendText (line + "\n");
+    const auto fileBytesAfter = logFile.existsAsFile() ? logFile.getSize() : 0;
+
+    const juce::ScopedLock sl (commandLogCacheLock_);
+    if (commandLogCachePrimed_ && commandLogPath_ == filePath && commandLogBytes_ == fileBytesBefore)
+    {
+        ++commandLogTotal_;
+
+        auto entry = makeCommandLogInspectorEntry (record);
+        if (entry.isObject())
+        {
+            commandLogRecentEntries_.add (entry);
+            if (commandLogRecentEntries_.size() > kCommandLogInspectorMaxEntries)
+                commandLogRecentEntries_.remove (0);
+        }
+
+        commandLogBytes_ = fileBytesAfter;
+        return;
+    }
+
+    commandLogRecentEntries_.clearQuick();
+    commandLogTotal_ = 0;
+    commandLogBytes_ = -1;
+    commandLogPath_.clear();
+    commandLogCachePrimed_ = false;
 }
 
 // ── A3 — crash-recovery journal ───────────────────────────────────────────────

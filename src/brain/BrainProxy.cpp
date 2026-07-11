@@ -55,7 +55,14 @@ namespace
     String env (const char* name)
     {
         const auto v = SystemStats::getEnvironmentVariable (name, {});
-        return v.isNotEmpty() ? v : bundledBrainConfig().getValue (name, {});
+        if (v.isNotEmpty())
+            return v;
+
+        const auto ignoreBundled = SystemStats::getEnvironmentVariable ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", {});
+        if (ignoreBundled == "1" || ignoreBundled.equalsIgnoreCase ("true"))
+            return {};
+
+        return bundledBrainConfig().getValue (name, {});
     }
 
     // OpenAI reasoning models (gpt-5/6, o-series) reject `temperature` and use

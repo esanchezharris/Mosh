@@ -46,7 +46,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
-        "add_midi_clip", "set_track_input", "set_track_output", "add_send",
+        // DRM-002 — composite: can create a clip AND mutate track instrument/type.
+        "add_drum_pattern",
+        "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",
         "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
         "set_automation_point", "clear_automation",
         // LYR-001 — lyric sheet mutations target a track (args carry trackId).
@@ -54,7 +56,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_lyric_line", "remove_lyric_line",
         // LYR-L2 — generation + proposal review also target one track's sheet.
         "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-        "cancel_lyric_job", "accept_lyric_proposal", "reject_lyric_proposal",
+        "cancel_lyric_job", "accept_lyric_proposal", "assert_lyric_line", "reject_lyric_proposal",
         // LYR-L1 — analysis lands a transient blob on one track's sheet.
         "analyze_lyrics",
         // LYR Phase 2 — confirm the proposed flow grid (flips this track's lines proposed→seed).
@@ -67,7 +69,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
-        "transcribe_clip", "create_render_layer",
+        "transcribe_clip", "add_render_layer", "create_render_layer",
+        "set_render_param", "compile_render", "render_layer", "cancel_render",
+        "accept_render", "reject_render", "reset_render_layer", "bypass_layer",
+        "freeze_layer", "bounce_layer_to_clip", "remove_render_layer",
         "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
         "build_skeleton_from_clip", // LYR Phase 2 — gibberish skeleton (lands a sheet on the clip's track)
     };

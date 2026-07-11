@@ -12,7 +12,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+if [[ -n "${MOSH_SERVICE_LOG:-}" ]]; then
+  mkdir -p "$(dirname "$MOSH_SERVICE_LOG")" 2>/dev/null || true
+  exec >> "$MOSH_SERVICE_LOG" 2>&1
+  printf '[run.sh] cwd=%s\n' "$PWD"
+fi
+
 REQUESTED_MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-}"
+REQUESTED_MOSH_SERVICE_PYTHON="${MOSH_SERVICE_PYTHON:-}"
+REQUESTED_MOSH_RECIPE_LIBRARY="${MOSH_RECIPE_LIBRARY:-}"
+REQUESTED_MOSH_PALETTE_MANIFEST="${MOSH_PALETTE_MANIFEST:-}"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 
 # Persisted setup from setup-sa3.sh (resolved paths + MOSH_ENABLE_SA3). Optional —
@@ -39,20 +48,11 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # Transform (RAVE timbre transfer, Route C) lives in its own venv; .transform.env
 # (written by transform/setup-transform.sh) exports TRANSFORM_PY + RAVE_MODEL_DIR.
 # Absent → the `transform` adapter falls back to the deterministic fake (Route B).
-TRANSFORM_ENVFILE="${MOSH_TRANSFORM_ENVFILE:-$HOME/Library/Mosh/transform/transform.env}"
-[[ -f "$TRANSFORM_ENVFILE" ]] && source "$TRANSFORM_ENVFILE"
-[[ -z "${TRANSFORM_PY:-}" && -f transform/.transform.env ]] && source ./transform/.transform.env
-transform_ready=0
-if [[ -x "${TRANSFORM_PY:-}" && -n "${RAVE_MODEL_DIR:-}" ]]; then
-  if [[ -n "$(find "$RAVE_MODEL_DIR" -maxdepth 1 -name '*.ts' -print -quit 2>/dev/null)" ]]; then
-    transform_ready=1
-  fi
-fi
-if [[ "$transform_ready" == "0" && -x transform/setup-transform.sh ]]; then
-  ./transform/setup-transform.sh >/dev/null 2>&1 || true
-  [[ -f "$TRANSFORM_ENVFILE" ]] && source "$TRANSFORM_ENVFILE"
-  [[ -z "${TRANSFORM_PY:-}" && -f transform/.transform.env ]] && source ./transform/.transform.env
-fi
+[[ -f transform/.transform.env ]] && source ./transform/.transform.env
+[[ -f .recipe.env ]] && source ./.recipe.env
+[[ -n "$REQUESTED_MOSH_SERVICE_PYTHON" ]] && export MOSH_SERVICE_PYTHON="$REQUESTED_MOSH_SERVICE_PYTHON"
+[[ -n "$REQUESTED_MOSH_RECIPE_LIBRARY" ]] && export MOSH_RECIPE_LIBRARY="$REQUESTED_MOSH_RECIPE_LIBRARY"
+[[ -n "$REQUESTED_MOSH_PALETTE_MANIFEST" ]] && export MOSH_PALETTE_MANIFEST="$REQUESTED_MOSH_PALETTE_MANIFEST"
 # Phase-4 SFT lane lives in its own mlx-lm venv; .sft.env (written by
 # sft/setup-sft.sh) exports SFT_PY for the trainer CLI. Absent → the SFT lane is
 # simply unavailable; the rest of the service is unaffected.
@@ -63,15 +63,19 @@ fi
 [[ -f phonology/.phonology.env ]] && source ./phonology/.phonology.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
-export MOSH_LORA_DIR="${MOSH_LORA_DIR:-$HOME/Library/Mosh/loras}"   # LoRA rack library (drop-in .safetensors + cards)
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 
 # SA3 is on by default; the carve runs under the MLX venv when present, else this
 # silently falls back to system python3 (FakeAdapter only). Set MOSH_ENABLE_SA3=0
 # to force FakeAdapter even when the venv exists.
-PY="python3"
-if [[ "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
+PY="${MOSH_SERVICE_PYTHON:-python3}"
+if [[ -z "${MOSH_SERVICE_PYTHON:-}" && "${MOSH_ENABLE_SA3:-1}" == "1" && -x "$SA3_MLX_DIR/.venv/bin/python" ]]; then
   PY="$SA3_MLX_DIR/.venv/bin/python"
+fi
+
+if [[ -n "${MOSH_SERVICE_LOG:-}" ]]; then
+  printf '[run.sh] py=%s MOSH_SERVICE_PYTHON=%s MOSH_RECIPE_LIBRARY=%s MOSH_PALETTE_MANIFEST=%s\n' \
+    "$PY" "${MOSH_SERVICE_PYTHON:-}" "${MOSH_RECIPE_LIBRARY:-}" "${MOSH_PALETTE_MANIFEST:-}"
 fi
 
 exec "$PY" server.py "$@"

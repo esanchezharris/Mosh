@@ -67,6 +67,7 @@ def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
 
     dry = ART / "04c_rave_insert_dry.wav"
     wet = ART / "04c_rave_insert_wet.wav"
+    wet2 = ART / "04c_rave_insert_wet_postreset.wav"   # after reset_rave (rebuild+swap)
     cmds = [
         {"command": "create_track", "args": {"name": "Rave"}, "capture": {"T": "trackId"}},
         {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}},
@@ -75,6 +76,11 @@ def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
         {"command": "export_audio", "args": {"file": str(dry)}},
         {"command": "set_rave_param", "args": {"trackId": "${T}", "index": "${RI}", "value": 100}},   # full wet
         {"command": "export_audio", "args": {"file": str(wet)}},
+        # reset_rave rebuilds the model + atomically swaps it in (RT-safe reset). Re-export and
+        # assert the insert still transforms gap-free afterwards, exercising RaveEngine::reset's
+        # rebuild-swap path end-to-end (a broken rebuild → silent/untransformed/gappy = fail).
+        {"command": "reset_rave", "args": {"trackId": "${T}", "index": "${RI}"}},
+        {"command": "export_audio", "args": {"file": str(wet2)}},
     ]
     results, proc = run_script(ctx.bin, cmds, "verify-rave-insert", timeout=300)
 
@@ -89,25 +95,38 @@ def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
                 "detail": {"stage": "model load", "add_result": add, "stderr": proc.stderr[-400:]}}
 
     fails = failed_commands(results)
-    if fails or not wet.exists() or not dry.exists():
+    if fails or not wet.exists() or not dry.exists() or not wet2.exists():
         return {"check": name, "pass": False,
                 "detail": {"failed_commands": fails, "wet": wet.exists(), "dry": dry.exists(),
-                           "stderr": proc.stderr[-500:]}}
+                           "wet_postreset": wet2.exists(), "stderr": proc.stderr[-500:]}}
 
     from verify import load_wav, mono  # reuse the WAV loader
-    wm = mono(load_wav(wet)[0]); sr = load_wav(wet)[1]
-    sw = stats(wet)
-    transformed = diff_rms(str(dry), str(wet))
 
     # Skip the head/tail latency regions (startup zeros + PDC tail are legitimate) and
     # look for dropped blocks in the steady-state middle.
     skip = 8192
-    mid = wm[skip: max(skip, wm.size - skip)]
-    gap = _max_zero_run(mid) if mid.size else 0
 
-    ok = bool(sw["rms"] > 0.01 and transformed > 0.01 and gap < 256)
+    def _analyze(path):
+        m = mono(load_wav(path)[0]); srr = load_wav(path)[1]
+        st = stats(path)
+        t = diff_rms(str(dry), str(path))
+        mid = m[skip: max(skip, m.size - skip)]
+        g = _max_zero_run(mid) if mid.size else 0
+        return srr, st, t, g
+
+    sr, sw, transformed, gap = _analyze(wet)
+    # Post-reset export must ALSO be non-silent, transformed vs dry, and gap-free — i.e. the
+    # reset rebuilt a working pipeline (not a dead/half-reset handler nor a lost model).
+    sr2, sw2, transformed2, gap2 = _analyze(wet2)
+
+    ok = bool(sw["rms"] > 0.01 and transformed > 0.01 and gap < 256
+              and sw2["rms"] > 0.01 and transformed2 > 0.01 and gap2 < 256)
     return {"check": name, "pass": ok,
             "detail": {"wav": str(wet), **sw, "diff_from_dry_rms": transformed,
                        "max_zero_run_samples": gap, "gap_threshold": 256, "samplerate": sr,
+                       "postreset": {"wav": str(wet2), **sw2, "diff_from_dry_rms": transformed2,
+                                     "max_zero_run_samples": gap2},
                        "note": "synthetic scripted RAVE-shaped model through anira+LibTorch; "
-                               "gap-free export proves non-real-time mode during render"}}
+                               "gap-free export proves non-real-time mode during render; the "
+                               "post-reset export proves RaveEngine::reset()'s RT-safe "
+                               "rebuild-swap yields a working pipeline"}}

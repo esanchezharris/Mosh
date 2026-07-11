@@ -1,0 +1,121 @@
+{
+  "sourceId": "a3b-r4-cuda-next-run",
+  "commonStartCommands": [
+    { "command": "create_track", "args": { "name": "Kick", "type": "drum" }, "bind": "TKICK" },
+    { "command": "create_track", "args": { "name": "Keys" }, "bind": "TKEYS" },
+    { "command": "create_track", "args": { "name": "Sub" }, "bind": "TSUB" },
+    { "command": "create_track", "args": { "name": "Lead" }, "bind": "TLEAD" },
+    { "command": "add_midi_clip", "args": { "trackId": "$TKEYS", "start": 4, "length": 8 }, "bind": "CKEYS" },
+    { "command": "add_note", "args": { "clipId": "$CKEYS", "pitch": 55, "start": 0, "length": 1, "velocity": 90 } },
+    { "command": "add_note", "args": { "clipId": "$CKEYS", "pitch": 58, "start": 2, "length": 1, "velocity": 110 } },
+    { "command": "add_note", "args": { "clipId": "$CKEYS", "pitch": 62, "start": 4, "length": 0.5, "velocity": 64 } },
+    { "command": "add_test_tone_clip", "args": { "trackId": "$TSUB", "seconds": 3, "freq": 55 }, "bind": "CSUB" },
+    { "command": "load_builtin", "args": { "trackId": "$TKEYS", "type": "delay" } },
+    { "command": "create_section", "args": { "name": "Drop", "startBeat": 0, "endBeat": 32 } },
+    { "command": "create_annotation", "args": { "text": "tighten this transition", "beat": 16 } },
+    { "command": "create_lyric_sheet", "args": { "trackId": "$TLEAD", "topic": "midnight drive", "mood": "wistful" } },
+    { "command": "set_lyric_line", "args": { "trackId": "$TLEAD", "lineIndex": 0, "text": "taillights paint the highway red" } },
+    { "command": "create_render_layer", "args": { "clipId": "$CSUB" } },
+    { "command": "render_layer", "args": { "clipId": "$CSUB" } }
+  ],
+  "clusters": [
+    {
+      "name": "assign_sample",
+      "examples": [
+        {
+          "id": "assign-sample-kick-id",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Map /Users/emiliosanchez-harris/Music/mosh-sft-assets/kick.wav to track 17 on note 38 so I can trigger it from the kit.",
+          "targetCommands": [
+            { "command": "assign_sample", "args": { "trackId": "$TKICK", "note": 38, "file": "/Users/emiliosanchez-harris/Music/mosh-sft-assets/kick.wav", "mode": "drum" } }
+          ],
+          "goldCommandNames": ["assign_sample"]
+        },
+        {
+          "id": "assign-sample-lead-name",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Load /Users/emiliosanchez-harris/Music/mosh-sft-assets/loop.wav onto the Lead track on note 48 and make it melodic so it follows the keyboard.",
+          "targetCommands": [
+            { "command": "assign_sample", "args": { "trackId": "$TLEAD", "note": 48, "file": "/Users/emiliosanchez-harris/Music/mosh-sft-assets/loop.wav", "mode": "melodic" } }
+          ],
+          "goldCommandNames": ["assign_sample"]
+        },
+        {
+          "id": "assign-sample-lead-id",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Put /Users/emiliosanchez-harris/Music/mosh-sft-assets/loop.wav on track 20 at note 52 in melodic mode.",
+          "targetCommands": [
+            { "command": "assign_sample", "args": { "trackId": "$TLEAD", "note": 52, "file": "/Users/emiliosanchez-harris/Music/mosh-sft-assets/loop.wav", "mode": "melodic" } }
+          ],
+          "goldCommandNames": ["assign_sample"]
+        }
+      ]
+    },
+    {
+      "name": "load_drum_kit",
+      "examples": [
+        {
+          "id": "load-kit-kick-name",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Load the drum kit on the Kick track.",
+          "targetCommands": [
+            { "command": "load_drum_kit", "args": { "trackId": "$TKICK" } }
+          ],
+          "goldCommandNames": ["load_drum_kit"]
+        },
+        {
+          "id": "load-kit-kick-id",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Put a built-in drum kit on track 17.",
+          "targetCommands": [
+            { "command": "load_drum_kit", "args": { "trackId": "$TKICK" } }
+          ],
+          "goldCommandNames": ["load_drum_kit"]
+        },
+        {
+          "id": "load-kit-builtins",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Load the built-in drums on the track called Kick.",
+          "targetCommands": [
+            { "command": "load_drum_kit", "args": { "trackId": "$TKICK" } }
+          ],
+          "goldCommandNames": ["load_drum_kit"]
+        }
+      ]
+    },
+    {
+      "name": "set_track_type",
+      "examples": [
+        {
+          "id": "set-type-keys-id",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Turn track 18 into drums.",
+          "targetCommands": [
+            { "command": "set_track_type", "args": { "trackId": "$TKEYS", "type": "drum" } }
+          ],
+          "goldCommandNames": ["set_track_type"]
+        },
+        {
+          "id": "set-type-keys-kit-id",
+          "intent": "ACK_GOT_IT",
+          "utterance": "I want track 18 to use the drum sampler and kit.",
+          "targetCommands": [
+            { "command": "set_track_type", "args": { "trackId": "$TKEYS", "type": "drum" } },
+            { "command": "load_drum_kit", "args": { "trackId": "$TKEYS" } }
+          ],
+          "goldCommandNames": ["set_track_type", "load_drum_kit"]
+        },
+        {
+          "id": "set-type-midi-track",
+          "intent": "ACK_GOT_IT",
+          "utterance": "Set the track with the MIDI clip on it to drum mode and load the built-in kit.",
+          "targetCommands": [
+            { "command": "set_track_type", "args": { "trackId": "$TKEYS", "type": "drum" } },
+            { "command": "load_drum_kit", "args": { "trackId": "$TKEYS" } }
+          ],
+          "goldCommandNames": ["set_track_type", "load_drum_kit"]
+        }
+      ]
+    }
+  ]
+}

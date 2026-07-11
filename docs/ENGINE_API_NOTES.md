@@ -129,6 +129,26 @@ const char* DistortionPlugin::xmlTypeName = "Distortion";
 ```
 `PluginRenderContext fc`: `fc.destBuffer` (`juce::AudioBuffer<float>*`), `fc.bufferNumSamples`, `fc.bufferStartSample`, `fc.bufferForMidiMessages`. Base stores `sampleRate`, `blockSizeSamples`. Latency base: `virtual double getLatencySeconds() { return 0.0; }`.
 
+## Drum pattern (DRM-002 `add_drum_pattern`) — RESOLVED
+
+Verified against the pinned clone for the composite grid command:
+- **Beats↔seconds at a position:** `BeatPosition TempoSequence::toBeats (TimePosition)` /
+  `TimePosition TempoSequence::toTime (BeatPosition)` (`model/edit/tracktion_TempoSequence.h:169,178`;
+  in-repo precedent MoshOps.cpp sections code). New-clip span:
+  `endTime = toTime (fromBeats (toBeats (fromSeconds (start)).inBeats() + bars * beatsPerBar))`.
+- **Time signature at a position:** `TimeSigSetting& TempoSequence::getTimeSigAt (TimePosition)`
+  → `numerator.get()` (`tracktion_TimeSigSetting.h:50`; precedent `ts->numerator.get()` in the
+  sections code). NB `beatsPerBar` here is the NUMERATOR — same convention as the UI drum grid
+  (`drumGrid.ts stepBeats`), which coincides with Tracktion quarter-note beats for `x/4` meters;
+  `x/8` meters would diverge (pre-existing drum-grid convention, not resolved here).
+- **Notes:** `MidiList::addNote (pitch, BeatPosition, BeatDuration, velocity, colourIndex, UndoManager*)`
+  (`tracktion_MidiList.h:85`, the `cmdAddNote` idiom). Selective removal (per-lane replace):
+  descending-index loop of `seq.removeNote (*seq.getNote (i), &undoManager())` — the
+  `cmdRemoveNote` idiom; `MidiList::clear` NOT used (replace must leave unnamed lanes intact).
+- **Clip:** `track->insertMIDIClip (name, { TimePosition, TimePosition }, nullptr)` exactly as
+  `cmdAddMidiClip`; clip-note beats are clip-local (no clip-start offset).
+- clipId→track resolution: `clip->getTrack()` (proven via `lockKeyFor`'s Clip branch).
+
 ## Still to verify at their stages
 
 - **Renderer::Parameters** field names + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`) — Stage 5. Grep `modules/tracktion_engine/.../tracktion_Renderer.h`.

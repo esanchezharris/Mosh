@@ -102,6 +102,28 @@ final class CompanionStore: ObservableObject {
         }
     }
 
+    func runPutMeIn() async {
+        guard ensureOnlineForCommand() else { return }
+
+        var args: [String: Any] = [
+            "action": "record",
+            "source": "phone_controller",
+            "controllerEvent": "PUT_ME_IN",
+            "issuedAtPhoneMs": Date().timeIntervalSince1970 * 1000.0
+        ]
+        if let trackId = selectedTrackId ?? controller.take?.trackId ?? tracks.first?.id {
+            args["trackId"] = trackId
+        }
+
+        do {
+            let result = try await client.execute("set_transport", args: args)
+            receipts.insert(result.ok ? "Put me in" : (result.error ?? "Record failed"), at: 0)
+            await refresh()
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
     func runControllerEvent(_ event: ControllerEvent, scrubPosition: Double? = nil) async {
         guard ensureOnlineForCommand() else { return }
         guard let command = controllerCommand(for: event, scrubPosition: scrubPosition) else { return }

@@ -82,7 +82,7 @@ bash setup-sft-cuda.sh
 python sft_cuda_train.py --data ./sft-v2 --out ./adapter --epochs 1        # 80GB: bf16 LoRA
 #   40GB card → add --4bit (QLoRA).  short test → --max-steps 200
 # serve OpenAI-compatible:
-vllm serve Qwen/Qwen3-4B-Instruct-2507 --enable-lora --lora-modules sft=./adapter --port 8000
+python serve_openai.py --base Qwen/Qwen3-4B-Instruct-2507 --adapter ./adapter --port 8000
 ```
 Then eval from the Mac against the box (same metric, same eval set, vs the 0.757 baseline):
 ```bash
@@ -91,6 +91,123 @@ cd ui && OPENAI_BASE_URL=http://<box-ip>:8000/v1 OPENAI_API_KEY=x \
 ```
 This is the multi-epoch run the local Mac can't do — the real test of whether the
 100k-arrangement corpus closes the content-generation gap.
+
+## CUDA parity run for a3b-r4
+
+The local `a3b-r4` run is pinned to `s2-mix-v4`, 12,889 steps, lr `1e-5`,
+sequence length `4096`, completion-only loss, and the last 16 transformer layers.
+The CUDA lane can now preserve those same recipe choices as closely as the
+`trl + peft` stack allows:
+
+```bash
+cd service/sft
+bash setup-sft-cuda.sh
+chmod +x launch-r4-cuda.sh
+./launch-r4-cuda.sh
+```
+
+That launcher defaults to:
+
+```bash
+python3 sft_cuda_train.py \
+  --data ./.sft-data/s2-mix-v4 \
+  --model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+  --out ./.adapters/a3b-r4-cuda \
+  --epochs 1 \
+  --max-steps 12889 \
+  --batch-size 1 \
+  --grad-accum 1 \
+  --lr 1e-5 \
+  --lora-r 16 \
+  --max-seq-len 4096 \
+  --last-layers 16 \
+  --save-steps 200
+```
+
+Use `BIT4=1 ./launch-r4-cuda.sh` on a smaller card when you need QLoRA; keep the
+default bf16 LoRA on an 80 GB box when possible.
+
+Serve the finished adapter for the frozen evals with:
+
+```bash
+python serve_openai.py \
+  --base Qwen/Qwen3-30B-A3B-Instruct-2507 \
+  --adapter ./.adapters/a3b-r4-cuda \
+  --model-id a3b-r4-cuda \
+  --port 8000
+```
+
+## RunPod control surface for a3b-r4
+
+The local control script is `service/sft/runpod_r4.py`. It never stores the
+RunPod key in repo state; set it in the shell only when you execute a command:
+
+```bash
+export RUNPOD_API_KEY=...
+python3 service/sft/runpod_r4.py create
+python3 service/sft/runpod_r4.py status
+python3 service/sft/runpod_r4.py bootstrap
+python3 service/sft/runpod_r4.py train
+```
+
+Defaults:
+
+- pod name: `codex-a3b-r4-cuda`
+- image: `runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04`
+- GPU priority: `NVIDIA A100 80GB PCIe` → `NVIDIA A100-SXM4-80GB` → `NVIDIA H100 PCIe` → `NVIDIA H100 80GB HBM3`
+- cloud type: `ALL`
+- pod volume: `200 GB`
+- container disk: `100 GB`
+- remote root: `/workspace/ClaudeMosh`
+
+`create` injects the local SSH public key into the pod via RunPod's `PUBLIC_KEY`
+environment variable. `bootstrap` uploads the exact `service/sft` launcher,
+trainer, serve shim, README, and `s2-mix-v4` dataset tarball to the pod, then
+runs `setup-sft-cuda.sh` remotely and verifies that `sft_cuda_train.py --help`
+still exposes `--last-layers` and `--resume-from-checkpoint`.
+
+`status` prints the current pod summary plus an SSH command once RunPod has
+assigned a public IP and mapped port `22`. `train` is recovery-safe: it no-ops
+if the trainer is already alive, otherwise it resumes from the newest
+`checkpoint-*` directory when one exists. `stop` and `resume` call the RunPod
+GraphQL lifecycle mutations for the same pod name or id.
+
+For the full operational sequence, artifact preservation rules, and the current
+live RunPod blocker state, see `service/sft/RUNPOD_a3b-r4.md`.
+
+## CUDA adapter → MLX inference artifact
+
+The safest post-training path is:
+
+1. Keep the adapter dir from `sft_cuda_train.py` as the canonical training artifact.
+2. Merge it into the full-precision Hugging Face base:
+
+```bash
+python - <<'PY'
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+base = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+adapter = "./.adapters/a3b-r4-cuda"
+out = "./merged-a3b-r4-cuda"
+
+model = AutoModelForCausalLM.from_pretrained(base, torch_dtype="auto", device_map="auto")
+model = PeftModel.from_pretrained(model, adapter)
+model = model.merge_and_unload()
+model.save_pretrained(out, safe_serialization=True)
+AutoTokenizer.from_pretrained(base).save_pretrained(out)
+PY
+```
+
+3. Convert and quantize that merged model for Mac inference:
+
+```bash
+mlx_lm.convert --hf-path ./merged-a3b-r4-cuda --mlx-path ./mlx-a3b-r4-cuda-4bit -q
+```
+
+`mlx_lm.convert --help` in the current local environment confirms that `--hf-path`
+accepts either a local path or a Hugging Face model identifier, so a private Hub
+upload is optional for this conversion step.
 
 ## Note-population — the content-quality fixes
 

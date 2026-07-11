@@ -22,16 +22,14 @@
     {
       "name": "fms-ksb",
       "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb && exec /usr/bin/python3 -m http.server ${PORT:-8189} --bind 127.0.0.1"],
-      "port": 8189,
-      "autoPort": true
+      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb && exec /usr/bin/python3 -m http.server 8189 --bind 127.0.0.1"],
+      "port": 8189
     },
     {
-      "name": "lora-listening-room",
+      "name": "fms-hybrid",
       "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-loras/demos && exec /usr/bin/python3 -m http.server ${PORT:-8190} --bind 127.0.0.1"],
-      "port": 8190,
-      "autoPort": true
+      "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb/hybrid-demo && exec /usr/bin/python3 -m http.server 8190 --bind 127.0.0.1"],
+      "port": 8190
     }
   ]
 }

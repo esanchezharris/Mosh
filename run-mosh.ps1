@@ -93,7 +93,7 @@ function Copy-ServiceBundle {
 
     # Whole-dir whitelist (MUST match run-mosh.sh bundle_service's `for d in ...`).
     $dirs = @(
-        "adapters", "colors", "sa3", "scripts", "training", "lyrics",
+        "adapters", "colors", "recipes", "sa3", "scripts", "training", "lyrics",
         "phonology", "skeleton", "whisper", "soulx", "bestofn", "compiler", "loras"
     )
     foreach ($d in $dirs) {

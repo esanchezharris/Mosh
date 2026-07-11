@@ -51,6 +51,8 @@ public:
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
+    void applyMultiplayerCommitForSelfTest (const juce::var& msg);
+
     /** Direct plugin-host access for the headless deep-scan CLI (--scan-plugins-deep),
         which runs a synchronous OOP + hang-watchdog rescan off the message thread.
         NOT used by the normal command surface (that goes through cmdRescanPlugins). */
@@ -64,6 +66,7 @@ public:
 
 private:
     // ── command handlers ──
+    void applyMultiplayerCommitMessage (const juce::var& msg);
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
@@ -87,6 +90,7 @@ private:
     juce::var cmdRegenerateLyric    (const juce::var& args);
     juce::var cmdCancelLyricJob     (const juce::var& args);
     juce::var cmdAcceptLyricProposal (const juce::var& args);  // undoable (commits chosen text) + taste label
+    juce::var cmdAssertLyricLine     (const juce::var& args);
     juce::var cmdRejectLyricProposal (const juce::var& args);  // clears proposals + taste label
     // LYR-L1 — precise per-line phonology (service; not undoable), analysis lands on the
     // line as a transient JSON blob → snapshot → the flow visualizer.
@@ -229,8 +233,10 @@ private:
     juce::var cmdClearAutomation        (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
+    juce::var cmdAddDrumPattern (const juce::var& args);  // DRM-002: whole grid, one command
     juce::var cmdTranscribeClip (const juce::var& args);  // audio->MIDI (Basic Pitch)
     juce::var cmdSketchBeatbox  (const juce::var& args);  // Sketch P0: beatbox->drum MoshOps
+    juce::var cmdGenerateBeatRecipe (const juce::var& args);
     juce::var cmdAddNote        (const juce::var& args);
     juce::var cmdRemoveNote     (const juce::var& args);
     juce::var cmdSetNote        (const juce::var& args);
@@ -269,6 +275,8 @@ private:
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)
     juce::var cmdGetCommandLog    (const juce::var& args);   // read-only (reads mosh-log.jsonl; NOT logged)
+    void invalidateCommandLogCache();
+    void refreshCommandLogCacheIfNeeded (const juce::File& file);
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
@@ -563,6 +571,12 @@ private:
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
     juce::int64 seq = 0;
     juce::File  logFile;
+    juce::CriticalSection commandLogCacheLock_;
+    juce::Array<juce::var> commandLogRecentEntries_;
+    juce::int64            commandLogTotal_ = 0;
+    juce::int64            commandLogBytes_ = -1;
+    juce::String           commandLogPath_;
+    bool                   commandLogCachePrimed_ = false;
     // A3 — crash-recovery journal. A dedicated append-only file holding only the REPLAYABLE
     // arrangement commands since the last save (truncated by MoshEngine::save). On an unclean
     // startup MoshOps reads it into pendingRecovery_ (so save-truncation can't race recovery);

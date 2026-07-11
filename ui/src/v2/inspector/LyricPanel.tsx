@@ -21,7 +21,7 @@ export function LyricPanel({ track }: { track: Track }) {
   // accepted lines accumulate). Pulled on demand (never via the snapshot — that would spawn
   // the service); -1/absent ⇒ service down ⇒ shown as nothing.
   const [corpusLines, setCorpusLines] = useState<number | null>(null);
-  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted").length ?? 0;
+  const acceptedCount = sheet?.lines.filter((l) => l.status === "accepted" || l.status === "asserted").length ?? 0;
   useEffect(() => {
     if (!sheet) return;
     let alive = true;
@@ -141,10 +141,25 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
     return (
       <li className="v2-lyric-line v2-skel-line" data-testid={`skeleton-line-${line.index}`} data-status="skeleton">
         <span className="v2-lyric-role" data-role={line.role}>{line.role}</span>
+        {line.origin && (
+          <span className="v2-lyric-origin" data-testid={`lyric-origin-${line.index}`}
+            data-origin={line.origin} title="words heard in your take anchor this line">♪</span>
+        )}
         <span className="v2-skel-grid" data-testid={`skel-grid-${line.index}`} aria-label={`${target} syllable slots`}>
-          {Array.from({ length: Math.min(target, 32) }).map((_, i) => (
-            <span key={i} className="v2-skel-pip" aria-hidden="true">•</span>
-          ))}
+          {(() => {
+            // Extraction anchors: heard words render as chips in their slots; gaps stay
+            // pips. An all-gaps skeleton (the wordless take) renders exactly as before.
+            const toks = (line.seedText || "").split(/\s+/).filter(Boolean);
+            const anchored = toks.some((t) => !/^_{2,}$/.test(t));
+            if (!anchored)
+              return Array.from({ length: Math.min(target, 32) }).map((_, i) => (
+                <span key={i} className="v2-skel-pip" aria-hidden="true">•</span>
+              ));
+            return toks.slice(0, 32).map((t, i) =>
+              /^_{2,}$/.test(t)
+                ? <span key={i} className="v2-skel-pip" aria-hidden="true">•</span>
+                : <span key={i} className="v2-skel-chip" data-testid={`skel-chip-${line.index}-${i}`}>{t}</span>);
+          })()}
         </span>
         <span className="v2-skel-count" data-testid={`skel-count-${line.index}`}>{target} syl</span>
         <button className="btn" data-testid={`skel-dec-${line.index}`} disabled={busy || target <= 1}
@@ -191,14 +206,32 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
   const state = flowStatus(count, target, line.syllableTol || 1);
   const gaps = parseSeed(line.seedText).gaps;
   const fillable = !line.locked && (!line.text.trim() || gaps > 0);
+  const canAssert = Boolean(content.trim() && !content.includes("___") && /[A-Za-z0-9]/.test(content));
 
   return (
     <li className="v2-lyric-line" data-testid={`lyric-line-${line.index}`} data-flow={state} data-status={line.status}>
       <div className="v2-lyric-line-main">
         <span className="v2-lyric-role" data-role={line.role}>{line.role}</span>
+        {line.origin && (
+          <span className="v2-lyric-origin" data-testid={`lyric-origin-${line.index}`}
+            data-origin={line.origin}
+            title={line.origin === "sung" ? "verbatim — you sang this"
+                 : line.origin === "partial" ? "partly from your take"
+                 : line.origin === "mixed" ? "generated around your words"
+                 : line.origin === "edited" ? "edited by hand" : "generated"}>
+            {line.origin === "sung" ? "♪ sung" : line.origin === "partial" ? "♪ part" : line.origin}
+          </span>
+        )}
         <input className="v2-lyric-text" aria-label={`line ${line.index + 1}`}
           key={content} defaultValue={content} placeholder="type bars, ___ for a gap"
-          onBlur={(e) => { if (e.target.value !== content) void exec("set_lyric_line", { trackId, lineIndex: line.index, seedText: e.target.value }); }} />
+          onBlur={(e) => {
+            if (e.target.value === content) return;
+            // A finalized line (accepted/sung) edits its TEXT — the backend mirrors and
+            // demotes "sung" → "edited"; a seed-stage line keeps committing to the seed.
+            void exec("set_lyric_line", line.text.trim()
+              ? { trackId, lineIndex: line.index, text: e.target.value, seedText: e.target.value }
+              : { trackId, lineIndex: line.index, seedText: e.target.value });
+          }} />
         <span className={`v2-flow-meter st-${state}`} data-testid={`flow-${line.index}`}
           title={`${count} syllables vs ~${target} (${grid})${gaps ? `, ${gaps} gap(s)` : ""}`}>
           {count}/{target}{gaps ? ` ·${gaps}_` : ""}
@@ -207,6 +240,14 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
         {fillable && !line.proposals?.length && (
           <button className="btn" data-testid={`lyric-fill-${line.index}`} disabled={busy} title="fill this line"
             onClick={() => void run("fill_lyric_gap", { lineIndex: line.index })}>✨</button>
+        )}
+        {canAssert && !line.asserted && (
+          <button className="btn" data-testid={`lyric-assert-${line.index}`} disabled={busy}
+            title="assert these words for sing render"
+            onClick={() => void exec("assert_lyric_line", { trackId, lineIndex: line.index, text: content })}>Assert</button>
+        )}
+        {line.asserted && (
+          <span className="v2-lyric-rgroup" data-testid={`lyric-asserted-${line.index}`}>asserted</span>
         )}
         <button className={`btn${line.locked ? " on" : ""}`} data-testid={`lyric-lock-${line.index}`}
           title="lock this line" aria-label={`${line.locked ? "Unlock" : "Lock"} line ${line.index + 1}`} aria-pressed={line.locked}

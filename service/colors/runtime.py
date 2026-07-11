@@ -68,7 +68,14 @@ def _ui_to_alpha(value_0_100: float, astd_max: float, more_sign: float, lab: boo
 def resolve_steers(colors, lab: bool = False):
     """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...]."""
     reg = registry()
-    picked = [c for c in (colors or []) if c.get("name") in reg][:3]      # ≤3, drop unknowns
+    picked, seen = [], set()                                             # dedup by name (keep first)
+    for c in (colors or []):                                            # then ≤3, drop unknowns
+        name = c.get("name")
+        if name in reg and name not in seen:                            # a duplicate can't stack on
+            seen.add(name)                                              # itself (2× alpha past the
+            picked.append(c)                                           # ASTD ceiling) nor eat a slot
+            if len(picked) == 3:
+                break
 
     names = {c["name"] for c in picked}
     for c in picked:

@@ -40,7 +40,6 @@ LEGACY_VENV="$HERE/.venv"
 MODELS_ROOT="${MOSH_MODELS_DIR:-$HOME/Library/Mosh/models}"
 LEGACY_MODEL_DIR="${RAVE_MODEL_DIR_LEGACY:-$HOME/AI/rave-models}"
 RAVE_MODEL_DIR="${RAVE_MODEL_DIR:-$MODELS_ROOT/transform}"
-STATE_ROOT="${MOSH_TRANSFORM_STATE_DIR:-$HOME/Library/Mosh/transform}"
 
 # Sanity: the venv must import torch + torchaudio.
 venv_ok() {
@@ -106,74 +105,18 @@ if [[ "$NMODELS" == "0" && -d "$LEGACY_MODEL_DIR" ]]; then
   fi
 fi
 
-seed_starter_models() {
-  SEED_PY="$(mktemp "${TMPDIR:-/tmp}/mosh-transform-seed.XXXXXX.py")"
-  cat > "$SEED_PY" <<'PY'
-import os
-import sys
-
-import torch
-
-
-class StarterRave(torch.nn.Module):
-    sr: int
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.sr = 44100
-
-    @torch.jit.export
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        return x
-
-    @torch.jit.export
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
-        return torch.tanh(z * 2.5)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.decode(self.encode(x))
-
-
-def main() -> int:
-    model_dir = sys.argv[1]
-    names = [
-        "violin", "flute", "choir", "strings",
-        "orchestra", "synth pad", "music box", "brass",
-    ]
-    os.makedirs(model_dir, exist_ok=True)
-    scripted = torch.jit.script(StarterRave())
-    for name in names:
-        scripted.save(os.path.join(model_dir, f"{name}.ts"))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-PY
-  "$PYBIN" "$SEED_PY" "$RAVE_MODEL_DIR"
-  rm -f "$SEED_PY"
-}
-
-if [[ "$NMODELS" == "0" ]]; then
-  say "seeding starter RAVE models in $RAVE_MODEL_DIR ..."
-  seed_starter_models
-  NMODELS=$(find "$RAVE_MODEL_DIR" -maxdepth 1 -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
-fi
+[[ "$NMODELS" == "0" ]] && say "  (drop <target>.ts RAVE models here — the file stem is the target name)"
 
 say "model dir = $RAVE_MODEL_DIR ($NMODELS RAVE .ts model(s) found)"
 [[ "$NMODELS" == "0" ]] && say "  (drop <target>.ts RAVE models here — the file stem is the target name)"
 
-mkdir -p "$STATE_ROOT"
-ENVFILE="$STATE_ROOT/transform.env"
+ENVFILE="$HERE/.transform.env"
 cat > "$ENVFILE" <<EOF
 export TRANSFORM_PY="$PYBIN"
 export RAVE_MODEL_DIR="$RAVE_MODEL_DIR"
 EOF
 say "wrote $ENVFILE"
 
-if [[ -w "$HERE" ]]; then
-  cp "$ENVFILE" "$HERE/.transform.env" 2>/dev/null || true
-fi
 
 if [[ -d "$LEGACY_VENV" && "$LEGACY_VENV" != "$VENV" ]]; then
   rm -rf "$LEGACY_VENV"

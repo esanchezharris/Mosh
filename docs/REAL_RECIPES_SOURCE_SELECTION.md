@@ -28,7 +28,7 @@ the repo. The committed artifact is metadata, a score, and an owner decision.
 ## Intake Fields
 
 Each candidate review should fill these fields. Use
-[`docs/templates/recipe-source-candidate.md`](docs/templates/recipe-source-candidate.md)
+[`docs/templates/recipe-source-candidate.md`](templates/recipe-source-candidate.md)
 for one source at a time. Validate cards with
 `python3 service/corpus/recipe_source_intake.py validate <card-or-dir>` and emit
 a safe review index with `python3 service/corpus/recipe_source_intake.py index <card-or-dir>`.
@@ -87,6 +87,25 @@ local-handling score can veto the candidate even when the music is useful.
 8. Before using a new recipe for generation or reward work, run the matching
    Phase 0 checks from the real-recipes substrate when available: recipe schema,
    compile/render smoke, recombination provenance, and owner audition set.
+
+For a local MIDI-pack corpus, generate a safe promotion packet before moving
+recipes from `.cache/` into a tracked library or broader staged runtime:
+
+```bash
+service/teardown/.venv/bin/python scripts/verify-hardware/midi_corpus_promotion_packet.py \
+  --root .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated \
+  --source-policy research-tracked \
+  --owner-decision docs/research-policy/2026-07-01-r7-research-promotion.md \
+  --out .cache/mosh-teardown/midi-ingredients/2026-07-01-r7-curated/promotion-packet.json
+```
+
+The packet intentionally reports source path classes and role counts only, not
+raw MIDI paths or media. `research-tracked` clears the owner source-policy blocker only
+when it points at a durable tracked owner-decision artifact. As of 2026-07-01, that
+artifact is `docs/research-policy/2026-07-01-r7-research-promotion.md`: it approves the
+r7 MIDI-derived recipe JSONs for tracked research-library promotion after Gate C scoring.
+This does not authorize raw MIDI/audio redistribution or public packaged-media release;
+those still require a separate rights and packaging decision.
 
 ## Local-Only Media Rules
 
