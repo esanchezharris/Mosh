@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { RecoveryNotice } from "./ui/RecoveryNotice";
+import { MissingMediaBanner } from "./ui/MissingMediaBanner";
 import { Arrange } from "./ui/Arrange";
 import { Dock } from "./ui/Dock";
 import { DockShell } from "./ui/dock/DockShell";
@@ -96,6 +97,7 @@ export function AppLegacy() {
       )}
       {lastError && <div className="error-bar" data-testid="error" role="alert">⚠ {lastError}</div>}
       <RecoveryNotice />
+      <MissingMediaBanner />
 
       {redesign && snapshot && <SectionNavigator snapshot={snapshot} />}
 
