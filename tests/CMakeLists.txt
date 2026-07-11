@@ -22,7 +22,9 @@ target_sources(MoshTests PRIVATE
     test_training.cpp
     test_webbridge_resource_guard.cpp
     test_rt_guard.cpp
+    test_generative_jobmanager.cpp
     test_rave_engine.cpp
+    ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
