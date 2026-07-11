@@ -480,7 +480,22 @@ void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
 MoshOps::~MoshOps()
 {
     stopTimer();
-    unregisterAllMeterClients();
+    unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
+                                        // masterClient is a separate registration (see below)
+    // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
+    // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
+    // (moshOps.reset() precedes engine.reset()), so if a playback context is still
+    // live here (quit-while-playing), its master LevelMeasurer keeps a raw pointer to
+    // masterClient — which is about to be freed with the rest of `this`. The audio
+    // thread would then write through that dangling pointer on the next block. Mirror
+    // the addClient bookkeeping (lastSeenContext tracks exactly the context we last
+    // registered with, and is nulled out everywhere the context is freed) to remove it
+    // here while the context — and `this` — are both still valid.
+    if (lastSeenContext != nullptr)
+    {
+        lastSeenContext->masterLevels.removeClient (masterClient);
+        lastSeenContext = nullptr;
+    }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
 }
