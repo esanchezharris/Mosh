@@ -118,5 +118,50 @@ check("prompt frames the mumbled words as a FEELING cue, not required words",
 check("a line WITHOUT flow fields omits the flow block (back-compat)",
       "highest pitch" not in core._build_messages(SPEC["lines"][0], SPEC, None, 8, 1, "slant", None)[-1]["content"])
 
+# ── 5. FLOW ENFORCEMENT (writer v2): breaks HARD-GATE, stress + echo SCORE terms ──────
+# Root cause of "doesn't sound good yet": stress/boundaries were prompt-only hints the LLM
+# ignored. Now they're validated like syllables: a word spanning a real breath FAILS with a
+# specific re-prompt; stress alignment and vowel-echo rank otherwise-valid candidates.
+FLOW_B = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 4,
+          "syllableTol": 0, "rhymeGroup": "", "locked": False,
+          "breaks": [1],   # a word must END at syllable 2 (0-based index 1)
+          "echoTargets": [{"pos": 3, "word": "flame", "conf": 0.4, "vowels": ["EY"]}]}
+
+ok_cand = core._evaluate("sunset in rain", FLOW_B, SPEC, None, 4, 0, "slant")
+bad_cand = core._evaluate("amazing rain", FLOW_B, SPEC, None, 4, 0, "slant")
+check("word ending AT the breath passes", ok_cand["passes"] and ok_cand.get("breaksOk") is True, str(ok_cand))
+check("word SPANNING the breath hard-fails", (not bad_cand["passes"]) and bad_cand.get("breaksOk") is False, str(bad_cand))
+reason = core._failure_reason(bad_cand, 4, 0, None, "slant")
+check("failure reason names the offending word + the breath",
+      "amazing" in reason and "syllable 2" in reason, reason)
+
+# echo term: identical candidates except the echo position — EY-echo beats OW
+echo_hi = core._evaluate("sunset in rain", FLOW_B, SPEC, None, 4, 0, "slant")   # rain = EY
+echo_lo = core._evaluate("sunset in gold", FLOW_B, SPEC, None, 4, 0, "slant")   # gold = OW
+check("echoing the demoted word's vowels outranks ignoring it",
+      echo_hi["score"] > echo_lo["score"], f"{echo_hi['score']} vs {echo_lo['score']}")
+
+# stress term (no echo, isolate): line accents X at syllables 1 and 3
+FLOW_S = {**FLOW_B, "echoTargets": [], "stress": "XxXx"}
+st_hi = core._evaluate("sunset midnight", FLOW_S, SPEC, None, 4, 0, "slant")   # Xx Xx
+st_lo = core._evaluate("sunset again", FLOW_S, SPEC, None, 4, 0, "slant")      # Xx xX
+check("accent-matching candidate outranks the mismatch",
+      st_hi["score"] > st_lo["score"], f"{st_hi['score']} vs {st_lo['score']}")
+
+# prompt carries the enforcement context
+fmsgs = core._build_messages(FLOW_B, SPEC, None, 4, 0, "slant", None)[-1]["content"]
+check("prompt states the breath point", "syllable 2" in fmsgs, fmsgs[-300:])
+check("prompt forbids the low-trust word but demands its SOUND",
+      'do NOT use "flame"' in fmsgs and "EY" in fmsgs)
+
+# the fake floor stays valid: every fake proposal respects the breaks
+fake = core._fake_propose_line({**FLOW_B, "echoTargets": []}, SPEC, None, 0)
+check("fake proposals all pass the break gate", all(c.get("breaksOk", True) for c in fake),
+      str([(c['text'], c.get('breaksOk')) for c in fake]))
+
+# back-compat: a line WITHOUT flow fields keeps today's semantics
+plain = core._evaluate("they counted me out alone", SPEC["lines"][0], SPEC, None, 8, 1, "slant")
+check("no-flow line unaffected (breaksOk defaults true)", plain.get("breaksOk", True) is True)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

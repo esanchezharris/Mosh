@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 import brain_client
 from phonology import core as phon
+from lyrics import soundmatch
 from lyrics import style_corpus
 
 _P = phon.Pronouncer()  # real cmudict if importable, else a stdlib heuristic
@@ -60,17 +61,21 @@ def _pick(seq: List[str], seed: str) -> Optional[str]:
     return seq[idx]
 
 
-def _filler_for(need: int, seed: str) -> List[str]:
-    """Filler words summing to EXACTLY `need` syllables (2s then a 1 — any need≥1)."""
+def _filler_for(need: int, seed: str, ones_only: bool = False) -> List[str]:
+    """Filler words summing to EXACTLY `need` syllables (2s then a 1 — any need≥1).
+    ``ones_only`` uses monosyllables exclusively — a 1-syllable word can never span a
+    breath, keeping the fake backend a valid floor for flow-grounded (breaks) lines."""
     out: List[str] = []
     i = 0
     rem = need
-    while rem >= 2:
+    while rem >= 2 and not ones_only:
         out.append(_pick(_FILLER_2, f"{seed}|f2|{i}") or "again")
         rem -= 2
         i += 1
-    if rem == 1:
+    while rem >= 1:
         out.append(_pick(_FILLER_1, f"{seed}|f1|{i}") or "now")
+        rem -= 1
+        i += 1
     return out
 
 
@@ -125,7 +130,8 @@ def _fillable(line: dict) -> bool:
 
 # ── assembly: build a line of `target` syllables, keeping the producer's words ────
 
-def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str) -> str:
+def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str,
+              ones_only: bool = False) -> str:
     toks = _tokens(seed_text)
     own_end = (not toks) or toks[-1]["gap"]    # we APPEND the end word (trailing gap / fresh)
     if toks and toks[-1]["gap"]:
@@ -146,7 +152,7 @@ def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str) -
     end_syl = _P.syllables(end_word) if own_end else 0
     base_syl = sum(_P.syllables(w) for w in words) + end_syl
     need = target - base_syl
-    filler = _filler_for(need, seed) if need > 0 else []
+    filler = _filler_for(need, seed, ones_only) if need > 0 else []
 
     out = words[:insert_at] + filler + words[insert_at:]
     if own_end:
@@ -156,10 +162,27 @@ def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str) -
 
 # ── the loop: propose N → validate(phonology) → retry/repair → rank → top-N ──────
 
+def _word_syl_map(text: str) -> List[tuple]:
+    """[(word, start_syllable_index, syllable_count), ...] — the candidate's words mapped
+    onto 0-based syllable positions, for break/stress/echo checks."""
+    out, pos = [], 0
+    for w in re.findall(r"[A-Za-z']+", text):
+        n = max(1, _P.syllables(w) or 1)
+        out.append((w, pos, n))
+        pos += n
+    return out
+
+
 def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
               target: int, tol: int, strict: str) -> dict:
     """Validate one candidate line against the constraints — the shared gate both the
-    fake and the LLM backend feed into. The end word is read from the text."""
+    fake and the LLM backend feed into. The end word is read from the text.
+
+    Flow-grounded lines (writer v2 — lines carrying `breaks`/`echoTargets` from
+    lyrics.flowspec) get flow ENFORCED, not suggested: a word spanning a real breath
+    HARD-FAILS (with a specific re-prompt reason), stress alignment against the take's
+    accents and vowel-echo of demoted mumble words RANK otherwise-valid candidates.
+    Lines without those fields keep the original semantics untouched."""
     fixed = _fixed_end_word(line)
     words = re.findall(r"[A-Za-z']+", text)
     end = words[-1] if words else ""
@@ -170,7 +193,21 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     # Locked words: the producer's non-gap seed words must survive in the candidate.
     seed_words = [t["w"] for t in _tokens(line.get("seedText", "")) if not t["gap"]]
     locked_ok = all(w.lower() in text.lower() for w in seed_words)
-    passes = syl_ok and rhyme_ok and locked_ok
+
+    flow_grounded = ("breaks" in line) or bool(line.get("echoTargets"))
+    wmap = _word_syl_map(text) if flow_grounded else []
+
+    # HARD gate: no word may run through a real breath (the take's intra-phrase rest).
+    breaks_ok, breaks_reason = True, ""
+    for p in (int(b) for b in (line.get("breaks") or [])):
+        bad = next((w for w, start, n in wmap if start <= p and p + 1 <= start + n - 1), None)
+        if bad is not None:
+            breaks_ok = False
+            breaks_reason = (f"\"{bad}\" runs through the breath after syllable {p + 1} — "
+                             f"end a word exactly there.")
+            break
+
+    passes = syl_ok and rhyme_ok and locked_ok and breaks_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
     # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
@@ -178,12 +215,38 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     # makes the ranker PREFER deeper rhymes among otherwise-valid candidates.
     depth = (phon.multisyllabic_depth(_P.phones(end) or [], _P.phones(anchor) or [])
              if (anchor and end) else 0)
+
+    # SOFT terms (flow-grounded only): accent alignment + vowel echo of demoted words.
+    stress_term = 0.0
+    line_stress = str(line.get("stress") or "")
+    if "breaks" in line and line_stress and wmap:
+        cand = "".join(((_P.stress(w) or "x" * n)[:n]).ljust(n, "x") for w, _, n in wmap)
+        xpos = [i for i, ch in enumerate(line_stress) if ch == "X" and i < len(cand)]
+        if xpos:
+            stress_term = 0.75 * sum(1 for i in xpos if cand[i] == "X") / len(xpos)
+    echo_term = 0.0
+    targets = line.get("echoTargets") or []
+    if targets and wmap:
+        sims = []
+        for e in targets:
+            p = int(e.get("pos", -1))
+            word = next((w for w, start, n in wmap if start <= p < start + n), "")
+            sims.append(soundmatch.similarity(word, str(e.get("word", ""))) if word else 0.0)
+        echo_term = 0.75 * sum(sims) / len(sims)
+
     score = (2 if passes else 0) + (1 if rhyme_ok else 0) + (1 if locked_ok else 0) \
         + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
-        + 0.5 * max(0, depth - 1)
-    return {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
-            "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
-            "grade": grade, "depth": depth, "score": round(score, 3)}
+        + 0.5 * max(0, depth - 1) + stress_term + echo_term
+    out = {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
+           "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
+           "grade": grade, "depth": depth, "score": round(score, 3)}
+    if flow_grounded:
+        out["breaksOk"] = breaks_ok
+        if not breaks_ok:
+            out["breaksReason"] = breaks_reason
+        out["stressTerm"] = round(stress_term, 3)
+        out["echoTerm"] = round(echo_term, 3)
+    return out
 
 
 def _rank(cands: List[dict], n: int = 3) -> List[dict]:
@@ -210,7 +273,8 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
             end = _pick(ends, seed) if ends else _pick(_topic_ends(spec), seed)
         else:
             end = _pick(_topic_ends(spec), seed)
-        cands.append(_evaluate(_assemble(line.get("seedText", ""), end, target, tol, seed),
+        cands.append(_evaluate(_assemble(line.get("seedText", ""), end, target, tol, seed,
+                                         ones_only=bool(line.get("breaks"))),
                                line, spec, anchor, target, tol, strict))
     return _rank(cands)
 
@@ -292,6 +356,23 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
     if hint:
         rules.append(f"The take mumbled roughly \"{hint}\" here — use it ONLY as a feeling/theme "
                      "cue; do not require or quote these words.")
+    # Writer v2 — ENFORCED flow. Breath points are validated (a violating candidate is
+    # rejected and re-prompted); echo targets carry the mumble's SOUND where Whisper's
+    # text is untrustworthy — never quote a low-trust word, echo its vowels instead.
+    brks = line.get("breaks") or []
+    if brks:
+        pts = ", ".join(str(int(p) + 1) for p in brks)
+        rules.append(f"BREATH points: a word must END exactly at syllable {pts} — never carry "
+                     "one word across a breath.")
+    for e in line.get("echoTargets") or []:
+        v = "-".join(e.get("vowels") or []) or "?"
+        w = str(e.get("word", ""))
+        if float(e.get("conf") or 0) < 0.5:
+            rules.append(f"Syllable {int(e.get('pos', 0)) + 1} should SOUND like \"{w}\" "
+                         f"(vowels {v}) — do NOT use \"{w}\"; pick a real word that echoes it.")
+        else:
+            rules.append(f"Syllable {int(e.get('pos', 0)) + 1} should sound like \"{w}\" "
+                         f"(vowels {v}) — use it, or a better real word with that sound.")
     # Bar IQ D — register. Raw is the DEFAULT (it's the artist's art): explicitly permit slang
     # / ad-libs / explicit language so the model doesn't self-censor into something neutered.
     # "clean" is the opt-in that sanitizes.
@@ -334,6 +415,8 @@ def _parse_lines(content: str) -> List[str]:
 def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], strict: str) -> str:
     if not d["syllableOk"]:
         return f"\"{d['text']}\" was {d['syllables']} syllables, need {target}±{tol}."
+    if not d.get("breaksOk", True):
+        return d.get("breaksReason") or "a word crosses a breath — end a word at the breath point."
     if not d.get("rhymeOk", True) and anchor:
         return f"the last word \"{d['endWord']}\" must be a {strict} rhyme with \"{anchor}\"."
     if not d.get("lockedOk", True):

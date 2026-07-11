@@ -71,6 +71,49 @@ def _contiguous(words: List[str], syls: List[int], slots: List[dict]) -> List[Tu
     return units
 
 
+def tidy_segments(slots: List[dict], min_dur: float = 0.04, collapse_spread_st: float = 4.0) -> List[dict]:
+    """Pitch hygiene v2 (the owner's 'correct notes' axis) — clean Basic-Pitch jitter BEFORE
+    the hold cap and key snap. Two documented failure modes of the transcription:
+      * micro-glitch segments (<``min_dur``): sub-40ms pitch blips that render as spurious
+        glides — dropped, with the freed span re-covered by the neighbor (no time hole);
+      * ornament mis-tracks: one slot scattered across a wide interval — when the intra-slot
+        spread exceeds ``collapse_spread_st`` semitones the slot collapses to its
+        duration-weighted median pitch (a singer heard ONE note there).
+    A genuine small melisma (substantial segments, small interval) passes through untouched.
+    Pure; input not mutated; an all-glitch slot keeps one representative segment."""
+    out: List[dict] = []
+    for s in slots:
+        segs = [dict(g) for g in s.get("segments") or []]
+        if not segs:
+            out.append(dict(s))
+            continue
+        kept = [g for g in segs if float(g["end"]) - float(g["start"]) >= min_dur]
+        if not kept:                                   # all-glitch: keep the longest as anchor
+            kept = [max(segs, key=lambda g: float(g["end"]) - float(g["start"]))]
+        # re-cover the dropped spans: each kept segment extends to the next kept start
+        kept.sort(key=lambda g: float(g["start"]))
+        kept[0]["start"] = min(float(kept[0]["start"]), float(s.get("start", kept[0]["start"])))
+        for j, g in enumerate(kept):
+            g["end"] = float(kept[j + 1]["start"]) if j + 1 < len(kept) else \
+                max(float(g["end"]), float(s.get("end", g["end"])))
+        pitches = [int(g.get("pitch", 69)) for g in kept]
+        if max(pitches) - min(pitches) > collapse_spread_st:
+            # duration-weighted median: the pitch at the midpoint of accumulated duration
+            weighted = sorted((int(g.get("pitch", 69)), float(g["end"]) - float(g["start"]))
+                              for g in kept)
+            half = sum(w for _, w in weighted) / 2.0
+            acc, med = 0.0, weighted[0][0]
+            for p, w in weighted:
+                acc += w
+                if acc >= half:
+                    med = p
+                    break
+            kept = [{"start": float(s.get("start", kept[0]["start"])),
+                     "end": float(s.get("end", kept[-1]["end"])), "pitch": med}]
+        out.append({**s, "segments": kept})
+    return out
+
+
 # Key → pitch-class set. Major and its relative minor share a set (D major == B minor),
 # which is exactly the Used2 lesson: the melody centered on B (relative-minor tonic) over a
 # D-major beat, and snapping to B MAJOR manufactured sour notes (owner ear, demos d4/d5).

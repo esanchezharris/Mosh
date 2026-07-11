@@ -175,5 +175,91 @@ check("default (preserve_words off) still blanks the seed (invent-freely)",
       all(l["seedText"] == "" for l in blank["lines"]))
 check("syllableTarget unchanged by preserve_words", [l["syllableTarget"] for l in kept["lines"]] == [4, 2])
 
+# ── 10. TRUST TIERS: verbatim only for a trusted kept RUN; junk → ECHO targets ─────────
+# Whisper's confident mishearings ("berry balls") poisoned the writer when quoted verbatim.
+# Tier by lineHeard conf over RUNS of adjacent kept words: a run stays VERBATIM iff
+# (len>=2, mean conf>=0.7, max>=0.8) or (a lone word with conf>=0.9). Everything else
+# becomes an echoTarget (vowel skeleton — the mumble's SOUND is evidence, Whisper's text is
+# not) and its seedText position reverts to a gap.
+def HEARDC(bar, *entries):   # (word, slot, conf)
+    return {"v": 1, "bar": bar,
+            "words": [{"word": w, "slot": s, "conf": c, "kept": True, "syl": 1} for (w, s, c) in entries]}
+
+TRUST_SKEL = {
+    "lineScores": [
+        # phrase 1: "cold hard truth" — a trusted run (mean .783, max .9)
+        LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57), SLOT(0.6, 0.88, 80, 59)]),
+        # phrase 2: "berry balls ___ flame" — junk pair (mean .65) + a lone high-conf word
+        LS(1, [SLOT(2.0, 2.28, 80, 55), SLOT(2.3, 2.58, 80, 57),
+               SLOT(2.6, 2.88, 80, 59), SLOT(2.9, 3.18, 80, 55)]),
+    ],
+    "lines": [
+        {"index": 0, "seedText": "cold hard truth", "syllableTarget": 3},
+        {"index": 1, "seedText": "berry balls ___ flame", "syllableTarget": 4},
+    ],
+    "lineHeard": [
+        HEARDC(0, ("cold", 0, 0.9), ("hard", 1, 0.6), ("truth", 2, 0.85)),
+        HEARDC(1, ("berry", 0, 0.45), ("balls", 1, 0.85), ("flame", 3, 0.92)),
+    ],
+}
+tspec = fs.build_flow_spec(TRUST_SKEL, preserve_words=True)
+t0, t1 = tspec["lines"][0], tspec["lines"][1]
+check("trusted kept run stays VERBATIM (mid-conf word rides its phrase)",
+      t0["seedText"] == "cold hard truth", repr(t0["seedText"]))
+check("verbatim phrase has no echo targets", t0["echoTargets"] == [])
+check("junk run demoted to gaps; lone high-conf word survives",
+      t1["seedText"] == "___ ___ ___ flame", repr(t1["seedText"]))
+echo_words = sorted(e["word"] for e in t1["echoTargets"])
+check("demoted words became echo targets with pos + vowels + conf",
+      echo_words == ["balls", "berry"]
+      and all(("pos" in e and "vowels" in e and "conf" in e) for e in t1["echoTargets"]),
+      str(t1["echoTargets"]))
+check("echo target carries the vowel skeleton + its phrase position",
+      any(e["word"] == "berry" and e["vowels"] and e["pos"] == 0 for e in t1["echoTargets"]),
+      str(t1["echoTargets"]))
+check("preserve_words WITHOUT lineHeard falls back to verbatim (back-compat)",
+      fs.build_flow_spec({**TRUST_SKEL, "lineHeard": []}, preserve_words=True)["lines"][0]["seedText"] == "cold hard truth")
+check("trust tiering is deterministic", fs.build_flow_spec(TRUST_SKEL, preserve_words=True) == tspec)
+
+# ── 10b. trust refinements (writer-round findings, 2026-07-11) ─────────────────────────
+# (a) member floor: a low-conf word must NOT ride a trusted run ("berry" 0.45 rode
+#     "feel like" 0.9+ into the seeds). (b) feasibility: kept words' syllables + gaps must
+#     fit the slot count at tol 0, else lowest-conf words demote until the line is writable.
+MEMBER_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+                          SLOT(0.6, 0.88, 80, 59), SLOT(0.9, 1.18, 80, 55)])],
+    "lines": [{"index": 0, "seedText": "feel like berry balls", "syllableTarget": 4}],
+    "lineHeard": [HEARDC(0, ("feel", 0, 0.9), ("like", 1, 0.95), ("berry", 2, 0.45), ("balls", 3, 0.85))],
+}
+mline = fs.build_flow_spec(MEMBER_SKEL, preserve_words=True)["lines"][0]
+check("low-conf member demotes even inside a trusted run", "berry" not in mline["seedText"], repr(mline["seedText"]))
+check("its high-conf run-mates survive", mline["seedText"].startswith("feel like"), repr(mline["seedText"]))
+check("the demoted member became an echo target", any(e["word"] == "berry" for e in mline["echoTargets"]))
+
+# feasibility: "berry"(2 syl) + "cold"(1) on a 2-slot phrase = 3 syllables into 2 slots →
+# the lowest-conf kept word demotes until the seed fits at tol 0.
+FEAS_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57)])],
+    "lines": [{"index": 0, "seedText": "berry cold", "syllableTarget": 2}],
+    "lineHeard": [HEARDC(0, ("berry", 0, 0.99), ("cold", 1, 0.95))],
+}
+fline = fs.build_flow_spec(FEAS_SKEL, preserve_words=True)["lines"][0]
+fseed_words = [t for t in fline["seedText"].split() if t != "___"]
+import sys as _sys
+_sys.path.insert(0, SERVICE)
+from lyrics import core as _c  # noqa: E402
+check("infeasible seed demoted until it fits the slot count",
+      sum(_c.syllables(w) for w in fseed_words) + fline["seedText"].split().count("___") <= 2,
+      repr(fline["seedText"]))
+
+# ── 11. BREAK MAP: intra-phrase slot gaps >= 70ms become required word boundaries ─────
+# phrase: slots at 0-0.28, 0.3-0.58 (tight), then a 0.15s breath, then 0.73-1.0
+BRK_SKEL = {"lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+                                  SLOT(0.73, 1.0, 80, 59)])], "lines": [], "lineHeard": []}
+bspec = fs.build_flow_spec(BRK_SKEL)
+check("intra-phrase breath becomes a break AFTER that syllable", bspec["lines"][0]["breaks"] == [1],
+      str(bspec["lines"][0]["breaks"]))
+check("tight slot joints are not breaks", 0 not in bspec["lines"][0]["breaks"])
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

@@ -121,5 +121,37 @@ try:
 except ValueError:
     check("unknown key raises", True)
 
+# ── 9. tidy_segments: pitch hygiene v2 — clean Basic-Pitch jitter BEFORE cap+snap ─────
+# The owner still hears wrong notes after the key snap ("correct notes" axis): micro-glitch
+# segments (<40ms) create spurious glides, and ornament mis-tracks scatter a slot across a
+# wide interval. Drop the glitches; collapse a wide slot to its duration-weighted median.
+JIT = [
+    # slot A: a solid note + a 20ms glitch two octaves off -> glitch dropped
+    {"start": 0.0, "end": 0.5, "velocity": 80.0,
+     "segments": [{"start": 0.0, "end": 0.48, "pitch": 57},
+                  {"start": 0.48, "end": 0.5, "pitch": 81}]},
+    # slot B: an ornament mis-track spread over 9 st -> collapsed to the weighted median
+    {"start": 0.6, "end": 1.2, "velocity": 80.0,
+     "segments": [{"start": 0.6, "end": 1.05, "pitch": 57},
+                  {"start": 1.05, "end": 1.2, "pitch": 66}]},
+    # slot C: a genuine 2-st melisma with substantial segments -> untouched
+    {"start": 1.3, "end": 1.9, "velocity": 80.0,
+     "segments": [{"start": 1.3, "end": 1.6, "pitch": 57},
+                  {"start": 1.6, "end": 1.9, "pitch": 59}]},
+]
+tidy = ff.tidy_segments(JIT)
+check("micro-glitch segment dropped", len(tidy[0]["segments"]) == 1 and tidy[0]["segments"][0]["pitch"] == 57,
+      str(tidy[0]["segments"]))
+check("dropped glitch's span is re-covered (no time hole)", abs(tidy[0]["segments"][-1]["end"] - 0.5) < 1e-9)
+check("wide-spread slot collapsed to ONE weighted-median pitch",
+      len(tidy[1]["segments"]) == 1 and tidy[1]["segments"][0]["pitch"] == 57, str(tidy[1]["segments"]))
+check("genuine small melisma untouched", [g["pitch"] for g in tidy[2]["segments"]] == [57, 59])
+check("tidy_segments does not mutate input", len(JIT[0]["segments"]) == 2)
+check("tidy_segments is deterministic", ff.tidy_segments(JIT) == tidy)
+# an all-glitch slot (every segment tiny) keeps ONE representative segment, never empties
+tiny = [{"start": 0.0, "end": 0.03, "velocity": 70.0,
+         "segments": [{"start": 0.0, "end": 0.03, "pitch": 60}]}]
+check("all-glitch slot keeps a representative segment", len(ff.tidy_segments(tiny)[0]["segments"]) == 1)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)
