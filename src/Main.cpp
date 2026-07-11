@@ -133,10 +133,13 @@ public:
         // overrides the leaf so each run gets a private session dir (pair with a
         // distinct MOSH_SERVICE_PORT for full isolation). Also honored for scripted
         // GUI demos so UI automation never mutates or reads the owner's GUI session.
-        if (headless || runScript || voiceSmoke || demoGui)
-            if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
-                s.trim().isNotEmpty())
-                freshSessionName = s.trim();
+        // Honored for ANY launch — including the plain interactive GUI — whenever the env is
+        // EXPLICITLY set. Normal GUI use never sets it (→ stays "session"), so this is a no-op
+        // there; a set value lets UI automation / a live demo run on an ISOLATED session and never
+        // mutate or read the owner's real GUI "session".
+        if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
+            s.trim().isNotEmpty())
+            freshSessionName = s.trim();
 
         // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
