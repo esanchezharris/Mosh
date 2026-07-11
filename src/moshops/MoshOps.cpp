@@ -480,7 +480,22 @@ void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
 MoshOps::~MoshOps()
 {
     stopTimer();
-    unregisterAllMeterClients();
+    unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
+                                        // masterClient is a separate registration (see below)
+    // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
+    // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
+    // (moshOps.reset() precedes engine.reset()), so if a playback context is still
+    // live here (quit-while-playing), its master LevelMeasurer keeps a raw pointer to
+    // masterClient — which is about to be freed with the rest of `this`. The audio
+    // thread would then write through that dangling pointer on the next block. Mirror
+    // the addClient bookkeeping (lastSeenContext tracks exactly the context we last
+    // registered with, and is nulled out everywhere the context is freed) to remove it
+    // here while the context — and `this` — are both still valid.
+    if (lastSeenContext != nullptr)
+    {
+        lastSeenContext->masterLevels.removeClient (masterClient);
+        lastSeenContext = nullptr;
+    }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
 }
@@ -5623,9 +5638,17 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     beginTxn ("quantize_notes");
     int moved = 0;
+    // Snapshot the note pointers ONCE before mutating: setStartAndLength() writes
+    // IDs::b, which triggers tracktion's synchronous re-sort of the live MidiList
+    // (the same hazard MidiList::moveAllBeatPositions/rescale guard against by
+    // binding getNotes() once). Walking seq.getNote(i) live means a note that gets
+    // re-sorted past an already-visited index is silently skipped; iterating a
+    // fixed local list avoids that.
+    juce::Array<te::MidiNote*> notes;
     for (int i = 0; i < seq.getNumNotes(); ++i)
+        notes.add (seq.getNote (i));
+    for (auto* note : notes)
     {
-        auto* note = seq.getNote (i);
         const double start = note->getStartBeat().inBeats();
         const double q = std::round (start / division) * division;
         const double next = start + (q - start) * strength;
