@@ -255,6 +255,7 @@ private:
     juce::var cmdListColors       (const juce::var& args);
     juce::var cmdListLoras        (const juce::var& args);
     juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
+    juce::var cmdListRaveModels   (const juce::var& args);       // Lane B — RAVE model browser (non-gated fs scan)
    #if MOSH_HAVE_ANIRA
     // Route C.2 — real-time RAVE insert (built only with anira+LibTorch).
     juce::var cmdAddRaveInsert    (const juce::var& args);

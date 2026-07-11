@@ -117,6 +117,12 @@ export type AvailableLora = {
   hint: string;      // suggested prompt vocabulary
 };
 
+// Lane B — a RAVE model in the library (RAVE_MODEL_DIR / ~/AI/rave-models), from list_rave_models.
+export type AvailableRaveModel = {
+  name: string;      // .ts stem (the load_rave_model `target`)
+  sizeMB?: number;
+};
+
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 // `reasoning` is the Audiobox judge's one-line explanation of the score; `axes` are its
 // raw aesthetic axes (PQ/CE/CU/PC on a 0–10 scale). Both are best-effort (AL-006).

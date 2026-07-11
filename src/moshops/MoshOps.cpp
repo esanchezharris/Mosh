@@ -721,6 +721,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_colors")       return cmdListColors (args);
     if (name == "list_loras")        return cmdListLoras (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
+    if (name == "list_rave_models")  return cmdListRaveModels (args);   // Lane B — non-gated fs scan
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
     if (name == "set_rave_param")    return cmdSetRaveParam (args);
@@ -6810,6 +6811,17 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
     return okResult ("list_transform_targets", r);
 }
 
+// Non-gated: the RAVE model library dir (RAVE_MODEL_DIR, else ~/AI/rave-models). Used by the
+// anira insert (raveModelPathFor) AND the always-available model browser (cmdListRaveModels) —
+// listing is a filesystem scan and needs no anira, so the browser works in the default build too.
+static juce::File raveModelDirFile()
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
+                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
+    return juce::File (dir);
+}
+
 #if MOSH_HAVE_ANIRA
 // ─────────────────────────────────────────────────────────────────────────────
 // Route C.2 — real-time RAVE insert (Tier-A; only built with anira+LibTorch)
@@ -6817,10 +6829,7 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
 static juce::String raveModelPathFor (const juce::String& target)
 {
     if (target.isEmpty()) return {};
-    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
-                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
-                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
-    return juce::File (dir).getChildFile (target + ".ts").getFullPathName();
+    return raveModelDirFile().getChildFile (target + ".ts").getFullPathName();
 }
 
 juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
@@ -6894,6 +6903,35 @@ juce::var MoshOps::cmdResetRave (const juce::var& args)
     return okResult ("reset_rave");
 }
 #endif // MOSH_HAVE_ANIRA
+
+juce::var MoshOps::cmdListRaveModels (const juce::var&)
+{
+    // Lane B — browse the RAVE model library (RAVE_MODEL_DIR / ~/AI/rave-models). A pure filesystem
+    // scan of *.ts, so it works in the DEFAULT build too (loading is still gated on
+    // session.raveAvailable — only the anira build hosts the live insert). Mirrors the LoRA rack:
+    // the UI card offers a dropdown instead of a raw path prompt. Sorted by name (std::map) for a
+    // stable list; non-mutating, non-undoable.
+    std::map<juce::String, int> found;   // name → sizeMB (auto-sorted by key)
+    auto dir = raveModelDirFile();
+    const bool available = dir.isDirectory();
+    if (available)
+        for (auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.ts"))
+            found[f.getFileNameWithoutExtension()] = juce::roundToInt (f.getSize() / (1024.0 * 1024.0));
+
+    Array<var> models;
+    for (auto& [name, sizeMB] : found)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("name", name);
+        o->setProperty ("sizeMB", sizeMB);
+        models.add (var (o));
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("models", models);
+    d->setProperty ("dir", dir.getFullPathName());
+    d->setProperty ("available", available);
+    return okResult ("list_rave_models", var (d));
+}
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {

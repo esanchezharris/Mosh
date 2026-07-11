@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, AvailableTransformTarget, AvailableLora, RenderQA, Level, AudioDevices, Clip,
+  BuiltinPlugin, AvailableColor, AvailableTransformTarget, AvailableLora, AvailableRaveModel, RenderQA, Level, AudioDevices, Clip,
   WaveInput, TrackOutputs,
   PluginCounts,
 } from "./types";
@@ -76,6 +76,7 @@ type State = {
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
+  availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
@@ -158,6 +159,7 @@ type State = {
   loadColors: () => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
+  loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   setLab: (b: boolean) => void;
@@ -244,6 +246,7 @@ export const useStore = create<State>((set, get) => ({
   availableColors: [],
   availableTransformTargets: [],
   availableLoras: [],
+  availableRaveModels: [],
   transformFreeText: true,
   labMode: false,
   qaByClip: {},
@@ -647,6 +650,16 @@ export const useStore = create<State>((set, get) => ({
       args: {},
     }).then((res) => {
       if (res.ok && res.data?.loras) set({ availableLoras: res.data.loras });
+    });
+  },
+
+  loadRaveModels: () => {
+    if (get().availableRaveModels.length > 0) return;
+    void executeCommand<CommandResult<{ models: AvailableRaveModel[] }>>({
+      command: "list_rave_models",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.models) set({ availableRaveModels: res.data.models });
     });
   },
 

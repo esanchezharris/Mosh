@@ -20,7 +20,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
-        "list_transform_targets", "get_rhymes", "get_lyric_corpus_stats",
+        "list_transform_targets", "list_rave_models", "get_rhymes", "get_lyric_corpus_stats",
         "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",

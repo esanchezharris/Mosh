@@ -80,12 +80,17 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   );
 }
 
-// Route C.2 — the real-time RAVE insert's rack card: model name + dry/wet + latency.
+// Route C.2 / Lane B — the real-time RAVE insert's rack card: a model BROWSER (drop a .ts into
+// RAVE_MODEL_DIR / ~/AI/rave-models → it lists), dry/wet, latency. Mirrors the LoRA-rack pattern:
+// a dropdown of installed models (list_rave_models) plus a "custom path…" escape hatch.
 function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
+  const models = useStore((s) => s.availableRaveModels);
+  const loadRaveModels = useStore((s) => s.loadRaveModels);
   const r = plugin.rave!;
-  const loadModel = () => {
-    const v = window.prompt("RAVE model — a .ts path, or a target name in RAVE_MODEL_DIR:", r.modelPath ?? "")?.trim();
+  useEffect(() => { loadRaveModels(); }, [loadRaveModels]);
+  const loadCustom = () => {
+    const v = window.prompt("RAVE model — a .ts path (or a name in RAVE_MODEL_DIR):", r.modelPath ?? "")?.trim();
     if (!v) return;
     void exec("load_rave_model", v.endsWith(".ts")
       ? { trackId, pluginIndex: plugin.index, path: v }
@@ -96,6 +101,15 @@ function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
       <div className="neural-model tc" title={r.modelPath ?? r.modelName} data-testid="rave-model-name">
         {r.modelLoaded ? (r.modelName || r.model) : "no model loaded"}
       </div>
+      <div className="neural-row">
+        <select className="btn ghost" data-testid="rave-model-select" value=""
+          title="Pick a RAVE model from the library"
+          onChange={(e) => e.target.value && void exec("load_rave_model", { trackId, pluginIndex: plugin.index, target: e.target.value })}>
+          <option value="">{models.length ? "load model…" : "no models found"}</option>
+          {models.map((m) => <option key={m.name} value={m.name}>{m.name}{m.sizeMB ? ` (${m.sizeMB} MB)` : ""}</option>)}
+        </select>
+        <button className="btn ghost" data-testid="rave-load-custom" title="Load a .ts by path" onClick={loadCustom}>path…</button>
+      </div>
       <label className="nparam">
         <span className="nlabel">mix</span>
         <span className="nslider"><input type="range" min={0} max={100} step={1} value={Math.round(r.mix)}
@@ -104,7 +118,6 @@ function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         <span className="nval">{Math.round(r.mix)}</span>
       </label>
       <div className="neural-row">
-        <button className="btn" data-testid="rave-load-model" title="Load a RAVE .ts model" onClick={loadModel}>Load model…</button>
         <button className="btn" onClick={() => void exec("reset_rave", { trackId, index: plugin.index })}>Reset</button>
         <span className="nlat tc">{(r.latencySeconds * 1000).toFixed(1)} ms</span>
         <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>

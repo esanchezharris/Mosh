@@ -172,7 +172,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
@@ -1139,6 +1139,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // ── generative (Tier-B) render layers ────────────────────────────────────
     case "list_colors": return ok(command, { colors: COLORS });
     case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
+    case "list_rave_models":   // Lane B — RAVE model browser fixture
+      return ok(command, { models: [
+        { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
+        { name: "sax", sizeMB: 116 }, { name: "vocals", sizeMB: 156 },
+      ], available: true });
     case "list_transform_targets":
       return ok(command, { targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"], freeText: true });
     case "create_render_layer": {

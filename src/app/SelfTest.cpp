@@ -744,6 +744,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     const int nPlugins = lp["data"].getProperty ("plugins", var()).size();
     std::cerr << "  ..    " << nPlugins << " VST3 plugin(s) scanned\n";
 
+    // Lane B — RAVE model browser (non-gated fs scan; works in the default light build). Assert the
+    // SHAPE (ok + a models array + an available flag), not the count — the model dir is machine-
+    // dependent, so a clean CI box with no ~/AI/rave-models returns {models:[], available:false}.
+    {
+        auto lr = cmd (ops, "list_rave_models");
+        check (ok (lr), "list_rave_models ok (fs scan, non-gated)");
+        check (lr["data"].getProperty ("models", var()).isArray(), "list_rave_models returns a models array");
+        check (lr["data"].hasProperty ("available"), "list_rave_models reports an available flag");
+    }
+
     String fxId, instId;
     if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
         for (auto& p : *arr)
