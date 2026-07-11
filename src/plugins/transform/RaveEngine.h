@@ -30,6 +30,16 @@ public:
     bool ready() const;
     int  latencySamples() const;        // anira's reported latency (for PDC)
 
+    // AL-022 — diagnostics for a failed prepare()/loadModel(): both previously
+    // swallowed any exception into a bare `false`/silent no-op with no way to
+    // learn why (bad model file, tensor-shape mismatch, backend init failure,
+    // etc). Additive: existing callers that never call this are unaffected.
+    // Empty when the last prepare()/loadModel() succeeded (or none has run yet).
+    // Always empty when built without anira (MOSH_HAVE_ANIRA off) — compiles and
+    // returns a stable value in the default build so this is safe to call
+    // unconditionally.
+    std::string lastError() const;
+
     // Audio thread, RT-safe: transform `n` mono samples IN PLACE (model output is
     // latency-delayed by latencySamples()). No-op (leaves `mono` untouched) when not
     // ready — the caller handles dry passthrough.

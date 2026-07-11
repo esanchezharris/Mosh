@@ -1,4 +1,5 @@
 #include "WebBridge.h"
+#include "UiResourcePathGuard.h"
 #include "../brain/BrainProxy.h"
 #include "../voice/NativeSpeech.h"
 
@@ -75,19 +76,16 @@ Resource WebBridge::serveUiResource (const juce::String& url)
 {
     const auto& uiDir = getUiDir();
 
-    // Strip query/fragment; map "/" → index.html (SPA).
-    auto path = url.upToFirstOccurrenceOf ("?", false, false)
-                   .upToFirstOccurrenceOf ("#", false, false);
-    if (path.isEmpty() || path == "/")
-        path = "/index.html";
+    auto rel = ui_resource_guard::normalisePath (url);
+    if (! rel || ! ui_resource_guard::isSafePath (uiDir, url))
+        return { toBytes ("blocked UI resource path"), "text/plain" };
 
-    auto rel = path.startsWith ("/") ? path.substring (1) : path;
-    auto file = uiDir.getChildFile (rel);
+    auto file = uiDir.getChildFile (*rel);
 
     if (! file.existsAsFile())
     {
         // SPA fallback: unknown non-asset paths serve index.html.
-        if (! rel.containsChar ('.'))
+        if (! rel->containsChar ('.'))
             file = uiDir.getChildFile ("index.html");
     }
 
@@ -110,6 +108,16 @@ Resource WebBridge::serveUiResource (const juce::String& url)
         + "</code></p><p>Build it: <code>cd ui &amp;&amp; npm install &amp;&amp; npm run build</code>, "
           "or set <code>MOSH_UI_DEV_SERVER</code>.</p></body></html>";
     return { toBytes (html), "text/html" };
+}
+
+bool WebBridge::isSafeUiResourcePath (const juce::String& url)
+{
+    return ui_resource_guard::isSafePath (url);
+}
+
+bool WebBridge::isSafeUiResourcePath (const juce::File& uiDir, const juce::String& url)
+{
+    return ui_resource_guard::isSafePath (uiDir, url);
 }
 
 juce::WebBrowserComponent::Options WebBridge::buildOptions()

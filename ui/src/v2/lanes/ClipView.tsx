@@ -52,7 +52,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const pxToSec = (px: number) => px / pxPerSec;
   const secToPx = (s: number) => s * pxPerSec;
   const bs = beatSeconds(meterOf(snapshot)); // seconds per beat (renderers map beats→px)
-  useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, ensurePeaks]);
+  // clip.sourceFile is a dep so an in-place repoint (re-imagine / relink) re-fetches the waveform.
+  useEffect(() => { if (clip.type === "wave") ensurePeaks(clip.id); }, [clip.id, clip.type, clip.sourceFile, ensurePeaks]);
 
   // Optimistic preview during a drag; cleared when the committed props arrive.
   const [preview, setPreview] = useState<DragPos | null>(null);
