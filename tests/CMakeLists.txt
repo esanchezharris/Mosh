@@ -20,6 +20,8 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_outbox.cpp
     test_training.cpp
     test_rt_guard.cpp
+    test_generative_jobmanager.cpp
+    ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
