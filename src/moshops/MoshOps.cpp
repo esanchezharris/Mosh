@@ -5623,9 +5623,17 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     beginTxn ("quantize_notes");
     int moved = 0;
+    // Snapshot the note pointers ONCE before mutating: setStartAndLength() writes
+    // IDs::b, which triggers tracktion's synchronous re-sort of the live MidiList
+    // (the same hazard MidiList::moveAllBeatPositions/rescale guard against by
+    // binding getNotes() once). Walking seq.getNote(i) live means a note that gets
+    // re-sorted past an already-visited index is silently skipped; iterating a
+    // fixed local list avoids that.
+    juce::Array<te::MidiNote*> notes;
     for (int i = 0; i < seq.getNumNotes(); ++i)
+        notes.add (seq.getNote (i));
+    for (auto* note : notes)
     {
-        auto* note = seq.getNote (i);
         const double start = note->getStartBeat().inBeats();
         const double q = std::round (start / division) * division;
         const double next = start + (q - start) * strength;
