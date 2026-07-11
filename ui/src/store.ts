@@ -6,7 +6,7 @@ import {
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
-  WaveInput, TrackOutputs,
+  WaveInput, MidiInput, TrackOutputs,
   PluginCounts,
 } from "./types";
 import { versionBannerError } from "./types";
@@ -85,6 +85,7 @@ type State = {
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
   audioDevices: AudioDevices | null;       // full device enumeration (on-demand, lazy)
   waveInputs: WaveInput[] | null;          // RTG-001 input choices (on-demand, lazy)
+  midiInputs: MidiInput[] | null;          // CTL-001 MIDI-input choices (on-demand, lazy)
   trackOutputs: TrackOutputs | null;       // RTG-002 output destinations (on-demand, lazy)
   // Live level meters (Wave 9) — fed by the 30Hz "levels" event, NOT the snapshot.
   levels: { tracks: Record<string, Level>; master: Level };
@@ -162,6 +163,7 @@ type State = {
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
+  loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
   setLab: (b: boolean) => void;
 
   view: View;
@@ -252,6 +254,7 @@ export const useStore = create<State>((set, get) => ({
   remoteStatus: null,
   audioDevices: null,
   waveInputs: null,
+  midiInputs: null,
   trackOutputs: null,
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   spectrum: { bands: [], level: 0, flux: 0 },
@@ -723,6 +726,16 @@ export const useStore = create<State>((set, get) => ({
       command: "list_track_outputs", args: {},
     });
     if (to.ok && to.data) set({ trackOutputs: to.data });
+  },
+
+  // CTL-001 — enumerate live MIDI inputs on demand (the v2 inspector's per-instrument
+  // MIDI-input picker fetches this when it mounts). Read-only, like loadRouting.
+  loadMidiInputs: async () => {
+    if (!isNative()) return;
+    const res = await executeCommand<CommandResult<{ inputs: MidiInput[] }>>({
+      command: "list_midi_inputs", args: {},
+    });
+    if (res.ok && res.data) set({ midiInputs: res.data.inputs });
   },
   setLab: (b) => set({ labMode: b }),
 

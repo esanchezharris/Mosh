@@ -663,6 +663,7 @@
 .v2-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--v2-dim); }
 .v2-field > span:first-child { flex: 0 0 30px; }
 .v2-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-field select { flex: 1 1 auto; min-width: 0; }
 .v2-val { flex: 0 0 40px; text-align: right; color: var(--v2-text); font-family: var(--font-mono); font-size: 11px; }
 .v2-mix-btns { display: flex; gap: 8px; }
 .v2-mix-btns button {
