@@ -243,7 +243,8 @@ def _style_exemplars(spec: dict, k: int = 3) -> List[str]:
 # ── the LLM backend (L3): prompt → validate → re-prompt with the SPECIFIC failure ──
 
 def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
-                    tol: int, strict: str, feedback: Optional[str]) -> List[dict]:
+                    tol: int, strict: str, feedback: Optional[str],
+                    context: Optional[dict] = None) -> List[dict]:
     fixed = _fixed_end_word(line)
     seed_words = [t["w"] for t in _tokens(line.get("seedText", "")) if not t["gap"]]
     rules = [f"Write {3} candidate {line.get('role', 'verse')} lines.",
@@ -258,6 +259,39 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append(f"Topic: {spec['topic']}.")
     if spec.get("mood"):
         rules.append(f"Mood: {spec['mood']}.")
+    # Stage B0 — COHERENCE. A mumbled back half is a wordless outline; to make it a real
+    # verse (not disconnected bars) each line is generated knowing the chorus it resolves
+    # into, the song's theme, and the verse SO FAR — so the story develops and lands the hook.
+    if context:
+        ch = context.get("chorus")
+        if ch:
+            rules.append(f"This is a VERSE that must resolve into the song's CHORUS: \"{ch}\". "
+                         "Build toward it — the closing lines should set the hook up.")
+        th = context.get("theme")
+        if th:
+            rules.append(f"The song's story / theme to develop coherently: {th}.")
+        prior = context.get("priorLines") or []
+        if prior:
+            rules.append("The verse SO FAR (continue this SAME thought/story with a fresh line — "
+                         "do not repeat or contradict it): " + " / ".join(f"\"{p}\"" for p in prior[-6:]) + ".")
+        pos, total = context.get("position"), context.get("total")
+        if pos and total:
+            rules.append(f"This is line {pos} of {total} in the verse.")
+    # Stage 1 (FlowSpec) — line-level FLOW grounding. When the line came from a mumbled take
+    # (lyrics.flowspec), it carries the take's REAL rhythm and melody. Write TO them so the
+    # words actually fit the mumble — the whole point of the harness (logic + rhythm + rhyme).
+    contour = line.get("pitchContour")
+    if contour:
+        rules.append(f"Melody of this line: {contour}. Land the most important / rhyming word "
+                     "on the highest or the held note.")
+    line_stress = line.get("stress")
+    if line_stress:
+        rules.append(f"Rhythm — stress pattern (X=accented beat, x=unstressed): {line_stress}. "
+                     "Put strong syllables on the X positions so it rides the beat.")
+    hint = line.get("themeHint")
+    if hint:
+        rules.append(f"The take mumbled roughly \"{hint}\" here — use it ONLY as a feeling/theme "
+                     "cue; do not require or quote these words.")
     # Bar IQ D — register. Raw is the DEFAULT (it's the artist's art): explicitly permit slang
     # / ad-libs / explicit language so the model doesn't self-censor into something neutered.
     # "clean" is the opt-in that sanitizes.
@@ -307,13 +341,14 @@ def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], stric
     return "try again."
 
 
-def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int) -> List[dict]:
+def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int,
+                      context: Optional[dict] = None) -> List[dict]:
     target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
     corpus = _style_corpus(spec)   # non-empty only when style biasing is opted in
     cands: List[dict] = []
     feedback: Optional[str] = None
     for _ in range(3):  # budget the retries (re-prompt with the specific phonology failure)
-        resp = brain_client.chat_json(_build_messages(line, spec, anchor, target, tol, strict, feedback))
+        resp = brain_client.chat_json(_build_messages(line, spec, anchor, target, tol, strict, feedback, context))
         if not resp.get("ok"):
             break
         raw = _parse_lines(resp.get("content", ""))
@@ -347,9 +382,10 @@ def _auto_backend() -> str:
         return "fake"
 
 
-def _propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int, backend: str) -> List[dict]:
+def _propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int, backend: str,
+                  context: Optional[dict] = None) -> List[dict]:
     if backend == "llm":
-        return _llm_propose_line(line, spec, anchor, regen)
+        return _llm_propose_line(line, spec, anchor, regen, context)
     return _fake_propose_line(line, spec, anchor, regen)
 
 
@@ -386,6 +422,53 @@ def _run(spec: dict, indices: Optional[List[int]] = None,
 def complete(spec: dict, regen: Optional[Dict[int, int]] = None, backend: Optional[str] = None) -> dict:
     """Fill every gap in the sheet — proposals for all fillable, non-locked lines."""
     return _run(spec, indices=None, regen=regen, backend=backend)
+
+
+def complete_verse(spec: dict, chorus: str = "", theme: str = "",
+                   regen: Optional[Dict[int, int]] = None, backend: Optional[str] = None) -> dict:
+    """Stage B0 — COHERENT verse generation. Walk the skeleton in order, threading the
+    chorus, theme, and the running verse-so-far into every line's prompt so the verse
+    develops one story and resolves into the hook. Each line is still phonology-validated
+    (syllables/stress/rhyme) and drawn from the vocab palette; the top proposal per line is
+    committed as context for the next. Returns per-line proposals + the `chosen` verse path.
+
+    Distinct from complete(), which generates every line independently (good for gap-fill,
+    but disconnected across a whole verse)."""
+    regen = regen or {}
+    backend = backend or _auto_backend()
+    theme = theme or spec.get("topic", "")
+    by_index = sorted(spec.get("lines", []), key=lambda l: int(l.get("index", 0)))
+
+    anchors: Dict[str, str] = {}
+    for l in by_index:
+        g, fe = l.get("rhymeGroup") or "", _fixed_end_word(l)
+        if g and fe and g not in anchors:
+            anchors[g] = fe
+
+    fillable = [l for l in by_index if not l.get("locked") and _fillable(l)]
+    total = len(fillable)
+    prior: List[str] = []   # the committed verse-so-far (chosen lines + locked text), in order
+    out = []
+    pos = 0
+    for l in by_index:
+        if l.get("locked") or not _fillable(l):
+            if l.get("text"):   # a locked/finalized line is still part of the story context
+                prior.append(str(l["text"]))
+            continue
+        pos += 1
+        g = l.get("rhymeGroup") or ""
+        anchor = anchors.get(g)
+        is_anchor_line = anchor is not None and _fixed_end_word(l) == anchor
+        context = {"chorus": chorus, "theme": theme, "priorLines": list(prior), "position": pos, "total": total}
+        props = _propose_line(l, spec, None if is_anchor_line else anchor,
+                              int(regen.get(l["index"], 0)), backend, context)
+        if g and g not in anchors and props:
+            anchors[g] = props[0]["endWord"]
+        chosen = props[0]["text"] if props else ""
+        if chosen:
+            prior.append(chosen)
+        out.append({"index": l["index"], "proposals": props, "chosen": chosen})
+    return {"ok": True, "backend": backend, "chorus": chorus, "theme": theme, "lines": out}
 
 
 def fill_gap(spec: dict, line_index: int, regen: Optional[Dict[int, int]] = None, backend: Optional[str] = None) -> dict:

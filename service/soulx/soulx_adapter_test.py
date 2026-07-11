@@ -44,7 +44,7 @@ def SLOT(a, b, *pitches):
     return {"start": a, "end": b, "velocity": 90, "kind": "gap", "segments": segs}
 
 
-LINES = [{"text": "hold the flame",
+LINES = [{"text": "hold the flame", "asserted": True,
           "score": {"v": 1, "algo": "v3", "bar": 0, "bpm": 120.0, "timeSig": [4, 4],
                     "grid": "1/16", "clamped": False,
                     "slots": [SLOT(0.5, 1.0, 57), SLOT(1.0, 1.5, 59), SLOT(1.5, 2.2, 60, 64)]}}]
@@ -102,10 +102,10 @@ try:
     A.render("", os.path.join(td, "err.wav"), {"lines": [{"text": "typed only", "score": None}]})
     check("scoreless sheet raises", False)
 except RuntimeError as e:
-    check("scoreless sheet raises a helpful error", "build a flow" in str(e), str(e)[:60])
+    check("scoreless sheet raises a helpful error", "build a flow" in str(e) or "assert the lyric line" in str(e), str(e)[:60])
 
 # ── 4. JSON-string score blobs tolerated (native sends parsed; belt for strings) ───────
-as_str = [{"text": "hold", "score": json.dumps(LINES[0]["score"])}]
+as_str = [{"text": "hold", "asserted": True, "score": json.dumps(LINES[0]["score"])}]
 m2 = A.render("", os.path.join(td, "str.wav"), {"lines": as_str})
 check("string score blob parses and renders", m2["ok"] and m2["linesUsed"] == 1)
 

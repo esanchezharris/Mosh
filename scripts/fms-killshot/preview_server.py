@@ -153,6 +153,21 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         if not path.is_relative_to(root):
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return None
+        if not path.exists():
+            # No more dead-ends: any stale/old PAGE url (a bookmark to an archived review
+            # page, a bare directory) funnels to the ONE clean review page instead of a
+            # confusing 404. Missing ASSETS (.wav/.json/...) still 404 honestly so a broken
+            # media reference stays visible rather than silently loading HTML.
+            reqp = urlsplit(self.path).path
+            leaf = reqp.rsplit("/", 1)[-1]
+            if reqp.endswith("/") or reqp.endswith(".html") or "." not in leaf:
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", URL_PREFIX + "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+            return None
         if path.is_dir():
             for name in ("index.html", "index.htm"):
                 candidate = path / name
@@ -160,7 +175,12 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
                     path = candidate
                     break
             else:
-                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+                # A bare directory with no index (e.g. an old /opening/ round folder) is a
+                # navigation dead-end — funnel it to the clean review page, never a 404.
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", URL_PREFIX + "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
                 return None
         try:
             source = path.open("rb")

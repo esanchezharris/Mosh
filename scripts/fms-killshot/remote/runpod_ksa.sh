@@ -15,6 +15,7 @@ API="https://rest.runpod.io/v1"
 NAME="mosh-ksa"
 IMAGE="runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 GPUS='["NVIDIA GeForce RTX 4090","NVIDIA RTX A5000","NVIDIA L40S"]'
+GPUS="${KSA_GPUS:-$GPUS}"   # override: SoulX preprocess CUDA-crashes on L40S (flash-attn illegal access, 2026-07-11) — pin 4090 when it matters
 CLOUD="${KSA_CLOUD:-SECURE}"          # COMMUNITY is ~half price; SECURE default for voice data
 DISK="${KSA_DISK:-60}"
 STATE="$HOME/.mosh-ksa-runpod"        # remembers the active pod id
