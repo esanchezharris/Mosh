@@ -6,7 +6,7 @@
 // existing MoshOps commands (set_audio_device / set_track_input) — one mutation
 // path, no new commands, no audio concepts leaking across the seam.
 
-import type { AudioDevices, WaveInput, Track } from "../types";
+import type { AudioDevices, WaveInput, TrackOutputs, Track } from "../types";
 
 export type DeviceOption = { value: string; label: string };
 
@@ -49,4 +49,37 @@ export function currentTrackInput(track: Track): string {
 // optional), so we only send the one field the user changed.
 export function audioDevicePatch(field: "output" | "input", value: string): Record<string, string> {
   return field === "output" ? { outputDevice: value } : { inputDevice: value };
+}
+
+// ── RTG-002 — per-track OUTPUT routing ───────────────────────────────────────
+// The output destinations from list_track_outputs (TrackOutputs): the hardware
+// wave outs + every audio track as a candidate route-to-track destination (an
+// implicit submix). A single <select> shows all three destination forms; the
+// value is a discriminated string ("default" | "dev:<id>" | "track:<id>") that
+// trackOutputPatch decodes into the existing set_track_output command args. The
+// current track is excluded (a track can't output to itself).
+export function trackOutputOptions(outputs: TrackOutputs | null, currentTrackId: string): DeviceOption[] {
+  const opts: DeviceOption[] = [{ value: "default", label: "Default output" }];
+  if (!outputs) return opts;
+  for (const o of outputs.outputs)
+    opts.push({ value: `dev:${o.deviceID}`, label: o.enabled ? o.name : `${o.name} (disabled)` });
+  for (const t of outputs.tracks)
+    if (t.id !== currentTrackId) opts.push({ value: `track:${t.id}`, label: `→ ${t.name}` });
+  return opts;
+}
+
+// The track's current output as an option value: "default" (no explicit output),
+// "track:<destId>" (routed into a track), or "dev:<deviceID>" (hardware out).
+export function currentTrackOutput(track: Track): string {
+  const out = track.output;
+  if (!out) return "default";
+  return out.isTrack ? `track:${out.destId ?? ""}` : `dev:${out.deviceID ?? ""}`;
+}
+
+// Decode an option value into set_track_output args. The command accepts exactly
+// one destination form: { output: "default" } | { destTrackId } | { deviceID }.
+export function trackOutputPatch(value: string, trackId: string): Record<string, string> {
+  if (value.startsWith("track:")) return { trackId, destTrackId: value.slice("track:".length) };
+  if (value.startsWith("dev:")) return { trackId, deviceID: value.slice("dev:".length) };
+  return { trackId, output: "default" };
 }

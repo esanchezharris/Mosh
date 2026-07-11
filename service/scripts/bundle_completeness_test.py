@@ -58,6 +58,15 @@ def _bundled(body: str):
     return files, dirs
 
 
+def _referenced_dirs(body: str) -> set:
+    """Top-level `service/<name>/` dir names the bundle references by LITERAL path —
+    a mkdir or an explicit `cp service/<name>/file` (e.g. teardown, transcribe, sketch,
+    transform). These ride as PARTIAL dirs (individual files copied), not via the
+    `for d in ...` whole-dir whitelist, but the package name still resolves in the
+    bundle — so they count as "present" for the package-presence check below."""
+    return set(re.findall(r"service/([A-Za-z0-9_]+)/", body))
+
+
 def _ps1_whitelist():
     """(top-level .py stems, whitelisted dir names) the Windows packager ships.
 
@@ -80,6 +89,25 @@ def _top_level_modules() -> set:
     """Top-level service/*.py module names (excluding tests + server itself)."""
     return {f[:-3] for f in os.listdir(SERVICE)
             if f.endswith(".py") and not f.endswith("_test.py")}
+
+
+def _top_level_packages() -> set:
+    """Top-level `service/<pkg>/` directory names that are importable packages
+    (contain at least one non-test `.py`). A `from <pkg> import ...` in bundled code
+    needs <pkg> shipped — as a whole-dir whitelist entry OR via an explicit file copy —
+    or the packaged app throws ModuleNotFoundError. Enumerating only `service/*.py`
+    (see `_top_level_modules`) misses this whole class: a package DIR absent from the
+    whitelist has no top-level `.py`, so it never trips the file check. (e.g. the
+    `from compiler import core` in server.py — `compiler/` is a dir, not a file.)"""
+    pkgs = set()
+    for name in os.listdir(SERVICE):
+        if name.startswith(".") or name == "__pycache__":
+            continue
+        d = os.path.join(SERVICE, name)
+        if os.path.isdir(d) and any(
+                f.endswith(".py") and not f.endswith("_test.py") for f in os.listdir(d)):
+            pkgs.add(name)
+    return pkgs
 
 
 def _imported_roots(path: str):
@@ -109,24 +137,56 @@ def _bundled_py_files(files: set, dirs: set):
                     yield os.path.join(base, n)
 
 
+def _missing_imports(py_files, top_level: set, present: set):
+    """{module -> sorted importer relpaths} for every top-level service module — a
+    `service/X.py` FILE *or* a `service/X/` PACKAGE dir — imported by `py_files` but
+    absent from `present`. Pure over its args so a synthetic `present`/`top_level`
+    drives the RED-prove below without touching run-mosh.sh."""
+    missing: dict = {}
+    for py in py_files:
+        for root in _imported_roots(py):
+            if root in top_level and root not in present:
+                missing.setdefault(root, []).append(os.path.relpath(py, REPO))
+    return {m: sorted(set(v)) for m, v in missing.items()}
+
+
 body = _bundle_service_body()
 bundled_files, bundled_dirs = _bundled(body)
 bundled = bundled_files | bundled_dirs
-top_level = _top_level_modules()
+top_level_files = _top_level_modules()
+top_level_pkgs = _top_level_packages()
+top_level = top_level_files | top_level_pkgs
+# A package is "present" if it rides as a whole-dir whitelist entry OR via explicit
+# file copies (teardown/recipe.py, transcribe/transcribe_cli.py, ...) — both make its
+# top-level name resolvable in the bundle.
+present = bundled | _referenced_dirs(body)
 
 check("parsed a non-empty bundle whitelist", bool(bundled_files) and bool(bundled_dirs),
       f"files={sorted(bundled_files)} dirs={sorted(bundled_dirs)}")
 
-# The heart: no bundled module may import a top-level service module that is absent
-# from the bundle.
-missing = {}  # module -> list of importer relpaths
-for py in _bundled_py_files(bundled_files, bundled_dirs):
-    for root in _imported_roots(py):
-        if root in top_level and root not in bundled:
-            missing.setdefault(root, []).append(os.path.relpath(py, REPO))
+# The heart: no bundled module may import a top-level service module — a top-level
+# `service/X.py` FILE *or* a `service/X/` PACKAGE dir — that is absent from the bundle.
+py_files = list(_bundled_py_files(bundled_files, bundled_dirs))
+missing = _missing_imports(py_files, top_level, present)
 
-detail = "; ".join(f"{m} <- {sorted(set(v))}" for m, v in sorted(missing.items())) or "none"
+detail = "; ".join(f"{m} <- {v}" for m, v in sorted(missing.items())) or "none"
 check("every top-level module imported by bundled code is bundled", not missing, detail)
+
+# RED-prove the DIR half of that guard hermetically (no run-mosh.sh edit): a top-level
+# PACKAGE imported by bundled code but absent from the whitelist MUST be flagged — and
+# the pre-enhancement files-only enumeration (`_top_level_modules`) would have MISSED it,
+# because a package dir has no top-level `.py`. `compiler` (imported by server.py) is the
+# fixture; simulate dropping it from the whitelist.
+probe = "compiler"
+if probe in top_level_pkgs and probe in present:
+    dropped = present - {probe}
+    caught_new = probe in _missing_imports(py_files, top_level, dropped)        # files + pkgs
+    caught_old = probe in _missing_imports(py_files, top_level_files, dropped)  # files only (pre-fix)
+    check("DIR guard flags a whitelist-absent imported package (files-only missed it)",
+          caught_new and not caught_old, f"caught_new={caught_new} caught_old={caught_old}")
+else:
+    check("DIR guard RED-prove fixture available", False,
+          f"{probe}: pkg={probe in top_level_pkgs} present={probe in present}")
 
 # The Windows packager (run-mosh.ps1) must ship the SAME service subtree, or the packaged
 # Windows app 500s where the packaged mac app works. Assert the two whitelists are identical.

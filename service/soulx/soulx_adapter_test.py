@@ -44,7 +44,9 @@ def SLOT(a, b, *pitches):
     return {"start": a, "end": b, "velocity": 90, "kind": "gap", "segments": segs}
 
 
-LINES = [{"text": "hold the flame",
+# asserted=True: the sing gate (#274) only authors a line the producer has ASSERTED — the
+# native payload sets this from the line's "asserted" status (MoshOps cmdRenderLayer).
+LINES = [{"text": "hold the flame", "asserted": True,
           "score": {"v": 1, "algo": "v3", "bar": 0, "bpm": 120.0, "timeSig": [4, 4],
                     "grid": "1/16", "clamped": False,
                     "slots": [SLOT(0.5, 1.0, 57), SLOT(1.0, 1.5, 59), SLOT(1.5, 2.2, 60, 64)]}}]
@@ -97,15 +99,22 @@ floors = [max(abs(v) for v in boundary[k: k + window]) for k in range(0, len(bou
 check("no re-attack across the melisma continuation (envelope never collapses)",
       min(floors) > 4000, str(min(floors)))
 
-# ── 3. No scored lines -> a clear job error, never a silent render ─────────────────────
-try:
-    A.render("", os.path.join(td, "err.wav"), {"lines": [{"text": "typed only", "score": None}]})
-    check("scoreless sheet raises", False)
-except RuntimeError as e:
-    check("scoreless sheet raises a helpful error", "build a flow" in str(e), str(e)[:60])
+# ── 3. Unrenderable sheets raise a clear job error, never a silent render ───────────────
+# #274 gate: a scored line that has NOT been asserted must not be sung (the producer confirms
+# the words first), and a line with no flow at all is likewise unrenderable. Both surface as
+# author_score's `no_asserted_scored_lines` → the adapter's "assert the lyric line first".
+for label, sheet in [
+    ("scored but UNASSERTED (the #274 gate)", [{"text": "hold the flame", "score": LINES[0]["score"]}]),
+    ("no score / no flow at all", [{"text": "typed only", "score": None}]),
+]:
+    try:
+        A.render("", os.path.join(td, "err.wav"), {"lines": sheet})
+        check(f"{label} -> raises (never a silent render)", False)
+    except RuntimeError as e:
+        check(f"{label} -> raises a helpful error", "assert" in str(e).lower(), str(e)[:70])
 
 # ── 4. JSON-string score blobs tolerated (native sends parsed; belt for strings) ───────
-as_str = [{"text": "hold", "score": json.dumps(LINES[0]["score"])}]
+as_str = [{"text": "hold", "asserted": True, "score": json.dumps(LINES[0]["score"])}]
 m2 = A.render("", os.path.join(td, "str.wav"), {"lines": as_str})
 check("string score blob parses and renders", m2["ok"] and m2["linesUsed"] == 1)
 

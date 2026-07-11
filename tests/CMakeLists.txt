@@ -19,8 +19,10 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
     test_training.cpp
+    test_webbridge_resource_guard.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
+    test_rave_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
@@ -28,6 +30,13 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
+    # RaveEngine.cpp is unconditionally compiled (MOSH_HAVE_ANIRA gates its body,
+    # not its existence — see cmake/Dependencies.cmake); MoshTests never defines
+    # MOSH_HAVE_ANIRA, so this always builds the graceful no-op stub branch. That
+    # is exactly what test_rave_engine.cpp exercises (AL-022's additive
+    # lastError() surface, compile-safe in the default anira-off build).
+    ${CMAKE_SOURCE_DIR}/src/plugins/transform/RaveEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshAutoTuneDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshOTTDsp.cpp
     ${CMAKE_SOURCE_DIR}/src/plugins/moshfx/MoshXFeedbackDsp.cpp)

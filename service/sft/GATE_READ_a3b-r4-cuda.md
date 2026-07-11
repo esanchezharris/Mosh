@@ -107,3 +107,5 @@ fold new SFT rows into r5 for misses that survive as genuinely model-caused. Rec
 in `docs/bench/R5_TRAINING_DECISION_2026-07-09.md` (addendum) and PROGRAM_STAGE1 §R.
 
 > **2026-07-10 addendum:** the fixed-harness RERUN of this read (same adapter, sha-verified) cleared split_clip (0.833) and set_track_type (0.500) as harness-caused; assign_sample/load_drum_kit remain model-caused → informed r5 (§P9). Full record: [R4_RERUN_AMENDMENT.md](R4_RERUN_AMENDMENT.md).
+>
+> **2026-07-10 — superseded by r5:** the informed r5 run **PASSED** the §P9 gate on one clean read — `assign_sample 0.333→0.667`, `load_drum_kit 0.333→0.750`, agg(A,C) 0.9563, §B 0.8919. r5 is the new best A3B adapter. Full read: [GATE_READ_a3b-r5-cuda.md](GATE_READ_a3b-r5-cuda.md).

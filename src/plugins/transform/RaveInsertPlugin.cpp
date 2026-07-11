@@ -173,6 +173,9 @@ juce::var RaveInsertPlugin::describe() const
     o->setProperty ("mix", jlimit (0.0f, 1.0f, mixValue.get()) * 100.0f);
     o->setProperty ("latencySamples", engine.latencySamples());
     o->setProperty ("latencySeconds", (double) engine.latencySamples() / (sr > 0 ? sr : 44100.0));
+    // AL-022 — additive: surfaces WHY the last loadModel()/prepare() failed (was
+    // previously undiagnosable from the caller's side). Empty on success/no-op.
+    o->setProperty ("lastError", juce::String (engine.lastError()));
     return juce::var (o);
 }
 

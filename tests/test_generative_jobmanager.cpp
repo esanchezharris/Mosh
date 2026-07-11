@@ -59,9 +59,12 @@ TEST_CASE ("GenerativeJobManager read surface is concurrency-safe", "[generative
 
     // No service is up, so no /health probe ever succeeds → svcBuild is never written and
     // stays empty. Any torn read here would surface as a crash under a sanitizer / in the wild.
+    // NB: Catch2's REQUIRE/CHECK are NOT thread-safe (they race a shared result counter), so the
+    // worker threads record into atomics only — every assertion runs on the main thread post-join.
     constexpr int kThreads = 8;
     constexpr int kIters   = 200;
-    std::atomic<int> healthyCount { 0 };
+    std::atomic<int> healthyCount   { 0 };   // probes that (wrongly) reported healthy
+    std::atomic<int> nonEmptyBuilds { 0 };   // reads that saw a non-empty svcBuild (torn/unexpected)
 
     std::vector<std::thread> pool;
     pool.reserve (kThreads);
@@ -74,8 +77,8 @@ TEST_CASE ("GenerativeJobManager read surface is concurrency-safe", "[generative
                 if (t % 2 == 0)
                 {
                     // Reader: mirrors the message-thread fingerprint read.
-                    auto b = mgr.serviceBuild();
-                    REQUIRE (b.isEmpty());
+                    if (mgr.serviceBuild().isNotEmpty())
+                        nonEmptyBuilds.fetch_add (1);
                 }
                 else
                 {
@@ -92,6 +95,7 @@ TEST_CASE ("GenerativeJobManager read surface is concurrency-safe", "[generative
 
     // Nothing was listening, so no probe should have reported healthy, and the build id read
     // by every reader thread stayed the (empty) initial value without tearing.
-    CHECK (healthyCount.load() == 0);
+    CHECK (healthyCount.load()   == 0);
+    CHECK (nonEmptyBuilds.load() == 0);
     CHECK (mgr.serviceBuild().isEmpty());
 }

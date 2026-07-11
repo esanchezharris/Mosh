@@ -1,6 +1,7 @@
 #include "RaveEngine.h"
 
 #include <atomic>
+#include <exception>
 #include <vector>
 
 #if MOSH_HAVE_ANIRA
@@ -42,6 +43,7 @@ struct RaveEngine::Impl
     std::atomic<RavePipeline*> activePtr { nullptr };
     std::atomic<int>  latency { 0 };
     std::atomic<bool> isReady { false };
+    std::string lastError;   // AL-022 — message thread only (prepare/loadModel/lastError)
 
     std::unique_ptr<RavePipeline> build (const std::string& path)
     {
@@ -86,8 +88,18 @@ void RaveEngine::prepare (double sampleRate, int blockSize)
         {
             impl->activeOwned->handler->prepare (anira::HostConfig ((float) impl->block, (float) impl->sr));
             impl->latency.store ((int) impl->activeOwned->handler->get_latency());
+            impl->lastError.clear();
         }
-        catch (...) {}
+        // AL-022 — record WHY a re-prepare failed (was a bare `catch (...) {}`,
+        // silently leaving the model on its old host config with no diagnostic).
+        catch (const std::exception& e)
+        {
+            impl->lastError = std::string ("prepare: ") + e.what();
+        }
+        catch (...)
+        {
+            impl->lastError = "prepare: unknown error";
+        }
     }
 }
 
@@ -104,16 +116,27 @@ bool RaveEngine::loadModel (const std::string& tsPath)
         impl->latency.store (lat, std::memory_order_relaxed);
         impl->activePtr.store (impl->activeOwned.get(), std::memory_order_release);
         impl->isReady.store (true, std::memory_order_release);
+        impl->lastError.clear();
         return true;
+    }
+    // AL-022 — record WHY the load failed (was a bare `catch (...) { return false; }`
+    // with no diagnostic — bad model file, tensor-shape mismatch, and backend init
+    // failure were all indistinguishable from the caller's side).
+    catch (const std::exception& e)
+    {
+        impl->lastError = std::string ("loadModel: ") + e.what();
+        return false;   // bad model / shape mismatch / backend error → stay on the old one
     }
     catch (...)
     {
+        impl->lastError = "loadModel: unknown error (bad model file, tensor-shape mismatch, or backend init failure)";
         return false;   // bad model / shape mismatch / backend error → stay on the old one
     }
 }
 
 bool RaveEngine::ready() const            { return impl->isReady.load (std::memory_order_acquire); }
 int  RaveEngine::latencySamples() const   { return impl->latency.load (std::memory_order_relaxed); }
+std::string RaveEngine::lastError() const { return impl->lastError; }
 
 void RaveEngine::process (float* mono, int n)
 {
@@ -150,6 +173,7 @@ int  RaveEngine::latencySamples() const { return 0; }
 void RaveEngine::process (float*, int) {}
 void RaveEngine::setNonRealtime (bool) {}
 void RaveEngine::reset() {}
+std::string RaveEngine::lastError() const { return {}; }   // AL-022 — always empty: no anira, no failures to report
 
 #endif
 
