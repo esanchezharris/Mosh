@@ -33,6 +33,26 @@ def _all_inputs_current(manifest: dict, artifact_root: Path) -> bool:
     return True
 
 
+def _full_song_banner(output_dir: Path) -> str:
+    """Top-of-page inline player for the whole-song sonic-check render, when present."""
+    if not (output_dir / "full-song-cover-str07.wav").is_file():
+        return ""
+    source = (
+        "<audio class='fs-src' controls preload='none' src='source-autotuned-full.wav'></audio>"
+        if (output_dir / "source-autotuned-full.wav").is_file()
+        else ""
+    )
+    return (
+        "<section class='full-song-banner'>"
+        "<div class='kicker'>Full song · sonic check</div>"
+        "<h2>Strength 0.7 · B major @ 138 · your autotuned vocal</h2>"
+        "<p>Judge the key and tone across the whole track — not the words (back-half lyrics drift; that's next).</p>"
+        "<audio controls preload='metadata' src='full-song-cover-str07.wav'></audio>"
+        f"<p class='fs-ref'>A/B vs the autotuned source that went in:</p>{source}"
+        "</section>"
+    )
+
+
 def _melody_round_banner(output_dir: Path) -> str:
     """Top-of-page jump to the current round's ear-diagnostics menu, when present.
 
@@ -346,6 +366,7 @@ def build_page(output_dir: Path) -> Path:
 header{{display:grid;grid-template-columns:1.4fr .6fr;gap:32px;align-items:end;padding-bottom:32px;border-bottom:1px solid var(--rule)}} .kicker,.eyebrow{{font:600 11px/1.2 'IBM Plex Mono',Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}} h1{{font-size:clamp(40px,7vw,84px);line-height:.92;letter-spacing:-.055em;margin:12px 0 0;max-width:820px}} header p{{color:var(--muted);margin:0;max-width:38ch}} .status{{display:inline-flex;margin-top:16px;border:1px solid var(--accent);border-radius:999px;padding:6px 10px;color:var(--accent);font:600 12px/1 'IBM Plex Mono',Menlo,monospace}}
 .assertion{{margin:32px 0;padding:24px;border-left:4px solid var(--accent);background:linear-gradient(90deg,rgba(242,169,59,.1),transparent)}} .assertion p{{font-size:22px;letter-spacing:-.02em;margin:8px 0 0}}
 .menu-banner{{display:block;margin:24px 0 0;padding:20px 24px;border:1px solid var(--accent);border-radius:var(--r);background:linear-gradient(90deg,rgba(242,169,59,.16),var(--inset));text-decoration:none;color:var(--text)}} .menu-banner:hover,.menu-banner:focus-visible{{background:linear-gradient(90deg,rgba(242,169,59,.26),var(--inset));outline:2px solid transparent}} .menu-banner strong{{display:block;font-size:26px;letter-spacing:-.02em;margin:6px 0}} .menu-banner span:last-child{{color:var(--muted);font-size:14px}}
+.full-song-banner{{margin:24px 0 0;padding:24px;border:1px solid var(--pass);border-radius:var(--r);background:linear-gradient(90deg,rgba(139,191,118,.14),var(--inset))}} .full-song-banner h2{{font-size:24px;letter-spacing:-.02em;margin:6px 0 4px}} .full-song-banner p{{color:var(--muted);margin:6px 0}} .full-song-banner audio{{width:100%;margin-top:6px}} .full-song-banner .fs-ref{{font-size:13px;margin-top:14px}}
 .repair-note{{margin:0 0 32px;padding:20px 24px;border:1px solid var(--accent);border-radius:var(--r);background:var(--inset)}} .repair-note p{{margin:8px 0 0;color:var(--muted)}} .repair-note strong{{color:var(--text)}}
 .rail{{border-top:1px solid var(--rule)}} .evidence{{display:grid;grid-template-columns:72px 1fr;gap:24px;padding:28px 0;border-bottom:1px solid var(--rule);animation:reveal .5s ease both}} .evidence:nth-child(2){{animation-delay:.06s}} .evidence:nth-child(3){{animation-delay:.12s}} .evidence:nth-child(4){{animation-delay:.18s}} .stage{{font:500 14px 'IBM Plex Mono',Menlo,monospace;color:var(--muted)}} .evidence h2{{font-size:25px;margin:4px 0 4px;letter-spacing:-.025em}} .evidence p{{color:var(--muted);margin:0 0 16px}} audio{{width:100%;height:44px}} .empty,.quarantine{{padding:14px 16px;border:1px dashed var(--rule);border-radius:8px;color:var(--muted);font:13px 'IBM Plex Mono',Menlo,monospace}} .quarantine{{border-color:var(--fail);color:var(--fail)}}
 .metrics{{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);margin:32px 0}} .metrics div{{background:var(--inset);padding:16px}} .metrics span,.metrics strong{{display:block;font-family:'IBM Plex Mono',Menlo,monospace}} .metrics span{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}} .metrics strong{{font-size:18px;margin-top:6px}}
@@ -355,6 +376,7 @@ header{{display:grid;grid-template-columns:1.4fr .6fr;gap:32px;align-items:end;p
 @keyframes reveal{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:none}}}} @media(max-width:700px){{main{{padding:28px 16px 48px}}header,.section-heading,.clip-head{{grid-template-columns:1fr}}.clip-stats{{text-align:left}}.evidence{{grid-template-columns:44px 1fr;gap:12px}}.metrics{{grid-template-columns:1fr 1fr}}.lane-metrics{{grid-template-columns:1fr}}}} @media(prefers-reduced-motion:reduce){{.evidence{{animation:none}}}}
 </style></head><body><main>
 <header><div><div class='kicker'>Used2 / asserted proof / opening</div><h1>Words first. Then voice.</h1><span class='status'>needs owner ear</span></div><p>This page isolates whether corrected words can survive exact timing and measured register before any second-half invention resumes.</p></header>
+{_full_song_banner(output_dir)}
 {_melody_round_banner(output_dir)}
 <section class='assertion'><div class='kicker'>Asserted text · {len(words)} words</div><p>{html.escape(text)}</p></section>
 <section class='rail'>{''.join(cards)}</section>

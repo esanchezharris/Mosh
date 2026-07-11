@@ -487,6 +487,18 @@ def test_page_section_renders_top_ranked_current_candidates(tmp_path: Path) -> N
     assert "yeah" in section  # lexical chip content
 
 
+def test_full_song_banner_appears_only_when_the_render_exists(tmp_path: Path) -> None:
+    from asserted_proof_page import _full_song_banner
+
+    root, opening, ace_dir = _spike_dirs(tmp_path)
+    output = root / "asserted-proof"
+    assert _full_song_banner(output) == ""
+    (output / "full-song-cover-str07.wav").write_bytes(b"RIFFfake")
+    banner = _full_song_banner(output)
+    assert "full-song-cover-str07.wav" in banner
+    assert "<audio" in banner  # an inline player, not just a link
+
+
 def test_melody_round_banner_appears_only_when_the_menu_exists(tmp_path: Path) -> None:
     from asserted_proof_page import _melody_round_banner
 
