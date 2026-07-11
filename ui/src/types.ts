@@ -26,6 +26,7 @@ export type RenderLayer = {
   hasOriginal?: boolean;     // wave clips: a pre-render original is stored → Reset is available
   coverage?: "auto" | "loop" | "stitch";  // whole-clip: how a clip longer than the model window is covered
   reimagineActive?: boolean; // MIDI/drum clips: a hidden audio render plays beneath the muted MIDI → Reset is available
+  liveArmed?: boolean;       // Lane A: "Live" render-ahead is armed — playback lays the re-imagine ahead of the playhead
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().

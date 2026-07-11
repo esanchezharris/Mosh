@@ -52,4 +52,28 @@ describe("mock MIDI re-imagine — hidden audio beneath the muted MIDI (Phase 2)
     expect(rl?.appliedInPlace).toBe(true);
     expect(rl?.reimagineActive).toBeFalsy();                      // wave uses in-place, not the beneath model
   });
+
+  it("Live (render-ahead) arms + disarms on a WAVE clip (Lane A)", async () => {
+    const s = await snap();
+    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave")!;
+    const clipId = wave.id;
+    await exec("create_render_layer", { clipId, adapter: "fake", mode: "reimagine" });
+    const rlOf = async () => (await snap()).tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)?.renderLayer;
+
+    expect((await rlOf())?.liveArmed).toBeFalsy();                // not armed by default
+    expect((await exec("render_ahead_arm", { clipId })).ok).toBe(true);
+    let rl2 = await rlOf();
+    expect(rl2?.liveArmed).toBe(true);                           // armed → Live is on
+    expect(rl2?.appliedInPlace).toBe(true);                      // the clip fills in place
+
+    expect((await exec("render_ahead_arm", { clipId, armed: false })).ok).toBe(true);
+    expect((await rlOf())?.liveArmed).toBe(false);              // disarm clears it
+  });
+
+  it("Live rejects a MIDI clip (wave-only in v1)", async () => {
+    const midi = (await snap()).tracks.flatMap((t) => t.clips).find((c) => c.type === "midi")!;
+    await exec("create_render_layer", { clipId: midi.id, adapter: "fake", mode: "reimagine" });
+    const r = await exec("render_ahead_arm", { clipId: midi.id });
+    expect(r.ok).toBe(false);
+  });
 });

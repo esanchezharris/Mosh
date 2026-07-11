@@ -350,9 +350,14 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           </>
         ) : clip.type === "wave" ? (
           // Wave clips auto-apply in place — the waveform swaps to the result instantly.
-          // No accept/reject; Reset restores the original.
+          // No accept/reject; Reset restores the original. "Live" arms render-ahead: as you play,
+          // the re-imagine lays down ahead of the playhead (Lane A); a knob change re-lays from
+          // where you are. It fills the clip in place, so Reset still restores the original.
           <>
             <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine</button>
+            <button className={`btn${rl.liveArmed ? " on" : ""}`} data-testid="gen-live" aria-pressed={!!rl.liveArmed}
+              title="Live — render the re-imagine ahead of the playhead as you play; turn a knob and hear it fill in ahead of you"
+              onClick={() => void exec("render_ahead_arm", { clipId: clip.id, armed: !rl.liveArmed })}>{rl.liveArmed ? "◉ Live" : "Live"}</button>
             <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         ) : (

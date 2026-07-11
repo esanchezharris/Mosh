@@ -190,6 +190,11 @@ namespace mosh::ids
     // finalizeRender drops a result whose epoch is stale (a newer edit superseded it). Both non-undoable.
     MOSH_DECLARE_ID (reactive)
     MOSH_DECLARE_ID (reactiveEpoch)
+    // Lane A (render-ahead / "Live"): when armed on a wave clip, transport playback drives a
+    // progressive window-by-window re-imagine that lays crossfaded audio AHEAD of the playhead and
+    // repoints the clip's source to the growing file (byte-stable prefix ⇒ glitch-free mid-play).
+    // `liveArmed` is the per-layer toggle surfaced in the snapshot for the UI. Non-undoable.
+    MOSH_DECLARE_ID (liveArmed)
     MOSH_DECLARE_ID (createdBy)        // user | (future) monster
     MOSH_DECLARE_ID (userKept)
     MOSH_DECLARE_ID (compiledEnvelope) // TRANSIENT: JSON of the last compile_render result (mode/backend/reasoning/say) — non-undoable, like lyricProposals

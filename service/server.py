@@ -44,6 +44,7 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stitch  # noqa: E402  (render-ahead incremental-stitch primitive; stdlib wave only)
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
@@ -761,6 +762,34 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/stitch_windows":
+            # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
+            # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless
+            # stitch.stitch_windows (1ms equal-power default). Pure + hermetic (stdlib wave) —
+            # the native RenderAheadScheduler calls this after each new window completes to
+            # extend the growing render-ahead file. Byte-stable: appending a window never
+            # perturbs earlier seams (each seam depends only on its two neighbours), so the
+            # region the playhead is reading stays identical across an extend.
+            wins = data.get("windows", []) or []
+            out = data.get("outPath", "")
+            if not wins or not out:
+                self._send(400, {"ok": False, "error": "windows[] and outPath required"})
+                return
+            missing = [w for w in wins if not (isinstance(w, str) and os.path.exists(w))]
+            if missing:
+                self._send(400, {"ok": False, "error": f"window(s) missing: {missing[:3]}"})
+                return
+            try:
+                target = float(data.get("targetSeconds") or 0.0)
+                if target <= 0.0:
+                    target = sum(stitch.wav_duration(w) for w in wins)
+                xfade = float(data.get("xfadeMs") or 1.0)
+                stitch.stitch_windows(wins, out, target, xfade_ms=xfade)
+                self._send(200, {"ok": True, "outPath": out,
+                                 "durationSeconds": round(stitch.wav_duration(out), 3),
+                                 "windows": len(wins), "xfadeMs": xfade})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"stitch failed: {e}"})
         elif path == "/transcribe":
             # Audio -> MIDI via Basic Pitch, run as a subprocess under the dedicated
             # transcribe venv so its deps stay isolated. Synchronous: the server is

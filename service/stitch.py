@@ -71,7 +71,7 @@ def _xfade_join(a, b, ch, xfade_frames):
     return out
 
 
-def tile_to_length(in_path, out_path, target_s, xfade_ms=8.0):
+def tile_to_length(in_path, out_path, target_s, xfade_ms=1.0):
     """Repeat in_path (one cycle) to fill target_s, crossfading each loop seam so it doesn't
     click. The result is exactly target_s long (trimmed)."""
     samples, ch, sr = _read(in_path)
@@ -87,7 +87,7 @@ def tile_to_length(in_path, out_path, target_s, xfade_ms=8.0):
     _write(out_path, buf[: target_frames * ch], ch, sr)
 
 
-def stitch_windows(window_paths, out_path, target_s, xfade_ms=8.0):
+def stitch_windows(window_paths, out_path, target_s, xfade_ms=1.0):
     """Overlap-add crossfade consecutive window renders into one continuous file of target_s."""
     if not window_paths:
         raise ValueError("stitch_windows: no windows")
