@@ -438,12 +438,48 @@ function ExportTool({ audioEnabled }: { audioEnabled: boolean }) {
   );
 }
 
+// The popover body loads the command log from an effect on mount. Because Pop only
+// renders its children while open, mounting == opening, so the mount effect replaces
+// the former render-time `void load()` (which set state during Pop's render). State
+// lives in the parent so the fetched log survives close/reopen (load-once caching).
+function CommandLogBody({
+  log,
+  loading,
+  load,
+}: {
+  log: CommandLogData | null;
+  loading: boolean;
+  load: () => void;
+}) {
+  useEffect(() => {
+    if (!log && !loading) load();
+    // Load once on open; the guard keeps a cached log from re-fetching on reopen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const entries = log?.entries ?? [];
+  return (
+    <>
+      <div className="pop-head">Command log <button className="btn icon" title="Refresh" aria-label="Refresh command log" onClick={load}><IconRefresh size={14} /></button></div>
+      <div className="pop-note">{loading ? "Loading…" : `${entries.length} of ${log?.total ?? 0} · newest first`}</div>
+      <div className="cmdlog-list" data-testid="command-log">
+        {entries.length === 0 && !loading ? <div className="rack-empty">no commands yet</div> :
+          entries.map((e, i) => (
+            <div className={`cmdlog-row${e.ok ? "" : " err"}`} key={i}>
+              <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? <IconCheck size={12} /> : <IconX size={12} />}</span>
+              <span className="cmdlog-name tc" title={e.error ?? e.command}>{e.command}</span>
+              {e.undoable && <span className="cmdlog-badge">undo</span>}
+            </div>
+          ))}
+      </div>
+    </>
+  );
+}
+
 export function CommandLogTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const exec = useStore((s) => s.exec);
   const [log, setLog] = useState<CommandLogData | null>(null);
   const [loading, setLoading] = useState(false);
   const load = async () => { setLoading(true); const r = await exec("get_command_log", { limit: 50 }); if (r.ok && r.data) setLog(r.data as CommandLogData); setLoading(false); };
-  const entries = log?.entries ?? [];
   return (
     <Pop
       label={label ?? "☰"}
@@ -452,25 +488,7 @@ export function CommandLogTool({ label, title, className, ariaLabel, testId }: T
       ariaLabel={ariaLabel ?? "Command log"}
       testId={testId}
     >
-      {() => {
-        if (!log && !loading) void load();
-        return (
-          <>
-            <div className="pop-head">Command log <button className="btn icon" title="Refresh" aria-label="Refresh command log" onClick={() => void load()}><IconRefresh size={14} /></button></div>
-            <div className="pop-note">{loading ? "Loading…" : `${entries.length} of ${log?.total ?? 0} · newest first`}</div>
-            <div className="cmdlog-list" data-testid="command-log">
-              {entries.length === 0 && !loading ? <div className="rack-empty">no commands yet</div> :
-                entries.map((e, i) => (
-                  <div className={`cmdlog-row${e.ok ? "" : " err"}`} key={i}>
-                    <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? <IconCheck size={12} /> : <IconX size={12} />}</span>
-                    <span className="cmdlog-name tc" title={e.error ?? e.command}>{e.command}</span>
-                    {e.undoable && <span className="cmdlog-badge">undo</span>}
-                  </div>
-                ))}
-            </div>
-          </>
-        );
-      }}
+      {() => <CommandLogBody log={log} loading={loading} load={() => void load()} />}
     </Pop>
   );
 }
