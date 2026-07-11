@@ -539,6 +539,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         emit("transport", snapshot.transport);
         return ok(command);
       }
+      if (action === "to_start") {
+        snapshot.transport = { ...t, position: 0 };
+        emit("transport", snapshot.transport);
+        return ok(command);
+      }
       if (action === "record") {
         snapshot.transport = { ...t, recording: !t.recording, playing: true };
         startPlayback();

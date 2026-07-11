@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fairRecall, SHORT_PATTERN_NOTES, scoreExample, scoreReply } from "./metric";
+import { fairRecall, SHORT_PATTERN_NOTES, scoreExample, scoreReply, resolveUtterance, buildExamplePrompt } from "./metric";
 import type { EvalExample } from "./evalset";
 import type { CallBrain } from "../harvest/genTurns";
 
@@ -84,5 +84,54 @@ describe("scoreExample / scoreReply — fair note population", () => {
     const s = await scoreReply(POP_EXAMPLE, JSON.stringify({ intent: "HUH", say: "?" }));
     expect(s.deferred).toBe(true);
     expect(s.score).toBe(0);
+  });
+});
+
+// ── ${VAR} utterance placeholders (frozen-eval id fix, 2026-07) ──────────────
+// Eval rows may reference session entities via the SAME vars their startCommands
+// bind ("Mute ${TKEYS}."); the scorer resolves them against the mock-bound env so
+// the model always sees an id that exists in its rendered snapshot.
+
+describe("resolveUtterance", () => {
+  it("substitutes bound vars and leaves everything else intact", () => {
+    const env = new Map([["TKEYS", "18"], ["CSUB", "108"]]);
+    expect(resolveUtterance("Mute ${TKEYS}, reject ${CSUB}.", env)).toBe("Mute 18, reject 108.");
+    expect(resolveUtterance("no placeholders here", env)).toBe("no placeholders here");
+  });
+
+  it("leaves an unknown var intact (the build-time gap check owns that failure)", () => {
+    expect(resolveUtterance("Mute ${TNOPE}.", new Map())).toBe("Mute ${TNOPE}.");
+  });
+});
+
+const PLACEHOLDER_EXAMPLE: EvalExample = {
+  id: "ph",
+  utterance: "Mute track ${t0}.",
+  startCommands: [{ command: "create_track", args: { name: "Keys" }, bind: "t0" }],
+  goldCommandNames: ["set_track_mute"],
+};
+
+describe("placeholder resolution in prompts", () => {
+  it("buildExamplePrompt sends the model a RESOLVED utterance whose id exists in its snapshot", async () => {
+    const msgs = await buildExamplePrompt("Rules:", PLACEHOLDER_EXAMPLE);
+    const user = msgs.find((m) => m.role === "user")!.content;
+    expect(user).not.toContain("${");
+    const id = user.match(/^Mute track (\w+)\.$/)![1];
+    // the resolved id must be visible (quoted) in the snapshot the model sees
+    const sys = msgs.find((m) => m.role === "system")!.content;
+    expect(sys).toContain(`"${id}"`);
+  });
+
+  it("scoreExample resolves the utterance, and a rule-following reply passes", async () => {
+    let seenUser = "";
+    const brain: CallBrain = async (messages) => {
+      seenUser = messages.find((m) => m.role === "user")?.content ?? "";
+      const id = seenUser.match(/^Mute track (\w+)\.$/)?.[1] ?? "";
+      return JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_mute", args: { trackId: id, mute: true } }] });
+    };
+    const s = await scoreExample("Rules:", PLACEHOLDER_EXAMPLE, brain);
+    expect(seenUser).not.toContain("${");
+    expect(s.deferred).toBe(false);
+    expect(s.score).toBe(1);
   });
 });

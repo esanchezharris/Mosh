@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "multiplayer/LockManager.h"
+#include <set>
 
 using namespace mosh;
 using Scope = LockManager::Scope;
@@ -97,4 +98,133 @@ TEST_CASE ("decide: free or self-owned keys are allowed; reads always allowed", 
     REQUIRE (m.decide (Scope::Unguarded, "track-2").allow); // a read on a peer-locked track is fine
     REQUIRE (m.ownerOf ("track-2") == "other");
     REQUIRE (m.ownerOf ("track-9").isEmpty());
+}
+
+// ── AL-011: lock-classifier drift coverage ──────────────────────────────────────
+//
+// LockManager::classify() is an independent, hand-maintained mirror of what
+// MoshOps actually dispatches (src/moshops/MoshOps.cpp's `if (name == "...")`
+// table) -- nothing enforces that the two stay in sync as new commands are
+// added. sketch_beatbox is a real example: it dispatches in MoshOps but was
+// never added to any of LockManager's Unguarded/Track/Clip sets, so it falls
+// through to the fail-closed SessionGlobal default. That default happens to be
+// CORRECT for sketch_beatbox (it internally lands both create_track and
+// set_tempo, both of which are themselves session-global), but nothing was
+// checking that this was a deliberate call rather than an oversight.
+//
+// The two tests below close that gap without requiring an invasive shared
+// command->scope registry (LockManager's sets are file-local statics; MoshOps
+// is a ~9000-line file well outside this fix's scope): (1) pin the specific,
+// deliberate sketch_beatbox decision, and (2) parse MoshOps.cpp's real dispatch
+// table at test time and assert every command it dispatches is EITHER
+// classified into a non-default scope OR named on an explicit, commented
+// allow-list of "deliberately session-global" commands below. A future command
+// that is dispatched but neither classified nor allow-listed fails this test
+// with the offending name(s) -- forcing an explicit scoping decision instead of
+// silently inheriting SessionGlobal by omission.
+
+TEST_CASE ("classify: sketch_beatbox fails closed to session-global by design", "[multiplayer][lock]")
+{
+    // MoshOps::cmdSketchBeatbox lands its transduced hits via set_tempo +
+    // create_track (drum) + add_midi_clip -- the first two are themselves
+    // session-global, so sketch_beatbox is correctly left UNCLASSIFIED here
+    // (falling through to the fail-closed default) rather than narrowly
+    // track/clip-scoped.
+    REQUIRE (LockManager::classify ("sketch_beatbox") == Scope::SessionGlobal);
+}
+
+namespace
+{
+    // Extracts every command name from MoshOps.cpp's dispatch table: lines of
+    // the exact, consistently-used shape `if (name == "xxx")  return ...;`
+    // (179 such lines currently; the only other `name ==` occurrences in the
+    // file are an unrelated recipe-command allow-list and a plugin-name
+    // comparison, neither of which has "return" on the same line, so they are
+    // correctly excluded by the filter below).
+    juce::StringArray extractDispatchedCommands (const juce::File& moshOpsCpp)
+    {
+        juce::StringArray out;
+        juce::StringArray lines;
+        lines.addLines (moshOpsCpp.loadFileAsString());
+        for (auto& line : lines)
+        {
+            auto trimmed = line.trim();
+            if (! trimmed.startsWith ("if (name == \""))
+                continue;
+            if (! trimmed.contains ("return"))
+                continue;
+            auto rest = trimmed.fromFirstOccurrenceOf ("if (name == \"", false, false);
+            auto name = rest.upToFirstOccurrenceOf ("\"", false, false);
+            if (name.isNotEmpty())
+                out.addIfNotAlreadyThere (name);
+        }
+        return out;
+    }
+
+    // Commands dispatched by MoshOps that are DELIBERATELY left unclassified
+    // (session-global by the fail-closed default), each with the one-line
+    // reason it is safe to be global rather than track/clip-scoped. Keep this
+    // list in sync by design, not by accident: a command belongs here only if
+    // classifying it narrowly would be wrong (it structurally affects more than
+    // one track, or -- like sketch_beatbox -- performs a session-global
+    // mutation as part of its own effect).
+    const std::set<juce::String>& intentionallySessionGlobal()
+    {
+        static const std::set<juce::String> allow {
+            // Structural: create/rename/remove a track, bus, or group -- these
+            // change the session's track list itself, not one existing track.
+            "create_track", "create_bus", "create_group_track", "ungroup_track",
+            "rename_bus", "remove_bus",
+            // Song-structure sections/annotations span the whole timeline.
+            "create_section", "rename_section", "move_section", "remove_section",
+            "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",
+            // Tempo/key/time-signature/metronome are session-wide, not per-track.
+            "set_tempo", "set_tempo_curve", "insert_tempo_change", "remove_tempo_change",
+            "set_key",
+            "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
+            "set_metronome", "delete_time_range",
+            // The master bus is not "a track" -- it is the session's one mix bus.
+            "set_master_volume", "set_master_pan",
+            // Project/session lifecycle.
+            "open_recent", "recover_session", "discard_recovery",
+            // Authors a multi-command recipe (tempo/key/tracks) -- see
+            // isGeneratedRecipeCommandAllowed in MoshOps.cpp.
+            "generate_beat_recipe",
+            // Lands create_track + set_tempo internally (see the dedicated test
+            // above) -- both already session-global on their own.
+            "sketch_beatbox",
+            // Multiplayer session-to-session signalling, not a track/clip edit.
+            "mp_send_signal",
+        };
+        return allow;
+    }
+}
+
+TEST_CASE ("classify: every MoshOps-dispatched command is classified or explicitly allow-listed as global (AL-011 drift guard)", "[multiplayer][lock]")
+{
+    // WORKING_DIRECTORY is pinned to the repo root for the MoshTests ctest entry
+    // (tests/CMakeLists.txt) -- test_training.cpp already relies on the same
+    // repo-root-relative resolution to shell out to service/training.
+    auto repoRoot = juce::File::getCurrentWorkingDirectory();
+    auto moshOpsCpp = repoRoot.getChildFile ("src/moshops/MoshOps.cpp");
+    REQUIRE (moshOpsCpp.existsAsFile());
+
+    auto dispatched = extractDispatchedCommands (moshOpsCpp);
+    // Sanity floor on the extraction itself, so a regex/parse regression (e.g. the
+    // dispatch table changing shape) fails loudly here instead of silently
+    // passing with zero commands checked.
+    REQUIRE (dispatched.size() > 150);
+
+    juce::StringArray drifted;
+    for (auto& name : dispatched)
+        if (LockManager::classify (name) == Scope::SessionGlobal
+            && intentionallySessionGlobal().count (name) == 0)
+            drifted.add (name);
+
+    juce::String driftMsg = "New MoshOps command(s) fall through to SessionGlobal without an "
+        "explicit LockManager scope decision or an intentionallySessionGlobal() allow-list "
+        "entry -- classify them (Track/Clip/Unguarded) or add them to the allow-list with a "
+        "reason: " + drifted.joinIntoString (", ");
+    INFO (driftMsg.toStdString());
+    REQUIRE (drifted.isEmpty());
 }

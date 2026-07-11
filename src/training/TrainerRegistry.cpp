@@ -131,10 +131,17 @@ String TrainerRegistry::sanitize (const String& s) const
 
 String TrainerRegistry::sha256File (const File& file) const
 {
-    MemoryBlock mb;
-    if (! file.loadFileAsData (mb))
+    // AL-016 — stream the file in fixed-size chunks via JUCE's File-constructor
+    // overload (SHA256Processor::processStream reads 64 bytes at a time through a
+    // FileInputStream) instead of loading the whole file into one MemoryBlock; a
+    // multi-GB corpus source no longer has to fit in memory just to be hashed.
+    // Produces a byte-identical digest to the old full-read approach (see the
+    // equivalence test in tests/test_training.cpp) -- preserve the old
+    // missing-file contract (empty string, not the zeroed-hash JUCE would
+    // otherwise report) with an explicit existence check.
+    if (! file.existsAsFile())
         return {};
-    return SHA256 (mb.getData(), mb.getSize()).toHexString();
+    return SHA256 (file).toHexString();
 }
 
 bool TrainerRegistry::sourceEligible (const var& src, String& reason) const
@@ -245,20 +252,28 @@ var TrainerRegistry::importSource (const var& args, String& error)
     o->setProperty ("updated_at", utcNow());
 
     bool replaced = false;
+    int landedIndex = -1;
     for (int i = 0; i < sources.size(); ++i)
     {
         if (sources.getReference (i).getProperty ("source_id", var()).toString() == sid)
         {
             sources.set (i, var (o));
             replaced = true;
+            landedIndex = i;
             break;
         }
     }
     if (! replaced)
+    {
         sources.add (var (o));
+        landedIndex = sources.size() - 1;
+    }
     reg.getDynamicObject()->setProperty ("sources", sources);
     saveRegistry (reg);
-    return sourceSummary (var (o), sources.size() - 1, true);
+    // AL-013 — landedIndex is the slot the record actually occupies: for a fresh
+    // import that's the newly-appended last slot, but for a replacement it is the
+    // EXISTING slot found above, which is not necessarily sources.size()-1.
+    return sourceSummary (var (o), landedIndex, true);
 }
 
 var TrainerRegistry::approveSource (const String& sourceId, bool approved, String& error)
