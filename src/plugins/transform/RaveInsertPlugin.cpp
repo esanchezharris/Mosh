@@ -70,6 +70,14 @@ void RaveInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
     auto* buf = fc.destBuffer;
     if (buf == nullptr) return;
 
+    // Service a reset_rave's dry-ring clear here, on the RT thread, before any ring access
+    // (clear() is a memset of already-allocated memory — no alloc, RT-safe).
+    if (pendingDryReset.exchange (false, std::memory_order_acquire))
+    {
+        dryRing.clear();
+        dryWritePos = 0;
+    }
+
     const int numCh = jmin (buf->getNumChannels(), kMaxChannels);
     const int n = jmin (fc.bufferNumSamples, kMaxBlock);
     const int start = fc.bufferStartSample;
@@ -158,9 +166,10 @@ bool RaveInsertPlugin::loadModelFromFile (const juce::File& tsFile)
 
 void RaveInsertPlugin::resetModel()
 {
-    engine.reset();
-    dryRing.clear();
-    dryWritePos = 0;
+    engine.reset();     // RT-safe: rebuilds the model + atomic swap (see RaveEngine::reset)
+    // dryRing/dryWritePos are read+written by applyToBuffer on the RT thread, so clearing them
+    // here (message thread) would race. Request the clear; the RT thread does it next block.
+    pendingDryReset.store (true, std::memory_order_release);
 }
 
 juce::var RaveInsertPlugin::describe() const
