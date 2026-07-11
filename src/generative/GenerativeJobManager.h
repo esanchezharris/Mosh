@@ -29,6 +29,7 @@ public:
 
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
+    juce::var listLoras();
 
     /** Submit a render job to a named adapter ("fake" | "stable_audio3").
         Returns the jobId (empty on failure). Non-blocking. */

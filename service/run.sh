@@ -63,6 +63,7 @@ fi
 [[ -f phonology/.phonology.env ]] && source ./phonology/.phonology.env
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
+export MOSH_LORA_DIR="${MOSH_LORA_DIR:-$HOME/Library/Mosh/loras}"   # LoRA rack library (drop-in .safetensors + cards)
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 
 # SA3 is on by default; the carve runs under the MLX venv when present, else this

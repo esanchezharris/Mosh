@@ -252,6 +252,7 @@ private:
     juce::var cmdBounceLayerToClip(const juce::var& args);
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
+    juce::var cmdListLoras        (const juce::var& args);
     juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
    #if MOSH_HAVE_ANIRA
     // Route C.2 — real-time RAVE insert (built only with anira+LibTorch).

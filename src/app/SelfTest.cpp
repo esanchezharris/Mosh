@@ -1578,6 +1578,66 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) xLayer().getProperty ("appliedInPlace", true), "reset cleared the applied transform");
     }
 
+    // ── LoRA rack: selection round-trip + full-fingerprint cache (fake adapter, hermetic).
+    // The rack rides the re-imagine layer as a params modifier (like colours); the real
+    // SA3 merge path is covered by verify-hardware, not selftest (service-spawning).
+    section ("LoRA rack: params + fingerprint");
+    {
+        auto lt = cmd (ops, "create_track", args1 ("name", "LoraRack"))["data"].getProperty ("trackId", var()).toString();
+        // freq 251 is unique to this section: add_test_tone_clip caches the generated
+        // WAV by int(freq) and reuses it (duration is NOT in the key), so sharing a
+        // frequency with another section that expects a different duration collides.
+        auto ltone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 1.2 }, { "freq", 251.0 }}));
+        const auto lcid = ltone["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", lcid }, { "adapter", "fake" }, { "mode", "reimagine" }}))),
+               "create_render_layer (reimagine, for LoRA rack) ok");
+
+        Array<var> sel;
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", "ken-sa3"); lo->setProperty ("value", 100); sel.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "seed", 3 }, { "nl", 0.4 }, { "loras", var (sel) }}));
+
+        auto lLayer = [&] () -> var {
+            auto trk = trackById (lt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == lcid)
+                    return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
+          auto* larr = lv.getArray();
+          check (larr != nullptr && larr->size() == 1
+                 && larr->getReference (0).getProperty ("name", var()).toString() == "ken-sa3"
+                 && (double) larr->getReference (0).getProperty ("value", 0) == 100.0,
+                 "loras selection round-trips through the snapshot"); }
+
+        auto lr1 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
+        check (ok (lr1), "render with a LoRA selection ok (fake)");
+        check (lr1["data"].getProperty ("cache", var()).toString() == "miss", "first LoRA render is a cache MISS");
+        auto lr2 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
+        check (lr2["data"].getProperty ("cache", var()).toString() == "hit", "identical LoRA re-render is a cache HIT");
+
+        // Strength is in the fingerprint: 100 -> 40 must MISS.
+        Array<var> sel40;
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", "ken-sa3"); lo->setProperty ("value", 40); sel40.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel40) }}));
+        auto lr3 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
+        check (lr3["data"].getProperty ("cache", var()).toString() == "miss", "LoRA strength change -> cache MISS");
+
+        // Clearing the rack changes the fingerprint too.
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", Array<var>{} }}));
+        auto lr4 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
+        check (lr4["data"].getProperty ("cache", var()).toString() == "miss", "clearing the LoRA rack -> cache MISS");
+
+        // The command clamps to <=2 entries (compose limit).
+        Array<var> sel3;
+        for (auto* nm : { "a", "b", "c" })
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", 50); sel3.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel3) }}));
+        { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
+          auto* larr = lv.getArray();
+          check (larr != nullptr && larr->size() == 2, "LoRA rack clamps to two entries"); }
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The

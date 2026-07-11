@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
+import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
@@ -165,8 +165,9 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
+  const loadLoras = useStore((s) => s.loadLoras);
   const qaByClip = useStore((s) => s.qaByClip);
-  useEffect(() => { loadColors(); loadTransformTargets(); }, [loadColors, loadTransformTargets]);
+  useEffect(() => { loadColors(); loadTransformTargets(); loadLoras(); }, [loadColors, loadTransformTargets, loadLoras]);
 
   // Generative runs on ANY clip type — a MIDI/drum clip is auto-bounced to audio by the
   // backend before the model. Target the SELECTED clip when it's on this track, else the
@@ -296,6 +297,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
+      <LoraRack clip={clip} />
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
@@ -367,6 +369,55 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
     </div>
+  );
+}
+
+// LoRA rack — trained style adapters applied to the SA3 re-imagine at 0–100 strength,
+// composing with colours/prompt/seed (≤2, ordered: stacks merge sequentially). The
+// library is a drop-in dir (~/Library/Mosh/loras/sa3); hidden when it's empty. A LoRA
+// whose trigger token is missing from the prompt offers a one-tap "add trigger" chip —
+// the trigger is what meaningfully activates the trained style.
+function LoraRack({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const lorasAvail = useStore((s) => s.availableLoras);
+  const rl = clip.renderLayer!;
+  const active: RenderLora[] = rl.loras ?? [];
+  if (lorasAvail.length === 0 && active.length === 0) return null;
+  const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next.slice(0, 2) });
+  const addable = lorasAvail.filter((m) => !active.some((a) => a.name === m.name));
+  const prompt = rl.prompt ?? "";
+  const missingTriggers = active
+    .map((a) => lorasAvail.find((m) => m.name === a.name)?.trigger ?? "")
+    .filter((t) => t && !prompt.toLowerCase().includes(t.toLowerCase()));
+  return (
+    <>
+      {active.map((l) => {
+        const meta = lorasAvail.find((m) => m.name === l.name);
+        return (
+          <label key={l.name} className="nparam" data-testid={`lora-row-${l.name}`}>
+            <span className="nlabel" title={meta?.hint || undefined}>🧬 {meta?.displayName ?? l.name}</span>
+            <input type="range" min={0} max={100} step={1} value={Math.round(l.value)}
+              aria-label={`${meta?.displayName ?? l.name} LoRA strength`}
+              onChange={(e) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value: Number(e.target.value) } : a)))} />
+            <button className="btn x" onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
+          </label>
+        );
+      })}
+      {active.length < 2 && addable.length > 0 && (
+        <select className="btn ghost color-add" data-testid="lora-add" value=""
+          onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: 70 }])}>
+          <option value="">+ LoRA…</option>
+          {addable.map((m) => <option key={m.name} value={m.name}>{m.displayName}</option>)}
+        </select>
+      )}
+      {missingTriggers.length > 0 && (
+        <button className="btn ghost" data-testid="lora-trigger-chip"
+          title="This LoRA's trigger word isn't in the prompt — add it so the style engages"
+          onClick={() => void exec("set_render_param", { clipId: clip.id, prompt: [prompt, ...missingTriggers].filter(Boolean).join(", ") })}>
+          + add trigger “{missingTriggers.join("”, “")}”
+        </button>
+      )}
+    </>
   );
 }
 

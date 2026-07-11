@@ -712,6 +712,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
+    if (name == "list_loras")        return cmdListLoras (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
@@ -5533,6 +5534,22 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
             }
     }
 
+    if (args.hasProperty ("loras"))   // LoRA rack: ≤2, ordered (stacks merge sequentially)
+    {
+        // getOrCreate: layers created before the rack shipped have no LORAS child.
+        auto loras = params.getOrCreateChildWithName (ids::LORAS, &undoManager());
+        loras.removeAllChildren (&undoManager());
+        if (auto* arr = args.getProperty ("loras", var()).getArray())
+            for (int i = 0; i < juce::jmin (2, arr->size()); ++i)
+            {
+                auto& l = arr->getReference (i);
+                juce::ValueTree lo (ids::LORA);
+                lo.setProperty (ids::name, l.getProperty ("name", ""), nullptr);
+                lo.setProperty (ids::value, l.getProperty ("value", 0), nullptr);
+                loras.appendChild (lo, &undoManager());
+            }
+    }
+
     node.setProperty (ids::status, "dirty", nullptr);   // params changed → re-render
     logLine ("set_render_param", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -6012,6 +6029,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             colors.add (var (co));
         }
     p->setProperty ("colors", colors);
+    Array<var> lorasArr;
+    if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+        for (int i = 0; i < ls.getNumChildren(); ++i)
+        {
+            auto* lo = new DynamicObject();
+            lo->setProperty ("name", ls.getChild (i)[ids::name]);
+            lo->setProperty ("value", ls.getChild (i)[ids::value]);
+            lorasArr.add (var (lo));
+        }
+    p->setProperty ("loras", lorasArr);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
     if (! singLines.isVoid())
         p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
@@ -6411,6 +6438,17 @@ juce::var MoshOps::cmdListColors (const juce::var&)
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
     return okResult ("list_colors", r);
+}
+
+juce::var MoshOps::cmdListLoras (const juce::var&)
+{
+    // The LoRA rack library (drop-in adapters + cards) for the generative UI.
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("list_loras", "generative service unavailable");
+    auto r = jobManager.listLoras();
+    if (! (bool) r.getProperty ("ok", false))
+        return okResult ("list_loras", [] { auto* o = new DynamicObject(); o->setProperty ("loras", Array<var>{}); return var (o); }());
+    return okResult ("list_loras", r);
 }
 
 juce::var MoshOps::cmdListTransformTargets (const juce::var&)
@@ -8213,6 +8251,16 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                     colors.add (var (co));
                 }
             r->setProperty ("colors", colors);
+            Array<var> loras;
+            if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+                for (int i = 0; i < ls.getNumChildren(); ++i)
+                {
+                    auto* lo = new DynamicObject();
+                    lo->setProperty ("name", ls.getChild (i)[ids::name]);
+                    lo->setProperty ("value", (double) ls.getChild (i)[ids::value]);
+                    loras.add (var (lo));
+                }
+            r->setProperty ("loras", loras);
         }
         // The last compile_render verdict (transient) — lets the UI show what it chose +
         // surface an "unsupported" honest message. Parsed back from the JSON blob.

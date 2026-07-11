@@ -2,6 +2,7 @@
 // renders this; no Tracktion/audio concepts leak across the seam.
 
 export type RenderColor = { name: string; value: number };
+export type RenderLora = { name: string; value: number };   // LoRA rack: 0–100 UI strength
 export type RenderLayer = {
   id: string;
   status: "empty" | "dirty" | "queued" | "rendering" | "ready" | "error" | "bypassed" | "frozen" | "bounced";
@@ -13,6 +14,7 @@ export type RenderLayer = {
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
+  loras?: RenderLora[];  // LoRA rack selection (≤2, ordered — stacks merge sequentially)
   target?: string;    // Route B: transform target (instrument or free-text)
   strength?: number;  // Route B: transform strength (0–100)
   // The render's time scope (seconds). A section-scoped render carries a sub-range of
@@ -105,6 +107,14 @@ export type AvailableColor = {
 
 // Route B transform target from GET /transform_targets (via list_transform_targets).
 export type AvailableTransformTarget = { name: string };
+
+// LoRA library card from GET /loras (via list_loras) — the drop-in adapter dir.
+export type AvailableLora = {
+  name: string;
+  displayName: string;
+  trigger: string;   // prompt token that activates the style ("" when none)
+  hint: string;      // suggested prompt vocabulary
+};
 
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 // `reasoning` is the Audiobox judge's one-line explanation of the score; `axes` are its

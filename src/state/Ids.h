@@ -206,6 +206,8 @@ namespace mosh::ids
     MOSH_DECLARE_ID (nl)               // init_noise_level (reimagine)
     MOSH_DECLARE_ID (target)           // Route B transform target (instrument or free-text)
     MOSH_DECLARE_ID (strength)         // Route B transform strength (0–100 ASTD UI value)
+    MOSH_DECLARE_ID (LORAS)            // LoRA rack selection (≤2 LORA children, ordered)
+    MOSH_DECLARE_ID (LORA)             // one selected LoRA: name + value (0–100 UI strength)
 
 #undef MOSH_DECLARE_ID
 } // namespace mosh::ids
