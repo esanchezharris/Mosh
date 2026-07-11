@@ -89,6 +89,9 @@ if (MOSH_BUILD_APP)
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp
+        # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
+        # serveUiResource); split out so it's testable without juce_gui_extra.
+        src/webview/UiResourcePathGuard.cpp
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp
