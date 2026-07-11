@@ -1,5 +1,7 @@
 #include "RemoteCompanionServer.h"
 
+#include <memory>
+
 #if JUCE_MAC
  #include <arpa/inet.h>
  #include <dlfcn.h>
@@ -749,15 +751,30 @@ juce::var RemoteCompanionServer::callOnMessageThread (const std::function<juce::
     if (juce::MessageManager::getInstance()->isThisTheMessageThread())
         return fn();
 
-    juce::WaitableEvent done;
-    juce::var result;
-    juce::MessageManager::callAsync ([&] {
-        result = fn();
-        done.signal();
+    // On a timeout we return WITHOUT joining the queued job — the message thread
+    // may still be blocked (e.g. a long cmdExportAudio) and run the lambda well
+    // after this stack frame is gone. Capturing `done`/`result` BY REFERENCE (the
+    // old code) is a cross-thread use-after-free the moment that happens: the
+    // async lambda later writes through &result/&done into a freed stack frame,
+    // and calls the dangling `fn` too. Fix: give the shared state HEAP lifetime via
+    // shared_ptr, and capture a BY-VALUE copy of `fn` (not a reference to the
+    // caller's temporary) into the async lambda — both copies keep the state (and
+    // the callable) alive for as long as either side still needs them. If we time
+    // out, our shared_ptr just drops; the lambda's own copy keeps Shared alive
+    // until it actually runs, then the lambda's copy drops too and Shared is freed
+    // — never while anything still references it. `result` is only read by the
+    // waiter AFTER `done.wait()` returns true, i.e. after the message-thread side
+    // has already signalled — no data race on the value itself.
+    struct Shared { juce::WaitableEvent done; juce::var result; };
+    auto shared = std::make_shared<Shared>();
+    std::function<juce::var()> fnCopy = fn;
+    juce::MessageManager::callAsync ([shared, fnCopy] {
+        shared->result = fnCopy();
+        shared->done.signal();
     });
-    if (! done.wait (timeoutMs))
+    if (! shared->done.wait (timeoutMs))
         return err ("message-thread call timed out");
-    return result;
+    return shared->result;
 }
 
 RemoteAuthResult RemoteCompanionServer::authorizeRequest (const juce::var& body) const
