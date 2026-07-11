@@ -6956,13 +6956,18 @@ juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
     juce::String path = args.getProperty ("path", var()).toString();
     if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
     bool loaded = false;
+    juce::String loadError;   // AL-022 — surfaced below when the best-effort load fails
     if (path.isNotEmpty())
         if (auto* r = asRave (plugin.get()))
+        {
             loaded = r->loadModelFromFile (juce::File (path));
+            if (! loaded) loadError = r->lastLoadError();
+        }
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("modelLoaded", loaded);
+    if (! loaded && loadError.isNotEmpty()) data->setProperty ("lastError", loadError);
     logLine ("add_rave_insert", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_rave_insert", var (data));
@@ -6995,7 +7000,15 @@ juce::var MoshOps::cmdLoadRaveModel (const juce::var& args)
     const bool ok = r->loadModelFromFile (juce::File (path));
     logLine ("load_rave_model", args, ok, ok ? juce::String() : juce::String ("load failed"), false);
     emitSnapshotInvalidated();
-    if (! ok) return errResult ("load_rave_model", "could not load model: " + path);
+    if (! ok)
+    {
+        // AL-022 — append the engine's diagnostic (exception message / failure
+        // reason) to the error, when one was captured. Additive: the base
+        // message is unchanged when there is no diagnostic to add.
+        const auto detail = r->lastLoadError();
+        return errResult ("load_rave_model", "could not load model: " + path
+            + (detail.isNotEmpty() ? (" (" + detail + ")") : juce::String()));
+    }
     auto* data = new DynamicObject();
     data->setProperty ("applied", true);
     data->setProperty ("describe", r->describe());

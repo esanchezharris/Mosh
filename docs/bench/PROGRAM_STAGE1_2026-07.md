@@ -345,3 +345,53 @@ not more rows. (2) evalA floor families are n=3–6 — one row flips a floor;
 reads are reported with counts, not just rates. (3) The base is the bf16 HF
 model (CUDA lane), not the 4-bit MLX base named in §P8's local recipe — same as
 the r4-cuda read this run is compared against.
+
+### §P9 amendment 1 (2026-07-10, pre-launch — evalA fixture-id repair + RE-BASELINE)
+
+Recorded BEFORE any r5 training or gate read. Same fixture-bug class as the 2
+degenerate `split_clip` rows repaired in the r4 rerun, now fixed at the root.
+
+**Defect:** 29/210 evalA rows carried utterances authored against the REAL
+engine's 1000-series logical ids (the eval-synthesis session assigned
+Kick=1010 · Keys=1012 · Sub=1013 · Lead=1014 · Keys-clip=1016 · Sub-clip=1018),
+but rows replay their `startCommands` on the MOCK (ids 17+/107+) — the
+referenced entity never exists in the snapshot the model sees, so those rows
+were unpassable by a rule-following model (defer OR emit the literal id → 0
+either way; 3 of them — `reject_render#0/#4`, `rename_track#4` — could only
+"pass" by ignoring the stated id and guessing, which name-recall can't detect).
+
+**Fix (branch `claude/peaceful-davinci-89c18a`):** utterance id tokens →
+`${VAR}` placeholders naming the same vars the row's startCommands bind,
+resolved at scoring time from the mock-bound env (`ui/src/gepa/metric.ts
+resolveUtterance`, applied in buildExamplePrompt/scoreExample/scoreReply); map +
+tripwire in `ui/src/gepa/fixtureIds.ts`; `buildEvalV2A.mts` now rewrites at
+build time, binds `TKICK`, gains `--repair`, and FAILS the build if any row's
+rendered prompt still carries an unresolvable id (the gate that would have
+caught this). Row ids, order, gold names and held-out rows unchanged; repair is
+idempotent. Verified: dump-audit 29→0 unresolved rows (remaining 3–4-digit
+tokens are BPM values + the "808 Bass" name); resolved ids land on the
+semantically right entities; vitest 854 + tsc clean.
+
+**Shas (durable copies at `~/Library/Mosh/work/gate/rerun-evals/`):** pre-fix
+`evalA.eval.pre-idfix-20260710.jsonl` = `f4944392053f…` (archived); post-fix
+`evalA.eval.jsonl` = `d68ec63696ee…` (+ manifest + `evalA-idfix-20260710.shasums.txt`).
+The §P9 floor read runs on the POST-FIX file.
+
+**RE-BASELINE (binding on the r5 read):** every pre-fix floor read (r1–r4,
+incl. the 2026-07-10 r4 rerun) carried FIXTURE CEILINGS on the affected
+families — broken rows scored 0 regardless of the model: `assign_sample`
+0.333 (2/3 rows broken) · `create_render_layer`/`reject_render`/`rename_track`/
+`set_note`/`set_track_type` 0.500 · `suggest_next_line` 0.600 ·
+`load_drum_kit`/`remove_track`/`set_track_mute`/`set_track_solo`/
+`set_track_volume` 0.667 · `bypass_plugin`/`render_layer` 0.750 ·
+`arm_track`/`set_track_pan` 0.833. Pre-fix reads on these families MUST NOT be
+compared against post-fix reads: an r5 "improvement" there may be the fixture
+repair, not the model. Notably the r4 rerun's `assign_sample` 0.333 sits
+EXACTLY at its ceiling (zero measurable model misses), so §P9's "misses ONLY
+assign_sample + load_drum_kit" framing is now partly moot — `load_drum_kit`
+0.333 < its 0.667 ceiling remains a real model miss. **Recommended (the
+program's own fix-first precedent): re-read the evalA floor surface vs the
+archived r4-cuda adapter (sha `2f29b655…`) on the repaired file BEFORE judging
+r5 deltas**, so the r5 report separates fixture recovery from model gains. The
+§A "45 raw-engine-id utterances" exclusion amendment is RETIRED for the
+210-row core — all 210 rows are measurable on the post-fix file.

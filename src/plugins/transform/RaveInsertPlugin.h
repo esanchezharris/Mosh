@@ -44,6 +44,10 @@ public:
     bool loadModelFromFile (const juce::File& tsFile);
     void resetModel();
     juce::var describe() const;
+    // AL-022 — diagnostic for the most recent loadModelFromFile() failure (or
+    // prepare() re-init failure); empty on success/no-op. Additive passthrough
+    // to RaveEngine::lastError(), also mirrored into describe()'s "lastError".
+    juce::String lastLoadError() const { return juce::String (engine.lastError()); }
 
 private:
     juce::CachedValue<float>        mixValue;

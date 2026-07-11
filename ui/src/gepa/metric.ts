@@ -52,6 +52,15 @@ export async function runBound(
   return { applied, total: cmds.length, errors };
 }
 
+/** Resolve ${VAR} utterance placeholders from the env `runBound` populated —
+ *  the same vars the row's startCommands bind — so the model is always shown an
+ *  id that exists in its rendered snapshot (frozen-eval id fix, 2026-07-10; see
+ *  fixtureIds.ts). Unknown vars are left intact: the eval builder's gap check
+ *  (buildEvalV2A.mts) owns that failure at build time. */
+export function resolveUtterance(utterance: string, env: Map<string, string>): string {
+  return utterance.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, v: string) => env.get(v) ?? m);
+}
+
 /** multiset recall of `gold` names covered by `got` names (0..1). The strict
  *  primitive — content-batch tasks (note population) should use fairRecall. */
 export function nameRecall(gold: string[], got: string[]): number {
@@ -105,18 +114,19 @@ export async function scoreExample(
   const env = new Map<string, string>();
   await runBound(ex.startCommands, env);
   const snapshotBefore = await mockSnapshot<Snapshot>();
+  const utterance = resolveUtterance(ex.utterance, env);
 
   let content = "";
   try {
     content = await callBrain([
       { role: "system", content: buildSystemPrompt(rules, snapshotBefore) },
-      { role: "user", content: ex.utterance },
+      { role: "user", content: utterance },
     ]);
   } catch { content = ""; }
 
   const cmds = parseReply(content).commands ?? [];
   if (cmds.length === 0) {
-    return { id: ex.id, score: 0, deferred: true, feedback: `DEFERRED on "${ex.utterance}" — expected ${ex.goldCommandNames.join(", ")}` };
+    return { id: ex.id, score: 0, deferred: true, feedback: `DEFERRED on "${utterance}" — expected ${ex.goldCommandNames.join(", ")}` };
   }
 
   let ok = 0;
@@ -151,7 +161,7 @@ export async function buildExamplePrompt(rules: string, ex: EvalExample): Promis
   const snap = await mockSnapshot<Snapshot>();
   return [
     { role: "system", content: buildSystemPrompt(rules, snap) },
-    { role: "user", content: ex.utterance },
+    { role: "user", content: resolveUtterance(ex.utterance, env) },
   ];
 }
 
@@ -163,7 +173,7 @@ export async function scoreReply(ex: EvalExample, content: string): Promise<Exam
   await runBound(ex.startCommands, env);
   const cmds = parseReply(content).commands ?? [];
   if (cmds.length === 0) {
-    return { id: ex.id, score: 0, deferred: true, feedback: `DEFERRED on "${ex.utterance}" — expected ${ex.goldCommandNames.join(", ")}` };
+    return { id: ex.id, score: 0, deferred: true, feedback: `DEFERRED on "${resolveUtterance(ex.utterance, env)}" — expected ${ex.goldCommandNames.join(", ")}` };
   }
   let ok = 0;
   const errors: string[] = [];
