@@ -195,7 +195,7 @@ def page() -> int:
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — performance lock: the renders wear YOUR delivery</title>
+<title>Used2 — mouth round: your sounds, your delivery</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
