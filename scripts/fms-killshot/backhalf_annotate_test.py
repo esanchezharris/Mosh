@@ -101,6 +101,11 @@ check("page data carries the heard words with keys",
       and data["words"][1]["key"] == "balls@2.51",
       str(data.get("words")))
 
+# ── 2c. page JS stops scheduled clicks on stop (owner: clicks ran on after Space) ──────
+check("page tracks scheduled click oscillators", "clickNodes.push(o)" in ann._PAGE)
+check("stop() kills the scheduled clicks",
+      "clickNodes.forEach(o=>{ try{o.stop();}catch(e){} }); clickNodes=[];" in ann._PAGE)
+
 # ── 3. determinism ─────────────────────────────────────────────────────────────────────
 digs = {hashlib.sha256(json.dumps(ann.build_annotate_data(EVID, SKEL), sort_keys=True).encode()).hexdigest()
         for _ in range(3)}

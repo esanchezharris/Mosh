@@ -284,21 +284,34 @@ def calibrate() -> int:
 TRUTH_MIN_HOLD_S = 0.05      # a mark in silence still gets a minimal slot — truth is
                              # never dropped, only surfaced (the owner heard something)
 TRUTH_MELISMA_ST = 1.5       # sustained F0 step inside a slot = a melisma segment split
+TRUTH_REST_HOLD_S = 0.10     # this much sustained sub-gate audio ENDS the slot — an
+                             # unmarked breath hump later in the gap must not extend it
+                             # (measured on the real take: a 0.09-level breath at 4.44s
+                             # dragged a slot across a 510ms true rest → ONE phrase)
 
 
 def truth_slots(ev: dict, skeleton: dict, ground_truth: dict, warns: list | None = None) -> list:
     """v2 — the owner's hand-marked onsets as lineScores-shaped slots, free of the old
     grid: slots come from the GLOBAL onset list (phrase membership was a UI convenience;
     the v1 per-phrase build inherited the distrusted windows and could span rests or
-    overlap across old edges). Each slot's end trims to the last VOICED frame before the
-    next onset (rest gate = the perform convention, 5% of the envelope p95) so rests
-    emerge from the audio itself; segments re-derive from F0 steps inside the slot so
+    overlap across old edges). Each slot's end = the end of its OWN voiced run: the trim
+    stops at the first sustained rest (>= TRUTH_REST_HOLD_S below the perform-convention
+    gate, 5% of envelope p95) after voicing begins — a later unmarked breath hump belongs
+    to the gap, not the syllable. Rests emerge from the audio itself; segments re-derive
+    from F0 steps inside the slot so
     melisma glides survive hand-marking. `skeleton` is unused (kept for call-site
     stability); `warns` collects sub-40ms mark pairs (double-click accidents surface,
     never silently vanish)."""
     env, hop = ev["env"], float(ev["hopS"])
     gt = ground_truth.get("phrases") or {}
-    onsets = sorted(set(round(float(t), 4) for lst in gt.values() for t in lst))
+    # each onset remembers WHICH annotator window the owner marked it in — membership is
+    # his verdict (confirmed per page) and survives as the slot's `phrase` id, the hard
+    # grouping boundary downstream (legato tails defeat any silence gate between phrases)
+    owner_of: dict = {}
+    for k in sorted(gt, key=lambda x: int(x)):
+        for t in gt[k] or []:
+            owner_of.setdefault(round(float(t), 4), int(k))
+    onsets = sorted(owner_of)
     if not onsets:
         return []
     sv = sorted(env)
@@ -306,12 +319,18 @@ def truth_slots(ev: dict, skeleton: dict, ground_truth: dict, warns: list | None
     th = max(1e-6, 0.05 * p95)
     take_end = len(env) * hop
 
+    rest_hold = max(1, int(round(TRUTH_REST_HOLD_S / hop)))
+
     def voiced_end(a: float, b: float):
         lo, hi = int(a / hop) + 1, min(len(env), int(b / hop))
-        last = None
+        last, rest = None, 0
         for i in range(lo, hi):
             if env[i] >= th:
-                last = i
+                last, rest = i, 0
+            elif last is not None:       # rest-hold arms only once voicing has begun
+                rest += 1
+                if rest >= rest_hold:    # sustained rest = the syllable ended at `last`
+                    break
         return (last + 1) * hop if last is not None else None
 
     slots, prev_pitch = [], None
@@ -342,7 +361,7 @@ def truth_slots(ev: dict, skeleton: dict, ground_truth: dict, warns: list | None
             segments.append({"start": round(edges[i], 4), "end": round(edges[i + 1], 4),
                              "pitch": pitch})
         slots.append({"start": a, "end": b, "velocity": vel, "kind": "gap",
-                      "segments": segments})
+                      "phrase": owner_of[a], "segments": segments})
     return slots
 
 
@@ -385,7 +404,9 @@ def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path,
             if kept and toks[idx] == "___":
                 toks[idx] = tok
             heard_rows.append({"word": w.get("word"), "slot": idx,
-                               "conf": round(float(w.get("conf", 0) or 0), 3),
+                               # evidence.json whisper words carry `confidence`; older
+                               # skeleton-shaped words carry `conf` — accept both
+                               "conf": round(float(w.get("conf") or w.get("confidence") or 0), 3),
                                "kept": kept, "syl": int(w.get("syl", 1) or 1)})
         lines.append({"index": bar, "seedText": " ".join(toks), "syllableTarget": len(bslots)})
         if heard_rows:

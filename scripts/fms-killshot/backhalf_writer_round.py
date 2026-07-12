@@ -48,11 +48,13 @@ KEY, MAX_BEATS, CHUNK_S, SPLIT_S = "D major", 1.5, 20.0, 55.06
 OWN_LINES = ["Yeah we used to fight like invincible",
              "But in the night we got hella close"]     # the owner's own chorus — corpus seed
 
-# Mouth round (2026-07-12): the owner picked A ("flow") but heard "the mouth sounds and
-# mouth shapes are just way off" — so this round regenerates the A config under the NEW
-# mouth enforcement (every heard word's sounds constrain the writer), two draws.
-CANDS = [("M1", "mouth", dict(styleBias=False, regen=0)),
-         ("M2", "mouth alt", dict(styleBias=False, regen=1))]
+# Truth round (2026-07-12): the grid is now the owner's HAND-MARKED syllables (147
+# annotator marks) — slot starts, counts, phrase membership, and junk-word strikes are
+# all his verdicts (resolve_skeleton → skeleton-truth.json). Two draws (owner decision),
+# same enforcement + filler generosity (heard fillers ride; isolated slots may just be
+# "yeah").
+CANDS = [("T1", "truth", dict(styleBias=False, regen=0)),
+         ("T2", "truth alt", dict(styleBias=False, regen=1))]
 
 
 def recipe_slots(slots: list) -> list:
@@ -64,6 +66,9 @@ def recipe_slots(slots: list) -> list:
 def gen_candidate(spec: dict, style_bias: bool, regen_n: int) -> list:
     sp = copy.deepcopy(spec)
     sp["styleBias"] = style_bias
+    # owner (2026-07-12): fallback lines are rap placeholders ("yeah uh ay woah"), never
+    # awkward forced-lexical vocab — fillers are essential
+    sp["fillerStyle"] = "interjection"
     regen = {l["index"]: regen_n for l in sp["lines"]} if regen_n else None
     res = core.complete_verse(sp, chorus=CHORUS, theme=THEME, regen=regen, backend="llm")
     if res.get("backend") != "llm":
@@ -199,7 +204,7 @@ def assemble() -> int:
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — writer round: three full back halves</title>
+<title>Used2 — writer round: {len(man['candidates'])} full back halves</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -213,9 +218,10 @@ def assemble() -> int:
   .idx{{color:#6e7681;width:34px}} .txt{{font-weight:600}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — writer round: three full back halves</h1>
-  <p class="sub">Same melody, same enforced flow (breath gate · stress · sound-echo · D major · exact counts) —
-     three writer draws. Also in the daw-kit as writer-A/B/C.wav (plain + padded).</p>
+  <h1>Used2 — writer round: {len(man['candidates'])} full back halves</h1>
+  <p class="sub">Your hand-marked grid (147 truth marks), same enforced flow (breath gate · stress ·
+     sound-echo · D major · exact counts) — {len(man['candidates'])} writer draws. Also in the daw-kit
+     (plain + padded).</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}

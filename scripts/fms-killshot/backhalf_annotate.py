@@ -143,6 +143,7 @@ const MARK_MARGIN = 0.12, NUDGE_S = 0.005, NUDGE_BIG_S = 0.02, UNDO_MAX = 100;
 let buffer = null, actx = null, cur = 0, marks = {}, done = {}, sel = -1, drag = false;
 let hoverIdx = -1, undoStack = [], struck = {}, wordBoxes = [];
 let playing = false, srcNode = null, startAt = 0, playFrom = 0, raf = 0, saveTimer = 0;
+let clickNodes = [];   // scheduled click oscillators — stop() must kill these too
 
 function W(){ return cv.width; } function H(){ return cv.height; }
 // internal px per screen px; floor the display size so a degenerate/zero layout
@@ -317,13 +318,14 @@ function play(){
     const when=startAt+(t-p.padStart); const o=actx.createOscillator(), g=actx.createGain();
     o.frequency.value=2000; o.connect(g).connect(actx.destination);
     g.gain.setValueAtTime(cvol,when); g.gain.exponentialRampToValueAtTime(0.0001,when+0.03);
-    o.start(when); o.stop(when+0.04);
+    o.start(when); o.stop(when+0.04); clickNodes.push(o);
   });
   srcNode.onended=()=>{ if(playing && document.getElementById('loop').checked){ play(); } else { stop(); } };
   playing=true; document.getElementById('play').textContent='■ stop (Space)';
   const tick=()=>{ if(!playing)return; render(); raf=requestAnimationFrame(tick); }; tick();
 }
 function stop(){ if(srcNode){ try{srcNode.onended=null;srcNode.stop();}catch(e){} srcNode=null; }
+  clickNodes.forEach(o=>{ try{o.stop();}catch(e){} }); clickNodes=[];
   playing=false; cancelAnimationFrame(raf); document.getElementById('play').textContent='▶ play (Space)';
   render(); }
 

@@ -76,6 +76,8 @@ check("prompt lists the locked words", "they" in usr and "counted" in usr, usr)
 check("prompt carries the topic", "comeback" in usr, usr)
 check("feedback is appended when a prior attempt failed",
       "Fix it" in core._build_messages(LINE, SPEC, "flame", 8, 1, "slant", "too long.")[-1]["content"])
+check("prompt blesses filler interjections (owner: fillers are essential)",
+      "Filler interjections" in usr and "yeah" in usr, usr)
 
 # ── 3b. Register (Bar IQ D): raw is the DEFAULT (de-censored); clean is the opt-in ─
 check("default prompt PERMITS an authentic register (slang/explicit, no self-censor)",

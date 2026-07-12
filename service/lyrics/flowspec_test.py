@@ -257,6 +257,85 @@ check("infeasible seed demoted until it fits the slot count",
       sum(_c.syllables(w) for w in fseed_words) + fline["seedText"].split().count("___") <= 2,
       repr(fline["seedText"]))
 
+# ── 9b. OWNER PHRASE IDS (truth round, 2026-07-12): legato singing defeats any silence
+# gate (held tails sit at the take's MEDIAN level between perceptual phrases — measured:
+# six owner windows merged into one 55-slot "line"). When slots carry an explicit
+# `phrase` id (the annotator window the owner confirmed), grouping NEVER merges across
+# differing ids; real rests still split WITHIN a window. Id-less slots are untouched.
+def _PSLOT(a, b, pid):
+    return {**SLOT(a, b, 80, 57), "phrase": pid}
+
+PID_LS = [LS(0, [_PSLOT(0.0, 0.28, 0), _PSLOT(0.3, 0.58, 0),
+                 _PSLOT(0.68, 0.96, 1), _PSLOT(1.0, 1.28, 1)])]   # only 0.10s between ids
+pid_phr = fs.group_by_rest(PID_LS, gap_s=0.35, min_syllables=2)
+check("differing owner phrase ids split even without a rest", len(pid_phr) == 2,
+      str([len(p["slots"]) for p in pid_phr]))
+check("slots stay with their owner phrase",
+      len(pid_phr) == 2 and [s["phrase"] for s in pid_phr[0]["slots"]] == [0, 0]
+      and [s["phrase"] for s in pid_phr[1]["slots"]] == [1, 1])
+NOID_LS = [LS(0, [SLOT(0.0, 0.28, 80, 57), SLOT(0.3, 0.58, 80, 57),
+                  SLOT(0.68, 0.96, 80, 57), SLOT(1.0, 1.28, 80, 57)])]
+check("id-less slots keep the old behavior (one phrase)",
+      len(fs.group_by_rest(NOID_LS, gap_s=0.35, min_syllables=2)) == 1)
+# a real rest still splits WITHIN one owner window
+INTRA_LS = [LS(0, [_PSLOT(0.0, 0.28, 0), _PSLOT(0.3, 0.58, 0),
+                   _PSLOT(1.2, 1.48, 0), _PSLOT(1.5, 1.78, 0)])]  # 0.62s rest inside id 0
+check("a real rest still splits inside one owner window",
+      len(fs.group_by_rest(INTRA_LS, gap_s=0.35, min_syllables=2)) == 2)
+# min_syllables absorb prefers the SAME-id neighbor (never leak a fragment across owners)
+FRAG_LS = [LS(0, [_PSLOT(0.0, 0.28, 0), _PSLOT(0.3, 0.58, 0),
+                  _PSLOT(1.2, 1.48, 0),                     # 1-slot fragment of id 0
+                  _PSLOT(1.55, 1.83, 1), _PSLOT(1.86, 2.14, 1)])]  # id 1 is CLOSER
+frag_phr = fs.group_by_rest(FRAG_LS, gap_s=0.35, min_syllables=2)
+check("a short fragment absorbs into its OWN owner phrase, not the closer foreign one",
+      any(len(p["slots"]) == 3 and all(s["phrase"] == 0 for s in p["slots"]) for p in frag_phr),
+      str([[s["phrase"] for s in p["slots"]] for p in frag_phr]))
+
+# ── 10c. FILLER GENEROSITY (owner, 2026-07-12): "be very generous with placeholder rap
+# words like yeah and huh … filler words are incredibly helpful (essential)". A heard
+# filler interjection can't be a mishearing worth demoting — it IS the sound — so fillers
+# are exempt from trust demotion; and feasibility demotion prefers words whose removal
+# actually reduces the syllable load (a 1-syl filler never shrinks the load).
+FILLER_LONE_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57)])],
+    "lines": [{"index": 0, "seedText": "yeah ___", "syllableTarget": 2}],
+    "lineHeard": [HEARDC(0, ("yeah", 0, 0.6))],
+}
+fl = fs.build_flow_spec(FILLER_LONE_SKEL, preserve_words=True)["lines"][0]
+check("lone filler survives below TRUST_LONE (generous)", fl["seedText"].startswith("yeah"),
+      repr(fl["seedText"]))
+
+NONFILLER_LONE_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57)])],
+    "lines": [{"index": 0, "seedText": "brick ___", "syllableTarget": 2}],
+    "lineHeard": [HEARDC(0, ("brick", 0, 0.6))],
+}
+nfl = fs.build_flow_spec(NONFILLER_LONE_SKEL, preserve_words=True)["lines"][0]
+check("lone NON-filler at the same conf still demotes (guard)",
+      "brick" not in nfl["seedText"], repr(nfl["seedText"]))
+
+# untrusted run: the junk member demotes, the filler rides
+FILLER_RUN_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+                          SLOT(0.6, 0.88, 80, 59)])],
+    "lines": [{"index": 0, "seedText": "yeah scarber ___", "syllableTarget": 3}],
+    "lineHeard": [HEARDC(0, ("yeah", 0, 0.5), ("scarber", 1, 0.45))],
+}
+fr = fs.build_flow_spec(FILLER_RUN_SKEL, preserve_words=True)["lines"][0]
+check("filler survives an untrusted run; the junk word demotes",
+      fr["seedText"].startswith("yeah") and "scarber" not in fr["seedText"], repr(fr["seedText"]))
+
+# feasibility: "yeah"(1 syl, .6) + "berry"(2 syl, .95) on 2 slots — demoting the filler
+# reduces nothing; the multi-syllable word is the offender and must go first.
+FILLER_FEAS_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57)])],
+    "lines": [{"index": 0, "seedText": "yeah berry", "syllableTarget": 2}],
+    "lineHeard": [HEARDC(0, ("yeah", 0, 0.6), ("berry", 1, 0.95))],
+}
+ff = fs.build_flow_spec(FILLER_FEAS_SKEL, preserve_words=True)["lines"][0]
+check("feasibility demotes the load-reducing word, not the filler",
+      ff["seedText"].startswith("yeah") and "berry" not in ff["seedText"], repr(ff["seedText"]))
+
 # ── 11. BREAK MAP: intra-phrase slot gaps >= 70ms become required word boundaries ─────
 # phrase: slots at 0-0.28, 0.3-0.58 (tight), then a 0.15s breath, then 0.73-1.0
 BRK_SKEL = {"lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),

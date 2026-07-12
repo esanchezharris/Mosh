@@ -143,5 +143,49 @@ check("partial line keeps every heard anchor word",
 check("gap line rhymes against the EXTRACTED line's end word (group A anchored by 'flame')",
       bool(props3[0].get("passes")), str(props3[0]))
 
+# ── 11. INTERJECTION filler style (owner, 2026-07-12): "filler words are incredibly
+# helpful (essential)" — when a line falls back to the deterministic filler, forced
+# lexical vocab ("fast up strong out…") is exactly the awkward rhythm he rejected; the
+# opt-in spec fillerStyle="interjection" fills gaps with rap placeholders instead.
+_INTERJ = {"yeah", "uh", "ay", "woah", "oh", "hey", "yo", "huh"}
+spec4 = {"grid": "1/16", "rhymeStrictness": "slant", "topic": "", "mood": "",
+         "fillerStyle": "interjection",
+         "lines": [{"index": 0, "role": "verse", "seedText": "___ ___ ___ ___ ___ ___",
+                    "text": "", "syllableTarget": 6, "syllableTol": 0,
+                    "rhymeGroup": "", "locked": False}]}
+res4 = core.complete(spec4, backend="fake")
+p4 = res4["lines"][0]["proposals"][0]
+w4 = p4["text"].lower().split()
+check("interjection filler uses rap placeholders only", all(w in _INTERJ for w in w4), p4["text"])
+check("interjection filler is count-exact", p4["syllables"] == 6, str(p4["syllables"]))
+check("interjection filler is deterministic",
+      core.complete(spec4, backend="fake")["lines"][0]["proposals"][0]["text"] == p4["text"])
+# default spec unchanged: no fillerStyle ⇒ the classic lexical filler vocab
+spec5 = {k: v for k, v in spec4.items() if k != "fillerStyle"}
+p5 = core.complete(spec5, backend="fake")["lines"][0]["proposals"][0]
+check("without the flag the classic filler vocab is untouched",
+      any(w not in _INTERJ for w in p5["text"].lower().split()), p5["text"])
+# a fixed end word still wins over the interjection end
+spec6 = {**spec4, "lines": [{"index": 0, "role": "verse", "seedText": "___ ___ ___ flame",
+                             "text": "", "syllableTarget": 4, "syllableTol": 0,
+                             "rhymeGroup": "", "locked": False}]}
+p6 = core.complete(spec6, backend="fake")["lines"][0]["proposals"][0]
+check("a fixed end word survives interjection style", p6["text"].split()[-1] == "flame", p6["text"])
+
+# ── 12. TOKENIZER PARITY with the SoulX score author (adversarial review, 2026-07-12):
+# the LLM writes typographic apostrophes — "I’m" (U+2019) must count as ONE word/one
+# syllable exactly like ASCII "I'm" (the author whitespace-splits, so a 2-count here
+# smears every following word one slot early in the sung score). And a sung word can
+# never be 0 syllables: "mm"/"hmm" consume one slot at author time, so they count 1.
+check("curly-apostrophe I’m counts like ASCII I'm",
+      core.syllables("I’m") == core.syllables("I'm") == 1,
+      f"curly={core.syllables(chr(0x2019).join(['I','m']))} ascii={core.syllables(chr(39).join(['I','m']))}")
+check("the review's exact line counts 6 (not 7)",
+      core.syllables("I’m bout to pray we bond") == 6,
+      str(core.syllables("I’m bout to pray we bond")))
+check("a sung word is never 0 syllables (mm/hmm floor to 1)",
+      core.syllables("mm") == 1 and core.syllables("hmm") == 1,
+      f"mm={core.syllables('mm')} hmm={core.syllables('hmm')}")
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))

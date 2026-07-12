@@ -178,6 +178,35 @@ check("segment pitches follow the contour (A3 then C4)",
 check("plain slots keep one segment", len(tslots[2]["segments"]) == 1, str(tslots[2]["segments"]))
 check("velocity is in range", all(1 <= s["velocity"] <= 127 for s in tslots))
 
+# REAL-DATA finding (first truth rebuild, 2026-07-12): "last voiced frame before the
+# next onset" is wrong when the rest contains an UNMARKED breath hump (measured: a
+# 0.09-level breath at 4.44s dragged a slot across a 510ms true rest → 147 slots, ONE
+# phrase). A slot must end at the first SUSTAINED rest (>=100ms below gate) after its
+# own voiced run — later humps belong to the gap, not the syllable.
+BREATH_ENV = env_from([(0.30, 0.001), (0.30, 0.5),   # voiced 0.30-0.60
+                       (0.50, 0.001),                # TRUE rest 0.60-1.10 (500ms)
+                       (0.15, 0.3),                  # unmarked BREATH hump 1.10-1.25
+                       (0.15, 0.001),                # dip 1.25-1.40
+                       (0.30, 0.5), (0.20, 0.001)])  # next syllable 1.40-1.70
+BREATH_EV = {"hopS": HOP, "env": BREATH_ENV, "notes": [], "f0": []}
+bs = rg.truth_slots(BREATH_EV, TS_SKEL, {"phrases": {"0": [0.30, 1.40]}})
+check("a breath hump inside the rest does NOT extend the slot",
+      abs(bs[0]["end"] - 0.60) <= 0.03, str(bs[0]["end"]))
+check("the rest emerges despite the hump (gap >= 0.35s)",
+      bs[1]["start"] - bs[0]["end"] >= 0.35, f"gap={bs[1]['start'] - bs[0]['end']:.2f}")
+# a mark a hair EARLY (before the attack) must not end instantly: the rest-hold arms
+# only once the slot's voiced run has begun
+be = rg.truth_slots(BREATH_EV, TS_SKEL, {"phrases": {"0": [0.20, 1.40]}})
+check("an early mark still rides to its voiced end (rest-hold arms after voicing)",
+      abs(be[0]["end"] - 0.60) <= 0.03, str(be[0]["end"]))
+
+# each truth slot carries its owner WINDOW id (`phrase`) — the owner confirmed marks
+# per annotator page, so membership is his verdict; grouping splits on it downstream
+# (legato tails defeat any silence gate — measured: 6 windows merged into one line).
+check("truth slots carry the owner phrase id",
+      [s.get("phrase") for s in tslots] == [0, 0, 0, 1, 1],
+      str([s.get("phrase") for s in tslots]))
+
 # a mark in SILENCE is still truth: it gets a minimal slot, never dropped
 gt_sil = {"phrases": {"0": [0.30, 1.00]}}   # 1.00 is inside the 0.90-1.40 rest
 sil = rg.truth_slots(TS_EV, TS_SKEL, gt_sil)
@@ -202,8 +231,10 @@ check("truth_slots is deterministic (3x)",
            for _ in range(3)}) == 1)
 
 # ── strike-aware rebuild: a struck word never locks verbatim ───────────────────────────
-SK_EV = {**TS_EV, "words": [{"word": "flame", "start": 0.31, "end": 0.50, "conf": 0.9, "syl": 1},
-                            {"word": "balls", "start": 0.56, "end": 0.80, "conf": 0.9, "syl": 1}]}
+# NOTE the real evidence.json schema: whisper words carry `confidence`, NOT `conf` —
+# the first truth render silently zeroed every conf (all keeps demoted to echoes).
+SK_EV = {**TS_EV, "words": [{"word": "flame", "start": 0.31, "end": 0.50, "confidence": 0.9, "syl": 1},
+                            {"word": "balls", "start": 0.56, "end": 0.80, "confidence": 0.9, "syl": 1}]}
 SK_SKEL = {**TS_SKEL,
            "lineHeard": [{"v": 1, "bar": 0,
                           "words": [{"word": "flame", "slot": 0, "conf": 0.9, "kept": True},
@@ -217,6 +248,8 @@ check("a STRUCK word never locks verbatim", "balls" not in l0["seedText"], l0["s
 hw = {w["word"]: w for lh in doc["lineHeard"] for w in lh["words"]}
 check("the struck word stays as SOUND evidence (kept=False, still heard)",
       hw["balls"]["kept"] is False and hw["flame"]["kept"] is True, str(hw))
+check("heard rows carry the REAL whisper confidence (not a zeroed default)",
+      hw["flame"]["conf"] == 0.9, str(hw["flame"]))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

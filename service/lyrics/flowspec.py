@@ -55,6 +55,14 @@ TRUST_LONE = 0.9          # a lone kept word must be near-certain
 TRUST_MEMBER = 0.55       # a word below this demotes even inside a trusted run
                           # (writer-round finding: "berry" 0.45 rode "feel like" 0.9+)
 
+# Filler interjections are exempt from trust demotion (owner, 2026-07-12: "be very
+# generous with placeholder rap words like yeah and huh … filler words are incredibly
+# helpful (essential)") — a heard "yeah" can't be a mishearing worth demoting; it IS the
+# sound, and keeping it spares the writer an awkward lexical invention on that slot.
+FILLER_WORDS = {"yeah", "yea", "yuh", "huh", "uh", "uhh", "um", "oh", "ooh", "ah", "aw",
+                "woah", "whoa", "hey", "yo", "ay", "aye", "ayy", "la", "na", "mm", "hmm",
+                "woo", "brr"}
+
 
 # ── grouping ──────────────────────────────────────────────────────────────────────────
 
@@ -95,10 +103,16 @@ def group_by_rest(line_scores: List[dict], gap_s: float = 0.35, min_syllables: i
     phrases: List[dict] = []
     cur: Optional[dict] = None
     prev_end: Optional[float] = None
+    prev_pid = None
     for bar, s in flat:
         st = float(s.get("start", 0.0))
         en = float(s.get("end", st))
-        if cur is None or (prev_end is not None and st - prev_end >= gap_s):
+        # An explicit `phrase` id (the annotator window the owner confirmed) is a hard
+        # boundary: legato tails can bridge perceptual phrases at voice-level energy, so
+        # a silence gate alone can't recover them — the owner's membership can.
+        pid = s.get("phrase")
+        id_break = pid is not None and prev_pid is not None and pid != prev_pid
+        if cur is None or id_break or (prev_end is not None and st - prev_end >= gap_s):
             cur = {"slots": [], "bars": [], "start": st, "end": en}
             phrases.append(cur)
         cur["slots"].append(s)
@@ -106,15 +120,28 @@ def group_by_rest(line_scores: List[dict], gap_s: float = 0.35, min_syllables: i
             cur["bars"].append(bar)
         cur["end"] = max(cur["end"], en)
         prev_end = en
+        prev_pid = pid
 
     # Absorb un-writable short phrases into the temporally nearest neighbor (repeat until
     # none remain or only one phrase is left). Deterministic: leftmost short phrase first.
+    # A fragment carrying an owner phrase id prefers a SAME-id neighbor — it must never
+    # leak across an owner boundary just because the foreign side is temporally closer.
     while min_syllables > 1 and len(phrases) > 1:
         i = next((k for k, p in enumerate(phrases) if len(p["slots"]) < min_syllables), None)
         if i is None:
             break
         gap_prev = (phrases[i]["start"] - phrases[i - 1]["end"]) if i > 0 else float("inf")
         gap_next = (phrases[i + 1]["start"] - phrases[i]["end"]) if i < len(phrases) - 1 else float("inf")
+        sid = phrases[i]["slots"][0].get("phrase")
+        if sid is not None:
+            if i > 0 and phrases[i - 1]["slots"][-1].get("phrase") != sid:
+                gap_prev = float("inf")
+            if i < len(phrases) - 1 and phrases[i + 1]["slots"][0].get("phrase") != sid:
+                gap_next = float("inf")
+            if gap_prev == float("inf") and gap_next == float("inf"):
+                # no same-id neighbor: fall back to the plain nearest (never strand)
+                gap_prev = (phrases[i]["start"] - phrases[i - 1]["end"]) if i > 0 else float("inf")
+                gap_next = (phrases[i + 1]["start"] - phrases[i]["end"]) if i < len(phrases) - 1 else float("inf")
         _merge_into(phrases[i - 1] if gap_prev <= gap_next else phrases[i + 1], phrases[i])
         phrases.pop(i)
     return phrases
@@ -294,6 +321,9 @@ def _tier_phrase(infos: List[dict]) -> tuple:
             cur = []
     if cur:
         runs.append(cur)
+    def _filler(i: int) -> bool:
+        return _clean_tok(infos[i]["tok"]) in FILLER_WORDS
+
     demote: set = set()
     for run in runs:
         confs = [infos[i]["conf"] for i in run]
@@ -301,11 +331,11 @@ def _tier_phrase(infos: List[dict]) -> tuple:
             continue
         if len(run) >= 2 and sum(confs) / len(confs) >= TRUST_RUN_MEAN and max(confs) >= TRUST_RUN_MAX:
             # a trusted run still sheds its low-conf members (junk must not ride the phrase)
-            demote.update(i for i in run if infos[i]["conf"] < TRUST_MEMBER)
+            demote.update(i for i in run if infos[i]["conf"] < TRUST_MEMBER and not _filler(i))
             continue
         if len(run) == 1 and confs[0] >= TRUST_LONE:
             continue
-        demote.update(run)
+        demote.update(i for i in run if not _filler(i))
 
     # FEASIBILITY (tol=0): kept words' syllables + remaining gaps must fit the slot count —
     # a multi-syllable kept word on one slot otherwise makes every candidate fail the exact
@@ -324,7 +354,10 @@ def _tier_phrase(infos: List[dict]) -> tuple:
         kept = [i for i in range(len(infos)) if infos[i]["tok"] != "___" and i not in demote]
         if not kept:
             break
-        demote.add(min(kept, key=lambda i: (infos[i]["conf"] if infos[i]["conf"] is not None else 1.0, i)))
+        # Demoting a 1-syllable word never reduces the load (its slot becomes a 1-syllable
+        # gap) — only multi-syllable words are real offenders; fillers ride out feasibility.
+        offenders = [i for i in kept if _syl(infos[i]["tok"]) > 1] or kept
+        demote.add(min(offenders, key=lambda i: (infos[i]["conf"] if infos[i]["conf"] is not None else 1.0, i)))
 
     # A TRAILING kept stop word must never survive as the line's locked END (it forces a
     # dangling "...i'm the" ending the end-gate then exempts) — demote it to an echo.

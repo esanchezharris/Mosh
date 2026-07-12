@@ -48,6 +48,13 @@ _FILLER_1 = ["up", "down", "now", "back", "through", "on", "out", "high",
              "low", "cold", "hard", "fast", "gold", "real", "strong", "loud"]
 _FILLER_2 = ["again", "tonight", "alone", "inside", "over", "under", "money",
              "power", "never", "rising", "burning", "focused"]
+# Interjection filler (owner, 2026-07-12: "filler words are incredibly helpful
+# (essential)") — the opt-in spec fillerStyle="interjection" swaps the lexical filler
+# vocab for rap placeholders, so a fallback line is a natural scratch vocal ("yeah uh
+# ay woah…") instead of an awkward forced-lexical rhythm. All 1-syllable by design.
+_FILLER_INTERJ = ["yeah", "uh", "ay", "woah", "oh", "hey", "yo", "huh"]
+_INTERJ_ENDS = ["yeah", "woah", "ay", "yo"]
+
 # End-word pools (1-syllable, for easy assembly) when a line has no rhyme anchor.
 _DEFAULT_ENDS = ["flow", "grind", "game", "time", "night", "light", "fight",
                  "line", "mind", "crown", "throne", "gold", "cold", "real", "deal"]
@@ -58,11 +65,22 @@ _TOPIC_ENDS = {
 }
 
 
+def _norm_apostrophes(text: str) -> str:
+    """LLMs write typographic apostrophes (U+2019/U+2018); the tokenizers only know
+    ASCII ' — un-normalized, "I’m" splits into two 1-syllable tokens while the SoulX
+    score author sings it as ONE word, smearing every following word one slot early
+    (adversarial review, 2026-07-12)."""
+    return text.replace("’", "'").replace("‘", "'")
+
+
 def syllables(text: str) -> int:
-    """Syllable count over a line (per-word, dictionary then heuristic)."""
+    """Syllable count over a line (per-word, dictionary then heuristic). Every sung
+    word is at least 1 syllable — the score author consumes max(1,·) slots, and the
+    two graders must agree ("mm"/"hmm" would otherwise count 0 but sing 1)."""
     if not isinstance(text, str):
         return 0
-    return sum(_P.syllables(w) for w in re.findall(r"[A-Za-z']+", text))
+    return sum(max(1, _P.syllables(w) or 1)
+               for w in re.findall(r"[A-Za-z']+", _norm_apostrophes(text)))
 
 
 def rhymes(a: str, b: str, strictness: str = "slant") -> bool:
@@ -78,13 +96,21 @@ def _pick(seq: List[str], seed: str) -> Optional[str]:
     return seq[idx]
 
 
-def _filler_for(need: int, seed: str, ones_only: bool = False) -> List[str]:
+def _filler_for(need: int, seed: str, ones_only: bool = False,
+                style: Optional[str] = None) -> List[str]:
     """Filler words summing to EXACTLY `need` syllables (2s then a 1 — any need≥1).
     ``ones_only`` uses monosyllables exclusively — a 1-syllable word can never span a
-    breath, keeping the fake backend a valid floor for flow-grounded (breaks) lines."""
+    breath, keeping the fake backend a valid floor for flow-grounded (breaks) lines.
+    ``style="interjection"`` draws rap placeholders (all 1-syllable) instead."""
     out: List[str] = []
     i = 0
     rem = need
+    if style == "interjection":
+        while rem >= 1:
+            out.append(_pick(_FILLER_INTERJ, f"{seed}|fi|{i}") or "yeah")
+            rem -= 1
+            i += 1
+        return out
     while rem >= 2 and not ones_only:
         out.append(_pick(_FILLER_2, f"{seed}|f2|{i}") or "again")
         rem -= 2
@@ -156,7 +182,7 @@ def _fillable(line: dict) -> bool:
 # ── assembly: build a line of `target` syllables, keeping the producer's words ────
 
 def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str,
-              ones_only: bool = False) -> str:
+              ones_only: bool = False, style: Optional[str] = None) -> str:
     toks = _tokens(seed_text)
     own_end = (not toks) or toks[-1]["gap"]    # we APPEND the end word (trailing gap / fresh)
     if toks and toks[-1]["gap"]:
@@ -177,7 +203,7 @@ def _assemble(seed_text: str, end_word: str, target: int, tol: int, seed: str,
     end_syl = _P.syllables(end_word) if own_end else 0
     base_syl = sum(_P.syllables(w) for w in words) + end_syl
     need = target - base_syl
-    filler = _filler_for(need, seed, ones_only) if need > 0 else []
+    filler = _filler_for(need, seed, ones_only, style) if need > 0 else []
 
     out = words[:insert_at] + filler + words[insert_at:]
     if own_end:
@@ -191,7 +217,7 @@ def _word_syl_map(text: str) -> List[tuple]:
     """[(word, start_syllable_index, syllable_count), ...] — the candidate's words mapped
     onto 0-based syllable positions, for break/stress/echo checks."""
     out, pos = [], 0
-    for w in re.findall(r"[A-Za-z']+", text):
+    for w in re.findall(r"[A-Za-z']+", _norm_apostrophes(text)):
         n = max(1, _P.syllables(w) or 1)
         out.append((w, pos, n))
         pos += n
@@ -328,6 +354,7 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
     """The deterministic, constraint-aware template backend (always available)."""
     target, tol, strict = _target(line, spec), _syl_tol(line), _strictness(line, spec)
     fixed = _fixed_end_word(line)
+    style = spec.get("fillerStyle")
     cands: List[dict] = []
     for v in range(3):
         seed = f"{line.get('index')}|{v}|{regen}|{spec.get('topic','')}|{spec.get('mood','')}"
@@ -336,10 +363,12 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
         elif anchor:
             ends = _P.rhyme_search(anchor, strict, max_n=40, syllables=1)
             end = _pick(ends, seed) if ends else _pick(_topic_ends(spec), seed)
+        elif style == "interjection":
+            end = _pick(_INTERJ_ENDS, seed)
         else:
             end = _pick(_topic_ends(spec), seed)
         cands.append(_evaluate(_assemble(line.get("seedText", ""), end, target, tol, seed,
-                                         ones_only=bool(line.get("breaks"))),
+                                         ones_only=bool(line.get("breaks")), style=style),
                                line, spec, anchor, target, tol, strict))
     return _rank(cands)
 
@@ -458,6 +487,11 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
     else:
         rules.append("Authentic register: slang, ad-libs, and explicit language are welcome — "
                      "don't self-censor or sanitize.")
+    # Filler generosity (owner, 2026-07-12): filler interjections are essential rap
+    # vocabulary — an isolated slot wants a natural "yeah", not a crammed lexical word.
+    rules.append("Filler interjections (yeah, uh, huh, ay, woah) are first-class rap "
+                 "vocabulary — on an isolated or awkward syllable, a natural filler beats "
+                 "forcing a lexical word.")
     # Style-RAG (§7): bias toward the artist's OWN voice with retrieved exemplars, but
     # forbid copying them verbatim — the model is steered by style, not by parroting.
     exemplars = _style_exemplars(spec)
@@ -472,7 +506,10 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
 
 
 def _parse_lines(content: str) -> List[str]:
-    """Pull candidate line strings from an LLM reply (json_object), defensively."""
+    """Pull candidate line strings from an LLM reply (json_object), defensively.
+    Text is apostrophe-normalized at the door so every consumer (graders, the SoulX
+    score author, soundmatch) sees the same ASCII words."""
+    content = _norm_apostrophes(content)
     out: List[str] = []
     try:
         obj = json.loads(content)
