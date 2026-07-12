@@ -108,7 +108,12 @@ check("themeHint carries the phrase's kept mumble words", all(w in lines[0]["the
 check("themeHint drops un-kept low-confidence words", "world" not in lines[1]["themeHint"] and "family" in lines[1]["themeHint"], lines[1]["themeHint"])
 
 # ── 6. end-rhyme scheme paired across phrases (AABB couplets) ──────────────────────────
-check("rhymeGroup pairs phrases into couplets (A A B)", [l["rhymeGroup"] for l in lines] == ["A", "A", "B"], str([l["rhymeGroup"] for l in lines]))
+# (on a heard-free skeleton: mouth-grounded lines deliberately go rhyme-free — the take's
+#  own end sounds are the rhyme structure; see section 12)
+_scheme = [l["rhymeGroup"] for l in fs.build_flow_spec({**SKELETON, "lineHeard": []},
+                                                       chorus="got hella close",
+                                                       theme="drifted apart")["lines"]]
+check("rhymeGroup pairs phrases into couplets (A A B)", _scheme == ["A", "A", "B"], str(_scheme))
 
 # ── 7. INTEGRATION: the attached score blob feeds author_score on the ABSOLUTE grid ───
 # Give each line an asserted text of exactly its slot count (monosyllables → 1:1 fit).
@@ -260,6 +265,108 @@ bspec = fs.build_flow_spec(BRK_SKEL)
 check("intra-phrase breath becomes a break AFTER that syllable", bspec["lines"][0]["breaks"] == [1],
       str(bspec["lines"][0]["breaks"]))
 check("tight slot joints are not breaks", 0 not in bspec["lines"][0]["breaks"])
+
+# ── 12. MOUTH TARGETS: every heard word's SOUNDS become per-line targets ───────────────
+# The mouth-shape verdict (2026-07-12): the writer only sound-constrained demoted seed
+# positions; 57/117 heard words (the non-kept ones) were discarded entirely — with them
+# went the mumble's mouth movie. Whisper's junk words are untrustworthy as TEXT but solid
+# as SOUNDS: "top of a cup of water" is a rich vowel/onset sequence. Every heard word
+# (kept or not) now contributes ordered syllable sounds to the line's `mouthTargets`.
+def HEARDK(bar, *entries):   # (word, slot, conf, kept)
+    return {"v": 1, "bar": bar,
+            "words": [{"word": w, "slot": s, "conf": c, "kept": k, "syl": 1}
+                      for (w, s, c, k) in entries]}
+
+MOUTH_SKEL = {
+    "lineScores": [
+        LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+               SLOT(0.6, 0.88, 80, 59), SLOT(0.9, 1.18, 80, 55)]),
+        # a second phrase (after a rest) with NO heard words at all
+        LS(1, [SLOT(3.0, 3.28, 80, 55), SLOT(3.3, 3.58, 80, 57)]),
+    ],
+    "lines": [{"index": 0, "seedText": "___ ___ ___ flame", "syllableTarget": 4},
+              {"index": 1, "seedText": "", "syllableTarget": 2}],
+    "lineHeard": [
+        HEARDK(0, ("top", 0, 0.18, False), ("cup", 1, 0.43, False),
+               ("water", 2, 0.05, False), ("flame", 3, 0.92, True)),
+        None,   # the real skeleton carries None bars — must not crash
+    ],
+}
+mou = fs.build_flow_spec(MOUTH_SKEL, preserve_words=True)
+m0, m1 = mou["lines"][0], mou["lines"][1]
+check("every heard word contributes sounds (kept AND discarded)",
+      [t["word"] for t in m0["mouthTargets"]] == ["top", "cup", "water", "water", "flame"],
+      str([t["word"] for t in m0["mouthTargets"]]))
+check("targets carry vowel + onset + conf per syllable",
+      m0["mouthTargets"][0]["vowel"] == "AA" and m0["mouthTargets"][0]["onset"] == "T"
+      and m0["mouthTargets"][0]["conf"] == 0.18, str(m0["mouthTargets"][0]))
+check("a multi-syllable heard word contributes one target per syllable",
+      [t["vowel"] for t in m0["mouthTargets"] if t["word"] == "water"] == ["AO", "ER"],
+      str(m0["mouthTargets"]))
+check("mouthText is the heard phrase for the prompt", m0["mouthText"] == "top cup water flame",
+      repr(m0["mouthText"]))
+check("a phrase with no heard words has empty mouth targets",
+      m1["mouthTargets"] == [] and m1["mouthText"] == "")
+check("mouth targets also derive WITHOUT preserve_words (sound evidence is independent)",
+      fs.build_flow_spec(MOUTH_SKEL)["lines"][0]["mouthTargets"] == m0["mouthTargets"])
+check("mouth derivation is deterministic",
+      fs.build_flow_spec(MOUTH_SKEL, preserve_words=True) == mou)
+
+# ── 12b. SLOT-scoped attribution: phrases sharing a bar don't inherit each other's
+# sounds (12/24 real Used2 bars are shared across phrases — bar-coarse attribution let a
+# line pass its gate by echoing a NEIGHBOR's words, and armed gates on phantom evidence).
+SHARE_SKEL = {
+    "lineScores": [
+        LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+               # 0.52s mid-bar rest splits the bar into two phrases
+               SLOT(1.1, 1.38, 80, 59), SLOT(1.4, 1.68, 80, 55)]),
+    ],
+    "lines": [{"index": 0, "seedText": "", "syllableTarget": 4}],
+    "lineHeard": [HEARDK(0, ("top", 0, 0.3, False), ("cup", 1, 0.3, False),
+                         ("water", 2, 0.3, False), ("flame", 3, 0.9, True))],
+}
+sh = fs.build_flow_spec(SHARE_SKEL)
+check("mid-bar rest splits into two phrases", len(sh["lines"]) == 2,
+      str([l["syllableTarget"] for l in sh["lines"]]))
+check("phrase 0 gets ONLY its own slots' sounds",
+      [t["word"] for t in sh["lines"][0]["mouthTargets"]] == ["top", "cup"]
+      and sh["lines"][0]["mouthText"] == "top cup", str(sh["lines"][0]["mouthTargets"]))
+check("phrase 1 gets ONLY its own slots' sounds",
+      [t["word"] for t in sh["lines"][1]["mouthTargets"]] == ["water", "water", "flame"]
+      and sh["lines"][1]["mouthText"] == "water flame", str(sh["lines"][1]["mouthTargets"]))
+# degenerate fuse data (all heard words dumped at slot 0) attributes to the slot-0 owner —
+# honest per the data, and strictly no worse than bar-coarse
+DEGEN_SKEL = {
+    "lineScores": SHARE_SKEL["lineScores"],
+    "lines": SHARE_SKEL["lines"],
+    "lineHeard": [HEARDK(0, ("top", 0, 0.3, False), ("cup", 0, 0.3, False))],
+}
+dg = fs.build_flow_spec(DEGEN_SKEL)
+check("degenerate slot-0 words attribute to the slot-0 phrase",
+      [t["word"] for t in dg["lines"][0]["mouthTargets"]] == ["top", "cup"]
+      and dg["lines"][1]["mouthTargets"] == [], str([l["mouthTargets"] for l in dg["lines"]]))
+
+# ── 12c. a TRAILING kept stop word demotes to an echo target — it must never become the
+# line's locked END (real round: seeds locked "...i'm the" and "...my", forcing dangling
+# endings the end-gate then exempted).
+TRAIL_SKEL = {
+    "lineScores": [LS(0, [SLOT(0.0, 0.28, 80, 55), SLOT(0.3, 0.58, 80, 57),
+                          SLOT(0.6, 0.88, 80, 59)])],
+    "lines": [{"index": 0, "seedText": "feel like my", "syllableTarget": 3}],
+    "lineHeard": [HEARDC(0, ("feel", 0, 0.9), ("like", 1, 0.95), ("my", 2, 0.9))],
+}
+tr = fs.build_flow_spec(TRAIL_SKEL, preserve_words=True)["lines"][0]
+check("trailing kept stop word is demoted from the seed",
+      tr["seedText"] == "feel like ___", repr(tr["seedText"]))
+check("the demoted trailing word becomes an echo target",
+      any(e["word"] == "my" for e in tr["echoTargets"]), str(tr["echoTargets"]))
+# The take's own end sounds ARE the rhyme structure: imposing AABB on top tears a line
+# between "rhyme with the previous line" and "echo the mumble" (measured in the first
+# mouth round: rhyme-forced ends drove mouth-gate failures). Mouth-grounded lines go free.
+check("mouth-grounded line drops the imposed rhyme scheme", m0["rhymeGroup"] == "",
+      repr(m0["rhymeGroup"]))
+check("a line without mouth evidence keeps the scheme", m1["rhymeGroup"] != "",
+      repr(m1["rhymeGroup"]))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

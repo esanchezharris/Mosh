@@ -26,6 +26,23 @@ from lyrics import style_corpus
 
 _P = phon.Pronouncer()  # real cmudict if importable, else a stdlib heuristic
 
+# Mouth enforcement (mouth round, 2026-07-12) — calibrated on the Used2 back half under
+# the min-normalized, base-sharpened metric: sound-alike lines score >= 0.68, mouth-blind
+# lines <= 0.36. The floor sits between those bands.
+MOUTH_FLOOR = 0.50        # hard gate: below this the line ignores the take's sounds
+MOUTH_MIN_TARGETS = 4     # gate only with a real phrase of evidence; less still SCORES
+MOUTH_MIN_DISTINCT = 3    # ... of which this many must be non-schwa: AH is the neutral
+                          # mouth and any English line echoes it, so generic evidence
+                          # scores but must never REJECT
+MOUTH_WEIGHT = 1.5        # ranking weight — the owner's #1 axis, above stress/echo (0.75)
+
+# A flow-grounded line must not END on a dangling function word ("...I was a") — the
+# exact-count corset otherwise trims lines mid-thought. Deliberate short list: pure
+# determiners/prepositions/conjunctions only ("was"/"be" can legitimately end a bar).
+END_STOP_WORDS = {"a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "with",
+                  "and", "or", "but", "nor", "so", "yet",
+                  "my", "your", "our", "their", "his", "her", "its"}
+
 # Deterministic filler vocab, indexed by syllable count, so any target is hit exactly.
 _FILLER_1 = ["up", "down", "now", "back", "through", "on", "out", "high",
              "low", "cold", "hard", "fast", "gold", "real", "strong", "loud"]
@@ -194,7 +211,8 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     seed_words = [t["w"] for t in _tokens(line.get("seedText", "")) if not t["gap"]]
     locked_ok = all(w.lower() in text.lower() for w in seed_words)
 
-    flow_grounded = ("breaks" in line) or bool(line.get("echoTargets"))
+    flow_grounded = ("breaks" in line) or bool(line.get("echoTargets")) \
+        or bool(line.get("mouthTargets"))
     wmap = _word_syl_map(text) if flow_grounded else []
 
     # HARD gate: no word may run through a real breath (the take's intra-phrase rest).
@@ -207,7 +225,31 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
                              f"end a word exactly there.")
             break
 
-    passes = syl_ok and rhyme_ok and locked_ok and breaks_ok
+    # HARD gate: the line must ECHO the take's heard sounds (the mouth movie). Gated only
+    # when a real phrase of evidence exists; short evidence still scores below.
+    mtargets = line.get("mouthTargets") or []
+    mouth_sim, mouth_ok = 0.0, True
+    if mtargets:
+        mouth_sim = soundmatch.mouth_similarity(text, mtargets)
+        # arm the gate only with a real phrase of evidence that also COVERS the line
+        # (4 heard syllables against a 12-slot line is too sparse to reject on) and
+        # carries DISTINCTIVE mouth shapes (an all-schwa movie matches anything)
+        distinct = sum(1 for t in mtargets if t.get("vowel") not in (None, "AH"))
+        if (len(mtargets) >= MOUTH_MIN_TARGETS and 2 * len(mtargets) >= target
+                and distinct >= MOUTH_MIN_DISTINCT):
+            mouth_ok = mouth_sim >= MOUTH_FLOOR
+
+    # HARD gate (flow-grounded): the line must actually END on its locked end word
+    # (containment alone exempted the dangling-ending gate — review-confirmed), and a
+    # free ending must not dangle on a function word.
+    end_ok = True
+    if flow_grounded:
+        if fixed is not None:
+            end_ok = end.lower().strip("'") == fixed.lower().strip("'")
+        else:
+            end_ok = end.lower() not in END_STOP_WORDS
+
+    passes = syl_ok and rhyme_ok and locked_ok and breaks_ok and mouth_ok and end_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
     # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
@@ -236,7 +278,7 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
 
     score = (2 if passes else 0) + (1 if rhyme_ok else 0) + (1 if locked_ok else 0) \
         + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
-        + 0.5 * max(0, depth - 1) + stress_term + echo_term
+        + 0.5 * max(0, depth - 1) + stress_term + echo_term + MOUTH_WEIGHT * mouth_sim
     out = {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
            "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
            "grade": grade, "depth": depth, "score": round(score, 3)}
@@ -246,6 +288,21 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
             out["breaksReason"] = breaks_reason
         out["stressTerm"] = round(stress_term, 3)
         out["echoTerm"] = round(echo_term, 3)
+        out["endOk"] = end_ok
+        if not end_ok:
+            out["endReason"] = (
+                f"the line must END on the word \"{fixed}\" (it ended on \"{end}\")."
+                if fixed is not None else
+                f"the line ends on \"{end}\" — never end on a dangling "
+                "article/preposition/conjunction; finish the thought on a content word.")
+    if mtargets:
+        out["mouthSim"] = round(mouth_sim, 3)
+        out["mouthOk"] = mouth_ok
+        if not mouth_ok:
+            out["mouthReason"] = (
+                f"the line must SOUND like the take's mumble \"{line.get('mouthText', '')}\" — "
+                f"echo those vowels/mouth shapes syllable by syllable (this scored "
+                f"{int(round(mouth_sim * 100))}%).")
     return out
 
 
@@ -373,6 +430,18 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         else:
             rules.append(f"Syllable {int(e.get('pos', 0)) + 1} should sound like \"{w}\" "
                          f"(vowels {v}) — use it, or a better real word with that sound.")
+    # Mouth movie (mouth round): the take's heard sounds are a per-syllable CONSTRAINT —
+    # the words must echo the mumble's vowel/mouth-shape sequence, but Whisper's junk
+    # text itself must never be quoted as words.
+    mtext = str(line.get("mouthText") or "")
+    if line.get("mouthTargets") and mtext:
+        sketch = " ".join((f"{t.get('onset') or ''}·{t.get('vowel', '')}").strip("·")
+                          for t in line["mouthTargets"])
+        rules.append(f"MOUTH MOVIE: the take mumbles sounds like \"{mtext}\" "
+                     f"(syllable sounds: {sketch}). Your line must ECHO that vowel / "
+                     "mouth-shape sequence syllable by syllable. These are MISHEARD sounds, "
+                     "not required words — write real words that sound like them; never "
+                     "quote the nonsense verbatim.")
     # Bar IQ D — register. Raw is the DEFAULT (it's the artist's art): explicitly permit slang
     # / ad-libs / explicit language so the model doesn't self-censor into something neutered.
     # "clean" is the opt-in that sanitizes.
@@ -417,6 +486,10 @@ def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], stric
         return f"\"{d['text']}\" was {d['syllables']} syllables, need {target}±{tol}."
     if not d.get("breaksOk", True):
         return d.get("breaksReason") or "a word crosses a breath — end a word at the breath point."
+    if not d.get("mouthOk", True):
+        return d.get("mouthReason") or "the line must echo the take's heard sounds."
+    if not d.get("endOk", True):
+        return d.get("endReason") or "never end the line on a dangling function word."
     if not d.get("rhymeOk", True) and anchor:
         return f"the last word \"{d['endWord']}\" must be a {strict} rhyme with \"{anchor}\"."
     if not d.get("lockedOk", True):

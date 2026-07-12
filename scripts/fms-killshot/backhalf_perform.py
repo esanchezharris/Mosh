@@ -166,21 +166,32 @@ def page() -> int:
                             f"adelay={int(SPLIT_S * 1000)}:all=1",
                             str(KIT / "demo-clips-padded-to-song-start" / f"writer-{key}{suffix}.wav")],
                            check=True, capture_output=True)
-        rows = "".join(f"<tr><td class='idx'>L{w['index']}</td>"
-                       f"<td class='txt'>{html.escape(w['text'])}</td></tr>"
-                       for w in cand["words"])
+        rows = "".join(
+            f"<tr><td class='idx'>L{w['index']}</td>"
+            f"<td class='txt'>{html.escape(w['text'])}</td>"
+            f"<td class='sim'>{('%.2f' % w['mouthSim']) if w.get('mouthSim') is not None else ''}</td></tr>"
+            for w in cand["words"])
         ec = r["envCorr"]
+        mouth = cand.get("mouthSimMean")
+        mouth_txt = f"mouth echo {mouth:.2f} (old round 0.36) · " if mouth else ""
         cards.append(f"""
       <div class="card">
-        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — performance-locked</h2>
-          <span class="stat">envCorr {ec['before']:.2f} → {ec['after']:.2f} · timing snap med {r['shiftMedianMs']:.0f} ms</span></div>
+        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — mouth-matched + performance-locked</h2>
+          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · snap med {r['shiftMedianMs']:.0f} ms</span></div>
         <audio controls preload="metadata" src="voice-writer-{key}-perf.wav"></audio>
-        <div class="row"><span>original render (for contrast)</span>
-          <audio controls preload="metadata" src="voice-writer-{key}.wav"></audio></div>
         <div class="row"><span>overlay — your mumble LEFT, locked render RIGHT</span>
           <audio controls preload="metadata" src="ab-perf-{key}.wav"></audio></div>
-        <details><summary style="color:#8b949e;font-size:13px;cursor:pointer;margin-top:8px">the lines</summary>
+        <details><summary style="color:#8b949e;font-size:13px;cursor:pointer;margin-top:8px">the lines (with per-line mouth echo)</summary>
         <table><tbody>{rows}</tbody></table></details>
+      </div>""")
+    if (SERVE / "voice-writer-A-perf.wav").is_file():
+        cards.append("""
+      <div class="card">
+        <div class="chead"><span class="tag">A</span><h2>last round's pick (mouth-blind words, performance-locked)</h2>
+          <span class="stat">mouth echo 0.36 · envCorr 0.31 → 0.70</span></div>
+        <audio controls preload="metadata" src="voice-writer-A-perf.wav"></audio>
+        <div class="row"><span>overlay — your mumble LEFT, A RIGHT</span>
+          <audio controls preload="metadata" src="ab-perf-A.wav"></audio></div>
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -196,14 +207,14 @@ def page() -> int:
   audio{{width:100%;margin-top:8px}}
   .row{{margin-top:10px}} .row span{{font-size:12px;color:#8b949e}}
   table{{width:100%;border-collapse:collapse;font-size:13px}} td{{padding:5px 8px;border-top:1px solid #21262d}}
-  .idx{{color:#6e7681;width:34px}} .txt{{font-weight:600}}
+  .idx{{color:#6e7681;width:34px}} .txt{{font-weight:600}} .sim{{color:#8b949e;width:44px;text-align:right}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — performance lock</h1>
-  <p class="sub">Same three writer candidates, now CONSTRAINED to your mumble's delivery:
-     phrases snapped onto your clock, then your take's volume/attack/decay envelope
-     transferred onto the render (the score format carries no dynamics — this stage adds them).
-     Also in the daw-kit as writer-A/B/C-perf.wav (plain + padded).</p>
+  <h1>Used2 — mouth round</h1>
+  <p class="sub">The words are now written to ECHO your mumble's sounds — every heard word
+     (even Whisper's junk) feeds per-syllable vowel/mouth-shape targets the writer must hit
+     (mean mouth echo 0.36 → 0.74/0.79) — then each render is snapped to your clock and wears
+     your volume/attack/decay. In the daw-kit as writer-M1/M2-perf.wav (plain + padded).</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}

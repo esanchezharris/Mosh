@@ -48,9 +48,11 @@ KEY, MAX_BEATS, CHUNK_S, SPLIT_S = "D major", 1.5, 20.0, 55.06
 OWN_LINES = ["Yeah we used to fight like invincible",
              "But in the night we got hella close"]     # the owner's own chorus — corpus seed
 
-CANDS = [("A", "flow", dict(styleBias=False, regen=0)),
-         ("B", "voice", dict(styleBias=True, regen=0)),
-         ("C", "alt", dict(styleBias=False, regen=1))]
+# Mouth round (2026-07-12): the owner picked A ("flow") but heard "the mouth sounds and
+# mouth shapes are just way off" — so this round regenerates the A config under the NEW
+# mouth enforcement (every heard word's sounds constrain the writer), two draws.
+CANDS = [("M1", "mouth", dict(styleBias=False, regen=0)),
+         ("M2", "mouth alt", dict(styleBias=False, regen=1))]
 
 
 def recipe_slots(slots: list) -> list:
@@ -70,9 +72,11 @@ def gen_candidate(spec: dict, style_bias: bool, regen_n: int) -> list:
     for c in res["lines"]:
         top = (c.get("proposals") or [{}])[0]
         rejected = sum(1 for p in c.get("proposals") or [] if p.get("breaksOk") is False)
+        m_rejected = sum(1 for p in c.get("proposals") or [] if p.get("mouthOk") is False)
         out.append({"index": c["index"], "text": (c.get("chosen") or "").strip(),
                     "passes": bool(top.get("passes")), "stressTerm": top.get("stressTerm"),
-                    "echoTerm": top.get("echoTerm"), "breaksRejected": rejected})
+                    "echoTerm": top.get("echoTerm"), "mouthSim": top.get("mouthSim"),
+                    "breaksRejected": rejected, "mouthRejected": m_rejected})
     return out
 
 
@@ -133,15 +137,21 @@ def build() -> int:
         print(f"\n== candidate {key} ({label})", flush=True)
         metas = gen_candidate(spec, opts["styleBias"], opts["regen"])
         fired = sum(m["breaksRejected"] for m in metas)
+        m_fired = sum(m["mouthRejected"] for m in metas)
+        sims = [m["mouthSim"] for m in metas if m.get("mouthSim") is not None]
         for m in metas:
             print(f"  L{m['index']:>2} {'✓' if m['passes'] else '✗'} "
-                  f"st={m['stressTerm']} echo={m['echoTerm']} | {m['text']}", flush=True)
+                  f"mouth={m['mouthSim']} st={m['stressTerm']} | {m['text']}", flush=True)
         chunks = chunk_scores(key, metas, spec_lines)
         manifest["candidates"].append({"key": key, "label": label, "chunks": chunks,
                                        "breaksRejectedTotal": fired,
+                                       "mouthRejectedTotal": m_fired,
+                                       "mouthSimMean": round(sum(sims) / len(sims), 3) if sims else None,
                                        "words": [{"index": m["index"], "text": m["text"],
-                                                  "passes": m["passes"]} for m in metas]})
-        print(f"  breaks-gate rejections during writing: {fired}", flush=True)
+                                                  "passes": m["passes"],
+                                                  "mouthSim": m.get("mouthSim")} for m in metas]})
+        mean_txt = f"; mean mouthSim {sum(sims) / len(sims):.3f} (old-round baseline 0.359)" if sims else ""
+        print(f"  gate rejections while writing: breaths {fired}, mouth {m_fired}{mean_txt}", flush=True)
     MANIFEST.write_text(json.dumps(manifest, indent=2))
     print(f"\nstaged {sum(len(c['chunks']) for c in manifest['candidates'])} scores -> {SCORES}", flush=True)
     return 0
