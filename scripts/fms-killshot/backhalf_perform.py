@@ -231,6 +231,31 @@ def page() -> int:
         <div class="row"><span>overlay — your mumble LEFT, A RIGHT</span>
           <audio controls preload="metadata" src="ab-perf-A.wav"></audio></div>
       </div>""")
+    cal_json = BH / "regrid-calibrate.json"
+    if cal_json.is_file():
+        cal = json.loads(cal_json.read_text())
+        blocks = []
+        for ph in cal["phrases"]:
+            vars_html = "".join(f"""
+        <div class="grow"><div class="ghead"><span class="tag">variant {v['variant']}</span>
+          <b>{v['clicks']} clicks</b></div>
+          <audio controls preload="none" src="{v['wav']}"></audio></div>"""
+                                for v in ph["variants"])
+            blocks.append(f"""
+      <div class="card">
+        <div class="chead"><span class="tag">L{ph['index']}</span>
+          <h2>calibration phrase — which variant's clicks match your syllables?</h2>
+          <span class="gspan">{ph['startS']:.1f}–{ph['endS']:.1f}s</span></div>
+        {vars_html}
+      </div>""")
+        cards.append(f"""
+      <div class="card">
+        <div class="chead"><h2>DETECTOR CALIBRATION — the new grid, picked by your ear</h2></div>
+        <p class="blurb">The grid is being rebuilt from scratch. For each phrase below, three
+           BLIND variants place clicks where a different detector hears your syllables
+           (mumble LEFT, mumble + clicks RIGHT). Reply per phrase with the variant whose
+           clicks match what you sang — e.g. “L9: 2, L7: 1, L2: 3, L4: 2”.</p>
+      </div>{''.join(blocks)}""")
     grid_json = BH / "grid-check.json"
     if grid_json.is_file():
         g = json.loads(grid_json.read_text())

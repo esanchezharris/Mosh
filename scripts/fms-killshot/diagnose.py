@@ -47,7 +47,9 @@ import segment_v2                            # noqa: E402  (pure stdlib)
 
 
 def _venv_python(env_rel: str, var: str) -> str | None:
-    """Resolve a venv python from a service .env file, repo checkout first then main."""
+    """Resolve a venv python from a service .env file, repo checkout first then main,
+    then the conventional venv root (~/Library/Mosh/venvs/<name>) — the same fallback
+    server.py uses when the gitignored, setup-written .env files are absent."""
     for root in (REPO, MAIN_CHECKOUT):
         p = os.path.join(root, "service", env_rel)
         if not os.path.isfile(p):
@@ -58,7 +60,9 @@ def _venv_python(env_rel: str, var: str) -> str | None:
                 py = line.split("=", 1)[1].strip().strip('"')
                 if os.path.isfile(py):
                     return py
-    return None
+    name = env_rel.split("/", 1)[0]
+    conventional = os.path.expanduser(f"~/Library/Mosh/venvs/{name}/bin/python3")
+    return conventional if os.path.isfile(conventional) else None
 
 
 def _stdlib_readable(path: str) -> bool:
