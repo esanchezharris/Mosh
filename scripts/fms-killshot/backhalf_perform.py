@@ -231,9 +231,34 @@ def page() -> int:
         <div class="row"><span>overlay — your mumble LEFT, A RIGHT</span>
           <audio controls preload="metadata" src="ab-perf-A.wav"></audio></div>
       </div>""")
+    grid_json = BH / "grid-check.json"
+    if grid_json.is_file():
+        g = json.loads(grid_json.read_text())
+        rows = sorted(g["rows"], key=lambda r: (not r["suspect"], r["index"]))
+        items = []
+        for r in rows:
+            badge = (f"<span class='sus'>CHECK: {html.escape('; '.join(r['reasons']))}</span>"
+                     if r["suspect"] else "<span class='oksus'>detectors agree</span>")
+            heard = f" · heard: “{html.escape(r['heardText'])}”" if r.get("heardText") else ""
+            items.append(f"""
+        <div class="grow">
+          <div class="ghead"><span class="tag">L{r['index']}</span>
+            <b>{r['slots']} syllables</b> {badge}
+            <span class="gspan">{r['startS']:.1f}–{r['endS']:.1f}s{heard}</span></div>
+          <audio controls preload="none" src="{r['wav']}"></audio>
+        </div>""")
+        cards.append(f"""
+      <div class="card">
+        <div class="chead"><h2>GRID CHECK — verify the syllable counts before the next render</h2></div>
+        <p class="blurb">Every strictness gate measures against this grid, and you said some counts
+           feel wrong. Each phrase below: your mumble LEFT, your mumble + a CLICK at every counted
+           syllable RIGHT. Count against your own ear and reply in chat with corrections
+           (e.g. “L3 is 9, L14 is 3”) or “grid good”. Flagged phrases first.</p>
+        {''.join(items)}
+      </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — mouth round: your sounds, your delivery</title>
+<title>Used2 — strict round: verify the grid, hear the timing lock</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -246,13 +271,20 @@ def page() -> int:
   .row{{margin-top:10px}} .row span{{font-size:12px;color:#8b949e}}
   table{{width:100%;border-collapse:collapse;font-size:13px}} td{{padding:5px 8px;border-top:1px solid #21262d}}
   .idx{{color:#6e7681;width:34px}} .txt{{font-weight:600}} .sim{{color:#8b949e;width:44px;text-align:right}}
+  .blurb{{color:#8b949e;font-size:13px;margin:6px 0 10px}}
+  .grow{{border-top:1px solid #21262d;padding:8px 0}}
+  .ghead{{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}}
+  .gspan{{color:#6e7681;font-size:12px;margin-left:auto}}
+  .sus{{background:#f8514922;color:#f85149;border:1px solid #f8514955;border-radius:6px;padding:0 6px;font-size:11px}}
+  .oksus{{color:#3fb950;font-size:11px}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — mouth round</h1>
-  <p class="sub">The words are now written to ECHO your mumble's sounds — every heard word
-     (even Whisper's junk) feeds per-syllable vowel/mouth-shape targets the writer must hit
-     (mean mouth echo 0.36 → 0.74/0.79) — then each render is snapped to your clock and wears
-     your volume/attack/decay. In the daw-kit as writer-M1/M2-perf.wav (plain + padded).</p>
+  <h1>Used2 — strict round</h1>
+  <p class="sub">M1/M2 below are now SYLLABLE-TIMING-LOCKED: every word snapped onto its
+     slot's exact start (median correction ~44 ms/word), on top of the phrase snap and your
+     volume/attack/decay envelope. The GRID CHECK section at the bottom is the gate for the
+     next render — verify the counts, reply with corrections or “grid good”.
+     Kit: writer-M1/M2-perf.wav (plain + padded).</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
