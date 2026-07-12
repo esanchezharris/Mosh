@@ -75,6 +75,33 @@ def candidate_windows(cand: dict, rest_split_s: float = 0.35) -> list:
     return wins
 
 
+def candidate_events(cand: dict) -> list:
+    """Word events [(start, end)] on the take's timeline — one per note_type-2 event,
+    the end extended through its continuation (type-3) run. The slot-snap unit."""
+    events = []
+    for ch in cand["chunks"]:
+        doc = json.loads((SCORES / f"{ch['name']}.json").read_text())
+        clip = doc[0] if isinstance(doc, list) else doc
+        off = float(ch["offsetS"])
+        durs = [float(d) for d in clip["duration"].split()]
+        types = [int(x) for x in clip["note_type"].split()]
+        t, cur = 0.0, None
+        for d, nt in zip(durs, types):
+            if nt == 2:
+                if cur:
+                    events.append(cur)
+                cur = [round(t + off, 4), round(t + d + off, 4)]
+            elif nt == 3 and cur:
+                cur[1] = round(t + d + off, 4)
+            elif nt == 1 and cur:
+                events.append(cur)
+                cur = None
+            t += d
+        if cur:
+            events.append(cur)
+    return [(a, b) for a, b in events]
+
+
 def masked_env_corr(env_t: list, sig: list, sr: int, voiced: list) -> float:
     """Envelope correlation restricted to the score's SUNG spans — the honest target:
     the d5 hold cap DELIBERATELY rests the tail of long held notes, so the raw take
@@ -115,7 +142,11 @@ def lock() -> int:
         wins = candidate_windows(cand)
         shifts = ar.phrase_shifts(env_t, env_r, wins, max_shift_s=MAX_SHIFT_S)
         aligned = ar.apply_shifts(rend, sr, wins, shifts, total_s=len(take) / sr)
-        out = perform.transfer_envelope(take, aligned, sr, max_boost=MAX_BOOST)
+        # strict round: after phrase starts, snap each WORD onto its slot's exact start
+        events = candidate_events(cand)
+        syl_lags = perform.event_lags(take, aligned, sr, events)
+        snapped = perform.snap_to_events(take, aligned, sr, events)
+        out = perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST)
 
         peak = max(abs(v) for v in out) or 1.0
         if peak > 0.99:
@@ -133,9 +164,13 @@ def lock() -> int:
                          sr=sr, right_gain=0.9)
 
         abs_ms = sorted(abs(s) * 1000 for s in shifts)
+        syl_ms = sorted(abs(s) * 1000 for s in syl_lags)
         entry = {"key": key, "phrases": len(wins), "globalLagMs": round(glag * 1000, 1),
                  "shiftMedianMs": round(statistics.median(abs_ms), 1),
                  "shiftP90Ms": round(abs_ms[int(0.9 * (len(abs_ms) - 1))], 1),
+                 "words": len(events),
+                 "sylSnapMedianMs": round(statistics.median(syl_ms), 1) if syl_ms else 0.0,
+                 "sylSnapP90Ms": round(syl_ms[int(0.9 * (len(syl_ms) - 1))], 1) if syl_ms else 0.0,
                  "envCorr": {"before": round(corr0, 3), "aligned": round(corr1, 3),
                              "after": round(corr2, 3)},
                  "envCorrSung": {"before": round(sung0, 3), "after": round(sung2, 3)},
@@ -143,8 +178,9 @@ def lock() -> int:
         report["candidates"].append(entry)
         print(f"{key}: envCorr {corr0:.3f} -> {corr1:.3f} (aligned) -> {corr2:.3f} (perf) | "
               f"sung-spans {sung0:.3f} -> {sung2:.3f} | "
-              f"{len(wins)} phrases, shift med {entry['shiftMedianMs']}ms "
-              f"p90 {entry['shiftP90Ms']}ms, global {entry['globalLagMs']}ms", flush=True)
+              f"{len(wins)} phrases shift med {entry['shiftMedianMs']}ms p90 {entry['shiftP90Ms']}ms | "
+              f"{len(events)} words syl-snap med {entry['sylSnapMedianMs']}ms "
+              f"p90 {entry['sylSnapP90Ms']}ms", flush=True)
     REPORT.write_text(json.dumps(report, indent=2))
     print(f"report -> {REPORT}", flush=True)
     return 0
@@ -174,10 +210,12 @@ def page() -> int:
         ec = r["envCorr"]
         mouth = cand.get("mouthSimMean")
         mouth_txt = f"mouth echo {mouth:.2f} (old round 0.36) · " if mouth else ""
+        syl_txt = (f" · syllable snap med {r['sylSnapMedianMs']:.0f} ms"
+                   if r.get("sylSnapMedianMs") is not None else "")
         cards.append(f"""
       <div class="card">
         <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — mouth-matched + performance-locked</h2>
-          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · snap med {r['shiftMedianMs']:.0f} ms</span></div>
+          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · phrase snap med {r['shiftMedianMs']:.0f} ms{syl_txt}</span></div>
         <audio controls preload="metadata" src="voice-writer-{key}-perf.wav"></audio>
         <div class="row"><span>overlay — your mumble LEFT, locked render RIGHT</span>
           <audio controls preload="metadata" src="ab-perf-{key}.wav"></audio></div>

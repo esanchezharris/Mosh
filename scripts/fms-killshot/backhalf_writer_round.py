@@ -76,6 +76,7 @@ def gen_candidate(spec: dict, style_bias: bool, regen_n: int) -> list:
         out.append({"index": c["index"], "text": (c.get("chosen") or "").strip(),
                     "passes": bool(top.get("passes")), "stressTerm": top.get("stressTerm"),
                     "echoTerm": top.get("echoTerm"), "mouthSim": top.get("mouthSim"),
+                    "fallback": top.get("fallback"),
                     "breaksRejected": rejected, "mouthRejected": m_rejected})
     return out
 
@@ -100,6 +101,12 @@ def chunk_scores(key: str, lines_meta: list, spec_lines: dict) -> list:
         off = max(0.0, chunk[0][1]["startS"] - 0.1)
         rebased = []
         for m, l in chunk:
+            # STRICT COUNT belt: an off-count line must never reach the score author
+            # (its pad/squeeze policies are exactly the "count and timing off" the
+            # owner heard). The writer guarantees this now — fail loudly if not.
+            n = core.syllables(m["text"])
+            assert n == len(l["score"]["slots"]), \
+                f"L{m['index']}: {n} syllables vs {len(l['score']['slots'])} slots — {m['text']!r}"
             slots = [{**s, "start": round(s["start"] - off, 4), "end": round(s["end"] - off, 4),
                       "segments": [{**g, "start": round(g["start"] - off, 4),
                                     "end": round(g["end"] - off, 4)} for g in s["segments"]]}
@@ -140,8 +147,9 @@ def build() -> int:
         m_fired = sum(m["mouthRejected"] for m in metas)
         sims = [m["mouthSim"] for m in metas if m.get("mouthSim") is not None]
         for m in metas:
+            tag = " [FILLER]" if m.get("fallback") == "filler" else ""
             print(f"  L{m['index']:>2} {'✓' if m['passes'] else '✗'} "
-                  f"mouth={m['mouthSim']} st={m['stressTerm']} | {m['text']}", flush=True)
+                  f"mouth={m['mouthSim']} st={m['stressTerm']} | {m['text']}{tag}", flush=True)
         chunks = chunk_scores(key, metas, spec_lines)
         manifest["candidates"].append({"key": key, "label": label, "chunks": chunks,
                                        "breaksRejectedTotal": fired,

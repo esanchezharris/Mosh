@@ -121,6 +121,56 @@ ident = perform.transfer_envelope(take, render, SR, strength=0.0)
 check("strength=0 returns the render unchanged",
       max(abs(a - b) for a, b in zip(ident, render)) < 1e-9)
 
+# ── 4b. SLOT-LEVEL SNAP (strict round): each word lands on its slot's exact start ─────
+# Phrase snap fixes phrase STARTS only; SoulX places syllables inside a phrase freely.
+# snap_to_events measures each word-event's local lag vs the take (envelope
+# cross-correlation in the window bounded by the neighboring events) and shifts that
+# segment onto the slot start. Audio between events (legato continuations) rides along.
+# take: three syllables attacking at 0.20 / 0.50 / 0.80 exactly (the slot starts)
+take_s = (silence(0.20) + tone(220, 0.22, lambda x: 0.6) + silence(0.08)
+          + tone(277, 0.22, lambda x: 0.6) + silence(0.08)
+          + tone(330, 0.22, lambda x: 0.6) + silence(0.20))
+# render: same syllables but #2 lands +80ms late and #3 +40ms late (independent lags —
+# each event must be corrected by ITS OWN measured shift, not a shared phrase lag)
+rend_s = (silence(0.20) + tone(220, 0.22, lambda x: 0.6) + silence(0.16)
+          + tone(277, 0.22, lambda x: 0.6) + silence(0.04)
+          + tone(330, 0.22, lambda x: 0.6) + silence(0.16))
+EVENTS = [(0.20, 0.42), (0.50, 0.72), (0.80, 1.02)]
+
+snapped = perform.snap_to_events(take_s, rend_s, SR, EVENTS)
+check("snap output length covers the take", len(snapped) >= len(take_s) - SR // 100)
+
+
+def _attack(sig, t0, t1):
+    """First time the local envelope crosses half its window max — the audible attack."""
+    import math as _m
+    a, b = int(t0 * SR), int(t1 * SR)
+    seg = sig[a:b]
+    win = max(1, SR // 100)
+    env = [sum(abs(x) for x in seg[i:i + win]) / win for i in range(0, len(seg) - win, win)]
+    if not env or max(env) <= 0:
+        return None
+    th = 0.5 * max(env)
+    for i, e in enumerate(env):
+        if e >= th:
+            return t0 + i * win / SR
+    return None
+
+
+for i, (s, e) in enumerate(EVENTS):
+    # scan starts just before the slot (after the previous syllable's take-side end),
+    # or the neighbor's sustain reads as a false early attack
+    at = _attack(snapped, s - 0.05, s + 0.17)
+    check(f"syllable {i + 1} attacks within 20ms of its slot start",
+          at is not None and abs(at - s) <= 0.02, f"attack={at}")
+check("slot snap is deterministic (3x)",
+      len({hashlib.sha256(",".join(f"{v:.9f}" for v in perform.snap_to_events(take_s, rend_s, SR, EVENTS)).encode()).hexdigest()
+           for _ in range(3)}) == 1)
+lags = perform.event_lags(take_s, rend_s, SR, EVENTS)
+check("event_lags reports each word's measured lag (0/+80/+40ms here)",
+      len(lags) == 3 and abs(lags[0]) <= 0.015 and abs(lags[1] - 0.08) <= 0.015
+      and abs(lags[2] - 0.04) <= 0.015, str([round(x * 1000) for x in lags]))
+
 # ── 5. metric sanity + determinism ────────────────────────────────────────────────────
 check("env_corr(x, x) ~= 1", perform.env_corr(take, take, SR) > 0.999)
 

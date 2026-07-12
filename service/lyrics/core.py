@@ -125,6 +125,14 @@ def _tokens(seed: str):
     return [{"w": t, "gap": bool(re.fullmatch(r"_{2,}", t))} for t in seed.split()]
 
 
+def _syl_tol(line: dict) -> int:
+    """The line's syllable tolerance. An EXPLICIT 0 means 0 — the old `x or 1` idiom
+    turned tol 0 into tol 1 and silently voided the syllable-EXACT discipline (strict
+    round, 2026-07-12: 8/17 and 13/17 shipped lines were off-count)."""
+    v = line.get("syllableTol")
+    return 1 if v is None else int(v)
+
+
 def _fixed_end_word(line: dict) -> Optional[str]:
     """The producer's locked end word: the final text's last word, or the seed's last
     token when it's a word (not a gap). This anchors the rhyme group."""
@@ -318,7 +326,7 @@ def _rank(cands: List[dict], n: int = 3) -> List[dict]:
 
 def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int) -> List[dict]:
     """The deterministic, constraint-aware template backend (always available)."""
-    target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
+    target, tol, strict = _target(line, spec), _syl_tol(line), _strictness(line, spec)
     fixed = _fixed_end_word(line)
     cands: List[dict] = []
     for v in range(3):
@@ -499,7 +507,7 @@ def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], stric
 
 def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int,
                       context: Optional[dict] = None) -> List[dict]:
-    target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
+    target, tol, strict = _target(line, spec), _syl_tol(line), _strictness(line, spec)
     corpus = _style_corpus(spec)   # non-empty only when style biasing is opted in
     cands: List[dict] = []
     feedback: Optional[str] = None
@@ -526,7 +534,17 @@ def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int,
         feedback = _failure_reason(fails[0], target, tol, anchor, strict)
     if not cands:   # LLM/service unreachable mid-call → fall back to the fake for this line
         return _fake_propose_line(line, spec, anchor, regen)
-    return _rank(cands)
+    # STRICT COUNT (owner policy, 2026-07-12): an off-count line must never ship — the
+    # score author would stretch/cram words to fit the slots. Keep only in-tolerance
+    # candidates; if the LLM produced none, the deterministic filler (count-exact by
+    # construction) ships instead, marked for re-rolling.
+    exact = [c for c in cands if c.get("syllableOk")]
+    if exact:
+        return _rank(exact)
+    filler = _fake_propose_line(line, spec, anchor, regen)
+    for f in filler:
+        f["fallback"] = "filler"
+    return _rank(filler)
 
 
 def _auto_backend() -> str:

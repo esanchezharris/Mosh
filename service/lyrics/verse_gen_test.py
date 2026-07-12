@@ -259,5 +259,56 @@ check("content-word ending passes the end gate", d_ok.get("endOk") is True)
 d_plain = core._evaluate("they counted me out into the", SPEC["lines"][0], SPEC, None, 7, 1, "slant")
 check("plain line keeps today's semantics (no end gate)", "endOk" not in d_plain)
 
+# ── 8. STRICT COUNT (strict round, 2026-07-12): tol 0 means tol 0 ─────────────────────
+# The bug: `int(line.get("syllableTol", 1) or 1)` — `0 or 1` is 1, so the syllable-EXACT
+# discipline silently ran at ±1 and 8/17 (M1) / 13/17 (M2) shipped lines were off-count;
+# the score author then stretches/crams words to fit. Owner policy: EXACT or a
+# deterministic filler line (never off-count) marked fallback:"filler" for re-rolling.
+check("tol resolution honors an explicit 0", core._syl_tol({"syllableTol": 0}) == 0)
+check("tol resolution defaults a MISSING field to 1", core._syl_tol({}) == 1)
+check("tol resolution defaults an explicit None to 1", core._syl_tol({"syllableTol": None}) == 1)
+
+TOL_LINE = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 8,
+            "syllableTol": 0, "rhymeGroup": "", "locked": False, "breaks": [],
+            "echoTargets": [], "mouthTargets": [], "mouthText": ""}
+
+
+def _mock_offcount(messages, **k):
+    # ALWAYS one syllable short (7 vs the target 8) — with the bug this PASSED at tol 1
+    return {"ok": True, "content": '{"lines":["they counted me out tonight"]}'}
+
+
+try:
+    brain_client.chat_json = _mock_offcount
+    props = core._llm_propose_line(TOL_LINE, SPEC, None, 0)
+    top = props[0]
+    check("off-by-one line NEVER ships on a tol-0 line",
+          core.syllables(top["text"]) == 8, f"chose {top['text']!r} ({core.syllables(top['text'])} syl)")
+    check("the shipped line is the deterministic filler, marked as such",
+          top.get("fallback") == "filler", str({k: top.get(k) for k in ("text", "fallback")}))
+    check("no off-count proposal survives in the ranked list",
+          all(c["syllableOk"] for c in props), str([(c["text"], c["syllables"]) for c in props]))
+    props_b = core._llm_propose_line(TOL_LINE, SPEC, None, 0)
+    check("exact-or-filler is deterministic", props == props_b)
+finally:
+    brain_client.chat_json = _real_chat
+
+# an LLM batch that CONTAINS an in-tolerance line keeps it (no filler needed)
+_batch = ['{"lines":["they counted me out tonight", "counted me out alone tonight"]}']
+
+
+def _mock_mixed(messages, **k):
+    return {"ok": True, "content": _batch[0]}
+
+
+try:
+    brain_client.chat_json = _mock_mixed
+    props = core._llm_propose_line(TOL_LINE, SPEC, None, 0)
+    check("an exact LLM line wins over filler (no fallback flag)",
+          core.syllables(props[0]["text"]) == 8 and props[0].get("fallback") is None,
+          str({k: props[0].get(k) for k in ("text", "fallback")}))
+finally:
+    brain_client.chat_json = _real_chat
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)
