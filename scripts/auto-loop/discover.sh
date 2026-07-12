@@ -19,8 +19,10 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib.sh"
 set +e
 
-BL="$AL_DOCS_DIR/backlog.jsonl"
-mkdir -p "$AL_DOCS_DIR"; [ -f "$BL" ] || : > "$BL"
+# Machine source of truth. Defaults to docs/auto-loop/backlog.jsonl, but honors an
+# AL_BACKLOG_JSONL override (set by the stranger-loop to point at its own backlog).
+BL="$AL_BACKLOG_JSONL"
+mkdir -p "$(dirname "$BL")"; [ -f "$BL" ] || : > "$BL"
 
 # Strip blank lines, parse each as JSON, collect into an array.
 _all() { grep -v '^[[:space:]]*$' "$BL" 2>/dev/null | jq -sc '.'; }
