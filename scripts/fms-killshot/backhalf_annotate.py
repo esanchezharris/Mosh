@@ -85,24 +85,27 @@ _PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:7px;padding:6px 11px;
           font-size:13px;cursor:pointer} button:hover{border-color:#58a6ff} button:disabled{opacity:.4;cursor:default}
   .prim{background:#1f6feb33;border-color:#1f6feb}
+  .danger{border-color:#f8514966;color:#ffa198} .danger:hover{border-color:#f85149}
   .count{font-weight:700;font-size:15px} .muted{color:#8b949e} .ok{color:#3fb950}
   input[type=range]{width:90px;vertical-align:middle}
-  canvas{width:100%;height:260px;display:block;background:#0b0f14;border:1px solid #30363d;border-radius:10px;
-          touch-action:none}
+  canvas{width:100%;height:280px;display:block;background:#0b0f14;border:1px solid #30363d;border-radius:10px;
+          touch-action:none;cursor:crosshair}
   .legend{display:flex;gap:16px;font-size:12px;color:#8b949e;margin:8px 2px 0;flex-wrap:wrap}
   .sw{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
   kbd{background:#21262d;border:1px solid #30363d;border-radius:4px;padding:0 5px;font-size:11px}
   #status{font-size:12px;margin-left:auto}
 </style></head><body><div class="wrap">
   <h1>Used2 — mark the syllables</h1>
-  <p class="sub">Click the waveform to drop a marker on each syllable's ATTACK; drag to nudge; select + <kbd>Delete</kbd> to remove.
-     Press <kbd>Space</kbd> to hear it with clicks and adjust until dead-on. <kbd>[</kbd>/<kbd>]</kbd> change phrase.
-     Autosaves as you go.</p>
+  <p class="sub">Click empty waveform to add a marker on a syllable's ATTACK; grab the handle (the pill at top, or anywhere on the line) to drag.
+     <kbd>←</kbd>/<kbd>→</kbd> nudge the selected marker (hold <kbd>Shift</kbd> for a bigger step), <kbd>Delete</kbd> removes it, <kbd>⌘Z</kbd> undoes,
+     double-click a marker to delete. <kbd>Space</kbd> plays it with clicks; <kbd>[</kbd>/<kbd>]</kbd> change phrase. Autosaves.</p>
   <div class="bar">
     <button id="prev">← prev</button>
     <span class="count"><span id="pidx"></span> / <span id="ptot"></span></span>
     <button id="next">next →</button>
     <span class="muted">syllables: <b id="ccount" class="count">0</b></span>
+    <button id="del" class="danger">🗑 delete selected</button>
+    <button id="undo">↶ undo</button>
     <label class="muted"><input type="checkbox" id="done"> phrase done</label>
     <span id="status" class="muted"></span>
   </div>
@@ -127,13 +130,32 @@ _PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 const DATA = /*DATA*/;
 const API = "/used2/asserted-proof/api/annotations";
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+// grab radius + handle size are in SCREEN px, scaled to internal px per render (the
+// canvas is 2000px internal but displayed ~1000px, so raw internal px read tiny on screen)
+const GRAB_SCREEN_PX = 18, HANDLE_HW = 11, HANDLE_H = 16;
+const MARK_MARGIN = 0.12, NUDGE_S = 0.005, NUDGE_BIG_S = 0.02, UNDO_MAX = 100;
 let buffer = null, actx = null, cur = 0, marks = {}, done = {}, sel = -1, drag = false;
+let hoverIdx = -1, undoStack = [];
 let playing = false, srcNode = null, startAt = 0, playFrom = 0, raf = 0, saveTimer = 0;
 
 function W(){ return cv.width; } function H(){ return cv.height; }
+// internal px per screen px; floor the display size so a degenerate/zero layout
+// (e.g. an unlaid-out iframe) can't blow the grab radius up to the whole canvas
+function sx(){ const w=cv.getBoundingClientRect().width; return W()/(w>100?w:1000); }
+function sy(){ const h=cv.getBoundingClientRect().height; return H()/(h>40?h:280); }
 function ph(){ return DATA.phrases[cur]; }
+function curKey(){ return String(ph().index); }
 function t2x(t){ const p = ph(); return (t - p.padStart) / (p.padEnd - p.padStart) * W(); }
 function x2t(x){ const p = ph(); return p.padStart + x / W() * (p.padEnd - p.padStart); }
+// the old grid's phrase edges are exactly what we distrust, so allow a small margin past them
+function clampT(t){ const p = ph(); return Math.max(p.startS - MARK_MARGIN,
+  Math.min(p.endS + MARK_MARGIN, Math.max(p.padStart, Math.min(p.padEnd, t)))); }
+function pushUndo(){ undoStack.push({k: curKey(), snap: (marks[curKey()]||[]).slice()});
+  if(undoStack.length > UNDO_MAX) undoStack.shift(); }
+function doUndo(){ const u = undoStack.pop(); if(!u) return;
+  const idx = DATA.phrases.findIndex(p => String(p.index) === u.k);
+  if(idx >= 0 && idx !== cur){ cur = idx; stop(); }
+  marks[u.k] = u.snap.slice(); sel = -1; scheduleSave(); render(); }
 
 async function load(){
   const r = await fetch(DATA.audio); const ab = await r.arrayBuffer();
@@ -180,12 +202,19 @@ function render(){
   }
   // reference rows (read-only): C, E
   drawRefs(p.refC, H()*0.90, "#6e7681"); drawRefs(p.refE, H()*0.83, "#8b949e");
-  // editable marks
-  const m = marks[String(p.index)]||[];
-  m.forEach((t,i)=>{ const x=t2x(t);
-    ctx.strokeStyle = i===sel ? "#ffd33d" : "#e6edf3"; ctx.lineWidth = i===sel?3:2;
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,mid+amp*0.7); ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(x,10,i===sel?6:4,0,7); ctx.fill();
+  // editable marks — a full-height grabbable line + a big handle pill at the top (sized
+  // in screen px via sx/sy so it's an easy target on the downscaled canvas)
+  const m = marks[String(p.index)]||[]; const kx=sx(), ky=sy();
+  const hw=HANDLE_HW*kx, hh=HANDLE_H*ky, top=2*ky;
+  m.forEach((t,i)=>{ const x=t2x(t); const on=i===sel, hv=i===hoverIdx;
+    ctx.strokeStyle = on ? "#ffd33d" : "#e6edf3"; ctx.lineWidth = (on?2.5:1.5)*kx;
+    ctx.beginPath(); ctx.moveTo(x, top+hh+2); ctx.lineTo(x, H()); ctx.stroke();
+    ctx.fillStyle = on ? "#ffd33d" : (hv ? "#ffffff" : "#e6edf3");
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(x-hw, top, hw*2, hh, 5*kx); else ctx.rect(x-hw, top, hw*2, hh);
+    ctx.fill();
+    ctx.strokeStyle="#0d1117"; ctx.lineWidth=1*kx;   // grip lines so it reads as draggable
+    for(const dx of [-3.5,0,3.5]){ ctx.beginPath(); ctx.moveTo(x+dx*kx, top+5*ky); ctx.lineTo(x+dx*kx, top+hh-5*ky); ctx.stroke(); }
   });
   ctx.lineWidth = 1;
   // playhead
@@ -202,37 +231,47 @@ function render(){
 function drawRefs(arr, y, col){ ctx.strokeStyle=col; arr.forEach(t=>{ const x=t2x(t);
   ctx.beginPath(); ctx.moveTo(x,y-7); ctx.lineTo(x,y+7); ctx.stroke(); }); }
 
-function nearest(x){ const m=marks[String(ph().index)]||[]; let bi=-1, bd=9;
-  m.forEach((t,i)=>{ const d=Math.abs(t2x(t)-x); if(d<bd){bd=d;bi=i;} }); return bd<8?bi:-1; }
+function nearest(x){ const m=marks[curKey()]||[]; let bi=-1, bd=1e9; const g=GRAB_SCREEN_PX*sx();
+  m.forEach((t,i)=>{ const d=Math.abs(t2x(t)-x); if(d<bd){bd=d;bi=i;} }); return bd<=g?bi:-1; }
+function evx(e){ const r=cv.getBoundingClientRect(); return (e.clientX-r.left)/r.width*W(); }
 
 cv.addEventListener('pointerdown', e=>{
-  const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)/r.width*W();
-  const hit=nearest(x);
-  if(hit>=0){ sel=hit; drag=true; cv.setPointerCapture(e.pointerId); }
-  else { const p=ph(); let t=x2t(x); t=Math.max(p.startS, Math.min(p.endS, t));
-    const m=marks[String(p.index)]; m.push(+t.toFixed(4)); m.sort((a,b)=>a-b);
-    sel=m.indexOf(+t.toFixed(4)); scheduleSave(); }
+  const x=evx(e), hit=nearest(x);
+  if(hit>=0){ sel=hit; drag=true; pushUndo(); cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing'; }
+  else { pushUndo(); const t=+clampT(x2t(x)).toFixed(4);
+    const m=marks[curKey()]; m.push(t); m.sort((a,b)=>a-b); sel=m.indexOf(t); scheduleSave(); }
   render();
 });
-cv.addEventListener('pointermove', e=>{ if(!drag)return;
-  const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)/r.width*W(); const p=ph();
-  let t=Math.max(p.startS, Math.min(p.endS, x2t(x))); marks[String(p.index)][sel]=+t.toFixed(4); render(); });
-cv.addEventListener('pointerup', e=>{ if(drag){ drag=false; const m=marks[String(ph().index)];
-  const v=m[sel]; m.sort((a,b)=>a-b); sel=m.indexOf(v); scheduleSave(); render(); } });
+cv.addEventListener('pointermove', e=>{
+  const x=evx(e);
+  if(drag){ marks[curKey()][sel]=+clampT(x2t(x)).toFixed(4); render(); return; }
+  const h=nearest(x); cv.style.cursor = h>=0 ? 'grab' : 'crosshair';
+  if(h!==hoverIdx){ hoverIdx=h; render(); }
+});
+cv.addEventListener('pointerup', e=>{ if(drag){ drag=false; cv.style.cursor='grab';
+  const m=marks[curKey()]; const v=m[sel]; m.sort((a,b)=>a-b); sel=m.indexOf(v); scheduleSave(); render(); } });
+cv.addEventListener('dblclick', e=>{ const h=nearest(evx(e)); if(h>=0){ sel=h; delSel(); } });
 
-function delSel(){ if(sel<0)return; marks[String(ph().index)].splice(sel,1); sel=-1; scheduleSave(); render(); }
+function delSel(){ if(sel<0)return; pushUndo(); marks[curKey()].splice(sel,1); sel=-1; scheduleSave(); render(); }
+function nudge(d){ if(sel<0)return; pushUndo(); const m=marks[curKey()];
+  const v=+clampT(m[sel]+d).toFixed(4); m[sel]=v; m.sort((a,b)=>a-b); sel=m.indexOf(v); scheduleSave(); render(); }
 document.addEventListener('keydown', e=>{
   if(e.target.tagName==='INPUT') return;
+  if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); doUndo(); return; }
   if(e.key===' '){ e.preventDefault(); toggle(); }
   else if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); delSel(); }
-  else if(e.key===']'){ if(cur<DATA.phrases.length-1){cur++;sel=-1;stop();render();} }
-  else if(e.key==='['){ if(cur>0){cur--;sel=-1;stop();render();} }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); nudge(-(e.shiftKey?NUDGE_BIG_S:NUDGE_S)); }
+  else if(e.key==='ArrowRight'){ e.preventDefault(); nudge(e.shiftKey?NUDGE_BIG_S:NUDGE_S); }
+  else if(e.key===']'){ if(cur<DATA.phrases.length-1){cur++;sel=-1;hoverIdx=-1;stop();render();} }
+  else if(e.key==='['){ if(cur>0){cur--;sel=-1;hoverIdx=-1;stop();render();} }
 });
-document.getElementById('prev').onclick=()=>{ if(cur>0){cur--;sel=-1;stop();render();} };
-document.getElementById('next').onclick=()=>{ if(cur<DATA.phrases.length-1){cur++;sel=-1;stop();render();} };
-document.getElementById('reset').onclick=()=>{ marks[String(ph().index)]=ph().seedF.slice(); sel=-1; scheduleSave(); render(); };
-document.getElementById('clear').onclick=()=>{ marks[String(ph().index)]=[]; sel=-1; scheduleSave(); render(); };
-document.getElementById('done').onchange=e=>{ done[String(ph().index)]=e.target.checked; scheduleSave(); };
+document.getElementById('prev').onclick=()=>{ if(cur>0){cur--;sel=-1;hoverIdx=-1;stop();render();} };
+document.getElementById('next').onclick=()=>{ if(cur<DATA.phrases.length-1){cur++;sel=-1;hoverIdx=-1;stop();render();} };
+document.getElementById('reset').onclick=()=>{ pushUndo(); marks[curKey()]=ph().seedF.slice(); sel=-1; scheduleSave(); render(); };
+document.getElementById('clear').onclick=()=>{ pushUndo(); marks[curKey()]=[]; sel=-1; scheduleSave(); render(); };
+document.getElementById('del').onclick=()=>delSel();
+document.getElementById('undo').onclick=()=>doUndo();
+document.getElementById('done').onchange=e=>{ done[curKey()]=e.target.checked; scheduleSave(); };
 
 function toggle(){ playing?stop():play(); }
 document.getElementById('play').onclick=toggle;
@@ -257,7 +296,7 @@ function play(){
 }
 function stop(){ if(srcNode){ try{srcNode.onended=null;srcNode.stop();}catch(e){} srcNode=null; }
   playing=false; cancelAnimationFrame(raf); document.getElementById('play').textContent='▶ play (Space)';
-  const b=document.getElementById('play'); render(); }
+  render(); }
 
 function scheduleSave(){ const s=document.getElementById('status'); s.textContent='saving…'; s.className='muted';
   clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
@@ -269,6 +308,7 @@ async function save(){
     if(j.ok){ s.textContent='saved ✓'; s.className='ok'; } else { s.textContent='save error: '+(j.error||'?'); s.className='muted'; }
   }catch(e){ document.getElementById('status').textContent='save failed'; }
 }
+window.addEventListener('resize', ()=>{ if(buffer) render(); });
 load();
 </script></body></html>"""
 
