@@ -13,7 +13,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from asserted_proof_verdict import save_ab_verdict, save_ace_cover_verdict, save_review_verdict
+from asserted_proof_verdict import (save_ab_verdict, save_ace_cover_verdict,
+                                    save_annotations, save_review_verdict)
 
 URL_PREFIX = "/used2/asserted-proof"
 VERDICT_ENDPOINT = URL_PREFIX + "/api/verdict/opening"
@@ -21,6 +22,11 @@ AB_VERDICT_ENDPOINT = URL_PREFIX + "/api/verdict/ace-cover-ab"
 ACE_VERDICT_RE = re.compile("^" + re.escape(URL_PREFIX) + r"/api/verdict/ace-cover/(\d{1,10})$")
 ACE_COVER_DIR = "opening/ace-step-cover"
 MAX_VERDICT_BYTES = 16 * 1024
+
+# Ground-truth annotations (annotator round): the owner's hand-marked syllable onsets.
+ANNOTATIONS_ENDPOINT = URL_PREFIX + "/api/annotations"
+ANNOTATIONS_PATH = "back-half/ground-truth.json"
+MAX_ANNOTATION_BYTES = 256 * 1024
 
 
 def ace_verdict_seed(path: str) -> int | None:
@@ -73,6 +79,18 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if request_path == ANNOTATIONS_ENDPOINT:
+            gt = Path.cwd() / ANNOTATIONS_PATH
+            if not gt.is_file():
+                self._send_json(HTTPStatus.OK, {"ok": True, "annotations": None})
+                return
+            try:
+                self._send_json(HTTPStatus.OK,
+                                {"ok": True, "annotations": json.loads(gt.read_text())})
+            except (OSError, json.JSONDecodeError):
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR,
+                                {"ok": False, "error": "saved annotations are unreadable"})
+            return
         seed = ace_verdict_seed(self.path)
         is_ab = is_ab_verdict_path(self.path)
         if request_path != VERDICT_ENDPOINT and seed is None and not is_ab:
@@ -99,6 +117,24 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_path = urlsplit(self.path).path
+        if request_path == ANNOTATIONS_ENDPOINT:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid content length"})
+                return
+            if length <= 0 or length > MAX_ANNOTATION_BYTES:
+                self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                                {"ok": False, "error": "invalid annotations size"})
+                return
+            try:
+                payload = json.loads(self.rfile.read(length))
+                save_annotations(payload, Path.cwd() / ANNOTATIONS_PATH)
+            except (json.JSONDecodeError, OSError, RuntimeError) as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})
+                return
+            self._send_json(HTTPStatus.CREATED, {"ok": True})
+            return
         seed = ace_verdict_seed(self.path)
         is_ab = is_ab_verdict_path(self.path)
         if request_path != VERDICT_ENDPOINT and seed is None and not is_ab:

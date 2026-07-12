@@ -122,5 +122,44 @@ def dig():
 
 check("detectors are deterministic (3x)", len({dig() for _ in range(3)}) == 1)
 
+# ── truth_slots (annotator round): the owner's hand-marked onsets ARE the grid ─────────
+def _ls(bar, slots):
+    return {"v": 1, "bar": bar, "bpm": 138.0, "timeSig": [4, 4], "grid": "1/16", "slots": slots}
+
+
+def _slot(a, b):
+    return {"start": a, "end": b, "velocity": 80, "kind": "gap",
+            "segments": [{"start": a, "end": b, "pitch": 57}]}
+
+
+TS_SKEL = {"lineScores": [_ls(0, [_slot(0.30, 0.60), _slot(0.60, 0.90)]),
+                          _ls(1, [_slot(2.50, 2.70), _slot(2.70, 2.90)])],
+           "lines": [], "lineHeard": []}
+TS_ENV = env_from([(0.30, 0.001), (0.60, 0.5), (1.60, 0.001), (0.40, 0.5), (0.30, 0.001)])
+TS_EV = {"hopS": HOP, "env": TS_ENV, "notes": [],
+         "f0": [{"t": 0.30 + i * 0.01, "hz": 220.0} for i in range(60)]}   # A3 = MIDI 57
+
+GT = {"phrases": {"0": [0.30, 0.55, 0.78], "1": [2.50, 2.72]}}
+tslots = rg.truth_slots(TS_EV, TS_SKEL, GT)
+check("one slot per owner onset (3 + 2)", len(tslots) == 5, str(len(tslots)))
+check("slot starts ARE the owner's onsets",
+      [round(s["start"], 2) for s in tslots] == [0.30, 0.55, 0.78, 2.50, 2.72],
+      str([round(s["start"], 2) for s in tslots]))
+check("slots are contiguous within a phrase (end == next start)",
+      abs(tslots[0]["end"] - tslots[1]["start"]) < 1e-6
+      and abs(tslots[1]["end"] - tslots[2]["start"]) < 1e-6)
+check("the phrase's last slot ends at the phrase end", abs(tslots[2]["end"] - 0.90) < 1e-6,
+      str(tslots[2]))
+check("pitch is attached from the F0 contour", tslots[0]["segments"][0]["pitch"] == 57)
+check("velocity is in range", all(1 <= s["velocity"] <= 127 for s in tslots))
+
+# an unmarked phrase contributes no slots (a rest the owner left empty)
+gt_empty = {"phrases": {"0": [], "1": [2.6]}}
+check("an unmarked phrase yields no slots", len(rg.truth_slots(TS_EV, TS_SKEL, gt_empty)) == 1,
+      str(rg.truth_slots(TS_EV, TS_SKEL, gt_empty)))
+check("truth_slots is deterministic (3x)",
+      len({hashlib.sha256(json.dumps(rg.truth_slots(TS_EV, TS_SKEL, GT), sort_keys=True).encode()).hexdigest()
+           for _ in range(3)}) == 1)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

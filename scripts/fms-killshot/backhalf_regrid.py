@@ -44,6 +44,8 @@ EVIDENCE = BH / "evidence.json"
 MANIFEST = BH / "regrid-manifest.json"
 CAL_JSON = BH / "regrid-calibrate.json"
 REGRID = BH / "skeleton-regrid.json"
+TRUTH = BH / "ground-truth.json"                 # the owner's hand-marked onsets
+SKELETON_TRUTH = BH / "skeleton-truth.json"      # the grid built from them
 
 HOP_S = 0.01
 MIN_NUCLEUS_S = 0.04      # sub-40ms nuclei are glitches (mirrors tidy_segments)
@@ -76,7 +78,7 @@ def _pitch_for(a: float, b: float, f0, notes, prev: int | None) -> int:
     return prev if prev is not None else DEFAULT_PITCH
 
 
-def _slots_from_edges(env, hop_s, span_edges, f0, notes):
+def _slots_from_edges(env, hop_s, span_edges, f0, notes, min_nucleus_s=MIN_NUCLEUS_S):
     """span_edges: [(sa, sb, [interior split times])] -> lineScores-shaped slots.
     Each span's first nucleus starts at the span's ATTACK (sa); interior times split."""
     p95 = sv2._pctl(sorted(env), 95) or 1.0
@@ -85,7 +87,7 @@ def _slots_from_edges(env, hop_s, span_edges, f0, notes):
         edges = [sa] + sorted(t for t in interior if sa < t < sb) + [sb]
         for i in range(len(edges) - 1):
             a, b = edges[i], edges[i + 1]
-            if b - a < MIN_NUCLEUS_S:
+            if b - a < min_nucleus_s:
                 continue
             lo, hi = int(a / hop_s), max(int(a / hop_s) + 1, int(b / hop_s))
             peak = max(env[lo:hi]) if env[lo:hi] else 0.0
@@ -189,9 +191,10 @@ def _load_evidence() -> dict:
     return json.loads(EVIDENCE.read_text())
 
 
-def _candidate_slots(ev: dict) -> dict:
-    """All three candidates' slots on the take timeline."""
-    skel = json.loads(SKELETON.read_text())
+def _candidate_slots(ev: dict, skeleton: dict | None = None) -> dict:
+    """All three candidates' slots on the take timeline. `skeleton` overrides the on-disk
+    skeleton.json (keeps callers pure/testable)."""
+    skel = skeleton if skeleton is not None else json.loads(SKELETON.read_text())
     c_slots = [s for ls in skel.get("lineScores") or [] if isinstance(ls, dict)
                for s in ls.get("slots") or []]
     e = detect_e(ev["env"], ev["hopS"], f0=ev["f0"], notes=ev["notes"])
@@ -276,15 +279,31 @@ def calibrate() -> int:
     return 0
 
 
-# ── Phase C: full re-grid from the winning detector ────────────────────────────────────
+# ── Phase C: full re-grid from the winning detector, or from hand-marked truth ─────────
 
-def rebuild(winner: str) -> int:
-    ev = _load_evidence()
-    cands = _candidate_slots(ev)
-    if winner not in cands:
-        raise SystemExit(f"winner must be one of {sorted(cands)}")
-    slots = cands[winner]
-    skel = json.loads(SKELETON.read_text())
+def truth_slots(ev: dict, skeleton: dict, ground_truth: dict) -> list:
+    """The owner's hand-marked onsets (ground-truth.json) as lineScores-shaped slots:
+    within each phrase, onsets are the slot starts; each runs to the next onset (last to
+    the phrase end). Pitch/velocity attached from evidence like the detectors. An
+    unmarked phrase (rest) contributes nothing."""
+    phrases = flowspec.group_by_rest(skeleton.get("lineScores") or [],
+                                     gap_s=0.35, min_syllables=2)
+    gt = ground_truth.get("phrases") or {}
+    span_edges = []
+    for i, ph in enumerate(phrases):
+        onsets = sorted(set(round(float(t), 4) for t in gt.get(str(i), [])))
+        if not onsets:
+            continue
+        end = max(float(ph["end"]), onsets[-1] + 0.08)   # the last syllable holds to phrase end
+        span_edges.append((onsets[0], end, onsets[1:]))
+    return _slots_from_edges(ev["env"], ev["hopS"], span_edges, ev["f0"], ev["notes"],
+                             min_nucleus_s=0.005)
+
+
+def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path):
+    """slots (any origin) -> a skeleton.json-shaped doc: bar-binned lineScores +
+    per-line seedText (kept words re-anchored by evidence timestamps) + lineHeard.
+    Writes to `dest` and returns (doc, line_scores)."""
     bpm = 138.0
     for ls in skel.get("lineScores") or []:
         if isinstance(ls, dict) and ls.get("bpm"):
@@ -294,20 +313,16 @@ def rebuild(winner: str) -> int:
     by_bar: dict = {}
     for s in slots:
         by_bar.setdefault(int(float(s["start"]) // bar_s), []).append(s)
-
-    # kept-word re-anchoring: evidence ASR words matched against the ORIGINAL lineHeard
-    # kept words (by text, per bar) land at their nearest NEW slot index
     kept_words = set()
     for lh in skel.get("lineHeard") or []:
         if isinstance(lh, dict):
             for w in lh.get("words") or []:
                 if w.get("kept"):
                     kept_words.add((lh.get("bar"), flowspec._clean_tok(w.get("word"))))
-
     line_scores, lines, line_heard = [], [], []
     for bar in sorted(by_bar):
         bslots = sorted(by_bar[bar], key=lambda s: float(s["start"]))
-        line_scores.append({"v": 1, "algo": f"regrid-{winner}", "bar": bar, "bpm": bpm,
+        line_scores.append({"v": 1, "algo": algo, "bar": bar, "bpm": bpm,
                             "timeSig": [4, 4], "grid": "1/16", "clamped": False,
                             "slots": bslots})
         toks = ["___"] * len(bslots)
@@ -316,8 +331,7 @@ def rebuild(winner: str) -> int:
             ws = float(w.get("start", 0))
             if not (bar * bar_s <= ws < (bar + 1) * bar_s) or not bslots:
                 continue
-            idx = min(range(len(bslots)),
-                      key=lambda i: abs(float(bslots[i]["start"]) - ws))
+            idx = min(range(len(bslots)), key=lambda i: abs(float(bslots[i]["start"]) - ws))
             tok = flowspec._clean_tok(w.get("word"))
             kept = (bar, tok) in kept_words
             if kept and toks[idx] == "___":
@@ -325,18 +339,33 @@ def rebuild(winner: str) -> int:
             heard_rows.append({"word": w.get("word"), "slot": idx,
                                "conf": round(float(w.get("conf", 0) or 0), 3),
                                "kept": kept, "syl": int(w.get("syl", 1) or 1)})
-        lines.append({"index": bar, "seedText": " ".join(toks),
-                      "syllableTarget": len(bslots)})
+        lines.append({"index": bar, "seedText": " ".join(toks), "syllableTarget": len(bslots)})
         if heard_rows:
             line_heard.append({"v": 1, "bar": bar, "words": heard_rows})
+    doc = {**{k: v for k, v in skel.items() if k not in ("lineScores", "lines", "lineHeard")},
+           "lineScores": line_scores, "lines": lines, "lineHeard": line_heard}
+    if dest is not None:
+        dest.write_text(json.dumps(doc, indent=1))
+    return doc, line_scores
 
-    REGRID.write_text(json.dumps({**{k: v for k, v in skel.items()
-                                     if k not in ("lineScores", "lines", "lineHeard")},
-                                  "lineScores": line_scores, "lines": lines,
-                                  "lineHeard": line_heard}, indent=1))
+
+def rebuild(winner: str) -> int:
+    ev = _load_evidence()
+    skel = json.loads(SKELETON.read_text())
+    if winner == "truth":
+        if not TRUTH.is_file():
+            raise SystemExit("no ground-truth.json — mark the take in the annotator first")
+        slots = truth_slots(ev, skel, json.loads(TRUTH.read_text()))
+        algo, dest = "truth", SKELETON_TRUTH
+    else:
+        cands = _candidate_slots(ev, skel)
+        if winner not in cands:
+            raise SystemExit(f"winner must be one of {sorted(cands) + ['truth']}")
+        slots, algo, dest = cands[winner], f"regrid-{winner}", REGRID
+    _, line_scores = _slots_to_skeleton(slots, skel, ev, algo, dest)
     phrases = flowspec.group_by_rest(line_scores, gap_s=0.35, min_syllables=2)
-    print(f"regrid-{winner}: {len(slots)} slots, {len(line_scores)} bars, "
-          f"{len(phrases)} phrases -> {REGRID}", flush=True)
+    print(f"{algo}: {len(slots)} slots, {len(line_scores)} bars, "
+          f"{len(phrases)} phrases -> {dest}", flush=True)
     return 0
 
 
@@ -349,5 +378,5 @@ if __name__ == "__main__":
     if cmd == "calibrate":
         sys.exit(calibrate())
     if cmd == "rebuild":
-        sys.exit(rebuild(sys.argv[2] if len(sys.argv) > 2 else "F"))
+        sys.exit(rebuild(sys.argv[2] if len(sys.argv) > 2 else "truth"))
     raise SystemExit(f"unknown subcommand {cmd!r}")

@@ -2,10 +2,51 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 VERDICTS = {"pass", "close but revise", "fail"}
 CLASSIFICATIONS = {"", "words", "timing", "pitch/register", "voice/timbre"}
+
+# Ground-truth annotation (annotator round, 2026-07-12): the owner's hand-marked syllable
+# onsets, saved by the waveform tool. No manifest hash — this is fresh truth, not a verdict
+# ON an artifact. Bounds are sanity guards; the real precision is the owner's ear.
+MAX_ANNOTATION_ONSETS = 2000        # a 56s take holds ~150; 2000 is a runaway backstop
+MAX_ANNOTATION_TIME_S = 3600.0      # 1 hour — a paste/units-bug tripwire, not a real limit
+
+
+def validate_annotations(payload: dict) -> None:
+    """Raise RuntimeError unless payload is a well-formed onset annotation set:
+    {phrases: {"<index>": [onset_s, ...]}, createdAt, ...}. Onsets are finite,
+    non-negative, within the sanity cap; the total is bounded."""
+    if not isinstance(payload, dict):
+        raise RuntimeError("annotations must be a JSON object")
+    if not isinstance(payload.get("createdAt"), str) or not payload["createdAt"]:
+        raise RuntimeError("annotations must include createdAt")
+    phrases = payload.get("phrases")
+    if not isinstance(phrases, dict):
+        raise RuntimeError("annotations.phrases must be an object of per-phrase onset lists")
+    total = 0
+    for key, onsets in phrases.items():
+        if not isinstance(onsets, list):
+            raise RuntimeError(f"phrase {key} onsets must be a list")
+        total += len(onsets)
+        for t in onsets:
+            if isinstance(t, bool) or not isinstance(t, (int, float)):
+                raise RuntimeError(f"phrase {key} has a non-numeric onset")
+            if not math.isfinite(float(t)) or not (0.0 <= float(t) <= MAX_ANNOTATION_TIME_S):
+                raise RuntimeError(f"phrase {key} has an out-of-range onset: {t}")
+    if total > MAX_ANNOTATION_ONSETS:
+        raise RuntimeError(f"too many onsets ({total} > {MAX_ANNOTATION_ONSETS})")
+
+
+def save_annotations(payload: dict, destination: Path) -> dict:
+    validate_annotations(payload)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(destination)
+    return payload
 
 
 def _validate_verdict_fields(verdict: dict, manifest_path: Path) -> None:
