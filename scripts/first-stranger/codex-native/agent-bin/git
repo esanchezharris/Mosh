@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL="${CN_REAL_GIT:?CN_REAL_GIT is required}"
+args=("$@")
+i=0
+command=""
+while [ "$i" -lt "${#args[@]}" ]; do
+  arg="${args[$i]}"
+  case "$arg" in
+    -C|-c|--git-dir|--work-tree) i=$((i + 2)); continue ;;
+    --no-pager|--paginate|--literal-pathspecs|--no-literal-pathspecs) i=$((i + 1)); continue ;;
+    -*) i=$((i + 1)); continue ;;
+    *) command="$arg"; break ;;
+  esac
+done
+
+case "$command" in
+  status|diff|log|show|grep|ls-files|rev-parse|cat-file|merge-base|describe|blame|shortlog)
+    exec "$REAL" "$@"
+    ;;
+  *)
+    printf 'codex-native agent guard: git %s is not permitted; the supervisor owns git mutations\n' "${command:-<none>}" >&2
+    exit 126
+    ;;
+esac

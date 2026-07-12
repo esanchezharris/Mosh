@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "ready_for_gate", "summary", "tests_run", "blockers"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^FS-[A-Z0-9]+$"},
+    "ready_for_gate": {"type": "boolean"},
+    "summary": {"type": "string", "minLength": 1},
+    "tests_run": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}}
+  }
+}

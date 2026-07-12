@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "planned", "gap_exists", "route", "summary"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^FS-[A-Z0-9]+$"},
+    "planned": {"type": "boolean"},
+    "gap_exists": {"type": "boolean"},
+    "route": {"enum": ["safe", "owner", "never"]},
+    "summary": {"type": "string", "minLength": 1}
+  }
+}

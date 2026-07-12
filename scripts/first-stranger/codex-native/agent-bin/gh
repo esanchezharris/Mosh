@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'codex-native agent guard: gh is not available to agents; the supervisor owns PR actions\n' >&2
+exit 126
