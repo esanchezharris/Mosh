@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "service"))
 
-from backhalf_ab_bench import BH, CHORUS, ROOT, THEME  # noqa: E402
+from backhalf_ab_bench import BH, CHORUS, ROOT, THEME, resolve_skeleton  # noqa: E402
 from lyrics import flowspec  # noqa: E402
 from skeleton import core as skcore  # noqa: E402
 from soulx import ab_mix  # noqa: E402
@@ -129,7 +129,9 @@ def _write_mono(path: Path, mono: list, sr: int) -> None:
 
 
 def build() -> int:
-    skel = json.loads((BH / "skeleton.json").read_text())
+    skel_path = resolve_skeleton()
+    print(f"grid check against: {skel_path.name}", flush=True)
+    skel = json.loads(skel_path.read_text())
     spec = flowspec.build_flow_spec(skel, chorus=CHORUS, theme=THEME, gap_s=GAP_S,
                                     min_syllables=MIN_SYL, preserve_words=True)
     take, sr = skcore.read_pcm_mono(str(TAKE))
@@ -173,7 +175,9 @@ def build() -> int:
 
 
 def apply_cli(arg: str) -> int:
-    skel = json.loads((BH / "skeleton.json").read_text())
+    skel_path = resolve_skeleton()
+    print(f"corrections against: {skel_path.name}", flush=True)
+    skel = json.loads(skel_path.read_text())
     corrections = json.loads(arg)
     out = apply_grid_corrections(skel, corrections)
     CORRECTED.write_text(json.dumps(out, indent=1))

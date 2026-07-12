@@ -43,6 +43,17 @@ SKELETON = BH / "skeleton.json"
 RAW_SRC = BH / "source-backhalf-48k.wav"
 WORK = BH / "ab-bench"
 PAGE = SERVE / "index.html"
+
+
+def resolve_skeleton() -> Path:
+    """The grid every downstream stage measures against. Priority: BH_SKELETON env
+    override -> the owner's hand-marked truth (skeleton-truth.json) when it exists ->
+    the original detector skeleton. Callers should LOG which grid they got."""
+    env = os.environ.get("BH_SKELETON")
+    if env:
+        return Path(env).expanduser()
+    truth = BH / "skeleton-truth.json"
+    return truth if truth.is_file() else SKELETON
 BENCH_OUT = BH / "ab-bench.json"
 SR = 44100
 

@@ -13,6 +13,8 @@ CLASSIFICATIONS = {"", "words", "timing", "pitch/register", "voice/timbre"}
 # ON an artifact. Bounds are sanity guards; the real precision is the owner's ear.
 MAX_ANNOTATION_ONSETS = 2000        # a 56s take holds ~150; 2000 is a runaway backstop
 MAX_ANNOTATION_TIME_S = 3600.0      # 1 hour — a paste/units-bug tripwire, not a real limit
+MAX_STRUCK_WORDS = 500              # struck ASR words ("word@start" keys) — same backstop idea
+MAX_STRUCK_KEY_LEN = 64
 
 
 def validate_annotations(payload: dict) -> None:
@@ -38,6 +40,14 @@ def validate_annotations(payload: dict) -> None:
                 raise RuntimeError(f"phrase {key} has an out-of-range onset: {t}")
     if total > MAX_ANNOTATION_ONSETS:
         raise RuntimeError(f"too many onsets ({total} > {MAX_ANNOTATION_ONSETS})")
+    struck = payload.get("struck", {})
+    if not isinstance(struck, dict):
+        raise RuntimeError("annotations.struck must be an object of word@start keys")
+    if len(struck) > MAX_STRUCK_WORDS:
+        raise RuntimeError(f"too many struck words ({len(struck)} > {MAX_STRUCK_WORDS})")
+    for key in struck:
+        if not isinstance(key, str) or len(key) > MAX_STRUCK_KEY_LEN:
+            raise RuntimeError("struck keys must be short 'word@start' strings")
 
 
 def save_annotations(payload: dict, destination: Path) -> dict:

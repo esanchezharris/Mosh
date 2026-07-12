@@ -122,7 +122,11 @@ def dig():
 
 check("detectors are deterministic (3x)", len({dig() for _ in range(3)}) == 1)
 
-# ── truth_slots (annotator round): the owner's hand-marked onsets ARE the grid ─────────
+# ── truth_slots v2 (audit round): GLOBAL onsets, envelope-trimmed ends, melisma ────────
+# The v1 builder inherited the OLD grid's phrase windows (a slot could span a real rest;
+# marks past an old edge could overlap the next phrase). v2: slots come from the global
+# onset list; each end trims to the last VOICED frame before the next onset (rests
+# emerge from the audio); segments re-derive from F0 (melisma glides return).
 def _ls(bar, slots):
     return {"v": 1, "bar": bar, "bpm": 138.0, "timeSig": [4, 4], "grid": "1/16", "slots": slots}
 
@@ -132,34 +136,87 @@ def _slot(a, b):
             "segments": [{"start": a, "end": b, "pitch": 57}]}
 
 
-TS_SKEL = {"lineScores": [_ls(0, [_slot(0.30, 0.60), _slot(0.60, 0.90)]),
+# OLD grid wrongly merged across a real rest: one old slot spans 0.30-1.50 (through the
+# 0.90-1.40 silence), so the OLD phrase window is 0.30-1.70. Second phrase 2.50-2.90.
+TS_SKEL = {"lineScores": [_ls(0, [_slot(0.30, 1.50), _slot(1.50, 1.70)]),
                           _ls(1, [_slot(2.50, 2.70), _slot(2.70, 2.90)])],
            "lines": [], "lineHeard": []}
-TS_ENV = env_from([(0.30, 0.001), (0.60, 0.5), (1.60, 0.001), (0.40, 0.5), (0.30, 0.001)])
-TS_EV = {"hopS": HOP, "env": TS_ENV, "notes": [],
-         "f0": [{"t": 0.30 + i * 0.01, "hz": 220.0} for i in range(60)]}   # A3 = MIDI 57
+TS_ENV = env_from([(0.30, 0.001), (0.60, 0.5),            # voiced 0.30-0.90
+                   (0.50, 0.001), (0.30, 0.5),            # REST 0.90-1.40, voiced 1.40-1.70
+                   (0.80, 0.001), (0.40, 0.5), (0.30, 0.001)])   # voiced 2.50-2.90
+# F0: A3 through 0.30-0.42, then a sustained +3st step to C4 through 0.55 (melisma inside
+# slot 1), plain A3 elsewhere it is voiced
+TS_F0 = ([{"t": round(0.30 + i * 0.01, 3), "hz": 220.0} for i in range(12)]
+         + [{"t": round(0.42 + i * 0.01, 3), "hz": 261.63} for i in range(13)]
+         + [{"t": round(0.55 + i * 0.01, 3), "hz": 220.0} for i in range(35)]
+         + [{"t": round(1.40 + i * 0.01, 3), "hz": 220.0} for i in range(30)])
+TS_EV = {"hopS": HOP, "env": TS_ENV, "notes": [], "f0": TS_F0}
 
-GT = {"phrases": {"0": [0.30, 0.55, 0.78], "1": [2.50, 2.72]}}
-tslots = rg.truth_slots(TS_EV, TS_SKEL, GT)
+# marks: 3 in the (old) first window — incl. one whose next onset is far PAST the rest —
+# and 2 in the second window
+GT = {"phrases": {"0": [0.30, 0.55, 1.40], "1": [2.50, 2.72]}}
+warns = []
+tslots = rg.truth_slots(TS_EV, TS_SKEL, GT, warns=warns)
 check("one slot per owner onset (3 + 2)", len(tslots) == 5, str(len(tslots)))
 check("slot starts ARE the owner's onsets",
-      [round(s["start"], 2) for s in tslots] == [0.30, 0.55, 0.78, 2.50, 2.72],
+      [round(s["start"], 2) for s in tslots] == [0.30, 0.55, 1.40, 2.50, 2.72],
       str([round(s["start"], 2) for s in tslots]))
-check("slots are contiguous within a phrase (end == next start)",
-      abs(tslots[0]["end"] - tslots[1]["start"]) < 1e-6
-      and abs(tslots[1]["end"] - tslots[2]["start"]) < 1e-6)
-check("the phrase's last slot ends at the phrase end", abs(tslots[2]["end"] - 0.90) < 1e-6,
-      str(tslots[2]))
-check("pitch is attached from the F0 contour", tslots[0]["segments"][0]["pitch"] == 57)
+check("a slot NEVER spans a rest: the 0.55 slot trims to the voiced end (~0.90)",
+      abs(tslots[1]["end"] - 0.90) <= 0.03, str(tslots[1]["end"]))
+check("the rest EMERGES between slots (gap >= 0.35s for phrase re-derivation)",
+      tslots[2]["start"] - tslots[1]["end"] >= 0.35,
+      f"gap={tslots[2]['start'] - tslots[1]['end']:.2f}")
+check("no slot overlaps the next (global ordering holds)",
+      all(tslots[i]["end"] <= tslots[i + 1]["start"] + 1e-6 for i in range(len(tslots) - 1)))
+check("the 1.40 slot trims to ITS voiced end (~1.70), not the old window edge",
+      abs(tslots[2]["end"] - 1.70) <= 0.03, str(tslots[2]["end"]))
+# melisma: slot 1 (0.30-0.55) has an F0 step at ~0.42 -> TWO segments, ONE slot
+segs = tslots[0]["segments"]
+check("melisma re-derives INSIDE the slot (2 segments, 1 slot)", len(segs) == 2, str(segs))
+check("segment pitches follow the contour (A3 then C4)",
+      segs[0]["pitch"] == 57 and segs[1]["pitch"] == 60, str(segs))
+check("plain slots keep one segment", len(tslots[2]["segments"]) == 1, str(tslots[2]["segments"]))
 check("velocity is in range", all(1 <= s["velocity"] <= 127 for s in tslots))
 
-# an unmarked phrase contributes no slots (a rest the owner left empty)
+# a mark in SILENCE is still truth: it gets a minimal slot, never dropped
+gt_sil = {"phrases": {"0": [0.30, 1.00]}}   # 1.00 is inside the 0.90-1.40 rest
+sil = rg.truth_slots(TS_EV, TS_SKEL, gt_sil)
+check("a silence mark keeps a minimal slot (truth is never dropped)",
+      len(sil) == 2 and sil[1]["end"] > sil[1]["start"], str(sil[1] if len(sil) > 1 else sil))
+
+# marks <40ms apart are KEPT but warned (double-click accidents surface, never vanish)
+warns2 = []
+close_gt = {"phrases": {"0": [0.30, 0.32]}}
+close_slots = rg.truth_slots(TS_EV, TS_SKEL, close_gt, warns=warns2)
+check("marks <40ms apart are kept", len(close_slots) == 2, str(close_slots))
+check("...and warned", len(warns2) >= 1, str(warns2))
+check("...and the min-hold never overlaps the NEXT mark's slot",
+      close_slots[0]["end"] <= close_slots[1]["start"] + 1e-6,
+      str([(s['start'], s['end']) for s in close_slots]))
+
+# unmarked phrases contribute nothing; determinism holds
 gt_empty = {"phrases": {"0": [], "1": [2.6]}}
-check("an unmarked phrase yields no slots", len(rg.truth_slots(TS_EV, TS_SKEL, gt_empty)) == 1,
-      str(rg.truth_slots(TS_EV, TS_SKEL, gt_empty)))
+check("an unmarked phrase yields no slots", len(rg.truth_slots(TS_EV, TS_SKEL, gt_empty)) == 1)
 check("truth_slots is deterministic (3x)",
       len({hashlib.sha256(json.dumps(rg.truth_slots(TS_EV, TS_SKEL, GT), sort_keys=True).encode()).hexdigest()
            for _ in range(3)}) == 1)
+
+# ── strike-aware rebuild: a struck word never locks verbatim ───────────────────────────
+SK_EV = {**TS_EV, "words": [{"word": "flame", "start": 0.31, "end": 0.50, "conf": 0.9, "syl": 1},
+                            {"word": "balls", "start": 0.56, "end": 0.80, "conf": 0.9, "syl": 1}]}
+SK_SKEL = {**TS_SKEL,
+           "lineHeard": [{"v": 1, "bar": 0,
+                          "words": [{"word": "flame", "slot": 0, "conf": 0.9, "kept": True},
+                                    {"word": "balls", "slot": 1, "conf": 0.9, "kept": True}]}]}
+sk_slots = rg.truth_slots(SK_EV, SK_SKEL, GT)
+doc, _ = rg._slots_to_skeleton(sk_slots, SK_SKEL, SK_EV, "truth", None,
+                               struck={"balls@0.56": True})
+l0 = doc["lines"][0]
+check("unstruck kept word still locks into the seed", "flame" in l0["seedText"], l0["seedText"])
+check("a STRUCK word never locks verbatim", "balls" not in l0["seedText"], l0["seedText"])
+hw = {w["word"]: w for lh in doc["lineHeard"] for w in lh["words"]}
+check("the struck word stays as SOUND evidence (kept=False, still heard)",
+      hw["balls"]["kept"] is False and hw["flame"]["kept"] is True, str(hw))
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

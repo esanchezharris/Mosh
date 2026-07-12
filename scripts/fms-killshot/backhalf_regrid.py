@@ -281,29 +281,77 @@ def calibrate() -> int:
 
 # ── Phase C: full re-grid from the winning detector, or from hand-marked truth ─────────
 
-def truth_slots(ev: dict, skeleton: dict, ground_truth: dict) -> list:
-    """The owner's hand-marked onsets (ground-truth.json) as lineScores-shaped slots:
-    within each phrase, onsets are the slot starts; each runs to the next onset (last to
-    the phrase end). Pitch/velocity attached from evidence like the detectors. An
-    unmarked phrase (rest) contributes nothing."""
-    phrases = flowspec.group_by_rest(skeleton.get("lineScores") or [],
-                                     gap_s=0.35, min_syllables=2)
+TRUTH_MIN_HOLD_S = 0.05      # a mark in silence still gets a minimal slot — truth is
+                             # never dropped, only surfaced (the owner heard something)
+TRUTH_MELISMA_ST = 1.5       # sustained F0 step inside a slot = a melisma segment split
+
+
+def truth_slots(ev: dict, skeleton: dict, ground_truth: dict, warns: list | None = None) -> list:
+    """v2 — the owner's hand-marked onsets as lineScores-shaped slots, free of the old
+    grid: slots come from the GLOBAL onset list (phrase membership was a UI convenience;
+    the v1 per-phrase build inherited the distrusted windows and could span rests or
+    overlap across old edges). Each slot's end trims to the last VOICED frame before the
+    next onset (rest gate = the perform convention, 5% of the envelope p95) so rests
+    emerge from the audio itself; segments re-derive from F0 steps inside the slot so
+    melisma glides survive hand-marking. `skeleton` is unused (kept for call-site
+    stability); `warns` collects sub-40ms mark pairs (double-click accidents surface,
+    never silently vanish)."""
+    env, hop = ev["env"], float(ev["hopS"])
     gt = ground_truth.get("phrases") or {}
-    span_edges = []
-    for i, ph in enumerate(phrases):
-        onsets = sorted(set(round(float(t), 4) for t in gt.get(str(i), [])))
-        if not onsets:
-            continue
-        end = max(float(ph["end"]), onsets[-1] + 0.08)   # the last syllable holds to phrase end
-        span_edges.append((onsets[0], end, onsets[1:]))
-    return _slots_from_edges(ev["env"], ev["hopS"], span_edges, ev["f0"], ev["notes"],
-                             min_nucleus_s=0.005)
+    onsets = sorted(set(round(float(t), 4) for lst in gt.values() for t in lst))
+    if not onsets:
+        return []
+    sv = sorted(env)
+    p95 = sv2._pctl(sv, 95)
+    th = max(1e-6, 0.05 * p95)
+    take_end = len(env) * hop
+
+    def voiced_end(a: float, b: float):
+        lo, hi = int(a / hop) + 1, min(len(env), int(b / hop))
+        last = None
+        for i in range(lo, hi):
+            if env[i] >= th:
+                last = i
+        return (last + 1) * hop if last is not None else None
+
+    slots, prev_pitch = [], None
+    for k, a in enumerate(onsets):
+        nxt = onsets[k + 1] if k + 1 < len(onsets) else take_end
+        if warns is not None and nxt - a < 0.04:
+            warns.append(f"marks at {a:.3f}s and {nxt:.3f}s are {int((nxt - a) * 1000)}ms apart"
+                         " — double-click accident?")
+        ve = voiced_end(a, nxt)
+        b = ve if ve is not None else a + TRUTH_MIN_HOLD_S
+        # min-hold extends only into REST space — never across the next mark's slot
+        b = max(b, a + TRUTH_MIN_HOLD_S)
+        if k + 1 < len(onsets):
+            b = min(b, nxt)
+        b = round(min(b, take_end), 4)
+        lo, hi = int(a / hop), max(int(a / hop) + 1, int(b / hop))
+        peak = max(env[lo:hi]) if env[lo:hi] else 0.0
+        vel = max(1, min(127, int(round(127.0 * min(1.0, peak / (p95 or 1.0))))))
+        f0_in = [p for p in ev.get("f0") or []
+                 if a <= float(p.get("t", -1)) < b and float(p.get("hz", 0)) > 0]
+        steps = [t for t in sv2.pitch_step_events(f0_in, step_st=TRUTH_MELISMA_ST)
+                 if a < t < b]
+        edges = [a] + steps + [b]
+        segments = []
+        for i in range(len(edges) - 1):
+            pitch = _pitch_for(edges[i], edges[i + 1], ev.get("f0"), ev.get("notes"), prev_pitch)
+            prev_pitch = pitch
+            segments.append({"start": round(edges[i], 4), "end": round(edges[i + 1], 4),
+                             "pitch": pitch})
+        slots.append({"start": a, "end": b, "velocity": vel, "kind": "gap",
+                      "segments": segments})
+    return slots
 
 
-def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path):
+def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path,
+                       struck: dict | None = None):
     """slots (any origin) -> a skeleton.json-shaped doc: bar-binned lineScores +
     per-line seedText (kept words re-anchored by evidence timestamps) + lineHeard.
-    Writes to `dest` and returns (doc, line_scores)."""
+    `struck` ("word@start" keys from the annotator) demotes a word to sound-only:
+    never locked verbatim, still heard. Writes to `dest`; returns (doc, line_scores)."""
     bpm = 138.0
     for ls in skel.get("lineScores") or []:
         if isinstance(ls, dict) and ls.get("bpm"):
@@ -333,7 +381,7 @@ def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path)
                 continue
             idx = min(range(len(bslots)), key=lambda i: abs(float(bslots[i]["start"]) - ws))
             tok = flowspec._clean_tok(w.get("word"))
-            kept = (bar, tok) in kept_words
+            kept = (bar, tok) in kept_words and f"{tok}@{ws:.2f}" not in (struck or {})
             if kept and toks[idx] == "___":
                 toks[idx] = tok
             heard_rows.append({"word": w.get("word"), "slot": idx,
@@ -352,17 +400,23 @@ def _slots_to_skeleton(slots: list, skel: dict, ev: dict, algo: str, dest: Path)
 def rebuild(winner: str) -> int:
     ev = _load_evidence()
     skel = json.loads(SKELETON.read_text())
+    struck = None
     if winner == "truth":
         if not TRUTH.is_file():
             raise SystemExit("no ground-truth.json — mark the take in the annotator first")
-        slots = truth_slots(ev, skel, json.loads(TRUTH.read_text()))
+        gt = json.loads(TRUTH.read_text())
+        warns: list = []
+        slots = truth_slots(ev, skel, gt, warns=warns)
+        for w in warns:
+            print(f"  WARN {w}", flush=True)
+        struck = gt.get("struck") or None
         algo, dest = "truth", SKELETON_TRUTH
     else:
         cands = _candidate_slots(ev, skel)
         if winner not in cands:
             raise SystemExit(f"winner must be one of {sorted(cands) + ['truth']}")
         slots, algo, dest = cands[winner], f"regrid-{winner}", REGRID
-    _, line_scores = _slots_to_skeleton(slots, skel, ev, algo, dest)
+    _, line_scores = _slots_to_skeleton(slots, skel, ev, algo, dest, struck=struck)
     phrases = flowspec.group_by_rest(line_scores, gap_s=0.35, min_syllables=2)
     print(f"{algo}: {len(slots)} slots, {len(line_scores)} bars, "
           f"{len(phrases)} phrases -> {dest}", flush=True)

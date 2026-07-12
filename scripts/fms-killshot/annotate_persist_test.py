@@ -68,6 +68,17 @@ check("a valid payload does NOT raise", validate_annotations(GOOD) is None
       or True)   # returns None on success
 
 
+# ── 2b. word strikes (truth v2): struck ASR words persist with the marks ──────────────
+STRUCK = {**GOOD, "struck": {"balls@29.11": True, "berry@28.90": True}}
+with tempfile.TemporaryDirectory() as d:
+    dest = Path(d) / "gt.json"
+    save_annotations(STRUCK, dest)
+    check("struck words round-trip", json.loads(dest.read_text())["struck"]["balls@29.11"] is True)
+rejects("struck not a dict", {**GOOD, "struck": ["balls"]})
+rejects("struck key too long", {**GOOD, "struck": {"x" * 80: True}})
+rejects("too many strikes", {**GOOD, "struck": {f"w{i}@1.0": True for i in range(600)}})
+
+
 # ── 3. an empty grid (all markers cleared) is a legal save ────────────────────────────
 with tempfile.TemporaryDirectory() as d:
     dest = Path(d) / "ground-truth.json"

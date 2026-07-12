@@ -43,7 +43,9 @@ def env_from(spec):
 ENV = env_from([(0.30, 0.001), (0.25, 0.55), (0.05, 0.08), (0.25, 0.30),
                 (1.60, 0.001), (0.18, 0.50), (0.04, 0.08), (0.18, 0.45), (0.30, 0.001)])
 EVID = {"takeS": round(len(ENV) * HOP, 3), "hopS": HOP, "env": ENV,
-        "notes": [], "f0": [], "words": []}
+        "notes": [], "f0": [],
+        "words": [{"word": "flame", "start": 0.31, "end": 0.55, "conf": 0.9, "syl": 1},
+                  {"word": "balls", "start": 2.51, "end": 2.70, "conf": 0.85, "syl": 1}]}
 
 
 def LS(bar, slots):
@@ -90,6 +92,14 @@ for i, ph in enumerate(phrases):
 check("reference rows carry C and E", "refC" in p0 and "refE" in p0)
 check("every seed mark lies inside its phrase span",
       all(p["startS"] <= t < p["endS"] for p in data["phrases"] for t in p["seedF"]))
+
+# ── 2b. heard ASR words ride along for the strike UI (word@start keys) ─────────────────
+check("page data carries the heard words with keys",
+      len(data["words"]) == 2
+      and data["words"][0]["word"] == "flame"
+      and data["words"][0]["key"] == "flame@0.31"
+      and data["words"][1]["key"] == "balls@2.51",
+      str(data.get("words")))
 
 # ── 3. determinism ─────────────────────────────────────────────────────────────────────
 digs = {hashlib.sha256(json.dumps(ann.build_annotate_data(EVID, SKEL), sort_keys=True).encode()).hexdigest()

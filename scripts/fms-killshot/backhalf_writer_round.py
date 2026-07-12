@@ -30,7 +30,7 @@ if os.path.isfile(_OWNER_ENV):
     os.environ["MOSH_BRAIN_ENV"] = _OWNER_ENV
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from backhalf_ab_bench import BH, CHORUS, ROOT, THEME  # noqa: E402
+from backhalf_ab_bench import BH, CHORUS, ROOT, THEME, resolve_skeleton  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "service"))
 import brain_client  # noqa: E402
@@ -127,7 +127,9 @@ def build() -> int:
     if not brain_client.available():
         raise SystemExit("brain unavailable — check MOSH_BRAIN_ENV")
 
-    skel = json.loads((BH / "skeleton.json").read_text())
+    skel_path = resolve_skeleton()
+    print(f"writing against: {skel_path.name}", flush=True)
+    skel = json.loads(skel_path.read_text())
     spec = flowspec.build_flow_spec(skel, chorus=CHORUS, theme=THEME, gap_s=0.35,
                                     min_syllables=2, preserve_words=True)
     spec_lines = {l["index"]: l for l in spec["lines"]}

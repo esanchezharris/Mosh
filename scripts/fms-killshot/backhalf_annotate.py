@@ -56,9 +56,14 @@ def build_annotate_data(evidence: dict, skeleton: dict) -> dict:
             "refC": _onsets_in(cands["C"], a, b),
             "refE": _onsets_in(cands["E"], a, b),
         })
+    words = [{"word": str(w.get("word", "")).strip(),
+              "start": round(float(w.get("start", 0)), 2),
+              "conf": round(float(w.get("conf", 0) or 0), 2),
+              "key": f"{flowspec._clean_tok(w.get('word'))}@{float(w.get('start', 0)):.2f}"}
+             for w in evidence.get("words") or [] if str(w.get("word", "")).strip()]
     return {"takeS": round(take_s, 4), "hopS": float(evidence.get("hopS") or 0.01),
             "env": evidence.get("env") or [], "audio": "../back-half/source-backhalf-48k.wav",
-            "phrases": rows}
+            "words": words, "phrases": rows}
 
 
 def build() -> int:
@@ -124,6 +129,7 @@ _PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
     <span><span class="sw" style="background:#3fb950"></span>detector F (seed)</span>
     <span><span class="sw" style="background:#8b949e"></span>detector E</span>
     <span><span class="sw" style="background:#6e7681"></span>current grid C</span>
+    <span>heard words at the bottom — <b>click a word to STRIKE it</b> (junk that must never be used verbatim; its sound still guides)</span>
   </div>
 </div>
 <script>
@@ -135,7 +141,7 @@ const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const GRAB_SCREEN_PX = 18, HANDLE_HW = 11, HANDLE_H = 16;
 const MARK_MARGIN = 0.12, NUDGE_S = 0.005, NUDGE_BIG_S = 0.02, UNDO_MAX = 100;
 let buffer = null, actx = null, cur = 0, marks = {}, done = {}, sel = -1, drag = false;
-let hoverIdx = -1, undoStack = [];
+let hoverIdx = -1, undoStack = [], struck = {}, wordBoxes = [];
 let playing = false, srcNode = null, startAt = 0, playFrom = 0, raf = 0, saveTimer = 0;
 
 function W(){ return cv.width; } function H(){ return cv.height; }
@@ -168,6 +174,7 @@ async function load(){
     marks[k] = (saved && saved.phrases && saved.phrases[k]) ? saved.phrases[k].slice() : p.seedF.slice();
     done[k] = !!(saved && saved.done && saved.done[k]);
   });
+  struck = (saved && saved.struck) ? Object.assign({}, saved.struck) : {};
   render();
 }
 
@@ -202,6 +209,21 @@ function render(){
   }
   // reference rows (read-only): C, E
   drawRefs(p.refC, H()*0.90, "#6e7681"); drawRefs(p.refE, H()*0.83, "#8b949e");
+  // heard ASR words — click a word to STRIKE it (never locked verbatim; sound still guides)
+  wordBoxes = [];
+  const wy = H()*0.975, kfx = sx(), kfy = sy();
+  ctx.font = `${12*kfy}px -apple-system, sans-serif`;
+  ctx.textBaseline = "middle";
+  (DATA.words||[]).forEach(w => {
+    if (w.start < p.padStart || w.start >= p.padEnd) return;
+    const x = t2x(w.start), isStruck = !!struck[w.key];
+    ctx.fillStyle = isStruck ? "#f8514999" : "#8b949e";
+    ctx.fillText(w.word, x+2*kfx, wy);
+    const tw = ctx.measureText(w.word).width;
+    if (isStruck){ ctx.strokeStyle="#f85149"; ctx.lineWidth=1.5*kfx;
+      ctx.beginPath(); ctx.moveTo(x+1*kfx, wy); ctx.lineTo(x+3*kfx+tw, wy); ctx.stroke(); }
+    wordBoxes.push({x0:x-2*kfx, x1:x+4*kfx+tw, y0:wy-9*kfy, y1:wy+9*kfy, key:w.key});
+  });
   // editable marks — a full-height grabbable line + a big handle pill at the top (sized
   // in screen px via sx/sy so it's an easy target on the downscaled canvas)
   const m = marks[String(p.index)]||[]; const kx=sx(), ky=sy();
@@ -235,8 +257,15 @@ function nearest(x){ const m=marks[curKey()]||[]; let bi=-1, bd=1e9; const g=GRA
   m.forEach((t,i)=>{ const d=Math.abs(t2x(t)-x); if(d<bd){bd=d;bi=i;} }); return bd<=g?bi:-1; }
 function evx(e){ const r=cv.getBoundingClientRect(); return (e.clientX-r.left)/r.width*W(); }
 
+function evy(e){ const r=cv.getBoundingClientRect(); return (e.clientY-r.top)/r.height*H(); }
+function wordHit(x, y){ return wordBoxes.find(b => x>=b.x0 && x<=b.x1 && y>=b.y0 && y<=b.y1); }
+
 cv.addEventListener('pointerdown', e=>{
-  const x=evx(e), hit=nearest(x);
+  const x=evx(e), y=evy(e);
+  const wb = wordHit(x, y);
+  if(wb){ if(struck[wb.key]) delete struck[wb.key]; else struck[wb.key]=true;
+    scheduleSave(); render(); return; }   // striking a word never drops a marker
+  const hit=nearest(x);
   if(hit>=0){ sel=hit; drag=true; pushUndo(); cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing'; }
   else { pushUndo(); const t=+clampT(x2t(x)).toFixed(4);
     const m=marks[curKey()]; m.push(t); m.sort((a,b)=>a-b); sel=m.indexOf(t); scheduleSave(); }
@@ -302,13 +331,20 @@ function scheduleSave(){ const s=document.getElementById('status'); s.textConten
   clearTimeout(saveTimer); saveTimer=setTimeout(save,600); }
 async function save(){
   const payload={take:"source-backhalf-48k.wav", takeS:DATA.takeS,
-    createdAt:new Date().toISOString(), phrases:marks, done:done};
+    createdAt:new Date().toISOString(), phrases:marks, done:done, struck:struck};
   try{ const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const j=await r.json(); const s=document.getElementById('status');
     if(j.ok){ s.textContent='saved ✓'; s.className='ok'; } else { s.textContent='save error: '+(j.error||'?'); s.className='muted'; }
   }catch(e){ document.getElementById('status').textContent='save failed'; }
 }
 window.addEventListener('resize', ()=>{ if(buffer) render(); });
+// flush a pending debounced save if the tab hides/closes within the 600ms window
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden' && saveTimer){
+  clearTimeout(saveTimer); saveTimer=0;
+  const payload={take:"source-backhalf-48k.wav", takeS:DATA.takeS,
+    createdAt:new Date().toISOString(), phrases:marks, done:done, struck:struck};
+  navigator.sendBeacon(API, new Blob([JSON.stringify(payload)], {type:'application/json'}));
+}});
 load();
 </script></body></html>"""
 
