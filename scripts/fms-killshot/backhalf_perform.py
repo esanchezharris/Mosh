@@ -225,14 +225,16 @@ def page() -> int:
     if (SERVE / "voice-writer-A-perf.wav").is_file():
         cards.append("""
       <div class="card">
-        <div class="chead"><span class="tag">A</span><h2>last round's pick (mouth-blind words, performance-locked)</h2>
-          <span class="stat">mouth echo 0.36 · envCorr 0.31 → 0.70</span></div>
+        <div class="chead"><span class="tag">A</span><h2>before the truth grid — an early pick, for contrast</h2>
+          <span class="stat">detector grid · performance-locked</span></div>
         <audio controls preload="metadata" src="voice-writer-A-perf.wav"></audio>
         <div class="row"><span>overlay — your mumble LEFT, A RIGHT</span>
           <audio controls preload="metadata" src="ab-perf-A.wav"></audio></div>
       </div>""")
+    # The blind detector-calibration block is obsolete on the listen page — the grid is
+    # now the owner's own hand-marks (annotator truth), not a detector to pick between.
     cal_json = BH / "regrid-calibrate.json"
-    if cal_json.is_file():
+    if False and cal_json.is_file():
         cal = json.loads(cal_json.read_text())
         blocks = []
         for ph in cal["phrases"]:
@@ -274,16 +276,16 @@ def page() -> int:
         </div>""")
         cards.append(f"""
       <div class="card">
-        <div class="chead"><h2>GRID CHECK — verify the syllable counts before the next render</h2></div>
-        <p class="blurb">Every strictness gate measures against this grid, and you said some counts
-           feel wrong. Each phrase below: your mumble LEFT, your mumble + a CLICK at every counted
-           syllable RIGHT. Count against your own ear and reply in chat with corrections
-           (e.g. “L3 is 9, L14 is 3”) or “grid good”. Flagged phrases first.</p>
+        <div class="chead"><h2>GRID CHECK — your own marks, played back as clicks</h2></div>
+        <p class="blurb">This grid is now YOUR hand-marked syllables (147 marks). Each phrase:
+           your mumble LEFT, your mumble + a CLICK at every mark RIGHT — a sanity replay of
+           what you drew. If a click still feels off, say so (e.g. “L3 is 9”); otherwise the
+           renders above already sing this grid.</p>
         {''.join(items)}
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — strict round: verify the grid, hear the timing lock</title>
+<title>Used2 — truth round: your marked grid, sung in your voice</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -304,12 +306,13 @@ def page() -> int:
   .oksus{{color:#3fb950;font-size:11px}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — strict round</h1>
-  <p class="sub">M1/M2 below are now SYLLABLE-TIMING-LOCKED: every word snapped onto its
-     slot's exact start (median correction ~44 ms/word), on top of the phrase snap and your
-     volume/attack/decay envelope. The GRID CHECK section at the bottom is the gate for the
-     next render — verify the counts, reply with corrections or “grid good”.
-     Kit: writer-M1/M2-perf.wav (plain + padded).</p>
+  <h1>Used2 — truth round</h1>
+  <p class="sub">The grid is now YOUR hand-marked syllables — every count, every rest,
+     every phrase boundary is where you put it (147 marks). T1 and T2 are two writer draws
+     of the back half sung over that grid in your voice, then performance-locked: each word
+     snapped onto its slot's exact start (~48 ms/word) and shaped to your volume / attack /
+     decay. Filler slots are natural ad-libs (yeah / uh) instead of forced words. Pick the
+     draw that feels most like your song. Kit: writer-T1/T2-perf.wav (plain + padded).</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
