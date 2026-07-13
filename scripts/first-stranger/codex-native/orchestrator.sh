@@ -39,7 +39,18 @@ CN_AGENT_PATH="${CN_AGENT_PATH:-$CN_PINNED_PATH}"
 CN_GATE_PATH="${CN_GATE_PATH:-$CN_PINNED_PATH}"
 CN_REAL_NPM="${CN_REAL_NPM:-/opt/homebrew/bin/npm}"
 CN_BREW_ROOT="${CN_BREW_ROOT:-/opt/homebrew}"
-CN_PLAYWRIGHT_CACHE="${CN_PLAYWRIGHT_CACHE:-$HOME/Library/Caches/ms-playwright}"
+CN_LOGIN_USER="$(/usr/bin/id -un)" || {
+  printf 'codex-native-loop: could not resolve the local login account\n' >&2
+  exit 1
+}
+case "$CN_LOGIN_USER" in
+  ''|*[!A-Za-z0-9._-]*)
+    printf 'codex-native-loop: local login account is not safe to use in a path\n' >&2
+    exit 1
+    ;;
+esac
+CN_EXPECTED_PLAYWRIGHT_CACHE="/Users/$CN_LOGIN_USER/Library/Caches/ms-playwright"
+CN_PLAYWRIGHT_CACHE="${CN_PLAYWRIGHT_CACHE:-$CN_EXPECTED_PLAYWRIGHT_CACHE}"
 if [ -n "${CN_CONTROL_REPO:-}" ]; then
   CN_CONTROL_REPO="$(cn_real_dir "$CN_CONTROL_REPO")" || {
     printf 'codex-native-loop: CN_CONTROL_REPO is not a readable directory\n' >&2
@@ -96,6 +107,32 @@ cn_toml_path_ok() {
   return 0
 }
 
+cn_playwright_cache_valid() {
+  local cache deps manifest manifest_real chromium headless ffmpeg path resolved
+  [ "$CN_PLAYWRIGHT_CACHE" = "$CN_EXPECTED_PLAYWRIGHT_CACHE" ] || return 1
+  [ -d "$CN_PLAYWRIGHT_CACHE" ] && [ ! -L "$CN_PLAYWRIGHT_CACHE" ] || return 1
+  cache="$(cn_real_dir "$CN_PLAYWRIGHT_CACHE")" || return 1
+  [ "$cache" = "$CN_EXPECTED_PLAYWRIGHT_CACHE" ] || return 1
+
+  deps="$(cn_real_dir "$CN_TRUSTED_UI_DEPS")" || return 1
+  manifest="$deps/playwright-core/browsers.json"
+  [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -r "$manifest" ] || return 1
+  manifest_real="$(/bin/realpath "$manifest")" || return 1
+  [ "$manifest_real" = "$manifest" ] || return 1
+  chromium="$(/usr/bin/jq -er '.browsers[] | select(.name == "chromium") | .revision' "$manifest")" || return 1
+  headless="$(/usr/bin/jq -er '.browsers[] | select(.name == "chromium-headless-shell") | .revision' "$manifest")" || return 1
+  ffmpeg="$(/usr/bin/jq -er '.browsers[] | select(.name == "ffmpeg") | .revision' "$manifest")" || return 1
+  [ "$chromium" = 1228 ] && [ "$headless" = 1228 ] && [ "$ffmpeg" = 1011 ] || return 1
+
+  for path in "$cache/chromium-$chromium" "$cache/chromium_headless_shell-$headless" "$cache/ffmpeg-$ffmpeg"; do
+    [ -d "$path" ] && [ ! -L "$path" ] || return 1
+    resolved="$(cn_real_dir "$path")" || return 1
+    [ "$resolved" = "$path" ] || return 1
+    cn_toml_path_ok "$resolved" || return 1
+  done
+  cn_toml_path_ok "$cache" || return 1
+}
+
 cn_agent_toolchain_valid() {
   local repo ui expected_deps deps tools_root brew_root brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
   local node_root node_real npm_real cmd_list_real
@@ -138,8 +175,9 @@ cn_agent_toolchain_valid() {
   [ "$npm_real" = "$node_root/lib/node_modules/npm/bin/npm-cli.js" ] || return 1
   [ "$cmd_list_real" = "$node_root/lib/node_modules/npm/lib/utils/cmd-list.js" ] || return 1
   [ -x "$node_real" ] && [ -x "$npm_real" ] && [ -r "$cmd_list_real" ] || return 1
+  cn_playwright_cache_valid || return 1
 
-  for path in "$repo" "$deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
+  for path in "$repo" "$deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config" "$CN_PLAYWRIGHT_CACHE"; do
     cn_toml_path_ok "$path" || return 1
   done
 }
@@ -199,7 +237,7 @@ cn_agent_secret_boundary_valid() {
 }
 
 cn_agent_permissions_arg() {
-  local wt runtime access="$3" common home tmp pointer deps_path trusted_deps tools_root
+  local wt runtime access="$3" common home tmp pointer deps_path trusted_deps tools_root playwright_cache
   local brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
   cn_agent_toolchain_valid || return 1
   wt="$(cn_real_dir "$1")" || return 1
@@ -213,22 +251,24 @@ cn_agent_permissions_arg() {
   deps_path="$wt/ui/node_modules"
   trusted_deps="$(cn_real_dir "$CN_TRUSTED_UI_DEPS")" || return 1
   tools_root="$(cn_real_dir "$SELF/agent-bin")" || return 1
+  playwright_cache="$(cn_real_dir "$CN_PLAYWRIGHT_CACHE")" || return 1
   brew_bin="$(cn_real_dir "$CN_BREW_ROOT/bin")" || return 1
   brew_cellar="$(cn_real_dir "$CN_BREW_ROOT/Cellar")" || return 1
   brew_opt="$(cn_real_dir "$CN_BREW_ROOT/opt")" || return 1
   brew_node_modules="$(cn_real_dir "$CN_BREW_ROOT/lib/node_modules")" || return 1
   brew_openssl_config="$(cn_real_dir "$CN_BREW_ROOT/etc/openssl@3")" || return 1
   for path in "$wt" "$runtime" "$common" "$home" "$tmp" "$pointer" "$deps_path" \
-    "$trusted_deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
+    "$trusted_deps" "$tools_root" "$playwright_cache" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
     cn_toml_path_ok "$path" || return 1
   done
-  printf 'permissions.cn_lane.filesystem={":minimal"="read","%s"="%s","%s"="read","%s"="write","%s"="write","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read"}\n' \
+  printf 'permissions.cn_lane.filesystem={":minimal"="read","%s"="%s","%s"="read","%s"="write","%s"="write","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read"}\n' \
     "$wt" "$access" "$runtime" "$home" "$tmp" "$common" "$pointer" "$deps_path" \
-    "$trusted_deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"
+    "$trusted_deps" "$tools_root" "$playwright_cache" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"
 }
 
 cn_gate_profile_valid() {
-  local worktree probe_home probe_tmp deps brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config
+  local worktree probe_home probe_tmp deps playwright_cache brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config
+  cn_agent_toolchain_valid || return 1
   [ -r "$CN_GATE_PROFILE" ] || return 1
   cn_command_exists "$CN_SANDBOX_BIN" || return 1
   worktree="$(cd "$CN_REPO" && pwd -P)" || return 1
@@ -236,16 +276,16 @@ cn_gate_profile_valid() {
   probe_home="$worktree"
   probe_tmp="$worktree"
   deps="$(cn_real_dir "$CN_TRUSTED_UI_DEPS")" || return 1
+  playwright_cache="$(cn_real_dir "$CN_PLAYWRIGHT_CACHE")" || return 1
   brew_bin="$(cn_real_dir "$CN_BREW_ROOT/bin")" || return 1
   brew_cellar="$(cn_real_dir "$CN_BREW_ROOT/Cellar")" || return 1
   brew_opt="$(cn_real_dir "$CN_BREW_ROOT/opt")" || return 1
   brew_node_modules="$(cn_real_dir "$CN_BREW_ROOT/lib/node_modules")" || return 1
   brew_openssl_config="$(cn_real_dir "$CN_BREW_ROOT/etc/openssl@3")" || return 1
-  [ -d "$CN_PLAYWRIGHT_CACHE" ] || return 1
   "$CN_SANDBOX_BIN" -D "WORKTREE=$worktree" -D "GATE_HOME=$probe_home" \
     -D "TEMP_ROOT=$probe_tmp" -D "GIT_POINTER=$worktree/.git" -D "DEPS_ROOT=$deps" \
     -D "LANE_DEPS=$worktree/ui/node_modules" -D "LANE_UI=$worktree/ui" \
-    -D "PLAYWRIGHT_CACHE=$CN_PLAYWRIGHT_CACHE" -D "BREW_BIN=$brew_bin" \
+    -D "PLAYWRIGHT_CACHE=$playwright_cache" -D "BREW_BIN=$brew_bin" \
     -D "BREW_CELLAR=$brew_cellar" -D "BREW_OPT=$brew_opt" -D "BREW_NODE_MODULES=$brew_node_modules" \
     -D "BREW_OPENSSL_CONFIG=$brew_openssl_config" \
     -D "TOOLS_ROOT=$SELF/agent-bin" \
@@ -625,7 +665,7 @@ cn_commit_phase() {
 cn_gate_phase() {
   local lane="$1" wt="$2" base="$3" state="$4" logs="$5" thread="$6" head="$7"
   local classification class gate_result gate_parent gate_home gate_home_real gate_tmp gate_wt auto_home changed gate_exec
-  local deps_real brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config gate_rc
+  local deps_real playwright_cache brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config gate_rc
   classification="$("$CN_CLASSIFY" "$base" "$wt")" || cn_die "$lane classifier failed"
   class="$(jq -er .class <<<"$classification")" || cn_die "$lane classifier returned invalid JSON"
   changed="$(git -C "$wt" diff --name-only "$base...$head")"
@@ -671,7 +711,8 @@ cn_gate_phase() {
   brew_opt="$(cn_real_dir "$CN_BREW_ROOT/opt")" || cn_die "$lane cannot resolve Homebrew opt"
   brew_node_modules="$(cn_real_dir "$CN_BREW_ROOT/lib/node_modules")" || cn_die "$lane cannot resolve Homebrew Node modules"
   brew_openssl_config="$(cn_real_dir "$CN_BREW_ROOT/etc/openssl@3")" || cn_die "$lane cannot resolve Homebrew OpenSSL configuration"
-  [ -d "$CN_PLAYWRIGHT_CACHE" ] || cn_die "$lane Playwright browser cache is unavailable"
+  cn_playwright_cache_valid || cn_die "$lane Playwright browser cache is not the pinned trusted cache"
+  playwright_cache="$(cn_real_dir "$CN_PLAYWRIGHT_CACHE")" || cn_die "$lane cannot resolve the pinned Playwright browser cache"
   cn_worktree_clean "$wt" || cn_die "$lane worktree is dirty before the authoritative gate"
   cn_before_mutation "$wt"
   gate_result="$logs/gate.json"
@@ -679,11 +720,11 @@ cn_gate_phase() {
   ( cd "$gate_wt" && env -i PATH="$CN_GATE_PATH" HOME="$gate_home_real" TMPDIR="$gate_tmp" CI=1 \
       LANG="${LANG:-C}" MOSH_AUTOLOOP_HOME="$auto_home" \
       MOSH_SELFTEST_BASELINE="${MOSH_SELFTEST_BASELINE:-}" \
-      PLAYWRIGHT_BROWSERS_PATH="$CN_PLAYWRIGHT_CACHE" CN_REAL_NPM="$CN_REAL_NPM" \
+      PLAYWRIGHT_BROWSERS_PATH="$playwright_cache" CN_REAL_NPM="$CN_REAL_NPM" \
       "$CN_SANDBOX_BIN" -D "WORKTREE=$gate_wt" -D "GATE_HOME=$gate_home_real" \
       -D "TEMP_ROOT=$gate_tmp" -D "GIT_POINTER=$gate_wt/.git" -D "DEPS_ROOT=$deps_real" \
       -D "LANE_DEPS=$gate_wt/ui/node_modules" -D "LANE_UI=$gate_wt/ui" \
-      -D "PLAYWRIGHT_CACHE=$CN_PLAYWRIGHT_CACHE" -D "BREW_BIN=$brew_bin" \
+      -D "PLAYWRIGHT_CACHE=$playwright_cache" -D "BREW_BIN=$brew_bin" \
       -D "BREW_CELLAR=$brew_cellar" -D "BREW_OPT=$brew_opt" -D "BREW_NODE_MODULES=$brew_node_modules" \
       -D "BREW_OPENSSL_CONFIG=$brew_openssl_config" \
       -D "TOOLS_ROOT=$SELF/agent-bin" \
@@ -981,11 +1022,13 @@ usage:
 EOF
 }
 
-case "${1:-check}" in
-  check) shift || true; [ "$#" -eq 0 ] || cn_die "check takes no arguments"; cn_check ;;
-  status) shift; [ "$#" -eq 0 ] || cn_die "status takes no arguments"; cn_status ;;
-  run) shift; cn_run "$@" ;;
-  resume) shift; cn_resume "$@" ;;
-  -h|--help|help) cn_usage ;;
-  *) cn_usage >&2; exit 2 ;;
-esac
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case "${1:-check}" in
+    check) shift || true; [ "$#" -eq 0 ] || cn_die "check takes no arguments"; cn_check ;;
+    status) shift; [ "$#" -eq 0 ] || cn_die "status takes no arguments"; cn_status ;;
+    run) shift; cn_run "$@" ;;
+    resume) shift; cn_resume "$@" ;;
+    -h|--help|help) cn_usage ;;
+    *) cn_usage >&2; exit 2 ;;
+  esac
+fi

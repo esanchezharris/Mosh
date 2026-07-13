@@ -79,8 +79,11 @@ git -C "$REPO" commit -qm "fixture"
 git -C "$REPO" remote add origin "$REMOTE"
 git -C "$REPO" push -q -u origin main
 
-mkdir -p "$REPO/ui/node_modules"
+mkdir -p "$REPO/ui/node_modules/playwright-core"
 shasum -a 256 "$REPO/ui/package-lock.json" | awk '{print $1}' >"$REPO/ui/node_modules/.mosh-deps-stamp"
+printf '%s\n' \
+  '{"browsers":[{"name":"chromium","revision":"1228"},{"name":"chromium-headless-shell","revision":"1228"},{"name":"ffmpeg","revision":"1011"}]}' \
+  >"$REPO/ui/node_modules/playwright-core/browsers.json"
 export CN_TRUSTED_UI_DEPS="$REPO/ui/node_modules"
 export CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1
 
@@ -660,6 +663,7 @@ assert_match "agent sessions use restricted permission profiles" 'default_permis
 assert_match "agent permission profile denies network" 'permissions\.cn_lane\.network\.enabled=false' "$STUB_STATE/codex.log"
 assert_match "agent permission profile can traverse the trusted dependency target" "$(cd "$REPO/ui/node_modules" && pwd -P)" "$STUB_STATE/codex.log"
 assert_match "agent permission profile can execute pinned command guards" "$ROOT/scripts/first-stranger/codex-native/agent-bin" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read only the pinned Playwright cache root" "/Users/$(/usr/bin/id -un)/Library/Caches/ms-playwright" "$STUB_STATE/codex.log"
 assert_match "agent permission profile can read the Homebrew binary root" "$(cd /opt/homebrew/bin && pwd -P)" "$STUB_STATE/codex.log"
 assert_match "agent permission profile can read Homebrew Cellar dylibs" "$(cd /opt/homebrew/Cellar && pwd -P)" "$STUB_STATE/codex.log"
 assert_match "agent permission profile can read Homebrew opt links" "$(cd /opt/homebrew/opt && pwd -P)" "$STUB_STATE/codex.log"

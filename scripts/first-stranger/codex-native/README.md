@@ -71,7 +71,11 @@ source independently; missing or unreadable control/STOP state is fatal.
   cache without changing Playwright invocations.
   Toolchain health also pins both agent/gate PATH values and resolves Node
   24.16.0, npm, and npm's command parser to the same reviewed Homebrew Cellar
-  root; caller overrides or version drift make `check` fail.
+  root. The Playwright cache is fixed to the local account's canonical
+  `~/Library/Caches/ms-playwright` path, must not traverse a symlink, and must
+  contain the Chromium 1228, Chromium headless-shell 1228, and FFmpeg 1011
+  revisions declared by the lock-stamped Playwright package. Caller overrides
+  or version drift make `check` fail.
 - Real model execution is fail-closed. A live Codex 0.144.1 probe showed that
   the native file/network profile still permits a model-launched command to
   invoke macOS Keychain APIs. Wrapping Codex in a Mach-denying Seatbelt profile
@@ -158,6 +162,7 @@ file. Scheduling is not a safety boundary and must not be used to bypass a STOP.
 ```sh
 bash scripts/first-stranger/codex-native/test.sh
 bash scripts/first-stranger/codex-native/integration-test.sh
+bash scripts/first-stranger/codex-native/sandbox-test.sh
 ```
 
 The first suite covers routing, sentinels, schemas, private/stale state, exact
@@ -165,6 +170,11 @@ remote SHA comparison, git/GitHub agent guards, read-only `check`, and unarmed
 refusal. The hermetic integration test creates temporary repositories and stubs
 Codex, GitHub, classifier, and gate behavior to prove the full draft-PR path
 without touching a real branch, session, push, or PR.
+The third suite uses `codex sandbox` directly, without a model, in a disposable
+detached worktree. It proves the generated `cn_lane` profile supports the
+pinned Node/npm toolchain, TypeScript, focused no-cache Vitest, and the
+Playwright CLI while denying owner-auth reads, trusted-dependency writes, and
+network access.
 
 Both `check` and `status` expose `checks.agent_toolchain_profile` and
 `checks.agent_secret_boundary` independently. The toolchain check is false if

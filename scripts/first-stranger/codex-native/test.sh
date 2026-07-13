@@ -219,6 +219,7 @@ assert_success "worker receipts require controller-observed resource limits" \
     "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
 
 assert_success "entrypoint has shell syntax" bash -n "$ENTRY"
+assert_success "live sandbox regression has shell syntax" bash -n "$NATIVE/sandbox-test.sh"
 assert_success "agent git guard permits status" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git -C "$ROOT" status --short >/dev/null
 assert_failure "agent git guard blocks commits" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git commit --allow-empty -m forbidden
 assert_failure "agent GitHub guard blocks PR actions" env PATH="$NATIVE/agent-bin:$PATH" gh pr create --draft
@@ -385,6 +386,28 @@ else
 fi
 assert_eq "unpinned PATH reports an unhealthy agent profile" false \
   "$(jq -r '.checks.agent_toolchain_profile' "$TMP/unpinned-path-check.json")"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_PLAYWRIGHT_CACHE="$HOME" "$ENTRY" check >"$TMP/owner-home-browser-check.json"; then
+  not_ok "check rejects owner home as a Playwright cache override"
+else
+  ok "check rejects owner home as a Playwright cache override"
+fi
+assert_eq "owner-home Playwright override reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/owner-home-browser-check.json")"
+assert_eq "owner-home Playwright override invalidates the gate profile" false \
+  "$(jq -r '.checks.gate_profile' "$TMP/owner-home-browser-check.json")"
+PLAYWRIGHT_CACHE_EXPECTED="/Users/$(/usr/bin/id -un)/Library/Caches/ms-playwright"
+ln -s "$PLAYWRIGHT_CACHE_EXPECTED" "$TMP/playwright-cache-link"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_PLAYWRIGHT_CACHE="$TMP/playwright-cache-link" "$ENTRY" check >"$TMP/symlink-browser-check.json"; then
+  not_ok "check rejects a symlinked Playwright cache override"
+else
+  ok "check rejects a symlinked Playwright cache override"
+fi
+assert_eq "symlinked Playwright override reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/symlink-browser-check.json")"
+assert_eq "symlinked Playwright override invalidates the gate profile" false \
+  "$(jq -r '.checks.gate_profile' "$TMP/symlink-browser-check.json")"
 assert_failure "unarmed run refuses before orchestration" env CN_HOME="$TMP/unarmed-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" run --lane FS-B1
 assert_failure "unarmed run never reaches Codex" test -e "$TMP/codex.called"
 assert_failure "unarmed run never reaches GitHub" test -e "$TMP/gh.called"
