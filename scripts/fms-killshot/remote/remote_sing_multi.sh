@@ -81,9 +81,25 @@ if [[ ! -f "$OUT/_smoke/done" ]]; then
 fi
 
 # ── preprocess the FRESH reference (own-30s) → its metadata JSON ──
+# Flash-attention illegal-memory-access CUDA crash regressed onto sm_80+ GPUs incl. the 4090
+# (2026-07-13): the vocal-sep roformer gates flash on "GPU Compute Capability >= 8.0". A
+# sitecustomize on PYTHONPATH (env-pre / preprocess ONLY — the inference env keeps flash)
+# masks the capability to 7.5 and disables torch flash SDP, so the preprocess takes the
+# standard-attention branch. Real torch kernel dispatch still uses the real hardware.
+FLASHDIR="$WORKDIR/flashfix"; mkdir -p "$FLASHDIR"
+cat > "$FLASHDIR/sitecustomize.py" <<'PYSC'
+try:
+    import torch
+    torch.cuda.get_device_capability = lambda *a, **k: (7, 5)
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(True)
+    torch.backends.cuda.enable_math_sdp(True)
+except Exception:
+    pass
+PYSC
 if [[ ! -f "$HANDOFF/refs/own-30s.json" ]]; then
-  say "transcribing reference own-30s (English, vocal_sep) …"
-  ( cd "$SOULX" && PYTHONPATH="$SOULX" "$PYPRE" -m preprocess.pipeline \
+  say "transcribing reference own-30s (English, vocal_sep; flash-attn disabled) …"
+  ( cd "$SOULX" && PYTHONPATH="$FLASHDIR:$SOULX" "$PYPRE" -m preprocess.pipeline \
       --audio_path "$HANDOFF/refs/own-30s.wav" --save_dir "$WORKDIR/transcriptions/own-30s" \
       --language English --device cuda --vocal_sep True --max_merge_duration 30000 --midi_transcribe True ) >"$LOG/pre-own-30s.log" 2>&1 || die "preprocess failed (logs/pre-own-30s.log)"
   meta=$(find "$WORKDIR/transcriptions/own-30s" -name "*.json" | head -1)
