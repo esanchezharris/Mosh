@@ -172,6 +172,32 @@ def build() -> int:
     return 0
 
 
+def rescore() -> int:
+    """Re-author the EXISTING T1/T2 lyrics through the current recipe (the Part-1 pitch
+    fix) WITHOUT re-drawing words — isolates the melody change so the next render is the
+    same lines with corrected pitches. Words/timing unchanged; only score note_pitch moves."""
+    man = json.loads(MANIFEST.read_text())
+    skel_path = resolve_skeleton()
+    print(f"rescoring against: {skel_path.name} (pitch fix only, words frozen)", flush=True)
+    skel = json.loads(skel_path.read_text())
+    spec = flowspec.build_flow_spec(skel, chorus=CHORUS, theme=THEME, gap_s=0.35,
+                                    min_syllables=2, preserve_words=True)
+    spec_lines = {l["index"]: l for l in spec["lines"]}
+    SCORES.mkdir(parents=True, exist_ok=True)
+    for old in SCORES.glob("*.json"):
+        old.unlink()
+    for cand in man["candidates"]:
+        metas = [{"index": w["index"], "text": w["text"]} for w in cand["words"]]
+        chunks = chunk_scores(cand["key"], metas, spec_lines)
+        assert [c["name"] for c in chunks] == [c["name"] for c in cand["chunks"]], \
+            f"{cand['key']}: chunk layout changed — pitch rescore must not move words/timing"
+        cand["chunks"] = chunks
+        print(f"  {cand['key']}: re-authored {len(chunks)} chunks (words frozen)", flush=True)
+    MANIFEST.write_text(json.dumps(man, indent=2))
+    print(f"re-staged {sum(len(c['chunks']) for c in man['candidates'])} pitch-corrected scores -> {SCORES}", flush=True)
+    return 0
+
+
 def assemble() -> int:
     man = json.loads(MANIFEST.read_text())
     cards = []
@@ -231,4 +257,6 @@ def assemble() -> int:
 
 
 if __name__ == "__main__":
+    if "rescore" in sys.argv:
+        sys.exit(rescore())
     sys.exit(assemble() if "assemble" in sys.argv else build())
