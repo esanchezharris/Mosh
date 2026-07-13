@@ -199,6 +199,23 @@ describe("skill harness", () => {
     expect(runBatch).not.toHaveBeenCalled();
   });
 
+  it("allows a volume-only skill on a group track", async () => {
+    const member = firstTrack(await snapshot());
+    await useStore.getState().exec("create_group_track", { trackIds: [member.id] });
+    await useStore.getState().refresh();
+    const group = (await snapshot()).tracks.find((track) => track.isGroup);
+    if (!group) throw new Error("fixture did not create a group track");
+
+    const result = await runSkill(
+      SET_TRACK_LEVEL_SKILL,
+      { trackId: group.id, db: -8 },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(trackById(await snapshot(), group.id).volumeDb).toBe(-8);
+  });
+
   it("accepts a typed slot record without mutating the caller's values", async () => {
     const track = firstTrack(await snapshot());
     const slots: SkillSlotValues = { trackId: track.id, db: -3, mute: false };

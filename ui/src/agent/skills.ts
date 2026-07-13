@@ -172,7 +172,7 @@ export const SET_TRACK_LEVEL_SKILL: SkillDefinition = {
       return { ok: false, reason: "set_track_level: validated trackId is unavailable." };
     const track = trackFor(snapshot, trackId);
     if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
-    if (track.isGroup)
+    if (track.isGroup && owns(slots, "mute"))
       return { ok: false, reason: `Track "${trackId}" is a group and cannot be muted by this skill.` };
     return { ok: true };
   },

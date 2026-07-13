@@ -43,16 +43,17 @@ snapshot or mutation call. Values are never coerced.
 
 | Slot | Type | Required | Constraint |
 |---|---|---:|---|
-| `trackId` | string | yes | existing non-group track |
+| `trackId` | string | yes | existing track; group mute is refused |
 | `db` | number | yes | `-60..+6` dB |
 | `mute` | boolean | no | presence controls the branch |
 
 The template always emits `set_track_volume({trackId, db})`. It emits
 `set_track_mute({trackId, mute})` only inside `if_present("mute")`, so
-`mute:false` is distinct from an omitted value. Group tracks are rejected
-before execution because native `set_track_mute` does not accept them. The
-postcondition compares narrowed numeric and boolean values without coercion and
-requires an omitted mute slot to preserve the prior state.
+`mute:false` is distinct from an omitted value. A group track may use the
+volume-only template, but a group mute is rejected before execution because
+native `set_track_mute` does not accept groups. The postcondition compares
+narrowed numeric and boolean values without coercion and requires an omitted
+mute slot to preserve the prior state.
 
 ### Harness and existing seams
 
@@ -69,7 +70,9 @@ requires an omitted mute slot to preserve the prior state.
 `ui/src/agent/executor.ts` remains the only batch executor. Its change entries
 now carry the original call index and command identity. The destructive-command
 screen, `batch_begin`/`batch_end` grouping, MoshOps validation, store seam, and
-single undo path remain in place.
+single undo path remain in place. Resolved failure envelopes from either batch
+boundary reject execution; commands never run after a failed begin and a failed
+end is never reported as success.
 
 ### Failure and rollback semantics
 
@@ -152,6 +155,7 @@ who merges.
 | `ui/src/agent/skillHarnessResult.ts` | exact per-call result accounting |
 | `ui/src/agent/skillHarness.test.ts` | happy path, validation, branches, preconditions |
 | `ui/src/agent/skillHarness.failure.test.ts` | failure, rollback, transport, undo grouping |
+| `ui/src/agent/executor.batch-boundary.test.ts` | resolved batch-boundary failure handling |
 | `ui/src/agent/commands.contract.test.ts` | static skill-to-command-to-C++ contract |
 | `ui/src/agent/executor.ts` | indexed result identity and confirmed undo result |
 | `docs/first-stranger-program/lanes/fs-b1.md` | durable lane facts and evidence map |

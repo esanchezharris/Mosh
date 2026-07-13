@@ -130,12 +130,14 @@ export async function runAgentBatch(
   }
 
   if (allowed.length > 0) {
-    await exec("batch_begin", {
+    const begin = await exec("batch_begin", {
       name: label, // still the undo-transaction label
       turn_id: newTurnId(),
       utterance: meta.utterance ?? label,
       source: meta.source ?? "brain_chat",
     });
+    if (!begin.ok)
+      throw new Error(`batch_begin failed: ${begin.error ?? "unknown error"}`);
     for (const c of allowed) {
       const res = await exec(c.command, c.args ?? {});
       entries.push({
@@ -146,8 +148,10 @@ export async function runAgentBatch(
         error: res.ok ? undefined : res.error,
       });
     }
-    await exec("batch_end", {});
+    const end = await exec("batch_end", {});
     await refresh();
+    if (!end.ok)
+      throw new Error(`batch_end failed: ${end.error ?? "unknown error"}`);
   }
 
   return {
