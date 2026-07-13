@@ -211,6 +211,12 @@ assert_success "worker receipt schema fixes the exported artifact set" \
 assert_success "passed worker receipts bind exit, gate, and clean status" \
   jq -e '.allOf[0].then.properties | .gate.properties.exit_status.const == 0 and .gate.properties.result.properties.pass.const == true and .repository.properties.tracked_clean.const == true' \
     "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
+assert_success "worker jobs bind nonce, offline image manifests, and resource limits" \
+  jq -e '(.required | index("nonce") != null and index("limits") != null) and (.properties.worker.required | index("image_sha256") != null and index("toolchain_manifest_sha256") != null and index("dependency_manifest_sha256") != null)' \
+    "$NATIVE/schemas/gate-worker-job.json" >/dev/null
+assert_success "worker receipts require controller-observed resource limits" \
+  jq -e '(.required | index("limits") != null) and (.properties.limits.allOf[1].properties.timeout_triggered.type == "boolean") and (.allOf[0].then.properties.limits.properties.timeout_triggered.const == false)' \
+    "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
 
 assert_success "entrypoint has shell syntax" bash -n "$ENTRY"
 assert_success "agent git guard permits status" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git -C "$ROOT" status --short >/dev/null
@@ -363,6 +369,22 @@ else
 fi
 assert_eq "missing Homebrew root reports an unhealthy agent profile" false \
   "$(jq -r '.checks.agent_toolchain_profile' "$TMP/missing-brew-check.json")"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_REAL_NPM=/bin/true "$ENTRY" check >"$TMP/unpinned-npm-check.json"; then
+  not_ok "check rejects an unpinned npm executable"
+else
+  ok "check rejects an unpinned npm executable"
+fi
+assert_eq "unpinned npm reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/unpinned-npm-check.json")"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_AGENT_PATH=/usr/bin:/bin "$ENTRY" check >"$TMP/unpinned-path-check.json"; then
+  not_ok "check rejects an unpinned agent PATH"
+else
+  ok "check rejects an unpinned agent PATH"
+fi
+assert_eq "unpinned PATH reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/unpinned-path-check.json")"
 assert_failure "unarmed run refuses before orchestration" env CN_HOME="$TMP/unarmed-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" run --lane FS-B1
 assert_failure "unarmed run never reaches Codex" test -e "$TMP/codex.called"
 assert_failure "unarmed run never reaches GitHub" test -e "$TMP/gh.called"

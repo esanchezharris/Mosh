@@ -4,9 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 ENTRY="$ROOT/scripts/first-stranger/codex-native-loop.sh"
 TMP="$(mktemp -d)"
+OUTSIDE_FIXTURE=""
 GATE_ESCAPE_MARKER="/tmp/codex-native-gate-escape-test"
 rm -f "$GATE_ESCAPE_MARKER"
-trap 'rm -rf "$TMP"; rm -f "$GATE_ESCAPE_MARKER"' EXIT
+trap 'rm -rf "$TMP" "${OUTSIDE_FIXTURE:-}"; rm -f "$GATE_ESCAPE_MARKER"' EXIT
 
 pass=0
 fail=0
@@ -22,6 +23,8 @@ HOME_DIR="$TMP/automation"
 WORK_ROOT="$TMP/worktrees"
 STUB_STATE="$TMP/stub-state"
 mkdir -p "$STUB_STATE" "$HOME_DIR"
+mkdir -p "$TMP/codex-home"
+export CODEX_HOME="$TMP/codex-home"
 git init --bare -q "$REMOTE"
 git init -q "$REPO"
 git -C "$REPO" checkout -q -b main
@@ -37,6 +40,8 @@ printf '# FS-Z1 fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z1.
 printf '# FS-Z2 closed-gap fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z2.md"
 printf '# FS-Z3 unplanned fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z3.md"
 printf '# FS-Z4 publication-race fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z4.md"
+printf '# FS-Z5 base-race fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z5.md"
+printf '# FS-Z6 existing-PR fixture plan\n' >"$REPO/docs/first-stranger-program/lanes/fs-z6.md"
 printf '%s\n' '{"name":"fixture-ui","private":true,"scripts":{}}' >"$REPO/ui/package.json"
 printf '%s\n' '{"name":"fixture-ui","lockfileVersion":3,"requires":true,"packages":{}}' >"$REPO/ui/package-lock.json"
 printf '%s\n' '{"id":"FS-Z1","lane":"Z","title":"Hermetic lane","class":"cheap","status":"ready","order":1,"files":["docs/"],"acceptance":"fixture"}' >"$REPO/docs/first-stranger-program/backlog.jsonl"
@@ -44,6 +49,8 @@ printf '%s\n' \
   '{"id":"FS-Z2","lane":"Z","title":"Closed gap","class":"cheap","status":"ready","order":2,"files":["docs/"],"acceptance":"fixture"}' \
   '{"id":"FS-Z3","lane":"Z","title":"Unplanned lane","class":"cheap","status":"ready","order":3,"files":["docs/"],"acceptance":"fixture"}' \
   '{"id":"FS-Z4","lane":"Z","title":"Publication race","class":"cheap","status":"ready","order":4,"files":["docs/"],"acceptance":"fixture"}' \
+  '{"id":"FS-Z5","lane":"Z","title":"Base race","class":"cheap","status":"ready","order":5,"files":["docs/"],"acceptance":"fixture"}' \
+  '{"id":"FS-Z6","lane":"Z","title":"Existing PR mismatch","class":"cheap","status":"ready","order":6,"files":["docs/"],"acceptance":"fixture"}' \
   >>"$REPO/docs/first-stranger-program/backlog.jsonl"
 
 cat >"$REPO/scripts/auto-loop/classify.sh" <<'EOF'
@@ -216,13 +223,47 @@ if [ "${1:-}" = pr ] && [ "${2:-}" = create ]; then
   fi
   printf 'https://example.invalid/draft/1\n'
 fi
-if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then
+if [ "${1:-}" = label ] && [ "${2:-}" = list ] && [ -e "$CN_STUB_STATE/advance-base-on-label" ]; then
   head="$(git --git-dir="$CN_TEST_REMOTE" for-each-ref --format='%(objectname)' 'refs/heads/codex/stranger-*' | head -1)"
-  jq -nc --arg head "$head" '{isDraft:true,state:"OPEN",baseRefName:"main",headRefName:"codex/stranger-fs-z1",headRefOid:$head,url:"https://example.invalid/draft/1"}'
+  git --git-dir="$CN_TEST_REMOTE" update-ref refs/heads/main "$head"
+  rm -f "$CN_STUB_STATE/advance-base-on-label"
+fi
+if [ "${1:-}" = pr ] && [ "${2:-}" = list ] && [ -e "$CN_STUB_STATE/existing-pr-mismatch" ] \
+    && [[ " $* " = *" --json url "* ]]; then
+  printf 'https://example.invalid/draft/existing\n'
+fi
+if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then
+  head_ref="$(git --git-dir="$CN_TEST_REMOTE" for-each-ref --format='%(refname:short)' 'refs/heads/codex/stranger-*' | head -1)"
+  head="$(git --git-dir="$CN_TEST_REMOTE" rev-parse "refs/heads/$head_ref")"
+  base="$(git --git-dir="$CN_TEST_REMOTE" rev-parse refs/heads/main)"
+  is_draft=true
+  if [ -e "$CN_STUB_STATE/existing-pr-mismatch" ]; then is_draft=false; fi
+  jq -nc --arg head "$head" --arg base "$base" --arg head_ref "$head_ref" --argjson is_draft "$is_draft" \
+    '{isDraft:$is_draft,state:"OPEN",baseRefName:"main",baseRefOid:$base,headRefName:$head_ref,headRefOid:$head,url:"https://example.invalid/draft/1"}'
 fi
 EOF
 chmod +x "$GH_STUB"
 export CN_HERMETIC_FIXTURE=1
+
+OUTSIDE_FIXTURE="$(mktemp -d)"
+mkdir -p "$OUTSIDE_FIXTURE/home"
+touch "$OUTSIDE_FIXTURE/home/ARMED"
+chmod 700 "$OUTSIDE_FIXTURE/home"
+chmod 600 "$OUTSIDE_FIXTURE/home/ARMED"
+rm -f "$STUB_STATE/codex.log" "$STUB_STATE/gh.log"
+if env CN_REPO="$REPO" CN_HOME="$OUTSIDE_FIXTURE/home" CN_WORK_ROOT="$WORK_ROOT" \
+    CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" CN_GH_BIN="$GH_STUB" \
+    CN_CLASSIFY="$REPO/scripts/auto-loop/classify.sh" CN_GATE="$REPO/scripts/auto-loop/gate.sh" \
+    CN_TEST_REMOTE="$REMOTE" CN_STUB_STATE="$STUB_STATE" CN_GH_REPO=fixture/repo \
+    "$ENTRY" run --lane FS-Z1 >"$TMP/outside-fixture.out" 2>"$TMP/outside-fixture.err"; then
+  not_ok "fixture mode rejects mutable roots outside its repository fixture"
+else
+  ok "fixture mode rejects mutable roots outside its repository fixture"
+fi
+assert_match "outside-fixture refusal names the secret boundary" 'agent secret boundary is unavailable' "$TMP/outside-fixture.err"
+assert_eq "outside-fixture refusal creates no lock" false "$([ -e "$OUTSIDE_FIXTURE/home/run.lock" ] && printf true || printf false)"
+assert_eq "outside-fixture refusal never reaches Codex" false "$([ -e "$STUB_STATE/codex.log" ] && printf true || printf false)"
+assert_eq "outside-fixture refusal never reaches GitHub" false "$([ -e "$STUB_STATE/gh.log" ] && printf true || printf false)"
 
 CONTROL_REPO="$TMP/control-repo"
 STOP_RUNNER="$TMP/stopped-runner"
@@ -547,6 +588,53 @@ assert_eq "publication race preserves the primary checkout" "$race_before" \
 git -C "$REPO" push -q origin :refs/heads/codex/stranger-fs-z4
 rm -f "$STUB_STATE/advance-after-create" "$STUB_STATE/codex.log" "$STUB_STATE/gh.log"
 
+FIXTURE_BASE="$(git -C "$REPO" rev-parse origin/main)"
+BASE_RACE_HOME="$TMP/base-race-home"
+BASE_RACE_WORK_ROOT="$TMP/base-race-worktrees"
+mkdir -p "$BASE_RACE_HOME"
+touch "$BASE_RACE_HOME/ARMED" "$STUB_STATE/advance-base-on-label"
+chmod 700 "$BASE_RACE_HOME"
+chmod 600 "$BASE_RACE_HOME/ARMED"
+if env CN_REPO="$REPO" CN_HOME="$BASE_RACE_HOME" CN_WORK_ROOT="$BASE_RACE_WORK_ROOT" \
+    CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" \
+    CN_GH_BIN="$GH_STUB" CN_CLASSIFY="$REPO/scripts/auto-loop/classify.sh" \
+    CN_GATE="$REPO/scripts/auto-loop/gate.sh" CN_TEST_REMOTE="$REMOTE" CN_STUB_STATE="$STUB_STATE" \
+    CN_GH_REPO=fixture/repo CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1 \
+    "$ENTRY" run --lane FS-Z5 >"$TMP/base-race.out" 2>"$TMP/base-race.err"; then
+  not_ok "remote base advancement stops publication"
+else
+  ok "remote base advancement stops publication"
+fi
+assert_eq "base advancement becomes needs-human" needs-human "$(jq -r .phase "$BASE_RACE_HOME/state/fs-z5.json")"
+assert_no_match "base advancement never opens a PR" 'pr create' "$STUB_STATE/gh.log"
+assert_match "base advancement refusal is explicit" 'remote PR base advanced' "$TMP/base-race.err"
+git --git-dir="$REMOTE" update-ref refs/heads/main "$FIXTURE_BASE"
+git -C "$REPO" push -q origin :refs/heads/codex/stranger-fs-z5
+rm -f "$STUB_STATE/codex.log" "$STUB_STATE/gh.log"
+
+EXISTING_HOME="$TMP/existing-pr-home"
+EXISTING_WORK_ROOT="$TMP/existing-pr-worktrees"
+mkdir -p "$EXISTING_HOME"
+touch "$EXISTING_HOME/ARMED" "$STUB_STATE/existing-pr-mismatch"
+chmod 700 "$EXISTING_HOME"
+chmod 600 "$EXISTING_HOME/ARMED"
+if env CN_REPO="$REPO" CN_HOME="$EXISTING_HOME" CN_WORK_ROOT="$EXISTING_WORK_ROOT" \
+    CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" \
+    CN_GH_BIN="$GH_STUB" CN_CLASSIFY="$REPO/scripts/auto-loop/classify.sh" \
+    CN_GATE="$REPO/scripts/auto-loop/gate.sh" CN_TEST_REMOTE="$REMOTE" CN_STUB_STATE="$STUB_STATE" \
+    CN_GH_REPO=fixture/repo CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1 \
+    "$ENTRY" run --lane FS-Z6 >"$TMP/existing-pr.out" 2>"$TMP/existing-pr.err"; then
+  not_ok "mismatched existing draft stops publication"
+else
+  ok "mismatched existing draft stops publication"
+fi
+assert_eq "existing draft mismatch becomes needs-human" needs-human "$(jq -r .phase "$EXISTING_HOME/state/fs-z6.json")"
+assert_no_match "existing draft mismatch never creates another PR" 'pr create' "$STUB_STATE/gh.log"
+assert_match "existing draft mismatch refusal is explicit" 'existing draft PR does not match' "$TMP/existing-pr.err"
+rm -f "$STUB_STATE/existing-pr-mismatch"
+git -C "$REPO" push -q origin :refs/heads/codex/stranger-fs-z6
+rm -f "$STUB_STATE/codex.log" "$STUB_STATE/gh.log"
+
 touch "$HOME_DIR/ARMED"
 chmod 600 "$HOME_DIR/ARMED"
 before="$(git -C "$REPO" status --porcelain=v1 --untracked-files=all)"
@@ -590,6 +678,7 @@ else
   ok "every GitHub call is pinned to the repository"
 fi
 assert_match "supervisor verifies draft PR metadata" 'pr view .*headRefOid' "$STUB_STATE/gh.log"
+assert_match "supervisor verifies the draft PR base object" 'pr view .*baseRefOid' "$STUB_STATE/gh.log"
 assert_no_match "no GitHub merge command is reachable" '(^| )merge( |$)' "$STUB_STATE/gh.log"
 assert_no_match "PR body omits raw hostile-review reasons" 'reasons' "$HOME_DIR/logs/fs-z1/pr-body.md"
 local_head="$(jq -r .head_sha "$STATE")"

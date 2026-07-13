@@ -69,6 +69,9 @@ source independently; missing or unreadable control/STOP state is fatal.
   guard uses `/bin/sh`, disables update checks, confines its cache to the
   private agent HOME, forces CI mode, and disables Vitest's dependency-local
   cache without changing Playwright invocations.
+  Toolchain health also pins both agent/gate PATH values and resolves Node
+  24.16.0, npm, and npm's command parser to the same reviewed Homebrew Cellar
+  root; caller overrides or version drift make `check` fail.
 - Real model execution is fail-closed. A live Codex 0.144.1 probe showed that
   the native file/network profile still permits a model-launched command to
   invoke macOS Keychain APIs. Wrapping Codex in a Mach-denying Seatbelt profile
@@ -76,7 +79,9 @@ source independently; missing or unreadable control/STOP state is fatal.
   Therefore `check` reports `checks.agent_secret_boundary:false`, and armed
   `run` or `resume` stops before locking, worktree creation, fetch, or model
   invocation. Only the tightly bound, local-repository fixture can exercise
-  orchestration without a model or GitHub. Production model execution requires
+  orchestration without a model or GitHub. Its repository, common Git metadata,
+  automation home, worktree root, Codex home, local bare remote, and executable
+  stubs must all resolve inside one temporary fixture root. Production model execution requires
   a separately isolated agent backend; the credential-free gate worker below
   solves only gate execution and is not sufficient by itself.
 - The routing guard is not a second test gate. It rejects never-touch paths,
@@ -113,7 +118,9 @@ source independently; missing or unreadable control/STOP state is fatal.
   enable a backend.
 - The supervisor pushes `GATED_SHA:refs/heads/<lane-branch>`, reads the remote
   ref back, pins every GitHub call to the configured repository, and accepts a
-  draft PR only when its base, branch, and head SHA match the gated state.
+  draft PR only when the remote base ref and GitHub `baseRefOid` equal the gated
+  base SHA and its branch/head equal the gated head. Base drift or any existing
+  draft mismatch makes the lane terminal `needs-human`.
 
 Execution-only state and evidence live under:
 

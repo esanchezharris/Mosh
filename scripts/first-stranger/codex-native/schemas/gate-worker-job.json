@@ -7,6 +7,7 @@
   "required": [
     "schema_version",
     "job_id",
+    "nonce",
     "lane_id",
     "created_at",
     "expires_at",
@@ -14,11 +15,13 @@
     "head_sha",
     "bundle",
     "worker",
-    "gate"
+    "gate",
+    "limits"
   ],
   "properties": {
     "schema_version": {"const": 1},
     "job_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
+    "nonce": {"$ref": "#/$defs/sha256"},
     "lane_id": {"type": "string", "pattern": "^FS-[A-Z][A-Z0-9-]*$"},
     "created_at": {"type": "string", "format": "date-time"},
     "expires_at": {"type": "string", "format": "date-time"},
@@ -38,9 +41,12 @@
     "worker": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image_id", "architecture", "network_enabled"],
+      "required": ["image_id", "image_sha256", "toolchain_manifest_sha256", "dependency_manifest_sha256", "architecture", "network_enabled"],
       "properties": {
         "image_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$"},
+        "image_sha256": {"$ref": "#/$defs/sha256"},
+        "toolchain_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "dependency_manifest_sha256": {"$ref": "#/$defs/sha256"},
         "architecture": {"const": "arm64"},
         "network_enabled": {"const": false}
       }
@@ -56,10 +62,26 @@
         "class": {"enum": ["cheap", "native"]},
         "selftest_baseline": {"type": "integer", "minimum": 0}
       }
+    },
+    "limits": {
+      "$ref": "#/$defs/limits"
     }
   },
   "$defs": {
     "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_clock_seconds", "cpu_count", "memory_bytes", "disk_bytes", "output_bytes", "process_count"],
+      "properties": {
+        "wall_clock_seconds": {"type": "integer", "minimum": 60, "maximum": 7200},
+        "cpu_count": {"type": "integer", "minimum": 1, "maximum": 16},
+        "memory_bytes": {"type": "integer", "minimum": 4294967296, "maximum": 68719476736},
+        "disk_bytes": {"type": "integer", "minimum": 21474836480, "maximum": 214748364800},
+        "output_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "process_count": {"type": "integer", "minimum": 64, "maximum": 4096}
+      }
+    }
   }
 }

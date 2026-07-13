@@ -34,9 +34,10 @@ CN_SCHEMAS="$SELF/schemas"
 CN_GATE_PROFILE="${CN_GATE_PROFILE:-$SELF/gate.sb}"
 CN_SANDBOX_BIN="${CN_SANDBOX_BIN:-/usr/bin/sandbox-exec}"
 CN_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-CN_AGENT_PATH="${CN_AGENT_PATH:-$SELF/agent-bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
-CN_GATE_PATH="${CN_GATE_PATH:-$SELF/agent-bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
-CN_REAL_NPM="${CN_REAL_NPM:-$(command -v npm 2>/dev/null || true)}"
+CN_PINNED_PATH="$SELF/agent-bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+CN_AGENT_PATH="${CN_AGENT_PATH:-$CN_PINNED_PATH}"
+CN_GATE_PATH="${CN_GATE_PATH:-$CN_PINNED_PATH}"
+CN_REAL_NPM="${CN_REAL_NPM:-/opt/homebrew/bin/npm}"
 CN_BREW_ROOT="${CN_BREW_ROOT:-/opt/homebrew}"
 CN_PLAYWRIGHT_CACHE="${CN_PLAYWRIGHT_CACHE:-$HOME/Library/Caches/ms-playwright}"
 if [ -n "${CN_CONTROL_REPO:-}" ]; then
@@ -97,6 +98,7 @@ cn_toml_path_ok() {
 
 cn_agent_toolchain_valid() {
   local repo ui expected_deps deps tools_root brew_root brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
+  local node_root node_real npm_real cmd_list_real
   repo="$(cn_real_dir "$CN_REPO")" || return 1
   [ -d "$repo/ui" ] && [ ! -L "$repo/ui" ] || return 1
   ui="$(cn_real_dir "$repo/ui")" || return 1
@@ -111,7 +113,7 @@ cn_agent_toolchain_valid() {
   tools_root="$(cn_real_dir "$SELF/agent-bin")" || return 1
   [ "$tools_root" = "$SELF/agent-bin" ] || return 1
   [ -x "$tools_root/npm" ] && [ -x "$tools_root/git" ] && [ -x "$tools_root/gh" ] || return 1
-  [ -r "/opt/homebrew/lib/node_modules/npm/lib/utils/cmd-list.js" ] || return 1
+  [ "$CN_AGENT_PATH" = "$CN_PINNED_PATH" ] && [ "$CN_GATE_PATH" = "$CN_PINNED_PATH" ] || return 1
 
   [ -d "$CN_BREW_ROOT" ] && [ ! -L "$CN_BREW_ROOT" ] || return 1
   brew_root="$(cn_real_dir "$CN_BREW_ROOT")" || return 1
@@ -127,14 +129,39 @@ cn_agent_toolchain_valid() {
   [ "$brew_node_modules" = "$brew_root/lib/node_modules" ] || return 1
   [ "$brew_openssl_config" = "$brew_root/etc/openssl@3" ] || return 1
   [ -x "$brew_bin/node" ] && [ -x "$brew_bin/npm" ] || return 1
+  [ "$CN_REAL_NPM" = "$brew_bin/npm" ] || return 1
+  node_root="$brew_cellar/node@24/24.16.0"
+  node_real="$(/bin/realpath "$brew_bin/node")" || return 1
+  npm_real="$(/bin/realpath "$CN_REAL_NPM")" || return 1
+  cmd_list_real="$(/bin/realpath "$brew_node_modules/npm/lib/utils/cmd-list.js")" || return 1
+  [ "$node_real" = "$node_root/bin/node" ] || return 1
+  [ "$npm_real" = "$node_root/lib/node_modules/npm/bin/npm-cli.js" ] || return 1
+  [ "$cmd_list_real" = "$node_root/lib/node_modules/npm/lib/utils/cmd-list.js" ] || return 1
+  [ -x "$node_real" ] && [ -x "$npm_real" ] && [ -r "$cmd_list_real" ] || return 1
 
   for path in "$repo" "$deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
     cn_toml_path_ok "$path" || return 1
   done
 }
 
+cn_fixture_child_dir() {
+  local fixture="$1" candidate="$2" parent name resolved
+  name="${candidate##*/}"
+  [ -n "$name" ] && [ "$name" != . ] && [ "$name" != .. ] || return 1
+  parent="$(cn_real_dir "${candidate%/*}")" || return 1
+  [ "$parent" = "$fixture" ] || return 1
+  if cn_path_present "$candidate"; then
+    [ -d "$candidate" ] && [ ! -L "$candidate" ] || return 1
+    resolved="$(cn_real_dir "$candidate")" || return 1
+    [ "$resolved" = "$fixture/$name" ] || return 1
+  else
+    resolved="$fixture/$name"
+  fi
+  printf '%s\n' "$resolved"
+}
+
 cn_hermetic_fixture_valid() {
-  local repo control fixture remote origin code gh code_dir gh_dir
+  local repo control fixture remote origin code gh code_dir gh_dir home work_root code_home common
   [ "${CN_HERMETIC_FIXTURE:-0}" = 1 ] || return 1
   [ "$CN_GH_REPO" = fixture/repo ] || return 1
   repo="$(cn_real_dir "$CN_REPO")" || return 1
@@ -158,6 +185,13 @@ cn_hermetic_fixture_valid() {
   gh_dir="$(cn_real_dir "${gh%/*}")" || return 1
   [ "$code_dir/${code##*/}" = "$fixture/codex" ] || return 1
   [ "$gh_dir/${gh##*/}" = "$fixture/gh" ] || return 1
+  home="$(cn_fixture_child_dir "$fixture" "$CN_HOME")" || return 1
+  work_root="$(cn_fixture_child_dir "$fixture" "$CN_WORK_ROOT")" || return 1
+  code_home="$(cn_fixture_child_dir "$fixture" "$CN_CODEX_HOME")" || return 1
+  [ "$home" != "$work_root" ] && [ "$home" != "$code_home" ] && [ "$work_root" != "$code_home" ] || return 1
+  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  common="$(cn_real_dir "$common")" || return 1
+  [ "$common" = "$repo/.git" ] || return 1
 }
 
 cn_agent_secret_boundary_valid() {
@@ -701,14 +735,21 @@ cn_ensure_label() {
   "$CN_GH_BIN" label create "$name" --color "$color" --repo "$CN_GH_REPO" >/dev/null
 }
 
+cn_remote_base_matches() {
+  local wt="$1" base="$2" remote
+  remote="$(git -C "$wt" ls-remote origin "refs/heads/$CN_PR_BASE" | awk '{print $1}')"
+  [ "$remote" = "$base" ]
+}
+
 cn_verify_published_pr() {
-  local wt="$1" pr_url="$2" branch="$3" head="$4" remote meta
+  local wt="$1" pr_url="$2" branch="$3" head="$4" base="$5" remote meta
+  cn_remote_base_matches "$wt" "$base" || return 1
   remote="$(git -C "$wt" ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
   cn_remote_head_matches "$head" "$remote" || return 1
   meta="$("$CN_GH_BIN" pr view "$pr_url" --repo "$CN_GH_REPO" \
-    --json isDraft,state,baseRefName,headRefName,headRefOid,url)" || return 1
-  jq -e --arg base "$CN_PR_BASE" --arg branch "$branch" --arg head "$head" \
-    '.isDraft == true and .state == "OPEN" and .baseRefName == $base and .headRefName == $branch and .headRefOid == $head' \
+    --json isDraft,state,baseRefName,baseRefOid,headRefName,headRefOid,url)" || return 1
+  jq -e --arg base_name "$CN_PR_BASE" --arg base "$base" --arg branch "$branch" --arg head "$head" \
+    '.isDraft == true and .state == "OPEN" and .baseRefName == $base_name and .baseRefOid == $base and .headRefName == $branch and .headRefOid == $head' \
     <<<"$meta" >/dev/null
 }
 
@@ -732,6 +773,10 @@ cn_publish_phase() {
     || cn_die "$lane hostile-review evidence is missing or invalid before publication"
   [ "$(jq -r .verdict <<<"$review")" = APPROVE ] && [ "$(jq -r .blockers <<<"$review")" -eq 0 ] \
     || cn_die "$lane hostile-review evidence rejects publication"
+  if ! cn_remote_base_matches "$wt" "$base"; then
+    cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+    cn_die "$lane remote PR base differs from the gated base SHA"
+  fi
   cn_before_mutation "$wt"
   git -C "$wt" push origin "$head:refs/heads/$branch"
   remote="$(git -C "$wt" ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
@@ -753,11 +798,17 @@ cn_publish_phase() {
   if [ "$route" = owner ]; then
     cn_ensure_label "$wt" needs-owner-merge B60205
   fi
+  if ! cn_remote_base_matches "$wt" "$base"; then
+    cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+    cn_die "$lane remote PR base advanced after the gated head was pushed"
+  fi
   existing_pr="$("$CN_GH_BIN" pr list --state open --head "$branch" --base "$CN_PR_BASE" --json url --jq '.[0].url // empty' --repo "$CN_GH_REPO")" \
     || cn_die "$lane could not check for an already-created PR"
   if [ -n "$existing_pr" ]; then
-    cn_verify_published_pr "$wt" "$existing_pr" "$branch" "$head" \
-      || cn_die "$lane existing draft PR does not match the gated head/base"
+    if ! cn_verify_published_pr "$wt" "$existing_pr" "$branch" "$head" "$base"; then
+      cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+      cn_die "$lane existing draft PR does not match the exact gated head/base"
+    fi
     cn_write_state "$wt" "$state" "$lane" "$base" "$head" pr-opened "$thread"
     printf '%s %s\n' "$lane" "$existing_pr"
     return 0
@@ -765,13 +816,17 @@ cn_publish_phase() {
   remote="$(git -C "$wt" ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
   cn_remote_head_matches "$head" "$remote" \
     || cn_die "$lane remote head advanced before draft creation"
+  if ! cn_remote_base_matches "$wt" "$base"; then
+    cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+    cn_die "$lane remote PR base advanced before draft creation"
+  fi
   cn_before_mutation "$wt"
   if [ "$route" = owner ]; then
     pr_url="$("$CN_GH_BIN" pr create --draft --base "$CN_PR_BASE" --head "$branch" --title "$lane: $(jq -r .title <<<"$lane_json")" --body-file "$body" --label "$program_label" --label "codex-route:$route" --label needs-owner-merge --repo "$CN_GH_REPO")"
   else
     pr_url="$("$CN_GH_BIN" pr create --draft --base "$CN_PR_BASE" --head "$branch" --title "$lane: $(jq -r .title <<<"$lane_json")" --body-file "$body" --label "$program_label" --label "codex-route:$route" --repo "$CN_GH_REPO")"
   fi
-  if ! cn_verify_published_pr "$wt" "$pr_url" "$branch" "$head"; then
+  if ! cn_verify_published_pr "$wt" "$pr_url" "$branch" "$head" "$base"; then
     cn_before_mutation "$wt"
     if ! "$CN_GH_BIN" pr close "$pr_url" --comment \
       "Codex-native supervisor closed this draft because its published head/base did not match the exact gated SHA." \

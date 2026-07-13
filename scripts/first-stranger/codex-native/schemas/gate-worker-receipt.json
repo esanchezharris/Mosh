@@ -9,6 +9,7 @@
     "outcome",
     "reasons",
     "job_id",
+    "nonce",
     "lane_id",
     "manifest_sha256",
     "started_at",
@@ -20,6 +21,7 @@
     "gate",
     "repository",
     "isolation",
+    "limits",
     "artifacts"
   ],
   "properties": {
@@ -27,6 +29,7 @@
     "outcome": {"enum": ["passed", "needs-human"]},
     "reasons": {"type": "array", "items": {"type": "string"}},
     "job_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
+    "nonce": {"$ref": "#/$defs/sha256"},
     "lane_id": {"type": "string", "pattern": "^FS-[A-Z][A-Z0-9-]*$"},
     "manifest_sha256": {"$ref": "#/$defs/sha256"},
     "started_at": {"type": "string", "format": "date-time"},
@@ -45,9 +48,12 @@
     "worker": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image_id", "architecture"],
+      "required": ["image_id", "image_sha256", "toolchain_manifest_sha256", "dependency_manifest_sha256", "architecture"],
       "properties": {
         "image_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$"},
+        "image_sha256": {"$ref": "#/$defs/sha256"},
+        "toolchain_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "dependency_manifest_sha256": {"$ref": "#/$defs/sha256"},
         "architecture": {"const": "arm64"}
       }
     },
@@ -112,6 +118,16 @@
         "evidence_source": {"const": "controller-hypervisor"}
       }
     },
+    "limits": {
+      "allOf": [
+        {"$ref": "#/$defs/limits"},
+        {
+          "type": "object",
+          "required": ["timeout_triggered"],
+          "properties": {"timeout_triggered": {"type": "boolean"}}
+        }
+      ]
+    },
     "artifacts": {
       "type": "array",
       "minItems": 3,
@@ -172,6 +188,9 @@
                 "const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
               }
             }
+          },
+          "limits": {
+            "properties": {"timeout_triggered": {"const": false}}
           }
         }
       }
@@ -189,6 +208,20 @@
   "$defs": {
     "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_clock_seconds", "cpu_count", "memory_bytes", "disk_bytes", "output_bytes", "process_count", "timeout_triggered"],
+      "properties": {
+        "wall_clock_seconds": {"type": "integer", "minimum": 60, "maximum": 7200},
+        "cpu_count": {"type": "integer", "minimum": 1, "maximum": 16},
+        "memory_bytes": {"type": "integer", "minimum": 4294967296, "maximum": 68719476736},
+        "disk_bytes": {"type": "integer", "minimum": 21474836480, "maximum": 214748364800},
+        "output_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "process_count": {"type": "integer", "minimum": 64, "maximum": 4096},
+        "timeout_triggered": {"type": "boolean"}
+      }
+    },
     "relative_path": {
       "type": "string",
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
