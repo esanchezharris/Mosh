@@ -71,8 +71,9 @@ mute slot to preserve the prior state.
 now carry the original call index and command identity. The destructive-command
 screen, `batch_begin`/`batch_end` grouping, MoshOps validation, store seam, and
 single undo path remain in place. Resolved failure envelopes from either batch
-boundary reject execution; commands never run after a failed begin and a failed
-end is never reported as success.
+boundary reject execution; commands never run after a failed begin. A resolved
+failed end carries the exact applied-command count to the harness, which attempts
+the existing undo seam and reports rollback only when undo confirms it.
 
 ### Failure and rollback semantics
 
@@ -81,8 +82,8 @@ The harness makes only these rollback claims:
 - Validation, precondition, template, and preflight failures make no mutation
   call and return `rolledBack:false`.
 - A resolved batch that reports a partial failure, malformed per-call results,
-  or a failed postcondition attempts the existing `undo` seam when at least one
-  mutation was reported.
+  a resolved failed `batch_end`, or a failed postcondition attempts the existing
+  `undo` seam when at least one mutation was reported.
 - `rolledBack:true` is returned only when the undo result explicitly reports
   that an undo occurred. A rejected or no-op undo returns `rolledBack:false`.
 - A rejected batch promise has an ambiguous transport outcome. It returns
@@ -134,6 +135,7 @@ npm test -- --run \
   src/agent/skillHarness.failure.test.ts \
   src/agent/commands.contract.test.ts \
   src/agent/executor.test.ts \
+  src/agent/executor.batch-boundary.test.ts \
   --no-cache
 npm run typecheck
 

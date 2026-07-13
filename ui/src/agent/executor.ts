@@ -24,6 +24,18 @@ export type ChangeSet = {
   readonly applied: number;
 };
 
+export class AgentBatchBoundaryError extends Error {
+  readonly boundary: "begin" | "end";
+  readonly changes: ChangeSet;
+
+  constructor(boundary: "begin" | "end", message: string, changes: ChangeSet) {
+    super(message);
+    this.name = "AgentBatchBoundaryError";
+    this.boundary = boundary;
+    this.changes = changes;
+  }
+}
+
 // ── Destructive-command scope limit (safety) ─────────────────────────────────
 // Moshi runs mutating commands; undo is the backstop, not the only line. A confused
 // tool-loop (or an adversarial generative result) that emits "delete everything" should
@@ -95,6 +107,14 @@ function newTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function changeSet(label: string, entries: readonly ChangeEntry[]): ChangeSet {
+  return {
+    label,
+    entries: [...entries].sort((left, right) => left.index - right.index),
+    applied: entries.filter((entry) => entry.ok).length,
+  };
+}
+
 export async function runAgentBatch(
   label: string,
   calls: readonly AgentCommandCall[],
@@ -137,7 +157,11 @@ export async function runAgentBatch(
       source: meta.source ?? "brain_chat",
     });
     if (!begin.ok)
-      throw new Error(`batch_begin failed: ${begin.error ?? "unknown error"}`);
+      throw new AgentBatchBoundaryError(
+        "begin",
+        `batch_begin failed: ${begin.error ?? "unknown error"}`,
+        changeSet(label, entries),
+      );
     for (const c of allowed) {
       const res = await exec(c.command, c.args ?? {});
       entries.push({
@@ -151,14 +175,14 @@ export async function runAgentBatch(
     const end = await exec("batch_end", {});
     await refresh();
     if (!end.ok)
-      throw new Error(`batch_end failed: ${end.error ?? "unknown error"}`);
+      throw new AgentBatchBoundaryError(
+        "end",
+        `batch_end failed: ${end.error ?? "unknown error"}`,
+        changeSet(label, entries),
+      );
   }
 
-  return {
-    label,
-    entries: [...entries].sort((left, right) => left.index - right.index),
-    applied: entries.filter((entry) => entry.ok).length,
-  };
+  return changeSet(label, entries);
 }
 
 /** Revert the agent's last batch — one undo reverses the whole thing. */

@@ -1,6 +1,10 @@
 import type { Snapshot } from "../types";
 import { validateCommand } from "./commands";
-import type { AgentCommandCall, ChangeSet } from "./executor";
+import {
+  AgentBatchBoundaryError,
+  type AgentCommandCall,
+  type ChangeSet,
+} from "./executor";
 import { checkSkillChangeSet } from "./skillHarnessResult";
 import {
   validateSkillSlots,
@@ -173,6 +177,14 @@ export async function runSkill(
   try {
     changes = await deps.runBatch(skill.name, calls);
   } catch (error) {
+    if (error instanceof AgentBatchBoundaryError)
+      return failedAfterMutation(
+        skill.name,
+        "execution",
+        `Resolved batch_${error.boundary} failure: ${error.message}`,
+        error.changes.applied,
+        deps,
+      );
     const detail = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
