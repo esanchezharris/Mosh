@@ -124,8 +124,7 @@ check("a line WITHOUT flow fields omits the flow block (back-compat)",
 # specific re-prompt; stress alignment and vowel-echo rank otherwise-valid candidates.
 FLOW_B = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 4,
           "syllableTol": 0, "rhymeGroup": "", "locked": False,
-          "breaks": [1],   # a word must END at syllable 2 (0-based index 1)
-          "echoTargets": [{"pos": 3, "word": "flame", "conf": 0.4, "vowels": ["EY"]}]}
+          "breaks": [1]}   # a word must END at syllable 2 (0-based index 1)
 
 ok_cand = core._evaluate("sunset in rain", FLOW_B, SPEC, None, 4, 0, "slant")
 bad_cand = core._evaluate("amazing rain", FLOW_B, SPEC, None, 4, 0, "slant")
@@ -135,14 +134,8 @@ reason = core._failure_reason(bad_cand, 4, 0, None, "slant")
 check("failure reason names the offending word + the breath",
       "amazing" in reason and "syllable 2" in reason, reason)
 
-# echo term: identical candidates except the echo position — EY-echo beats OW
-echo_hi = core._evaluate("sunset in rain", FLOW_B, SPEC, None, 4, 0, "slant")   # rain = EY
-echo_lo = core._evaluate("sunset in gold", FLOW_B, SPEC, None, 4, 0, "slant")   # gold = OW
-check("echoing the demoted word's vowels outranks ignoring it",
-      echo_hi["score"] > echo_lo["score"], f"{echo_hi['score']} vs {echo_lo['score']}")
-
-# stress term (no echo, isolate): line accents X at syllables 1 and 3
-FLOW_S = {**FLOW_B, "echoTargets": [], "stress": "XxXx"}
+# stress term (isolate): line accents X at syllables 1 and 3
+FLOW_S = {**FLOW_B, "stress": "XxXx"}
 st_hi = core._evaluate("sunset midnight", FLOW_S, SPEC, None, 4, 0, "slant")   # Xx Xx
 st_lo = core._evaluate("sunset again", FLOW_S, SPEC, None, 4, 0, "slant")      # Xx xX
 check("accent-matching candidate outranks the mismatch",
@@ -151,11 +144,9 @@ check("accent-matching candidate outranks the mismatch",
 # prompt carries the enforcement context
 fmsgs = core._build_messages(FLOW_B, SPEC, None, 4, 0, "slant", None)[-1]["content"]
 check("prompt states the breath point", "syllable 2" in fmsgs, fmsgs[-300:])
-check("prompt forbids the low-trust word but demands its SOUND",
-      'do NOT use "flame"' in fmsgs and "EY" in fmsgs)
 
 # the fake floor stays valid: every fake proposal respects the breaks
-fake = core._fake_propose_line({**FLOW_B, "echoTargets": []}, SPEC, None, 0)
+fake = core._fake_propose_line(FLOW_B, SPEC, None, 0)
 check("fake proposals all pass the break gate", all(c.get("breaksOk", True) for c in fake),
       str([(c['text'], c.get('breaksOk')) for c in fake]))
 
@@ -163,92 +154,21 @@ check("fake proposals all pass the break gate", all(c.get("breaksOk", True) for 
 plain = core._evaluate("they counted me out alone", SPEC["lines"][0], SPEC, None, 8, 1, "slant")
 check("no-flow line unaffected (breaksOk defaults true)", plain.get("breaksOk", True) is True)
 
-# ── 6. MOUTH ENFORCEMENT (mouth round, 2026-07-12): echo the take's heard sounds ──────
-# Owner verdict on the writer round: timing/notes land but "the mouth sounds and mouth
-# shapes are just way off". Every heard word's sounds (flowspec `mouthTargets`) now
-# CONSTRAIN the writer: a line that ignores the take's vowel sequence hard-fails with a
-# specific re-prompt; the mouth term dominates ranking. Floor calibrated on real data:
-# sound-alikes score 0.72+, unrelated lines <=0.48, candidate A's old lines averaged 0.36.
-from lyrics import soundmatch as _sm  # noqa: E402
+# ── 5b. sound-matching is GONE (2026-07-13): the audit found it backfired (forced
+# sound-salad) and the owner confirmed words only need the take's rhythm/timing, not its
+# exact sounds. A breaks-carrying line's prompt must carry no leftover MOUTH/echo/SOUND-like
+# language, and _evaluate's output must carry none of the old mouth/echo score keys.
+check("prompt for a breaks-line has no removed MOUTH/echo/SOUND-like language",
+      not any(s in fmsgs for s in ("MOUTH", "echo", "SOUND like")), fmsgs[-320:])
+check("_evaluate output carries no removed mouth/echo keys",
+      not any(k in bad_cand for k in ("mouthSim", "mouthOk", "echoTerm")), str(bad_cand))
 
-MOUTH_TGTS = [{**s, "word": "heard", "conf": 0.3} for s in _sm.text_sounds("top of a cup of water")]
-MOUTH_LINE = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 8,
-              "syllableTol": 0, "rhymeGroup": "", "locked": False, "breaks": [],
-              "echoTargets": [], "mouthTargets": MOUTH_TGTS,
-              "mouthText": "top of a cup of water"}
-
-# LOOSENED (owner, 2026-07-12): now that the NSF re-vocode makes the VOICE natural, the
-# mumble sets FLOW (count/stress/breath/melody) and the WORDS are free to be coherent bars.
-# Mouth is a SOFT nudge — it ranks but NEVER rejects; the syllable-by-syllable vowel echo
-# was forcing all-filler bars ("oh oh oh yeah").
-m_ok = core._evaluate("not a lot of stuff to squander", MOUTH_LINE, SPEC, None, 8, 0, "slant")
-m_bad = core._evaluate("we remain easy tonight please", MOUTH_LINE, SPEC, None, 8, 0, "slant")
-check("sound-alike line passes", m_ok["passes"] is True,
-      str({k: m_ok.get(k) for k in ("passes", "mouthOk", "mouthSim")}))
-check("mouth-blind line now PASSES too (mouth never rejects)", m_bad["passes"] is True,
-      str({k: m_bad.get(k) for k in ("passes", "mouthOk", "mouthSim")}))
-check("mouthOk still REPORTS the echo (informational, for the flow-viz)",
-      m_ok.get("mouthOk") is True and m_bad.get("mouthOk") is False,
-      str((m_ok.get("mouthOk"), m_bad.get("mouthOk"))))
-check("mouthSim is reported and ordered", m_ok["mouthSim"] > 0.6 > m_bad["mouthSim"],
-      f"{m_ok['mouthSim']} vs {m_bad['mouthSim']}")
-check("mouth still NUDGES ranking (sound-alike above blind)", m_ok["score"] > m_bad["score"])
-check("but the nudge is small — mouth no longer dominates (weight ~0.35)",
-      (m_ok["score"] - m_bad["score"]) < 0.6, f"delta={m_ok['score'] - m_bad['score']:.3f}")
-m_reason = core._failure_reason(m_bad, 8, 0, None, "slant")
-check("failure reason carries the heard sounds to the re-prompt",
-      "top of a cup of water" in m_reason and "sound" in m_reason.lower(), m_reason)
-
-# prompt: the sound sketch is a constraint, but junk words must not be quoted verbatim
-m_usr = core._build_messages(MOUTH_LINE, SPEC, None, 8, 0, "slant", None)[-1]["content"]
-check("prompt carries the mouth sketch", "top of a cup of water" in m_usr, m_usr[-260:])
-check("prompt frames the sketch as sounds, not required words",
-      "not required words" in m_usr.lower() or "misheard" in m_usr.lower(), m_usr[-260:])
-
-# ── flow-over-sounds v2 (owner, 2026-07-12): the first loosening touched only the ranker
-# gate, but the PROMPT still HARD-ordered a syllable-by-syllable sound echo — forcing
-# sound-salad whenever the mumble itself was repetitive ("star burns star" -> "scars burn
-# scars"). The mumble must set FLOW (count/breath/stress/melody); the take's SOUNDS become
-# an OPTIONAL flavor and only a small ranking tiebreak, so a coherent bar wins.
-check("MOUTH MOVIE no longer HARD-orders a syllable-by-syllable echo (flow over sounds)",
-      "must ECHO" not in m_usr and "syllable by syllable" not in m_usr, m_usr[-320:])
-check("echoTargets drops the per-syllable SOUND demand but keeps the junk prohibition",
-      "should SOUND like" not in fmsgs and "should sound like" not in fmsgs.lower(), fmsgs[-320:])
-check("sound is now only a small ranking tiebreak, not a lever (echo swing < 0.3)",
-      abs(echo_hi["score"] - echo_lo["score"]) < 0.3, f"{echo_hi['score']} vs {echo_lo['score']}")
-
-# short evidence (<4 sounds) scores but does NOT gate
-SHORT_LINE = {**MOUTH_LINE, "mouthTargets": MOUTH_TGTS[:3], "mouthText": "top of a"}
-m_short = core._evaluate("we remain easy tonight please", SHORT_LINE, SPEC, None, 8, 0, "slant")
-check("short mouth evidence never hard-gates", m_short.get("mouthOk") is True and m_short["passes"],
-      str({k: m_short.get(k) for k in ("passes", "mouthOk", "mouthSim")}))
-
-# back-compat: a plain line (no mouth fields) carries no mouth keys and is unaffected
-m_plain = core._evaluate("they counted me out alone", SPEC["lines"][0], SPEC, None, 8, 1, "slant")
-check("no-mouth line unaffected (no mouth keys)", "mouthSim" not in m_plain and "mouthOk" not in m_plain)
-
-# coverage arming (review fix): 4 targets against a 12-syllable line is too little
-# evidence to HARD-gate — it scores, but cannot reject (Whisper under-hears soft takes).
-UNDER_LINE = {**MOUTH_LINE, "syllableTarget": 12,
-              "mouthTargets": [{**s, "word": "heard", "conf": 0.3} for s in _sm.text_sounds("top of a cup")],
-              "mouthText": "top of a cup"}
-m_under = core._evaluate("the moon is high and every star reminds me now", UNDER_LINE, SPEC, None, 12, 0, "slant")
-check("under-heard line scores but never hard-gates", m_under.get("mouthOk") is True,
-      str({k: m_under.get(k) for k in ("mouthOk", "mouthSim")}))
-
-# generic evidence: an all-schwa movie (the neutral mouth) scores but must never reject
-GENERIC_LINE = {**MOUTH_LINE, "syllableTarget": 4,
-                "mouthTargets": [{**s, "word": "heard", "conf": 0.3} for s in _sm.text_sounds("of a the up")],
-                "mouthText": "of a the up"}
-m_gen = core._evaluate("time flies moonlight", GENERIC_LINE, SPEC, None, 4, 0, "slant")
-check("all-schwa evidence never hard-gates", m_gen.get("mouthOk") is True,
-      str({k: m_gen.get(k) for k in ("mouthOk", "mouthSim")}))
-
-# fixed-end enforcement (review fix): a locked trailing seed word must actually END the
-# line — containment alone exempted the dangling-ending gate entirely.
+# fixed-end enforcement (review fix, still-live flow behavior — NOT mouth-related): a
+# locked trailing seed word must actually END the line — containment alone exempted the
+# dangling-ending gate entirely.
 FIX_LINE = {"index": 0, "role": "verse", "seedText": "___ ___ ___ flame", "text": "",
             "syllableTarget": 5, "syllableTol": 0, "rhymeGroup": "", "locked": False,
-            "breaks": [], "echoTargets": [], "mouthTargets": [], "mouthText": ""}
+            "breaks": []}
 f_ok = core._evaluate("cup of water flame", FIX_LINE, SPEC, None, 5, 0, "slant")
 f_bad = core._evaluate("flame of the water shot", FIX_LINE, SPEC, None, 5, 0, "slant")
 check("line actually ending on the locked word passes", f_ok["passes"] and f_ok.get("endOk") is True,
@@ -260,22 +180,24 @@ check("failure reason names the required end word",
       "flame" in core._failure_reason(f_bad, 5, 0, None, "slant"),
       core._failure_reason(f_bad, 5, 0, None, "slant"))
 
-# the fake floor still returns ranked proposals on a mouth line (deterministic, no crash)
-m_fake_a = core._fake_propose_line(MOUTH_LINE, SPEC, None, 0)
-m_fake_b = core._fake_propose_line(MOUTH_LINE, SPEC, None, 0)
-check("fake backend still proposes on mouth lines (deterministic)",
-      len(m_fake_a) >= 1 and m_fake_a == m_fake_b)
+# the fake floor still returns ranked proposals on a fixed-end flow line (deterministic)
+fake_fix_a = core._fake_propose_line(FIX_LINE, SPEC, None, 0)
+fake_fix_b = core._fake_propose_line(FIX_LINE, SPEC, None, 0)
+check("fake backend still proposes on a fixed-end flow line (deterministic)",
+      len(fake_fix_a) >= 1 and fake_fix_a == fake_fix_b)
 
 # ── 7. flow-grounded lines must not END on a dangling function word ────────────────────
 # Exact-count trimming produced "Cruel, are you? I was a" — an unfinished mouth. A
 # flow-grounded line ending on a bare article/preposition/conjunction hard-fails with a
 # specific re-prompt. Plain (non-flow) lines keep today's semantics.
-d_bad = core._evaluate("not a lot of stuff in the", MOUTH_LINE, SPEC, None, 7, 0, "slant")
+FLOW_END_LINE = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 8,
+                 "syllableTol": 0, "rhymeGroup": "", "locked": False, "breaks": []}
+d_bad = core._evaluate("not a lot of stuff in the", FLOW_END_LINE, SPEC, None, 7, 0, "slant")
 check("dangling function-word ending hard-fails", (not d_bad["passes"]) and d_bad.get("endOk") is False,
       str({k: d_bad.get(k) for k in ("passes", "endOk")}))
 d_reason = core._failure_reason(d_bad, 7, 0, None, "slant")
 check("failure reason names the dangling ending", "the" in d_reason and "end" in d_reason.lower(), d_reason)
-d_ok = core._evaluate("not a lot of stuff to squander", MOUTH_LINE, SPEC, None, 8, 0, "slant")
+d_ok = core._evaluate("not a lot of stuff to squander", FLOW_END_LINE, SPEC, None, 8, 0, "slant")
 check("content-word ending passes the end gate", d_ok.get("endOk") is True)
 d_plain = core._evaluate("they counted me out into the", SPEC["lines"][0], SPEC, None, 7, 1, "slant")
 check("plain line keeps today's semantics (no end gate)", "endOk" not in d_plain)
@@ -290,8 +212,7 @@ check("tol resolution defaults a MISSING field to 1", core._syl_tol({}) == 1)
 check("tol resolution defaults an explicit None to 1", core._syl_tol({"syllableTol": None}) == 1)
 
 TOL_LINE = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 8,
-            "syllableTol": 0, "rhymeGroup": "", "locked": False, "breaks": [],
-            "echoTargets": [], "mouthTargets": [], "mouthText": ""}
+            "syllableTol": 0, "rhymeGroup": "", "locked": False, "breaks": []}
 
 
 def _mock_offcount(messages, **k):

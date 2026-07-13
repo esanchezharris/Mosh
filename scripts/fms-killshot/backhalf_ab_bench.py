@@ -33,7 +33,7 @@ sys.path.insert(0, str(REPO / "service"))
 
 import brain_client  # noqa: E402
 from adapters import soulx_adapter  # noqa: E402
-from lyrics import core, flowspec, soundmatch  # noqa: E402
+from lyrics import core, flowspec  # noqa: E402
 from soulx import ab_mix  # noqa: E402
 
 ROOT = Path("~/mosh-fms-ksb/used2").expanduser()
@@ -65,9 +65,9 @@ THEME = ("Two people who were inseparable and drifted into strangers — nostalg
          "the ache of 'used to'.")
 
 CANDIDATES = [
-    ("A", "Invent-freely", "Blank slate — the model writes every line to the rhythm only. Today's approach; the one that felt disconnected.", dict(preserve_words=False, echo_rerank=False)),
-    ("B", "Keep your words + fill gaps", "Your confident mumbled words are KEPT in place; the model invents only the filler gaps. Your actual bars survive.", dict(preserve_words=True, echo_rerank=False)),
-    ("C", "Phonetic echo", "Invented from scratch, but each line picks the wording that most ECHOES your mumble's vowels — so it feels like your take cleaned up.", dict(preserve_words=False, echo_rerank=True)),
+    ("A", "Invent-freely", "Blank slate — the model writes every line to the rhythm only. Today's approach; the one that felt disconnected.", dict(preserve_words=False)),
+    ("B", "Keep your words + fill gaps", "Your confident mumbled words are KEPT in place; the model invents only the filler gaps. Your actual bars survive.", dict(preserve_words=True)),
+    # (arm C "Phonetic echo" retired 2026-07-13 — sound-matching removed; the mumble sets flow, not the words' sounds.)
 ]
 
 
@@ -91,7 +91,7 @@ def slice_and_rebase(skel: dict, t0: float, t1: float) -> dict:
             "lineHeard": [h for h in skel.get("lineHeard") or [] if isinstance(h, dict) and h.get("bar") in bars]}
 
 
-def gen_candidate(sec_skel: dict, preserve_words: bool, echo_rerank: bool) -> list:
+def gen_candidate(sec_skel: dict, preserve_words: bool) -> list:
     """Generate one candidate's chosen lines for the section (deterministic given the LLM)."""
     spec = flowspec.build_flow_spec(sec_skel, chorus=CHORUS, theme=THEME, gap_s=0.35,
                                     min_syllables=2, preserve_words=preserve_words)
@@ -105,25 +105,9 @@ def gen_candidate(sec_skel: dict, preserve_words: bool, echo_rerank: bool) -> li
         line = by_index[idx]
         c = prop_by_index.get(idx, {})
         chosen = (c.get("chosen") or "").strip()
-        # C: re-pick the proposal that best echoes the mumble fragment for this line.
-        if echo_rerank and c.get("proposals"):
-            hint = line.get("themeHint") or ""
-            if hint:
-                ranked = soundmatch.rank([p.get("text", "") for p in c["proposals"] if p.get("text")], hint)
-                if ranked and ranked[0][0]:
-                    chosen = ranked[0][0]
         out.append({"index": idx, "text": chosen, "themeHint": line.get("themeHint") or "",
                     "score": line["score"], "syllableTarget": line["syllableTarget"]})
     return out
-
-
-def echo_score(lines: list) -> float:
-    """Slot-weighted mean 'sounds like your take' — soundmatch of each line vs its mumble
-    fragment. Lines with no mumble words to echo are skipped."""
-    scored = [(soundmatch.similarity(l["text"], l["themeHint"]), l["syllableTarget"])
-              for l in lines if l.get("themeHint") and l.get("text")]
-    tot = sum(w for _, w in scored)
-    return (sum(s * w for s, w in scored) / tot) if tot else 0.0
 
 
 def build() -> dict:
@@ -147,9 +131,8 @@ def build() -> dict:
         soulx_adapter.render(str(mumble), str(guide), {"lines": copy.deepcopy(authored)})
         ab = SERVE / f"ab-{key}.wav"
         ab_mix.stereo_ab(str(mumble), str(guide), str(ab), sr=SR, right_gain=0.85)
-        es = echo_score(lines)
-        print(f"  [{key}] {name}: echo={es:.2f}  lines={len(lines)}", flush=True)
-        cards.append({"key": key, "name": name, "blurb": blurb, "echo": es, "lines": lines, "ab": f"ab-{key}.wav"})
+        print(f"  [{key}] {name}: lines={len(lines)}", flush=True)
+        cards.append({"key": key, "name": name, "blurb": blurb, "lines": lines, "ab": f"ab-{key}.wav"})
 
     # the mono mumble reference at the serve root too
     subprocess.run(["ffmpeg", "-y", "-i", str(mumble), str(SERVE / "mumble-section.wav")],

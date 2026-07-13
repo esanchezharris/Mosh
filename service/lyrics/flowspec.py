@@ -27,7 +27,6 @@ from __future__ import annotations
 import re
 from typing import List, Optional
 
-from lyrics import soundmatch
 from phonology import core as _ph
 
 _pronouncer: Optional[_ph.Pronouncer] = None
@@ -250,68 +249,12 @@ def _word_by_slot_id(skeleton: dict) -> dict:
     return out
 
 
-def _heard_by_bar(skeleton: dict) -> dict:
-    """bar -> ALL heard words (kept or not), slot-ordered. Whisper's junk words are
-    untrustworthy as TEXT but solid as SOUNDS — the mumble's mouth movie. None bars
-    (present in real skeletons) are skipped."""
-    out: dict = {}
-    for lh in skeleton.get("lineHeard") or []:
-        if not isinstance(lh, dict):
-            continue
-        ws = [w for w in lh.get("words") or []
-              if isinstance(w, dict) and _clean_tok(w.get("word"))]
-        out[lh.get("bar")] = sorted(ws, key=lambda w: int(w.get("slot", 0) or 0))
-    return out
-
-
-def _bar_slot_owners(line_scores: List[dict], phrases: List[dict]) -> dict:
-    """(bar, slot_idx) -> phrase index, from the FINAL phrase grouping (slots ride
-    through group_by_rest by identity). Phrases split mid-bar own only their own slots —
-    12/24 real Used2 bars are shared across phrases, and bar-coarse attribution leaked
-    neighbors' sounds into a line's mouth movie (adversarial-review confirmed)."""
-    slot_pos = {}
-    for ls in line_scores:
-        if isinstance(ls, dict):
-            for idx, s in enumerate(ls.get("slots") or []):
-                slot_pos[id(s)] = (ls.get("bar"), idx)
-    owners: dict = {}
-    for i, ph in enumerate(phrases):
-        for s in ph.get("slots") or []:
-            pos = slot_pos.get(id(s))
-            if pos is not None:
-                owners[pos] = i
-    return owners
-
-
-def _mouth_targets(phrase_i: int, bars: List[int], heard_by_bar: dict,
-                   owners: dict) -> tuple:
-    """(mouthTargets, mouthText) for one phrase: every heard word ON THIS PHRASE'S OWN
-    SLOTS contributes one {vowel, onset, word, conf} per syllable, in order. A word whose
-    slot index no phrase owns lands on the bar's nearest owned slot (deterministic)."""
-    heard = []
-    for b in bars:
-        bar_idxs = sorted(idx for (bar, idx) in owners if bar == b)
-        for w in heard_by_bar.get(b, []):
-            s = int(w.get("slot", 0) or 0)
-            owner = owners.get((b, s))
-            if owner is None and bar_idxs:
-                owner = owners[(b, min(bar_idxs, key=lambda idx: (abs(idx - s), idx)))]
-            if owner == phrase_i:
-                heard.append(w)
-    targets: List[dict] = []
-    for w in heard:
-        word = _clean_tok(w.get("word"))
-        conf = None if w.get("conf") is None else round(float(w.get("conf") or 0), 3)
-        for snd in soundmatch.syllable_sounds(word):
-            targets.append({"vowel": snd["vowel"], "onset": snd["onset"],
-                            "word": word, "conf": conf})
-    return targets, " ".join(_clean_tok(w.get("word")) for w in heard)
-
-
-def _tier_phrase(infos: List[dict]) -> tuple:
-    """Split a phrase's per-slot (tok, conf) into verbatim seed tokens + echo targets.
-    Runs of adjacent kept words tier TOGETHER (a mid-conf word rides its trusted phrase);
-    a run without heard confidence stays verbatim (back-compat)."""
+def _tier_phrase(infos: List[dict]) -> List[str]:
+    """Split a phrase's per-slot (tok, conf) into verbatim seed tokens (kept trusted words +
+    `___` gaps for the rest). Runs of adjacent kept words tier TOGETHER (a mid-conf word rides
+    its trusted phrase); a run without heard confidence stays verbatim (back-compat). Untrusted
+    words are demoted to gaps (the writer invents there) — the take's SOUNDS no longer steer
+    the words (flow-over-sounds: rhythm from the take, coherent words from the writer)."""
     runs, cur = [], []
     for i, inf in enumerate(infos):
         if inf["tok"] != "___":
@@ -368,11 +311,7 @@ def _tier_phrase(infos: List[dict]) -> tuple:
             break
         demote.add(last)
 
-    seed_toks = [("___" if i in demote else infos[i]["tok"]) for i in range(len(infos))]
-    echo = [{"pos": i, "word": infos[i]["tok"], "conf": infos[i]["conf"],
-             "vowels": soundmatch.vowel_backbone(infos[i]["tok"])}
-            for i in sorted(demote)]
-    return seed_toks, echo
+    return [("___" if i in demote else infos[i]["tok"]) for i in range(len(infos))]
 
 
 def build_flow_spec(skeleton: dict, *, gap_s: float = 0.35, min_syllables: int = 1,
@@ -390,7 +329,6 @@ def build_flow_spec(skeleton: dict, *, gap_s: float = 0.35, min_syllables: int =
     line_scores = skeleton.get("lineScores") or []
     line_heard = skeleton.get("lineHeard") or []
     slot_word = _word_by_slot_id(skeleton) if preserve_words else {}
-    heard_by_bar = _heard_by_bar(skeleton)
     bpm = 138.0
     for ls in line_scores:
         if isinstance(ls, dict) and ls.get("bpm"):
@@ -398,28 +336,22 @@ def build_flow_spec(skeleton: dict, *, gap_s: float = 0.35, min_syllables: int =
             break
 
     phrases = group_by_rest(line_scores, gap_s=gap_s, min_syllables=min_syllables)
-    owners = _bar_slot_owners(line_scores, phrases)
     lines: List[dict] = []
     for i, ph in enumerate(phrases):
         slots = ph["slots"]
         if preserve_words:
             infos = [slot_word.get(id(s), {"tok": "___", "conf": None}) for s in slots]
-            seed_toks, echo = _tier_phrase(infos)
-            seed = " ".join(seed_toks)
+            seed = " ".join(_tier_phrase(infos))
         else:
-            seed, echo = "", []
+            seed = ""
         # Break map: an intra-phrase gap >= 70ms is a real micro-breath — a word must END
         # at that syllable (enforced by lyrics.core._evaluate, not just prompted).
         breaks = [j for j in range(len(slots) - 1)
                   if float(slots[j + 1].get("start", 0.0)) - float(slots[j].get("end", 0.0)) >= 0.07]
-        mouth, mouth_text = _mouth_targets(i, ph["bars"], heard_by_bar, owners)
         lines.append({
             "index": i,
             "role": "verse",
             "seedText": seed,                        # TRUSTED kept words + gaps, or blank (invent)
-            "echoTargets": echo,                     # demoted words: echo the SOUND, not the text
-            "mouthTargets": mouth,                   # EVERY heard word's sounds — the mouth movie
-            "mouthText": mouth_text,                 # the heard phrase, for the prompt's sketch
             "breaks": breaks,                        # required word boundaries (real breaths)
             "syllableTarget": len(slots),
             # EXACT count — the hand-fit discipline the owner certified by ear (demo d5,
@@ -428,10 +360,11 @@ def build_flow_spec(skeleton: dict, *, gap_s: float = 0.35, min_syllables: int =
             "stress": _stress_from_velocity(slots),
             "pitchContour": _pitch_contour(slots),
             "themeHint": _theme_hint(ph["bars"], line_heard),
-            # The take's own end sounds ARE the rhyme structure: imposing a scheme on a
-            # mouth-grounded line tears it between "rhyme with the previous line" and
-            # "echo the mumble" (measured: rhyme-forced ends drove mouth-gate failures).
-            "rhymeGroup": "" if mouth else _rhyme_group(i, rhyme_scheme),
+            # Rhyme-free: a mumble-derived grid didn't necessarily rhyme AABB, so let the
+            # writer rhyme where natural (the craft prompt encourages it) rather than force
+            # a scheme onto the take (matches the certified T1/T2 recipe). Re-enable an
+            # imposed scheme here — `_rhyme_group(i, rhyme_scheme)` — if tighter rhyming wins.
+            "rhymeGroup": "",
             "score": {"v": 1, "algo": "flow", "bar": (ph["bars"][0] if ph["bars"] else 0),
                       "bpm": bpm, "timeSig": [4, 4], "grid": grid, "clamped": False,
                       "slots": slots},
