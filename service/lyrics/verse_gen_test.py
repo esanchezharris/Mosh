@@ -205,6 +205,18 @@ check("prompt carries the mouth sketch", "top of a cup of water" in m_usr, m_usr
 check("prompt frames the sketch as sounds, not required words",
       "not required words" in m_usr.lower() or "misheard" in m_usr.lower(), m_usr[-260:])
 
+# ── flow-over-sounds v2 (owner, 2026-07-12): the first loosening touched only the ranker
+# gate, but the PROMPT still HARD-ordered a syllable-by-syllable sound echo — forcing
+# sound-salad whenever the mumble itself was repetitive ("star burns star" -> "scars burn
+# scars"). The mumble must set FLOW (count/breath/stress/melody); the take's SOUNDS become
+# an OPTIONAL flavor and only a small ranking tiebreak, so a coherent bar wins.
+check("MOUTH MOVIE no longer HARD-orders a syllable-by-syllable echo (flow over sounds)",
+      "must ECHO" not in m_usr and "syllable by syllable" not in m_usr, m_usr[-320:])
+check("echoTargets drops the per-syllable SOUND demand but keeps the junk prohibition",
+      "should SOUND like" not in fmsgs and "should sound like" not in fmsgs.lower(), fmsgs[-320:])
+check("sound is now only a small ranking tiebreak, not a lever (echo swing < 0.3)",
+      abs(echo_hi["score"] - echo_lo["score"]) < 0.3, f"{echo_hi['score']} vs {echo_lo['score']}")
+
 # short evidence (<4 sounds) scores but does NOT gate
 SHORT_LINE = {**MOUTH_LINE, "mouthTargets": MOUTH_TGTS[:3], "mouthText": "top of a"}
 m_short = core._evaluate("we remain easy tonight please", SHORT_LINE, SPEC, None, 8, 0, "slant")
