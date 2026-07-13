@@ -120,6 +120,22 @@ else
 fi
 rm -f "$REPO/ui/node_modules/forged-by-gate"
 
+MALFORMED_REPO="$TMP/"$'malformed\001runner'
+git clone -q -b main "$REMOTE" "$MALFORMED_REPO"
+mkdir -p "$MALFORMED_REPO/ui/node_modules"
+shasum -a 256 "$MALFORMED_REPO/ui/package-lock.json" | awk '{print $1}' >"$MALFORMED_REPO/ui/node_modules/.mosh-deps-stamp"
+if env CN_REPO="$MALFORMED_REPO" CN_CONTROL_REPO="$MALFORMED_REPO" \
+    CN_TRUSTED_UI_DEPS="$MALFORMED_REPO/ui/node_modules" CN_HOME="$HOME_DIR" \
+    CN_WORK_ROOT="$WORK_ROOT" CN_BASE_REF=origin/main CN_PR_BASE=main \
+    CN_CODEX_BIN=/usr/bin/true CN_GH_BIN=/usr/bin/true CN_GH_REPO=fixture/repo \
+    "$ENTRY" check >"$TMP/malformed-path-check.json"; then
+  not_ok "control characters in agent-profile roots fail closed"
+else
+  ok "control characters in agent-profile roots fail closed"
+fi
+assert_eq "malformed profile root reports unhealthy" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/malformed-path-check.json")"
+
 CODEX_STUB="$TMP/codex"
 cat >"$CODEX_STUB" <<'EOF'
 #!/usr/bin/env bash
@@ -190,6 +206,9 @@ git clone -q -b main "$REMOTE" "$CONTROL_REPO"
 git -C "$CONTROL_REPO" worktree add -q -b stopped-runner "$STOP_RUNNER" main
 printf '[core]\n\tworktree = %s\n' "$CONTROL_REPO" >"$CONTROL_REPO/.git/config.worktree"
 CONTROL_REAL="$(cd "$CONTROL_REPO" && pwd -P)"
+mkdir -p "$STOP_RUNNER/ui/node_modules"
+shasum -a 256 "$STOP_RUNNER/ui/package-lock.json" | awk '{print $1}' >"$STOP_RUNNER/ui/node_modules/.mosh-deps-stamp"
+export CN_TRUSTED_UI_DEPS="$STOP_RUNNER/ui/node_modules"
 mkdir -p "$CONTROL_REPO/docs/auto-loop" "$STOP_HOME" "$STOP_STUB_STATE"
 touch "$CONTROL_REPO/docs/auto-loop/STOP" "$STOP_HOME/ARMED"
 chmod 700 "$STOP_HOME"
@@ -209,6 +228,47 @@ assert_match "missing canonical config is explicit" 'could not resolve canonical
 assert_eq "missing canonical config creates no work root" false "$([ -e "$STOP_WORK_ROOT" ] && printf true || printf false)"
 assert_eq "missing canonical config creates no state" false "$([ -e "$STOP_HOME/state" ] && printf true || printf false)"
 mv "$CONTROL_REPO/.git/config.worktree.saved" "$CONTROL_REPO/.git/config.worktree"
+
+ESCAPED_DEPS="$TMP/escaped-runner-deps"
+mkdir -p "$ESCAPED_DEPS"
+cp "$STOP_RUNNER/ui/node_modules/.mosh-deps-stamp" "$ESCAPED_DEPS/.mosh-deps-stamp"
+rm -rf "$STOP_RUNNER/ui/node_modules"
+ln -s "$ESCAPED_DEPS" "$STOP_RUNNER/ui/node_modules"
+if env CN_REPO="$STOP_RUNNER" CN_HOME="$STOP_HOME" CN_WORK_ROOT="$STOP_WORK_ROOT" \
+    CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" \
+    CN_GH_BIN="$GH_STUB" CN_CLASSIFY="$STOP_RUNNER/scripts/auto-loop/classify.sh" \
+    CN_GATE="$STOP_RUNNER/scripts/auto-loop/gate.sh" CN_STUB_STATE="$STOP_STUB_STATE" \
+    "$ENTRY" check >"$TMP/escaped-deps.out"; then
+  not_ok "runner dependency-root symlink substitution fails closed"
+else
+  ok "runner dependency-root symlink substitution fails closed"
+fi
+assert_eq "dependency-root symlink reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/escaped-deps.out")"
+rm "$STOP_RUNNER/ui/node_modules"
+mkdir -p "$STOP_RUNNER/ui/node_modules"
+cp "$ESCAPED_DEPS/.mosh-deps-stamp" "$STOP_RUNNER/ui/node_modules/.mosh-deps-stamp"
+
+ESCAPED_UI="$TMP/escaped-runner-ui"
+SAVED_UI="$TMP/stopped-runner-ui"
+mkdir -p "$ESCAPED_UI/node_modules"
+cp "$STOP_RUNNER/ui/package-lock.json" "$ESCAPED_UI/package-lock.json"
+cp "$STOP_RUNNER/ui/node_modules/.mosh-deps-stamp" "$ESCAPED_UI/node_modules/.mosh-deps-stamp"
+mv "$STOP_RUNNER/ui" "$SAVED_UI"
+ln -s "$ESCAPED_UI" "$STOP_RUNNER/ui"
+if env CN_REPO="$STOP_RUNNER" CN_HOME="$STOP_HOME" CN_WORK_ROOT="$STOP_WORK_ROOT" \
+    CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" \
+    CN_GH_BIN="$GH_STUB" CN_CLASSIFY="$STOP_RUNNER/scripts/auto-loop/classify.sh" \
+    CN_GATE="$STOP_RUNNER/scripts/auto-loop/gate.sh" CN_STUB_STATE="$STOP_STUB_STATE" \
+    "$ENTRY" check >"$TMP/escaped-ui.out"; then
+  not_ok "runner UI ancestor symlink substitution fails closed"
+else
+  ok "runner UI ancestor symlink substitution fails closed"
+fi
+assert_eq "UI ancestor symlink reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/escaped-ui.out")"
+rm "$STOP_RUNNER/ui"
+mv "$SAVED_UI" "$STOP_RUNNER/ui"
 
 stopped_check="$(env CN_REPO="$STOP_RUNNER" CN_HOME="$STOP_HOME" CN_WORK_ROOT="$STOP_WORK_ROOT" \
   CN_BASE_REF=origin/main CN_PR_BASE=main CN_CODEX_BIN="$CODEX_STUB" \
@@ -391,6 +451,7 @@ assert_eq "unreadable sentinel refusal creates no logs" false "$([ -e "$HIDDEN_H
 assert_eq "unreadable sentinel refusal never reaches Codex" false "$([ -e "$STOP_STUB_STATE/codex.log" ] && printf true || printf false)"
 assert_eq "unreadable sentinel refusal never reaches GitHub" false "$([ -e "$STOP_STUB_STATE/gh.log" ] && printf true || printf false)"
 
+export CN_TRUSTED_UI_DEPS="$REPO/ui/node_modules"
 touch "$HOME_DIR/ARMED"
 chmod 600 "$HOME_DIR/ARMED"
 before="$(git -C "$REPO" status --porcelain=v1 --untracked-files=all)"
@@ -414,6 +475,13 @@ assert_match "implementation resumed the planning thread" 'exec resume .*019f000
 assert_match "agent sessions ignore user config" '--ignore-user-config' "$STUB_STATE/codex.log"
 assert_match "agent sessions use restricted permission profiles" 'default_permissions="cn_lane"' "$STUB_STATE/codex.log"
 assert_match "agent permission profile denies network" 'permissions\.cn_lane\.network\.enabled=false' "$STUB_STATE/codex.log"
+assert_match "agent permission profile can traverse the trusted dependency target" "$(cd "$REPO/ui/node_modules" && pwd -P)" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can execute pinned command guards" "$ROOT/scripts/first-stranger/codex-native/agent-bin" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read the Homebrew binary root" "$(cd /opt/homebrew/bin && pwd -P)" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read Homebrew Cellar dylibs" "$(cd /opt/homebrew/Cellar && pwd -P)" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read Homebrew opt links" "$(cd /opt/homebrew/opt && pwd -P)" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read global Node modules" "$(cd /opt/homebrew/lib/node_modules && pwd -P)" "$STUB_STATE/codex.log"
+assert_match "agent permission profile can read OpenSSL configuration" "$(cd /opt/homebrew/etc/openssl@3 && pwd -P)" "$STUB_STATE/codex.log"
 assert_match "agent shell environment inheritance is pinned" 'shell_environment_policy\.inherit="core"' "$STUB_STATE/codex.log"
 assert_eq "agent process receives no supervisor secret environment" false "$([ -e "$STUB_STATE/agent-env-leak" ] && printf true || printf false)"
 assert_no_match "agent sessions do not use legacy full-read sandbox modes" 'sandbox_mode=| -s (read-only|workspace-write)' "$STUB_STATE/codex.log"

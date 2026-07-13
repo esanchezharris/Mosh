@@ -206,16 +206,57 @@ assert_failure "agent git guard blocks commits" env CN_REAL_GIT="$(command -v gi
 assert_failure "agent GitHub guard blocks PR actions" env PATH="$NATIVE/agent-bin:$PATH" gh pr create --draft
 NPM_REAL_STUB="$TMP/npm-real"
 NPM_CAPTURE="$TMP/npm-args"
+NPM_ENV_CAPTURE="$TMP/npm-env"
 cat >"$NPM_REAL_STUB" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >"$NPM_CAPTURE"
+printf '%s\n' \
+  "script_shell=${NPM_CONFIG_SCRIPT_SHELL:-}" \
+  "update_notifier=${NPM_CONFIG_UPDATE_NOTIFIER:-}" \
+  "ci=${CI:-}" \
+  "cache=${NPM_CONFIG_CACHE:-}" >"$NPM_ENV_CAPTURE"
 EOF
 chmod +x "$NPM_REAL_STUB"
-export NPM_CAPTURE
-CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run dev -- --host 127.0.0.1
+export NPM_CAPTURE NPM_ENV_CAPTURE
+WRAPPER_HOME="$TMP/npm-home"
+mkdir -p "$WRAPPER_HOME"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run dev -- --host 127.0.0.1
 assert_success "gate npm guard forces Vite strictPort" rg -q -- '--strictPort' "$NPM_CAPTURE"
-CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run test:e2e
+assert_success "npm guard pins the lifecycle shell" rg -qx 'script_shell=/bin/sh' "$NPM_ENV_CAPTURE"
+assert_success "npm guard disables update notifications" rg -qx 'update_notifier=false' "$NPM_ENV_CAPTURE"
+assert_success "npm guard forces CI mode" rg -qx 'ci=1' "$NPM_ENV_CAPTURE"
+assert_success "npm guard confines cache to private HOME" rg -qx "cache=$WRAPPER_HOME/.npm" "$NPM_ENV_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" test
+assert_success "npm guard disables Vitest cache without an existing separator" rg -qx 'test -- --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run test -- src/agent/skillHarness.test.ts
+assert_success "npm guard disables Vitest cache with an existing separator" rg -qx 'run test -- src/agent/skillHarness.test.ts --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run --silent test
+assert_success "npm guard cannot be bypassed by run options before the Vitest script" rg -qx 'run --silent test -- --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" --silent test --no-cache
+assert_success "npm guard appends a pass-through cache flag when npm consumed an earlier flag" \
+  rg -qx -- '--silent test --no-cache -- --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run --silent dev
+assert_success "Vite strictPort cannot be bypassed by run options" rg -q -- '--strictPort' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" view test
+assert_eq "npm guard does not rewrite a non-Vitest view command" 'view test' "$(cat "$NPM_CAPTURE")"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" exec test
+assert_eq "npm guard does not rewrite a non-Vitest exec command" 'exec test' "$(cat "$NPM_CAPTURE")"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" --workspace test run build
+assert_eq "npm guard does not confuse an option value with the Vitest script" '--workspace test run build' "$(cat "$NPM_CAPTURE")"
+assert_failure "npm guard rejects ambiguous options before a guarded script" \
+  env HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" --unknown test
+for test_alias in t tst tes; do
+  HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" "$test_alias"
+  assert_success "npm guard covers the $test_alias alias for Vitest" rg -qx "$test_alias -- --no-cache" "$NPM_CAPTURE"
+done
+for run_alias in rum urn; do
+  HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" "$run_alias" test
+  assert_success "npm guard covers the $run_alias alias for npm run test" \
+    rg -qx "$run_alias test -- --no-cache" "$NPM_CAPTURE"
+done
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run test:e2e
 assert_failure "gate npm guard does not rewrite non-server scripts" rg -q -- '--strictPort' "$NPM_CAPTURE"
+assert_failure "gate npm guard does not rewrite Playwright scripts" rg -q -- '--no-cache' "$NPM_CAPTURE"
 MKTEMP_HOME="$TMP/mktemp-home"
 mkdir -p "$MKTEMP_HOME"
 guarded_tmp="$(TMPDIR="$MKTEMP_HOME" "$NATIVE/agent-bin/mktemp")"
@@ -251,7 +292,8 @@ done
 before_status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 before_worktrees="$(git -C "$ROOT" worktree list --porcelain)"
 before_branches="$(git -C "$ROOT" branch --format='%(refname)')"
-assert_success "check succeeds without mutation" env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" check >/dev/null
+check_json="$(env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" check)"
+assert_eq "check reports a healthy agent toolchain profile" true "$(jq -r '.checks.agent_toolchain_profile' <<<"$check_json")"
 after_status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 assert_eq "check leaves the checkout unchanged" "$before_status" "$after_status"
 BROKEN_GATE_PROFILE="$TMP/broken-gate.sb"
@@ -263,6 +305,38 @@ else
   ok "check rejects an invalid gate profile"
 fi
 assert_eq "check reports invalid gate profile" false "$(jq -r '.checks.gate_profile' "$TMP/broken-check.json")"
+FOREIGN_DEPS="$TMP/foreign-deps"
+mkdir -p "$FOREIGN_DEPS"
+cp "$ROOT/ui/node_modules/.mosh-deps-stamp" "$FOREIGN_DEPS/.mosh-deps-stamp"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_TRUSTED_UI_DEPS="$FOREIGN_DEPS" "$ENTRY" check >"$TMP/foreign-deps-check.json"; then
+  not_ok "check rejects a lock-matched dependency root outside the runner"
+else
+  ok "check rejects a lock-matched dependency root outside the runner"
+fi
+assert_eq "foreign dependency root reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/foreign-deps-check.json")"
+FAKE_BREW="$TMP/fake-homebrew"
+mkdir -p "$FAKE_BREW/bin" "$FAKE_BREW/Cellar" "$FAKE_BREW/opt" \
+  "$FAKE_BREW/lib/node_modules" "$FAKE_BREW/etc/openssl@3"
+touch "$FAKE_BREW/bin/node" "$FAKE_BREW/bin/npm"
+chmod +x "$FAKE_BREW/bin/node" "$FAKE_BREW/bin/npm"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_BREW_ROOT="$FAKE_BREW" "$ENTRY" check >"$TMP/foreign-brew-check.json"; then
+  not_ok "check rejects an unexpected Homebrew root even when its shape is plausible"
+else
+  ok "check rejects an unexpected Homebrew root even when its shape is plausible"
+fi
+assert_eq "unexpected Homebrew root reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/foreign-brew-check.json")"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_BREW_ROOT="$TMP/missing-homebrew" "$ENTRY" check >"$TMP/missing-brew-check.json"; then
+  not_ok "check rejects a missing Homebrew root"
+else
+  ok "check rejects a missing Homebrew root"
+fi
+assert_eq "missing Homebrew root reports an unhealthy agent profile" false \
+  "$(jq -r '.checks.agent_toolchain_profile' "$TMP/missing-brew-check.json")"
 assert_failure "unarmed run refuses before orchestration" env CN_HOME="$TMP/unarmed-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" run --lane FS-B1
 assert_failure "unarmed run never reaches Codex" test -e "$TMP/codex.called"
 assert_failure "unarmed run never reaches GitHub" test -e "$TMP/gh.called"
@@ -271,6 +345,7 @@ assert_eq "unarmed run creates no branch" "$before_branches" "$(git -C "$ROOT" b
 
 status_json="$(env CN_HOME="$TMP/status-home" CN_CONTROL_REPO="$ROOT" CN_WORK_ROOT="$TMP/status-work" "$ENTRY" status)"
 assert_success "status is valid JSON" jq -e . <<<"$status_json"
+assert_eq "status exposes agent toolchain profile health" true "$(jq -r '.checks.agent_toolchain_profile' <<<"$status_json")"
 assert_eq "status reports unarmed" false "$(jq -r '.armed' <<<"$status_json")"
 assert_eq "status reports no lane states" 0 "$(jq '.lanes | length' <<<"$status_json")"
 assert_eq "status exposes external STOP independently" false "$(jq -r '.stop_sources.external' <<<"$status_json")"

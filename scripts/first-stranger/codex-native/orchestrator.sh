@@ -90,12 +90,53 @@ cn_bool() {
 }
 
 cn_toml_path_ok() {
-  case "$1" in *'"'*|*'\'*|*$'\n'*|*$'\r'*) return 1 ;; esac
+  if LC_ALL=C printf '%s' "$1" | grep -q '[^ -~]'; then return 1; fi
+  case "$1" in *'"'*|*'\'*) return 1 ;; esac
   return 0
 }
 
+cn_agent_toolchain_valid() {
+  local repo ui expected_deps deps tools_root brew_root brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
+  repo="$(cn_real_dir "$CN_REPO")" || return 1
+  [ -d "$repo/ui" ] && [ ! -L "$repo/ui" ] || return 1
+  ui="$(cn_real_dir "$repo/ui")" || return 1
+  [ "$ui" = "$repo/ui" ] || return 1
+  [ -d "$repo/ui/node_modules" ] && [ ! -L "$repo/ui/node_modules" ] || return 1
+  [ -d "$CN_TRUSTED_UI_DEPS" ] && [ ! -L "$CN_TRUSTED_UI_DEPS" ] || return 1
+  expected_deps="$(cn_real_dir "$repo/ui/node_modules")" || return 1
+  deps="$(cn_real_dir "$CN_TRUSTED_UI_DEPS")" || return 1
+  [ "$expected_deps" = "$ui/node_modules" ] && [ "$deps" = "$expected_deps" ] || return 1
+  cn_trusted_deps_match "$repo" "$CN_TRUSTED_UI_DEPS" || return 1
+  [ -d "$SELF/agent-bin" ] && [ ! -L "$SELF/agent-bin" ] || return 1
+  tools_root="$(cn_real_dir "$SELF/agent-bin")" || return 1
+  [ "$tools_root" = "$SELF/agent-bin" ] || return 1
+  [ -x "$tools_root/npm" ] && [ -x "$tools_root/git" ] && [ -x "$tools_root/gh" ] || return 1
+  [ -r "/opt/homebrew/lib/node_modules/npm/lib/utils/cmd-list.js" ] || return 1
+
+  [ -d "$CN_BREW_ROOT" ] && [ ! -L "$CN_BREW_ROOT" ] || return 1
+  brew_root="$(cn_real_dir "$CN_BREW_ROOT")" || return 1
+  [ "$brew_root" = /opt/homebrew ] || return 1
+  brew_bin="$(cn_real_dir "$brew_root/bin")" || return 1
+  brew_cellar="$(cn_real_dir "$brew_root/Cellar")" || return 1
+  brew_opt="$(cn_real_dir "$brew_root/opt")" || return 1
+  brew_node_modules="$(cn_real_dir "$brew_root/lib/node_modules")" || return 1
+  brew_openssl_config="$(cn_real_dir "$brew_root/etc/openssl@3")" || return 1
+  [ "$brew_bin" = "$brew_root/bin" ] || return 1
+  [ "$brew_cellar" = "$brew_root/Cellar" ] || return 1
+  [ "$brew_opt" = "$brew_root/opt" ] || return 1
+  [ "$brew_node_modules" = "$brew_root/lib/node_modules" ] || return 1
+  [ "$brew_openssl_config" = "$brew_root/etc/openssl@3" ] || return 1
+  [ -x "$brew_bin/node" ] && [ -x "$brew_bin/npm" ] || return 1
+
+  for path in "$repo" "$deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
+    cn_toml_path_ok "$path" || return 1
+  done
+}
+
 cn_agent_permissions_arg() {
-  local wt runtime access="$3" common home tmp pointer deps_path
+  local wt runtime access="$3" common home tmp pointer deps_path trusted_deps tools_root
+  local brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
+  cn_agent_toolchain_valid || return 1
   wt="$(cn_real_dir "$1")" || return 1
   runtime="$(cn_real_dir "$2")" || return 1
   case "$access" in read|write) ;; *) return 1 ;; esac
@@ -105,11 +146,20 @@ cn_agent_permissions_arg() {
   tmp="$(cn_real_dir "$runtime/tmp")" || return 1
   pointer="$wt/.git"
   deps_path="$wt/ui/node_modules"
-  cn_toml_path_ok "$wt" && cn_toml_path_ok "$runtime" && cn_toml_path_ok "$common" && \
-    cn_toml_path_ok "$home" && cn_toml_path_ok "$tmp" && cn_toml_path_ok "$pointer" && \
-    cn_toml_path_ok "$deps_path" || return 1
-  printf 'permissions.cn_lane.filesystem={":minimal"="read","%s"="%s","%s"="read","%s"="write","%s"="write","%s"="read","%s"="read","%s"="read"}\n' \
-    "$wt" "$access" "$runtime" "$home" "$tmp" "$common" "$pointer" "$deps_path"
+  trusted_deps="$(cn_real_dir "$CN_TRUSTED_UI_DEPS")" || return 1
+  tools_root="$(cn_real_dir "$SELF/agent-bin")" || return 1
+  brew_bin="$(cn_real_dir "$CN_BREW_ROOT/bin")" || return 1
+  brew_cellar="$(cn_real_dir "$CN_BREW_ROOT/Cellar")" || return 1
+  brew_opt="$(cn_real_dir "$CN_BREW_ROOT/opt")" || return 1
+  brew_node_modules="$(cn_real_dir "$CN_BREW_ROOT/lib/node_modules")" || return 1
+  brew_openssl_config="$(cn_real_dir "$CN_BREW_ROOT/etc/openssl@3")" || return 1
+  for path in "$wt" "$runtime" "$common" "$home" "$tmp" "$pointer" "$deps_path" \
+    "$trusted_deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"; do
+    cn_toml_path_ok "$path" || return 1
+  done
+  printf 'permissions.cn_lane.filesystem={":minimal"="read","%s"="%s","%s"="read","%s"="write","%s"="write","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read","%s"="read"}\n' \
+    "$wt" "$access" "$runtime" "$home" "$tmp" "$common" "$pointer" "$deps_path" \
+    "$trusted_deps" "$tools_root" "$brew_bin" "$brew_cellar" "$brew_opt" "$brew_node_modules" "$brew_openssl_config"
 }
 
 cn_gate_profile_valid() {
@@ -269,13 +319,14 @@ cn_branch() {
 }
 
 cn_check() {
-  local ok=true stopped armed base_ok backlog_ok schemas_ok=true gate_profile_ok gate_execution_enabled dep stop_report
+  local ok=true stopped armed base_ok backlog_ok schemas_ok=true gate_profile_ok agent_toolchain_profile_ok gate_execution_enabled dep stop_report
   for dep in git jq lsof rg "$CN_CODEX_BIN" "$CN_GH_BIN" "$CN_SANDBOX_BIN"; do
     cn_command_exists "$dep" || ok=false
   done
   if git -C "$CN_REPO" rev-parse --verify "$CN_BASE_REF^{commit}" >/dev/null 2>&1; then base_ok=true; else base_ok=false; fi
   if [ -r "$CN_BACKLOG" ]; then backlog_ok=true; else backlog_ok=false; fi
   if cn_gate_profile_valid; then gate_profile_ok=true; else gate_profile_ok=false; fi
+  if cn_agent_toolchain_valid; then agent_toolchain_profile_ok=true; else agent_toolchain_profile_ok=false; fi
   if [ "${CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE:-0}" = 1 ]; then gate_execution_enabled=true; else gate_execution_enabled=false; fi
   for schema in "$CN_SCHEMAS"/*.json; do jq -e . "$schema" >/dev/null || schemas_ok=false; done
   stop_report="$(cn_stop_sources_json "$CN_REPO" "$CN_CONTROL_REPO" "$CN_WORK_ROOT")"
@@ -284,24 +335,28 @@ cn_check() {
   jq -nc --argjson ok "$ok" --argjson armed "$armed" --argjson stopped "$stopped" \
     --argjson base_ok "$base_ok" --argjson backlog_ok "$backlog_ok" \
     --argjson schemas_ok "$schemas_ok" --argjson gate_profile_ok "$gate_profile_ok" \
+    --argjson agent_toolchain_profile_ok "$agent_toolchain_profile_ok" \
     --argjson gate_execution_enabled "$gate_execution_enabled" --arg base_ref "$CN_BASE_REF" \
     --arg pr_base "$CN_PR_BASE" --arg model "$CN_MODEL" --arg control_repo "$CN_CONTROL_REPO" \
     --argjson stop_report "$stop_report" \
-    '{ok:($ok and $base_ok and $backlog_ok and $schemas_ok and $gate_profile_ok),armed:$armed,stopped:$stopped,base_ref:$base_ref,pr_base:$pr_base,model:$model,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{base_ref:$base_ok,backlog:$backlog_ok,schemas:$schemas_ok,gate_profile:$gate_profile_ok,gate_execution_enabled:$gate_execution_enabled}}'
-  [ "$ok" = true ] && [ "$base_ok" = true ] && [ "$backlog_ok" = true ] && [ "$schemas_ok" = true ] && [ "$gate_profile_ok" = true ]
+    '{ok:($ok and $base_ok and $backlog_ok and $schemas_ok and $gate_profile_ok and $agent_toolchain_profile_ok),armed:$armed,stopped:$stopped,base_ref:$base_ref,pr_base:$pr_base,model:$model,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{base_ref:$base_ok,backlog:$backlog_ok,schemas:$schemas_ok,gate_profile:$gate_profile_ok,agent_toolchain_profile:$agent_toolchain_profile_ok,gate_execution_enabled:$gate_execution_enabled}}'
+  [ "$ok" = true ] && [ "$base_ok" = true ] && [ "$backlog_ok" = true ] && [ "$schemas_ok" = true ] && \
+    [ "$gate_profile_ok" = true ] && [ "$agent_toolchain_profile_ok" = true ]
 }
 
 cn_status() {
-  local armed stopped files="[]" stop_report
+  local armed stopped files="[]" stop_report agent_toolchain_profile_ok
   armed="$(cn_bool cn_require_armed)"
   stop_report="$(cn_stop_sources_json "$CN_REPO" "$CN_CONTROL_REPO" "$CN_WORK_ROOT")"
   stopped="$(jq -r '.stop_sources | [.[]] | any' <<<"$stop_report")"
+  if cn_agent_toolchain_valid; then agent_toolchain_profile_ok=true; else agent_toolchain_profile_ok=false; fi
   if [ -d "$CN_HOME/state" ]; then
     files="$(for f in "$CN_HOME/state"/*.json; do [ -f "$f" ] && jq -c . "$f" 2>/dev/null || true; done | jq -sc '.')"
   fi
   jq -nc --argjson armed "$armed" --argjson stopped "$stopped" --argjson lanes "$files" \
     --arg base_ref "$CN_BASE_REF" --arg control_repo "$CN_CONTROL_REPO" --argjson stop_report "$stop_report" \
-    '{armed:$armed,stopped:$stopped,base_ref:$base_ref,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,lanes:$lanes}'
+    --argjson agent_toolchain_profile_ok "$agent_toolchain_profile_ok" \
+    '{armed:$armed,stopped:$stopped,base_ref:$base_ref,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{agent_toolchain_profile:$agent_toolchain_profile_ok},lanes:$lanes}'
 }
 
 cn_lane_json() {

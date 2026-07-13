@@ -57,7 +57,15 @@ source independently; missing or unreadable control/STOP state is fatal.
   block GitHub CLI access. The OS-enforced permission profile is the authority;
   the supervisor also rejects any unexpected agent-created commit or Git
   metadata rebinding. Runtime parents are read-only to the agent and every
-  resumed HOME/TMP is revalidated as a real child directory.
+  resumed HOME/TMP is revalidated as a real child directory. The profile adds
+  read-only access only to the pinned command guards, the lock-stamped
+  dependency target in the clean runner checkout, and the fixed Apple Silicon
+  Homebrew runtime roots needed by Node, npm, TypeScript, Vitest, Playwright,
+  and OpenSSL. Dependency writes,
+  owner-home reads, and non-loopback network remain denied. The pinned npm
+  guard uses `/bin/sh`, disables update checks, confines its cache to the
+  private agent HOME, forces CI mode, and disables Vitest's dependency-local
+  cache without changing Playwright invocations.
 - The routing guard is not a second test gate. It rejects never-touch paths,
   routes all non-safe product work to owner review, and permits `safe` only for
   `docs/**`, `ui/**`, and Python under `service/**`.
@@ -132,3 +140,8 @@ remote SHA comparison, git/GitHub agent guards, read-only `check`, and unarmed
 refusal. The hermetic integration test creates temporary repositories and stubs
 Codex, GitHub, classifier, and gate behavior to prove the full draft-PR path
 without touching a real branch, session, push, or PR.
+
+Both `check` and `status` expose `checks.agent_toolchain_profile` independently.
+It is false if the dependency root escapes the runner, its lock stamp drifts,
+or a required Homebrew runtime root is missing, malformed, or unexpected.
+`check` then exits nonzero without invoking a model.

@@ -7,11 +7,126 @@ REAL_NPM="${CN_REAL_NPM:-/opt/homebrew/bin/npm}"
   exit 127
 }
 
-if [ "${1:-}" = run ] && [ "${2:-}" = dev ]; then
-  for arg in "$@"; do
-    [ "$arg" != --strictPort ] || exec "$REAL_NPM" "$@"
+export NPM_CONFIG_SCRIPT_SHELL=/bin/sh
+export NPM_CONFIG_UPDATE_NOTIFIER=false
+export NPM_CONFIG_CACHE="$HOME/.npm"
+export CI=1
+
+args=("$@")
+argc="${#args[@]}"
+index=0
+command_name=""
+script_name=""
+ambiguous=false
+has_separator=false
+
+for arg in "$@"; do
+  [ "$arg" != -- ] || has_separator=true
+done
+
+while [ "$index" -lt "$argc" ]; do
+  arg="${args[$index]}"
+  case "$arg" in
+    --silent|-s|--json|--workspaces|--include-workspace-root)
+      index=$((index + 1))
+      ;;
+    --workspace|-w|--prefix|--userconfig|--registry|--loglevel)
+      [ $((index + 1)) -lt "$argc" ] || exec "$REAL_NPM" "$@"
+      index=$((index + 2))
+      ;;
+    --workspace=*|--prefix=*|--userconfig=*|--registry=*|--loglevel=*)
+      index=$((index + 1))
+      ;;
+    --version|-v|--help|-h)
+      exec "$REAL_NPM" "$@"
+      ;;
+    --)
+      break
+      ;;
+    --*)
+      ambiguous=true
+      index=$((index + 1))
+      ;;
+    -*)
+      ambiguous=true
+      index=$((index + 1))
+      ;;
+    *)
+      command_name="$arg"
+      index=$((index + 1))
+      break
+      ;;
+  esac
+done
+
+if [ -n "$command_name" ]; then
+  command_name="$(/opt/homebrew/bin/node -e '
+    const { deref } = require("/opt/homebrew/lib/node_modules/npm/lib/utils/cmd-list.js");
+    process.stdout.write(deref(process.argv[1]) || "");
+  ' "$command_name")" || {
+    printf 'codex-native npm guard: could not resolve npm command\n' >&2
+    exit 127
+  }
+fi
+
+if [ "$command_name" = run ]; then
+  while [ "$index" -lt "$argc" ]; do
+    arg="${args[$index]}"
+    case "$arg" in
+      --silent|-s|--if-present|--ignore-scripts|--foreground-scripts|--workspaces|--include-workspace-root)
+        index=$((index + 1))
+        ;;
+      --workspace|-w)
+        [ $((index + 1)) -lt "$argc" ] || exec "$REAL_NPM" "$@"
+        index=$((index + 2))
+        ;;
+      --workspace=*)
+        index=$((index + 1))
+        ;;
+      --)
+        break
+        ;;
+      --*)
+        ambiguous=true
+        index=$((index + 1))
+        ;;
+      -*)
+        ambiguous=true
+        index=$((index + 1))
+        ;;
+      *)
+        script_name="$arg"
+        break
+        ;;
+    esac
   done
-  exec "$REAL_NPM" "$@" --strictPort
+fi
+
+if [ "$ambiguous" = true ]; then
+  if [ "$command_name" = test ] || [ "$script_name" = test ] || [ "$script_name" = dev ]; then
+    printf 'codex-native npm guard: ambiguous options cannot precede guarded scripts\n' >&2
+    exit 64
+  fi
+fi
+
+is_test=false
+is_dev=false
+[ "$command_name" != test ] || is_test=true
+[ "$script_name" != test ] || is_test=true
+[ "$script_name" != dev ] || is_dev=true
+
+if [ "$is_dev" = true ]; then
+  if [ "$has_separator" = true ]; then
+    exec "$REAL_NPM" "$@" --strictPort
+  fi
+  exec "$REAL_NPM" "$@" -- --strictPort
+fi
+
+if [ "$is_test" = true ]; then
+  if [ "$has_separator" = true ]; then
+    exec "$REAL_NPM" "$@" --no-cache
+  fi
+  exec "$REAL_NPM" "$@" -- --no-cache
 fi
 
 exec "$REAL_NPM" "$@"
