@@ -1,0 +1,14 @@
+{
+  "id": "seed-moshi-morph",
+  "title": "Body Morph",
+  "target": "moshi",
+  "pass": "bolder",
+  "kind": "html",
+  "model": "opus-insession",
+  "theme": "dark",
+  "usesMoshi": true,
+  "source": "<style>.mfail{display:grid;place-items:center;height:100%;color:var(--v2-faint);font:11px var(--font-mono)}</style><style>\n.m{position:absolute;inset:0;background:var(--v2-bg);color:var(--v2-text);font-family:var(--font-body);padding:44px;display:flex;flex-direction:column;gap:18px}\n.title{font-family:var(--font-display);font-weight:800;font-size:22px}\n.title em{font-style:normal;color:#ff8a3d}\n.sub{font-size:13px;color:var(--v2-dim);max-width:640px;line-height:1.5}\n.row{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;flex:1}\n.stage{position:relative;border:1px solid var(--v2-line);border-radius:18px;overflow:hidden;background:var(--v2-ink)}\n.stage>div{position:absolute;inset:0}\n.tag{position:absolute;left:12px;bottom:12px;z-index:2;font-family:var(--font-mono);font-size:10px;color:var(--v2-dim);background:rgba(8,9,12,.7);padding:4px 8px;border-radius:6px;border:1px solid var(--v2-line)}\n</style>\n<div class=\"m\">\n <div class=\"title\">Or — Moshi's <em>body itself</em> grows with the song</div>\n <div class=\"sub\">The alternative to the coat: your decisions reshape the creature. Riskier (can he get ugly? does he stay \"him\"?) — but visceral. Compare it head-to-head.</div>\n <div class=\"row\">\n  <div class=\"stage\"><div id=\"mo1\"></div><div class=\"tag\">bar 1 · sparse</div></div>\n  <div class=\"stage\"><div id=\"mo2\"></div><div class=\"tag\">bar 32 · dense</div></div>\n  <div class=\"stage\"><div id=\"mo3\"></div><div class=\"tag\">final · maxed</div></div>\n </div>\n</div>\n<script>\n\n  (function(){var h=document.getElementById('mo1');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"SILK\",\"seed\":0.4,\"quality\":\"ps2\",\"style\":\"toon\",\"interactive\":false});m.set('energy',0.15);m.set('mood',0.5);}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n\n  (function(){var h=document.getElementById('mo2');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"GHOST\",\"seed\":0.55,\"quality\":\"ps2\",\"style\":\"toon\",\"interactive\":false});m.set('energy',0.6);m.set('mood',0.7);m.setAnatomy&&m.setAnatomy('B');}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n\n  (function(){var h=document.getElementById('mo3');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"BREAKS\",\"seed\":0.9,\"quality\":\"ps2\",\"style\":\"ps2\",\"interactive\":false});m.set('energy',1);m.set('heat',0.8);m.setAnatomy&&m.setAnatomy('C');}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n</script>",
+  "createdAt": 0,
+  "notes": "the alternative you're torn about: the body itself mutates with the song",
+  "savedAt": 1783797639053
+}

@@ -1,0 +1,10 @@
+node_modules
+dist
+.env.local
+.arena-spend.json
+.arena-generated.json
+.arena-generated.archive-*.json
+.verify
+.arena-verdicts.json
+*.local
+.DS_Store

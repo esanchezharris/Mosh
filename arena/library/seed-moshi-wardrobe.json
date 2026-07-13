@@ -1,0 +1,14 @@
+{
+  "id": "seed-moshi-wardrobe",
+  "title": "Wardrobe of Songs",
+  "target": "moshi",
+  "pass": "elevate",
+  "kind": "html",
+  "model": "opus-insession",
+  "theme": "dark",
+  "usesMoshi": true,
+  "source": "<style>.mfail{display:grid;place-items:center;height:100%;color:var(--v2-faint);font:11px var(--font-mono)}</style><style>\n.m{position:absolute;inset:0;background:var(--v2-bg);color:var(--v2-text);font-family:var(--font-body);padding:44px;display:flex;flex-direction:column;gap:20px}\n.title{font-family:var(--font-display);font-weight:800;font-size:22px}\n.title span{color:var(--v2-dim);font-weight:400;font-size:14px}\n.row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;flex:1}\n.song{border:1px solid var(--v2-line);border-radius:18px;background:var(--v2-surface);overflow:hidden;display:flex;flex-direction:column}\n.thumb{flex:1;position:relative;background:var(--v2-ink)}\n.thumb>div{position:absolute;inset:0}\n.meta{padding:12px 14px;border-top:1px solid var(--v2-line)}\n.meta b{font-size:14px}.meta span{display:block;font-size:11px;color:var(--v2-faint);font-family:var(--font-mono);margin-top:2px}\n</style>\n<div class=\"m\">\n <div class=\"title\">Your library <span>— same Moshi, wearing each song's coat</span></div>\n <div class=\"row\">\n  <div class=\"song\"><div class=\"thumb\"><div id=\"w1\"></div></div><div class=\"meta\"><b>midnight drive</b><span>122 · F min · dark</span></div></div>\n  <div class=\"song\"><div class=\"thumb\"><div id=\"w2\"></div></div><div class=\"meta\"><b>sunroom</b><span>96 · C maj · warm</span></div></div>\n  <div class=\"song\"><div class=\"thumb\"><div id=\"w3\"></div></div><div class=\"meta\"><b>rink</b><span>150 · A min · chrome</span></div></div>\n </div>\n</div>\n<script>\n\n  (function(){var h=document.getElementById('w1');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"TAR\",\"seed\":0.5,\"quality\":\"ps2\",\"style\":\"ps2\",\"interactive\":false});}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n\n  (function(){var h=document.getElementById('w2');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"MOLTEN\",\"seed\":0.3,\"quality\":\"ps2\",\"style\":\"baked\",\"interactive\":false});}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n\n  (function(){var h=document.getElementById('w3');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"CHROME\",\"seed\":0.8,\"quality\":\"ps2\",\"style\":\"ps2\",\"interactive\":false});}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();\n</script>",
+  "createdAt": 0,
+  "notes": "invariant core + per-song coat → library thumbnails (3 real creatures)",
+  "savedAt": 1783797634314
+}

@@ -1,0 +1,14 @@
+{
+  "id": "seed-moshi-dock",
+  "title": "Dock Companion",
+  "target": "moshi",
+  "pass": "elevate",
+  "kind": "html",
+  "model": "opus-insession",
+  "theme": "dark",
+  "usesMoshi": true,
+  "source": "<style>.mfail{display:grid;place-items:center;height:100%;color:var(--v2-faint);font:11px var(--font-mono)}</style><style>\n.m{position:absolute;inset:0;display:grid;grid-template-columns:1fr 340px;background:var(--v2-bg);color:var(--v2-text);font-family:var(--font-body)}\n.work{padding:44px;display:flex;flex-direction:column;gap:14px;opacity:.42}\n.work .lane{height:70px;border:1px solid var(--v2-line);border-radius:12px;background:linear-gradient(180deg,var(--v2-surface-2),var(--v2-surface))}\n.rail{border-left:1px solid var(--v2-line);padding:22px;display:flex;flex-direction:column;gap:16px}\n.card{border:1px solid var(--v2-line);border-radius:22px;background:var(--v2-surface);padding:18px;box-shadow:var(--v2-shadow)}\n.head{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--v2-dim);margin-bottom:10px}\n.live{display:inline-flex;gap:7px;align-items:center;font-size:12px;color:var(--v2-accent)}\n.live .led{width:8px;height:8px;border-radius:50%;background:var(--v2-accent);box-shadow:0 0 10px var(--v2-accent)}\n#h1{width:100%;height:280px;border-radius:18px;overflow:hidden;background:radial-gradient(circle at 50% 42%,rgba(204,255,54,.1),transparent 70%);box-shadow:inset 0 0 0 1px rgba(204,255,54,.4),0 0 40px rgba(204,255,54,.14)}\n.cap{text-align:center;font-family:var(--font-display);font-weight:800;font-size:26px;color:var(--v2-accent);margin-top:14px}\n.st{text-align:center;font-size:13px;color:var(--v2-dim);margin-top:6px}\n</style>\n<div class=\"m\">\n <div class=\"work\"><div class=\"lane\"></div><div class=\"lane\"></div><div class=\"lane\"></div><div class=\"lane\"></div><div class=\"lane\"></div></div>\n <div class=\"rail\"><div class=\"card\">\n  <div class=\"head\"><span style=\"font-family:var(--font-display);font-weight:800;font-size:15px;color:var(--v2-text)\">Mosh</span><span class=\"live\"><span class=\"led\"></span>Live</span></div>\n  <div id=\"h1\"></div><div class=\"cap\">vibe</div><div class=\"st\">listening · ready when you are</div>\n </div></div>\n</div>\n<script>\n  (function(){var h=document.getElementById('h1');if(!h)return;\n   try{var m=window.Moshi(h, {\"personality\":\"TAR\",\"seed\":0.5,\"quality\":\"ps2\",\"style\":\"toon\",\"interactive\":true});m.setState('LISTENING');m.set('mood',0.74);function L(){var t=(window.__mosh&&window.__mosh.time)||0;m.set('energy',0.32+0.28*Math.abs(Math.sin(t*1.3)));requestAnimationFrame(L);}requestAnimationFrame(L);}\n   catch(e){h.className='mfail';h.textContent='Moshi (WebGL) unavailable';}})();</script>",
+  "createdAt": 0,
+  "notes": "today's right-rail presence, made premium — invariant core in place",
+  "savedAt": 1783797622897
+}
