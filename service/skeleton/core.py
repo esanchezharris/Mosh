@@ -393,7 +393,8 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
                         env: Optional[List[float]] = None,
                         words: Optional[List[dict]] = None,
                         extract_lyrics: bool = False,
-                        extract_use_llm: bool = True) -> dict:
+                        extract_use_llm: bool = True,
+                        detector: str = "ladder") -> dict:
     """Notes (+ optional F0 / envelope / ASR words) -> an editable `LineSpec`.
 
     Reuses `lyrics.mumble.build_spec_from_take` for the bar binning / stress / spec shape,
@@ -409,7 +410,26 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
         anchors (origin "partial"), mumble stays all-gaps. Raw heard words persist per
         line in `lineHeard` (nothing discarded — future splice boundaries + seeds).
     `words` without `env` is ignored (v4 folds by evidence kind, which only the pruner
-    assigns — that combination was never measured); extraction requires words+env too."""
+    assigns — that combination was never measured); extraction requires words+env too.
+
+    detector="energy" (Phase C, 2026-07-13): swap the Basic-Pitch v1-floor + prune ladder
+    for the benchtest-proven energy detector (gate attacks + relative dips own EXISTENCE;
+    melisma segments re-derived per-slot from F0). Owner-ear-gated adoption candidate — the
+    default stays "ladder" so shipped /skeleton_spec output is unchanged. Falls back to the
+    v1 floor when no envelope is present."""
+    if detector == "energy" and env:
+        from skeleton import segment
+        groups = segment.energy_nuclei(env, HOP_MS / 1000.0, f0)
+        spec = mumble.build_spec_from_take(groups, [], bpm, time_sig=time_sig, grid=grid,
+                                           topic=topic, mood=mood)
+        if spec.get("ok"):
+            spec["source"] = "skeleton"
+            spec["editable"] = True
+            spec["lineScores"] = _line_scores(groups, bpm, time_sig, grid, "energy")
+            spec["skeleton"] = {"algo": "energy", "nuclei": len(groups),
+                                "melisma_groups": sum(1 for g in groups if len(g["segments"]) > 1)}
+        return spec
+
     nuclei, pitches = _nuclei_with_pitch(notes, f0)
 
     if env:

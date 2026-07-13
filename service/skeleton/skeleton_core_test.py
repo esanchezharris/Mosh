@@ -287,6 +287,40 @@ check("no-extraction seedTexts stay ALL-GAPS (pre-correction behavior pinned)",
           for s in (l.get("seedText", "") for l in skx_off["lines"])),
       str([l.get("seedText") for l in skx_off["lines"]]))
 
+# ── 15. Phase C: opt-in energy detector (existence from the envelope, not Basic-Pitch) ──
+# detector="energy" swaps the v1-BP-floor + prune ladder for the benchtest-proven gate+dip
+# detector, melisma re-derived per-slot from F0. Default ("ladder") is UNCHANGED (every
+# check above still passes) — the energy path is the owner-ear-gated adoption candidate.
+E_ENV = [0.02] * 10 + [0.5] * 30 + [0.2] * 5 + [0.5] * 30 + [0.02] * 10   # la-la: 1 span, 1 dip
+ske = core.build_skeleton_spec([], f0=None, bpm=120.0, time_sig=(4, 4), grid="1/8",
+                               env=E_ENV, detector="energy")
+check("energy: ok skeleton from the envelope alone (no Basic-Pitch notes needed)",
+      ske.get("ok") and ske.get("skeleton", {}).get("algo") == "energy", str(ske.get("skeleton")))
+check("energy: gate+dip found 2 syllable nuclei", ske.get("skeleton", {}).get("nuclei") == 2,
+      str(ske.get("skeleton")))
+check("energy: source/editable tagged like every skeleton", ske.get("source") == "skeleton"
+      and ske.get("editable") is True)
+check("energy: lineScores emitted for the render path", len(ske.get("lineScores", [])) >= 1,
+      str(len(ske.get("lineScores", []))))
+# melisma preserved: one continuous span + an F0 step -> 1 slot, 2 pitch segments
+E_MEL_ENV = [0.02] * 10 + [0.5] * 80 + [0.02] * 10
+E_MEL_F0 = ([{"t": i / 100.0, "hz": 220.0} for i in range(50)]
+            + [{"t": i / 100.0, "hz": 277.18} for i in range(50, 100)])
+skem = core.build_skeleton_spec([], f0=E_MEL_F0, bpm=120.0, time_sig=(4, 4), grid="1/8",
+                                env=E_MEL_ENV, detector="energy")
+check("energy: a melisma span is ONE syllable with 2 pitch segments (SoulX glide kept)",
+      skem.get("skeleton", {}).get("nuclei") == 1
+      and len(((skem.get("lineScores") or [{}])[0].get("slots", [{}])[0]).get("segments", [])) == 2,
+      str(skem.get("skeleton")))
+# graceful: detector="energy" but no envelope -> the v1 floor (never breaks)
+ske_noenv = core.build_skeleton_spec(DUET, f0=None, bpm=120.0, env=None, detector="energy")
+check("energy: no envelope -> v1 floor (graceful degrade)",
+      ske_noenv.get("skeleton", {}).get("algo") == "v1", str(ske_noenv.get("skeleton")))
+# the DEFAULT is unchanged: an env call with no detector arg is still the ladder (v3)
+ske_default = core.build_skeleton_spec(DUET, f0=F0_STEP, bpm=120.0, env=FLAT)
+check("default detector is still the ladder (v3) — shipped behavior unchanged",
+      ske_default.get("skeleton", {}).get("algo") == "v3", str(ske_default.get("skeleton")))
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)
