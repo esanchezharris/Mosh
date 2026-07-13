@@ -56,8 +56,14 @@ def _voicing_threshold(env: List[float]) -> float:
 def transfer_envelope(take: List[float], render: List[float], sr: int,
                       hop_s: float = HOP_S, smooth_hops: int = SMOOTH_HOPS,
                       max_boost: float = MAX_BOOST, strength: float = 1.0,
-                      gate_frac: float = GATE_FRAC) -> List[float]:
-    """Return the render gain-matched to the take's energy envelope (same length)."""
+                      gate_frac: float = GATE_FRAC, release_s: float = 0.0) -> List[float]:
+    """Return the render gain-matched to the take's energy envelope (same length).
+
+    ``release_s`` (0 = off, the historical hard behavior): release-limit the gain's
+    fall so it can never drop to silence faster than this — SoulX's natural word tails
+    ring through the release window instead of being hard-chopped when the take rests
+    (owner: "words ending naturally"), while a sustained rest still reaches silence so
+    model breath/hiss stays killed. Fast attacks are unaffected (only the fall is limited)."""
     if strength <= 0.0:
         return list(render)
     env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
@@ -84,6 +90,15 @@ def transfer_envelope(take: List[float], render: List[float], sr: int,
         gains = [sum(gains[max(0, i - half):i + half + 1])
                  / (min(len(gains), i + half + 1) - max(0, i - half))
                  for i in range(len(gains))]
+
+    if release_s > 0.0 and gains:
+        # release-limit the FALL: the gain can never drop by more than one hop's worth of a
+        # full-scale ramp over release_s. A sharp gate-to-silence becomes a natural release
+        # (word tail rings out); a genuine within-phrase decay is gentler than the limit and
+        # rides through untouched; fast attacks (rises) are never limited.
+        max_drop = hop_s / release_s
+        for i in range(1, len(gains)):
+            gains[i] = max(gains[i], gains[i - 1] - max_drop)
 
     hop = max(1, int(sr * hop_s))
     out = []

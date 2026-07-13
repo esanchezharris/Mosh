@@ -153,5 +153,27 @@ tiny = [{"start": 0.0, "end": 0.03, "velocity": 70.0,
          "segments": [{"start": 0.0, "end": 0.03, "pitch": 60}]}]
 check("all-glitch slot keeps a representative segment", len(ff.tidy_segments(tiny)[0]["segments"]) == 1)
 
+# ── 10. snap tiebreaker: NEAREST, ties resolve UP (owner, 2026-07-12) ──────────────────
+# The old tiebreaker sorted(range(-6,7), key=(abs,k)) iterates 0,-1,+1,-2,+2 — every
+# equidistant off-key note FLOORS to the lower scale degree ("high notes are a whole step
+# down from reality"). In a major scale EVERY off-key pitch class is exactly 1 semitone from
+# two degrees (a genuine tie), so the floor bias transposes every off-key note DOWN. F0
+# detection reads sustained/high notes slightly FLAT, so a true E heard as Eb then floored to
+# D lands a whole step low. Fix: ties resolve UP (a flat-detected note lands on its intended
+# higher degree). Single-slot inputs (median == the note) isolate the snap from the octave clamp.
+def snap1(p):
+    return ff.snap_slots_to_key([{"segments": [{"start": 0, "end": 1, "pitch": p}]}],
+                                "D major")[0]["segments"][0]["pitch"]
+# D major = {D,E,F#,G,A,B,C#} = pcs {2,4,6,7,9,11,1}; off-key pcs {0,3,5,8,10} are all ties.
+check("off-key Eb (pc3) snaps UP to E, not down to D", snap1(63) == 64, str(snap1(63)))
+check("off-key G# (pc8) snaps UP to A, not down to G", snap1(68) == 69, str(snap1(68)))
+check("off-key F (pc5) snaps UP to F#, not down to E", snap1(65) == 66, str(snap1(65)))
+check("off-key Bb (pc10) snaps UP to B, not down to A", snap1(70) == 71, str(snap1(70)))
+check("off-key C (pc0) snaps UP to C#, not down to B", snap1(60) == 61, str(snap1(60)))
+check("in-key notes are never moved by the tiebreaker",
+      [snap1(p) for p in (62, 64, 66, 67, 69, 71, 61)] == [62, 64, 66, 67, 69, 71, 61])
+# a flat-detected HIGH note (true E5=76 read as Eb5=75) now recovers UP to E5, not down to D5
+check("a flat-read high note recovers to the intended degree", snap1(75) == 76, str(snap1(75)))
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

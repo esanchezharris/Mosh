@@ -171,6 +171,39 @@ check("event_lags reports each word's measured lag (0/+80/+40ms here)",
       len(lags) == 3 and abs(lags[0]) <= 0.015 and abs(lags[1] - 0.08) <= 0.015
       and abs(lags[2] - 0.04) <= 0.015, str([round(x * 1000) for x in lags]))
 
+# ── 6. RELEASE FADE (owner, 2026-07-12): word tails ring out, not chopped ─────────────
+# The hard silence-gate (raw=0 the instant the take rests) chops SoulX's natural word
+# endings — "I can hear the volume automation rather than the words ending naturally".
+# release_s>0 release-LIMITS the drop to zero (gain can't fall to silence faster than
+# release_s), so the render's own decay tail rings through the release window, then still
+# reaches silence for a sustained rest (model breath/hiss stays killed). release_s=0 keeps
+# the current hard behavior (back-compat — every test above uses the default).
+tail_take = (silence(0.2) + tone(220, 0.3, lambda x: 0.6) + silence(0.5))   # note 0.2-0.5, rest 0.5-1.0
+tail_hiss = 0.02
+tail_render = (silence(0.2) + tone(220, 0.3, lambda x: 0.6)                  # note 0.2-0.5
+               + tone(220, 0.2, lambda x: 0.6 * math.exp(-3.0 * x))          # decay TAIL 0.5-0.7 (~150ms release)
+               + [tail_hiss * math.sin(2 * math.pi * 50 * i / SR) for i in range(int(0.3 * SR))])  # hiss 0.7-1.0
+hard = perform.transfer_envelope(tail_take, tail_render, SR)                       # default release_s=0
+soft = perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.12)
+t0, t1 = span(0.52, 0.58)
+hard_tail = max(abs(v) for v in hard[t0:t1])
+soft_tail = max(abs(v) for v in soft[t0:t1])
+check("hard gate chops the render's decay tail (current behavior)", hard_tail < 0.02, f"{hard_tail:.4f}")
+check("release fade lets the word tail ring out", soft_tail > 0.1, f"{soft_tail:.4f}")
+check("the tail decays naturally (start of tail louder than end)",
+      max(abs(v) for v in soft[span(0.505, 0.53)[0]:span(0.505, 0.53)[1]])
+      > max(abs(v) for v in soft[span(0.60, 0.63)[0]:span(0.60, 0.63)[1]]))
+s0, s1 = span(0.80, 0.98)   # well past the note-end + release window: still silent (hiss killed)
+check("a sustained rest still reaches silence (release completes, hiss killed)",
+      max(abs(v) for v in soft[s0:s1]) < 1e-3, f"{max(abs(v) for v in soft[s0:s1]):.5f}")
+check("release_s=0 is identical to the default (back-compat)",
+      perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.0) == hard)
+check("softened transfer still tracks the take's arc (env_corr stays high)",
+      perform.env_corr(tail_take, soft, SR) > 0.9, f"{perform.env_corr(tail_take, soft, SR):.3f}")
+check("release fade is deterministic (3x)",
+      len({hashlib.sha256(",".join(f"{v:.9f}" for v in perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.12)).encode()).hexdigest()
+           for _ in range(3)}) == 1)
+
 # ── 5. metric sanity + determinism ────────────────────────────────────────────────────
 check("env_corr(x, x) ~= 1", perform.env_corr(take, take, SR) > 0.999)
 

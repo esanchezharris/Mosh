@@ -134,14 +134,19 @@ def _key_pcs(key: str) -> set:
 
 def snap_slots_to_key(slots: List[dict], key: str = "D major") -> List[dict]:
     """Pitch hygiene (owner-certified, demo d5): snap every segment pitch to the SONG KEY's
-    scale (nearest tone, ties prefer lower) and clamp octave outliers toward the line median.
+    scale (nearest tone, ties resolve UP) and clamp octave outliers toward the line median.
     Basic Pitch leaves noise in the skeleton's measured pitches — ornament mis-tracks and
     octave errors — and the singer faithfully sings the wrong note it's given. Pure; the
-    input is not mutated."""
+    input is not mutated.
+
+    Ties resolve UP (owner, 2026-07-12): in a major scale EVERY off-key note is exactly one
+    semitone from two degrees, so a floor-biased tiebreaker transposed every off-key note DOWN
+    ("high notes are a whole step down from reality"). F0 detection reads sustained/high notes
+    slightly FLAT, so a true E heard as Eb must recover UP to E, not floor to D."""
     pcs = _key_pcs(key)
 
     def snap(p: int) -> int:
-        for k in sorted(range(-6, 7), key=lambda k: (abs(k), k)):
+        for k in sorted(range(-6, 7), key=lambda k: (abs(k), -k)):
             if (p + k) % 12 in pcs:
                 return p + k
         return p

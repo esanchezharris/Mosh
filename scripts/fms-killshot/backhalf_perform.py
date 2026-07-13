@@ -50,6 +50,8 @@ TAKE = BH / "source-backhalf-48k.wav"
 SPLIT_S = 55.06
 MAX_SHIFT_S = 0.25    # calibrated: 150ms clamped 4/23 phrase snaps; 250ms only 1
 MAX_BOOST = 8.0       # asymmetric — only frames the render actually VOICES get lifted
+SOFT_RELEASE_S = 0.12  # owner round: release-fade the envelope so word tails ring out
+                       # instead of the hard silence-gate chopping them ("words ending naturally")
 
 
 def write_wav(path: Path, mono, sr: int) -> None:
@@ -146,21 +148,32 @@ def lock() -> int:
         events = candidate_events(cand)
         syl_lags = perform.event_lags(take, aligned, sr, events)
         snapped = perform.snap_to_events(take, aligned, sr, events)
-        out = perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST)
 
-        peak = max(abs(v) for v in out) or 1.0
-        if peak > 0.99:
-            out = [v * 0.99 / peak for v in out]
+        def _finish(mono):
+            pk = max(abs(v) for v in mono) or 1.0
+            return ([v * 0.99 / pk for v in mono] if pk > 0.99 else mono), pk
+
+        # HARD lock (historical): gate the render to silence the instant the take rests.
+        out, peak = _finish(perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST))
+        # SOFT lock (this round): release-fade so word tails ring out naturally.
+        soft, _ = _finish(perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST,
+                                                     release_s=SOFT_RELEASE_S))
 
         corr0 = perform.env_corr(take, rend, sr)
         corr1 = perform.env_corr(take, aligned, sr)
         corr2 = perform.env_corr(take, out, sr)
+        corr2s = perform.env_corr(take, soft, sr)
         voiced = candidate_windows(cand, rest_split_s=0.05)
         sung0 = masked_env_corr(env_t, rend, sr, voiced)
         sung2 = masked_env_corr(env_t, out, sr, voiced)
+        sung2s = masked_env_corr(env_t, soft, sr, voiced)
         perf_wav = SERVE / f"voice-writer-{key}-perf.wav"
+        soft_wav = SERVE / f"voice-writer-{key}-perfsoft.wav"
         write_wav(perf_wav, out, sr)
+        write_wav(soft_wav, soft, sr)
         ab_mix.stereo_ab(str(TAKE), str(perf_wav), str(SERVE / f"ab-perf-{key}.wav"),
+                         sr=sr, right_gain=0.9)
+        ab_mix.stereo_ab(str(TAKE), str(soft_wav), str(SERVE / f"ab-perfsoft-{key}.wav"),
                          sr=sr, right_gain=0.9)
 
         abs_ms = sorted(abs(s) * 1000 for s in shifts)
@@ -172,15 +185,15 @@ def lock() -> int:
                  "sylSnapMedianMs": round(statistics.median(syl_ms), 1) if syl_ms else 0.0,
                  "sylSnapP90Ms": round(syl_ms[int(0.9 * (len(syl_ms) - 1))], 1) if syl_ms else 0.0,
                  "envCorr": {"before": round(corr0, 3), "aligned": round(corr1, 3),
-                             "after": round(corr2, 3)},
-                 "envCorrSung": {"before": round(sung0, 3), "after": round(sung2, 3)},
+                             "after": round(corr2, 3), "afterSoft": round(corr2s, 3)},
+                 "envCorrSung": {"before": round(sung0, 3), "after": round(sung2, 3),
+                                 "afterSoft": round(sung2s, 3)},
                  "peakScaled": peak > 0.99}
         report["candidates"].append(entry)
-        print(f"{key}: envCorr {corr0:.3f} -> {corr1:.3f} (aligned) -> {corr2:.3f} (perf) | "
-              f"sung-spans {sung0:.3f} -> {sung2:.3f} | "
-              f"{len(wins)} phrases shift med {entry['shiftMedianMs']}ms p90 {entry['shiftP90Ms']}ms | "
-              f"{len(events)} words syl-snap med {entry['sylSnapMedianMs']}ms "
-              f"p90 {entry['sylSnapP90Ms']}ms", flush=True)
+        print(f"{key}: envCorr {corr0:.3f} -> {corr2:.3f} (hard) / {corr2s:.3f} (soft) | "
+              f"sung-spans {sung0:.3f} -> {sung2:.3f} (hard) / {sung2s:.3f} (soft) | "
+              f"{len(wins)} phrases shift med {entry['shiftMedianMs']}ms | "
+              f"{len(events)} words syl-snap med {entry['sylSnapMedianMs']}ms", flush=True)
     REPORT.write_text(json.dumps(report, indent=2))
     print(f"report -> {REPORT}", flush=True)
     return 0
@@ -193,8 +206,10 @@ def page() -> int:
     for cand in man["candidates"]:
         key = cand["key"]
         r = rep[key]
-        for suffix in ("-perf",):
+        for suffix in ("-perf", "-perfsoft"):
             src = SERVE / f"voice-writer-{key}{suffix}.wav"
+            if not src.is_file():
+                continue
             subprocess.run(["ffmpeg", "-y", "-i", str(src),
                             str(KIT / "demo-clips" / f"writer-{key}{suffix}.wav")],
                            check=True, capture_output=True)
@@ -208,16 +223,20 @@ def page() -> int:
             f"<td class='sim'>{('%.2f' % w['mouthSim']) if w.get('mouthSim') is not None else ''}</td></tr>"
             for w in cand["words"])
         ec = r["envCorr"]
+        has_soft = (SERVE / f"voice-writer-{key}-perfsoft.wav").is_file()
         mouth = cand.get("mouthSimMean")
-        mouth_txt = f"mouth echo {mouth:.2f} (old round 0.36) · " if mouth else ""
-        syl_txt = (f" · syllable snap med {r['sylSnapMedianMs']:.0f} ms"
-                   if r.get("sylSnapMedianMs") is not None else "")
+        mouth_txt = f"mouth echo {mouth:.2f} · " if mouth else ""
+        soft_block = (f"""
+        <div class="row"><span><b>SOFT lock</b> — word tails ring out (release fade, this round){' · envCorr %.2f' % ec.get('afterSoft', ec['after'])}</span>
+          <audio controls preload="metadata" src="voice-writer-{key}-perfsoft.wav"></audio>
+          <audio controls preload="metadata" src="ab-perfsoft-{key}.wav"></audio></div>""" if has_soft else "")
         cards.append(f"""
       <div class="card">
-        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — mouth-matched + performance-locked</h2>
-          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · phrase snap med {r['shiftMedianMs']:.0f} ms{syl_txt}</span></div>
-        <audio controls preload="metadata" src="voice-writer-{key}-perf.wav"></audio>
-        <div class="row"><span>overlay — your mumble LEFT, locked render RIGHT</span>
+        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — pitch-nearest melody + performance lock</h2>
+          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · phrase snap med {r['shiftMedianMs']:.0f} ms</span></div>
+        {soft_block}
+        <div class="row"><span>HARD lock — the previous chop-to-silence (for contrast)</span>
+          <audio controls preload="metadata" src="voice-writer-{key}-perf.wav"></audio>
           <audio controls preload="metadata" src="ab-perf-{key}.wav"></audio></div>
         <details><summary style="color:#8b949e;font-size:13px;cursor:pointer;margin-top:8px">the lines (with per-line mouth echo)</summary>
         <table><tbody>{rows}</tbody></table></details>
@@ -285,7 +304,7 @@ def page() -> int:
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — truth round: your marked grid, sung in your voice</title>
+<title>Used2 — dynamics bridge: word tails ring out (SOFT vs HARD lock)</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -306,13 +325,14 @@ def page() -> int:
   .oksus{{color:#3fb950;font-size:11px}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — truth round</h1>
-  <p class="sub">The grid is now YOUR hand-marked syllables — every count, every rest,
-     every phrase boundary is where you put it (147 marks). T1 and T2 are two writer draws
-     of the back half sung over that grid in your voice, then performance-locked: each word
-     snapped onto its slot's exact start (~48 ms/word) and shaped to your volume / attack /
-     decay. Filler slots are natural ad-libs (yeah / uh) instead of forced words. Pick the
-     draw that feels most like your song. Kit: writer-T1/T2-perf.wav (plain + padded).</p>
+  <h1>Used2 — dynamics bridge (SOFT vs HARD lock)</h1>
+  <p class="sub">You heard the performance lock as "volume automation rather than the words
+     ending naturally." The <b>SOFT lock</b> below fixes that: instead of chopping the render
+     to silence the instant your take rests, it release-fades the level so each word's tail
+     rings out — then still reaches silence so no model breath leaks. The <b>HARD lock</b> is
+     the old chop, for contrast. Same T1/T2 renders, envelope only — so you can hear the
+     difference now, no re-render. (The flat-high-note melody fix is a score change and lands
+     in the next render.) Kit: writer-T1/T2-perfsoft.wav.</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
