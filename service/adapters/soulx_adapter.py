@@ -59,6 +59,54 @@ def backend_name() -> str:
     return "soulx-pc" if available() else "fake-sing"
 
 
+_NSF_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "nsf", "nsf_cli.py")
+
+
+def _nsf_py() -> str:
+    """The isolated NSF venv python (torch/librosa/soundfile). Overridable for tests."""
+    return os.environ.get("MOSH_NSF_PY") \
+        or os.path.expanduser("~/Library/Mosh/venvs/nsf/bin/python3")
+
+
+def _nsf_model() -> str:
+    return os.environ.get("NSF_MODEL") or os.path.expanduser(
+        "~/AI/pc-nsf-hifigan/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt")
+
+
+def nsf_available() -> bool:
+    """The PC-NSF-HiFiGAN re-vocode post-step (recipe step 6 — natural dynamics + clean
+    pitch). SHIPPED OFF: the OpenVPI weights are CC BY-NC-SA (non-commercial), so
+    MOSH_ENABLE_NSF=1 is an explicit owner opt-in and a public release needs a self-trained
+    MIT checkpoint. Also requires the isolated nsf venv python + the checkpoint on disk."""
+    if os.environ.get("MOSH_ENABLE_NSF", "0") != "1":
+        return False
+    cli = os.environ.get("MOSH_NSF_CLI", _NSF_CLI)
+    return os.path.isfile(_nsf_py()) and os.path.isfile(_nsf_model()) and os.path.isfile(cli)
+
+
+def _nsf_revocode(output_wav: str) -> bool:
+    """Re-vocode the (snapped) render through PC-NSF-HiFiGAN for natural dynamics + clean
+    pitch. Subprocess under the nsf venv — importing nsf_cli in-process poisons
+    numba/librosa (documented). True on a successful swap; on any failure the original
+    output is untouched (the caller flags nsf_failed)."""
+    cli = os.environ.get("MOSH_NSF_CLI", _NSF_CLI)
+    tmp = output_wav + ".nsf.wav"
+    proc = subprocess.run([_nsf_py(), cli, output_wav, tmp, "revoice"],
+                          capture_output=True, text=True,
+                          timeout=int(os.environ.get("MOSH_NSF_TIMEOUT_S", "300")))
+    ok = proc.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 44
+    if not ok:
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return False
+    os.replace(tmp, output_wav)
+    return True
+
+
 def _midi_hz(p: float) -> float:
     return 440.0 * (2.0 ** ((p - 69) / 12.0))
 
@@ -210,6 +258,16 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             timing_snapped = False
         snap_skipped = not timing_snapped
 
+    # NSF re-vocode (certified recipe step 6) — SHIPPED OFF (CC-BY-NC-SA weights). Runs on
+    # the snapped output; best-effort (keeps the snapped render on any failure).
+    nsf_resynth, nsf_failed = False, False
+    if nsf_available():
+        try:
+            nsf_resynth = _nsf_revocode(output_wav)
+        except Exception:  # noqa: BLE001 — best-effort; never fail the render on NSF trouble
+            nsf_resynth = False
+        nsf_failed = not nsf_resynth
+
     dur = authored.get("duration_s", 0.0)
     probe_ok = True
     try:
@@ -231,6 +289,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         # A take was supplied but couldn't drive the snap (unreadable/empty) — surface it
         # so the render isn't mistaken for take-aligned.
         flags = [*flags, "snap_skipped"]
+    if nsf_failed:
+        flags = [*flags, "nsf_failed"]
     return {
         # backend label from the SAME gate evaluation that picked the code path —
         # backend_name() would re-evaluate available() (TOCTOU vs mid-render env changes).
@@ -239,6 +299,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "linesUsed": authored["linesUsed"], "linesSkipped": authored["linesSkipped"],
         "voiceEnrolled": bool(voice_ref_path()),
         "timingSnapped": timing_snapped, "sylSnapMedianMs": syl_snap_ms,
+        "nsfResynth": nsf_resynth,
         "pq": pq, "pq_base": 0.85, "flags": flags,
         "reasoning": quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags),
         "duration_s": dur, "sample_rate": sr, "channels": ch,

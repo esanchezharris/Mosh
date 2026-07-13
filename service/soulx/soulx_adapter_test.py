@@ -23,6 +23,7 @@ sys.path.insert(0, SERVICE)
 # Pin the gate env BEFORE import so module state can't leak from the machine's config.
 os.environ.pop("MOSH_SOULX_SSH_HOST", None)
 os.environ.pop("MOSH_ENABLE_SOULX", None)
+os.environ.pop("MOSH_ENABLE_NSF", None)          # NSF ships OFF; never let a host config leak in
 _EMPTY_VOICE = tempfile.mkdtemp(prefix="soulx-novoice-")
 os.environ["MOSH_VOICE_DIR"] = _EMPTY_VOICE
 
@@ -135,6 +136,49 @@ check("unreadable take -> snap skipped, render still ok + snap_skipped flag",
       badm["ok"] and badm.get("timingSnapped") is False and "snap_skipped" in badm.get("flags", []),
       str(badm.get("flags")))
 check("unreadable take still writes a real render", os.path.getsize(os.path.join(td, "badsnap.wav")) > 1000)
+
+# ── 6. NSF re-vocode post-step (Phase B): shipped OFF; opt-in subprocess wiring ────────
+# The PC-NSF-HiFiGAN weights are CC BY-NC-SA -> MOSH_ENABLE_NSF=1 is an explicit opt-in and
+# a public release needs a self-trained MIT checkpoint. Default path must be untouched.
+check("nsf_available() False by default (ship-gate off)", not A.nsf_available())
+default_m = A.render("", os.path.join(td, "nonsf.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("default render: nsfResynth false, no nsf flags",
+      default_m.get("nsfResynth") is False and "nsf_failed" not in default_m.get("flags", []),
+      str({"nsf": default_m.get("nsfResynth"), "flags": default_m.get("flags")}))
+
+# Prove the subprocess wiring with a STUB nsf CLI (no torch/weights). The adapter invokes
+# <nsf_py> <nsf_cli> <in> <out> revoice and swaps the CLI's output into output_wav.
+import textwrap  # noqa: E402
+stub = os.path.join(td, "nsf_stub.py")
+open(stub, "w").write(textwrap.dedent('''
+    import sys, wave, struct
+    with wave.open(sys.argv[2], "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(44100)
+        w.writeframes(struct.pack("<8h", *([12345] * 8)))   # a distinctive marker render
+'''))
+model = os.path.join(td, "model.ckpt"); open(model, "wb").write(b"x")
+os.environ["MOSH_ENABLE_NSF"] = "1"
+os.environ["MOSH_NSF_PY"] = sys.executable
+os.environ["MOSH_NSF_CLI"] = stub
+os.environ["NSF_MODEL"] = model
+check("nsf_available() True when opted-in + cli/py/model present", A.nsf_available())
+nm = A.render("", os.path.join(td, "nsfout.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("nsfResynth true when the NSF step runs", nm.get("nsfResynth") is True, str(nm.get("nsfResynth")))
+with wave.open(os.path.join(td, "nsfout.wav"), "rb") as w:
+    nsf_raw = struct.unpack("<%dh" % w.getnframes(), w.readframes(w.getnframes()))
+check("output IS the NSF CLI's render (swapped in)", set(nsf_raw) == {12345}, str(nsf_raw[:4]))
+
+# a FAILING nsf CLI -> keep the pre-NSF render + nsf_failed flag (best-effort, never fails)
+open(os.path.join(td, "nsf_fail.py"), "w").write("import sys; sys.exit(3)")
+os.environ["MOSH_NSF_CLI"] = os.path.join(td, "nsf_fail.py")
+fm = A.render("", os.path.join(td, "nsffail.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("failing nsf cli -> nsf_failed flag, render still ok",
+      fm.get("nsfResynth") is False and "nsf_failed" in fm.get("flags", []) and fm["ok"], str(fm.get("flags")))
+with wave.open(os.path.join(td, "nsffail.wav"), "rb") as w:
+    fail_raw = struct.unpack("<%dh" % min(w.getnframes(), 8), w.readframes(min(w.getnframes(), 8)))
+check("failed nsf keeps the fake render (not the 12345 marker)", set(fail_raw) != {12345}, str(fail_raw))
+for _k in ("MOSH_ENABLE_NSF", "MOSH_NSF_PY", "MOSH_NSF_CLI", "NSF_MODEL"):
+    os.environ.pop(_k, None)
 
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
