@@ -19,7 +19,7 @@ import os
 import urllib.request
 from typing import Dict, List, Optional
 
-_PROVIDERS = [("deepseek", "DEEPSEEK"), ("openai", "OPENAI"), ("xai", "GROK")]
+_PROVIDERS = [("deepseek", "DEEPSEEK"), ("openai", "OPENAI"), ("xai", "XAI")]
 _BRAIN_ENV_CACHE: Optional[Dict[str, str]] = None
 
 

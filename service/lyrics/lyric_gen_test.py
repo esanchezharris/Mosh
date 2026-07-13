@@ -143,10 +143,10 @@ check("partial line keeps every heard anchor word",
 check("gap line rhymes against the EXTRACTED line's end word (group A anchored by 'flame')",
       bool(props3[0].get("passes")), str(props3[0]))
 
-# ── 11. INTERJECTION filler style (owner, 2026-07-12): "filler words are incredibly
-# helpful (essential)" — when a line falls back to the deterministic filler, forced
-# lexical vocab ("fast up strong out…") is exactly the awkward rhythm he rejected; the
-# opt-in spec fillerStyle="interjection" fills gaps with rap placeholders instead.
+# ── 11. FILLER DENSITY CAP (owner, 2026-07-12): "yeah can be a placeholder but it can't be
+# every word in the bar" — an all-interjection bar ("oh oh oh yeah I feel like yeah") is
+# the failure. Interjection style now emits AT MOST ONE interjection per fill; the rest is
+# lexical filler. And a filler-heavy line is DEMOTED below any real-word candidate.
 _INTERJ = {"yeah", "uh", "ay", "woah", "oh", "hey", "yo", "huh"}
 spec4 = {"grid": "1/16", "rhymeStrictness": "slant", "topic": "", "mood": "",
          "fillerStyle": "interjection",
@@ -156,15 +156,24 @@ spec4 = {"grid": "1/16", "rhymeStrictness": "slant", "topic": "", "mood": "",
 res4 = core.complete(spec4, backend="fake")
 p4 = res4["lines"][0]["proposals"][0]
 w4 = p4["text"].lower().split()
-check("interjection filler uses rap placeholders only", all(w in _INTERJ for w in w4), p4["text"])
+n_interj = sum(1 for w in w4 if w in _INTERJ)
+check("a seedless bar is NEVER all interjections", n_interj <= 1, p4["text"])
 check("interjection filler is count-exact", p4["syllables"] == 6, str(p4["syllables"]))
 check("interjection filler is deterministic",
       core.complete(spec4, backend="fake")["lines"][0]["proposals"][0]["text"] == p4["text"])
-# default spec unchanged: no fillerStyle ⇒ the classic lexical filler vocab
-spec5 = {k: v for k, v in spec4.items() if k != "fillerStyle"}
-p5 = core.complete(spec5, backend="fake")["lines"][0]["proposals"][0]
-check("without the flag the classic filler vocab is untouched",
-      any(w not in _INTERJ for w in p5["text"].lower().split()), p5["text"])
+# _filler_frac helper: fraction of words that are interjection filler
+check("_filler_frac(all interjections) == 1.0", core._filler_frac("yeah uh ay woah") == 1.0)
+check("_filler_frac(no filler) == 0.0", core._filler_frac("counted me out alone") == 0.0)
+check("_filler_frac(one filler) is small", 0.0 < core._filler_frac("counted me out yeah") <= 0.34,
+      str(core._filler_frac("counted me out yeah")))
+# a filler-heavy line is demoted below a real-word line at equal count
+SP = {"grid": "1/16", "rhymeStrictness": "slant", "topic": "", "mood": "", "lines": []}
+LN = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllableTarget": 6,
+      "syllableTol": 0, "rhymeGroup": "", "locked": False}
+real = core._evaluate("counted me out alone", LN, SP, None, 6, 0, "slant")   # 6 syllables
+fill = core._evaluate("yeah uh ay woah oh hey", LN, SP, None, 6, 0, "slant")  # 6 interjections
+check("a real line outranks an all-filler line at equal count", real["score"] > fill["score"],
+      f"real={real['score']} fill={fill['score']}")
 # a fixed end word still wins over the interjection end
 spec6 = {**spec4, "lines": [{"index": 0, "role": "verse", "seedText": "___ ___ ___ flame",
                              "text": "", "syllableTarget": 4, "syllableTol": 0,

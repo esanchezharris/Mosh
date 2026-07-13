@@ -34,7 +34,9 @@ MOUTH_MIN_TARGETS = 4     # gate only with a real phrase of evidence; less still
 MOUTH_MIN_DISTINCT = 3    # ... of which this many must be non-schwa: AH is the neutral
                           # mouth and any English line echoes it, so generic evidence
                           # scores but must never REJECT
-MOUTH_WEIGHT = 1.5        # ranking weight — the owner's #1 axis, above stress/echo (0.75)
+MOUTH_WEIGHT = 0.35       # ranking NUDGE (loosened 2026-07-12: flow over sounds) — a soft
+                          # preference for sound-matched lines, never a gate; well below
+                          # the pass bonus (2) so coherence wins
 
 # A flow-grounded line must not END on a dangling function word ("...I was a") — the
 # exact-count corset otherwise trims lines mid-thought. Deliberate short list: pure
@@ -54,6 +56,16 @@ _FILLER_2 = ["again", "tonight", "alone", "inside", "over", "under", "money",
 # ay woah…") instead of an awkward forced-lexical rhythm. All 1-syllable by design.
 _FILLER_INTERJ = ["yeah", "uh", "ay", "woah", "oh", "hey", "yo", "huh"]
 _INTERJ_ENDS = ["yeah", "woah", "ay", "yo"]
+_INTERJ_SET = frozenset(_FILLER_INTERJ)
+FILLER_PENALTY = 2.5      # a bar of interjections ("oh oh oh yeah") is demoted below any
+                          # real-word line (owner: fillers are seasoning, not a meal)
+
+
+def _filler_frac(text: str) -> float:
+    """Fraction of a line's words that are placeholder INTERJECTIONS (yeah/oh/uh…). Only
+    interjections count — the lexical filler pool contains real words ('out', 'now')."""
+    ws = re.findall(r"[A-Za-z']+", _norm_apostrophes(str(text)).lower())
+    return sum(1 for w in ws if w in _INTERJ_SET) / len(ws) if ws else 0.0
 
 # End-word pools (1-syllable, for easy assembly) when a line has no rhyme anchor.
 _DEFAULT_ENDS = ["flow", "grind", "game", "time", "night", "light", "fight",
@@ -105,12 +117,12 @@ def _filler_for(need: int, seed: str, ones_only: bool = False,
     out: List[str] = []
     i = 0
     rem = need
-    if style == "interjection":
-        while rem >= 1:
-            out.append(_pick(_FILLER_INTERJ, f"{seed}|fi|{i}") or "yeah")
-            rem -= 1
-            i += 1
-        return out
+    if style == "interjection" and rem >= 1:
+        # DENSITY CAP (owner, 2026-07-12: "yeah can be a placeholder but it can't be every
+        # word in the bar"): at most ONE interjection per fill; the rest is lexical filler,
+        # so a fallback line is never "oh oh oh yeah…".
+        out.append(_pick(_FILLER_INTERJ, f"{seed}|fi") or "yeah")
+        rem -= 1
     while rem >= 2 and not ones_only:
         out.append(_pick(_FILLER_2, f"{seed}|f2|{i}") or "again")
         rem -= 2
@@ -283,7 +295,11 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
         else:
             end_ok = end.lower() not in END_STOP_WORDS
 
-    passes = syl_ok and rhyme_ok and locked_ok and breaks_ok and mouth_ok and end_ok
+    # LOOSENED (owner, 2026-07-12): mouth is a SOFT nudge now, NOT a gate — with the NSF
+    # re-vocode making the voice natural, the mumble sets FLOW and the words are free to be
+    # coherent bars. `mouth_ok` stays computed for the flow-viz but is out of `passes`; the
+    # syllable-by-syllable vowel echo was forcing all-filler bars.
+    passes = syl_ok and rhyme_ok and locked_ok and breaks_ok and end_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
     # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
@@ -310,9 +326,13 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
             sims.append(soundmatch.similarity(word, str(e.get("word", ""))) if word else 0.0)
         echo_term = 0.75 * sum(sims) / len(sims)
 
+    # A filler-heavy line ("oh oh oh yeah") is demoted below any real-word candidate; ~15%
+    # interjection is tolerated (a placeholder here and there), beyond that it's penalized.
+    filler_pen = FILLER_PENALTY * max(0.0, _filler_frac(text) - 0.15)
     score = (2 if passes else 0) + (1 if rhyme_ok else 0) + (1 if locked_ok else 0) \
         + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
-        + 0.5 * max(0, depth - 1) + stress_term + echo_term + MOUTH_WEIGHT * mouth_sim
+        + 0.5 * max(0, depth - 1) + stress_term + echo_term + MOUTH_WEIGHT * mouth_sim \
+        - filler_pen
     out = {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
            "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
            "grade": grade, "depth": depth, "score": round(score, 3)}
@@ -363,9 +383,9 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
         elif anchor:
             ends = _P.rhyme_search(anchor, strict, max_n=40, syllables=1)
             end = _pick(ends, seed) if ends else _pick(_topic_ends(spec), seed)
-        elif style == "interjection":
-            end = _pick(_INTERJ_ENDS, seed)
         else:
+            # end on a REAL word even under interjection style — the one allowed filler
+            # is the single interior placeholder, never the line's ending (density cap).
             end = _pick(_topic_ends(spec), seed)
         cands.append(_evaluate(_assemble(line.get("seedText", ""), end, target, tol, seed,
                                          ones_only=bool(line.get("breaks")), style=style),
@@ -487,11 +507,18 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
     else:
         rules.append("Authentic register: slang, ad-libs, and explicit language are welcome — "
                      "don't self-censor or sanitize.")
-    # Filler generosity (owner, 2026-07-12): filler interjections are essential rap
-    # vocabulary — an isolated slot wants a natural "yeah", not a crammed lexical word.
-    rules.append("Filler interjections (yeah, uh, huh, ay, woah) are first-class rap "
-                 "vocabulary — on an isolated or awkward syllable, a natural filler beats "
-                 "forcing a lexical word.")
+    # CRAFT (owner, 2026-07-12: "provide the model some common frameworks for how to
+    # approach writing a bar or using a punchline"). The mumble sets the FLOW; these teach
+    # the model to fill it with a real bar, not filler.
+    rules.append("CRAFT — write like a real bar, not a slot-filler: land a PUNCHLINE or "
+                 "payoff on the last words (set it up early, pay it off at the end); use "
+                 "CONCRETE imagery and specifics over vague abstractions; reach for WORDPLAY "
+                 "/ double meaning and multisyllabic + internal rhyme; make each bar connect "
+                 "to the theme and the line before it (tell a small story across the couplet).")
+    # Filler LIMIT (owner: "yeah can be a placeholder but it can't be every word in the
+    # bar") — REPLACES the old filler-generosity rule.
+    rules.append("Filler ad-libs (yeah, uh, ay) are seasoning, not a meal: at most ONE per "
+                 "bar and only on a genuinely isolated beat — never fill a bar with them.")
     # Style-RAG (§7): bias toward the artist's OWN voice with retrieved exemplars, but
     # forbid copying them verbatim — the model is steered by style, not by parroting.
     exemplars = _style_exemplars(spec)
@@ -499,8 +526,13 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append("Write in THIS voice (the artist's own lines) — match the phrasing, "
                      "imagery and vocabulary, but write NEW lines; do NOT copy them verbatim: "
                      + " / ".join(f"\"{e}\"" for e in exemplars) + ".")
-    sys = ("You are a skilled rap lyricist. Reply with ONLY a JSON object "
-           '{"lines": ["...", "...", "..."]} of candidate lines. No commentary.')
+    sys = ("You are an elite rap lyricist and ghostwriter with a real ear for flow. You "
+           "write vivid, coherent bars that mean something: a clear image or story, a setup "
+           "that pays off in a punchline, sharp wordplay, and multisyllabic rhymes that hit "
+           "on the beat. You match a given rhythm exactly without ever padding a bar with "
+           "empty filler. Reply with ONLY a JSON object "
+           '{"lines": ["...", "...", "..."]} of candidate lines — your best, most quotable '
+           "attempts. No commentary.")
     usr = " ".join(rules) + (f" Your previous attempt failed: {feedback} Fix it." if feedback else "")
     return [{"role": "system", "content": sys}, {"role": "user", "content": usr}]
 
@@ -546,10 +578,15 @@ def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int,
                       context: Optional[dict] = None) -> List[dict]:
     target, tol, strict = _target(line, spec), _syl_tol(line), _strictness(line, spec)
     corpus = _style_corpus(spec)   # non-empty only when style biasing is opted in
+    # Prefer Grok/xAI for lyrics (NSFW-tolerant; owner 2026-07-12) — resolve() falls through
+    # to the configured chain when xai has no key, so this is safe when Grok isn't set up.
+    provider = spec.get("llmProvider") or "xai"
     cands: List[dict] = []
     feedback: Optional[str] = None
     for _ in range(3):  # budget the retries (re-prompt with the specific phonology failure)
-        resp = brain_client.chat_json(_build_messages(line, spec, anchor, target, tol, strict, feedback, context))
+        resp = brain_client.chat_json(
+            _build_messages(line, spec, anchor, target, tol, strict, feedback, context),
+            requested=provider)
         if not resp.get("ok"):
             break
         raw = _parse_lines(resp.get("content", ""))

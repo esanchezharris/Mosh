@@ -177,15 +177,24 @@ MOUTH_LINE = {"index": 0, "role": "verse", "seedText": "", "text": "", "syllable
               "echoTargets": [], "mouthTargets": MOUTH_TGTS,
               "mouthText": "top of a cup of water"}
 
+# LOOSENED (owner, 2026-07-12): now that the NSF re-vocode makes the VOICE natural, the
+# mumble sets FLOW (count/stress/breath/melody) and the WORDS are free to be coherent bars.
+# Mouth is a SOFT nudge — it ranks but NEVER rejects; the syllable-by-syllable vowel echo
+# was forcing all-filler bars ("oh oh oh yeah").
 m_ok = core._evaluate("not a lot of stuff to squander", MOUTH_LINE, SPEC, None, 8, 0, "slant")
 m_bad = core._evaluate("we remain easy tonight please", MOUTH_LINE, SPEC, None, 8, 0, "slant")
-check("sound-alike line passes the mouth gate", m_ok["passes"] and m_ok.get("mouthOk") is True,
+check("sound-alike line passes", m_ok["passes"] is True,
       str({k: m_ok.get(k) for k in ("passes", "mouthOk", "mouthSim")}))
-check("mouth-blind line HARD-FAILS", (not m_bad["passes"]) and m_bad.get("mouthOk") is False,
+check("mouth-blind line now PASSES too (mouth never rejects)", m_bad["passes"] is True,
       str({k: m_bad.get(k) for k in ("passes", "mouthOk", "mouthSim")}))
+check("mouthOk still REPORTS the echo (informational, for the flow-viz)",
+      m_ok.get("mouthOk") is True and m_bad.get("mouthOk") is False,
+      str((m_ok.get("mouthOk"), m_bad.get("mouthOk"))))
 check("mouthSim is reported and ordered", m_ok["mouthSim"] > 0.6 > m_bad["mouthSim"],
       f"{m_ok['mouthSim']} vs {m_bad['mouthSim']}")
-check("mouth term dominates ranking", m_ok["score"] > m_bad["score"])
+check("mouth still NUDGES ranking (sound-alike above blind)", m_ok["score"] > m_bad["score"])
+check("but the nudge is small — mouth no longer dominates (weight ~0.35)",
+      (m_ok["score"] - m_bad["score"]) < 0.6, f"delta={m_ok['score'] - m_bad['score']:.3f}")
 m_reason = core._failure_reason(m_bad, 8, 0, None, "slant")
 check("failure reason carries the heard sounds to the re-prompt",
       "top of a cup of water" in m_reason and "sound" in m_reason.lower(), m_reason)

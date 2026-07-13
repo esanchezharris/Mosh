@@ -76,8 +76,17 @@ check("prompt lists the locked words", "they" in usr and "counted" in usr, usr)
 check("prompt carries the topic", "comeback" in usr, usr)
 check("feedback is appended when a prior attempt failed",
       "Fix it" in core._build_messages(LINE, SPEC, "flame", 8, 1, "slant", "too long.")[-1]["content"])
-check("prompt blesses filler interjections (owner: fillers are essential)",
-      "Filler interjections" in usr and "yeah" in usr, usr)
+# CRAFT + filler-LIMIT (owner, 2026-07-12): the prompt now teaches HOW to write a bar and
+# CAPS filler ("can't be every word in the bar"), instead of blessing fillers.
+check("prompt LIMITS filler (at most one per bar, not a meal)",
+      ("at most one" in usr.lower() or "one filler" in usr.lower()) and "bar" in usr.lower(), usr)
+check("prompt gives punchline / setup-payoff craft guidance",
+      "punchline" in usr.lower() or "setup" in usr.lower() or "payoff" in usr.lower(), usr)
+check("prompt asks for concrete imagery / wordplay",
+      "imagery" in usr.lower() or "concrete" in usr.lower() or "wordplay" in usr.lower(), usr)
+check("system prompt is a real lyricist brief, not one line",
+      len(core._build_messages(LINE, SPEC, "flame", 8, 1, "slant", None)[0]["content"]) > 200,
+      str(len(core._build_messages(LINE, SPEC, "flame", 8, 1, "slant", None)[0]["content"])))
 
 # ── 3b. Register (Bar IQ D): raw is the DEFAULT (de-censored); clean is the opt-in ─
 check("default prompt PERMITS an authentic register (slang/explicit, no self-censor)",
@@ -114,9 +123,24 @@ try:
     fb = core._llm_propose_line(LINE, SPEC, anchor="flame", regen=0)
     check("unreachable LLM ⇒ fake fallback (non-empty, constraint-checked)",
           len(fb) >= 1 and fb[0]["syllableOk"] is True, str(fb[:1]))
+
+    # GROK ROUTING (owner, 2026-07-12): lyrics prefer xAI/Grok (NSFW-tolerant); the spec can
+    # override via llmProvider. Capture the requested provider passed to chat_json.
+    seen = {}
+    brain_client.chat_json = lambda *a, **k: (seen.update(k), {"ok": True, "content": '{"lines":["they counted me out but I came"]}'})[1]
+    core._llm_propose_line(LINE, SPEC, anchor="flame", regen=0)
+    check("lyrics prefer Grok (requested='xai') by default", seen.get("requested") == "xai", str(seen))
+    seen.clear()
+    core._llm_propose_line(LINE, dict(SPEC, llmProvider="openai"), anchor="flame", regen=0)
+    check("spec.llmProvider overrides the default route", seen.get("requested") == "openai", str(seen))
 finally:
     brain_client.chat_json = _real_chat
     _clear_provider_env()
+
+# ── 6. xAI provider reads XAI_* env (bug: it was reading GROK_*) ──────────────────
+check("xai provider maps to the XAI_ env prefix (matches C++/vite/.env)",
+      ("xai", "XAI") in brain_client._PROVIDERS and ("xai", "GROK") not in brain_client._PROVIDERS,
+      str(brain_client._PROVIDERS))
 
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
