@@ -1,8 +1,7 @@
 # FS-B1 — Skill schema, mock harness, and contract test
 
 **Lane:** B (Brain) · **Spec:** `docs/first-stranger-program/SPEC.md` §0,
-§1.9–§1.10, §7 B1 · **Backlog class:** `cheap` · **Route:** `safe` ·
-**Status:** implemented in this lane; not merged.
+§1.9–§1.10, §7 B1 · **Backlog class:** `cheap` · **Route:** `safe`.
 
 ## Purpose
 
@@ -141,7 +140,7 @@ npm run typecheck
 
 cd ..
 scripts/auto-loop/gate.sh cheap <FS-B1-worktree> \
-  origin/claude/dev-automation-loops-141f8d
+  <target-base-ref>
 ```
 
 The authoritative cheap-gate result and exact committed SHA belong in the lane
