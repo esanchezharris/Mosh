@@ -146,6 +146,29 @@ def _render_real(output_wav: str, score_json: str) -> None:
         raise RuntimeError(f"soulx pc render failed: {(proc.stderr or proc.stdout)[-400:]}")
 
 
+def _snap_output_to_take(output_wav: str, take_path: str, clip: dict):
+    """Timing-snap the rendered output onto the take (the certified recipe's step 5, now
+    in the product path): phrase-align + word-snap via soulx.perform, derived from the
+    authored `clip`. Best-effort — any unreadable/empty input returns (False, None) and
+    leaves the output untouched. Returns (timing_snapped: bool, syl_snap_median_ms: float)."""
+    import statistics
+
+    from skeleton.core import read_pcm_mono
+    from soulx import perform
+    rt, ro = read_pcm_mono(take_path), read_pcm_mono(output_wav)
+    if not rt or not ro or not rt[0] or not ro[0]:
+        return False, None
+    take, sr_t = rt
+    rend, sr_r = ro
+    rend = perform.resample_linear(rend, sr_r, sr_t)
+    snapped = perform.snap_render_to_take(take, rend, sr_t, clip)
+    events = soulx_score.word_event_spans(clip)
+    lags = perform.event_lags(take, snapped, sr_t, events) if events else []
+    write_wav(output_wav, snapped, 1, sr_t)
+    med = round(statistics.median(sorted(abs(x) * 1000.0 for x in lags)), 1) if lags else 0.0
+    return True, med
+
+
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     """mode:"sing" — author the SoulX target score from params["lines"] (text +
     Stage-1 lyricScore blobs), write it next to the output as target_score.json (a
@@ -177,6 +200,16 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     else:
         _render_fake(output_wav, clip)
 
+    # Timing-snap (certified recipe step 5): align the render onto the take's clock when a
+    # readable take is present; otherwise a clean skip that never touches the render.
+    timing_snapped, syl_snap_ms, snap_skipped = False, None, False
+    if input_wav and os.path.isfile(input_wav):
+        try:
+            timing_snapped, syl_snap_ms = _snap_output_to_take(output_wav, input_wav, clip)
+        except Exception:  # noqa: BLE001 — snap is best-effort; never corrupt/lose the render
+            timing_snapped = False
+        snap_skipped = not timing_snapped
+
     dur = authored.get("duration_s", 0.0)
     probe_ok = True
     try:
@@ -194,6 +227,10 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         # healthy render — the owner's accept/reject gate needs the honesty signal.
         pq = min(pq, 0.2)
         flags = [*flags, "output_unverified"]
+    if snap_skipped:
+        # A take was supplied but couldn't drive the snap (unreadable/empty) — surface it
+        # so the render isn't mistaken for take-aligned.
+        flags = [*flags, "snap_skipped"]
     return {
         # backend label from the SAME gate evaluation that picked the code path —
         # backend_name() would re-evaluate available() (TOCTOU vs mid-render env changes).
@@ -201,6 +238,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "events": authored["events"], "words": authored["words"], "rests": authored["rests"],
         "linesUsed": authored["linesUsed"], "linesSkipped": authored["linesSkipped"],
         "voiceEnrolled": bool(voice_ref_path()),
+        "timingSnapped": timing_snapped, "sylSnapMedianMs": syl_snap_ms,
         "pq": pq, "pq_base": 0.85, "flags": flags,
         "reasoning": quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags),
         "duration_s": dur, "sample_rate": sr, "channels": ch,

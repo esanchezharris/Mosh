@@ -107,5 +107,30 @@ check("event_lags reports each word's measured lag (0/+80/+40ms here)",
 # ── 5. metric sanity ──────────────────────────────────────────────────────────────────
 check("env_corr(x, x) ~= 1", perform.env_corr(take, take, SR) > 0.999)
 
+# ── 6. snap_render_to_take: the product single-clip snap (phrase-align + word-snap) ────
+# The adapter hands the WHOLE authored clip; snap derives its own windows/events (via
+# soulx.score) — no chunk offsets. On the drifted render (#2 +80ms, #3 +40ms) the residual
+# event lags must fall to ~0; an already-aligned render stays on-grid; deterministic ×3.
+CLIP = {"duration": "0.20 0.22 0.08 0.22 0.08 0.22 0.20", "note_type": "1 2 1 2 1 2 1"}
+snapped2 = perform.snap_render_to_take(take_s, rend_s, SR, CLIP)
+resid = perform.event_lags(take_s, snapped2, SR, EVENTS)
+check("snap_render_to_take: residual event lags near zero after phrase+word snap",
+      len(resid) == 3 and all(abs(x) <= 0.02 for x in resid), str([round(x * 1000) for x in resid]))
+resid_id = perform.event_lags(take_s, perform.snap_render_to_take(take_s, take_s, SR, CLIP), SR, EVENTS)
+check("snap_render_to_take on an already-aligned render keeps events on-grid",
+      all(abs(x) <= 0.02 for x in resid_id), str([round(x * 1000) for x in resid_id]))
+check("snap_render_to_take deterministic (3x)",
+      len({hashlib.sha256(",".join(f"{v:.9f}" for v in perform.snap_render_to_take(take_s, rend_s, SR, CLIP)).encode()).hexdigest()
+           for _ in range(3)}) == 1)
+# empty clip (no events/windows) -> identity-safe, never raises
+_id = perform.snap_render_to_take(take_s, rend_s, SR, {"duration": "", "note_type": ""})
+check("snap_render_to_take on an empty clip returns the render unchanged (no-op safe)",
+      _id == list(rend_s), f"len {len(_id)} vs {len(rend_s)}")
+
+# ── 7. resample_linear: rate conversion so take/render envelopes meet ─────────────────
+check("resample_linear doubles length 4->8 rate", len(perform.resample_linear([0.0, 1.0, 0.0, -1.0], 4, 8)) == 8)
+check("resample_linear is a no-op at equal rate", perform.resample_linear([1.0, 2.0], 8, 8) == [1.0, 2.0])
+check("resample_linear empty -> empty", perform.resample_linear([], 24000, 44100) == [])
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

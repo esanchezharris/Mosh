@@ -227,3 +227,56 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
             "linesUsed": len(scored), "linesSkipped": len(lines) - len(scored),
             "events": len(dur_t), "words": n_words, "rests": n_rests,
             "duration_s": round(sum(dur_t), 3)}
+
+
+# ── timing-snap inputs (Phase A consolidation) ─────────────────────────────────────────
+# The product timing-snap (soulx.perform.snap_render_to_take) aligns a SoulX render onto
+# the take. It needs the score's word events (the slot-snap unit) and phrase windows
+# (the phrase-align unit) — derived from the SAME clip author_score emits. Both parse the
+# take-aligned duration/note_type chain (the single-clip version of the spike's
+# backhalf_perform.candidate_events / overlap.phrase_windows_from_score).
+
+def word_event_spans(clip: dict) -> List[tuple]:
+    """[(start_s, end_s), ...] — one span per word (note_type 2), its end extended through
+    the word's continuation (type-3) run; type-1 rests close the current word. Times sum
+    the 4dp error-diffused duration chain, so they land on the take's clock."""
+    durs = [float(d) for d in clip["duration"].split()]
+    types = [int(x) for x in clip["note_type"].split()]
+    events, t, cur = [], 0.0, None
+    for d, nt in zip(durs, types):
+        if nt == 2:
+            if cur:
+                events.append(cur)
+            cur = [round(t, 4), round(t + d, 4)]
+        elif nt == 3 and cur:
+            cur[1] = round(t + d, 4)
+        elif nt == 1 and cur:
+            events.append(cur)
+            cur = None
+        t += d
+    if cur:
+        events.append(cur)
+    return [(a, b) for a, b in events]
+
+
+def phrase_windows(clip: dict, rest_split_s: float = 0.35) -> List[tuple]:
+    """[(start, end, n_word_events), ...] — sung phrases split at rests >= rest_split_s
+    (a leading/sub-threshold rest never opens or splits a phrase)."""
+    durs = [float(d) for d in clip["duration"].split()]
+    types = [int(t) for t in clip["note_type"].split()]
+    wins, t, cur = [], 0.0, None
+    for d, nt in zip(durs, types):
+        if nt == 1:
+            if cur and d >= rest_split_s:
+                wins.append(cur)
+                cur = None
+        else:
+            if cur is None:
+                cur = [t, t + d, 1 if nt == 2 else 0]
+            else:
+                cur[1] = t + d
+                cur[2] += 1 if nt == 2 else 0
+        t += d
+    if cur:
+        wins.append(cur)
+    return [(round(a, 3), round(b, 3), n) for a, b, n in wins]

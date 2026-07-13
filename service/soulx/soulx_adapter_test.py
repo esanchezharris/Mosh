@@ -109,6 +109,33 @@ as_str = [{"text": "hold", "asserted": True, "score": json.dumps(LINES[0]["score
 m2 = A.render("", os.path.join(td, "str.wav"), {"lines": as_str})
 check("string score blob parses and renders", m2["ok"] and m2["linesUsed"] == 1)
 
+# ── 5. Timing-snap wiring (Phase A): a take present -> the render is snapped to it ──────
+# input_wav="" (every test above) skips snap -> those outputs stay byte-identical. With a
+# real take on disk the adapter derives windows/events from the authored clip and snaps.
+noin = A.render("", os.path.join(td, "noin.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("no input_wav -> timingSnapped false, clean skip (no snap flags)",
+      noin.get("timingSnapped") is False and "snap_skipped" not in noin.get("flags", []),
+      str({"ts": noin.get("timingSnapped"), "flags": noin.get("flags")}))
+
+take_wav = os.path.join(td, "take.wav")                          # a take to snap against
+A.render("", take_wav, {"lines": json.loads(json.dumps(LINES))})
+ms = A.render(take_wav, os.path.join(td, "snapped.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("input_wav present -> timingSnapped true", ms.get("timingSnapped") is True, str(ms.get("timingSnapped")))
+check("sylSnapMedianMs reported (small on an aligned take)",
+      isinstance(ms.get("sylSnapMedianMs"), (int, float)) and ms["sylSnapMedianMs"] <= 40,
+      str(ms.get("sylSnapMedianMs")))
+with wave.open(os.path.join(td, "snapped.wav"), "rb") as w:
+    check("snapped output is a valid wav covering the score", w.getnframes() / w.getframerate() >= 2.0, "")
+
+# take path present but UNREADABLE -> snap skipped, render STILL produced + honestly flagged
+bad = os.path.join(td, "bad.wav")
+open(bad, "wb").write(b"not a wav at all")
+badm = A.render(bad, os.path.join(td, "badsnap.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("unreadable take -> snap skipped, render still ok + snap_skipped flag",
+      badm["ok"] and badm.get("timingSnapped") is False and "snap_skipped" in badm.get("flags", []),
+      str(badm.get("flags")))
+check("unreadable take still writes a real render", os.path.getsize(os.path.join(td, "badsnap.wav")) > 1000)
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

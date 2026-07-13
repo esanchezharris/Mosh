@@ -194,6 +194,35 @@ r = sx.author_score(LINES)
 check("two lines flow into one clip with rests between", r["ok"] and len(r["score"]) == 1
       and r["score"][0]["text"].count("<SP>") >= 2, str(r["score"][0]["text"] if r.get("ok") else r))
 
+# ── 11. word_event_spans + phrase_windows: pure parse of the score chain (Phase A snap) ─
+# The product timing-snap derives its slot-snap events + phrase-align windows from the
+# SAME authored clip the adapter builds (no chunk offsets — single clip). Chain times are
+# take-aligned by construction (4dp error diffusion).
+_pclip = {"duration": "0.20 0.22 0.08 0.22 0.08 0.22 0.20", "note_type": "1 2 1 2 1 2 1"}
+_evs = sx.word_event_spans(_pclip)
+check("word_event_spans: 3 word events at the slot starts",
+      len(_evs) == 3 and abs(_evs[0][0] - 0.20) < 1e-6 and abs(_evs[0][1] - 0.42) < 1e-6
+      and abs(_evs[1][0] - 0.50) < 1e-6 and abs(_evs[2][0] - 0.80) < 1e-6, str(_evs))
+# a type-3 continuation extends its parent word's span (one event, not two)
+_cclip = {"duration": "0.20 0.30 0.10 0.50 0.40", "note_type": "1 2 3 1 2"}
+_ce = sx.word_event_spans(_cclip)
+check("word_event_spans: a type-3 continuation extends the word's end",
+      len(_ce) == 2 and abs(_ce[0][0] - 0.20) < 1e-6 and abs(_ce[0][1] - 0.60) < 1e-6
+      and abs(_ce[1][0] - 1.10) < 1e-6, str(_ce))
+# phrase_windows splits at rests >= rest_split_s (0.08s inter-word rests do NOT split)
+_pw = sx.phrase_windows(_cclip, rest_split_s=0.35)
+check("phrase_windows splits at the 0.5s rest -> 2 windows, word-counts intact",
+      len(_pw) == 2 and _pw[0][2] == 1 and _pw[1][2] == 1
+      and abs(_pw[0][0] - 0.20) < 1e-3 and abs(_pw[0][1] - 0.60) < 1e-3, str(_pw))
+_pw1 = sx.phrase_windows(_pclip, rest_split_s=0.35)
+check("phrase_windows: sub-threshold inter-word rests keep one window of 3 words",
+      len(_pw1) == 1 and _pw1[0][2] == 3, str(_pw1))
+# derived from a REAL author_score clip: events == word count, on the take timeline
+_ar = sx.author_score([LINE("hold the flame", [SLOT(0.5, 1.0, 57), SLOT(1.0, 1.5, 59), SLOT(1.5, 2.0, 60)])])
+_ac = _ar["score"][0]
+check("word_event_spans on a real authored clip == its word count",
+      len(sx.word_event_spans(_ac)) == _ar["words"], str(sx.word_event_spans(_ac)))
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

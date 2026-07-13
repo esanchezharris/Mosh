@@ -130,6 +130,80 @@ def snap_to_events(take: List[float], render: List[float], sr: int,
     return out
 
 
+PHRASE_MAX_SHIFT_S = 0.25   # a phrase START can drift more than a syllable within it
+
+
+def resample_linear(mono: List[float], sr_from: int, sr_to: int) -> List[float]:
+    """Linear-interp resampler so the take and render envelopes meet at one rate (SoulX
+    may emit 24k/48k; the take is its own). Stdlib; no-op at equal rate / empty input."""
+    if sr_from == sr_to or not mono:
+        return list(mono)
+    n_out = max(1, int(round(len(mono) * sr_to / float(sr_from))))
+    out, ratio = [], (len(mono) - 1) / float(max(1, n_out - 1))
+    for i in range(n_out):
+        x = i * ratio
+        j = int(x)
+        frac = x - j
+        a = mono[j]
+        b = mono[j + 1] if j + 1 < len(mono) else a
+        out.append(a + (b - a) * frac)
+    return out
+
+
+def phrase_shifts(env_take: List[float], env_render: List[float], windows: List[tuple],
+                  hop_s: float = HOP_S, max_shift_s: float = PHRASE_MAX_SHIFT_S) -> List[float]:
+    """Per-phrase lag (s) of the render vs the take (positive = render late), measured
+    inside each score phrase window PADDED by the max shift (an unpadded window clips a
+    late phrase's tail and biases the correlation low); clamped to +/- max_shift_s."""
+    out = []
+    for (a, b, _n) in windows:
+        lag = _window_lag(env_take, env_render, max(0.0, a - max_shift_s),
+                          b + max_shift_s, hop_s, max_shift_s)
+        out.append(max(-max_shift_s, min(max_shift_s, lag)))
+    return out
+
+
+def apply_shifts(render: List[float], sr: int, windows: List[tuple], shifts: List[float],
+                 total_s: float = None) -> List[float]:
+    """Rebuild the render on the take's timeline: each phrase's audio copied from its
+    (lag-shifted) source span to the score-true span, crossfaded at the seams. Gaps
+    between phrases stay silent (rests are rests)."""
+    n_total = int((total_s if total_s is not None else (len(render) / sr)) * sr) + int(0.25 * sr)
+    out = [0.0] * n_total
+    xf = max(1, int(SNAP_XFADE_S * sr))
+    for (a, b, _n), lag in zip(windows, shifts):
+        dst0, dst1 = int(a * sr), min(int(b * sr), n_total)
+        src0 = int((a + lag) * sr)
+        for i in range(dst0, dst1):
+            j = src0 + (i - dst0)
+            v = render[j] if 0 <= j < len(render) else 0.0
+            e = min(1.0, (i - dst0 + 1) / xf, (dst1 - i) / xf)
+            out[i] += v * e
+    return out
+
+
+def snap_render_to_take(take: List[float], render: List[float], sr: int, clip: dict,
+                        hop_s: float = HOP_S) -> List[float]:
+    """The product timing-snap (the spike backhalf_perform.lock() snap, single-clip): from
+    the authored SoulX `clip`, phrase-align the render onto the take's clock, then snap each
+    word event onto its slot's exact start. `take`/`render` are same-rate mono lists. No-op
+    safe: an empty clip (no windows/events) returns the render unchanged."""
+    from soulx.score import phrase_windows, word_event_spans
+    windows = phrase_windows(clip)
+    events = word_event_spans(clip)
+    if not windows and not events:
+        return list(render)
+    aligned = list(render)
+    if windows:
+        env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
+        env_r = energy_envelope(render, sr, hop_ms=hop_s * 1000.0)
+        shifts = phrase_shifts(env_t, env_r, windows, hop_s=hop_s)
+        aligned = apply_shifts(render, sr, windows, shifts, total_s=len(take) / sr)
+    if events:
+        aligned = snap_to_events(take, aligned, sr, events, hop_s=hop_s)
+    return aligned
+
+
 def env_corr(ref: List[float], other: List[float], sr: int,
              hop_s: float = HOP_S, gate_frac: float = GATE_FRAC) -> float:
     """Pearson correlation of the two energy envelopes over ref-ACTIVE frames."""
