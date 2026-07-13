@@ -158,6 +158,11 @@ def lock() -> int:
         # SOFT lock (this round): release-fade so word tails ring out naturally.
         soft, _ = _finish(perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST,
                                                      release_s=SOFT_RELEASE_S))
+        # TIMED (owner round, NSF pipeline): phrase+word-snapped to the take but with NO
+        # envelope transfer — this is the input the NSF re-vocode resynthesizes (natural
+        # dynamics from the model, aligned timing), the painted envelope dropped entirely.
+        timed, _ = _finish(list(snapped))
+        write_wav(SERVE / f"voice-writer-{key}-timed.wav", timed, sr)
 
         corr0 = perform.env_corr(take, rend, sr)
         corr1 = perform.env_corr(take, aligned, sr)
