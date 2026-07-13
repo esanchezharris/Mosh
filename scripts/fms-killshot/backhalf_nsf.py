@@ -22,7 +22,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from backhalf_ab_bench import ROOT  # noqa: E402
+from backhalf_ab_bench import BH, ROOT  # noqa: E402
 
 NSF_CLI = HERE.parents[1] / "service" / "nsf" / "nsf_cli.py"
 NSF_PY = pathlib.Path.home() / "Library" / "Mosh" / "venvs" / "nsf" / "bin" / "python3"
@@ -61,7 +61,18 @@ def render() -> int:
     return 0
 
 
+_THEME = {"T1": "fire / ash", "T2": "war / heroes"}
+
+
 def page() -> int:
+    import json as _json
+    lyr = {}
+    try:
+        man = _json.loads((BH / "writer-round-manifest.json").read_text())
+        for c in man.get("candidates", []):
+            lyr[c["key"]] = [w["text"].strip() for w in c.get("words", []) if w.get("text", "").strip()]
+    except Exception:  # noqa: BLE001 (page still renders audio if the manifest is absent)
+        pass
     cards = []
     for key in KEYS:
         have = {m: (SERVE / f"voice-nsf-{key}-{m}.wav").is_file() for m in ("revoice", "tune", "timed")}
@@ -83,8 +94,16 @@ def page() -> int:
             rows += (f'<div class="row"><span>NSF pitch-corrected — dead-in-tune to the nearest '
                      f'semitone, no autotune smear</span>'
                      f'<audio controls preload="metadata" src="voice-nsf-{key}-tune.wav"></audio></div>')
+        lines = lyr.get(key, [])
+        lyr_html = ""
+        if lines:
+            items = "".join(f"<div style='padding:2px 0;color:#c9d1d9'>{html.escape(t)}</div>" for t in lines)
+            lyr_html = (f"<details style='margin-top:10px' open><summary style='color:#8b949e;"
+                        f"font-size:13px;cursor:pointer'>the lyrics ({len(lines)} lines)</summary>"
+                        f"<div style='margin-top:8px;font-size:13px;line-height:1.7'>{items}</div></details>")
+        theme = _THEME.get(key, "")
         cards.append(f'<div class="card"><div class="chead"><span class="tag">{key}</span>'
-                     f'<h2>{html.escape(key)} — SoulX vs neural-vocoder resynthesis</h2></div>{rows}</div>')
+                     f'<h2>{html.escape(key)}{" — " + theme if theme else ""}</h2></div>{rows}{lyr_html}</div>')
 
     (SERVE / "nsf-spike.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -100,13 +119,13 @@ def page() -> int:
   .row{{border-top:1px solid #21262d;padding:9px 0}} .row span{{font-size:13px;color:#8b949e}}
   .note{{color:#8b949e;font-size:13px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — full pipeline preview (NSF re-vocode + timing snap)</h1>
-  <p class="sub"><b>★ FULL PIPELINE</b> is the direction: your render timing-snapped to the take,
-     then NSF re-vocoded (the natural voice you liked, now with the flow tightened and no painted
-     envelope). <b>Heads-up: these carry the PREVIOUS round's lyrics</b> — the new, coherent
-     lyrics (craft prompt + no filler-salad) are staged and render on the pod. This page is the
-     SOUND preview (voice + flow + pitch); judge the words from the draft list I sent, not here.
-     Verified: NSF re-vocode preserves the voice at 0.98 envelope correlation, pitch within 1 cent.</p>
+  <h1>Used2 — back half, full pipeline (new lyrics + tight flow + your voice)</h1>
+  <p class="sub"><b>★ FULL PIPELINE</b> is the whole thing together: the NEW Grok-written lyrics
+     (coherent bars, zero filler-salad — the "flow over sounds" fix), timing-snapped to your
+     take, then NSF re-vocoded — aligned flow + your natural voice + clean pitch, the painted
+     envelope gone. Two draws: <b>T1</b> (fire / ash) and <b>T2</b> (war / heroes); the lyrics
+     are under each player. The <b>SoulX + soft-lock</b> card in each is the old painted-envelope
+     pipeline, kept for contrast so you can hear the difference.</p>
   <div class="card"><div class="chead"><h2>Raw back half (your take, reference)</h2></div>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
