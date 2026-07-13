@@ -24,7 +24,8 @@ machine-local file already exists:
 
 The repository and this PR do not create that file. The owner may create it
 manually after reviewing the supervisor. It must be a regular, non-symlink file
-with mode 600, and `CN_HOME` must resolve outside the repository. Removing it
+with mode 600, and `CN_HOME` must resolve outside both runner and canonical
+control checkouts. Removing it
 prevents new runs. Any of the following stop a live run before its next
 state-changing supervisor action:
 
@@ -34,6 +35,11 @@ docs/auto-loop/STOP
 docs/first-stranger-program/STOP
 ```
 
+For linked worktrees, the supervisor resolves the canonical control checkout
+from the Git common directory's `config.worktree`. `CN_CONTROL_REPO` is an
+explicit override. `check` and `status` report the resolved path and each STOP
+source independently; missing or unreadable control/STOP state is fatal.
+
 ## Safety model
 
 - One worktree and branch (`codex/stranger-<fs-id>`) are created per lane under
@@ -41,19 +47,47 @@ docs/first-stranger-program/STOP
 - Planning and implementation share one persisted Codex thread in that same
   worktree. Different selected lanes run as separate concurrent `codex exec`
   processes.
-- All phases ignore user config, pin the model/reasoning policy, capture JSONL,
-  and require phase-specific JSON Schema output. Planning/implementation use
-  `workspace-write`; hostile review is a fresh `read-only` session.
+- All phases ignore user config and rules, pin the model/reasoning policy,
+  capture JSONL, and require phase-specific JSON Schema output. A native Codex
+  permission profile allows reads only from the lane, Git's shared object store,
+  the minimal system runtime, and a private empty agent runtime. Planning and
+  implementation may write the lane; hostile review receives read-only lane
+  access. Every other user path is denied, and network is disabled.
 - Agent PATH guards permit read-only git inspection, block git mutation, and
-  block GitHub CLI access. The workspace-write sandbox also has network access
-  disabled. The supervisor rejects any unexpected agent-created commit.
+  block GitHub CLI access. The OS-enforced permission profile is the authority;
+  the supervisor also rejects any unexpected agent-created commit or Git
+  metadata rebinding. Runtime parents are read-only to the agent and every
+  resumed HOME/TMP is revalidated as a real child directory.
 - The routing guard is not a second test gate. It rejects never-touch paths,
   routes all non-safe product work to owner review, and permits `safe` only for
   `docs/**`, `ui/**`, and Python under `service/**`.
-- The unchanged `scripts/auto-loop/gate.sh` remains authoritative. Native lanes
-  additionally require `MOSH_SELFTEST_BASELINE` to be set.
+- The unchanged `scripts/auto-loop/gate.sh` remains authoritative and must both
+  exit zero and emit `pass:true`. The supervisor runs it through macOS
+  `sandbox-exec` with a scrubbed environment, reads limited to the exact
+  worktree, owner-trusted lock-matched UI dependencies, Playwright browser
+  cache, system/tool runtime, and fresh private HOME/TMP, and network denied
+  except TCP loopback on Playwright's fixed port 5173. The lane worktree is
+  read-only to the gate. A pinned npm guard forces
+  Vite `strictPort`, so a raced-in listener makes the gate fail rather than
+  silently moving the server. Before the gate, all agent-created ignored state
+  is purged and trusted dependencies are rebound read-only; after the gate, all
+  ignored state is purged again before hostile review. `check` compiles this
+  profile before reporting it healthy. The supervisor rejects any gate-induced
+  tracked change and accepts exactly one typed gate JSON object. PR-only v1 runs
+  the full path only in hermetic tests. A live probe passed TypeScript and 963
+  Vitest checks but Chromium crashed under the same secret-safe boundary.
+  Production gate execution is disabled by default, so every real lane stops at
+  `needs-human` before gate execution. `check` reports
+  `checks.gate_execution_enabled:false`. The test-only
+  `CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1` switch is never set by the supervisor,
+  schedule example, or pilot and must not be treated as production support.
+  Native and touched service-Python tests additionally need dynamic loopback
+  isolation that Seatbelt cannot safely distinguish from owner-local services.
+  A dedicated secret-free worker/VM is required before unattended draft
+  publication is enabled.
 - The supervisor pushes `GATED_SHA:refs/heads/<lane-branch>`, reads the remote
-  ref back, and opens a draft PR only when the SHAs match.
+  ref back, pins every GitHub call to the configured repository, and accepts a
+  draft PR only when its base, branch, and head SHA match the gated state.
 
 Execution-only state and evidence live under:
 
@@ -61,11 +95,15 @@ Execution-only state and evidence live under:
 ~/Library/Mosh/automation/first-stranger-codex/
   state/<fs-id>.json
   logs/<fs-id>/{plan,implement,gate,review,pr-body}.*
+  agent-runtime/<fs-id>/worker/{home,tmp}/
+  agent-runtime/<fs-id>/review/session.XXXXXX/{home,tmp}/
 ```
 
 State files are mode 600 and bind the lane to its base SHA, current/gated head
-SHA, phase, and persisted thread ID. Conversation resume is never treated as
-proof that git state is current; `resume` rejects stale SHA state.
+SHA, exact worktree Git metadata, phase, and persisted thread ID. Conversation
+resume is never treated as proof that git state is current; `resume` fetches and
+rejects stale base/head, branch, or Git-binding state. Publication revalidates
+the typed gate and hostile-review artifacts before any push.
 
 ## Optional desktop schedule (not installed)
 

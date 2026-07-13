@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  : "${TMPDIR:?codex-native gate guard: TMPDIR is required}"
+  exec /usr/bin/mktemp "$TMPDIR/tmp.XXXXXXXX"
+fi
+
+exec /usr/bin/mktemp "$@"

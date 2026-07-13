@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_NPM="${CN_REAL_NPM:-/opt/homebrew/bin/npm}"
+[ -x "$REAL_NPM" ] || {
+  printf 'codex-native gate guard: real npm is unavailable\n' >&2
+  exit 127
+}
+
+if [ "${1:-}" = run ] && [ "${2:-}" = dev ]; then
+  for arg in "$@"; do
+    [ "$arg" != --strictPort ] || exec "$REAL_NPM" "$@"
+  done
+  exec "$REAL_NPM" "$@" --strictPort
+fi
+
+exec "$REAL_NPM" "$@"

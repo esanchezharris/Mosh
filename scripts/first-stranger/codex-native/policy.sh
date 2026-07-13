@@ -41,6 +41,19 @@ cn_route_paths() {
   printf '%s\n' "$route"
 }
 
+cn_effective_route() {
+  local route="$1" lane_json="$2" owner_merge
+  case "$route" in safe|owner|never) ;; *) return 1 ;; esac
+  owner_merge="$(jq -r '(.ownerMerge // false) | if type == "boolean" then . else error("ownerMerge must be boolean") end' <<<"$lane_json")" \
+    || return 1
+  case "$owner_merge" in true|false) ;; *) return 1 ;; esac
+  if [ "$owner_merge" = true ] && [ "$route" != never ]; then
+    printf 'owner\n'
+  else
+    printf '%s\n' "$route"
+  fi
+}
+
 cn_require_armed() {
   [ -f "$CN_HOME/ARMED" ] &&
     [ ! -L "$CN_HOME/ARMED" ] &&
@@ -56,15 +69,116 @@ cn_home_is_external() {
   return 0
 }
 
+cn_path_present() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+cn_real_dir() {
+  [ -d "$1" ] || return 1
+  (cd "$1" && pwd -P)
+}
+
+cn_default_control_repo() {
+  local runner="$1" common config configured git_dir common_real git_real runner_real
+  common="$(git -C "$runner" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  config="$common/config.worktree"
+  if cn_path_present "$config"; then
+    [ -r "$config" ] || return 1
+    configured="$(git config --file "$config" --path --get core.worktree)" || return 1
+    [ -n "$configured" ] || return 1
+    case "$configured" in /*) ;; *) configured="$common/$configured" ;; esac
+    cn_real_dir "$configured"
+  else
+    git_dir="$(git -C "$runner" rev-parse --path-format=absolute --git-dir)" || return 1
+    common_real="$(cn_real_dir "$common")" || return 1
+    git_real="$(cn_real_dir "$git_dir")" || return 1
+    runner_real="$(cn_real_dir "$runner")" || return 1
+    [ "$git_real" = "$common_real" ] || return 1
+    case "$common_real" in "$runner_real/.git"|"$runner_real/.git"/*) ;; *) return 1 ;; esac
+    printf '%s\n' "$runner_real"
+  fi
+}
+
+cn_present_bool() {
+  if cn_path_present "$1"; then printf 'true\n'; else printf 'false\n'; fi
+}
+
+cn_external_stop_bool() {
+  local root="$1"
+  cn_path_present "$root" || { printf 'false\n'; return; }
+  [ -d "$root" ] && [ -x "$root" ] || return 2
+  cn_present_bool "$root/STOP"
+}
+
+cn_repo_stop_bool() {
+  local root="$1" area="$2" docs dir
+  [ -d "$root" ] && [ -x "$root" ] || return 2
+  docs="$root/docs"
+  cn_path_present "$docs" || { printf 'false\n'; return; }
+  [ -d "$docs" ] && [ -x "$docs" ] || return 2
+  dir="$docs/$area"
+  cn_path_present "$dir" || { printf 'false\n'; return; }
+  [ -d "$dir" ] && [ -x "$dir" ] || return 2
+  cn_present_bool "$dir/STOP"
+}
+
+cn_lane_stop_append() {
+  local lanes="$1" tree="$2" real shared program
+  cn_path_present "$tree" || { printf '%s\n' "$lanes"; return; }
+  [ -d "$tree" ] && [ -x "$tree" ] || return 2
+  real="$(cn_real_dir "$tree")" || return 2
+  if jq -e --arg worktree "$real" 'map(.worktree) | index($worktree) != null' <<<"$lanes" >/dev/null; then
+    printf '%s\n' "$lanes"
+    return
+  fi
+  shared="$(cn_repo_stop_bool "$real" auto-loop)" || return 2
+  program="$(cn_repo_stop_bool "$real" first-stranger-program)" || return 2
+  jq -nc --argjson lanes "$lanes" --arg worktree "$real" \
+    --argjson shared "$shared" --argjson program "$program" \
+    '$lanes + [{worktree:$worktree,shared:$shared,program:$program}]'
+}
+
+cn_stop_sources_json() {
+  local runner="$1" control="$2" work_root="${3:-}" extra="${4:-}"
+  local external control_shared control_program runner_shared runner_program lanes tree lane_shared lane_program
+  external="$(cn_external_stop_bool "$CN_HOME")" || return 2
+  control_shared="$(cn_repo_stop_bool "$control" auto-loop)" || return 2
+  control_program="$(cn_repo_stop_bool "$control" first-stranger-program)" || return 2
+  runner_shared="$(cn_repo_stop_bool "$runner" auto-loop)" || return 2
+  runner_program="$(cn_repo_stop_bool "$runner" first-stranger-program)" || return 2
+  lanes='[]'
+  if [ -n "$work_root" ] && cn_path_present "$work_root"; then
+    [ -d "$work_root" ] && [ -r "$work_root" ] && [ -x "$work_root" ] || return 2
+    for tree in "$work_root"/*; do
+      lanes="$(cn_lane_stop_append "$lanes" "$tree")" || return 2
+    done
+  fi
+  if [ -n "$extra" ] && [ "$extra" != "$runner" ] && [ "$extra" != "$control" ]; then
+    lanes="$(cn_lane_stop_append "$lanes" "$extra")" || return 2
+  fi
+  lane_shared="$(jq -r 'map(.shared) | any' <<<"$lanes")"
+  lane_program="$(jq -r 'map(.program) | any' <<<"$lanes")"
+  jq -nc --argjson external "$external" --argjson control_shared "$control_shared" --argjson control_program "$control_program" \
+    --argjson runner_shared "$runner_shared" --argjson runner_program "$runner_program" \
+    --argjson lane_shared "$lane_shared" --argjson lane_program "$lane_program" \
+    --argjson lanes "$lanes" \
+    '{stop_sources:{external:$external,control_shared:$control_shared,control_program:$control_program,runner_shared:$runner_shared,runner_program:$runner_program,lane_shared:$lane_shared,lane_program:$lane_program},lane_stop_sources:$lanes}'
+}
+
 cn_stop_requested() {
-  local repo="$1"
-  [ -e "$CN_HOME/STOP" ] ||
-    [ -e "$repo/docs/auto-loop/STOP" ] ||
-    [ -e "$repo/docs/first-stranger-program/STOP" ]
+  local runner="$1" control="${2:-$1}" work_root="${3:-}" extra="${4:-}" report rc
+  report="$(cn_stop_sources_json "$runner" "$control" "$work_root" "$extra")" || return 2
+  if jq -e '.stop_sources | [.[]] | any' <<<"$report" >/dev/null; then
+    return 0
+  else
+    rc=$?
+  fi
+  [ "$rc" -eq 1 ] && return 1
+  return 2
 }
 
 cn_state_write() {
-  local file="$1" lane="$2" base="$3" head="$4" phase="$5" thread_id="$6"
+  local file="$1" lane="$2" base="$3" head="$4" phase="$5" thread_id="$6" binding="${7:-null}"
   local dir tmp
   dir="$(dirname "$file")"
   mkdir -p "$dir"
@@ -72,17 +186,22 @@ cn_state_write() {
   tmp="$(mktemp "$dir/.state.XXXXXX")"
   jq -nc \
     --arg lane "$lane" --arg base "$base" --arg head "$head" \
-    --arg phase "$phase" --arg thread "$thread_id" \
-    '{lane:$lane,base_sha:$base,head_sha:$head,phase:$phase,thread_id:$thread}' >"$tmp"
+    --arg phase "$phase" --arg thread "$thread_id" --argjson binding "$binding" \
+    '{lane:$lane,base_sha:$base,head_sha:$head,phase:$phase,thread_id:$thread,git_binding:$binding}' >"$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$file"
 }
 
 cn_state_validate() {
-  local file="$1" base="$2" head="$3"
+  local file="$1" base="$2" head="$3" binding="${4:-}"
   [ -f "$file" ] || return 1
-  jq -e --arg base "$base" --arg head "$head" \
-    '.base_sha == $base and .head_sha == $head' "$file" >/dev/null
+  if [ -n "$binding" ]; then
+    jq -e --arg base "$base" --arg head "$head" --argjson binding "$binding" \
+      '.base_sha == $base and .head_sha == $head and .git_binding == $binding' "$file" >/dev/null
+  else
+    jq -e --arg base "$base" --arg head "$head" \
+      '.base_sha == $base and .head_sha == $head' "$file" >/dev/null
+  fi
 }
 
 cn_state_field() {
@@ -92,6 +211,73 @@ cn_state_field() {
 
 cn_remote_head_matches() {
   [ "$1" = "$2" ]
+}
+
+cn_worktree_clean() {
+  local status
+  status="$(git -C "$1" status --porcelain=v1 --untracked-files=all)" || return 1
+  [ -z "$status" ]
+}
+
+cn_git_binding() {
+  local wt="$1" pointer git_dir common
+  [ -f "$wt/.git" ] && [ ! -L "$wt/.git" ] || return 1
+  pointer="$(LC_ALL=C sed -n '1p' "$wt/.git")" || return 1
+  git_dir="$(git -C "$wt" rev-parse --path-format=absolute --git-dir)" || return 1
+  common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)" || return 1
+  git_dir="$(cn_real_dir "$git_dir")" || return 1
+  common="$(cn_real_dir "$common")" || return 1
+  jq -nc --arg pointer "$pointer" --arg git_dir "$git_dir" --arg common "$common" \
+    '{pointer:$pointer,git_dir:$git_dir,common:$common}'
+}
+
+cn_trusted_deps_match() {
+  local wt="$1" deps="$2" want got
+  [ -d "$deps" ] && [ ! -L "$deps" ] || return 1
+  [ -r "$wt/ui/package-lock.json" ] && [ -r "$deps/.mosh-deps-stamp" ] || return 1
+  want="$(shasum -a 256 "$wt/ui/package-lock.json" | awk '{print $1}')" || return 1
+  got="$(LC_ALL=C sed -n '1p' "$deps/.mosh-deps-stamp")" || return 1
+  [ -n "$want" ] && [ "$want" = "$got" ]
+}
+
+cn_no_ignored_state() {
+  local status
+  status="$(git -C "$1" status --porcelain=v1 --ignored=matching)" || return 1
+  ! printf '%s\n' "$status" | rg -q '^!! '
+}
+
+cn_gate_candidate_paths_supported() {
+  local class="$1" changed="$2" path
+  [ "$class" = cheap ] || return 1
+  [ -n "$changed" ] || return 1
+  while IFS= read -r path; do
+    case "$path" in
+      docs/*|ui/*)
+        case "$path" in
+          ui/package.json|ui/package-lock.json|ui/npm-shrinkwrap.json) return 1 ;;
+        esac
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$changed"
+  return 0
+}
+
+cn_gate_sandbox_supported() {
+  [ "${CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE:-0}" = 1 ] || return 1
+  cn_gate_candidate_paths_supported "$@"
+}
+
+cn_validate_gate_result() {
+  local file="$1" class="$2"
+  jq -se --arg class "$class" '
+    length == 1 and
+    (.[0] | type == "object" and .pass == true and .class == $class and
+      (.selftest | type == "array") and
+      (.selftest_failed | type == "number") and
+      (.asserts | type == "number") and
+      (.steps | type == "array"))
+  ' "$file" >/dev/null
 }
 
 cn_diff_has_cmake_pin() {

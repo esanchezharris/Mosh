@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REAL="${CN_REAL_GIT:?CN_REAL_GIT is required}"
+REAL="${CN_REAL_GIT:-/usr/bin/git}"
 args=("$@")
 i=0
 command=""

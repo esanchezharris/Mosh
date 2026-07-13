@@ -69,6 +69,8 @@ assert_eq "never wins aggregate routing" never "$(cn_route_paths docs/a.md relay
 assert_eq "owner wins aggregate routing" owner "$(cn_route_paths docs/a.md relay/x.py)"
 assert_eq "all-safe aggregate routing" safe "$(cn_route_paths docs/a.md ui/a.ts service/a.py)"
 assert_eq "empty diff is never" never "$(cn_route_paths)"
+assert_eq "lane ownerMerge forces owner routing" owner "$(cn_effective_route safe '{"ownerMerge":true}')"
+assert_eq "lane without ownerMerge preserves safe routing" safe "$(cn_effective_route safe '{"ownerMerge":false}')"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -103,6 +105,27 @@ touch "$TMP/repo/docs/first-stranger-program/STOP"
 assert_success "program STOP is honored" cn_stop_requested "$TMP/repo"
 rm "$TMP/repo/docs/first-stranger-program/STOP"
 
+CONTROL="$TMP/control"
+WORK_ROOT="$TMP/work-root"
+LANE_TREE="$WORK_ROOT/fs-b1"
+mkdir -p "$CONTROL/docs/auto-loop" "$CONTROL/docs/first-stranger-program" \
+  "$LANE_TREE/docs/auto-loop" "$LANE_TREE/docs/first-stranger-program"
+touch "$CN_HOME/STOP" "$CONTROL/docs/auto-loop/STOP" "$CONTROL/docs/first-stranger-program/STOP" \
+  "$TMP/repo/docs/auto-loop/STOP" "$TMP/repo/docs/first-stranger-program/STOP" \
+  "$LANE_TREE/docs/auto-loop/STOP" "$LANE_TREE/docs/first-stranger-program/STOP"
+stop_report="$(cn_stop_sources_json "$TMP/repo" "$CONTROL" "$WORK_ROOT")"
+assert_eq "STOP report exposes external source" true "$(jq -r .stop_sources.external <<<"$stop_report")"
+assert_eq "STOP report exposes control source" true "$(jq -r .stop_sources.control_shared <<<"$stop_report")"
+assert_eq "STOP report exposes control program source" true "$(jq -r .stop_sources.control_program <<<"$stop_report")"
+assert_eq "STOP report exposes runner shared source" true "$(jq -r .stop_sources.runner_shared <<<"$stop_report")"
+assert_eq "STOP report exposes runner program source" true "$(jq -r .stop_sources.runner_program <<<"$stop_report")"
+assert_eq "STOP report exposes lane shared source" true "$(jq -r .stop_sources.lane_shared <<<"$stop_report")"
+assert_eq "STOP report exposes lane program source" true "$(jq -r .stop_sources.lane_program <<<"$stop_report")"
+assert_eq "STOP report identifies the lane worktree" "$(cd "$LANE_TREE" && pwd -P)" "$(jq -r '.lane_stop_sources[0].worktree' <<<"$stop_report")"
+rm "$CN_HOME/STOP" "$CONTROL/docs/auto-loop/STOP" "$CONTROL/docs/first-stranger-program/STOP" \
+  "$TMP/repo/docs/auto-loop/STOP" "$TMP/repo/docs/first-stranger-program/STOP" \
+  "$LANE_TREE/docs/auto-loop/STOP" "$LANE_TREE/docs/first-stranger-program/STOP"
+
 PIN_REPO="$TMP/pin-repo"
 git init -q "$PIN_REPO"
 git -C "$PIN_REPO" config user.name test
@@ -111,19 +134,62 @@ mkdir -p "$PIN_REPO/cmake"
 printf '# product integration\n' >"$PIN_REPO/cmake/Sentry.cmake"
 git -C "$PIN_REPO" add .
 git -C "$PIN_REPO" commit -qm base
+assert_success "clean worktree invariant accepts committed state" cn_worktree_clean "$PIN_REPO"
+assert_failure "clean worktree invariant fails closed when Git status errors" cn_worktree_clean "$TMP/missing-worktree"
+mkdir -p "$PIN_REPO/ui/node_modules"
+printf 'ui/node_modules/\n' >"$PIN_REPO/.gitignore"
+printf '%s\n' '{"lockfileVersion":3}' >"$PIN_REPO/ui/package-lock.json"
+git -C "$PIN_REPO" add .gitignore ui/package-lock.json
+git -C "$PIN_REPO" commit -qm deps
+shasum -a 256 "$PIN_REPO/ui/package-lock.json" | awk '{print $1}' >"$PIN_REPO/ui/node_modules/.mosh-deps-stamp"
+assert_success "owner-trusted dependencies must match the lane lockfile" cn_trusted_deps_match "$PIN_REPO" "$PIN_REPO/ui/node_modules"
+printf 'wrong\n' >"$PIN_REPO/ui/node_modules/.mosh-deps-stamp"
+assert_failure "mismatched trusted dependency stamp fails closed" cn_trusted_deps_match "$PIN_REPO" "$PIN_REPO/ui/node_modules"
+assert_failure "ignored dependency state is observable" cn_no_ignored_state "$PIN_REPO"
+rm -rf "$PIN_REPO/ui/node_modules"
+assert_success "purged worktree has no ignored state" cn_no_ignored_state "$PIN_REPO"
+BIND_WT="$TMP/binding-worktree"
+git -C "$PIN_REPO" worktree add -q -b binding-test "$BIND_WT"
+binding_token="$(cn_git_binding "$BIND_WT")"
+assert_success "linked worktree Git binding is captured" jq -e '.pointer and .git_dir and .common' <<<"$binding_token" >/dev/null
+binding_pointer="$(sed -n '1p' "$BIND_WT/.git")"
+printf 'gitdir: /invalid/agent-owned-metadata\n' >"$BIND_WT/.git"
+assert_failure "redirected linked-worktree Git metadata fails closed" cn_git_binding "$BIND_WT"
+printf '%s\n' "$binding_pointer" >"$BIND_WT/.git"
+git -C "$PIN_REPO" worktree remove --force "$BIND_WT"
+git -C "$PIN_REPO" branch -D binding-test >/dev/null
 printf 'CPMAddPackage(NAME sentry-native GIT_TAG 1.2.3)\n' >>"$PIN_REPO/cmake/Sentry.cmake"
+assert_failure "clean worktree invariant rejects tracked mutation" cn_worktree_clean "$PIN_REPO"
 assert_success "semantic guard catches a relocated CMake pin" cn_diff_has_cmake_pin "$PIN_REPO"
 
 STATE="$CN_HOME/state/fs-b1.json"
-assert_success "state writes atomically" cn_state_write "$STATE" FS-B1 base123 head456 planned thread-1
+STATE_BINDING='{"pointer":"gitdir: /tmp/example","git_dir":"/tmp/git/worktrees/example","common":"/tmp/git"}'
+assert_success "state writes atomically" cn_state_write "$STATE" FS-B1 base123 head456 planned thread-1 "$STATE_BINDING"
 assert_eq "state file mode is 600" 600 "$(stat -f '%Lp' "$STATE")"
-assert_success "matching state resumes" cn_state_validate "$STATE" base123 head456
-assert_failure "stale base is rejected" cn_state_validate "$STATE" other head456
-assert_failure "stale head is rejected" cn_state_validate "$STATE" base123 other
+assert_success "matching state resumes" cn_state_validate "$STATE" base123 head456 "$STATE_BINDING"
+assert_failure "stale base is rejected" cn_state_validate "$STATE" other head456 "$STATE_BINDING"
+assert_failure "stale head is rejected" cn_state_validate "$STATE" base123 other "$STATE_BINDING"
+assert_failure "stale Git binding is rejected" cn_state_validate "$STATE" base123 head456 '{"pointer":"other","git_dir":"other","common":"other"}'
 assert_eq "thread id is recoverable" thread-1 "$(cn_state_field "$STATE" thread_id)"
 
 assert_success "matching gated and remote heads pass" cn_remote_head_matches deadbeef deadbeef
 assert_failure "different remote head is rejected" cn_remote_head_matches deadbeef cafebabe
+assert_failure "on-host gate execution is disabled by default" cn_gate_sandbox_supported cheap $'docs/a.md\nui/a.ts'
+assert_success "experimental gate accepts only docs and UI" env CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1 bash -c ". '$NATIVE/policy.sh'; cn_gate_sandbox_supported cheap \$'docs/a.md\\nui/a.ts'"
+assert_failure "native gate candidate fails closed without stronger isolation" cn_gate_candidate_paths_supported native 'src/Main.cpp'
+assert_failure "service test gate candidate fails closed without dynamic-port isolation" cn_gate_candidate_paths_supported cheap 'service/skills/catalog.py'
+assert_failure "relay Python gate candidate fails closed outside docs/UI allowlist" cn_gate_candidate_paths_supported cheap 'relay/helpers.py'
+assert_failure "mixed docs and owner paths fail closed outside docs/UI allowlist" cn_gate_candidate_paths_supported cheap $'docs/a.md\nrelay/helpers.py'
+assert_failure "dependency manifest changes require human gating" cn_gate_candidate_paths_supported cheap 'ui/package-lock.json'
+
+GATE_JSON="$TMP/gate.json"
+printf '%s\n' '{"pass":true,"class":"cheap","selftest":[],"selftest_failed":0,"asserts":0,"steps":[]}' >"$GATE_JSON"
+assert_success "single typed gate verdict is accepted" cn_validate_gate_result "$GATE_JSON" cheap
+printf '%s\n%s\n' '{"pass":false,"class":"cheap","selftest":[],"selftest_failed":0,"asserts":0,"steps":[]}' \
+  '{"pass":true,"class":"cheap","selftest":[],"selftest_failed":0,"asserts":0,"steps":[]}' >"$GATE_JSON"
+assert_failure "multiple gate documents are rejected" cn_validate_gate_result "$GATE_JSON" cheap
+printf '%s\n' '{"pass":true,"class":"cheap"}' >"$GATE_JSON"
+assert_failure "incomplete gate verdict is rejected" cn_validate_gate_result "$GATE_JSON" cheap
 
 VALID_PLAN='{"id":"FS-B1","planned":true,"gap_exists":true,"route":"safe","summary":"ok"}'
 INVALID_PLAN='{"id":"FS-B1","planned":true,"gap_exists":true,"route":"unsafe","summary":"ok"}'
@@ -138,10 +204,37 @@ assert_success "entrypoint has shell syntax" bash -n "$ENTRY"
 assert_success "agent git guard permits status" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git -C "$ROOT" status --short >/dev/null
 assert_failure "agent git guard blocks commits" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git commit --allow-empty -m forbidden
 assert_failure "agent GitHub guard blocks PR actions" env PATH="$NATIVE/agent-bin:$PATH" gh pr create --draft
+NPM_REAL_STUB="$TMP/npm-real"
+NPM_CAPTURE="$TMP/npm-args"
+cat >"$NPM_REAL_STUB" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"$NPM_CAPTURE"
+EOF
+chmod +x "$NPM_REAL_STUB"
+export NPM_CAPTURE
+CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run dev -- --host 127.0.0.1
+assert_success "gate npm guard forces Vite strictPort" rg -q -- '--strictPort' "$NPM_CAPTURE"
+CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run test:e2e
+assert_failure "gate npm guard does not rewrite non-server scripts" rg -q -- '--strictPort' "$NPM_CAPTURE"
+MKTEMP_HOME="$TMP/mktemp-home"
+mkdir -p "$MKTEMP_HOME"
+guarded_tmp="$(TMPDIR="$MKTEMP_HOME" "$NATIVE/agent-bin/mktemp")"
+assert_eq "gate mktemp guard confines implicit temporary files" "$MKTEMP_HOME" "$(dirname "$guarded_tmp")"
+rm -f "$guarded_tmp"
 if rg -n 'gh[[:space:]]+pr[[:space:]]+merge|merge-one\.sh[[:space:]]+finalize' "$ENTRY" "$NATIVE" --glob '!test.sh' >/dev/null; then
   not_ok "v1 contains no merge operation"
 else
   ok "v1 contains no merge operation"
+fi
+if rg -n '"\$CN_GATE".*\|\| true' "$NATIVE/orchestrator.sh" >/dev/null; then
+  not_ok "gate exit status is authoritative"
+else
+  ok "gate exit status is authoritative"
+fi
+if rg -n '\[ -z "\$\(git -C "\$CN_REPO" status' "$NATIVE/orchestrator.sh" >/dev/null; then
+  not_ok "runner cleanliness checks do not suppress Git failures"
+else
+  ok "runner cleanliness checks do not suppress Git failures"
 fi
 
 # The public surface must remain inert unless explicitly armed. These checks use
@@ -161,16 +254,32 @@ before_branches="$(git -C "$ROOT" branch --format='%(refname)')"
 assert_success "check succeeds without mutation" env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" check >/dev/null
 after_status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 assert_eq "check leaves the checkout unchanged" "$before_status" "$after_status"
+BROKEN_GATE_PROFILE="$TMP/broken-gate.sb"
+printf '(version 1)\n(deny default\n' >"$BROKEN_GATE_PROFILE"
+if env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_GATE_PROFILE="$BROKEN_GATE_PROFILE" "$ENTRY" check >"$TMP/broken-check.json"; then
+  not_ok "check rejects an invalid gate profile"
+else
+  ok "check rejects an invalid gate profile"
+fi
+assert_eq "check reports invalid gate profile" false "$(jq -r '.checks.gate_profile' "$TMP/broken-check.json")"
 assert_failure "unarmed run refuses before orchestration" env CN_HOME="$TMP/unarmed-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" run --lane FS-B1
 assert_failure "unarmed run never reaches Codex" test -e "$TMP/codex.called"
 assert_failure "unarmed run never reaches GitHub" test -e "$TMP/gh.called"
 assert_eq "unarmed run creates no worktree" "$before_worktrees" "$(git -C "$ROOT" worktree list --porcelain)"
 assert_eq "unarmed run creates no branch" "$before_branches" "$(git -C "$ROOT" branch --format='%(refname)')"
 
-status_json="$(env CN_HOME="$TMP/status-home" "$ENTRY" status)"
+status_json="$(env CN_HOME="$TMP/status-home" CN_CONTROL_REPO="$ROOT" CN_WORK_ROOT="$TMP/status-work" "$ENTRY" status)"
 assert_success "status is valid JSON" jq -e . <<<"$status_json"
 assert_eq "status reports unarmed" false "$(jq -r '.armed' <<<"$status_json")"
 assert_eq "status reports no lane states" 0 "$(jq '.lanes | length' <<<"$status_json")"
+assert_eq "status exposes external STOP independently" false "$(jq -r '.stop_sources.external' <<<"$status_json")"
+assert_eq "status exposes control shared STOP independently" false "$(jq -r '.stop_sources.control_shared' <<<"$status_json")"
+assert_eq "status exposes control program STOP independently" false "$(jq -r '.stop_sources.control_program' <<<"$status_json")"
+assert_eq "status exposes runner shared STOP independently" false "$(jq -r '.stop_sources.runner_shared' <<<"$status_json")"
+assert_eq "status exposes runner program STOP independently" false "$(jq -r '.stop_sources.runner_program' <<<"$status_json")"
+assert_eq "status exposes lane shared STOP independently" false "$(jq -r '.stop_sources.lane_shared' <<<"$status_json")"
+assert_eq "status exposes lane program STOP independently" false "$(jq -r '.stop_sources.lane_program' <<<"$status_json")"
 
 if [ "$fail" -ne 0 ]; then
   printf '%d test(s) failed; %d passed\n' "$fail" "$pass" >&2

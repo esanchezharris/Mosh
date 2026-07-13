@@ -1,6 +1,6 @@
 # Codex-native First-Stranger assessment
 
-**Assessment date:** 2026-07-12
+**Assessment date:** 2026-07-12; live isolation follow-up 2026-07-13
 
 **Live Codex tested:** `codex-cli 0.144.1`
 
@@ -24,14 +24,14 @@ The checks below came from the live CLI/help and a real `exec` → `exec resume`
 | Lifecycle hooks | Codex hooks configured around lifecycle events | Hooks can observe or enforce policy at defined lifecycle points. [Hooks](https://learn.chatgpt.com/codex/hooks) | Hooks are not a workflow DAG, transaction manager, or merge authorization mechanism. User hooks also create configuration/trust variability, so this prototype ignores user config and keeps critical checks in deterministic shell. |
 | Profiles / specialist roles | CLI config/profile layers (`-p`, `-c`) and custom agent role configuration | Fixed model/reasoning/sandbox settings and specialist instructions are native. | Profiles are configuration, not durable lane state. User profiles can drift; unattended execution should pin overrides and ignore user config. |
 | MCP | Native MCP client/server configuration and CLI management | Codex can call external tools and services through MCP. | MCP expands capability and attack surface; First-Stranger's program truth should remain files, and git/GitHub mutation should remain in the deterministic supervisor. MCP is not needed for v1. |
-| Isolation | `codex exec -C WORKTREE -s workspace-write` and `-s read-only`; git worktrees remain the repository-native isolation boundary | Each lane can have a separate filesystem root and sandbox; review can be strictly read-only. | Codex does not itself enforce “one lane per worktree.” The supervisor must create and bind the worktree, prevent cross-lane reuse, and verify the agent did not commit. |
+| Isolation | Native named permission profiles with absolute filesystem policies, selected through pinned `-c permissions...` / `default_permissions` overrides; git worktrees remain the repository-native isolation boundary | A live `exec` then `exec resume` probe allowed lane writes and read-only Git-common access while denying a synthetic user-Library canary, an absolute Git commit, and an outside write. Review receives read-only lane access. | Legacy `-s workspace-write` is only a write boundary and allowed the live probe to read the external canary. Unattended publication must use the narrower permission profile, not merely disable network. Codex still does not enforce “one lane per worktree”; the supervisor owns that binding and verifies the agent did not commit. |
 | Programmatic orchestration | Codex SDK and app-server APIs; JSONL `exec` is also a stable shell integration point | Codex is stronger than a UI-only agent because a small supervisor can own state, events, schemas, and retries without parsing prose. | Building a full Workflow clone would duplicate a mature phase/cache system. The justified slice is a narrow PR supervisor, not a general workflow framework. |
 
 ### Where Codex is stronger
 
 - Schema-constrained top-level CLI output and JSONL event streaming make a deterministic shell supervisor straightforward.
 - Persisted session IDs give an explicit, tested continuation mechanism across plan and implementation phases.
-- Read-only versus workspace-write sandboxes can be selected per phase, and user configuration can be excluded.
+- Native filesystem permission profiles can give each phase an explicit absolute read/write set while excluding user configuration; this is materially stronger than legacy `workspace-write` for unattended publication.
 - Native subagents are available interactively without introducing program-specific agent state into the repository.
 - The SDK/app-server path leaves room to replace the shell supervisor later if phase durability becomes a real bottleneck.
 
@@ -65,7 +65,9 @@ The most serious defects are the gated-head race, mutable in-repo arming, rulebo
 
 ## Recommendation: hybrid, PR-only Codex v1
 
-Keep the Claude Workflow and `codex-lane.sh` unchanged for compatibility, but do not install or arm the Claude loop as currently written. Add a narrow Codex-native supervisor that uses native schemas, JSONL, session resume, sandbox selection, and concurrent independent `exec` sessions, while deliberately giving up auto-merge. The deterministic supervisor—not an agent—creates one external worktree per lane, persists execution state outside the repository, commits, invokes the unchanged `scripts/auto-loop/gate.sh`, verifies a fresh hostile review, pushes only the exact gated SHA, checks the remote SHA, and opens a draft PR. Every lane is PR-only in v1.
+Keep the Claude Workflow and `codex-lane.sh` unchanged for compatibility, but do not install or arm the Claude loop as currently written. Add a narrow Codex-native supervisor that uses native schemas, JSONL, session resume, absolute filesystem permission profiles, and concurrent independent `exec` sessions, while deliberately giving up auto-merge. The deterministic supervisor—not an agent—creates one external worktree per lane, persists execution state outside the repository, commits, invokes the unchanged `scripts/auto-loop/gate.sh` where the host boundary can safely support it, verifies a fresh hostile review, pushes only the exact gated SHA, checks the remote SHA, and opens a draft PR. Every published lane is PR-only in v1.
+
+The live hardening pass found a stronger v1 limit. macOS Seatbelt cannot distinguish a gate-owned dynamic loopback server from an already-running owner-local service, and the unchanged gate executes agent-authored JavaScript. A broad read profile let a hostile probe copy an owner-secret canary into ignored state; the narrowed profile blocked that read, passed TypeScript and all 963 Vitest checks, but Playwright's Chromium crashed inside the tighter boundary. Expanding host service authority until Chromium runs would not be an evidence-backed secret boundary. Production gate execution is therefore disabled by default, and real lanes enter `needs-human` before the gate. The docs/UI publication path remains exercised only by hermetic stubs behind `CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1`, with the lane worktree read-only inside the gate sandbox; that flag is not enabled by `check`, `run`, any production entry point or schedule configuration in this PR, or this pilot. FS-B1 therefore stops at `needs-human` in production; if its implementation uses the lane plan's optional `service/skills/` scope, that touched service path would also remain human-gated under the docs/UI experiment. A dedicated secret-free worker/VM or equivalent isolation boundary is required before unattended gating and draft publication can be trusted.
 
 This is a hybrid rather than a replacement because Codex's native primitives remove much of the agent-process plumbing, but do not replace phase/cache orchestration. A small supervisor is justified; recreating Claude Workflow's general DAG and cache would be a worse system.
 
@@ -73,8 +75,8 @@ This is a hybrid rather than a replacement because Codex's native primitives rem
 
 | Required invariant | Hybrid posture |
 |---|---|
-| 1. Fail-closed routing | A separate routing guard permits `safe` only for `docs/**`, `ui/**`, and `service/**/*.py`; all relay/engine/state/auth/packaging/CMake/product-unknown work is `owner`; rulebooks/pins/parked/control paths are `never`. V1 has no merge operation at all. |
-| 2. Reuse the gate | The supervisor calls the unchanged `scripts/auto-loop/gate.sh` with the class returned by the existing classifier and requires a native selftest floor. The routing guard authorizes whether a diff may become a PR; it is not a second verification gate. |
+| 1. Fail-closed routing | A separate routing guard permits `safe` only for `docs/**`, `ui/**`, and `service/**/*.py`; all relay/engine/state/auth/packaging/CMake/product-unknown work is `owner`; rulebooks/pins/parked/control paths are `never`. V1 has no merge operation at all. A safe route does not override the stricter host-isolation check: touched service-Python and native lanes stop at `needs-human`. |
+| 2. Reuse the gate | The publication path calls the unchanged `scripts/auto-loop/gate.sh`, requires the existing classifier's class, a single typed `pass:true` verdict, deterministic ignored-input cleanup, a read-only lane worktree during gate execution, and a clean pre/post worktree. It revalidates gate and hostile-review artifacts before any push and does not invent a substitute gate. Because the live host cannot presently isolate the gate's full Playwright workload, production execution refuses every lane before invoking it; the path is hermetically tested but disabled pending a secret-free worker. |
 | 3. SPEC §0 / never-touch | Planning and implementation happen in the same external lane worktree; agent git/GitHub mutations are blocked and checked; rulebook, pin, `.github`, parked, sentinel, and cross-lane changes are rejected before commit. |
 | 4. Agent-agnostic program | SPEC, backlog, and lane plans remain authoritative. Only execution/thread/SHA/phase evidence lives under `~/Library/Mosh/automation/first-stranger-codex/`; no agent-specific program state is added to the backlog schema. |
 
