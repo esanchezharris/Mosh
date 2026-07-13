@@ -304,7 +304,7 @@ def page() -> int:
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — dynamics bridge: word tails ring out (SOFT vs HARD lock)</title>
+<title>Used2 — melody fixed + natural dynamics (pitch-corrected re-render)</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -325,14 +325,14 @@ def page() -> int:
   .oksus{{color:#3fb950;font-size:11px}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — dynamics bridge (SOFT vs HARD lock)</h1>
-  <p class="sub">You heard the performance lock as "volume automation rather than the words
-     ending naturally." The <b>SOFT lock</b> below fixes that: instead of chopping the render
-     to silence the instant your take rests, it release-fades the level so each word's tail
-     rings out — then still reaches silence so no model breath leaks. The <b>HARD lock</b> is
-     the old chop, for contrast. Same T1/T2 renders, envelope only — so you can hear the
-     difference now, no re-render. (The flat-high-note melody fix is a score change and lands
-     in the next render.) Kit: writer-T1/T2-perfsoft.wav.</p>
+  <h1>Used2 — melody fixed + natural dynamics</h1>
+  <p class="sub">Two things you flagged, both landed. <b>Melody:</b> the flat high notes were
+     a floor-biased key snap transposing every off-key note down — fixed at the source
+     (nearest note, ties resolve up); these T1/T2 are re-rendered with the corrected pitches
+     (same words). <b>Dynamics:</b> the <b>SOFT lock</b> release-fades the level so each word's
+     tail rings out instead of being chopped to silence — the "words ending naturally" you
+     asked for; the <b>HARD lock</b> is the old chop, for contrast. Play SOFT vs HARD, and
+     check the melody now sits right. Kit: writer-T1/T2-perfsoft.wav.</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
