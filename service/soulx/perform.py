@@ -1,17 +1,14 @@
-"""Performance transfer — constrain a sung render to the TAKE's delivery.
+"""Performance lock — snap a sung render onto the TAKE's timing.
 
-The SoulX target score carries words/phonemes/pitch/timing but NO dynamics: the
-model invents its own volume, attack, and decay, so a render never wears the
-producer's performance — and "it doesn't feel like my idea brought to life."
-This module transfers the take's energy envelope onto the render
-deterministically:
+The SoulX target score carries words/phonemes/pitch/timing but places syllables
+within a phrase freely, so a render lands close to — but not exactly on — the
+take's clock. This module measures each word-event's local lag against the take
+(envelope cross-correlation) and shifts that segment onto the slot's exact start
+(`snap_to_events` / `event_lags`) — the timing snap that feeds the NSF re-vocode.
 
-  gain[frame] = take_env / render_env,  with
-    - silence gate: frames where the take rests force gain 0 (kills model
-      breath/hiss between phrases),
-    - boost cap: a note the render barely sang is not amplified into noise,
-    - short smoothing against zipper artifacts,
-    - a strength dial (1.0 = wear the take exactly, 0.0 = untouched).
+Dynamics are NOT painted here: NSF resynthesis supplies the render's natural
+volume/attack/decay, so the old envelope-transfer step was dropped (it only ever
+produced contrast artifacts once NSF owned dynamics).
 
 `env_corr` is the honest fit metric: envelope correlation on take-ACTIVE frames
 (the same convention the ACE audit used — a missed phrase tanks it, rests can't
@@ -27,8 +24,6 @@ from skeleton.core import energy_envelope
 
 HOP_S = 0.010
 GATE_FRAC = 0.05      # take-active threshold: this fraction of the envelope's p95
-MAX_BOOST = 4.0       # never lift a render frame by more than this factor
-SMOOTH_HOPS = 3       # centered moving average over the gain curve (~30 ms)
 
 
 def _pctl(sv: List[float], p: float) -> float:
@@ -41,77 +36,6 @@ def _gate_threshold(env: List[float], frac: float = GATE_FRAC) -> float:
     if not env:
         return float("inf")
     return max(1e-6, frac * _pctl(sorted(env), 95))
-
-
-def _voicing_threshold(env: List[float]) -> float:
-    """Voicing gate: above this, the signal is actually SINGING (the overlap-QA
-    convention — stricter than the rest gate, so breath under a note reads as
-    non-voicing and is never boosted)."""
-    if not env:
-        return float("inf")
-    sv = sorted(env)
-    return max(1e-6, 4.0 * _pctl(sv, 5), 0.15 * _pctl(sv, 95))
-
-
-def transfer_envelope(take: List[float], render: List[float], sr: int,
-                      hop_s: float = HOP_S, smooth_hops: int = SMOOTH_HOPS,
-                      max_boost: float = MAX_BOOST, strength: float = 1.0,
-                      gate_frac: float = GATE_FRAC, release_s: float = 0.0) -> List[float]:
-    """Return the render gain-matched to the take's energy envelope (same length).
-
-    ``release_s`` (0 = off, the historical hard behavior): release-limit the gain's
-    fall so it can never drop to silence faster than this — SoulX's natural word tails
-    ring through the release window instead of being hard-chopped when the take rests
-    (owner: "words ending naturally"), while a sustained rest still reaches silence so
-    model breath/hiss stays killed. Fast attacks are unaffected (only the fall is limited)."""
-    if strength <= 0.0:
-        return list(render)
-    env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
-    env_r = energy_envelope(render, sr, hop_ms=hop_s * 1000.0)
-    if not env_t or not env_r:
-        return list(render)
-
-    th = _gate_threshold(env_t, gate_frac)
-    th_r = _voicing_threshold(env_r)
-    gains = []
-    for i in range(len(env_r)):
-        et = env_t[i] if i < len(env_t) else 0.0
-        if et < th:
-            raw = 0.0                     # the take rests here — force silence
-        else:
-            # boost only where the render is actually VOICING; breath/hiss under a
-            # take note is left at unity, never amplified into fake energy
-            cap = max_boost if env_r[i] >= th_r else 1.0
-            raw = min(et / max(env_r[i], 1e-9), cap)
-        gains.append((1.0 - strength) + strength * raw)
-
-    if smooth_hops > 1:
-        half = smooth_hops // 2
-        gains = [sum(gains[max(0, i - half):i + half + 1])
-                 / (min(len(gains), i + half + 1) - max(0, i - half))
-                 for i in range(len(gains))]
-
-    if release_s > 0.0 and gains:
-        # release-limit the FALL: the gain can never drop by more than one hop's worth of a
-        # full-scale ramp over release_s. A sharp gate-to-silence becomes a natural release
-        # (word tail rings out); a genuine within-phrase decay is gentler than the limit and
-        # rides through untouched; fast attacks (rises) are never limited.
-        max_drop = hop_s / release_s
-        for i in range(1, len(gains)):
-            gains[i] = max(gains[i], gains[i - 1] - max_drop)
-
-    hop = max(1, int(sr * hop_s))
-    out = []
-    for j, v in enumerate(render):
-        f = j / hop
-        i = int(f)
-        if i >= len(gains) - 1:
-            g = gains[-1]
-        else:
-            frac = f - i
-            g = gains[i] + (gains[i + 1] - gains[i]) * frac
-        out.append(v * g)
-    return out
 
 
 SNAP_MAX_SHIFT_S = 0.12   # a word never moves more than this — beyond it, it's a miss

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Golden tests for performance transfer (soulx.perform).
+"""Golden tests for the performance lock (soulx.perform).
 
-The SoulX target score carries words/phonemes/pitch/timing but NO dynamics — the
-model invents its own volume/attack/decay, so a render never wears the take's
-delivery. `transfer_envelope` fixes that deterministically: measure the take's
-energy envelope, gain-match the render frame by frame (silence-gated so the
-take's rests force silence, boost-capped so a missing render note can't amplify
-noise, smoothed against zipper artifacts, with a strength dial). `env_corr` is
-the honest fit metric (envelope correlation on take-active frames — the same
-convention the ACE audit used).
+The SoulX target score places syllables within a phrase freely, so a render lands
+close to — but not exactly on — the take's clock. `snap_to_events` / `event_lags`
+measure each word-event's local lag against the take (envelope cross-correlation)
+and shift that segment onto the slot's exact start — the timing snap that feeds the
+NSF re-vocode (which now supplies the natural dynamics). `env_corr` is the honest
+fit metric (envelope correlation on take-active frames — the same convention the
+ACE audit used).
 
 Run:  python3 service/soulx/perform_test.py     (exit 0 = all pass)
 """
@@ -54,72 +53,6 @@ take = (silence(0.2)
         + silence(0.5)
         + tone(330, 0.3, lambda x: 0.6)
         + silence(0.3))
-
-# RENDER: same phrase spans but FLAT dynamics, plus low-level hiss in the take's rest
-#         (model breath/noise).
-hiss = 0.02
-render = (silence(0.2)
-          + tone(220, 0.5, lambda x: 0.5)
-          + [hiss * math.sin(2 * math.pi * 50 * i / SR) for i in range(int(0.5 * SR))]
-          + tone(330, 0.3, lambda x: 0.5)
-          + silence(0.3))
-
-out = perform.transfer_envelope(take, render, SR)
-
-# ── 1. the transferred render wears the take's envelope ───────────────────────────────
-corr_before = perform.env_corr(take, render, SR)
-corr_after = perform.env_corr(take, out, SR)
-check("output length == render length", len(out) == len(render))
-check("baseline envelope corr is poor (flat render vs decaying take)",
-      corr_before < 0.85, f"before={corr_before:.3f}")
-check("transferred envelope corr is high", corr_after > 0.95, f"after={corr_after:.3f}")
-check("transfer improves the corr", corr_after > corr_before + 0.1,
-      f"{corr_before:.3f} -> {corr_after:.3f}")
-
-# decay actually transferred: early in phrase 1 the output is much louder than late
-a0, a1 = span(0.23, 0.28)
-b0, b1 = span(0.62, 0.67)
-early = max(abs(v) for v in out[a0:a1])
-late = max(abs(v) for v in out[b0:b1])
-check("attack/decay shape transferred (early >> late in the decaying phrase)",
-      early > 2.5 * late, f"early={early:.3f} late={late:.3f}")
-
-# ── 2. the take's rests force silence (kills model breath/hiss) ───────────────────────
-r0, r1 = span(0.80, 1.10)
-check("render hiss in the take's rest is silenced",
-      max(abs(v) for v in out[r0:r1]) < 1e-3,
-      f"max={max(abs(v) for v in out[r0:r1]):.5f}")
-
-# ── 3. asymmetric boost: lift only where the render is actually VOICING ───────────────
-# (own fixtures — a genuinely missed phrase SHOULD also tank env_corr, so they can't
-#  live inside the corr fixture above)
-# 3a. breath/hiss where the take sings: never amplified (gain <= 1 on non-voicing
-#     frames). The render must SING elsewhere — voicing is judged relative to the
-#     render's own singing level, so an all-hiss fixture would be degenerate.
-take2 = (silence(0.2) + tone(220, 0.3, lambda x: 0.6) + silence(0.3)
-         + tone(262, 0.3, lambda x: 0.7) + silence(0.2))
-render2 = (silence(0.2) + tone(220, 0.3, lambda x: 0.5) + silence(0.3)
-           + [hiss * math.sin(2 * math.pi * 50 * i / SR) for i in range(int(0.3 * SR))]
-           + silence(0.2))
-out2 = perform.transfer_envelope(take2, render2, SR, max_boost=12.0)
-m0, m1 = span(0.82, 1.08)
-check("render breath under a take note is NOT amplified (even at a high cap)",
-      max(abs(v) for v in out2[m0:m1]) <= hiss * 1.05,
-      f"max={max(abs(v) for v in out2[m0:m1]):.4f} vs hiss={hiss}")
-
-# 3b. a quiet-but-VOICED render syllable IS lifted to the take's level
-take3 = silence(0.2) + tone(262, 0.4, lambda x: 0.6) + silence(0.2)
-render3 = silence(0.2) + tone(262, 0.4, lambda x: 0.1) + silence(0.2)
-out3 = perform.transfer_envelope(take3, render3, SR, max_boost=12.0)
-v0, v1 = span(0.3, 0.5)
-lifted = max(abs(v) for v in out3[v0:v1])
-check("quiet voiced render syllable lifted to the take's level",
-      0.45 <= lifted <= 0.75, f"peak={lifted:.3f} (take sings at 0.6)")
-
-# ── 4. strength dial: 0 = identity ────────────────────────────────────────────────────
-ident = perform.transfer_envelope(take, render, SR, strength=0.0)
-check("strength=0 returns the render unchanged",
-      max(abs(a - b) for a, b in zip(ident, render)) < 1e-9)
 
 # ── 4b. SLOT-LEVEL SNAP (strict round): each word lands on its slot's exact start ─────
 # Phrase snap fixes phrase STARTS only; SoulX places syllables inside a phrase freely.
@@ -171,50 +104,8 @@ check("event_lags reports each word's measured lag (0/+80/+40ms here)",
       len(lags) == 3 and abs(lags[0]) <= 0.015 and abs(lags[1] - 0.08) <= 0.015
       and abs(lags[2] - 0.04) <= 0.015, str([round(x * 1000) for x in lags]))
 
-# ── 6. RELEASE FADE (owner, 2026-07-12): word tails ring out, not chopped ─────────────
-# The hard silence-gate (raw=0 the instant the take rests) chops SoulX's natural word
-# endings — "I can hear the volume automation rather than the words ending naturally".
-# release_s>0 release-LIMITS the drop to zero (gain can't fall to silence faster than
-# release_s), so the render's own decay tail rings through the release window, then still
-# reaches silence for a sustained rest (model breath/hiss stays killed). release_s=0 keeps
-# the current hard behavior (back-compat — every test above uses the default).
-tail_take = (silence(0.2) + tone(220, 0.3, lambda x: 0.6) + silence(0.5))   # note 0.2-0.5, rest 0.5-1.0
-tail_hiss = 0.02
-tail_render = (silence(0.2) + tone(220, 0.3, lambda x: 0.6)                  # note 0.2-0.5
-               + tone(220, 0.2, lambda x: 0.6 * math.exp(-3.0 * x))          # decay TAIL 0.5-0.7 (~150ms release)
-               + [tail_hiss * math.sin(2 * math.pi * 50 * i / SR) for i in range(int(0.3 * SR))])  # hiss 0.7-1.0
-hard = perform.transfer_envelope(tail_take, tail_render, SR)                       # default release_s=0
-soft = perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.12)
-t0, t1 = span(0.52, 0.58)
-hard_tail = max(abs(v) for v in hard[t0:t1])
-soft_tail = max(abs(v) for v in soft[t0:t1])
-check("hard gate chops the render's decay tail (current behavior)", hard_tail < 0.02, f"{hard_tail:.4f}")
-check("release fade lets the word tail ring out", soft_tail > 0.1, f"{soft_tail:.4f}")
-check("the tail decays naturally (start of tail louder than end)",
-      max(abs(v) for v in soft[span(0.505, 0.53)[0]:span(0.505, 0.53)[1]])
-      > max(abs(v) for v in soft[span(0.60, 0.63)[0]:span(0.60, 0.63)[1]]))
-s0, s1 = span(0.80, 0.98)   # well past the note-end + release window: still silent (hiss killed)
-check("a sustained rest still reaches silence (release completes, hiss killed)",
-      max(abs(v) for v in soft[s0:s1]) < 1e-3, f"{max(abs(v) for v in soft[s0:s1]):.5f}")
-check("release_s=0 is identical to the default (back-compat)",
-      perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.0) == hard)
-check("softened transfer still tracks the take's arc (env_corr stays high)",
-      perform.env_corr(tail_take, soft, SR) > 0.9, f"{perform.env_corr(tail_take, soft, SR):.3f}")
-check("release fade is deterministic (3x)",
-      len({hashlib.sha256(",".join(f"{v:.9f}" for v in perform.transfer_envelope(tail_take, tail_render, SR, release_s=0.12)).encode()).hexdigest()
-           for _ in range(3)}) == 1)
-
-# ── 5. metric sanity + determinism ────────────────────────────────────────────────────
+# ── 5. metric sanity ──────────────────────────────────────────────────────────────────
 check("env_corr(x, x) ~= 1", perform.env_corr(take, take, SR) > 0.999)
-
-
-def digest():
-    o = perform.transfer_envelope(take, render, SR)
-    return hashlib.sha256(",".join(f"{v:.9f}" for v in o).encode()).hexdigest()
-
-
-d = {digest() for _ in range(3)}
-check("transfer_envelope deterministic (3x)", len(d) == 1)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

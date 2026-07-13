@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Performance lock — constrain the writer-round renders to the MUMBLE's delivery.
+"""Timing lock — snap the writer-round renders onto the MUMBLE's timing (NSF input).
 
-Owner verdict on the writer round: words/notes are close, but none of the renders
-are "constrained enough to my mumble — the note being hit, the volume being hit
-at the attack and decay". The score we hand SoulX carries NO dynamics, so this
-round transfers the take's performance onto the EXISTING renders deterministically
-(no pod, no seed lottery):
+The score we hand SoulX carries NO dynamics, and the NSF re-vocode now supplies the
+render's natural volume/attack/decay — so this stage only fixes TIMING and emits the
+`-timed` render that feeds the NSF pipeline. (The old envelope-transfer step was dead
+weight once NSF owned dynamics, producing only contrast artifacts — it's gone.)
 
   1. phrase time-align   render phrases snapped onto the take's clock
                          (align_render: per-phrase envelope cross-correlation,
                          windows from each candidate's own chunk scores)
-  2. envelope transfer   the take's energy envelope gain-matched onto the render
-                         (soulx.perform: silence-gated, boost-capped, smoothed)
+  2. word snap           each word-event shifted onto its slot's exact start
+                         (soulx.perform.snap_to_events) -> voice-writer-{key}-timed.wav
 
 Honest metric: envCorr (envelope correlation on take-active frames — the ACE-audit
-convention) before -> after, per candidate. Nothing under ~/mosh-fms-ksb enters git.
+convention) before -> timed, per candidate. Nothing under ~/mosh-fms-ksb enters git.
 
-Usage:  backhalf_perform.py           lock A/B/C + write report
+Usage:  backhalf_perform.py           write the -timed renders + report
         backhalf_perform.py page      rebuild the panel page + daw-kit delivery
 """
 from __future__ import annotations
@@ -38,7 +37,7 @@ import align_render as ar            # noqa: E402
 import overlap as ov                 # noqa: E402
 from backhalf_ab_bench import BH, ROOT  # noqa: E402
 from skeleton import core as skcore  # noqa: E402
-from soulx import ab_mix, perform    # noqa: E402
+from soulx import perform            # noqa: E402
 
 HANDOFF = BH / "sing-handoff"
 SCORES = HANDOFF / "scores"
@@ -49,9 +48,6 @@ REPORT = BH / "perf-lock-report.json"
 TAKE = BH / "source-backhalf-48k.wav"
 SPLIT_S = 55.06
 MAX_SHIFT_S = 0.25    # calibrated: 150ms clamped 4/23 phrase snaps; 250ms only 1
-MAX_BOOST = 8.0       # asymmetric — only frames the render actually VOICES get lifted
-SOFT_RELEASE_S = 0.12  # owner round: release-fade the envelope so word tails ring out
-                       # instead of the hard silence-gate chopping them ("words ending naturally")
 
 
 def write_wav(path: Path, mono, sr: int) -> None:
@@ -153,33 +149,19 @@ def lock() -> int:
             pk = max(abs(v) for v in mono) or 1.0
             return ([v * 0.99 / pk for v in mono] if pk > 0.99 else mono), pk
 
-        # HARD lock (historical): gate the render to silence the instant the take rests.
-        out, peak = _finish(perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST))
-        # SOFT lock (this round): release-fade so word tails ring out naturally.
-        soft, _ = _finish(perform.transfer_envelope(take, snapped, sr, max_boost=MAX_BOOST,
-                                                     release_s=SOFT_RELEASE_S))
-        # TIMED (owner round, NSF pipeline): phrase+word-snapped to the take but with NO
-        # envelope transfer — this is the input the NSF re-vocode resynthesizes (natural
-        # dynamics from the model, aligned timing), the painted envelope dropped entirely.
-        timed, _ = _finish(list(snapped))
+        # TIMED (NSF pipeline): phrase+word-snapped to the take but with NO envelope
+        # transfer — this is the input the NSF re-vocode resynthesizes (natural dynamics
+        # from the model, aligned timing). NSF now owns the dynamics, so the old hard/soft
+        # envelope-transfer arms are gone (they only produced contrast artifacts).
+        timed, peak = _finish(list(snapped))
         write_wav(SERVE / f"voice-writer-{key}-timed.wav", timed, sr)
 
         corr0 = perform.env_corr(take, rend, sr)
         corr1 = perform.env_corr(take, aligned, sr)
-        corr2 = perform.env_corr(take, out, sr)
-        corr2s = perform.env_corr(take, soft, sr)
+        corr_t = perform.env_corr(take, timed, sr)
         voiced = candidate_windows(cand, rest_split_s=0.05)
         sung0 = masked_env_corr(env_t, rend, sr, voiced)
-        sung2 = masked_env_corr(env_t, out, sr, voiced)
-        sung2s = masked_env_corr(env_t, soft, sr, voiced)
-        perf_wav = SERVE / f"voice-writer-{key}-perf.wav"
-        soft_wav = SERVE / f"voice-writer-{key}-perfsoft.wav"
-        write_wav(perf_wav, out, sr)
-        write_wav(soft_wav, soft, sr)
-        ab_mix.stereo_ab(str(TAKE), str(perf_wav), str(SERVE / f"ab-perf-{key}.wav"),
-                         sr=sr, right_gain=0.9)
-        ab_mix.stereo_ab(str(TAKE), str(soft_wav), str(SERVE / f"ab-perfsoft-{key}.wav"),
-                         sr=sr, right_gain=0.9)
+        sung_t = masked_env_corr(env_t, timed, sr, voiced)
 
         abs_ms = sorted(abs(s) * 1000 for s in shifts)
         syl_ms = sorted(abs(s) * 1000 for s in syl_lags)
@@ -190,13 +172,12 @@ def lock() -> int:
                  "sylSnapMedianMs": round(statistics.median(syl_ms), 1) if syl_ms else 0.0,
                  "sylSnapP90Ms": round(syl_ms[int(0.9 * (len(syl_ms) - 1))], 1) if syl_ms else 0.0,
                  "envCorr": {"before": round(corr0, 3), "aligned": round(corr1, 3),
-                             "after": round(corr2, 3), "afterSoft": round(corr2s, 3)},
-                 "envCorrSung": {"before": round(sung0, 3), "after": round(sung2, 3),
-                                 "afterSoft": round(sung2s, 3)},
+                             "timed": round(corr_t, 3)},
+                 "envCorrSung": {"before": round(sung0, 3), "timed": round(sung_t, 3)},
                  "peakScaled": peak > 0.99}
         report["candidates"].append(entry)
-        print(f"{key}: envCorr {corr0:.3f} -> {corr2:.3f} (hard) / {corr2s:.3f} (soft) | "
-              f"sung-spans {sung0:.3f} -> {sung2:.3f} (hard) / {sung2s:.3f} (soft) | "
+        print(f"{key}: envCorr {corr0:.3f} -> {corr_t:.3f} (timed) | "
+              f"sung-spans {sung0:.3f} -> {sung_t:.3f} (timed) | "
               f"{len(wins)} phrases shift med {entry['shiftMedianMs']}ms | "
               f"{len(events)} words syl-snap med {entry['sylSnapMedianMs']}ms", flush=True)
     REPORT.write_text(json.dumps(report, indent=2))
@@ -211,16 +192,14 @@ def page() -> int:
     for cand in man["candidates"]:
         key = cand["key"]
         r = rep[key]
-        for suffix in ("-perf", "-perfsoft"):
-            src = SERVE / f"voice-writer-{key}{suffix}.wav"
-            if not src.is_file():
-                continue
+        src = SERVE / f"voice-writer-{key}-timed.wav"
+        if src.is_file():
             subprocess.run(["ffmpeg", "-y", "-i", str(src),
-                            str(KIT / "demo-clips" / f"writer-{key}{suffix}.wav")],
+                            str(KIT / "demo-clips" / f"writer-{key}-timed.wav")],
                            check=True, capture_output=True)
             subprocess.run(["ffmpeg", "-y", "-i", str(src), "-af",
                             f"adelay={int(SPLIT_S * 1000)}:all=1",
-                            str(KIT / "demo-clips-padded-to-song-start" / f"writer-{key}{suffix}.wav")],
+                            str(KIT / "demo-clips-padded-to-song-start" / f"writer-{key}-timed.wav")],
                            check=True, capture_output=True)
         rows = "".join(
             f"<tr><td class='idx'>L{w['index']}</td>"
@@ -228,32 +207,16 @@ def page() -> int:
             f"<td class='sim'>{('%.2f' % w['mouthSim']) if w.get('mouthSim') is not None else ''}</td></tr>"
             for w in cand["words"])
         ec = r["envCorr"]
-        has_soft = (SERVE / f"voice-writer-{key}-perfsoft.wav").is_file()
         mouth = cand.get("mouthSimMean")
         mouth_txt = f"mouth echo {mouth:.2f} · " if mouth else ""
-        soft_block = (f"""
-        <div class="row"><span><b>SOFT lock</b> — word tails ring out (release fade, this round){' · envCorr %.2f' % ec.get('afterSoft', ec['after'])}</span>
-          <audio controls preload="metadata" src="voice-writer-{key}-perfsoft.wav"></audio>
-          <audio controls preload="metadata" src="ab-perfsoft-{key}.wav"></audio></div>""" if has_soft else "")
         cards.append(f"""
       <div class="card">
-        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — pitch-nearest melody + performance lock</h2>
-          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['after']:.2f} · phrase snap med {r['shiftMedianMs']:.0f} ms</span></div>
-        {soft_block}
-        <div class="row"><span>HARD lock — the previous chop-to-silence (for contrast)</span>
-          <audio controls preload="metadata" src="voice-writer-{key}-perf.wav"></audio>
-          <audio controls preload="metadata" src="ab-perf-{key}.wav"></audio></div>
+        <div class="chead"><span class="tag">{key}</span><h2>{html.escape(cand['label'])} — pitch-nearest melody + timing lock</h2>
+          <span class="stat">{mouth_txt}envCorr {ec['before']:.2f} → {ec['timed']:.2f} · phrase snap med {r['shiftMedianMs']:.0f} ms</span></div>
+        <div class="row"><span>timing-snapped to your take — the NSF re-vocode input (natural dynamics come from NSF)</span>
+          <audio controls preload="metadata" src="voice-writer-{key}-timed.wav"></audio></div>
         <details><summary style="color:#8b949e;font-size:13px;cursor:pointer;margin-top:8px">the lines (with per-line mouth echo)</summary>
         <table><tbody>{rows}</tbody></table></details>
-      </div>""")
-    if (SERVE / "voice-writer-A-perf.wav").is_file():
-        cards.append("""
-      <div class="card">
-        <div class="chead"><span class="tag">A</span><h2>before the truth grid — an early pick, for contrast</h2>
-          <span class="stat">detector grid · performance-locked</span></div>
-        <audio controls preload="metadata" src="voice-writer-A-perf.wav"></audio>
-        <div class="row"><span>overlay — your mumble LEFT, A RIGHT</span>
-          <audio controls preload="metadata" src="ab-perf-A.wav"></audio></div>
       </div>""")
     # The blind detector-calibration block is obsolete on the listen page — the grid is
     # now the owner's own hand-marks (annotator truth), not a detector to pick between.
@@ -309,7 +272,7 @@ def page() -> int:
       </div>""")
     (SERVE / "index.html").write_text(f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Used2 — melody fixed + natural dynamics (pitch-corrected re-render)</title>
+<title>Used2 — melody fixed + timing-snapped (NSF re-vocode input)</title>
 <style>
   body{{margin:0;background:#0d1117;color:#e6edf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
   .wrap{{max-width:820px;margin:0 auto;padding:26px 20px 80px}}
@@ -330,14 +293,13 @@ def page() -> int:
   .oksus{{color:#3fb950;font-size:11px}}
   .ref h2{{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#8b949e;margin:0 0 8px}}
 </style></head><body><div class="wrap">
-  <h1>Used2 — melody fixed + natural dynamics</h1>
-  <p class="sub">Two things you flagged, both landed. <b>Melody:</b> the flat high notes were
-     a floor-biased key snap transposing every off-key note down — fixed at the source
-     (nearest note, ties resolve up); these T1/T2 are re-rendered with the corrected pitches
-     (same words). <b>Dynamics:</b> the <b>SOFT lock</b> release-fades the level so each word's
-     tail rings out instead of being chopped to silence — the "words ending naturally" you
-     asked for; the <b>HARD lock</b> is the old chop, for contrast. Play SOFT vs HARD, and
-     check the melody now sits right. Kit: writer-T1/T2-perfsoft.wav.</p>
+  <h1>Used2 — melody fixed + timing-snapped</h1>
+  <p class="sub"><b>Melody:</b> the flat high notes were a floor-biased key snap transposing
+     every off-key note down — fixed at the source (nearest note, ties resolve up); these
+     T1/T2 carry the corrected pitches. <b>Timing:</b> each render is phrase- and word-snapped
+     onto your take's clock, then handed to the NSF re-vocode for natural volume/attack/decay
+     — the painted envelope-transfer step is gone, NSF owns the dynamics now. Kit:
+     writer-T1/T2-timed.wav.</p>
   <div class="card ref"><h2>Raw back half (your take, reference)</h2>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}

@@ -87,9 +87,6 @@ def page() -> int:
             rows += (f'<div class="row"><span>NSF re-vocode — the render\'s own timing (natural voice, '
                      f'flow not yet snapped)</span>'
                      f'<audio controls preload="metadata" src="voice-nsf-{key}-revoice.wav"></audio></div>')
-        if (SERVE / f"voice-writer-{key}-perfsoft.wav").is_file():
-            rows += (f'<div class="row"><span>SoulX + our SOFT lock (the painted-envelope pipeline, for contrast)</span>'
-                     f'<audio controls preload="metadata" src="voice-writer-{key}-perfsoft.wav"></audio></div>')
         if have["tune"]:
             rows += (f'<div class="row"><span>NSF pitch-corrected — dead-in-tune to the nearest '
                      f'semitone, no autotune smear</span>'
@@ -124,8 +121,7 @@ def page() -> int:
      (coherent bars, zero filler-salad — the "flow over sounds" fix), timing-snapped to your
      take, then NSF re-vocoded — aligned flow + your natural voice + clean pitch, the painted
      envelope gone. Two draws: <b>T1</b> (fire / ash) and <b>T2</b> (war / heroes); the lyrics
-     are under each player. The <b>SoulX + soft-lock</b> card in each is the old painted-envelope
-     pipeline, kept for contrast so you can hear the difference.</p>
+     are under each player.</p>
   <div class="card"><div class="chead"><h2>Raw back half (your take, reference)</h2></div>
     <audio controls preload="metadata" src="back-half/source-backhalf-48k.wav"></audio></div>
   {''.join(cards)}
