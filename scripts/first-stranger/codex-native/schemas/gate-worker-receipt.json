@@ -14,6 +14,7 @@
     "started_at",
     "finished_at",
     "duration_ms",
+    "producer",
     "worker",
     "source",
     "gate",
@@ -31,6 +32,16 @@
     "started_at": {"type": "string", "format": "date-time"},
     "finished_at": {"type": "string", "format": "date-time"},
     "duration_ms": {"type": "integer", "minimum": 0},
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "protocol", "guest_writable"],
+      "properties": {
+        "kind": {"const": "controller"},
+        "protocol": {"const": "mosh-gate-controller-v1"},
+        "guest_writable": {"const": false}
+      }
+    },
     "worker": {
       "type": "object",
       "additionalProperties": false,
@@ -79,31 +90,102 @@
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["detached_head_sha", "tracked_clean", "tracked_status", "tracked_status_sha256"],
+      "required": ["detached_head_sha", "tracked_clean", "tracked_status", "tracked_status_sha256", "verification_source"],
       "properties": {
         "detached_head_sha": {"$ref": "#/$defs/git_sha"},
         "tracked_clean": {"type": "boolean"},
         "tracked_status": {"type": "string"},
-        "tracked_status_sha256": {"$ref": "#/$defs/sha256"}
+        "tracked_status_sha256": {"$ref": "#/$defs/sha256"},
+        "verification_source": {"const": "controller-readonly-disk"}
       }
     },
     "isolation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["network_adapter_enabled", "network_probe", "account_admin", "owner_home_mounted", "credentials_present"],
+      "required": ["network_adapter_enabled", "network_probe", "account_admin", "owner_home_mounted", "credentials_present", "evidence_source"],
       "properties": {
         "network_adapter_enabled": {"const": false},
         "network_probe": {"const": "disabled"},
         "account_admin": {"const": false},
         "owner_home_mounted": {"const": false},
-        "credentials_present": {"const": false}
+        "credentials_present": {"const": false},
+        "evidence_source": {"const": "controller-hypervisor"}
       }
     },
     "artifacts": {
       "type": "array",
-      "items": {"$ref": "#/$defs/artifact"}
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "allOf": [
+            {"$ref": "#/$defs/artifact"},
+            {"properties": {"path": {"const": "gate.stdout"}}}
+          ]
+        },
+        {
+          "allOf": [
+            {"$ref": "#/$defs/artifact"},
+            {"properties": {"path": {"const": "gate.stderr"}}}
+          ]
+        },
+        {
+          "allOf": [
+            {"$ref": "#/$defs/artifact"},
+            {"properties": {"path": {"const": "tracked-status.txt"}}}
+          ]
+        }
+      ],
+      "items": false
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"outcome": {"const": "passed"}},
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "reasons": {"maxItems": 0},
+          "gate": {
+            "properties": {
+              "exit_status": {"const": 0},
+              "result": {
+                "properties": {
+                  "pass": {"const": true},
+                  "selftest_failed": {"const": 0},
+                  "asserts": {"const": 0},
+                  "steps": {
+                    "minItems": 1,
+                    "items": {"properties": {"ok": {"const": true}}}
+                  }
+                }
+              }
+            }
+          },
+          "repository": {
+            "properties": {
+              "tracked_clean": {"const": true},
+              "tracked_status": {"const": ""},
+              "tracked_status_sha256": {
+                "const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"outcome": {"const": "needs-human"}},
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {"reasons": {"minItems": 1}}
+      }
+    }
+  ],
   "$defs": {
     "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -118,7 +200,7 @@
       "properties": {
         "path": {"$ref": "#/$defs/relative_path"},
         "sha256": {"$ref": "#/$defs/sha256"},
-        "size_bytes": {"type": "integer", "minimum": 0}
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 1073741824}
       }
     },
     "gate_result": {
@@ -135,12 +217,13 @@
         "asserts": {"type": "integer", "minimum": 0},
         "steps": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["name", "ok", "detail"],
             "properties": {
-              "name": {"type": "string"},
+              "name": {"type": "string", "minLength": 1},
               "ok": {"type": "boolean"},
               "detail": {"type": "object"}
             }

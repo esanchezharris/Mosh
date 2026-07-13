@@ -133,6 +133,37 @@ cn_agent_toolchain_valid() {
   done
 }
 
+cn_hermetic_fixture_valid() {
+  local repo control fixture remote origin code gh code_dir gh_dir
+  [ "${CN_HERMETIC_FIXTURE:-0}" = 1 ] || return 1
+  [ "$CN_GH_REPO" = fixture/repo ] || return 1
+  repo="$(cn_real_dir "$CN_REPO")" || return 1
+  control="$(cn_real_dir "$CN_CONTROL_REPO")" || return 1
+  [ "$repo" = "$control" ] || return 1
+  case "$repo" in
+    /private/var/folders/*/repo|/var/folders/*/repo|/tmp/*/repo) ;;
+    *) return 1 ;;
+  esac
+  fixture="$(cn_real_dir "${repo%/repo}")" || return 1
+  [ -n "${CN_TEST_REMOTE:-}" ] || return 1
+  remote="$(cn_real_dir "$CN_TEST_REMOTE")" || return 1
+  [ "$remote" = "$fixture/remote.git" ] || return 1
+  origin="$(git -C "$repo" remote get-url origin)" || return 1
+  origin="$(cn_real_dir "$origin")" || return 1
+  [ "$origin" = "$remote" ] || return 1
+  code="$CN_CODEX_BIN"; gh="$CN_GH_BIN"
+  [ -f "$code" ] && [ ! -L "$code" ] && [ -x "$code" ] || return 1
+  [ -f "$gh" ] && [ ! -L "$gh" ] && [ -x "$gh" ] || return 1
+  code_dir="$(cn_real_dir "${code%/*}")" || return 1
+  gh_dir="$(cn_real_dir "${gh%/*}")" || return 1
+  [ "$code_dir/${code##*/}" = "$fixture/codex" ] || return 1
+  [ "$gh_dir/${gh##*/}" = "$fixture/gh" ] || return 1
+}
+
+cn_agent_secret_boundary_valid() {
+  cn_hermetic_fixture_valid
+}
+
 cn_agent_permissions_arg() {
   local wt runtime access="$3" common home tmp pointer deps_path trusted_deps tools_root
   local brew_bin brew_cellar brew_opt brew_node_modules brew_openssl_config path
@@ -319,7 +350,7 @@ cn_branch() {
 }
 
 cn_check() {
-  local ok=true stopped armed base_ok backlog_ok schemas_ok=true gate_profile_ok agent_toolchain_profile_ok gate_execution_enabled dep stop_report
+  local ok=true stopped armed base_ok backlog_ok schemas_ok=true gate_profile_ok agent_toolchain_profile_ok agent_secret_boundary_ok gate_execution_enabled dep stop_report
   for dep in git jq lsof rg "$CN_CODEX_BIN" "$CN_GH_BIN" "$CN_SANDBOX_BIN"; do
     cn_command_exists "$dep" || ok=false
   done
@@ -327,6 +358,7 @@ cn_check() {
   if [ -r "$CN_BACKLOG" ]; then backlog_ok=true; else backlog_ok=false; fi
   if cn_gate_profile_valid; then gate_profile_ok=true; else gate_profile_ok=false; fi
   if cn_agent_toolchain_valid; then agent_toolchain_profile_ok=true; else agent_toolchain_profile_ok=false; fi
+  if cn_agent_secret_boundary_valid; then agent_secret_boundary_ok=true; else agent_secret_boundary_ok=false; fi
   if [ "${CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE:-0}" = 1 ]; then gate_execution_enabled=true; else gate_execution_enabled=false; fi
   for schema in "$CN_SCHEMAS"/*.json; do jq -e . "$schema" >/dev/null || schemas_ok=false; done
   stop_report="$(cn_stop_sources_json "$CN_REPO" "$CN_CONTROL_REPO" "$CN_WORK_ROOT")"
@@ -336,27 +368,30 @@ cn_check() {
     --argjson base_ok "$base_ok" --argjson backlog_ok "$backlog_ok" \
     --argjson schemas_ok "$schemas_ok" --argjson gate_profile_ok "$gate_profile_ok" \
     --argjson agent_toolchain_profile_ok "$agent_toolchain_profile_ok" \
+    --argjson agent_secret_boundary_ok "$agent_secret_boundary_ok" \
     --argjson gate_execution_enabled "$gate_execution_enabled" --arg base_ref "$CN_BASE_REF" \
     --arg pr_base "$CN_PR_BASE" --arg model "$CN_MODEL" --arg control_repo "$CN_CONTROL_REPO" \
     --argjson stop_report "$stop_report" \
-    '{ok:($ok and $base_ok and $backlog_ok and $schemas_ok and $gate_profile_ok and $agent_toolchain_profile_ok),armed:$armed,stopped:$stopped,base_ref:$base_ref,pr_base:$pr_base,model:$model,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{base_ref:$base_ok,backlog:$backlog_ok,schemas:$schemas_ok,gate_profile:$gate_profile_ok,agent_toolchain_profile:$agent_toolchain_profile_ok,gate_execution_enabled:$gate_execution_enabled}}'
+    '{ok:($ok and $base_ok and $backlog_ok and $schemas_ok and $gate_profile_ok and $agent_toolchain_profile_ok and $agent_secret_boundary_ok),armed:$armed,stopped:$stopped,base_ref:$base_ref,pr_base:$pr_base,model:$model,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{base_ref:$base_ok,backlog:$backlog_ok,schemas:$schemas_ok,gate_profile:$gate_profile_ok,agent_toolchain_profile:$agent_toolchain_profile_ok,agent_secret_boundary:$agent_secret_boundary_ok,gate_execution_enabled:$gate_execution_enabled}}'
   [ "$ok" = true ] && [ "$base_ok" = true ] && [ "$backlog_ok" = true ] && [ "$schemas_ok" = true ] && \
-    [ "$gate_profile_ok" = true ] && [ "$agent_toolchain_profile_ok" = true ]
+    [ "$gate_profile_ok" = true ] && [ "$agent_toolchain_profile_ok" = true ] && [ "$agent_secret_boundary_ok" = true ]
 }
 
 cn_status() {
-  local armed stopped files="[]" stop_report agent_toolchain_profile_ok
+  local armed stopped files="[]" stop_report agent_toolchain_profile_ok agent_secret_boundary_ok
   armed="$(cn_bool cn_require_armed)"
   stop_report="$(cn_stop_sources_json "$CN_REPO" "$CN_CONTROL_REPO" "$CN_WORK_ROOT")"
   stopped="$(jq -r '.stop_sources | [.[]] | any' <<<"$stop_report")"
   if cn_agent_toolchain_valid; then agent_toolchain_profile_ok=true; else agent_toolchain_profile_ok=false; fi
+  if cn_agent_secret_boundary_valid; then agent_secret_boundary_ok=true; else agent_secret_boundary_ok=false; fi
   if [ -d "$CN_HOME/state" ]; then
     files="$(for f in "$CN_HOME/state"/*.json; do [ -f "$f" ] && jq -c . "$f" 2>/dev/null || true; done | jq -sc '.')"
   fi
   jq -nc --argjson armed "$armed" --argjson stopped "$stopped" --argjson lanes "$files" \
     --arg base_ref "$CN_BASE_REF" --arg control_repo "$CN_CONTROL_REPO" --argjson stop_report "$stop_report" \
     --argjson agent_toolchain_profile_ok "$agent_toolchain_profile_ok" \
-    '{armed:$armed,stopped:$stopped,base_ref:$base_ref,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{agent_toolchain_profile:$agent_toolchain_profile_ok},lanes:$lanes}'
+    --argjson agent_secret_boundary_ok "$agent_secret_boundary_ok" \
+    '{armed:$armed,stopped:$stopped,base_ref:$base_ref,control_repo:$control_repo,stop_sources:$stop_report.stop_sources,lane_stop_sources:$stop_report.lane_stop_sources,checks:{agent_toolchain_profile:$agent_toolchain_profile_ok,agent_secret_boundary:$agent_secret_boundary_ok},lanes:$lanes}'
 }
 
 cn_lane_json() {
@@ -405,7 +440,8 @@ cn_exec_start() {
   local phase="$1" access="$2" wt="$3" prompt="$4" out="$5" events="$6" err="$7" runtime="$8" permissions
   permissions="$(cn_agent_permissions_arg "$wt" "$runtime" "$access")" \
     || cn_die "$phase could not build a restricted Codex permission profile"
-  env -i CODEX_HOME="$CN_CODEX_HOME" HOME="$runtime/home" TMPDIR="$runtime/tmp" \
+  /usr/bin/env -i \
+    CODEX_HOME="$CN_CODEX_HOME" HOME="$runtime/home" TMPDIR="$runtime/tmp" \
     PATH="$CN_AGENT_PATH" LANG="${LANG:-C}" "$CN_CODEX_BIN" exec --ignore-user-config --ignore-rules --json --color never \
     --output-schema "$CN_SCHEMAS/$phase.json" -o "$out" \
     -m "$CN_MODEL" -c "model_reasoning_effort=\"$CN_REASONING\"" \
@@ -419,7 +455,8 @@ cn_exec_resume() {
   local phase="$1" session="$2" prompt="$3" out="$4" events="$5" err="$6" wt="$7" runtime="$8" permissions
   permissions="$(cn_agent_permissions_arg "$wt" "$runtime" write)" \
     || cn_die "$phase could not build a restricted Codex permission profile"
-  env -i CODEX_HOME="$CN_CODEX_HOME" HOME="$runtime/home" TMPDIR="$runtime/tmp" \
+  /usr/bin/env -i \
+    CODEX_HOME="$CN_CODEX_HOME" HOME="$runtime/home" TMPDIR="$runtime/tmp" \
     PATH="$CN_AGENT_PATH" LANG="${LANG:-C}" "$CN_CODEX_BIN" exec resume --ignore-user-config --ignore-rules --json \
     --output-schema "$CN_SCHEMAS/$phase.json" -o "$out" \
     -m "$CN_MODEL" -c "model_reasoning_effort=\"$CN_REASONING\"" \
@@ -458,7 +495,7 @@ cn_prepare_lane() {
 
 cn_plan_phase() {
   local lane="$1" lane_json="$2" wt="$3" base="$4" state="$5" logs="$6" runtime="$7"
-  local prompt out events err thread result route gap binding
+  local prompt out events err thread result route planned gap outcome binding
   prompt="$(cn_plan_prompt "$lane" "$lane_json")"
   out="$logs/plan.result.json"; events="$logs/plan.events.jsonl"; err="$logs/plan.stderr.log"
   cn_purge_ignored "$wt"
@@ -477,9 +514,29 @@ cn_plan_phase() {
   cn_assert_plan_only "$wt" "$lane" || cn_die "$lane planning changed files outside its lane plan: $(cn_changed_paths "$wt" | tr '\n' ' ')"
   route="$(jq -r .route <<<"$result")"
   [ "$route" != never ] || { cn_write_state "$wt" "$state" "$lane" "$base" "$base" needs-human "$thread"; cn_die "$lane plan requires a never-touch path"; }
+  planned="$(jq -r .planned <<<"$result")"
   gap="$(jq -r .gap_exists <<<"$result")"
-  cn_write_state "$wt" "$state" "$lane" "$base" "$base" planned "$thread"
-  printf '%s\n' "$gap"
+  outcome="$(cn_plan_outcome "$planned" "$gap")" || {
+    cn_write_state "$wt" "$state" "$lane" "$base" "$base" needs-human "$thread"
+    cn_die "$lane plan returned an invalid execution outcome"
+  }
+  case "$outcome" in
+    proceed)
+      cn_write_state "$wt" "$state" "$lane" "$base" "$base" planned "$thread"
+      ;;
+    gap-closed)
+      cn_write_state "$wt" "$state" "$lane" "$base" "$base" needs-human "$thread"
+      cn_die "$lane gap is already closed; refusing implementation or publication"
+      ;;
+    needs-human)
+      cn_write_state "$wt" "$state" "$lane" "$base" "$base" needs-human "$thread"
+      cn_die "$lane planning did not produce an executable lane plan"
+      ;;
+    *)
+      cn_write_state "$wt" "$state" "$lane" "$base" "$base" needs-human "$thread"
+      cn_die "$lane plan returned an unknown execution outcome"
+      ;;
+  esac
 }
 
 cn_implement_phase() {
@@ -705,20 +762,32 @@ cn_publish_phase() {
     printf '%s %s\n' "$lane" "$existing_pr"
     return 0
   fi
+  remote="$(git -C "$wt" ls-remote origin "refs/heads/$branch" | awk '{print $1}')"
+  cn_remote_head_matches "$head" "$remote" \
+    || cn_die "$lane remote head advanced before draft creation"
   cn_before_mutation "$wt"
   if [ "$route" = owner ]; then
     pr_url="$("$CN_GH_BIN" pr create --draft --base "$CN_PR_BASE" --head "$branch" --title "$lane: $(jq -r .title <<<"$lane_json")" --body-file "$body" --label "$program_label" --label "codex-route:$route" --label needs-owner-merge --repo "$CN_GH_REPO")"
   else
     pr_url="$("$CN_GH_BIN" pr create --draft --base "$CN_PR_BASE" --head "$branch" --title "$lane: $(jq -r .title <<<"$lane_json")" --body-file "$body" --label "$program_label" --label "codex-route:$route" --repo "$CN_GH_REPO")"
   fi
-  cn_verify_published_pr "$wt" "$pr_url" "$branch" "$head" \
-    || cn_die "$lane created draft PR does not match the gated head/base"
+  if ! cn_verify_published_pr "$wt" "$pr_url" "$branch" "$head"; then
+    cn_before_mutation "$wt"
+    if ! "$CN_GH_BIN" pr close "$pr_url" --comment \
+      "Codex-native supervisor closed this draft because its published head/base did not match the exact gated SHA." \
+      --repo "$CN_GH_REPO" >/dev/null 2>&1; then
+      cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+      cn_die "$lane created a mismatched draft PR and could not close it; owner cleanup is required"
+    fi
+    cn_write_state "$wt" "$state" "$lane" "$base" "$head" needs-human "$thread"
+    cn_die "$lane created draft PR did not match the gated head/base and was closed"
+  fi
   cn_write_state "$wt" "$state" "$lane" "$base" "$head" pr-opened "$thread"
   printf '%s %s\n' "$lane" "$pr_url"
 }
 
 cn_run_lane() {
-  local lane="$1" resume_mode="${2:-false}" lane_json slug wt branch state logs runtime base phase thread gap result route head changed_paths binding
+  local lane="$1" resume_mode="${2:-false}" lane_json slug wt branch state logs runtime base phase thread result route head changed_paths binding
   lane_json="$(cn_lane_json "$lane")"
   [ -n "$lane_json" ] || cn_die "unknown lane: $lane"
   slug="$(cn_slug "$lane")"; wt="$(cn_worktree_path "$lane")"; branch="$(cn_branch "$lane")"
@@ -744,12 +813,8 @@ cn_run_lane() {
   cn_prepare_agent_runtime "$wt" "$runtime"
 
   if [ "$phase" = initialized ]; then
-    gap="$(cn_plan_phase "$lane" "$lane_json" "$wt" "$base" "$state" "$logs" "$runtime")"
+    cn_plan_phase "$lane" "$lane_json" "$wt" "$base" "$state" "$logs" "$runtime"
     phase=planned; thread="$(cn_state_field "$state" thread_id)"
-    if [ "$gap" = false ]; then
-      cn_write_state "$wt" "$state" "$lane" "$base" "$base" implemented "$thread"
-      phase=implemented
-    fi
   fi
   if [ "$phase" = planned ]; then
     cn_implement_phase "$lane" "$lane_json" "$wt" "$base" "$state" "$logs" "$thread" "$runtime"
@@ -802,6 +867,9 @@ cn_run() {
   case "$max" in ''|*[!0-9]*|0) cn_die "--max-items must be a positive integer" ;; esac
   [ "$max" -le 8 ] || cn_die "--max-items above 8 is refused"
   { [ -n "$lane" ] && [ "$next" = false ]; } || { [ -z "$lane" ] && [ "$next" = true ]; } || cn_die "choose exactly one of --lane or --next"
+  cn_before_mutation
+  cn_agent_secret_boundary_valid \
+    || cn_die "agent secret boundary is unavailable; real Codex execution requires a separately isolated agent backend"
   cn_acquire_lock
   cn_worktree_clean "$CN_REPO" || cn_die "runner checkout is dirty or unreadable; use a dedicated clean worktree"
   case "$CN_BASE_REF" in
@@ -834,6 +902,9 @@ cn_resume() {
   cn_require_armed || cn_die "resume is inert without $CN_HOME/ARMED"
   cn_home_is_external "$CN_REPO" && cn_home_is_external "$CN_CONTROL_REPO" \
     || cn_die "CN_HOME must resolve outside the runner and canonical control checkouts"
+  cn_before_mutation
+  cn_agent_secret_boundary_valid \
+    || cn_die "agent secret boundary is unavailable; real Codex execution requires a separately isolated agent backend"
   cn_acquire_lock
   cn_worktree_clean "$CN_REPO" || cn_die "runner checkout is dirty or unreadable; use a dedicated clean worktree"
   case "$CN_BASE_REF" in

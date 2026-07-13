@@ -48,15 +48,18 @@ source independently; missing or unreadable control/STOP state is fatal.
   worktree. Different selected lanes run as separate concurrent `codex exec`
   processes.
 - All phases ignore user config and rules, pin the model/reasoning policy,
-  capture JSONL, and require phase-specific JSON Schema output. A native Codex
-  permission profile allows reads only from the lane, Git's shared object store,
+  capture JSONL, and require phase-specific JSON Schema output. The prepared
+  native Codex permission profile allows reads only from the lane, Git's
+  read-only shared object store,
   the minimal system runtime, and a private empty agent runtime. Planning and
   implementation may write the lane; hostile review receives read-only lane
   access. Every other user path is denied, and network is disabled.
 - Agent PATH guards permit read-only git inspection, block git mutation, and
   block GitHub CLI access. The OS-enforced permission profile is the authority;
   the supervisor also rejects any unexpected agent-created commit or Git
-  metadata rebinding. Runtime parents are read-only to the agent and every
+  metadata rebinding. Shared Git metadata is read-only in every agent phase, so
+  agents cannot plant hooks, edit config or refs, or alter another worktree.
+  Runtime parents are read-only to the agent and every
   resumed HOME/TMP is revalidated as a real child directory. The profile adds
   read-only access only to the pinned command guards, the lock-stamped
   dependency target in the clean runner checkout, and the fixed Apple Silicon
@@ -66,6 +69,16 @@ source independently; missing or unreadable control/STOP state is fatal.
   guard uses `/bin/sh`, disables update checks, confines its cache to the
   private agent HOME, forces CI mode, and disables Vitest's dependency-local
   cache without changing Playwright invocations.
+- Real model execution is fail-closed. A live Codex 0.144.1 probe showed that
+  the native file/network profile still permits a model-launched command to
+  invoke macOS Keychain APIs. Wrapping Codex in a Mach-denying Seatbelt profile
+  blocked that API but also made Codex's required nested lane sandbox fail.
+  Therefore `check` reports `checks.agent_secret_boundary:false`, and armed
+  `run` or `resume` stops before locking, worktree creation, fetch, or model
+  invocation. Only the tightly bound, local-repository fixture can exercise
+  orchestration without a model or GitHub. Production model execution requires
+  a separately isolated agent backend; the credential-free gate worker below
+  solves only gate execution and is not sufficient by itself.
 - The routing guard is not a second test gate. It rejects never-touch paths,
   routes all non-safe product work to owner review, and permits `safe` only for
   `docs/**`, `ui/**`, and Python under `service/**`.
@@ -82,19 +95,22 @@ source independently; missing or unreadable control/STOP state is fatal.
   ignored state is purged again before hostile review. `check` compiles this
   profile before reporting it healthy. The supervisor rejects any gate-induced
   tracked change and accepts exactly one typed gate JSON object. PR-only v1 runs
-  the full path only in hermetic tests. A live probe passed TypeScript and 963
-  Vitest checks but Chromium crashed under the same secret-safe boundary.
-Production gate execution is disabled by default, so every real lane stops at
+  the full path only in hermetic tests. A live native-profile probe confirmed
+  that the read-only Node/npm roots support TypeScript and focused Vitest, but
+  the independent Keychain probe means that toolchain success is not a safe
+  production agent boundary.
+  Production gate execution is disabled by default, so every real lane stops at
   `needs-human` before gate execution. `check` reports
   `checks.gate_execution_enabled:false`. The test-only
   `CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1` switch is never set by the supervisor,
   schedule example, or pilot and must not be treated as production support.
   Native and touched service-Python tests additionally need dynamic loopback
   isolation that Seatbelt cannot safely distinguish from owner-local services.
-  A dedicated secret-free worker/VM is required before unattended draft
-  publication is enabled. The implementation-ready, still-disabled worker
-  contract is documented in `GATE_WORKER_DESIGN.md`; its job and receipt schemas
-  do not provision or enable a backend.
+  A dedicated secret-free worker/VM and a safe agent-execution backend are both
+  required before unattended draft publication is enabled. The
+  implementation-ready, still-disabled gate-worker contract is documented in
+  `GATE_WORKER_DESIGN.md`; its job and receipt schemas do not provision or
+  enable a backend.
 - The supervisor pushes `GATED_SHA:refs/heads/<lane-branch>`, reads the remote
   ref back, pins every GitHub call to the configured repository, and accepts a
   draft PR only when its base, branch, and head SHA match the gated state.
@@ -143,7 +159,9 @@ refusal. The hermetic integration test creates temporary repositories and stubs
 Codex, GitHub, classifier, and gate behavior to prove the full draft-PR path
 without touching a real branch, session, push, or PR.
 
-Both `check` and `status` expose `checks.agent_toolchain_profile` independently.
-It is false if the dependency root escapes the runner, its lock stamp drifts,
-or a required Homebrew runtime root is missing, malformed, or unexpected.
-`check` then exits nonzero without invoking a model.
+Both `check` and `status` expose `checks.agent_toolchain_profile` and
+`checks.agent_secret_boundary` independently. The toolchain check is false if
+the dependency root escapes the runner, its lock stamp drifts, or a required
+Homebrew runtime root is missing, malformed, or unexpected. The secret-boundary
+check is false in production until execution moves to the credential-free
+worker. Either condition makes `check` exit nonzero without invoking a model.

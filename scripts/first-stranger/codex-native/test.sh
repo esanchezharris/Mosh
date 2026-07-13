@@ -196,9 +196,21 @@ INVALID_PLAN='{"id":"FS-B1","planned":true,"gap_exists":true,"route":"unsafe","s
 assert_success "valid plan output is accepted" cn_validate_phase_output plan "$VALID_PLAN"
 assert_failure "invalid plan enum is rejected" cn_validate_phase_output plan "$INVALID_PLAN"
 assert_failure "missing required plan field is rejected" cn_validate_phase_output plan '{"id":"FS-B1"}'
+assert_eq "planned lane with an open gap may proceed" proceed "$(cn_plan_outcome true true)"
+assert_eq "closed gap stops before implementation" gap-closed "$(cn_plan_outcome true false)"
+assert_eq "unplanned lane routes to human review" needs-human "$(cn_plan_outcome false true)"
+assert_failure "malformed plan outcome fails closed" cn_plan_outcome unknown true
 assert_success "valid implementation output is accepted" cn_validate_phase_output implement '{"id":"FS-B1","ready_for_gate":true,"summary":"ok","tests_run":[],"blockers":[]}'
 assert_success "valid review output is accepted" cn_validate_phase_output review '{"verdict":"APPROVE","blockers":0,"reasons":[]}'
 assert_failure "review blockers must be numeric" cn_validate_phase_output review '{"verdict":"APPROVE","blockers":"0","reasons":[]}'
+assert_success "worker receipt schema requires a controller-produced receipt" \
+  jq -e '.required | index("producer") != null' "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
+assert_success "worker receipt schema fixes the exported artifact set" \
+  jq -e '.properties.artifacts | .minItems == 3 and .maxItems == 3 and (.prefixItems | length == 3) and .items == false' \
+    "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
+assert_success "passed worker receipts bind exit, gate, and clean status" \
+  jq -e '.allOf[0].then.properties | .gate.properties.exit_status.const == 0 and .gate.properties.result.properties.pass.const == true and .repository.properties.tracked_clean.const == true' \
+    "$NATIVE/schemas/gate-worker-receipt.json" >/dev/null
 
 assert_success "entrypoint has shell syntax" bash -n "$ENTRY"
 assert_success "agent git guard permits status" env CN_REAL_GIT="$(command -v git)" PATH="$NATIVE/agent-bin:$PATH" git -C "$ROOT" status --short >/dev/null
@@ -237,6 +249,14 @@ assert_success "npm guard appends a pass-through cache flag when npm consumed an
   rg -qx -- '--silent test --no-cache -- --no-cache' "$NPM_CAPTURE"
 HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run --silent dev
 assert_success "Vite strictPort cannot be bypassed by run options" rg -q -- '--strictPort' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" -- test
+assert_success "npm command separator cannot bypass the Vitest guard" rg -qx -- '-- test -- --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run -- test
+assert_success "npm script separator cannot bypass the Vitest guard" rg -qx 'run -- test -- --no-cache' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" -- run dev
+assert_success "npm command separator cannot bypass strictPort" rg -qx -- '-- run dev -- --strictPort' "$NPM_CAPTURE"
+HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" run -- dev
+assert_success "npm script separator cannot bypass strictPort" rg -qx 'run -- dev -- --strictPort' "$NPM_CAPTURE"
 HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" view test
 assert_eq "npm guard does not rewrite a non-Vitest view command" 'view test' "$(cat "$NPM_CAPTURE")"
 HOME="$WRAPPER_HOME" CN_REAL_NPM="$NPM_REAL_STUB" "$NATIVE/agent-bin/npm" exec test
@@ -292,8 +312,14 @@ done
 before_status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 before_worktrees="$(git -C "$ROOT" worktree list --porcelain)"
 before_branches="$(git -C "$ROOT" branch --format='%(refname)')"
-check_json="$(env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" check)"
+if check_json="$(env CN_HOME="$TMP/check-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" "$ENTRY" check)"; then
+  not_ok "check fails closed while the production agent secret boundary is unavailable"
+else
+  ok "check fails closed while the production agent secret boundary is unavailable"
+fi
 assert_eq "check reports a healthy agent toolchain profile" true "$(jq -r '.checks.agent_toolchain_profile' <<<"$check_json")"
+assert_eq "check reports the unavailable agent secret boundary independently" false \
+  "$(jq -r '.checks.agent_secret_boundary' <<<"$check_json")"
 after_status="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
 assert_eq "check leaves the checkout unchanged" "$before_status" "$after_status"
 BROKEN_GATE_PROFILE="$TMP/broken-gate.sb"
@@ -343,9 +369,29 @@ assert_failure "unarmed run never reaches GitHub" test -e "$TMP/gh.called"
 assert_eq "unarmed run creates no worktree" "$before_worktrees" "$(git -C "$ROOT" worktree list --porcelain)"
 assert_eq "unarmed run creates no branch" "$before_branches" "$(git -C "$ROOT" branch --format='%(refname)')"
 
+mkdir -p "$TMP/boundary-home"
+touch "$TMP/boundary-home/ARMED"
+chmod 700 "$TMP/boundary-home"
+chmod 600 "$TMP/boundary-home/ARMED"
+if env CN_HOME="$TMP/boundary-home" CN_CODEX_BIN="$STUB_BIN/codex" CN_GH_BIN="$STUB_BIN/gh" \
+    CN_HERMETIC_FIXTURE=1 CN_GH_REPO=fixture/repo CN_TEST_REMOTE="$TMP/remote.git" \
+    "$ENTRY" run --lane FS-B1 >"$TMP/boundary-run.out" 2>"$TMP/boundary-run.err"; then
+  not_ok "armed production run fails closed before orchestration without a secret boundary"
+else
+  ok "armed production run fails closed before orchestration without a secret boundary"
+fi
+assert_success "secret-boundary refusal is explicit" rg -q 'agent secret boundary is unavailable' "$TMP/boundary-run.err"
+assert_failure "secret-boundary refusal never reaches Codex" test -e "$TMP/codex.called"
+assert_failure "secret-boundary refusal never reaches GitHub" test -e "$TMP/gh.called"
+assert_eq "secret-boundary refusal creates no worktree" "$before_worktrees" "$(git -C "$ROOT" worktree list --porcelain)"
+assert_eq "secret-boundary refusal creates no branch" "$before_branches" "$(git -C "$ROOT" branch --format='%(refname)')"
+assert_failure "secret-boundary refusal creates no lock" test -e "$TMP/boundary-home/run.lock"
+
 status_json="$(env CN_HOME="$TMP/status-home" CN_CONTROL_REPO="$ROOT" CN_WORK_ROOT="$TMP/status-work" "$ENTRY" status)"
 assert_success "status is valid JSON" jq -e . <<<"$status_json"
 assert_eq "status exposes agent toolchain profile health" true "$(jq -r '.checks.agent_toolchain_profile' <<<"$status_json")"
+assert_eq "status exposes the unavailable agent secret boundary" false \
+  "$(jq -r '.checks.agent_secret_boundary' <<<"$status_json")"
 assert_eq "status reports unarmed" false "$(jq -r '.armed' <<<"$status_json")"
 assert_eq "status reports no lane states" 0 "$(jq '.lanes | length' <<<"$status_json")"
 assert_eq "status exposes external STOP independently" false "$(jq -r '.stop_sources.external' <<<"$status_json")"

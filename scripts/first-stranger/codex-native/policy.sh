@@ -333,3 +333,13 @@ cn_validate_phase_output() {
     *) return 1 ;;
   esac
 }
+
+cn_plan_outcome() {
+  local planned="$1" gap="$2"
+  case "$planned:$gap" in
+    true:true) printf 'proceed\n' ;;
+    true:false) printf 'gap-closed\n' ;;
+    false:true|false:false) printf 'needs-human\n' ;;
+    *) return 1 ;;
+  esac
+}

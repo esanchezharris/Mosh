@@ -7,9 +7,11 @@ sentinel, or schedule a job.
 ## Purpose and trust boundary
 
 The current Codex-native supervisor deliberately stops at `needs-human` before
-running a production lane gate. A future gate worker may remove that manual
-step only if it can run the unchanged `scripts/auto-loop/gate.sh` without access
-to owner credentials, owner-home files, or owner-local network services.
+running any real model session, and separately disables production lane gates.
+This contract addresses only the latter boundary: a future gate worker may run
+the unchanged `scripts/auto-loop/gate.sh` only if it has no access to owner
+credentials, owner-home files, or owner-local network services. It does not run
+Codex and does not make the native supervisor safe for model execution.
 
 The worker is a disposable Apple Silicon macOS VM started from an owner-pinned,
 immutable image. Its account is non-admin and has no iCloud, Keychain, GitHub,
@@ -19,9 +21,13 @@ before job input is attached; loopback remains available for the unchanged
 Playwright gate. A result from a VM with an enabled adapter is never accepted.
 
 This design uses structural integrity binding, not a secret-bearing signature
-or remote-attestation claim. The job and receipt schemas bind every accepted
-result to exact inputs and digests. Authentication of the pinned worker image
-and transfer channel remains an owner provisioning responsibility.
+or remote-attestation claim. The untrusted guest never constructs the accepted
+receipt. A controller outside the VM captures process status and output,
+observes hypervisor configuration, inspects the stopped guest disk read-only,
+and constructs the receipt from those observations. The job and receipt schemas
+bind every accepted result to exact inputs and digests. Authentication of the
+pinned worker image, controller, and transfer channel remains an owner
+provisioning responsibility.
 
 ## Job input
 
@@ -71,24 +77,38 @@ No branch name or remote credential is needed inside the VM.
 
    The process receives a fixed system PATH, a fresh private HOME/TMP/cache,
    locale and timezone pins, no inherited secrets, and no network adapter.
-6. Capture stdout and stderr as local artifacts. Validate stdout as exactly one
-   gate JSON object and require the process exit status, `pass`, class,
-   selftest floor, failed-check count, assertion count, and all step results to
-   agree. Recheck the detached HEAD and tracked-worktree status after the gate.
-7. Emit `receipt.json` conforming to
-   `schemas/gate-worker-receipt.json`, copy only the declared receipt/artifacts
-   out, then destroy the VM snapshot and per-job transfer directory.
+6. The controller captures stdout and stderr through hypervisor-owned pipes or
+   devices that the guest cannot reopen or rewrite, and records the process exit
+   status independently. The guest does not write `receipt.json`.
+7. Stop the VM, attach its per-job disk read-only, and use a controller-owned,
+   non-executing repository verifier. The verifier ignores guest Git config,
+   refs, hooks, filters, alternates, and executables; it reconstructs the
+   expected tree from the hashed input bundle and byte-compares every tracked
+   path in the stopped checkout. It independently verifies detached HEAD and
+   produces `tracked-status.txt`. Any unreadable, linked, special, missing,
+   extra, or changed tracked path is a failure.
+8. The controller validates captured stdout as exactly one gate JSON object and
+   requires the independently observed exit status, `pass`, class, selftest
+   floor, failed-check count, assertion count, and every step result to agree.
+9. The controller emits `receipt.json` conforming to
+   `schemas/gate-worker-receipt.json`. It exports exactly three bounded regular
+   files in schema order: `gate.stdout`, `gate.stderr`, and
+   `tracked-status.txt`. Symlinks, hard-link aliases, special files, duplicate
+   names, and extra artifacts are rejected. It then destroys the VM snapshot
+   and per-job transfer directory.
 
 The worker never fetches, pushes, opens a PR, writes supervisor state, or makes
 a routing decision.
 
 ## Receipt and acceptance
 
-The receipt binds the schema version, job and lane IDs, manifest digest, worker
-image, architecture, exact base/head SHAs, bundle digest, gate blob/hash/class,
-selftest floor, gate output digests and typed result, exit status, tracked status,
-network-disabled evidence, timestamps, and every exported artifact digest.
-Artifact paths are relative names with no parent traversal or absolute path.
+The controller-produced receipt binds the schema version, job and lane IDs,
+manifest digest, worker image, architecture, exact base/head SHAs, bundle
+digest, gate blob/hash/class, selftest floor, gate output digests and typed
+result, independently observed exit status, controller-verified tracked status,
+hypervisor-observed network state, timestamps, and every exported artifact
+digest. Artifact names and order are fixed by schema rather than supplied by the
+guest.
 
 The supervisor may accept a receipt only when all of these are true:
 
@@ -100,7 +120,14 @@ The supervisor may accept a receipt only when all of these are true:
 - the gate exited zero, emitted `pass:true`, met the selftest floor, reported
   zero failures and assertions, and every gate step is successful;
 - detached HEAD is still the declared head and tracked status is empty;
-- each artifact's recomputed size and SHA-256 matches the receipt.
+- the receipt producer and every isolation/repository evidence source identify
+  the pinned controller protocol, never a guest assertion;
+- `gate.stdout` and `gate.stderr` hashes equal their matching receipt fields,
+  the empty tracked-status hash equals the fixed empty-file SHA-256, and every
+  exported artifact is one canonical regular file whose recomputed size and
+  SHA-256 matches the receipt;
+- the receipt has `outcome:passed`, an empty reasons list, a non-empty step list,
+  and all cross-field pass/class/baseline/exit/cleanliness constraints agree.
 
 Any missing field, malformed value, schema drift, hash mismatch, mutation,
 enabled or indeterminate network, stale SHA, unexpected artifact, failed gate,
