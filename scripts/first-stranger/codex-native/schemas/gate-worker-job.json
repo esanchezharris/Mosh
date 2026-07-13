@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosh.invalid/schemas/first-stranger/gate-worker-job-v1.json",
+  "title": "First-Stranger secret-free gate worker job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "lane_id",
+    "created_at",
+    "expires_at",
+    "base_sha",
+    "head_sha",
+    "bundle",
+    "worker",
+    "gate"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "job_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
+    "lane_id": {"type": "string", "pattern": "^FS-[A-Z][A-Z0-9-]*$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "base_sha": {"$ref": "#/$defs/git_sha"},
+    "head_sha": {"$ref": "#/$defs/git_sha"},
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "base_ref", "head_ref"],
+      "properties": {
+        "path": {"const": "repo.bundle"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "base_ref": {"const": "refs/mosh-gate/base"},
+        "head_ref": {"const": "refs/mosh-gate/head"}
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "architecture", "network_enabled"],
+      "properties": {
+        "image_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$"},
+        "architecture": {"const": "arm64"},
+        "network_enabled": {"const": false}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "blob_oid", "sha256", "class", "selftest_baseline"],
+      "properties": {
+        "path": {"const": "scripts/auto-loop/gate.sh"},
+        "blob_oid": {"$ref": "#/$defs/git_sha"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "class": {"enum": ["cheap", "native"]},
+        "selftest_baseline": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mosh.invalid/schemas/first-stranger/gate-worker-receipt-v1.json",
+  "title": "First-Stranger secret-free gate worker receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "outcome",
+    "reasons",
+    "job_id",
+    "lane_id",
+    "manifest_sha256",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "worker",
+    "source",
+    "gate",
+    "repository",
+    "isolation",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "outcome": {"enum": ["passed", "needs-human"]},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "job_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
+    "lane_id": {"type": "string", "pattern": "^FS-[A-Z][A-Z0-9-]*$"},
+    "manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "architecture"],
+      "properties": {
+        "image_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$"},
+        "architecture": {"const": "arm64"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_sha", "head_sha", "bundle_sha256"],
+      "properties": {
+        "base_sha": {"$ref": "#/$defs/git_sha"},
+        "head_sha": {"$ref": "#/$defs/git_sha"},
+        "bundle_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "blob_oid",
+        "sha256",
+        "class",
+        "selftest_baseline",
+        "exit_status",
+        "stdout_sha256",
+        "stderr_sha256",
+        "result"
+      ],
+      "properties": {
+        "path": {"const": "scripts/auto-loop/gate.sh"},
+        "blob_oid": {"$ref": "#/$defs/git_sha"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "class": {"enum": ["cheap", "native"]},
+        "selftest_baseline": {"type": "integer", "minimum": 0},
+        "exit_status": {"type": "integer", "minimum": 0, "maximum": 255},
+        "stdout_sha256": {"$ref": "#/$defs/sha256"},
+        "stderr_sha256": {"$ref": "#/$defs/sha256"},
+        "result": {"$ref": "#/$defs/gate_result"}
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detached_head_sha", "tracked_clean", "tracked_status", "tracked_status_sha256"],
+      "properties": {
+        "detached_head_sha": {"$ref": "#/$defs/git_sha"},
+        "tracked_clean": {"type": "boolean"},
+        "tracked_status": {"type": "string"},
+        "tracked_status_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network_adapter_enabled", "network_probe", "account_admin", "owner_home_mounted", "credentials_present"],
+      "properties": {
+        "network_adapter_enabled": {"const": false},
+        "network_probe": {"const": "disabled"},
+        "account_admin": {"const": false},
+        "owner_home_mounted": {"const": false},
+        "credentials_present": {"const": false}
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact"}
+    }
+  },
+  "$defs": {
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "gate_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "class", "session", "port", "selftest", "selftest_failed", "asserts", "steps"],
+      "properties": {
+        "pass": {"type": "boolean"},
+        "class": {"enum": ["cheap", "native"]},
+        "session": {"type": "string"},
+        "port": {"type": "string", "pattern": "^[0-9]+$"},
+        "selftest": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "selftest_failed": {"type": "integer", "minimum": 0},
+        "asserts": {"type": "integer", "minimum": 0},
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "ok", "detail"],
+            "properties": {
+              "name": {"type": "string"},
+              "ok": {"type": "boolean"},
+              "detail": {"type": "object"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

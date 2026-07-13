@@ -84,7 +84,7 @@ source independently; missing or unreadable control/STOP state is fatal.
   tracked change and accepts exactly one typed gate JSON object. PR-only v1 runs
   the full path only in hermetic tests. A live probe passed TypeScript and 963
   Vitest checks but Chromium crashed under the same secret-safe boundary.
-  Production gate execution is disabled by default, so every real lane stops at
+Production gate execution is disabled by default, so every real lane stops at
   `needs-human` before gate execution. `check` reports
   `checks.gate_execution_enabled:false`. The test-only
   `CN_ENABLE_EXPERIMENTAL_SEATBELT_GATE=1` switch is never set by the supervisor,
@@ -92,7 +92,9 @@ source independently; missing or unreadable control/STOP state is fatal.
   Native and touched service-Python tests additionally need dynamic loopback
   isolation that Seatbelt cannot safely distinguish from owner-local services.
   A dedicated secret-free worker/VM is required before unattended draft
-  publication is enabled.
+  publication is enabled. The implementation-ready, still-disabled worker
+  contract is documented in `GATE_WORKER_DESIGN.md`; its job and receipt schemas
+  do not provision or enable a backend.
 - The supervisor pushes `GATED_SHA:refs/heads/<lane-branch>`, reads the remote
   ref back, pins every GitHub call to the configured repository, and accepts a
   draft PR only when its base, branch, and head SHA match the gated state.
