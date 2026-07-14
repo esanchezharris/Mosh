@@ -1,5 +1,11 @@
 # AGENTS.md
 
+> **ACTIVE THREAD (2026-07-13, branch `claude/used2-ace-step-cover-spike-be9519`):** Finish-My-Song
+> product consolidation + a fresh owner-ear render. Read **`docs/2026-07-13-fresh-render-handoff.md`**
+> FIRST — it has the state, the open decision (owner picks best of t1/t3/t4 → push it all the way), the
+> exact resume commands, and the gotchas (flash-attn fix, the Vast.ai render lane). This block is on a
+> feature branch only; delete it when the thread is done.
+
 **Trunk:** `main` is the only development trunk (per
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
 the full v0 DAW slice plus the post-v0 work merged through 2026-06-27: the DAW-parity
