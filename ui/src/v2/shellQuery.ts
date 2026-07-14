@@ -7,7 +7,7 @@
 // it, and effects.ts is itself imported by the settings store, so a settings import
 // here would create an evaluation cycle. Keep it dependency-free.
 
-export type ShellId = "classic" | "v2";
+export type ShellId = "classic" | "v2" | "openlanes";
 
 export function devShellOverride(): ShellId | null {
   // import.meta.env may be undefined in some non-Vite contexts; guard defensively.
@@ -17,6 +17,7 @@ export function devShellOverride(): ShellId | null {
   if (!dev) return null;
   try {
     const q = new URLSearchParams(window.location.search).get("shell");
+    if (q === "openlanes" || q === "v3") return "openlanes"; // accept "v3" as an alias
     if (q === "v2") return "v2";
     if (q === "classic" || q === "legacy") return "classic"; // accept "legacy" as an alias
     return null;
@@ -28,5 +29,6 @@ export function devShellOverride(): ShellId | null {
 // Resolve the active shell from an explicit uiShell value, honoring the dev override.
 // Pure (no store read) so both the reactive store path and effects.ts can share it.
 export function resolveShell(uiShell: unknown): ShellId {
-  return devShellOverride() ?? (uiShell === "v2" ? "v2" : "classic");
+  return devShellOverride()
+    ?? (uiShell === "openlanes" ? "openlanes" : uiShell === "v2" ? "v2" : "classic");
 }

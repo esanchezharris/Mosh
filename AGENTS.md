@@ -1,5 +1,10 @@
 # AGENTS.md
 
+> **ACTIVE WORK (branch `claude/daw-ui-upgrade-317ab2`):** building the new **"Open Lanes" v3 DAW
+> shell** at `ui/src/v3/`. If you're resuming this thread, read **`docs/OPENLANES_V3_HANDOFF.md`**
+> first — it is self-contained (decisions, seam facts, files, exact next steps, run/verify).
+> Stage 1 in progress; opt-in via `?shell=openlanes` or Settings → Interface (default stays v2).
+
 **Trunk:** `main` is the only development trunk (per
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
 the full v0 DAW slice plus the post-v0 work merged through 2026-07-16: the DAW-parity

@@ -15,10 +15,13 @@ import { resolveShell } from "../v2/shellQuery";
 export function applySettingEffects(values: Record<string, SettingValue>): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
-  // The v2 shell is a single Mosh-native design with NO skin axis. When it's active,
-  // pin data-skin to "mosh" so a persisted non-mosh skin (e.g. "ableton") can't leak
-  // its token overrides into v2's scoped CSS. Classic keeps the user's chosen skin.
-  if (resolveShell(values.uiShell) === "v2") root.setAttribute("data-skin", "mosh");
+  // The modern shells (v2 + the newer "openlanes" v3) are single Mosh-native designs with
+  // NO skin axis. When one is active, pin data-skin to "mosh" so a persisted non-mosh skin
+  // (e.g. "ableton") can't leak its token overrides into the shell's scoped CSS. (openlanes
+  // scopes its own CSS under .v3-shell and carries its OWN material theme, independent of
+  // this axis.) Classic keeps the user's chosen skin.
+  const shell = resolveShell(values.uiShell);
+  if (shell === "v2" || shell === "openlanes") root.setAttribute("data-skin", "mosh");
   else if (typeof values.skin === "string") root.setAttribute("data-skin", values.skin);
   if (typeof values.theme === "string") root.setAttribute("data-theme", values.theme);
   if (typeof values.uiScale === "number")

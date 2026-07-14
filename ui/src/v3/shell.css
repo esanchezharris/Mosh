@@ -1,0 +1,493 @@
+/* ============================================================================
+   MOSH v3 — "OPEN LANES" SHELL.  A loop-first, inline-lane-editor arrangement:
+   each track lane IS its own editor (drum step-grid / MIDI piano-roll / audio
+   waveform), the arrangement navigator is a slim minimap, and the work lives on a
+   centered obsidian slab with calm margins. Ported from the judged arena mockup
+   (scratchpad/fable-candidates/shell-rail-sequencer.html).
+
+   All tokens + rules are scoped under .v3-shell so this never touches the legacy
+   or v2 tokens (all three shells coexist behind the uiShell setting). Theme axis
+   only — no skin axis (effects.ts pins data-skin=mosh while a modern shell is
+   active). The material theme (Graphite / Glass / Dithered / Cream) is a later
+   axis layered via a data-material attribute; the base here is Graphite.
+   ============================================================================ */
+
+.v3-shell {
+  /* ── geometry ── */
+  --ol-topbar-h: 46px;
+  --ol-nav-h: 40px;
+  --ol-compact-h: 60px;   /* a collapsed lane (read by the layout engine too) */
+  --ol-min-ed: 116px;     /* smallest editable lane height in fill-all mode */
+  --ol-max-ed: 190px;     /* cap on an even-split editable lane */
+  --ol-slab-radius: 16px;
+  --ol-lane-radius: 11px;
+  --ol-lane-gap: 8px;
+  --ol-margin: 18px;      /* the calm obsidian gutter on each flank (dock rail) */
+  --ol-slab-pad: 14px;
+
+  /* ── graphite base — near-black obsidian, a single sacred lime accent ── */
+  --ol-bg: linear-gradient(180deg, #11141a 0%, #0b0d12 47%, #080a0c 100%);
+  --ol-aura: radial-gradient(120% 90% at 50% -18%, rgba(150, 158, 182, 0.09), transparent 60%);
+  --ol-floor: radial-gradient(120% 60% at 50% 118%, rgba(3, 4, 7, 0.7), transparent 62%);
+  --ol-surface: linear-gradient(180deg, rgba(22, 24, 29, 0.92), rgba(12, 13, 17, 0.92));
+  --ol-slab: rgba(20, 22, 28, 0.72);
+  --ol-lane: rgba(24, 26, 33, 0.72);
+  --ol-lane-focus: rgba(28, 31, 39, 0.84);
+  --ol-line: rgba(255, 255, 255, 0.07);
+  --ol-line-soft: rgba(255, 255, 255, 0.045);
+  --ol-line-strong: rgba(255, 255, 255, 0.12);
+  --ol-text: #e8ebf1;
+  --ol-dim: rgba(232, 235, 241, 0.56);
+  --ol-faint: rgba(220, 224, 232, 0.32);
+  --ol-accent: #ccff36;             /* lime — play / playhead / selection / commit */
+  --ol-accent-glow: rgba(204, 255, 54, 0.6);
+  --ol-rec: #d8483c;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ol-bg);
+  color: var(--ol-text);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* the breathing aura + floor vignette sit behind everything on the shell */
+.v3-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--ol-aura), var(--ol-floor);
+  pointer-events: none;
+  z-index: 0;
+}
+.v3-shell > * { position: relative; z-index: 1; }
+
+/* ── boot screen (opened outside a backend) ── */
+.v3-boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 8px;
+}
+.v3-boot h2 {
+  font-family: var(--font-display, "Archivo Black", sans-serif);
+  font-size: 34px;
+  letter-spacing: 0.18em;
+  margin: 0;
+}
+.v3-boot p { color: var(--ol-dim); font-size: 12px; max-width: 30ch; }
+
+.v3-errbar {
+  position: absolute;
+  top: calc(var(--ol-topbar-h) + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: rgba(40, 14, 12, 0.92);
+  color: #ffb4ac;
+  border: 1px solid rgba(216, 72, 60, 0.4);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================================
+   TOPBAR — brand · transport · project meta · session/friends. The bar itself is
+   transparent; each cluster floats.
+   ============================================================================ */
+.ol-topbar {
+  height: var(--ol-topbar-h);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 var(--ol-margin);
+  gap: 16px;
+}
+.ol-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.ol-logo {
+  font-family: var(--font-display, "Archivo Black", sans-serif);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+}
+.ol-meta { display: flex; align-items: center; gap: 6px; }
+.ol-chip {
+  appearance: none;
+  background: var(--ol-surface);
+  color: var(--ol-text);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 7px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  height: 22px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.ol-chip:hover { border-color: rgba(255, 255, 255, 0.22); }
+.ol-chip-num { width: 42px; text-align: center; -moz-appearance: textfield; }
+.ol-chip-num::-webkit-outer-spin-button,
+.ol-chip-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ol-chip[data-on="true"] { border-color: var(--ol-accent); color: var(--ol-accent); }
+.ol-timesig { display: inline-flex; align-items: center; gap: 2px; }
+.ol-timesig-slash { color: var(--ol-faint); }
+
+.ol-transport {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--ol-surface);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 999px;
+  padding: 4px 6px;
+}
+.ol-tbtn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--ol-text);
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+.ol-tbtn:hover { background: rgba(255, 255, 255, 0.08); }
+.ol-tbtn:active { transform: scale(0.9); }
+.ol-tbtn.play[data-on="true"] { background: var(--ol-accent); color: #0b0d12; box-shadow: 0 0 8px var(--ol-accent-glow); }
+.ol-tbtn.rec .dot { width: 9px; height: 9px; border-radius: 999px; background: #b9605a; transition: background 0.12s ease, transform 0.12s ease; }
+.ol-tbtn.rec[data-on="true"] .dot { background: var(--ol-rec); transform: scale(1.2); box-shadow: 0 0 8px rgba(216, 72, 60, 0.6); }
+
+.ol-center { display: flex; align-items: center; gap: 12px; justify-content: center; }
+.ol-readout { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
+.ol-time { font-variant-numeric: tabular-nums; font-size: 12px; letter-spacing: 0.06em; }
+.ol-bars { font-size: 8px; letter-spacing: 0.18em; color: var(--ol-faint); text-transform: uppercase; }
+.ol-loop-on { color: var(--ol-accent); }
+
+.ol-top-right { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.ol-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ol-dim);
+}
+.ol-led { width: 6px; height: 6px; border-radius: 999px; background: var(--ol-faint); }
+.ol-led.busy { background: var(--ol-accent); box-shadow: 0 0 6px var(--ol-accent-glow); }
+.ol-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--ol-surface);
+  color: var(--ol-text);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ol-btn:hover { border-color: rgba(255, 255, 255, 0.24); }
+.ol-avatars { display: inline-flex; }
+.ol-avatar {
+  width: 22px; height: 22px; margin-left: -6px;
+  border-radius: 999px;
+  display: grid; place-items: center;
+  font-size: 9px; font-weight: 700; color: #0b0d12;
+  border: 1.5px solid #0b0d12;
+}
+.ol-avatar.more { background: rgba(255, 255, 255, 0.18); color: #fff; }
+
+/* the overflow menu reuses the transparent-scrim pattern */
+.ol-menu-wrap { position: relative; }
+.ol-menu-panel {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  z-index: 56;
+  min-width: 190px;
+  background: linear-gradient(180deg, rgba(26, 28, 34, 0.98), rgba(16, 17, 22, 0.98));
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.8);
+}
+.ol-menu-panel button {
+  display: flex; width: 100%; align-items: center; justify-content: space-between;
+  background: transparent; border: 0; color: var(--ol-text);
+  padding: 7px 8px; border-radius: 6px; font: inherit; font-size: 11px; cursor: pointer;
+  text-align: left;
+}
+.ol-menu-panel button:hover { background: rgba(255, 255, 255, 0.06); }
+.ol-menu-panel kbd { color: var(--ol-faint); font-size: 10px; }
+.ol-menu-sep { height: 1px; background: var(--ol-line); margin: 5px 2px; }
+
+/* ============================================================================
+   BODY — slim navigator + zoom, the centered slab, calm margins.
+   ============================================================================ */
+.ol-nav-band {
+  height: var(--ol-nav-h);
+  margin: 4px var(--ol-margin) 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ol-zoom { display: inline-flex; gap: 2px; }
+.ol-zoom button {
+  appearance: none;
+  background: var(--ol-surface);
+  color: var(--ol-dim);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font: inherit; font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, transform 0.1s ease;
+}
+.ol-zoom button:hover { color: var(--ol-text); }
+.ol-zoom button[data-on="true"] { color: var(--ol-accent); border-color: var(--ol-accent); }
+.ol-zoom button:active { transform: scale(0.94); }
+
+.ol-stage {
+  position: absolute;
+  left: var(--ol-margin);
+  right: var(--ol-margin);
+  top: calc(var(--ol-topbar-h) + var(--ol-nav-h) + 14px);
+  bottom: 58px;
+  display: flex;
+  justify-content: center;
+}
+.ol-slab {
+  width: 100%;
+  max-width: 1180px;
+  background: var(--ol-slab);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: var(--ol-slab-radius);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 24px 60px -30px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ol-ruler {
+  height: 20px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--ol-slab-pad);
+  font-size: 6.5px;
+  letter-spacing: 0.2em;
+  color: var(--ol-faint);
+  border-bottom: 1px solid var(--ol-line-soft);
+}
+.ol-lanes {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ol-lane-gap);
+  padding: var(--ol-slab-pad);
+  min-height: 0;
+}
+.ol-empty { margin: auto; color: var(--ol-dim); font-size: 11px; letter-spacing: 0.1em; }
+
+/* ── a lane — chrome-off at rest; content carries the color ── */
+.ol-lane {
+  --hue: #9aa0ad;
+  position: relative;
+  border-radius: var(--ol-lane-radius);
+  background: var(--ol-lane);
+  border: 1px solid var(--ol-line);
+  overflow: hidden;
+  transition: height 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
+              background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.ol-lane:not(.focus):hover { transform: translateY(-2px); border-color: var(--ol-line-strong); box-shadow: 0 8px 20px -14px rgba(0, 0, 0, 0.7); }
+.ol-lane.focus { background: var(--ol-lane-focus); border-color: rgba(255, 255, 255, 0.1); box-shadow: 0 16px 38px -14px rgba(0, 0, 0, 0.7); }
+.ol-lane.muted .ol-ed { opacity: 0.4; }
+.ol-lane.selected { border-color: color-mix(in srgb, var(--hue) 60%, transparent); }
+
+/* header chrome — hidden at rest, revealed on hover/focus (progressive disclosure) */
+.ol-lhead {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  z-index: 5;
+  pointer-events: none;
+}
+.ol-lhead::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(6, 8, 11, 0.82) 0%, rgba(6, 8, 11, 0.4) 55%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+  pointer-events: none;
+}
+.ol-lane:hover .ol-lhead::before,
+.ol-lane.focus .ol-lhead::before { opacity: 1; }
+.ol-lhead > * { position: relative; }
+.ol-grip {
+  color: var(--ol-faint);
+  cursor: grab;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ol-nm {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--hue);
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+  white-space: nowrap;
+}
+.ol-lctl {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ol-lane:hover .ol-grip,
+.ol-lane:hover .ol-nm,
+.ol-lane:hover .ol-lctl,
+.ol-lane.focus .ol-grip,
+.ol-lane.focus .ol-nm,
+.ol-lane.focus .ol-lctl { opacity: 1; }
+.ol-lane:hover .ol-grip,
+.ol-lane:hover .ol-lctl,
+.ol-lane.focus .ol-grip,
+.ol-lane.focus .ol-lctl { pointer-events: auto; }
+.ol-cbtn {
+  appearance: none;
+  min-width: 22px; height: 19px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 5px;
+  color: var(--ol-dim);
+  font: inherit; font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em;
+  cursor: pointer;
+  padding: 0 5px;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.ol-cbtn:hover { color: var(--ol-text); }
+.ol-cbtn.m[data-on="true"] { color: #7fd9e8; border-color: #7fd9e8; }
+.ol-cbtn.s[data-on="true"] { color: var(--ol-accent); border-color: var(--ol-accent); }
+
+/* the editor body — fills the lane; per-type canvas draws inside */
+.ol-ed {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.2s ease;
+}
+.ol-ed canvas { display: block; width: 100%; height: 100%; }
+
+/* per-lane playhead — compositor-only translateX in the tick loop */
+.ol-ph {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 0;
+  width: 1.5px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(204, 255, 54, 0.4), var(--ol-accent) 50%, rgba(204, 255, 54, 0.4));
+  box-shadow: 0 0 5px var(--ol-accent-glow);
+  z-index: 6;
+  pointer-events: none;
+  display: none;
+}
+.ol-lane.focus .ol-ph { display: block; }
+
+/* ============================================================================
+   DOCK RAILS — vertical pull-tabs in the calm margins.
+   ============================================================================ */
+.ol-dock {
+  position: absolute;
+  top: calc(var(--ol-topbar-h) + var(--ol-nav-h) + 14px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 3;
+}
+.ol-dock.l { left: 0; align-items: flex-start; }
+.ol-dock.r { right: 0; align-items: flex-end; }
+.ol-dtab {
+  width: 27px; height: 62px;
+  background: var(--ol-surface);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--ol-dim);
+  font-size: 6.5px; font-weight: 600; letter-spacing: 0.18em;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  display: grid; place-items: center;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.ol-dock.l .ol-dtab:hover { transform: rotate(180deg) translateY(2px); color: var(--ol-text); }
+.ol-dock.r .ol-dtab:hover { transform: rotate(180deg) translateY(-2px); color: var(--ol-text); }
+.ol-dtab[data-on="true"] { border-color: var(--ol-accent); color: var(--ol-accent); }
+
+/* ============================================================================
+   COMPOSER — a floating pill straddling the slab's bottom edge; Moshi rides it.
+   ============================================================================ */
+.ol-composer {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 70vw);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--ol-surface);
+  border: 1px solid var(--ol-line-strong);
+  border-radius: 999px;
+  box-shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+  z-index: 4;
+}
+.ol-composer .kick {
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ol-faint);
+}
+.ol-composer input {
+  flex: 1;
+  background: transparent; border: 0; outline: none;
+  color: var(--ol-text); font: inherit; font-size: 12px;
+}
+.ol-composer input::placeholder { color: var(--ol-faint); }
+.ol-moshi {
+  position: absolute;
+  right: -8px; bottom: 0;
+  width: 150px; height: 160px;
+  pointer-events: auto;
+}
+
+/* ── reduced motion — kill the eased transitions ── */
+@media (prefers-reduced-motion: reduce) {
+  .v3-shell * { transition: none !important; animation: none !important; }
+}

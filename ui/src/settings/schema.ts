@@ -168,22 +168,24 @@ export const SETTINGS: SettingDef[] = [
     help: "The agent-first shell: Session rail (Moshi + collaborators + Inspector), section navigator, per-track FX drawers, the bottom prompt bar + the “+” file/options control, timeline annotations, and collaborator video. On by default; turn it off for the classic layout.",
   },
   {
-    // The from-scratch demo-driven shell (ui/src/v2). A first-class axis, NOT a
-    // variant of redesignShell: "classic" = the prior App; "v2" = the new Mosh shell.
-    // UI-local + reversible (flip back to classic anytime, here or via the in-app
-    // toggle). v2 is the DEFAULT as of the cutover; classic stays fully available. In
-    // dev/e2e a `?shell=` query-param overrides this per page-load (see v2/shellQuery.ts).
+    // The from-scratch demo-driven shells. A first-class axis, NOT a variant of
+    // redesignShell: "classic" = the prior App; "v2" = the Mosh shell; "openlanes" = the
+    // newer v3 "Open Lanes" shell (inline-lane-editor arrangement, ui/src/v3). UI-local +
+    // reversible (switch anytime, here or via the in-app toggle). "v2" stays the DEFAULT
+    // while openlanes is built toward parity; it flips to "openlanes" at the parity gate.
+    // In dev/e2e a `?shell=` query-param overrides this per page-load (see v2/shellQuery.ts).
     id: "uiShell",
     type: "enum",
     default: "v2",
     scope: "app",
     category: "Layout",
     label: "Interface",
-    help: "Which interface to use. “Mosh” is the new focused shell; “Classic” is the current layout. You can switch back anytime.",
+    help: "Which interface to use. “Open Lanes” is the newest shell; “Mosh” is the focused shell; “Classic” is the original layout. You can switch anytime.",
     constraints: {
       options: [
         { value: "classic", label: "Classic" },
-        { value: "v2", label: "Mosh (new)" },
+        { value: "v2", label: "Mosh" },
+        { value: "openlanes", label: "Open Lanes (new)" },
       ],
     },
   },
