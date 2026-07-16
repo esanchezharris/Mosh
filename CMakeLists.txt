@@ -228,10 +228,14 @@ if (MOSH_BUILD_APP)
             file(GLOB MOSH_ANIRA_RUNTIME_DLLS
                  "${anira_SOURCE_DIR}/modules/libtorch-*/lib/*.dll")
             if (MOSH_ANIRA_RUNTIME_DLLS)
+                # $<TARGET_FILE:anira> = the built anira.dll (it defaults to a
+                # SHARED lib even as a subdirectory), living under the CPM _deps
+                # build dir where no glob at configure time can see it.
                 add_custom_command(TARGET Mosh POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            $<TARGET_FILE:anira>
                             ${MOSH_ANIRA_RUNTIME_DLLS} "$<TARGET_FILE_DIR:Mosh>"
-                    COMMENT "Staging LibTorch runtime DLLs next to Mosh.exe"
+                    COMMENT "Staging anira + LibTorch runtime DLLs next to Mosh.exe"
                     VERBATIM)
             else()
                 message(WARNING "MOSH_ENABLE_ANIRA: no LibTorch DLLs found under "
