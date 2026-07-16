@@ -245,7 +245,7 @@ if ($Package) {
     Write-Host "  folder: $dist"
     Write-Host "  zip:    $zip"
     Write-Host "Copy the folder anywhere and run Mosh.exe. Real generative/FMS features need the"
-    Write-Host "per-feature venvs — see docs\WINDOWS_RUNBOOK.md (setup-feature-venv.ps1 / setup-sa3-cuda.ps1)."
+    Write-Host "per-feature venvs - see docs\WINDOWS_RUNBOOK.md (setup-feature-venv.ps1 / setup-sa3-cuda.ps1)."
     exit 0
 }
 
