@@ -102,6 +102,47 @@ Point the service at the CUDA SA3 venv when launching for real renders (else Fak
 .\run-mosh.ps1                   # launches the GUI with the CUDA backend selected
 ```
 
+## 5. Live-RAVE tier (anira + LibTorch) — FIT-013
+
+The RAVE insert needs the anira build tree (separate from the default build; **Release-only**
+— anira downloads release-CRT LibTorch, a Debug app against it is a CRT mismatch):
+
+```powershell
+.\run-mosh.ps1 -Build -Anira          # configure windows-x64-release-anira + build (first
+                                      # configure downloads LibTorch ~190 MB — be patient)
+pwsh scripts\verify-pc-build.ps1 -RealRave    # selftest on the anira exe + insert smoke
+.\run-mosh.ps1 -Package -Anira        # package WITH anira.dll + torch DLLs staged
+```
+
+Drop `.ts` models into `%USERPROFILE%\AI\rave-models` (or set `RAVE_MODEL_DIR`) — the Dock's
+RAVE dropdown lists them. RAVE inference runs **CPU LibTorch by design** (real-time block
+inference wants CPU latency stability; anira has no CUDA plumbing) — the GPU serves SA3 +
+training instead. Known limitation: LibTorch opens model paths with the ANSI codepage — keep
+`RAVE_MODEL_DIR` ASCII-only. `link.exe` may warn `LNK4044: unrecognized option '-w'` from an
+anira interface flag — harmless.
+
+## 6. Local LoRA trainer on this PC — FIT-013
+
+Small training runs can skip RunPod and use this box's GPU. The server is **unauthenticated
+and executes submitted bundles** — trusted LAN only: bind the LAN IP, Private-profile
+firewall rule scoped to the subnet, never port-forward, stop it when not training.
+
+```powershell
+# needs the SA3 code tree (scripts\pre_encode_dataset.py + train_lora.py) on disk:
+.\service\training\serve-trainer.ps1 -Sa3TrainDir E:\stable-audio-3 -BindHost <lan-ip>
+pwsh scripts\verify-pc-build.ps1 -RealTrainer   # /health probe: backend must be "real"
+```
+
+Mac side (then relaunch Mosh so it inherits the env; `launchctl unsetenv` to go back):
+
+```bash
+launchctl setenv MOSH_TRAINING_BACKEND remote_http
+launchctl setenv MOSH_TRAINING_REMOTE_URL http://<pc-lan-ip>:8799
+```
+
+The client has a 60s per-request timeout (`trainer_job._post_json`) — fine over LAN for
+typical corpora; if a very large bundle ever trips it, that's the knob to look at.
+
 ## Known Windows differences (see WINDOWS_PARITY.md for the full record)
 
 - **Voice:** always-on native STT is macOS-only; on Windows use the in-app browser voice
