@@ -78,6 +78,76 @@ digs = {hashlib.sha256(json.dumps(sg.energy_nuclei(lala, HOP, f0_step), sort_key
         for _ in range(3)}
 check("energy_nuclei 3x deterministic", len(digs) == 1)
 
+
+# ── 8. merge_short_nuclei: sub-floor slots fold into a neighbour (the density fix) ──────
+# Measured 2026-07-16: the energy grid emits 40–110ms nuclei; every slot gets a word, so the
+# score crams syllables no singer can articulate. Slots shorter than min_s fold into their
+# nearest-in-time neighbour (equidistant -> the LONGER one, the grid_check fold precedent);
+# a lone blip with no neighbour within join_gap_s drops (consonant burst/echo, not a syllable).
+def N(a, b, vel=90, pitch=60):
+    return {"start": a, "end": b, "velocity": vel,
+            "segments": [{"start": a, "end": b, "pitch": pitch}]}
+
+
+def _tiles(n):
+    """Segments exactly tile the slot span, contiguously."""
+    segs = n["segments"]
+    return (segs and abs(segs[0]["start"] - n["start"]) < 1e-9
+            and abs(segs[-1]["end"] - n["end"]) < 1e-9
+            and all(abs(segs[i]["end"] - segs[i + 1]["start"]) < 1e-9 for i in range(len(segs) - 1)))
+
+
+# 8a. all slots >= floor -> byte-identical no-op
+ok_slots = [N(0.0, 0.30), N(0.40, 0.70), N(0.90, 1.40)]
+check("merge: all >= floor is a no-op", sg.merge_short_nuclei(ok_slots) == ok_slots)
+
+# 8b. short slot folds BACKWARD into a nearer preceding neighbour (velocity = max, tiles)
+back = sg.merge_short_nuclei([N(0.0, 0.30, vel=80), N(0.31, 0.37, vel=110), N(0.60, 0.90)])
+check("merge: folds backward into the nearer prev", len(back) == 2 and back[0]["end"] == 0.37,
+      str([(n["start"], n["end"]) for n in back]))
+check("merge: absorbed velocity = max(neighbour, short)", back[0]["velocity"] == 110, str(back[0]["velocity"]))
+check("merge: backward-extended slot's segments tile its span", _tiles(back[0]),
+      str(back[0]["segments"]))
+
+# 8c. phrase-initial short slot folds FORWARD (only neighbour is the next slot)
+fwd = sg.merge_short_nuclei([N(0.0, 0.06), N(0.10, 0.40)])
+check("merge: phrase-initial folds forward", len(fwd) == 1 and fwd[0]["start"] == 0.0
+      and fwd[0]["end"] == 0.40, str([(n["start"], n["end"]) for n in fwd]))
+check("merge: forward-extended slot's segments tile its span", _tiles(fwd[0]), str(fwd[0]["segments"]))
+
+# 8d. equidistant neighbours -> fold into the LONGER one (binary-exact gaps of 0.125)
+tie = sg.merge_short_nuclei([N(0.0, 0.25), N(0.375, 0.4375), N(0.5625, 1.5625)])
+check("merge: equidistant tie folds into the LONGER neighbour",
+      len(tie) == 2 and tie[1]["start"] == 0.375 and tie[0]["end"] == 0.25,
+      str([(n["start"], n["end"]) for n in tie]))
+
+# 8e. a lone blip with no neighbour within join_gap_s DROPS
+lone = sg.merge_short_nuclei([N(0.0, 0.30), N(1.0, 1.06), N(2.0, 2.30)])
+check("merge: isolated sub-floor blip drops", len(lone) == 2
+      and [n["start"] for n in lone] == [0.0, 2.0], str([(n["start"], n["end"]) for n in lone]))
+
+# 8f. a CHAIN of tiny slots keeps folding until nothing is sub-floor
+chain = sg.merge_short_nuclei([N(0.0, 0.04), N(0.05, 0.09), N(0.11, 0.41)])
+check("merge: tiny chain collapses into the real slot", len(chain) == 1
+      and chain[0]["start"] == 0.0 and chain[0]["end"] == 0.41,
+      str([(n["start"], n["end"]) for n in chain]))
+check("merge: chain result tiles + nothing sub-floor",
+      _tiles(chain[0]) and all(n["end"] - n["start"] >= 0.10 for n in chain), str(chain))
+
+# 8h. a real fast 16th SURVIVES: 105ms ~ a 16th at 138-152bpm — the floor must not eat it.
+# Swept vs the owner's 147-mark truth (2026-07-16): floor 100ms is strictly better than raw
+# (|delta| 28<31, F1@120 0.72>0.70, within-1 preserved); 120ms folded real 16ths (within-1
+# 11->8). The cram class the ear caught was 40-99ms.
+keep = sg.merge_short_nuclei([N(0.0, 0.30), N(0.35, 0.455)])
+check("merge: a 105ms slot (real 16th) survives the floor", len(keep) == 2,
+      str([(n["start"], n["end"]) for n in keep]))
+
+# 8g. determinism: 3x identical on a mixed fixture
+mixed = [N(0.0, 0.30), N(0.31, 0.37), N(0.60, 0.66), N(1.5, 1.56), N(2.0, 2.40)]
+mdigs = {hashlib.sha256(json.dumps(sg.merge_short_nuclei(mixed), sort_keys=True).encode()).hexdigest()
+         for _ in range(3)}
+check("merge_short_nuclei 3x deterministic", len(mdigs) == 1)
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

@@ -312,6 +312,15 @@ check("energy: a melisma span is ONE syllable with 2 pitch segments (SoulX glide
       skem.get("skeleton", {}).get("nuclei") == 1
       and len(((skem.get("lineScores") or [{}])[0].get("slots", [{}])[0]).get("segments", [])) == 2,
       str(skem.get("skeleton")))
+# density fix (2026-07-16): a sub-120ms nucleus folds into its neighbour BEFORE binning, so
+# no slot ever demands an unsingable syllable. 30-frame span + 6-frame (60ms) span, 50ms gap.
+E_SHORT_ENV = [0.02] * 10 + [0.5] * 30 + [0.02] * 5 + [0.5] * 6 + [0.02] * 10
+skes = core.build_skeleton_spec([], f0=None, bpm=120.0, time_sig=(4, 4), grid="1/8",
+                                env=E_SHORT_ENV, detector="energy")
+check("energy: sub-floor nucleus merges into its neighbour (1 slot, not 2)",
+      skes.get("skeleton", {}).get("nuclei") == 1, str(skes.get("skeleton")))
+check("energy: provenance reports the fold count (shortMerged)",
+      skes.get("skeleton", {}).get("shortMerged") == 1, str(skes.get("skeleton")))
 # graceful: detector="energy" but no envelope -> the v1 floor (never breaks)
 ske_noenv = core.build_skeleton_spec(DUET, f0=None, bpm=120.0, env=None, detector="energy")
 check("energy: no envelope -> v1 floor (graceful degrade)",

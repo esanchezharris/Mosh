@@ -33,6 +33,11 @@ STEP_MEDIAN_K = 5        # median filter width for the semitone track
 MIN_SPAN_S = 0.04        # gate spans / slivers shorter than this are noise blips
 DIP_DEPTH = 0.55         # a valley must fall below 55% of the neighbouring peak (~-5 dB)
 DIP_MIN_SEP_S = 0.08     # dips closer than this to the last boundary are the same event
+MIN_NUCLEUS_S = 0.10     # shortest singable syllable slot — shorter slots fold. Swept vs the
+                         # owner's 147-mark truth (2026-07-16): 100ms beats raw on every metric
+                         # (|delta| 28<31, F1@120 0.72>0.70) and kills the measured 40–99ms cram
+                         # class; 120ms folded real 16ths at 138–152bpm (within-1 11->8).
+JOIN_GAP_S = 0.15        # a sub-floor slot folds only into a neighbour this close; else drops
 
 
 def _pctl(sorted_vals: list, p: float) -> float:
@@ -163,6 +168,52 @@ def _melisma_segments(f0_in: List[dict], a: float, b: float, take_med: Optional[
     return [{"start": round(bounds[i], 4), "end": round(bounds[i + 1], 4),
              "pitch": _pitch_of(f0_in, bounds[i], bounds[i + 1], take_med)}
             for i in range(len(bounds) - 1)]
+
+
+def merge_short_nuclei(nuclei: List[dict], min_s: float = MIN_NUCLEUS_S,
+                       join_gap_s: float = JOIN_GAP_S) -> List[dict]:
+    """Fold sub-`min_s` nuclei into a neighbour so every slot is singable.
+
+    Every slot receives a word downstream, so a 40–110ms nucleus forces the score author to
+    cram a syllable no singer can articulate. Shortest-first, each sub-floor slot folds into
+    its nearest-in-time neighbour within `join_gap_s` (equidistant -> the LONGER neighbour,
+    the grid_check fold precedent): the neighbour's span extends over the absorbed slot (its
+    boundary segment stretches so segments still tile the span; velocity keeps the max), and
+    the absorbed slot's own segments drop — at that duration its pitch is negligible. A lone
+    blip with no neighbour in reach DROPS (a consonant burst/echo, not a syllable). Repeats
+    until nothing is sub-floor; input untouched."""
+    out = [dict(n, segments=[dict(s) for s in (n.get("segments") or [])]) for n in nuclei]
+    out.sort(key=lambda n: (n["start"], n["end"]))
+
+    def dur(n):
+        return n["end"] - n["start"]
+
+    while True:
+        shorts = [i for i, n in enumerate(out) if dur(n) < min_s]
+        if not shorts:
+            return out
+        i = min(shorts, key=lambda k: (dur(out[k]), out[k]["start"]))
+        n = out[i]
+        cand = []                                    # (gap, -neighbour_dur, index)
+        if i > 0 and n["start"] - out[i - 1]["end"] <= join_gap_s:
+            cand.append((n["start"] - out[i - 1]["end"], -dur(out[i - 1]), i - 1))
+        if i + 1 < len(out) and out[i + 1]["start"] - n["end"] <= join_gap_s:
+            cand.append((out[i + 1]["start"] - n["end"], -dur(out[i + 1]), i + 1))
+        if not cand:
+            out.pop(i)
+            continue
+        cand.sort()
+        nb = out[cand[0][2]]
+        if nb["start"] < n["start"]:                 # fold backward: prev rings into the slot
+            nb["end"] = n["end"]
+            if nb["segments"]:
+                nb["segments"][-1]["end"] = n["end"]
+        else:                                        # fold forward: next starts at the slot
+            nb["start"] = n["start"]
+            if nb["segments"]:
+                nb["segments"][0]["start"] = n["start"]
+        nb["velocity"] = max(nb.get("velocity", 1), n.get("velocity", 1))
+        out.pop(i)
 
 
 def energy_nuclei(env: List[float], hop_s: float, f0: Optional[List[dict]]) -> List[dict]:

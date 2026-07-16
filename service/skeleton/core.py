@@ -420,6 +420,10 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
     if detector == "energy" and env:
         from skeleton import segment
         groups = segment.energy_nuclei(env, HOP_MS / 1000.0, f0)
+        raw_count = len(groups)
+        # density floor (2026-07-16): every slot receives a word downstream, and 40–110ms
+        # nuclei forced the score to cram unsingable syllables — fold them before binning.
+        groups = segment.merge_short_nuclei(groups)
         spec = mumble.build_spec_from_take(groups, [], bpm, time_sig=time_sig, grid=grid,
                                            topic=topic, mood=mood)
         if spec.get("ok"):
@@ -427,7 +431,8 @@ def build_skeleton_spec(notes: List[dict], f0: Optional[List[dict]] = None, bpm:
             spec["editable"] = True
             spec["lineScores"] = _line_scores(groups, bpm, time_sig, grid, "energy")
             spec["skeleton"] = {"algo": "energy", "nuclei": len(groups),
-                                "melisma_groups": sum(1 for g in groups if len(g["segments"]) > 1)}
+                                "melisma_groups": sum(1 for g in groups if len(g["segments"]) > 1),
+                                "shortMerged": raw_count - len(groups)}
         return spec
 
     nuclei, pitches = _nuclei_with_pitch(notes, f0)
