@@ -5,6 +5,13 @@ The Mac remains the only DAW/audio/model engine. The iPhone controls MOSH,
 records phone mic takes, and can run hold-to-talk voice commands when on-device
 speech recognition is available.
 
+> **DAWN pad (2026-07-06 #239, restyled 2026-07-09 #267).** The `/web` page is now the
+> five-button remote transport pad (PUT ME IN · KEEP · AGAIN · HEAR IT · MARKER · STOP)
+> that arms a track and drives the **Mac's own** recording via `arm_track` /
+> `set_transport record` / `keep_take` / `mark_take` / `undo` — distinct from the phone-mic
+> `/take/*` import flow documented below. First real-server verification + the 47873
+> bind-failure root cause: [`docs/2026-07-16-dawn-pad-verification.md`](2026-07-16-dawn-pad-verification.md).
+
 ## Mac Remote Server
 
 - The `RemoteCompanionServer` is off by default.
