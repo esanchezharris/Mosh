@@ -25,7 +25,7 @@ def render(render_window, input_wav, output_wav, params, window_max_s):
     target_s = float(params.get("duration_s") or dur or 0.0)
     coverage = (params.get("coverage") or "auto")
     loop_s = float(params.get("loop_seconds") or 0.0) or min(window_max_s, target_s or window_max_s)
-    xfade_ms = float(params.get("xfade_ms") or 8.0)
+    xfade_ms = float(params.get("xfade_ms") or 1.0)  # owner-tuned: 1ms is the sweet spot (declick without smear)
 
     fits = dur <= window_max_s + 1.0e-3
     # No source / no target, or it fits in one window and isn't an explicit loop → render directly.

@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "DrumPattern.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -480,7 +481,22 @@ void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
 MoshOps::~MoshOps()
 {
     stopTimer();
-    unregisterAllMeterClients();
+    unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
+                                        // masterClient is a separate registration (see below)
+    // masterClient (line ~736's ctx->masterLevels.addClient) is never balanced by the
+    // per-track path above. Main.cpp's shutdown() destroys MoshOps BEFORE the engine
+    // (moshOps.reset() precedes engine.reset()), so if a playback context is still
+    // live here (quit-while-playing), its master LevelMeasurer keeps a raw pointer to
+    // masterClient — which is about to be freed with the rest of `this`. The audio
+    // thread would then write through that dangling pointer on the next block. Mirror
+    // the addClient bookkeeping (lastSeenContext tracks exactly the context we last
+    // registered with, and is nulled out everywhere the context is freed) to remove it
+    // here while the context — and `this` — are both still valid.
+    if (lastSeenContext != nullptr)
+    {
+        lastSeenContext->masterLevels.removeClient (masterClient);
+        lastSeenContext = nullptr;
+    }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
 }
@@ -698,6 +714,11 @@ void MoshOps::timerCallback()
         emit ("transport", transportToVar());
     wasPlaying = playing;
 
+    // Lane A — drive the render-ahead scheduler off the transport clock while a Live clip plays.
+    // Gated on hasAudio() so headless --selftest (which never arms it) is untouched.
+    if (renderAhead_.active && playing && eng.hasAudio())
+        renderAheadTick (transport.getPosition().inSeconds());
+
     if (mpSession_ != nullptr && mpSession_->active())
     {
         const auto nowMs = Time::getMillisecondCounterHiRes();
@@ -900,6 +921,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "clear_automation")        return cmdClearAutomation (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
+    if (name == "add_drum_pattern")  return cmdAddDrumPattern (args);
     if (name == "transcribe_clip")   return cmdTranscribeClip (args);
     if (name == "sketch_beatbox")    return cmdSketchBeatbox (args);
     if (name == "generate_beat_recipe") return cmdGenerateBeatRecipe (args);
@@ -915,12 +937,16 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "accept_render")     return cmdAcceptRender (args);
     if (name == "reject_render")     return cmdRejectRender (args);
     if (name == "reset_render_layer") return cmdResetRenderLayer (args);
+    if (name == "render_ahead_arm")  return cmdRenderAheadArm (args);   // Lane A — arm/disarm "Live"
+    if (name == "render_ahead_tick") return cmdRenderAheadTick (args);  // Lane A — explicit clock tick (run-script)
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
+    if (name == "list_loras")        return cmdListLoras (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
+    if (name == "list_rave_models")  return cmdListRaveModels (args);   // Lane B — non-gated fs scan
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
     if (name == "set_rave_param")    return cmdSetRaveParam (args);
@@ -2784,6 +2810,11 @@ juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& arg
     {
         if (auto* t = findTrack (args.getProperty ("trackId", var()).toString()))
             return logicalid::track (t->state);
+        // Track-scoped composites may target via clipId only (add_drum_pattern) —
+        // resolve through the clip so a peer's track lock still guards them.
+        if (auto* c = findClip (args.getProperty ("clipId", var()).toString()))
+            if (auto* tr = c->getTrack())
+                return logicalid::track (tr->state);
         return {};   // unresolvable target -> empty key allows; the command itself will error
     }
 
@@ -5144,6 +5175,131 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     return okResult ("add_midi_clip", var (data));
 }
 
+// DRM-002 — add_drum_pattern: a whole drum grid in ONE undoable command. The DSL
+// parser (DrumPattern.h) is mirrored 1:1 by ui/src/ui/drumPatternUtil.ts, and the
+// mock case in bridge.mock.ts mirrors THIS handler's semantics + error strings.
+// Policy (owner-approved design, docs/superpowers/specs/2026-07-10-add-drum-pattern-design.md):
+// clipId → per-lane replace (only the lanes named in the pattern are cleared, then
+// re-laid); else a new clip lands on trackId (omitted → new "Drums" drum track).
+// Instrument-less target → trackType "drum" + kit in the SAME transaction (the
+// DRM-001 posture: the pattern must be audible, and specifically as DRUMS, not
+// 4OSC); instrument present → untouched (melodic-808 / custom kits keep working);
+// wave-audio target → error (a front-of-chain sampler clears the track buffer).
+juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
+{
+    // Literal per-arg reads: the agent-catalog contract test regex-matches these.
+    const auto pattern     = args.getProperty ("pattern", var());
+    const auto trackId     = args.getProperty ("trackId", var()).toString();
+    const auto clipId      = args.getProperty ("clipId", var()).toString();
+    const int  stepsPerBar = (int) args.getProperty ("stepsPerBar", 16);
+    const int  bars        = (int) args.getProperty ("bars", 0);
+    const int  velocity    = (int) args.getProperty ("velocity", 100);
+    const double start     = (double) args.getProperty ("start", 0.0);
+    const auto clipName    = args.getProperty ("name", "Drums").toString();
+
+    // Validate + parse + resolve the target BEFORE the transaction: every error
+    // path below leaves no empty undo step (the cmdLoadDrumKit discipline).
+    const auto parsed = parseDrumPattern (pattern, stepsPerBar, bars, velocity);
+    if (! parsed.ok)
+        return errResult ("add_drum_pattern", parsed.error);
+    const auto laneHasPitch = [&parsed] (int pitch)
+    {
+        for (int p : parsed.lanePitches) if (p == pitch) return true;
+        return false;
+    };
+
+    te::MidiClip* targetClip = nullptr;
+    te::AudioTrack* track = nullptr;
+    if (clipId.isNotEmpty())
+    {
+        targetClip = dynamic_cast<te::MidiClip*> (findClip (clipId));
+        if (targetClip == nullptr)
+            return errResult ("add_drum_pattern", "no midi clip with that id");
+    }
+    else if (trackId.isNotEmpty())
+    {
+        track = findTrack (trackId);
+        if (track == nullptr)
+            return errResult ("add_drum_pattern", "no track with that id");
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                return errResult ("add_drum_pattern",
+                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio — a drum sampler would silence it; use a drum track")));
+    }
+
+    beginTxn ("add_drum_pattern");
+    juce::String outClipId, outTrackId;
+    int noteCount = 0;
+    auto& ts = eng.edit().tempoSequence;
+
+    if (targetClip != nullptr)
+    {
+        // Per-lane replace: drop ONLY the named lanes' notes (descending keeps
+        // indices valid — the cmdAssignSample pad-removal idiom), then re-lay.
+        auto& seq = targetClip->getSequence();
+        for (int i = seq.getNumNotes(); --i >= 0;)
+            if (auto* n = seq.getNote (i))
+                if (laneHasPitch (n->getNoteNumber()))
+                    seq.removeNote (*n, &undoManager());
+
+        const int beatsPerBar = ts.getTimeSigAt (targetClip->getPosition().getStart()).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = targetClip->itemID.toString();
+        if (auto* tr = targetClip->getTrack())
+            outTrackId = tr->itemID.toString();
+    }
+    else
+    {
+        if (track == nullptr)
+        {
+            track = createAudioTrack ("Drums");
+            if (track == nullptr) return errResult ("add_drum_pattern", "no track");
+            track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        else if (! trackHasInstrument (*track))
+        {
+            if (track->state.getProperty (ids::trackType, "audio").toString() != "drum")
+                track->state.setProperty (ids::trackType, "drum", &undoManager());
+            ensureDefaultInstrument (*track, true);
+        }
+        // else: the track's instrument choice is respected (raw-pitch lanes can
+        // drive an assign_sample'd melodic 808 or a custom pad map).
+
+        const auto startTime = tracktion::TimePosition::fromSeconds (start);
+        const int beatsPerBar = ts.getTimeSigAt (startTime).numerator.get();
+        const double sb = drumPatternStepBeats ((double) beatsPerBar, parsed.stepsPerBar);
+        const auto endTime = ts.toTime (tracktion::BeatPosition::fromBeats (
+            ts.toBeats (startTime).inBeats() + (double) parsed.bars * beatsPerBar));
+        auto clip = track->insertMIDIClip (clipName, { startTime, endTime }, nullptr);
+        if (clip == nullptr) return errResult ("add_drum_pattern", "insertMIDIClip failed");
+
+        auto& seq = clip->getSequence();
+        for (const auto& s : parsed.steps)
+            seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.step * sb),
+                         tracktion::BeatDuration::fromBeats (sb), s.velocity, 0, &undoManager());
+        noteCount = seq.getNumNotes();
+        outClipId = clip->itemID.toString();
+        outTrackId = track->itemID.toString();
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", outClipId);
+    data->setProperty ("trackId", outTrackId);
+    data->setProperty ("noteCount", noteCount);
+    data->setProperty ("steps", parsed.totalSteps);
+    data->setProperty ("bars", parsed.bars);
+    logLine ("add_drum_pattern", args, true, {}, true);
+    emitSnapshotInvalidated();
+    if (targetClip != nullptr)
+        reactiveTouch (outClipId);   // add_note parity: a re-laid pattern re-fires a live re-imagine
+    return okResult ("add_drum_pattern", var (data));
+}
+
 // Audio -> MIDI: transcribe a wave clip with Basic Pitch (out-of-process, via the
 // service /transcribe). ASYNC — inference is ~1-3s, so we run it off the message
 // thread and emit transcribe_status {working|done|error}; on success the result is
@@ -5623,9 +5779,17 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     beginTxn ("quantize_notes");
     int moved = 0;
+    // Snapshot the note pointers ONCE before mutating: setStartAndLength() writes
+    // IDs::b, which triggers tracktion's synchronous re-sort of the live MidiList
+    // (the same hazard MidiList::moveAllBeatPositions/rescale guard against by
+    // binding getNotes() once). Walking seq.getNote(i) live means a note that gets
+    // re-sorted past an already-visited index is silently skipped; iterating a
+    // fixed local list avoids that.
+    juce::Array<te::MidiNote*> notes;
     for (int i = 0; i < seq.getNumNotes(); ++i)
+        notes.add (seq.getNote (i));
+    for (auto* note : notes)
     {
-        auto* note = seq.getNote (i);
         const double start = note->getStartBeat().inBeats();
         const double q = std::round (start / division) * division;
         const double next = start + (q - start) * strength;
@@ -5985,6 +6149,22 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
                 col.setProperty (ids::name, c.getProperty ("name", ""), nullptr);
                 col.setProperty (ids::value, c.getProperty ("value", 0), nullptr);
                 colors.appendChild (col, &undoManager());
+            }
+    }
+
+    if (args.hasProperty ("loras"))   // LoRA rack: ≤2, ordered (stacks merge sequentially)
+    {
+        // getOrCreate: layers created before the rack shipped have no LORAS child.
+        auto loras = params.getOrCreateChildWithName (ids::LORAS, &undoManager());
+        loras.removeAllChildren (&undoManager());
+        if (auto* arr = args.getProperty ("loras", var()).getArray())
+            for (int i = 0; i < juce::jmin (2, arr->size()); ++i)
+            {
+                auto& l = arr->getReference (i);
+                juce::ValueTree lo (ids::LORA);
+                lo.setProperty (ids::name, l.getProperty ("name", ""), nullptr);
+                lo.setProperty (ids::value, l.getProperty ("value", 0), nullptr);
+                loras.appendChild (lo, &undoManager());
             }
     }
 
@@ -6472,6 +6652,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
             colors.add (var (co));
         }
     p->setProperty ("colors", colors);
+    Array<var> lorasArr;
+    if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+        for (int i = 0; i < ls.getNumChildren(); ++i)
+        {
+            auto* lo = new DynamicObject();
+            lo->setProperty ("name", ls.getChild (i)[ids::name]);
+            lo->setProperty ("value", ls.getChild (i)[ids::value]);
+            lorasArr.add (var (lo));
+        }
+    p->setProperty ("loras", lorasArr);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
     if (! singLines.isVoid())
         p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
@@ -6850,6 +7040,13 @@ juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
 // ── Phase 3 — reactive auto-re-render ────────────────────────────────────────
 void MoshOps::reactiveTouch (const juce::String& clipId)
 {
+    // Lane A — while this clip is Live-armed, render-ahead OWNS re-rendering: route a knob/edit touch
+    // to a re-lay from the playhead forward (new params) instead of the debounced whole-clip fire.
+    // Placed BEFORE the hasAudio guard so a hermetic run-script that armed Live still re-lays; in
+    // --selftest renderAhead_ is never armed, so this is a no-op (hermetic preserved).
+    if (renderAhead_.active && renderAhead_.clipId == clipId)
+    { renderAheadParamChanged (clipId); return; }
+
     // Hermetic-harness guard: a reactive render SPAWNS the generative service, so in headless runs
     // (no audio device — --selftest / --run-script) it stays OFF unless a test explicitly opts in via
     // MOSH_REACTIVE_DEBOUNCE_MS. Keeps --selftest deterministic + service-free; the real GUI (hasAudio)
@@ -6905,6 +7102,339 @@ void MoshOps::reactiveFire (const juce::String& clipId)
     cmdRenderLayer (juce::var (o));
 }
 
+// ── Lane A — render-ahead ("Live") ───────────────────────────────────────────────
+juce::var MoshOps::buildRenderAheadParams (const juce::ValueTree& node) const
+{
+    // node → single-window render params (same shape as cmdRenderLayer's job params, minus the
+    // whole-clip coverage: the scheduler stages one 8s slice per window and stitches them itself).
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto* p = new juce::DynamicObject();
+    p->setProperty ("prompt", params[ids::prompt]);
+    p->setProperty ("seed", node[ids::seed]);          // stable across windows → consistent "voice"
+    p->setProperty ("nl", params[ids::nl]);
+    p->setProperty ("cfg", params[ids::cfg]);
+    p->setProperty ("steps", params[ids::steps]);
+    p->setProperty ("mode", node[ids::mode]);          // reimagine (Live is wave-clip re-imagine)
+    p->setProperty ("target", params[ids::target]);
+    p->setProperty ("strength", params[ids::strength]);
+    juce::Array<juce::var> colors;
+    if (auto cs = params.getChildWithName (ids::COLORS); cs.isValid())
+        for (int i = 0; i < cs.getNumChildren(); ++i)
+        {
+            auto* co = new juce::DynamicObject();
+            co->setProperty ("name", cs.getChild (i)[ids::name]);
+            co->setProperty ("value", cs.getChild (i)[ids::value]);
+            colors.add (juce::var (co));
+        }
+    p->setProperty ("colors", colors);
+    juce::Array<juce::var> loras;
+    if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+        for (int i = 0; i < ls.getNumChildren(); ++i)
+        {
+            auto* lo = new juce::DynamicObject();
+            lo->setProperty ("name", ls.getChild (i)[ids::name]);
+            lo->setProperty ("value", ls.getChild (i)[ids::value]);
+            loras.add (juce::var (lo));
+        }
+    p->setProperty ("loras", loras);
+    p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+    p->setProperty ("coverage", "single");             // one 8s window — no tile/stitch inside a window
+    return juce::var (p);
+}
+
+juce::var MoshOps::cmdRenderAheadArm (const juce::var& args)
+{
+    const auto clipId = args.getProperty ("clipId", var()).toString();
+    const bool armed  = (bool) args.getProperty ("armed", true);
+    auto* clip = findClip (clipId);
+    auto node  = findRenderLayer (clipId);
+    if (clip == nullptr || ! node.isValid()) return errResult ("render_ahead_arm", "no render layer");
+
+    if (! armed)
+    {
+        renderAheadDisarm();
+        logLine ("render_ahead_arm", args, true, {}, false);
+        return okResult ("render_ahead_arm", [] { auto* o = new DynamicObject(); o->setProperty ("armed", false); return var (o); }());
+    }
+
+    // v1 is WAVE-clip only: the clip's own source is progressively repointed. (MIDI/drum keep the
+    // existing whole-clip beneath-render path — a progressive beneath variant is a later increment.)
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (clip);
+    if (wave == nullptr)
+        return errResult ("render_ahead_arm", "live render-ahead is wave-clip only (v1)");
+
+    // Bring the generative service up ONCE at arm time (submitJob/stitchWindows don't self-spawn).
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("render_ahead_arm", "generative service unavailable");
+
+    // If another clip was armed, disarm it first (one Live clip at a time — the MLX worker is serial).
+    if (renderAhead_.active && renderAhead_.clipId != clipId)
+        renderAheadDisarm();
+
+    auto& ra = renderAhead_;
+    ra.active   = true;
+    ra.clipId   = clipId;
+    ra.layerId  = node[ids::id].toString();
+    ra.epoch   += 1;                                    // fresh generation
+    ra.winLen   = juce::jmax (1.0, juce::SystemStats::getEnvironmentVariable ("SA3_SECONDS", "8.0").getDoubleValue());
+    auto cpos   = clip->getPosition();
+    ra.clipStart = cpos.getStart().inSeconds();
+    ra.clipEnd   = cpos.getEnd().inSeconds();
+    ra.srcOffset = cpos.getOffset().inSeconds();
+    ra.lastPlayheadSec = ra.clipStart;
+
+    // Pristine original (prefer originalSourceRef so we never compound a prior in-place render).
+    juce::File src = wave->getCurrentSourceFile();
+    if (const auto orig = node[ids::originalSourceRef].toString(); orig.isNotEmpty())
+    {
+        juce::File of = juce::File::isAbsolutePath (orig) ? juce::File (orig)
+                        : eng.editFile().getParentDirectory().getChildFile (orig);
+        if (of.existsAsFile()) src = of;
+    }
+    ra.sourceFile = src;
+    ra.adapter    = node[ids::modelAdapter].toString();
+    ra.jobParams  = buildRenderAheadParams (node);
+    ra.jobDir     = eng.sessionDir().getChildFile ("renders").getChildFile (ra.layerId).getChildFile ("live");
+    ra.jobDir.createDirectory();
+
+    const double clipLen = juce::jmax (0.0, ra.clipEnd - ra.clipStart);
+    ra.numWindows = juce::jmax (1, (int) std::ceil (clipLen / ra.winLen - 1.0e-6));
+    ra.nextWindow = 0;
+    ra.growSeq    = 0;
+    ra.rendering  = false;
+    ra.originalCaptured = false;
+    ra.windows.assign ((size_t) ra.numWindows, juce::File());
+
+    node.setProperty (ids::liveArmed, true, nullptr);
+    emit ("layer_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("layerId", ra.layerId);
+        o->setProperty ("status", "live"); o->setProperty ("live", true); return var (o); }());
+
+    // Pre-warm from the current transport position (arming mid-play shouldn't render windows behind
+    // the playhead). Async in the GUI; a hermetic run-script drives the clock via render_ahead_tick.
+    if (eng.hasAudio())
+        renderAheadTick (eng.edit().getTransport().getPosition().inSeconds());
+
+    logLine ("render_ahead_arm", args, true, {}, false);
+    auto* d = new DynamicObject();
+    d->setProperty ("armed", true);
+    d->setProperty ("windows", ra.numWindows);
+    d->setProperty ("windowSeconds", ra.winLen);
+    return okResult ("render_ahead_arm", var (d));
+}
+
+void MoshOps::renderAheadDisarm()
+{
+    auto& ra = renderAhead_;
+    if (! ra.active && ra.clipId.isEmpty()) return;
+    ra.epoch += 1;                                      // drop any in-flight window completion
+    ra.active = false;
+    if (auto node = findRenderLayer (ra.clipId); node.isValid())
+        node.setProperty (ids::liveArmed, false, nullptr);
+    const auto clipId = ra.clipId;
+    ra.clipId = {}; ra.layerId = {};
+    ra.windows.clear();
+    emit ("layer_status", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", clipId); o->setProperty ("status", "ready");
+        o->setProperty ("live", false); return var (o); }());
+}
+
+void MoshOps::renderAheadTick (double playheadSec)
+{
+    auto& ra = renderAhead_;
+    if (! ra.active) return;
+    ra.lastPlayheadSec = playheadSec;
+    if (ra.rendering) return;                           // one window in flight (MLX serial)
+
+    const int cw = juce::jlimit (0, ra.numWindows - 1,
+                                 (int) std::floor ((playheadSec - ra.clipStart) / ra.winLen));
+    const int target = juce::jmin (cw + ra.lookahead, ra.numWindows - 1);
+    if (ra.nextWindow <= target && ra.nextWindow < ra.numWindows)
+        renderAheadStartWindow (ra.nextWindow);
+}
+
+bool MoshOps::renderAheadSubmitWindow (int k, int epoch, juce::String& jobId,
+                                       juce::File& outFile, juce::File& manifest)
+{
+    auto& ra = renderAhead_;
+    const double srcStart = ra.srcOffset + (double) k * ra.winLen;
+    const double srcEnd   = ra.srcOffset + juce::jmin ((double) (k + 1) * ra.winLen, ra.clipEnd - ra.clipStart);
+    const juce::String stem = "win_" + juce::String (k) + "_e" + juce::String (epoch);
+    auto inFile = ra.jobDir.getChildFile (stem + "_in.wav");
+    outFile     = ra.jobDir.getChildFile (stem + "_out.wav");
+    manifest    = ra.jobDir.getChildFile (stem + "_out.wav.manifest.json");
+    if (! stageWavRegionAt44k (ra.sourceFile, srcStart, srcEnd, inFile))
+        return false;
+    jobId = jobManager.submitJob (ra.adapter, inFile, outFile, manifest, ra.jobParams);
+    return jobId.isNotEmpty();
+}
+
+void MoshOps::renderAheadStartWindow (int k)
+{
+    auto& ra = renderAhead_;
+    ra.rendering = true;
+    const int capturedEpoch = ra.epoch;
+    juce::String jobId; juce::File outFile, manifest;
+    if (! renderAheadSubmitWindow (k, capturedEpoch, jobId, outFile, manifest))
+    {
+        ra.rendering = false;
+        emit ("layer_status", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", ra.clipId); o->setProperty ("status", "error");
+            o->setProperty ("error", "render-ahead window submit failed"); return var (o); }());
+        renderAheadDisarm();
+        return;
+    }
+
+    // Poll on a background thread (service I/O off the message thread); marshal the placement back.
+    std::thread ([this, k, capturedEpoch, jobId, outFile, manifest]
+    {
+        for (int i = 0; i < 1800; ++i)                  // 100ms ticks → ~180s ceiling
+        {
+            auto st = jobManager.jobStatus (jobId);
+            const auto status = st.getProperty ("status", juce::var()).toString();
+            if (status == "ready" || (outFile.existsAsFile() && manifest.existsAsFile())
+                || status == "error" || status == "cancelled")
+                break;
+            juce::Thread::sleep (100);
+        }
+        juce::MessageManager::callAsync ([this, k, capturedEpoch, outFile]
+        {
+            auto& r = renderAhead_;
+            r.rendering = false;
+            if (! r.active || capturedEpoch != r.epoch) { if (r.active) renderAheadTick (r.lastPlayheadSec); return; }
+            if (! outFile.existsAsFile())
+            {
+                emit ("layer_status", [&] { auto* o = new DynamicObject();
+                    o->setProperty ("clipId", r.clipId); o->setProperty ("status", "error");
+                    o->setProperty ("error", "render-ahead window failed"); return var (o); }());
+                renderAheadDisarm();
+                return;
+            }
+            renderAheadWindowDone (k, capturedEpoch, outFile);
+            if (r.active) renderAheadTick (r.lastPlayheadSec);   // chain the next window
+        });
+    }).detach();
+}
+
+bool MoshOps::renderAheadWindowDone (int k, int epoch, const juce::File& outFile)
+{
+    auto& ra = renderAhead_;
+    if (! ra.active || epoch != ra.epoch) return false;   // disarmed / superseded by a re-lay
+    if (! outFile.existsAsFile()) return false;
+
+    if (k >= (int) ra.windows.size()) ra.windows.resize ((size_t) (k + 1));
+    ra.windows[(size_t) k] = outFile;
+    ra.nextWindow = juce::jmax (ra.nextWindow, k + 1);
+
+    // Contiguous completed prefix [0..m]; stitch it into the growing render-ahead file.
+    int m = -1;
+    for (int i = 0; i < (int) ra.windows.size(); ++i)
+    {
+        if (ra.windows[(size_t) i] != juce::File() && ra.windows[(size_t) i].existsAsFile()) m = i;
+        else break;
+    }
+    if (m < 0) return true;
+
+    juce::StringArray paths;
+    for (int i = 0; i <= m; ++i) paths.add (ra.windows[(size_t) i].getFullPathName());
+    auto dest = ra.jobDir.getChildFile ("render_ahead_" + juce::String (ra.growSeq) + ".wav");
+    const double covered = jobManager.stitchWindows (paths, dest, 0.0, 1.0);   // 1ms — owner-tuned
+    if (covered <= 0.0 || ! dest.existsAsFile()) return false;
+
+    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (ra.clipId)))
+    {
+        auto node = findRenderLayer (ra.clipId);
+        if (! ra.originalCaptured)
+        {
+            if (node.isValid() && node[ids::originalSourceRef].toString().isEmpty())
+                node.setProperty (ids::originalSourceRef, wave->getCurrentSourceFile().getFullPathName(), nullptr);
+            ra.originalCaptured = true;
+        }
+        const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
+        mosh::repointWaveClipSource (*wave, dest, eng.editFile().getParentDirectory(), local);
+        if (node.isValid())
+        {
+            node.setProperty (ids::appliedInPlace, true, nullptr);
+            node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
+            node.setProperty (ids::status, "ready", nullptr);
+        }
+    }
+    ra.growSeq += 1;
+
+    emit ("render_ahead", [&] { auto* o = new DynamicObject();
+        o->setProperty ("clipId", ra.clipId);
+        o->setProperty ("coveredSeconds", covered);
+        o->setProperty ("windows", m + 1);
+        o->setProperty ("total", ra.numWindows); return var (o); }());
+    return true;
+}
+
+void MoshOps::renderAheadParamChanged (const juce::String& clipId)
+{
+    auto& ra = renderAhead_;
+    if (! ra.active || ra.clipId != clipId) return;
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+
+    ra.epoch += 1;                                      // supersede any in-flight window
+    ra.jobParams = buildRenderAheadParams (node);       // capture the new knob values
+
+    // Keep windows BEHIND the playhead (already heard, old params fine); re-render from the current
+    // window forward. The stitch crossfades old→new at that seam (1ms, at the playhead) — a smooth
+    // timbral shift exactly where the producer turned the knob.
+    const int cw = juce::jlimit (0, ra.numWindows - 1,
+                                 (int) std::floor ((ra.lastPlayheadSec - ra.clipStart) / ra.winLen));
+    for (int i = cw; i < (int) ra.windows.size(); ++i) ra.windows[(size_t) i] = juce::File();
+    ra.nextWindow = cw;
+    // Do NOT kick a render here: the GUI's 30Hz transport tick (or a run-script's explicit wait-tick)
+    // picks up the reset nextWindow within ~33ms. Kicking the async path directly would wedge headless
+    // (callAsync never fires without a pumped message loop) and could race an in-flight window.
+}
+
+juce::var MoshOps::cmdRenderAheadTick (const juce::var& args)
+{
+    // Explicit clock tick. The GUI drives renderAheadTick from the transport timer (async); this
+    // command lets a HERMETIC run-script drive a simulated playhead. wait:true renders the due
+    // windows INLINE (no message-loop dependence) so a headless harness sees deterministic coverage.
+    auto& ra = renderAhead_;
+    if (! ra.active) return errResult ("render_ahead_tick", "not armed");
+    const double playhead = (double) args.getProperty ("playheadSec", ra.lastPlayheadSec);
+    const bool wait = (bool) args.getProperty ("wait", false);
+    ra.lastPlayheadSec = playhead;
+
+    if (! wait) { renderAheadTick (playhead); return okResult ("render_ahead_tick"); }
+
+    const int cw = juce::jlimit (0, ra.numWindows - 1,
+                                 (int) std::floor ((playhead - ra.clipStart) / ra.winLen));
+    const int target = juce::jmin (cw + ra.lookahead, ra.numWindows - 1);
+    int placed = 0;
+    while (ra.active && ra.nextWindow <= target && ra.nextWindow < ra.numWindows)
+    {
+        const int k = ra.nextWindow;
+        juce::String jobId; juce::File outFile, manifest;
+        if (! renderAheadSubmitWindow (k, ra.epoch, jobId, outFile, manifest))
+        { renderAheadDisarm(); return errResult ("render_ahead_tick", "window submit failed"); }
+        for (int i = 0; i < 4800; ++i)                  // ~240s inline ceiling
+        {
+            auto st = jobManager.jobStatus (jobId);
+            const auto status = st.getProperty ("status", var()).toString();
+            if (status == "ready" || (outFile.existsAsFile() && manifest.existsAsFile())
+                || status == "error" || status == "cancelled")
+                break;
+            juce::Thread::sleep (50);
+        }
+        if (! outFile.existsAsFile())
+        { renderAheadDisarm(); return errResult ("render_ahead_tick", "window render failed"); }
+        renderAheadWindowDone (k, ra.epoch, outFile);
+        ++placed;
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("placed", placed);
+    d->setProperty ("nextWindow", ra.nextWindow);
+    d->setProperty ("total", ra.numWindows);
+    return okResult ("render_ahead_tick", var (d));
+}
+
 juce::var MoshOps::cmdListColors (const juce::var&)
 {
     // The SA3 colour rack (name + ASTD ceiling per color) for the generative UI.
@@ -6914,6 +7444,17 @@ juce::var MoshOps::cmdListColors (const juce::var&)
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
     return okResult ("list_colors", r);
+}
+
+juce::var MoshOps::cmdListLoras (const juce::var&)
+{
+    // The LoRA rack library (drop-in adapters + cards) for the generative UI.
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("list_loras", "generative service unavailable");
+    auto r = jobManager.listLoras();
+    if (! (bool) r.getProperty ("ok", false))
+        return okResult ("list_loras", [] { auto* o = new DynamicObject(); o->setProperty ("loras", Array<var>{}); return var (o); }());
+    return okResult ("list_loras", r);
 }
 
 juce::var MoshOps::cmdListTransformTargets (const juce::var&)
@@ -6928,6 +7469,17 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
     return okResult ("list_transform_targets", r);
 }
 
+// Non-gated: the RAVE model library dir (RAVE_MODEL_DIR, else ~/AI/rave-models). Used by the
+// anira insert (raveModelPathFor) AND the always-available model browser (cmdListRaveModels) —
+// listing is a filesystem scan and needs no anira, so the browser works in the default build too.
+static juce::File raveModelDirFile()
+{
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
+                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
+    return juce::File (dir);
+}
+
 #if MOSH_HAVE_ANIRA
 // ─────────────────────────────────────────────────────────────────────────────
 // Route C.2 — real-time RAVE insert (Tier-A; only built with anira+LibTorch)
@@ -6935,10 +7487,7 @@ juce::var MoshOps::cmdListTransformTargets (const juce::var&)
 static juce::String raveModelPathFor (const juce::String& target)
 {
     if (target.isEmpty()) return {};
-    const auto dir = juce::SystemStats::getEnvironmentVariable ("RAVE_MODEL_DIR",
-                         juce::File::getSpecialLocation (juce::File::userHomeDirectory)
-                             .getChildFile ("AI").getChildFile ("rave-models").getFullPathName());
-    return juce::File (dir).getChildFile (target + ".ts").getFullPathName();
+    return raveModelDirFile().getChildFile (target + ".ts").getFullPathName();
 }
 
 juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
@@ -6956,13 +7505,18 @@ juce::var MoshOps::cmdAddRaveInsert (const juce::var& args)
     juce::String path = args.getProperty ("path", var()).toString();
     if (path.isEmpty()) path = raveModelPathFor (args.getProperty ("target", var()).toString());
     bool loaded = false;
+    juce::String loadError;   // AL-022 — surfaced below when the best-effort load fails
     if (path.isNotEmpty())
         if (auto* r = asRave (plugin.get()))
+        {
             loaded = r->loadModelFromFile (juce::File (path));
+            if (! loaded) loadError = r->lastLoadError();
+        }
 
     auto* data = new DynamicObject();
     data->setProperty ("index", track->pluginList.indexOf (plugin.get()));
     data->setProperty ("modelLoaded", loaded);
+    if (! loaded && loadError.isNotEmpty()) data->setProperty ("lastError", loadError);
     logLine ("add_rave_insert", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_rave_insert", var (data));
@@ -6995,7 +7549,15 @@ juce::var MoshOps::cmdLoadRaveModel (const juce::var& args)
     const bool ok = r->loadModelFromFile (juce::File (path));
     logLine ("load_rave_model", args, ok, ok ? juce::String() : juce::String ("load failed"), false);
     emitSnapshotInvalidated();
-    if (! ok) return errResult ("load_rave_model", "could not load model: " + path);
+    if (! ok)
+    {
+        // AL-022 — append the engine's diagnostic (exception message / failure
+        // reason) to the error, when one was captured. Additive: the base
+        // message is unchanged when there is no diagnostic to add.
+        const auto detail = r->lastLoadError();
+        return errResult ("load_rave_model", "could not load model: " + path
+            + (detail.isNotEmpty() ? (" (" + detail + ")") : juce::String()));
+    }
     auto* data = new DynamicObject();
     data->setProperty ("applied", true);
     data->setProperty ("describe", r->describe());
@@ -7012,6 +7574,35 @@ juce::var MoshOps::cmdResetRave (const juce::var& args)
     return okResult ("reset_rave");
 }
 #endif // MOSH_HAVE_ANIRA
+
+juce::var MoshOps::cmdListRaveModels (const juce::var&)
+{
+    // Lane B — browse the RAVE model library (RAVE_MODEL_DIR / ~/AI/rave-models). A pure filesystem
+    // scan of *.ts, so it works in the DEFAULT build too (loading is still gated on
+    // session.raveAvailable — only the anira build hosts the live insert). Mirrors the LoRA rack:
+    // the UI card offers a dropdown instead of a raw path prompt. Sorted by name (std::map) for a
+    // stable list; non-mutating, non-undoable.
+    std::map<juce::String, int> found;   // name → sizeMB (auto-sorted by key)
+    auto dir = raveModelDirFile();
+    const bool available = dir.isDirectory();
+    if (available)
+        for (auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.ts"))
+            found[f.getFileNameWithoutExtension()] = juce::roundToInt (f.getSize() / (1024.0 * 1024.0));
+
+    Array<var> models;
+    for (auto& [name, sizeMB] : found)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("name", name);
+        o->setProperty ("sizeMB", sizeMB);
+        models.add (var (o));
+    }
+    auto* d = new DynamicObject();
+    d->setProperty ("models", models);
+    d->setProperty ("dir", dir.getFullPathName());
+    d->setProperty ("available", available);
+    return okResult ("list_rave_models", var (d));
+}
 
 juce::var MoshOps::cmdCancelRender (const juce::var& args)
 {
@@ -8660,6 +9251,7 @@ juce::var MoshOps::clipToVar (te::Clip& c)
             && rl[kLandedClipId].toString().isNotEmpty()
             && findClip (rl[kLandedClipId].toString()) != nullptr);
         r->setProperty ("coverage", rl[ids::coverage].toString().isNotEmpty() ? rl[ids::coverage] : var ("auto"));   // whole-clip strategy
+        r->setProperty ("liveArmed", (bool) rl[ids::liveArmed]);   // Lane A — "Live" render-ahead is armed on this layer
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);
@@ -8686,6 +9278,16 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                     colors.add (var (co));
                 }
             r->setProperty ("colors", colors);
+            Array<var> loras;
+            if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+                for (int i = 0; i < ls.getNumChildren(); ++i)
+                {
+                    auto* lo = new DynamicObject();
+                    lo->setProperty ("name", ls.getChild (i)[ids::name]);
+                    lo->setProperty ("value", (double) ls.getChild (i)[ids::value]);
+                    loras.add (var (lo));
+                }
+            r->setProperty ("loras", loras);
         }
         // The last compile_render verdict (transient) — lets the UI show what it chose +
         // surface an "unsupported" honest message. Parsed back from the JSON blob.

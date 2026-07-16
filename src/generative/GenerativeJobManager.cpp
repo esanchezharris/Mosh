@@ -87,6 +87,7 @@ GenerativeJobManager::GenerativeJobManager()
 
 GenerativeJobManager::~GenerativeJobManager()
 {
+    const juce::ScopedLock sl (spawnLock);   // no worker may be mid-spawn as we tear down
     if (spawnedByUs && serviceProcess.isRunning())
         serviceProcess.kill();        // cancel-on-close (05 §4)
     if (spawnedByUs)                  // C2 — clean shutdown clears the handshake files
@@ -107,7 +108,7 @@ void GenerativeJobManager::reapStaleService()
     const int pid = toks.size() > 0 ? toks[0].getIntValue() : 0;
     const int stalePort = toks.size() > 1 ? toks[1].getIntValue() : 0;
     const int targetPort = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_PORT", "8770").getIntValue();
-    const int adoptedPort = portFromBaseUrl (baseUrl);
+    const int adoptedPort = portFromBaseUrl (currentBaseUrl());
 
     if (pid > 0
         && (stalePort == 0 || stalePort == targetPort || stalePort == adoptedPort)
@@ -128,12 +129,25 @@ void GenerativeJobManager::adoptPortFromHandshake()
     if (p <= 0) return;
     const auto host = SystemStats::getEnvironmentVariable ("MOSH_SERVICE_HOST", "127.0.0.1");
     auto want = "http://" + host + ":" + String (p);
+    const juce::ScopedLock sl (stateLock);
     if (want != baseUrl) baseUrl = want;
+}
+
+juce::String GenerativeJobManager::currentBaseUrl() const
+{
+    const juce::ScopedLock sl (stateLock);
+    return baseUrl;   // a copy taken while no writer can reassign the holder
+}
+
+juce::String GenerativeJobManager::serviceBuild() const
+{
+    const juce::ScopedLock sl (stateLock);
+    return svcBuild;
 }
 
 juce::var GenerativeJobManager::httpGet (const juce::String& path, int connectMs)
 {
-    URL url (baseUrl + path);
+    URL url (currentBaseUrl() + path);
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
                     .withConnectionTimeoutMs (connectMs);
     if (auto s = url.createInputStream (opts))
@@ -143,7 +157,7 @@ juce::var GenerativeJobManager::httpGet (const juce::String& path, int connectMs
 
 juce::var GenerativeJobManager::httpPost (const juce::String& path, const juce::var& body)
 {
-    URL url = URL (baseUrl + path).withPOSTData (JSON::toString (body));
+    URL url = URL (currentBaseUrl() + path).withPOSTData (JSON::toString (body));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (10000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -157,6 +171,7 @@ bool GenerativeJobManager::isHealthy (int connectMs)
     auto r = httpGet ("/health", connectMs);
     if ((bool) r.getProperty ("ok", false))
     {
+        const juce::ScopedLock sl (stateLock);   // svcBuild is read on the message thread
         svcBuild = r.getProperty ("build", svcBuild).toString();
         return true;
     }
@@ -165,6 +180,10 @@ bool GenerativeJobManager::isHealthy (int connectMs)
 
 bool GenerativeJobManager::ensureServiceRunning()
 {
+    // Serialize cold-start: without this, two workers can both see isHealthy()==false and
+    // both spawn serviceProcess, orphaning one Python service. A second caller blocks here
+    // until the first finishes warmup, then its isHealthy() check returns true immediately.
+    const juce::ScopedLock sl (spawnLock);
     if (isHealthy()) return true;
 
     // C2 — health failed: a wedged/orphaned service from a crashed Mosh may be squatting the
@@ -234,6 +253,11 @@ juce::var GenerativeJobManager::listTransformTargets()
     return httpGet ("/transform_targets");
 }
 
+juce::var GenerativeJobManager::listLoras()
+{
+    return httpGet ("/loras");
+}
+
 juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)
@@ -260,6 +284,25 @@ void GenerativeJobManager::cancelJob (const juce::String& jobId)
     httpPost ("/cancel", var (body));
 }
 
+double GenerativeJobManager::stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                                            double targetSeconds, double xfadeMs)
+{
+    if (windowPaths.isEmpty() || ! ensureServiceRunning())
+        return 0.0;
+
+    Array<var> wins;
+    for (const auto& w : windowPaths) wins.add (w);
+    auto* body = new DynamicObject();
+    body->setProperty ("windows", wins);
+    body->setProperty ("outPath", outWav.getFullPathName());
+    body->setProperty ("targetSeconds", targetSeconds);
+    body->setProperty ("xfadeMs", xfadeMs);
+
+    auto r = httpPost ("/stitch_windows", var (body));
+    if (! (bool) r.getProperty ("ok", false)) return 0.0;
+    return (double) r.getProperty ("durationSeconds", 0.0);
+}
+
 juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const juce::String& mode)
 {
     if (! ensureServiceRunning())
@@ -272,7 +315,7 @@ juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const ju
     // Transcription runs a model-loading subprocess; give it a generous timeout
     // (the service caps the subprocess at 180s). This blocks, so the caller runs it
     // off the message thread.
-    URL url = URL (baseUrl + "/transcribe").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/transcribe").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (185000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -291,7 +334,7 @@ juce::var GenerativeJobManager::transcribeWords (const juce::File& inputWav)
 
     // Whisper loads a model in a subprocess (generous timeout; the service caps at 180s).
     // Blocks → off the message thread. Mirrors transcribe(). Empty words when Whisper absent.
-    URL url = URL (baseUrl + "/transcribe_words").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/transcribe_words").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (185000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -315,7 +358,7 @@ juce::var GenerativeJobManager::mumbleSpec (const juce::var& notes, const juce::
     body->setProperty ("confThreshold", confThreshold > 0 ? confThreshold : 0.6);
 
     // In-process deterministic note/word math — fast; a short timeout. Off the message thread.
-    URL url = URL (baseUrl + "/mumble_spec").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/mumble_spec").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (30000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -341,7 +384,7 @@ juce::var GenerativeJobManager::skeletonSpec (const juce::File& inputWav, double
     // whisper word budgets, then the in-process bin) — up to THREE sequential subprocesses with
     // ~180 s budgets each, so the client timeout must cover their sum or a legitimately slow
     // chain reads as "service unavailable". Blocks → the caller runs it off the message thread.
-    URL url = URL (baseUrl + "/skeleton_spec").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/skeleton_spec").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (560000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -363,7 +406,7 @@ juce::var GenerativeJobManager::sketchBeatbox (const juce::File& inputWav, doubl
     // Onset analysis runs in a subprocess under the dedicated sketch venv; it is
     // model-free but still spawns a process, so give it a generous timeout and run it
     // off the message thread. Mirrors transcribe().
-    URL url = URL (baseUrl + "/sketch").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/sketch").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (60000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -377,7 +420,7 @@ juce::var GenerativeJobManager::generateBeatRecipe (const juce::var& args)
     if (! ensureServiceRunning())
         return {};
 
-    URL url = URL (baseUrl + "/generate_recipe").withPOSTData (JSON::toString (args));
+    URL url = URL (currentBaseUrl() + "/generate_recipe").withPOSTData (JSON::toString (args));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (30000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -402,7 +445,7 @@ juce::var GenerativeJobManager::getRhymes (const juce::String& word, const juce:
     // Fast + deterministic; the service caps the (optional) phonology subprocess at
     // 60s. A short timeout keeps an on-demand lookup snappy. Blocks → off the message
     // thread (or accept a brief block for an explicit lookup). Mirrors transcribe().
-    URL url = URL (baseUrl + "/get_rhymes").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/get_rhymes").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (15000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -428,7 +471,7 @@ juce::var GenerativeJobManager::generateLyrics (const juce::String& mode, const 
 
     // Fake backend is fast; a real LLM (L3) takes seconds — generous timeout, and the
     // caller runs this off the message thread (mirrors transcribe()).
-    URL url = URL (baseUrl + path).withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + path).withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (120000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -444,7 +487,7 @@ juce::var GenerativeJobManager::escalateCandidates (const juce::var& payload)
 
     // The service's route budget is 45s; 60s here leaves headroom without letting a
     // wedged service hang the relay thread forever. Blocks → background thread only.
-    URL url = URL (baseUrl + "/escalate_candidates").withPOSTData (JSON::toString (payload));
+    URL url = URL (currentBaseUrl() + "/escalate_candidates").withPOSTData (JSON::toString (payload));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (60000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -458,7 +501,7 @@ bool GenerativeJobManager::archivePair (const juce::var& row)
     if (! isHealthy())
         return false;
 
-    URL url = URL (baseUrl + "/archive_pair").withPOSTData (JSON::toString (row));
+    URL url = URL (currentBaseUrl() + "/archive_pair").withPOSTData (JSON::toString (row));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (5000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -481,7 +524,7 @@ juce::var GenerativeJobManager::compileRender (const juce::String& instruction, 
 
     // Fake backend is instant; a real LLM (L3) takes a couple of seconds — generous
     // timeout, and the caller runs this off the message thread (mirrors generateLyrics()).
-    URL url = URL (baseUrl + "/compile_render").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/compile_render").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (120000)
                     .withExtraHeaders ("Content-Type: application/json");
@@ -500,7 +543,7 @@ juce::var GenerativeJobManager::analyzeLyrics (const juce::var& spec)
 
     // Fast + deterministic (phonology only, no LLM) — a short timeout keeps the precise
     // flow-meter snappy. Off the message thread (mirrors transcribe()).
-    URL url = URL (baseUrl + "/analyze_lyrics").withPOSTData (JSON::toString (var (body)));
+    URL url = URL (currentBaseUrl() + "/analyze_lyrics").withPOSTData (JSON::toString (var (body)));
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (15000)
                     .withExtraHeaders ("Content-Type: application/json");

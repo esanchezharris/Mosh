@@ -28,6 +28,25 @@ def _mk(path, secs, sr=44100, freq=220.0, ch=2):
         w.writeframes(bytes(body))
 
 
+def _mk24(path, secs, sr=44100, freq=220.0, ch=2):
+    """Synthesize a 24-bit PCM WAV — what bounceClipToWav (bitDepth=24) produces for
+    MIDI/drum bounces that feed whole-clip stitch coverage."""
+    with wave.open(path, "wb") as w:
+        w.setnchannels(ch); w.setsampwidth(3); w.setframerate(sr)
+        body = bytearray()
+        for i in range(int(sr * secs)):
+            v = int(0.4 * 8388607 * math.sin(2 * math.pi * freq * i / sr)) & 0xFFFFFF
+            frame = bytes((v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF)) * ch
+            body += frame
+        w.writeframes(bytes(body))
+
+
+def _pcm(path):
+    """Return (sampwidth, raw PCM body) so we can assert byte-exact round-trip fidelity."""
+    with wave.open(path, "rb") as w:
+        return w.getsampwidth(), w.readframes(w.getnframes())
+
+
 def _md5(path):
     return hashlib.md5(open(path, "rb").read()).hexdigest()
 
@@ -50,10 +69,45 @@ def main():
     assert abs(stitch.wav_duration(s1) - 16.0) < 0.05, "stitch length"
     assert _md5(s1) == _md5(s2), "stitch deterministic"
 
+    # Default crossfade is 1ms (owner-tuned sweet spot). A 0ms stitch (hard cut) must
+    # differ from the default, confirming the default is actually applying a fade.
+    s_hard = os.path.join(td, "stitch_hard.wav"); stitch.stitch_windows([win0, win1], s_hard, 16.0, xfade_ms=0.0)
+    assert _md5(s_hard) != _md5(s1), "1ms default crossfade is applied (differs from 0ms hard cut)"
+
+    # BYTE-STABLE EXTENSION — the render-ahead safety guarantee. Appending a window
+    # crossfades only onto the END of the prior buffer (the last `xfade` frames), so the
+    # samples BEFORE that seam are IDENTICAL whether 2 or 3 windows were stitched. This is
+    # why the native scheduler can repoint the hidden clip's source to the extended file
+    # mid-playback: everything up to (and past) the current read position is unchanged.
+    win2 = os.path.join(td, "w2.wav"); _mk(win2, 8.0, freq=300.0)
+    s2win = os.path.join(td, "ext_2.wav"); stitch.stitch_windows([win0, win1], s2win, 16.0)
+    s3win = os.path.join(td, "ext_3.wav"); stitch.stitch_windows([win0, win1, win2], s3win, 24.0)
+    a2, ch2, sr2, sw2 = stitch._read(s2win)   # _read now returns (samples, ch, sr, sampwidth)
+    a3, ch3, sr3, sw3 = stitch._read(s3win)
+    # Compare frames strictly BEFORE the w1↔w2 seam at ~16s (leave a 2ms guard around it).
+    prefix_frames = int((16.0 - 0.002) * sr2)
+    n = prefix_frames * ch2
+    assert a2[:n] == a3[:n], "byte-stable extension: prefix before the new seam is identical (safe to repoint mid-play)"
+
+    # 24-bit input (MIDI/drum bounces are bitDepth=24): slice must not raise, must stay
+    # 24-bit, and round-trip the sliced PCM byte-for-byte (whole-clip stitch coverage feeds
+    # slice_wav the DAW-staged input directly).
+    in24 = os.path.join(td, "in24.wav"); _mk24(in24, 1.0, freq=220.0)
+    sl24 = os.path.join(td, "slice24.wav"); stitch.slice_wav(in24, sl24, 0.0, 0.5)
+    sw_sl, _ = _pcm(sl24)
+    assert sw_sl == 3, "24-bit slice preserves sample width"
+    assert abs(stitch.wav_duration(sl24) - 0.5) < 0.01, "24-bit slice length"
+    # slicing the ENTIRE clip [0, dur) must return the source PCM byte-identically.
+    full24 = os.path.join(td, "full24.wav"); stitch.slice_wav(in24, full24, 0.0, 1.0)
+    assert _pcm(full24) == _pcm(in24), "24-bit slice round-trip fidelity (byte-identical)"
+    # deterministic across runs (byte-identical) → golden checksums stay stable.
+    sl24b = os.path.join(td, "slice24b.wav"); stitch.slice_wav(in24, sl24b, 0.0, 0.5)
+    assert _md5(sl24) == _md5(sl24b), "24-bit slice deterministic"
+
     # coverage.render routing with a trivial passthrough window renderer.
     def passthrough(in_wav, out_wav, params):
-        seg, ch, sr = stitch._read(in_wav)
-        stitch._write(out_wav, seg, ch, sr)
+        seg, ch, sr, sw = stitch._read(in_wav)
+        stitch._write(out_wav, seg, ch, sr, sw)
         return {"ok": True}
 
     long_in = os.path.join(td, "long.wav"); _mk(long_in, 20.0)

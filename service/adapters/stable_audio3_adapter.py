@@ -76,6 +76,17 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     steers = CR.resolve_steers(colors, lab=lab)             # validated / clamped / composed
 
     eng = E.get_engine()                                    # singleton; first call loads the model
+
+    # LoRA rack: apply the selection to the DiT weights at RUNTIME (in-memory, no
+    # disk bake, no reload) — idempotent on the selection key; empty == stock.
+    import time as _time
+    from loras import registry as LR
+    lora_sel = LR.resolve(params.get("loras") or [], lab=lab)
+    loras_key = "|".join(f"{n}@{s}" for n, _f, s in lora_sel)     # "" == stock
+    _t0 = _time.perf_counter()
+    eng.apply_loras(lora_sel, loras_key)
+    apply_ms = round((_time.perf_counter() - _t0) * 1000.0, 1)
+
     has_src = bool(input_wav) and os.path.exists(input_wav)
 
     def _render_window(in_wav, out_wav, p):
@@ -103,6 +114,9 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "seconds_pinned": eng.SECONDS,
             "init_cache": init_status,
             "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
+            "loras": [{"name": n, "strength": s} for (n, _f, s) in lora_sel],
+            "lora_apply": "runtime",
+            "apply_ms": apply_ms,
             "pq": None, "pq_base": None, "flags": [],
         }
 

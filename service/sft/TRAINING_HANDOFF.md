@@ -1,5 +1,13 @@
 # Cycle-3 (a3b-r4) training — handoff / protection guide
 
+> ⛔ **SUPERSEDED (2026-07-09): the local r4 run this doc protects was intentionally STOPPED
+> at 5200/12889 during the CUDA cutover** — see [`LOCAL_R4_STOPPED.md`](LOCAL_R4_STOPPED.md).
+> The watchdog, LaunchAgent, and MLX process were all torn down; do **not** restart them.
+> r4 completed on a RunPod CUDA pod ([`GATE_READ_a3b-r4-cuda.md`](GATE_READ_a3b-r4-cuda.md),
+> §P8 gate = MISS on measurable floors → fix-first decision) and r5 followed on CUDA
+> ([`GATE_READ_a3b-r5-cuda.md`](GATE_READ_a3b-r5-cuda.md), §P9 gate = **PASS**). The text
+> below is kept as the reference runbook shape for a future LOCAL MLX run only.
+
 **The training is a detached OS process (watchdog PPID = 1). It does NOT depend on any
 Claude/Codex session.** A Claude usage-limit hit, closing the editor, or ending the
 session does **not** touch it. Closing the laptop lid just *suspends + resumes* it

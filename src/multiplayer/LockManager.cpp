@@ -20,7 +20,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
-        "list_transform_targets", "get_rhymes", "get_lyric_corpus_stats",
+        "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
+        // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
+        // target in its args; run-script/GUI-internal), so it never contends for a track.
+        "render_ahead_tick",
         "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
@@ -46,6 +49,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
+        // DRM-002 — composite: can create a clip AND mutate track instrument/type.
+        "add_drum_pattern",
         "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",
         "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
         "set_automation_point", "clear_automation",
@@ -71,6 +76,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_render_param", "compile_render", "render_layer", "cancel_render",
         "accept_render", "reject_render", "reset_render_layer", "bypass_layer",
         "freeze_layer", "bounce_layer_to_clip", "remove_render_layer",
+        "render_ahead_arm",   // Lane A — arms/disarms Live on one clip (mutates its render layer)
         "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
         "build_skeleton_from_clip", // LYR Phase 2 — gibberish skeleton (lands a sheet on the clip's track)
     };

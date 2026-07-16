@@ -16,6 +16,8 @@
 
 import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
+import { parseDrumPattern } from "./ui/drumPatternUtil";
+import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
@@ -159,6 +161,19 @@ const MOCK_WAVE_INPUTS = [
   { deviceID: "in-3-4", name: "Input 3-4", enabled: true, isStereoPair: true },
   { deviceID: "in-5", name: "Input 5", enabled: false, isStereoPair: false },
 ];
+// CTL-001 — mock MIDI inputs so the v2 inspector's per-instrument MIDI-input picker
+// has real choices and set_track_input can route one (list_midi_inputs enumeration).
+const MOCK_MIDI_INPUTS = [
+  { deviceID: "midi-akai", name: "Akai MPK Mini", alias: "Akai MPK Mini", enabled: true, monitor: "automatic" as const },
+  { deviceID: "midi-iac", name: "IAC Driver Bus 1", alias: "IAC Driver Bus 1", enabled: true, monitor: "automatic" as const },
+  { deviceID: "midi-launchkey", name: "Launchkey 49", alias: "Launchkey 49", enabled: false, monitor: "off" as const },
+];
+// RTG-002 — hardware output destinations (so the per-track output picker has real
+// device choices and set_track_output's deviceID form can stick in dev/e2e).
+const MOCK_OUTPUT_DEVICES = [
+  { deviceID: "out-1-2", name: "MacBook Pro Speakers", enabled: true },
+  { deviceID: "out-3-4", name: "External Headphones", enabled: true },
+];
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 function scheduleMock(callback: () => void, delayMs: number) {
   globalThis.setTimeout(callback, delayMs);
@@ -176,10 +191,24 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
+
+// AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
+// silently report success: for a MUTATING command that means the dev/e2e UI looks like
+// it worked while nothing changed, hiding real UI-test gaps (paste_clip is the canonical
+// example). The `default` case therefore ERRORS on any unmodeled command, EXCEPT the ones
+// below — intentional native-only / read-only passthroughs the dev UI degrades around
+// gracefully (these mirror the non-mutating entries of bridge.mock.test.ts's ALLOWLIST;
+// give any of them a real case when dev-mode fidelity matters).
+const DEFAULT_OK = new Set([
+  "rescan_plugins",    // live plugin scan — no dev-mock catalog to mutate
+  "import_clip_data",  // bytes-over-bridge is native-only; dev imports via import_clip
+  "recover_session",   // A3 crash recovery — native-only (no dev-mock crash journal)
+  "discard_recovery",  // "
+]);
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in
 // browser dev / e2e (the real path is the phonology service). Suffix fallback keeps
@@ -379,6 +408,24 @@ function ensureInstrument(t: Track, drum: boolean): void {
 }
 function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
 
+// RTG-002 — does `track`'s output chain (transitively) already feed into targetId?
+// Mirrors the native TrackOutput::feedsInto cycle guard so set_track_output can
+// reject a routing that would loop. Walks route-into-track hops with a seen guard.
+function outputFeedsInto(track: Track, targetId: string): boolean {
+  const seen = new Set<string>();
+  let cur: Track | undefined = track;
+  while (cur) {
+    const out = cur.output;
+    if (!out || !out.isTrack || !out.destId) return false;
+    if (out.destId === targetId) return true;
+    if (seen.has(cur.id)) return false;
+    seen.add(cur.id);
+    const nextId: string = out.destId;
+    cur = snapshot.tracks.find((tr) => tr.id === nextId);
+  }
+  return false;
+}
+
 const ok = (command: string, data?: unknown): CommandResult => ({ ok: true, command, data });
 const err = (command: string, error: string): CommandResult => ({ ok: false, command, error });
 
@@ -464,6 +511,10 @@ const COLORS = [
   { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
   { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
 ];
+const LORAS = [
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental" },
+];
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
 const reindexNotes = (c: Clip) => c.notes!.forEach((n, i) => (n.i = i));
@@ -522,6 +573,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       if (action === "to_end") {
         snapshot.transport = { ...t, position: snapshot.session.length ?? 16 };
+        emit("transport", snapshot.transport);
+        return ok(command);
+      }
+      if (action === "to_start") {
+        snapshot.transport = { ...t, position: 0 };
         emit("transport", snapshot.transport);
         return ok(command);
       }
@@ -632,6 +688,58 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_track_pan":    { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.pan = num(args.pan); invalidate(); return ok(command); }
     case "set_track_mute":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_track_solo":   { const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found"); pushUndo(); t.solo = Boolean(args.solo); invalidate(); return ok(command); }
+
+    // ── sends / returns / aux buses (Wave 8) ─────────────────────────────────
+    // A "bus" is an integer; the return is an instrument-free audio track carrying
+    // an aux-return (isReturn/returnBus). Sends are post-fader entries on a track's
+    // sends[], routed purely by matching bus number. Mirrors MoshOps cmdCreateBus/…
+    case "create_bus": {
+      pushUndo();
+      const used = new Set((snapshot.buses ?? []).map((b) => b.bus));
+      let bus = 0; while (used.has(bus)) bus++;
+      const name = str(args.name) || `Bus ${bus + 1}`;
+      const rt: Track = {
+        id: nextTrackId(), index: snapshot.tracks.length, name, type: "audio",
+        volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+        isReturn: true, returnBus: bus,
+      };
+      snapshot.tracks.push(rt);
+      (snapshot.buses ??= []).push({ bus, name, trackId: rt.id });
+      invalidate();
+      return ok(command, { busNumber: bus, trackId: rt.id, name });
+    }
+    case "add_send": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const bus = num(args.bus, -1);
+      if (!(snapshot.buses ?? []).some((b) => b.bus === bus)) return err(command, "no such bus");
+      if ((t.sends ?? []).some((s) => s.bus === bus)) return err(command, "send already exists");
+      pushUndo();
+      (t.sends ??= []).push({ bus, db: Math.max(-60, Math.min(6, num(args.db, 0))), mute: false });
+      invalidate();
+      return ok(command, { bus });
+    }
+    case "set_send_level": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const s = (t.sends ?? []).find((x) => x.bus === num(args.bus, -1));
+      if (!s) return err(command, "no send to that bus");
+      pushUndo();
+      s.db = Math.max(-100, Math.min(6, num(args.db, 0)));
+      invalidate();
+      return ok(command);
+    }
+    case "remove_send": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "no track");
+      const i = (t.sends ?? []).findIndex((x) => x.bus === num(args.bus, -1));
+      if (i < 0) return err(command, "no send to that bus");
+      pushUndo();
+      t.sends!.splice(i, 1);
+      invalidate();
+      return ok(command);
+    }
+
     case "create_section": {
       pushUndo();
       const start = num(args.startBeat, 0);
@@ -930,6 +1038,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
 
+    // Audio warp (auto-tempo): the clip follows the tempo map + time-stretches (SoundTouch).
+    // Wave clips only; `autoTempo` is required (mirrors cmdSetClipWarp). Enabling with no
+    // mode defaults to SoundTouch (Better). `stretchMode` is carried on the clip ONLY while
+    // warp is on, matching the native snapshot serialiser. Undoable.
+    case "set_clip_warp": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "not an audio clip");
+      if (!("autoTempo" in args)) return err(command, "missing 'autoTempo'");
+      pushUndo();
+      const on = Boolean(args.autoTempo);
+      f.clip.autoTempo = on;
+      if (on) f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
+      else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
+      invalidate();
+      return ok(command, { clipId: f.clip.id, autoTempo: on, stretchMode: f.clip.stretchMode });
+    }
+
     // ── recording transport + take lanes (comp tree) ─────────────────────────
     // No audio I/O in the browser dev mock, so "recording" is simulated against
     // session state: arming flags the track; stop_recording lands a take on each
@@ -1056,7 +1181,46 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
-    case "list_track_outputs": return ok(command, { outputs: [], tracks: snapshot.tracks.map((t) => ({ id: t.id, name: t.name })), audioEnabled: true });
+    case "list_midi_inputs": return ok(command, { inputs: MOCK_MIDI_INPUTS, audioEnabled: true });
+    case "list_track_outputs": return ok(command, {
+      outputs: MOCK_OUTPUT_DEVICES,
+      tracks: snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn).map((t) => ({ id: t.id, name: t.name })),
+      audioEnabled: true,
+    });
+    case "set_track_output": {
+      // RTG-002 — an Edit mutation (undoable). Three destination forms mirror the
+      // native cmdSetTrackOutput: destTrackId (implicit submix), deviceID (hardware
+      // out), or output:"default" (reset). Cycle + self rejection match the backend.
+      const t = snapshot.tracks.find((tr) => tr.id === str(args.trackId));
+      if (!t) return err(command, "no track");
+      if (typeof args.destTrackId === "string") {
+        const destId = str(args.destTrackId);
+        const dest = snapshot.tracks.find((tr) => tr.id === destId);
+        if (!dest) return err(command, "no destination track: " + destId);
+        if (dest.id === t.id) return err(command, "a track cannot output to itself");
+        if (outputFeedsInto(dest, t.id)) return err(command, "routing would create a cycle");
+        pushUndo();
+        t.output = { isTrack: true, destId, name: dest.name };
+        invalidate();
+        return ok(command, { trackId: t.id, destTrackId: destId });
+      }
+      if (typeof args.deviceID === "string") {
+        const deviceID = str(args.deviceID);
+        if (!deviceID) return err(command, "empty 'deviceID'");
+        const dev = MOCK_OUTPUT_DEVICES.find((d) => d.deviceID === deviceID);
+        pushUndo();
+        t.output = { isTrack: false, deviceID, name: dev?.name ?? deviceID };
+        invalidate();
+        return ok(command, { trackId: t.id, deviceID });
+      }
+      if (str(args.output) === "default") {
+        pushUndo();
+        delete t.output;
+        invalidate();
+        return ok(command, { trackId: t.id, output: "default" });
+      }
+      return err(command, "expected 'destTrackId', 'deviceID', or output:'default'");
+    }
 
     // ── settings / export / command log (topbar utilities) ───────────────────
     case "list_audio_devices": return ok(command, {
@@ -1081,8 +1245,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t) return err(command, "no track");
       const deviceID = str(args.deviceID);
       if (deviceID) {
-        const wi = MOCK_WAVE_INPUTS.find((w) => w.deviceID === deviceID);
-        t.input = { deviceID, name: wi?.name };
+        // The chosen input may be a wave OR a MIDI device (CTL-001 instrument tracks) —
+        // both are the deviceID-keyed "explicitly-chosen input". Resolve its name from
+        // whichever enumeration owns it so the picker reflects a readable label.
+        const dev = MOCK_WAVE_INPUTS.find((w) => w.deviceID === deviceID)
+          ?? MOCK_MIDI_INPUTS.find((m) => m.deviceID === deviceID);
+        t.input = { deviceID, name: dev?.name };
       } else {
         delete t.input;
       }
@@ -1182,6 +1350,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
     case "list_colors": return ok(command, { colors: COLORS });
+    case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
+    case "list_rave_models":   // Lane B — RAVE model browser fixture
+      return ok(command, { models: [
+        { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
+        { name: "sax", sizeMB: 116 }, { name: "vocals", sizeMB: 156 },
+      ], available: true });
     case "list_transform_targets":
       return ok(command, { targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"], freeText: true });
     case "create_render_layer": {
@@ -1189,7 +1363,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.hasRenderLayer = true;
       const mode = str(args.mode, "reimagine");
-      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [],
+      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [], loras: [],
         ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
@@ -1197,6 +1371,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
       const rl = f.clip.renderLayer;
       if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
+      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []).slice(0, 2);
+      if ("prompt" in args) rl.prompt = str(args.prompt, rl.prompt ?? "");
       if ("nl" in args) rl.nl = num(args.nl, rl.nl);
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);
       if ("target" in args) rl.target = str(args.target, rl.target ?? "");
@@ -1245,6 +1421,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
       invalidate(); return ok(command);
     }
+    case "render_ahead_arm": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.type !== "wave") return err(command, "live render-ahead is wave-clip only (v1)");
+      const armed = args.armed === undefined ? true : Boolean(args.armed);
+      f.clip.renderLayer.liveArmed = armed;
+      if (armed) { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; f.clip.renderLayer.status = "ready"; }
+      invalidate(); return ok(command, { armed });
+    }
     case "reject_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; f.clip.renderLayer.userKept = false; invalidate(); } return ok(command); }
     case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
     case "cancel_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; invalidate(); } return ok(command); }
@@ -1291,6 +1475,49 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.notes.push({ i: f.clip.notes.length, pitch: num(args.pitch, 60), start: num(args.start, 0), length: num(args.length, 0.5), velocity: num(args.velocity, 100) });
       reindexNotes(f.clip); invalidate(); return ok(command);
+    }
+    case "add_drum_pattern": {
+      // DRM-002 — lay a whole drum grid in ONE undoable step (mirrors the native
+      // handler exactly): validate + parse BEFORE mutating; clipId → per-lane
+      // replace; instrument-less target → drum type + kit; wave-audio target →
+      // error; start defaults to 0.0 (the NATIVE add_midi_clip default — not the
+      // mock's transport-position divergence above).
+      const parsed = parseDrumPattern(args.pattern, num(args.stepsPerBar, 16), num(args.bars, 0), num(args.velocity, 100));
+      if (!parsed.ok) return err(command, parsed.error);
+      const beatsPerBar = snapshot.session.timeSigNumerator ?? 4;
+      const sb = stepBeats(beatsPerBar, parsed.stepsPerBar);
+      const mkNotes = () => parsed.steps.map((s, k) => ({ i: k, pitch: s.pitch, start: s.step * sb, length: sb, velocity: s.velocity }));
+
+      if (str(args.clipId)) {
+        const f = findClip(str(args.clipId));
+        if (!f || f.clip.type !== "midi" || !f.clip.notes) return err(command, "no midi clip with that id");
+        pushUndo();
+        const lanes = new Set(parsed.lanePitches);
+        f.clip.notes = f.clip.notes.filter((n) => !lanes.has(n.pitch)).concat(mkNotes());
+        reindexNotes(f.clip);
+        invalidate();
+        return ok(command, { clipId: f.clip.id, trackId: f.track.id, noteCount: f.clip.notes.length, steps: parsed.totalSteps, bars: parsed.bars });
+      }
+
+      let t = str(args.trackId) ? findTrack(str(args.trackId)) : null;
+      if (str(args.trackId) && !t) return err(command, "no track with that id");
+      if (t && t.clips.some((c) => c.type === "wave"))
+        return err(command, "track holds wave audio — a drum sampler would silence it; use a drum track");
+      pushUndo();
+      if (!t) {
+        t = { id: nextTrackId(), index: snapshot.tracks.length, name: "Drums", type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [] };
+        ensureInstrument(t, true);
+        snapshot.tracks.push(t);
+      } else if (!(t.plugins ?? []).some((p) => p.isInstrument)) {
+        t.type = "drum";
+        ensureInstrument(t, true);
+      }
+      const beatSec = (4 / (snapshot.session.timeSigDenominator ?? 4)) * (60 / snapshot.session.tempo);
+      const notes = mkNotes();
+      const c: Clip = { id: nextClipId(), name: str(args.name, "Drums"), type: "midi", start: num(args.start, 0), length: parsed.bars * beatsPerBar * beatSec, offset: 0, hasRenderLayer: false, notes };
+      t.clips.push(c);
+      invalidate();
+      return ok(command, { clipId: c.id, trackId: t.id, noteCount: notes.length, steps: parsed.totalSteps, bars: parsed.bars });
     }
     case "transcribe_clip": {
       // Audio→MIDI (Basic Pitch) — async like the native path: emit working now, then
@@ -1647,7 +1874,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
 
     default:
-      return ok(command);
+      // Fail-closed (AL-017): only the intentional passthroughs no-op-succeed; any other
+      // unmodeled command (crucially, a mutating one) surfaces as an error so the drift is
+      // loud instead of a silent fake success.
+      return DEFAULT_OK.has(command)
+        ? ok(command)
+        : err(command, `unhandled command in dev-mock: ${command}`);
   }
 }
 

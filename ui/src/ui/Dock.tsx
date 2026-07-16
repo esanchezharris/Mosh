@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
+import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
@@ -80,12 +80,17 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   );
 }
 
-// Route C.2 — the real-time RAVE insert's rack card: model name + dry/wet + latency.
+// Route C.2 / Lane B — the real-time RAVE insert's rack card: a model BROWSER (drop a .ts into
+// RAVE_MODEL_DIR / ~/AI/rave-models → it lists), dry/wet, latency. Mirrors the LoRA-rack pattern:
+// a dropdown of installed models (list_rave_models) plus a "custom path…" escape hatch.
 function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const exec = useStore((s) => s.exec);
+  const models = useStore((s) => s.availableRaveModels);
+  const loadRaveModels = useStore((s) => s.loadRaveModels);
   const r = plugin.rave!;
-  const loadModel = () => {
-    const v = window.prompt("RAVE model — a .ts path, or a target name in RAVE_MODEL_DIR:", r.modelPath ?? "")?.trim();
+  useEffect(() => { loadRaveModels(); }, [loadRaveModels]);
+  const loadCustom = () => {
+    const v = window.prompt("RAVE model — a .ts path (or a name in RAVE_MODEL_DIR):", r.modelPath ?? "")?.trim();
     if (!v) return;
     void exec("load_rave_model", v.endsWith(".ts")
       ? { trackId, pluginIndex: plugin.index, path: v }
@@ -96,6 +101,15 @@ function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
       <div className="neural-model tc" title={r.modelPath ?? r.modelName} data-testid="rave-model-name">
         {r.modelLoaded ? (r.modelName || r.model) : "no model loaded"}
       </div>
+      <div className="neural-row">
+        <select className="btn ghost" data-testid="rave-model-select" value=""
+          title="Pick a RAVE model from the library"
+          onChange={(e) => e.target.value && void exec("load_rave_model", { trackId, pluginIndex: plugin.index, target: e.target.value })}>
+          <option value="">{models.length ? "load model…" : "no models found"}</option>
+          {models.map((m) => <option key={m.name} value={m.name}>{m.name}{m.sizeMB ? ` (${m.sizeMB} MB)` : ""}</option>)}
+        </select>
+        <button className="btn ghost" data-testid="rave-load-custom" title="Load a .ts by path" onClick={loadCustom}>path…</button>
+      </div>
       <label className="nparam">
         <span className="nlabel">mix</span>
         <span className="nslider"><input type="range" min={0} max={100} step={1} value={Math.round(r.mix)}
@@ -104,7 +118,6 @@ function RaveBody({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
         <span className="nval">{Math.round(r.mix)}</span>
       </label>
       <div className="neural-row">
-        <button className="btn" data-testid="rave-load-model" title="Load a RAVE .ts model" onClick={loadModel}>Load model…</button>
         <button className="btn" onClick={() => void exec("reset_rave", { trackId, index: plugin.index })}>Reset</button>
         <span className="nlat tc">{(r.latencySeconds * 1000).toFixed(1)} ms</span>
         <button className="btn x" onClick={() => void exec("remove_plugin", { trackId, index: plugin.index })}>✕</button>
@@ -165,8 +178,9 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
+  const loadLoras = useStore((s) => s.loadLoras);
   const qaByClip = useStore((s) => s.qaByClip);
-  useEffect(() => { loadColors(); loadTransformTargets(); }, [loadColors, loadTransformTargets]);
+  useEffect(() => { loadColors(); loadTransformTargets(); loadLoras(); }, [loadColors, loadTransformTargets, loadLoras]);
 
   // Generative runs on ANY clip type — a MIDI/drum clip is auto-bounced to audio by the
   // backend before the model. Target the SELECTED clip when it's on this track, else the
@@ -294,6 +308,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
+      <LoraRack clip={clip} />
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>
@@ -346,9 +361,14 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           </>
         ) : clip.type === "wave" ? (
           // Wave clips auto-apply in place — the waveform swaps to the result instantly.
-          // No accept/reject; Reset restores the original.
+          // No accept/reject; Reset restores the original. "Live" arms render-ahead: as you play,
+          // the re-imagine lays down ahead of the playhead (Lane A); a knob change re-lays from
+          // where you are. It fills the clip in place, so Reset still restores the original.
           <>
             <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine</button>
+            <button className={`btn${rl.liveArmed ? " on" : ""}`} data-testid="gen-live" aria-pressed={!!rl.liveArmed}
+              title="Live — render the re-imagine ahead of the playhead as you play; turn a knob and hear it fill in ahead of you"
+              onClick={() => void exec("render_ahead_arm", { clipId: clip.id, armed: !rl.liveArmed })}>{rl.liveArmed ? "◉ Live" : "Live"}</button>
             <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         ) : (
@@ -365,6 +385,55 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         <button className="btn x" title="remove layer" onClick={() => void exec("remove_render_layer", { clipId: clip.id })}>✕</button>
       </div>
     </div>
+  );
+}
+
+// LoRA rack — trained style adapters applied to the SA3 re-imagine at 0–100 strength,
+// composing with colours/prompt/seed (≤2, ordered: stacks merge sequentially). The
+// library is a drop-in dir (~/Library/Mosh/loras/sa3); hidden when it's empty. A LoRA
+// whose trigger token is missing from the prompt offers a one-tap "add trigger" chip —
+// the trigger is what meaningfully activates the trained style.
+function LoraRack({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const lorasAvail = useStore((s) => s.availableLoras);
+  const rl = clip.renderLayer!;
+  const active: RenderLora[] = rl.loras ?? [];
+  if (lorasAvail.length === 0 && active.length === 0) return null;
+  const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next.slice(0, 2) });
+  const addable = lorasAvail.filter((m) => !active.some((a) => a.name === m.name));
+  const prompt = rl.prompt ?? "";
+  const missingTriggers = active
+    .map((a) => lorasAvail.find((m) => m.name === a.name)?.trigger ?? "")
+    .filter((t) => t && !prompt.toLowerCase().includes(t.toLowerCase()));
+  return (
+    <>
+      {active.map((l) => {
+        const meta = lorasAvail.find((m) => m.name === l.name);
+        return (
+          <label key={l.name} className="nparam" data-testid={`lora-row-${l.name}`}>
+            <span className="nlabel" title={meta?.hint || undefined}>🧬 {meta?.displayName ?? l.name}</span>
+            <input type="range" min={0} max={100} step={1} value={Math.round(l.value)}
+              aria-label={`${meta?.displayName ?? l.name} LoRA strength`}
+              onChange={(e) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value: Number(e.target.value) } : a)))} />
+            <button className="btn x" onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
+          </label>
+        );
+      })}
+      {active.length < 2 && addable.length > 0 && (
+        <select className="btn ghost color-add" data-testid="lora-add" value=""
+          onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: 70 }])}>
+          <option value="">+ LoRA…</option>
+          {addable.map((m) => <option key={m.name} value={m.name}>{m.displayName}</option>)}
+        </select>
+      )}
+      {missingTriggers.length > 0 && (
+        <button className="btn ghost" data-testid="lora-trigger-chip"
+          title="This LoRA's trigger word isn't in the prompt — add it so the style engages"
+          onClick={() => void exec("set_render_param", { clipId: clip.id, prompt: [prompt, ...missingTriggers].filter(Boolean).join(", ") })}>
+          + add trigger “{missingTriggers.join("”, “")}”
+        </button>
+      )}
+    </>
   );
 }
 

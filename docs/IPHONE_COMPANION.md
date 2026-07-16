@@ -1,16 +1,46 @@
 # MOSH iPhone Companion
 
-This is the first native iPhone companion slice for nearby, same-network use.
-The Mac remains the only DAW/audio/model engine. The iPhone controls MOSH,
-records phone mic takes, and can run hold-to-talk voice commands when on-device
-speech recognition is available.
+This is the iPhone companion for nearby, same-network use. The Mac remains the
+only DAW/audio/model engine. The iPhone controls MOSH, records phone mic takes,
+and can run hold-to-talk voice commands when on-device speech recognition is
+available.
 
-> **DAWN pad (2026-07-06 #239, restyled 2026-07-09 #267).** The `/web` page is now the
-> five-button remote transport pad (PUT ME IN · KEEP · AGAIN · HEAR IT · MARKER · STOP)
-> that arms a track and drives the **Mac's own** recording via `arm_track` /
-> `set_transport record` / `keep_take` / `mark_take` / `undo` — distinct from the phone-mic
-> `/take/*` import flow documented below. First real-server verification + the 47873
-> bind-failure root cause: [`docs/2026-07-16-dawn-pad-verification.md`](2026-07-16-dawn-pad-verification.md).
+**The primary phone workflow is now the DAWN recording pad** (below, #239/#267)
+— a no-install web controller served at `/web` that drives the whole
+vocal-take loop from the phone. The native SwiftUI app remains the richer
+surface for mic takes and on-device speech.
+
+## DAWN Recording Pad (primary phone workflow)
+
+The phone recording-loop controller (PR #239, restyled in #267) ports the
+owner's DAWN workflow onto the companion server as the `/web` controller —
+getting the recording session off the MacBook keyboard entirely:
+
+- **One pad, five actions:** `PUT ME IN` / `KEEP` / `AGAIN` / `HEAR IT` /
+  `STOP` drive record → keep-take → re-take → playback → stop, wired to the
+  **existing** MoshOps commands (`set_transport` record/play/stop/seek,
+  `arm_track`, `keep_take` — real Tracktion take lanes, undoable). No new C++
+  commands.
+- **Arrangement navigator:** filled vocal-take regions plus a draggable
+  playhead to seek.
+- **iOS-style FLIP rearrange:** long-press enters edit mode; the dragged tile
+  lifts and the others reflow; the order persists to `localStorage`.
+- **Code:** `ui/src/companion/` (pure logic in testable TS modules —
+  `commandMap`, `navMath`, `layout` — plus a thin DOM shell; `net.ts` speaks
+  the same `/command`/`/snapshot`/`/events` endpoints with the token in the
+  body). `vite.companion.config.ts` (`npm run build:companion`) emits one
+  self-contained HTML; `cmake/BuildCompanion.cmake` stages it to
+  `Resources/companion`, and `RemoteCompanionServer` serves the staged page at
+  `/web`, falling back to the prior inline page when absent.
+
+Pairing is unchanged: start pairing from the Mac topbar `iPhone` control and
+scan the Safari QR.
+
+> **First real-server verification + the 47873 bind-failure root cause (2026-07-16):**
+> [`docs/2026-07-16-dawn-pad-verification.md`](2026-07-16-dawn-pad-verification.md). The
+> pad drives the **Mac's own** recording via `arm_track` / `set_transport record` /
+> `keep_take` / `mark_take` / `undo` — distinct from the phone-mic `/take/*` import flow
+> documented below.
 
 ## Mac Remote Server
 
@@ -26,7 +56,7 @@ Remote endpoints are JSON over HTTP:
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Server status, no mutation. |
-| `GET /web` | No-signing Safari companion shell; actions still require token. |
+| `GET /web` | No-signing Safari companion shell — now the DAWN recording pad (see above); actions still require token. |
 | `POST /snapshot` | Returns the MoshOps snapshot. |
 | `POST /command` | Executes one existing MoshOps command. |
 | `POST /events` | Polls queued MoshOps events since a sequence number. |
@@ -189,8 +219,10 @@ The Mac popover now has two QR modes:
 - **Safari**: `http://<mac>.local:<port>/web?payload=...`, for no-signing local
   use when the Apple Developer Program or Xcode signing is blocked.
 
-The Safari page is intentionally compact: transport, track target, record/upload
-take, rendered-layer target, Accept, Reject, and receipts. It uses the same
+The Safari page served at `/web` is the DAWN recording pad (see the section at
+the top). When the staged companion bundle is absent, the server falls back to
+the prior compact inline page (transport, track target, record/upload take,
+rendered-layer target, Accept, Reject, receipts). Either way it uses the same
 `/snapshot`, `/command`, and `/take/*` endpoints as the native app, so there is
 still one mutation path through MoshOps.
 

@@ -51,11 +51,13 @@ export const DEFAULT_RULES = [
 ].join("\n");
 
 /** Assemble the full system prompt from an (optimizable) rules block + a snapshot.
- *  PREAMBLE + catalog + rules + session — the order systemPrompt has always used. */
-export function buildSystemPrompt(rules: string, snap: Snapshot | null): string {
+ *  PREAMBLE + catalog + rules + session — the order systemPrompt has always used.
+ *  `catalog` swaps the command catalog (the small-model-mode eval arm); omitted =
+ *  the full catalog, so every existing caller is byte-unchanged. */
+export function buildSystemPrompt(rules: string, snap: Snapshot | null, catalog?: string): string {
   return [
     PREAMBLE,
-    commandCatalogPrompt(),
+    catalog ?? commandCatalogPrompt(),
     rules,
     "Current session:",
     snap ? compactSnapshot(snap) : "(empty session)",

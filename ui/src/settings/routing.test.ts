@@ -5,8 +5,11 @@ import {
   waveInputOptions,
   currentTrackInput,
   audioDevicePatch,
+  trackOutputOptions,
+  currentTrackOutput,
+  trackOutputPatch,
 } from "./routing";
-import type { AudioDevices, WaveInput, Track } from "../types";
+import type { AudioDevices, WaveInput, Track, TrackOutputs } from "../types";
 
 const devices = (over: Partial<AudioDevices> = {}): AudioDevices => ({
   types: [
@@ -82,5 +85,71 @@ describe("audioDevicePatch", () => {
   });
   it("builds an input-device patch", () => {
     expect(audioDevicePatch("input", "Scarlett 2i2")).toEqual({ inputDevice: "Scarlett 2i2" });
+  });
+});
+
+// ── RTG-002 — per-track OUTPUT routing (the orphaned trackOutputs half) ───────
+const outputs = (over: Partial<TrackOutputs> = {}): TrackOutputs => ({
+  outputs: [
+    { deviceID: "out-1-2", name: "Main Out 1-2", enabled: true },
+    { deviceID: "out-3-4", name: "Cue 3-4", enabled: false },
+  ],
+  tracks: [
+    { id: "t1", name: "Drums" },
+    { id: "t2", name: "Bass" },
+    { id: "t3", name: "Keys" },
+  ],
+  audioEnabled: true,
+  ...over,
+});
+
+describe("trackOutputOptions", () => {
+  it("always leads with a 'Default output' option", () => {
+    expect(trackOutputOptions(outputs(), "t3")[0]).toEqual({ value: "default", label: "Default output" });
+  });
+
+  it("maps hardware outputs (dev: prefix) and flags disabled ones", () => {
+    const opts = trackOutputOptions(outputs(), "t3");
+    expect(opts).toContainEqual({ value: "dev:out-1-2", label: "Main Out 1-2" });
+    expect(opts).toContainEqual({ value: "dev:out-3-4", label: "Cue 3-4 (disabled)" });
+  });
+
+  it("maps candidate tracks (track: prefix) but EXCLUDES the current track (no self-route)", () => {
+    const opts = trackOutputOptions(outputs(), "t3");
+    expect(opts).toContainEqual({ value: "track:t1", label: "→ Drums" });
+    expect(opts).toContainEqual({ value: "track:t2", label: "→ Bass" });
+    expect(opts.some((o) => o.value === "track:t3")).toBe(false);
+  });
+
+  it("returns just 'Default output' when the enumeration is null (graceful headless)", () => {
+    expect(trackOutputOptions(null, "t3")).toEqual([{ value: "default", label: "Default output" }]);
+  });
+});
+
+describe("currentTrackOutput", () => {
+  it("returns 'default' when the track has no explicit output", () => {
+    expect(currentTrackOutput({ id: "t1" } as Track)).toBe("default");
+  });
+
+  it("encodes a route-into-track destination as track:<destId>", () => {
+    const t = { id: "t1", output: { isTrack: true, destId: "t2", name: "Bass" } } as Track;
+    expect(currentTrackOutput(t)).toBe("track:t2");
+  });
+
+  it("encodes a hardware-device destination as dev:<deviceID>", () => {
+    const t = { id: "t1", output: { isTrack: false, name: "Cue 3-4", deviceID: "out-3-4" } } as Track;
+    expect(currentTrackOutput(t)).toBe("dev:out-3-4");
+  });
+});
+
+describe("trackOutputPatch", () => {
+  it("decodes 'default' into a reset patch", () => {
+    expect(trackOutputPatch("default", "t1")).toEqual({ trackId: "t1", output: "default" });
+  });
+  it("decodes track:<id> into a destTrackId patch", () => {
+    expect(trackOutputPatch("track:t2", "t1")).toEqual({ trackId: "t1", destTrackId: "t2" });
+  });
+  it("decodes dev:<deviceID> into a deviceID patch (preserving colons in the id)", () => {
+    expect(trackOutputPatch("dev:out-3-4", "t1")).toEqual({ trackId: "t1", deviceID: "out-3-4" });
   });
 });

@@ -44,6 +44,10 @@ public:
     bool loadModelFromFile (const juce::File& tsFile);
     void resetModel();
     juce::var describe() const;
+    // AL-022 — diagnostic for the most recent loadModelFromFile() failure (or
+    // prepare() re-init failure); empty on success/no-op. Additive passthrough
+    // to RaveEngine::lastError(), also mirrored into describe()'s "lastError".
+    juce::String lastLoadError() const { return juce::String (engine.lastError()); }
 
 private:
     juce::CachedValue<float>        mixValue;
@@ -59,6 +63,9 @@ private:
     // Preallocated: dry-delay ring (align dry to anira's latency) + mono scratch buffers.
     juce::AudioBuffer<float> dryRing, monoBuf, dryAligned;
     int dryWritePos = 0;
+    // reset_rave (message thread) requests the dry-delay ring be cleared; the actual clear
+    // happens on the RT thread in applyToBuffer so we never race dryRing/dryWritePos.
+    std::atomic<bool> pendingDryReset { false };
     static constexpr int kMaxDelay = 1 << 16;       // 65536 — RAVE latency is a few k
     static constexpr int kMaxChannels = 2;
     static constexpr int kMaxBlock = 8192;

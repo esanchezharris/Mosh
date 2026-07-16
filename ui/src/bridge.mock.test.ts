@@ -24,9 +24,11 @@ const ALLOWLIST = new Set<string>([
   // A3 crash recovery is a native-only flow (no crash journal in the in-memory dev mock):
   "recover_session",
   "discard_recovery",
-  // KNOWN DEV-MOCK GAPS — these DO mutate session state, so the dev mock no-ops
-  // where the real backend would change the arrangement. Tracked here so the guard
-  // stays green; give them real mock cases when dev-mode fidelity matters.
+  // KNOWN DEV-MOCK GAPS — these DO mutate session state, so the dev mock has no case.
+  // AL-017 made the mock FAIL-CLOSED, so at runtime these now hit `default: err(...)`
+  // (not a silent fake success) — surfacing the gap loudly. They stay allowlisted here
+  // only so this STATIC cased-or-allowlisted guard passes; give them real mock cases
+  // when dev-mode fidelity matters. (See bridgeMockFailClosed.test.ts for the runtime.)
   "paste_clip",
   // (create_group_track is dispatched by the configurable keymap's GROUP action and
   //  now has a real mock case — so it's intentionally NOT allowlisted.)

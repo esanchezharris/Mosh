@@ -19,7 +19,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { AGENT_COMMANDS } from "./commands";
+import { AGENT_COMMANDS, AGENT_COMMAND_MAP } from "./commands";
+import {
+  SET_TRACK_LEVEL_SKILL,
+  SKILL_CATALOG,
+  type SkillDefinition,
+  type SkillTemplateNode,
+  type SkillValue,
+} from "./skills";
 
 const here = dirname(fileURLToPath(import.meta.url)); // ui/src/agent
 const CPP_PATH = resolve(here, "../../../src/moshops/MoshOps.cpp");
@@ -78,16 +85,160 @@ describe("agent catalog ⇄ MoshOps.cpp argument contract", () => {
     it(`${cmd.command}: every declared arg is read by its backend handler`, () => {
       const handler = dispatch.get(cmd.command);
       expect(handler, `"${cmd.command}" has no dispatch entry in MoshOps.cpp`).toBeTruthy();
+      if (!handler) return;
 
-      const keys = handlerArgKeys(handler!);
+      const keys = handlerArgKeys(handler);
       expect(keys, `handler ${handler}() not found in MoshOps.cpp`).toBeTruthy();
+      if (!keys) return;
 
       for (const arg of cmd.args)
         expect(
-          keys!.has(arg.name),
+          keys.has(arg.name),
           `${cmd.command}: catalog arg "${arg.name}" is never read by ${handler}() — ` +
-            `catalog/seam drift (handler reads: ${[...keys!].join(", ") || "nothing"})`,
+            `catalog/seam drift (handler reads: ${[...keys].join(", ") || "nothing"})`,
         ).toBe(true);
     });
   }
+});
+
+function isSlotReference(value: SkillValue): value is { slot: string } {
+  return value !== null && typeof value === "object";
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled skill template node: ${String(value)}`);
+}
+
+function collectSkillContractErrors(skill: SkillDefinition): readonly string[] {
+  const errors: string[] = [];
+  const slots = new Map(skill.slots.map((slot) => [slot.name, slot]));
+  const initiallyPresent = new Set(
+    skill.slots.filter((slot) => slot.required).map((slot) => slot.name),
+  );
+
+  const walk = (nodes: readonly SkillTemplateNode[], present: ReadonlySet<string>): void => {
+    for (const node of nodes) {
+      switch (node.kind) {
+        case "if_present": {
+          if (!slots.has(node.slot))
+            errors.push(`${skill.name}: conditional references unknown slot "${node.slot}"`);
+          if (node.then.length === 0)
+            errors.push(`${skill.name}: conditional "${node.slot}" has no commands`);
+          const nestedPresent = new Set(present);
+          nestedPresent.add(node.slot);
+          walk(node.then, nestedPresent);
+          break;
+        }
+        case "command": {
+          const command = AGENT_COMMAND_MAP.get(node.command);
+          if (!command) {
+            errors.push(`${skill.name}: "${node.command}" is not in AGENT_COMMANDS`);
+            break;
+          }
+          if (!dispatch.has(node.command))
+            errors.push(`${skill.name}: "${node.command}" has no MoshOps.cpp dispatch`);
+
+          const commandArgs = new Map(command.args.map((arg) => [arg.name, arg]));
+          for (const required of command.args.filter((arg) => arg.required)) {
+            if (!Object.prototype.hasOwnProperty.call(node.args, required.name))
+              errors.push(`${skill.name}/${node.command}: required arg "${required.name}" is not bound`);
+          }
+
+          for (const [argName, value] of Object.entries(node.args)) {
+            const arg = commandArgs.get(argName);
+            if (!arg) {
+              errors.push(`${skill.name}/${node.command}: unknown arg "${argName}"`);
+              continue;
+            }
+            if (!isSlotReference(value)) {
+              if (typeof value !== arg.type)
+                errors.push(`${skill.name}/${node.command}: literal type does not match arg "${argName}"`);
+              continue;
+            }
+
+            const slot = slots.get(value.slot);
+            if (!slot) {
+              errors.push(`${skill.name}/${node.command}: arg "${argName}" references unknown slot "${value.slot}"`);
+              continue;
+            }
+            if (!slot.required && !present.has(slot.name))
+              errors.push(`${skill.name}/${node.command}: optional slot "${slot.name}" is not guarded by if_present`);
+            if (slot.type !== arg.type)
+              errors.push(`${skill.name}/${node.command}: slot "${slot.name}" type does not match arg "${argName}"`);
+          }
+          break;
+        }
+        default:
+          assertNever(node);
+      }
+    }
+  };
+  walk(skill.template, initiallyPresent);
+  return errors;
+}
+
+describe("skill catalog ⇄ agent catalog ⇄ MoshOps.cpp contract", () => {
+  it("has unique, non-empty skill names", () => {
+    expect(SKILL_CATALOG.length).toBeGreaterThan(0);
+    expect(SKILL_CATALOG).toContain(SET_TRACK_LEVEL_SKILL);
+    const names = SKILL_CATALOG.map((skill) => skill.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const skill of SKILL_CATALOG) {
+      expect(skill.name.trim()).not.toBe("");
+      expect(skill.description.trim()).not.toBe("");
+    }
+  });
+
+  for (const skill of SKILL_CATALOG) {
+    it(`${skill.name}: every template branch is statically tied to the real command surface`, () => {
+      const slotNames = skill.slots.map((slot) => slot.name);
+      expect(new Set(slotNames).size, `${skill.name}: duplicate slot name`).toBe(slotNames.length);
+      expect(skill.template.length, `${skill.name}: template is empty`).toBeGreaterThan(0);
+      for (const slot of skill.slots) {
+        expect(slot.name.trim(), `${skill.name}: empty slot name`).not.toBe("");
+        expect(slot.description.trim(), `${skill.name}/${slot.name}: empty slot description`).not.toBe("");
+        if (slot.type === "number" && slot.min !== undefined && slot.max !== undefined)
+          expect(slot.min, `${skill.name}/${slot.name}: invalid numeric range`).toBeLessThanOrEqual(slot.max);
+      }
+      expect(collectSkillContractErrors(skill)).toEqual([]);
+    });
+  }
+
+  it("rejects an optional slot reference outside its enclosing if_present branch", () => {
+    const unguarded: SkillDefinition = {
+      ...SET_TRACK_LEVEL_SKILL,
+      name: "unguarded_optional",
+      template: [{
+        kind: "command",
+        command: "set_track_mute",
+        args: { trackId: { slot: "trackId" }, mute: { slot: "mute" } },
+      }],
+    };
+
+    expect(collectSkillContractErrors(unguarded)).toContain(
+      'unguarded_optional/set_track_mute: optional slot "mute" is not guarded by if_present',
+    );
+  });
+
+  it("tracks optional-slot presence through nested conditionals", () => {
+    const nested: SkillDefinition = {
+      ...SET_TRACK_LEVEL_SKILL,
+      name: "nested_optional",
+      template: [{
+        kind: "if_present",
+        slot: "mute",
+        then: [{
+          kind: "if_present",
+          slot: "mute",
+          then: [{
+            kind: "command",
+            command: "set_track_mute",
+            args: { trackId: { slot: "trackId" }, mute: { slot: "mute" } },
+          }],
+        }],
+      }],
+    };
+
+    expect(collectSkillContractErrors(nested)).toEqual([]);
+  });
 });

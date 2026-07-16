@@ -180,7 +180,7 @@ bundle_service() {                              # $1 = installed app
   # `compiler` = the prompt compiler (/compile_render, imported in-process by server.py);
   # its real-LLM path lazy-imports brain_client (bundled separately) and degrades to the
   # deterministic fake when that's absent, so the fake path works whole-dir on its own.
-  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler; do
+  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
   cp "$ROOT/service/teardown/recipe.py" "$SVC/teardown/"
@@ -292,8 +292,10 @@ build_anira() {
   local dir="$ROOT/build-anira"
   if [ ! -f "$dir/CMakeCache.txt" ]; then
     echo "configuring anira build (first run downloads LibTorch — long)…"
+    # Cache OUTSIDE the source tree — iCloud evicts content under ~/Documents
+    # (docs/2026-07-10-cpm-cache-icloud-eviction.md); matches the CMakeLists default.
     cmake -S "$ROOT" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="$ROOT/.cpm-cache" \
+      -DMOSH_ENABLE_ANIRA=ON -DCPM_SOURCE_CACHE="${MOSH_WORK_DIR:-$HOME/Library/Mosh/work}/cpm-cache" \
       ${FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE:+-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE"}
   fi
   echo "building Mosh (anira → $dir)…"
@@ -398,7 +400,7 @@ case "$MODE" in
 
   deploy)
     build_app macos-arm64-release macos-arm64-release-app
-    APP="$(resolve_app)"
+    APP="$(find "$ROOT/build-macos-arm64-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
     [ -n "$APP" ] || { echo "no built app to deploy" >&2; exit 1; }
     DEST="/Applications/Mosh.app"
     install_app "$APP" "$DEST"

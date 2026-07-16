@@ -27,7 +27,7 @@ Beat factory era begins (PR #204): 72-candidate grid → hard gates → auto mix
 Pack-001 fixes (PR #205): Audiobox axes protocol repair, melodic-variety floor,
 open-hat rule, kick↔808 sub-tail pairing, clip-guard/mix-audibility fixes, per-sample
 pack cap. Two reprises shipped — measured bit-identical (lesson: delta-gate every A/B).
-8/12 kept.
+9/12 kept.
 
 ## pack-003
 Scale-reference MIDI dumps found poisoning the library ("all the notes hitting at

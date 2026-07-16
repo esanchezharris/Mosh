@@ -7,9 +7,34 @@
 import { useStore } from "../store";
 import { validateCommand, describeCommand } from "./commands";
 
-export type AgentCommandCall = { command: string; args?: Record<string, unknown> };
-export type ChangeEntry = { summary: string; ok: boolean; error?: string };
-export type ChangeSet = { label: string; entries: ChangeEntry[]; applied: number };
+export type AgentCommandCall = {
+  readonly command: string;
+  readonly args?: Readonly<Record<string, unknown>>;
+};
+export type ChangeEntry = {
+  readonly index: number;
+  readonly command: string;
+  readonly summary: string;
+  readonly ok: boolean;
+  readonly error?: string;
+};
+export type ChangeSet = {
+  readonly label: string;
+  readonly entries: readonly ChangeEntry[];
+  readonly applied: number;
+};
+
+export class AgentBatchBoundaryError extends Error {
+  readonly boundary: "begin" | "end";
+  readonly changes: ChangeSet;
+
+  constructor(boundary: "begin" | "end", message: string, changes: ChangeSet) {
+    super(message);
+    this.name = "AgentBatchBoundaryError";
+    this.boundary = boundary;
+    this.changes = changes;
+  }
+}
 
 // ── Destructive-command scope limit (safety) ─────────────────────────────────
 // Moshi runs mutating commands; undo is the backstop, not the only line. A confused
@@ -35,20 +60,36 @@ export const DESTRUCTIVE_BLOCK_REASON =
   `Blocked: too many destructive commands in one step (limit ${MAX_DESTRUCTIVE_PER_BATCH}). ` +
   `Delete in smaller steps or use the editor directly.`;
 
-export type DestructiveScreen = { allowed: AgentCommandCall[]; blocked: AgentCommandCall[] };
+export type DestructiveScreen = {
+  readonly allowed: readonly AgentCommandCall[];
+  readonly blocked: readonly AgentCommandCall[];
+};
+
+type IndexedCommandCall = AgentCommandCall & { readonly index: number };
+
+function screenByCommand<T extends AgentCommandCall>(
+  calls: readonly T[],
+  max: number,
+): { readonly allowed: readonly T[]; readonly blocked: readonly T[] } {
+  const destructiveCount = calls.reduce(
+    (count, call) => count + (isDestructiveCommand(call.command) ? 1 : 0),
+    0,
+  );
+  if (destructiveCount <= max) return { allowed: calls, blocked: [] };
+  const allowed: T[] = [];
+  const blocked: T[] = [];
+  for (const call of calls)
+    (isDestructiveCommand(call.command) ? blocked : allowed).push(call);
+  return { allowed, blocked };
+}
 
 /** Split a planned batch into runnable vs blocked. Under the limit, everything runs. Over
  *  it, the destructive calls are blocked and the constructive calls still run. Pure. */
 export function screenDestructive(
-  calls: AgentCommandCall[],
+  calls: readonly AgentCommandCall[],
   max: number = MAX_DESTRUCTIVE_PER_BATCH,
 ): DestructiveScreen {
-  const destructiveCount = calls.reduce((n, c) => n + (isDestructiveCommand(c.command) ? 1 : 0), 0);
-  if (destructiveCount <= max) return { allowed: calls, blocked: [] };
-  const allowed: AgentCommandCall[] = [];
-  const blocked: AgentCommandCall[] = [];
-  for (const c of calls) (isDestructiveCommand(c.command) ? blocked : allowed).push(c);
-  return { allowed, blocked };
+  return screenByCommand(calls, max);
 }
 
 // Provenance for the harvested-trajectory dataset (Phase 0). It rides the
@@ -66,52 +107,92 @@ function newTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function changeSet(label: string, entries: readonly ChangeEntry[]): ChangeSet {
+  return {
+    label,
+    entries: [...entries].sort((left, right) => left.index - right.index),
+    applied: entries.filter((entry) => entry.ok).length,
+  };
+}
+
 export async function runAgentBatch(
   label: string,
-  calls: AgentCommandCall[],
+  calls: readonly AgentCommandCall[],
   meta: TurnMeta = {},
 ): Promise<ChangeSet> {
   const { exec, refresh } = useStore.getState();
   const entries: ChangeEntry[] = [];
-  const valid: AgentCommandCall[] = [];
+  const valid: IndexedCommandCall[] = [];
 
-  for (const c of calls) {
+  for (const [index, c] of calls.entries()) {
     const err = validateCommand(c.command, c.args ?? {});
-    if (err) entries.push({ summary: c.command.replace(/_/g, " "), ok: false, error: err });
-    else valid.push(c);
+    if (err) {
+      entries.push({
+        index,
+        command: c.command,
+        summary: c.command.replace(/_/g, " "),
+        ok: false,
+        error: err,
+      });
+    } else valid.push({ ...c, index });
   }
 
   // Safety: cap destructive commands per batch so a runaway tool-loop can't wipe a session.
-  const { allowed, blocked } = screenDestructive(valid);
+  const { allowed, blocked } = screenByCommand(valid, MAX_DESTRUCTIVE_PER_BATCH);
   for (const c of blocked) {
-    entries.push({ summary: describeCommand(c.command, c.args ?? {}), ok: false, error: DESTRUCTIVE_BLOCK_REASON });
+    entries.push({
+      index: c.index,
+      command: c.command,
+      summary: describeCommand(c.command, c.args ?? {}),
+      ok: false,
+      error: DESTRUCTIVE_BLOCK_REASON,
+    });
   }
 
   if (allowed.length > 0) {
-    await exec("batch_begin", {
+    const begin = await exec("batch_begin", {
       name: label, // still the undo-transaction label
       turn_id: newTurnId(),
       utterance: meta.utterance ?? label,
       source: meta.source ?? "brain_chat",
     });
+    if (!begin.ok)
+      throw new AgentBatchBoundaryError(
+        "begin",
+        `batch_begin failed: ${begin.error ?? "unknown error"}`,
+        changeSet(label, entries),
+      );
     for (const c of allowed) {
       const res = await exec(c.command, c.args ?? {});
       entries.push({
+        index: c.index,
+        command: c.command,
         summary: describeCommand(c.command, c.args ?? {}),
         ok: res.ok,
         error: res.ok ? undefined : res.error,
       });
     }
-    await exec("batch_end", {});
+    const end = await exec("batch_end", {});
     await refresh();
+    if (!end.ok)
+      throw new AgentBatchBoundaryError(
+        "end",
+        `batch_end failed: ${end.error ?? "unknown error"}`,
+        changeSet(label, entries),
+      );
   }
 
-  return { label, entries, applied: entries.filter((e) => e.ok).length };
+  return changeSet(label, entries);
 }
 
 /** Revert the agent's last batch — one undo reverses the whole thing. */
-export async function undoAgentBatch(): Promise<void> {
+export async function undoAgentBatch(): Promise<boolean> {
   const { exec, refresh } = useStore.getState();
-  await exec("undo");
+  const result = await exec("undo");
   await refresh();
+  if (!result.ok) return false;
+  if (result.data === true) return true;
+  if (result.data === null || typeof result.data !== "object" || Array.isArray(result.data))
+    return false;
+  return "undone" in result.data && result.data.undone === true;
 }

@@ -29,6 +29,7 @@ public:
 
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
+    juce::var listLoras();
 
     /** Submit a render job to a named adapter ("fake" | "stable_audio3").
         Returns the jobId (empty on failure). Non-blocking. */
@@ -39,6 +40,15 @@ public:
     /** Poll a job's status: { ok, status, progress, outputWav, manifest }. */
     juce::var jobStatus (const juce::String& jobId, int connectMs = 3000);
     void cancelJob (const juce::String& jobId);
+
+    /** Render-ahead primitive (Lane A): overlap-add crossfade already-rendered window WAVs into
+        ONE continuous file (POST /stitch_windows; 1ms equal-power default — owner-tuned). Reuses
+        the measured-gapless service stitch. SYNCHRONOUS + fast (stdlib wave, local) — call on the
+        RenderAheadScheduler's background stitch step. Byte-stable: appending a window never perturbs
+        earlier seams, so repointing a clip's source to the grown file mid-play is glitch-free.
+        Returns the output duration seconds (> 0) on success, or 0.0 on failure. */
+    double stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                          double targetSeconds, double xfadeMs = 1.0);
 
     /** Audio->MIDI transcription via Basic Pitch (POST /transcribe). SYNCHRONOUS —
         call on a BACKGROUND thread (model load + inference is ~1-3s). Returns
@@ -142,7 +152,10 @@ public:
         content (the backend-only safety wall). */
     int styleCorpusStats();
 
-    juce::String serviceBuild() const { return svcBuild; }
+    /** The service build id captured from the last successful /health probe (part of the
+        render cache fingerprint). Thread-safe: guarded by stateLock, because isHealthy()
+        may reassign it from a background worker while the message thread reads it here. */
+    juce::String serviceBuild() const;
 
 private:
     juce::var httpGet (const juce::String& path, int connectMs = 3000);
@@ -155,10 +168,26 @@ private:
     // one if a non-Mosh process held it).
     void adoptPortFromHandshake();
 
-    juce::String baseUrl;
-    juce::ChildProcess serviceProcess;
-    bool spawnedByUs = false;
-    juce::String svcBuild;
+    // Concurrency: MoshOps drives this manager from many detached worker threads (render
+    // poll / transcribe / sketch / lyric-gen / analyze / skeleton / corpus) AND the message
+    // thread (serviceBuild() during fingerprinting). Two locks keep that safe WITHOUT
+    // serializing the blocking HTTP calls themselves:
+    //   * stateLock — brief copies/assignments of baseUrl + svcBuild. juce::String
+    //     assignment is not atomic vs a concurrent copy (torn COW refcount / use-after-free),
+    //     so every read AND write of these two goes through the lock. Held only long enough
+    //     to copy a String, never across a network call.
+    //   * spawnLock — serializes ensureServiceRunning() so two cold-start workers can't both
+    //     spawn the single Python service (orphaning one). Held across warmup.
+    // Lock order: spawnLock (outer) may take stateLock (leaf); never the reverse.
+    juce::String currentBaseUrl() const;       // thread-safe copy of baseUrl
+
+    mutable juce::CriticalSection stateLock;   // guards baseUrl + svcBuild
+    juce::CriticalSection spawnLock;           // serializes ensureServiceRunning spawn
+
+    juce::String baseUrl;                       // guarded by stateLock
+    juce::ChildProcess serviceProcess;          // guarded by spawnLock
+    bool spawnedByUs = false;                   // guarded by spawnLock
+    juce::String svcBuild;                      // guarded by stateLock
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GenerativeJobManager)
 };

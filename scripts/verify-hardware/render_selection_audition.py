@@ -5,10 +5,7 @@ import argparse
 import csv
 import hashlib
 import json
-<<<<<<< HEAD
 import math
-=======
->>>>>>> origin/codex/r7-research-promotion-clean
 import os
 import shutil
 import sys
@@ -23,15 +20,12 @@ if str(SERVICE) not in sys.path:
 DEFAULT_BIN = REPO / "build-macos-arm64" / "Mosh_artefacts" / "Debug" / "Mosh.app" / "Contents" / "MacOS" / "Mosh"
 DEFAULT_OUT = Path("~/mosh-beats/r7-selection").expanduser()
 BASE_SEED_STEP = 97
-<<<<<<< HEAD
 PRODUCTION_PROFILES = ("none", "r7-drop")
 R7_DROP_SECTIONS = (
     ("intro", 0.0, 16.0, {"lead", "pad", "pluck", "fx"}),
     ("drop", 16.0, 48.0, None),
     ("outro", 48.0, 64.0, {"808", "bass", "kick", "snare", "hat", "clap", "perc", "pad", "pluck", "fx"}),
 )
-=======
->>>>>>> origin/codex/r7-research-promotion-clean
 
 BEATS = [
     ({"mood": "dark", "tempo": 140, "key": "F minor"}, 3),
@@ -112,7 +106,6 @@ def _keep(raw: str) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "y", "keep", "x"}
 
 
-<<<<<<< HEAD
 def _tempo(recipe: Any) -> float:
     value = getattr(getattr(getattr(recipe, "meta", None), "tempo_bpm", None), "value", None)
     try:
@@ -235,9 +228,6 @@ def render_pack(
     production_profile: str = "none",
     include_private_paths: bool = False,
 ) -> int:
-=======
-def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_paths: bool = False) -> int:
->>>>>>> origin/codex/r7-research-promotion-clean
     from recipes import generate as G
     from teardown.render.execute import execute_recipe
 
@@ -259,10 +249,7 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
         "# r7 generate-N selection pack",
         "",
         "This is a pre-Gate-C selection pass: score several candidates per prompt, then run `select` to copy the best few into `selected/`.",
-<<<<<<< HEAD
         f"Production profile: {production_profile}",
-=======
->>>>>>> origin/codex/r7-research-promotion-clean
         f"Library: {_display_library(library_dir)}",
         f"Private paths included: {include_private_paths}",
         "",
@@ -283,14 +270,9 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
             )
             wav = out_dir / filename
             session_dir = out_dir / f".s{group_index:02d}_{label}"
-<<<<<<< HEAD
             render_rec = apply_production_profile(rec, production_profile)
             res = execute_recipe(
                 render_rec,
-=======
-            res = execute_recipe(
-                rec,
->>>>>>> origin/codex/r7-research-promotion-clean
                 bin_path=str(binp),
                 out_wav=str(wav),
                 session_dir=str(session_dir),
@@ -324,7 +306,6 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
                     "file": filename,
                     "request": request,
                     "seed": seed,
-<<<<<<< HEAD
                     "source_recipe_id": rec.recipe_id,
                     "recipe_id": render_rec.recipe_id,
                     "production_profile": production_profile,
@@ -338,12 +319,6 @@ def render_pack(out_dir: Path, *, candidates_per_prompt: int, include_private_pa
                     "path_policy": {
                         "private_paths_included": include_private_paths,
                         "redaction": "absolute paths are replaced with redacted:path:<sha12>",
-=======
-                    "recipe_id": rec.recipe_id,
-                    "path_policy": {
-                        "private_paths_included": include_private_paths,
-                        "redaction": "absolute paths are replaced with redacted:<name>:<sha12>",
->>>>>>> origin/codex/r7-research-promotion-clean
                     },
                     "provenance": _jsonable_provenance(prov, include_private_paths=include_private_paths),
                     "render": {
@@ -451,10 +426,7 @@ def main(argv: list[str] | None = None) -> int:
     render.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     render.add_argument("--candidates-per-prompt", type=int, default=4)
     render.add_argument("--include-private-paths", action="store_true", help="write local sample paths into manifests")
-<<<<<<< HEAD
     render.add_argument("--production-profile", choices=PRODUCTION_PROFILES, default="none")
-=======
->>>>>>> origin/codex/r7-research-promotion-clean
     select = sub.add_parser("select", help="copy the best scored candidates into selected/")
     select.add_argument("out_dir", nargs="?", default=str(DEFAULT_OUT))
     select.add_argument("--selected-dir", default="")
@@ -468,10 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         return render_pack(
             Path(args.out_dir).expanduser(),
             candidates_per_prompt=args.candidates_per_prompt,
-<<<<<<< HEAD
             production_profile=args.production_profile,
-=======
->>>>>>> origin/codex/r7-research-promotion-clean
             include_private_paths=args.include_private_paths,
         )
     selected_dir = Path(args.selected_dir).expanduser() if args.selected_dir else None

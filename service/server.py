@@ -45,15 +45,21 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stitch  # noqa: E402  (render-ahead incremental-stitch primitive; stdlib wave only)
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
 from training.corpus_bundle import build_corpus_bundle  # noqa: E402
-from training.rights import load_registry, save_registry, write_json  # noqa: E402
+from training.rights import load_registry, read_json_object, save_registry, write_json  # noqa: E402
 from training.trainer_job import train as train_lora  # noqa: E402
 
 SERVICE_VERSION = "0.3.0"
 START_TIME = time.time()
+# Upper bound on a POST body — a defensive cap so a bogus or hostile
+# Content-Length can't drive an unbounded rfile.read() (hang / huge alloc).
+# POST payloads here are small JSON control messages (audio moves as file
+# paths, never inline), so 64 MiB is generous headroom.
+MAX_BODY_BYTES = 64 * 1024 * 1024
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SERVICE_DIR)
 SA3_ENABLED = os.environ.get("MOSH_ENABLE_SA3", "1") == "1" and stable_audio3_adapter.available()
@@ -261,8 +267,10 @@ def _colorrack_hash() -> str:
 # service_build feeds the native render-cache fingerprint: changing the engine/colors
 # must invalidate cached renders, so it encodes the carve identity.
 if SA3_ENABLED:
+    from sa3 import engine as _sa3_engine
     SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
-                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}")
+                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
+                     f"+lora{_sa3_engine.LORA_APPLY_VERSION}")
 else:
     SERVICE_BUILD = "fake-0.1.0"
 
@@ -405,24 +413,35 @@ def _training_state_path() -> str:
 
 
 def _load_training_state() -> dict:
-    data = {}
-    try:
-        with open(_training_state_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    # MISSING state initialises normally; a CORRUPT / non-object file is reported
+    # invalid (stateError surfaced) instead of silently returning bare defaults that
+    # the next save would overwrite the evidence with (AL-015).
+    data, error = read_json_object(_training_state_path())
     data.setdefault("activeAdapterId", "")
     data.setdefault("activeAdapterPath", "")
     data.setdefault("activeCorpusHash", "")
     data.setdefault("jobs", [])
     data.setdefault("adapters", [])
+    if error:
+        data["stateError"] = error
     return data
 
 
 def _save_training_state(state: dict) -> None:
-    write_json(_training_state_path(), state)
+    path = _training_state_path()
+    # A missing file is fine to (re)create, but a CORRUPT / non-object state file holds
+    # diagnostic evidence — preserve it as a .corrupt sidecar rather than silently
+    # overwriting it (AL-015). The transient stateError flag is never persisted.
+    _, error = read_json_object(path)
+    if error and os.path.exists(path):
+        backup = path + ".corrupt"
+        if not os.path.exists(backup):
+            try:
+                os.replace(path, backup)
+            except OSError:
+                pass
+    payload = {k: v for k, v in state.items() if k != "stateError"}
+    write_json(path, payload)
 
 
 def _record_training_job(job: dict) -> None:
@@ -666,13 +685,35 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict:
-        n = int(self.headers.get("Content-Length", 0))
+    def _read_json(self):
+        """Parse the POST body as JSON.
+
+        Returns a dict on success — or {} for an empty or malformed-JSON body,
+        which callers already treat as "no fields" and 400 on the missing args
+        (PR #297). Returns None when the request was already answered here with a
+        definitive 400/413 (a non-numeric or oversized Content-Length); do_POST
+        must stop when it sees None.
+        """
+        # _json_malformed lets a route distinguish a garbled body from a legitimately
+        # empty one (both otherwise return {}); routes that mutate on the body (e.g.
+        # /training/import-registry) reject the former with 400 instead of applying {}.
+        self._json_malformed = False
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send(400, {"ok": False, "error": "invalid Content-Length"})
+            return None
         if n <= 0:
             return {}
+        if n > MAX_BODY_BYTES:
+            # Reject BEFORE reading — never allocate/hang on a huge claimed length.
+            self._send(413, {"ok": False,
+                             "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"})
+            return None
         try:
             return json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception:  # noqa: BLE001
+            self._json_malformed = True
             return {}
 
     def do_GET(self) -> None:  # noqa: N802
@@ -712,6 +753,16 @@ class Handler(BaseHTTPRequestHandler):
                                  "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
+        elif path == "/loras":
+            # LoRA rack discovery (drop-in library dir, RAVE_MODEL_DIR posture).
+            try:
+                from loras import registry as LORA_R
+                self._send(200, {"ok": True, "loras": [
+                    {k: v for k, v in e.items() if k != "file"}
+                    for e in LORA_R.list_loras()
+                ], "maxActive": LORA_R.MAX_ACTIVE})
+            except Exception as e:  # noqa: BLE001
+                self._send(503, {"ok": False, "error": f"loras unavailable: {e}", "loras": []})
         elif path == "/transform_targets":
             # Route C discovery: when the REAL RAVE backend is installed, list the
             # installed .ts model stems (concrete targets, no free-text). Otherwise the
@@ -791,6 +842,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         data = self._read_json()
+        if data is None:  # a 400/413 was already sent for a bad/oversized Content-Length
+            return
         if path == "/submit":
             adapter_id = data.get("adapter", "fake")
             if adapter_id in ("stable_audio3", "sa3") and not SA3_ENABLED:
@@ -818,6 +871,34 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/stitch_windows":
+            # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
+            # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless
+            # stitch.stitch_windows (1ms equal-power default). Pure + hermetic (stdlib wave) —
+            # the native RenderAheadScheduler calls this after each new window completes to
+            # extend the growing render-ahead file. Byte-stable: appending a window never
+            # perturbs earlier seams (each seam depends only on its two neighbours), so the
+            # region the playhead is reading stays identical across an extend.
+            wins = data.get("windows", []) or []
+            out = data.get("outPath", "")
+            if not wins or not out:
+                self._send(400, {"ok": False, "error": "windows[] and outPath required"})
+                return
+            missing = [w for w in wins if not (isinstance(w, str) and os.path.exists(w))]
+            if missing:
+                self._send(400, {"ok": False, "error": f"window(s) missing: {missing[:3]}"})
+                return
+            try:
+                target = float(data.get("targetSeconds") or 0.0)
+                if target <= 0.0:
+                    target = sum(stitch.wav_duration(w) for w in wins)
+                xfade = float(data.get("xfadeMs") or 1.0)
+                stitch.stitch_windows(wins, out, target, xfade_ms=xfade)
+                self._send(200, {"ok": True, "outPath": out,
+                                 "durationSeconds": round(stitch.wav_duration(out), 3),
+                                 "windows": len(wins), "xfadeMs": xfade})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"stitch failed: {e}"})
         elif path == "/transcribe":
             # Audio -> MIDI via Basic Pitch, run as a subprocess under the dedicated
             # transcribe venv so its deps stay isolated. Synchronous: the server is
@@ -1278,7 +1359,21 @@ class Handler(BaseHTTPRequestHandler):
                     _training_jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
         elif path == "/training/import-registry":
-            registry = data.get("registry", {})
+            # A garbled, empty, or registry-less body must NOT clobber the rights
+            # registry: reject it with 400 and leave the on-disk registry untouched.
+            # An empty POST body (Content-Length 0) decodes to {} with
+            # _json_malformed=False, same as a well-formed object missing the
+            # "registry" key entirely -- both must be rejected explicitly rather
+            # than silently defaulting to {} (which would wipe the registry). A
+            # body that spells out "registry": {} still clears it, on purpose.
+            if (
+                getattr(self, "_json_malformed", False)
+                or not isinstance(data, dict)
+                or "registry" not in data
+            ):
+                self._send(400, {"ok": False, "error": "malformed JSON body"})
+                return
+            registry = data.get("registry")
             if not isinstance(registry, dict):
                 self._send(400, {"ok": False, "error": "registry must be an object"})
                 return

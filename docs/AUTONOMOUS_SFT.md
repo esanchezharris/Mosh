@@ -93,9 +93,20 @@ export MOSHI_BRAIN_PROVIDER=openai OPENAI_BASE_URL=http://127.0.0.1:8080/v1 \
 
 ## Results
 
-<!-- RESULTS: filled after the first full run -->
-_(populated by the first `autotrain.sh` run — baseline (cloud `gpt-5.4-mini`) vs finetuned
-(local Qwen3-4B LoRA) clean-apply over the frozen eval set)_
+The one-command `autotrain.sh` lane described above was superseded before a canonical
+baseline-vs-finetuned table was recorded here: the training effort graduated into the
+**staged, pre-registered SFT program** (owner-greenlit 2026-07-03), which runs the same
+verifier-reward idea with explicit gates and spend caps. Its results live where they land:
+
+- Program execution record + pre-registrations: [`bench/PROGRAM_STAGE1_2026-07.md`](bench/PROGRAM_STAGE1_2026-07.md)
+  (Stage 0: [`bench/PROGRAM_STAGE0_2026-07.md`](bench/PROGRAM_STAGE0_2026-07.md), scoreboards in `bench/scoreboard.*`).
+- Per-round gate reads: `../service/sft/GATE_READ_*.md` — r3 HALT, r4 (local run stopped in the
+  CUDA cutover, `LOCAL_R4_STOPPED.md`; CUDA rerun §P8 = MISS on measurable floors → fix-first),
+  **r5 (`a3b-r5-cuda`, s2-mix-v5): §P9 gate = PASS on one clean read** (2026-07-10).
+- Training decisions: [`bench/R5_TRAINING_DECISION_2026-07-09.md`](bench/R5_TRAINING_DECISION_2026-07-09.md).
+
+This doc remains the design reference for the pipeline shape (corpus → back-translation →
+LoRA → verifier eval) that the program builds on.
 
 ## Continuously autonomous (next)
 

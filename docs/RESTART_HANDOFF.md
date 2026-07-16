@@ -7,6 +7,13 @@ tutorial-scout pipeline (§3 sourcing) has also been merged via #194. Work from
 **`main`** — do not use `claude/production-reward` (superseded) or any stale local checkout
 (see §5).
 
+> **Addendum (2026-07-16):** the PR states in §5 have since resolved — **#197 (r7 corpus
+> promotion) MERGED and #176 (frozen RL host) CLOSED, both 2026-07-10** in the Codex→Claude
+> consolidation ([`CONSOLIDATION_2026-07-09.md`](CONSOLIDATION_2026-07-09.md)). The taste/training
+> arc continued past this handoff: owner taste packs 001–006 ([`TRAINING_JOURNAL.md`](TRAINING_JOURNAL.md)),
+> era freezes + ranker v2 (#215), and the staged SFT program ([`bench/`](bench/)). This doc remains
+> the correct deep context for the recipe substrate itself.
+
 ---
 
 ## 0. TL;DR — what happened and why
@@ -300,7 +307,7 @@ cd service/teardown && .venv/bin/python recipe.py --emit-schema > recipe.schema.
   branch (`service/teardown/{scout,catalog,jobs,youtube}.py` plus tests), and the r7
   MIDI-first rescore/export artifacts are already covered by
   `scripts/verify-hardware/restart_status_check.py`.
-- **#176 — Rung-2 GRPO/audio-reward host — OPEN, FROZEN.** Real, tested RL engineering that predates the restart decision. Commented to flag the freeze; **do not merge or run as the active path** without an explicit owner go-ahead. Not closed — may be revisited once a real generator + real preference data exist.
+- **#176 — Rung-2 GRPO/audio-reward host — CLOSED 2026-07-10** (was OPEN/FROZEN). Real, tested RL engineering that predates the restart decision; closed-with-reason in the consolidation, history preserved (`archive/funny-mendel-grpo-rungs` tag). The freeze posture stands: do not revive a learned-reward/RL loop as the active path without an explicit owner go-ahead.
 - **Stale checkouts:** `/Users/emiliosanchez-harris/Documents/ClaudeMosh` (the main checkout) was 44 commits behind `main` and dirty across 3+ unrelated efforts (a phone-controller-latency-gate feature, stale lyrics-doc drafts, the scout pipeline, a DAW reality-pack). Everything was safety-net committed to `origin/codex/phone-controller-latency-gate` before triage — nothing was lost — but **do not keep working in that checkout.** Use a fresh worktree off updated `main`, or `ClaudeMosh-moshfx` (already on `main`, just `git pull`).
   - The phone-controller-latency-gate work is real but orthogonal to this restart — it's preserved on its own branch; needs a separate owner decision on whether to continue it.
   - The loose root docs (`FINISH_MY_SONG_*.md`, `mosh-teardown-reward-pipeline-FINAL.md`) and `mosh_daw_reality_pack.{zip,/}` are very likely stale/superseded scratch (the FINISH_MY_SONG ones are near-identical to already-landed `docs/` versions; the reality-pack looks absorbed into the already-committed `scripts/daw-conformance/`) — recommend deleting after a final glance, not yet done unilaterally.
