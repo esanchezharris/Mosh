@@ -7285,10 +7285,17 @@ void MoshOps::renderAheadStartWindow (int k)
         return;
     }
 
+    // Ceiling for one window, 100ms ticks. Default unchanged (~180s); PC CUDA cold
+    // loads (model load + first render) can opt into longer via the same knob the
+    // render-layer wait honours (verify-pc-build.ps1 -RealSA3 sets 600000).
+    const int waitMs = juce::jmax (1000, juce::SystemStats::getEnvironmentVariable (
+        "MOSH_RENDER_WAIT_TIMEOUT_MS", "180000").getIntValue());
+    const int maxPolls = juce::jmax (1, waitMs / 100);
+
     // Poll on a background thread (service I/O off the message thread); marshal the placement back.
-    std::thread ([this, k, capturedEpoch, jobId, outFile, manifest]
+    std::thread ([this, k, capturedEpoch, jobId, outFile, manifest, maxPolls]
     {
-        for (int i = 0; i < 1800; ++i)                  // 100ms ticks → ~180s ceiling
+        for (int i = 0; i < maxPolls; ++i)
         {
             auto st = jobManager.jobStatus (jobId);
             const auto status = st.getProperty ("status", juce::var()).toString();
