@@ -6751,6 +6751,16 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         p->setProperty ("xfade_ms", 8.0);
     }
 
+    // The job dir is REUSED across renders of a layer, and the wait/async pollers treat
+    // an existing output+manifest pair as the durable completion signal (real SA3 can
+    // finish while /status is unreachable during teardown). Clear the PREVIOUS render's
+    // pair before submitting, or a RE-render "completes" on the first poll with the old
+    // audio (proven: an SA3 rack re-render landed the base render verbatim). Safe: the
+    // accepted/applied audio lives in durable copies (audio/rl-*.wav, accept_render's
+    // project copy) — these two files are per-job transients.
+    // output.deleteFile();  // ATTRIB-TEST
+    // manifest.deleteFile();
+
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
     if (jobId.isEmpty()) return errResult ("render_layer", "job submit failed");
