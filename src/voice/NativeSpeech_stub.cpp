@@ -21,7 +21,15 @@ NativeSpeech::~NativeSpeech() = default;
 
 bool NativeSpeech::isSupported() { return false; }
 
+int NativeSpeech::authorizationStatus() { return -1; }   // header contract: -1 on non-macOS
+
 void NativeSpeech::start (Callbacks cb)
+{
+    if (cb.onError)
+        cb.onError ("native speech-to-text is unsupported on this platform");
+}
+
+void NativeSpeech::transcribeFile (const juce::String&, Callbacks cb)
 {
     if (cb.onError)
         cb.onError ("native speech-to-text is unsupported on this platform");
