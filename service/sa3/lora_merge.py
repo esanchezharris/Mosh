@@ -19,9 +19,11 @@ Key mapping (torch module -> MLX npz key), verified against the real artifacts:
 1x1 Conv1d weights are stored [out, 1, in] in the npz and merge as [out, in].
 Unmappable/mismatched modules are skipped and reported, never fatal.
 
-The render path applies these weights at runtime (no bake, no disk) via
-weights_for_selection + the engine's apply_loras; merge() keeps the disk-bake for
-the Windows/CUDA fuse and as the test oracle. Both share one math path.
+The render path applies these weights at runtime (no bake, no disk) on every
+backend: MLX via the engine's apply_loras, Windows/CUDA via the torch in-memory
+apply in stable_audio3_cuda (FIT-013 decision — supersedes the earlier disk-fuse
+plan). merge() keeps the disk-bake as the cross-backend test oracle. All paths
+share the one math function below.
 
 Stdlib + numpy only (safetensors parsed by hand) so it runs in the SA3 venv.
 """
@@ -98,16 +100,22 @@ def group_lora(tensors: dict) -> dict:
 # ── per-layer math + weight selection (shared by disk merge AND runtime apply) ──
 
 def apply_dora(xp, W2, A, B, magnitude, adapter_type, scaling, strength):
-    """One layer's LoRA/DoRA update on a 2D weight. `xp` is numpy or mlx.core.
+    """One layer's LoRA/DoRA update on a 2D weight. `xp` is numpy, mlx.core or torch.
 
     W2 (out, in), A (rank, in), B (out, rank); `magnitude` (out,) for DoRA, None
     for plain LoRA. Returns the updated 2D weight in float32 (the caller casts to
-    the stored dtype + reshapes back). Mirrors dora_forward exactly; using
-    ``xp.linalg.norm`` keeps the numpy path bit-identical to the old disk merge.
+    the stored dtype + reshapes back). Mirrors dora_forward exactly; the numpy
+    path is bit-identical to the old disk merge. torch tensors lack .astype and
+    treat keepdims= as a version-fragile numpy alias, hence the hasattr fork —
+    same ops, same order, same precision on all three backends.
     """
-    V = W2.astype(xp.float32) + scaling * strength * (B @ A)
+    W32 = W2.astype(xp.float32) if hasattr(W2, "astype") else W2.to(xp.float32)
+    V = W32 + scaling * strength * (B @ A)
     if adapter_type in ("dora-rows", "dora"):
-        norm = xp.sqrt((V * V).sum(axis=1, keepdims=True))   # per-row L2 (np or mx)
+        if hasattr(V, "astype"):                              # numpy / mlx
+            norm = xp.sqrt((V * V).sum(axis=1, keepdims=True))  # per-row L2
+        else:                                                 # torch
+            norm = xp.sqrt((V * V).sum(dim=1, keepdim=True))
         V = V / (norm + _EPS)
         V = V * magnitude[:, None]
     return V
@@ -167,12 +175,13 @@ def weights_for_selection(selection, base_get):
     return work, {"applied": applied, "skipped": skipped}
 
 
-# ── merge (disk bake — reuses the shared math; kept for the Windows/CUDA fuse) ──
+# ── merge (disk bake — reuses the shared math; kept as the test oracle) ──
 
 def merge(base_npz: str, selection: list[tuple[str, str, float]], out_path: str) -> dict:
-    """Bake the selection onto the base npz and write it (Windows/CUDA disk-fuse
-    path). The macOS render path applies the same weights at RUNTIME instead — see
-    weights_for_selection, which this shares so the two paths stay bit-identical.
+    """Bake the selection onto the base npz and write it. Both render paths (MLX
+    engine.apply_loras, CUDA torch in-memory apply) apply the same weights at
+    RUNTIME instead — see weights_for_selection, which this shares so runtime
+    application stays bit-identical to a bake.
     selection = [(name, safetensors_path, strength)] in application order."""
     arrays = {k: np.array(v) for k, v in np.load(base_npz).items()}
     updated, report = weights_for_selection(selection, lambda k: arrays.get(k))
