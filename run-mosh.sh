@@ -180,7 +180,7 @@ bundle_service() {                              # $1 = installed app
   # `compiler` = the prompt compiler (/compile_render, imported in-process by server.py);
   # its real-LLM path lazy-imports brain_client (bundled separately) and degrades to the
   # deterministic fake when that's absent, so the fake path works whole-dir on its own.
-  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler; do
+  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
   cp "$ROOT/service/teardown/recipe.py" "$SVC/teardown/"
@@ -400,7 +400,7 @@ case "$MODE" in
 
   deploy)
     build_app macos-arm64-release macos-arm64-release-app
-    APP="$(resolve_app)"
+    APP="$(find "$ROOT/build-macos-arm64-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
     [ -n "$APP" ] || { echo "no built app to deploy" >&2; exit 1; }
     DEST="/Applications/Mosh.app"
     install_app "$APP" "$DEST"

@@ -29,6 +29,7 @@ public:
 
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
+    juce::var listLoras();
 
     /** Submit a render job to a named adapter ("fake" | "stable_audio3").
         Returns the jobId (empty on failure). Non-blocking. */
@@ -39,6 +40,15 @@ public:
     /** Poll a job's status: { ok, status, progress, outputWav, manifest }. */
     juce::var jobStatus (const juce::String& jobId, int connectMs = 3000);
     void cancelJob (const juce::String& jobId);
+
+    /** Render-ahead primitive (Lane A): overlap-add crossfade already-rendered window WAVs into
+        ONE continuous file (POST /stitch_windows; 1ms equal-power default — owner-tuned). Reuses
+        the measured-gapless service stitch. SYNCHRONOUS + fast (stdlib wave, local) — call on the
+        RenderAheadScheduler's background stitch step. Byte-stable: appending a window never perturbs
+        earlier seams, so repointing a clip's source to the grown file mid-play is glitch-free.
+        Returns the output duration seconds (> 0) on success, or 0.0 on failure. */
+    double stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                          double targetSeconds, double xfadeMs = 1.0);
 
     /** Audio->MIDI transcription via Basic Pitch (POST /transcribe). SYNCHRONOUS —
         call on a BACKGROUND thread (model load + inference is ~1-3s). Returns

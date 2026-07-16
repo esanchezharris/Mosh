@@ -253,6 +253,11 @@ juce::var GenerativeJobManager::listTransformTargets()
     return httpGet ("/transform_targets");
 }
 
+juce::var GenerativeJobManager::listLoras()
+{
+    return httpGet ("/loras");
+}
+
 juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)
@@ -277,6 +282,25 @@ void GenerativeJobManager::cancelJob (const juce::String& jobId)
     auto* body = new DynamicObject();
     body->setProperty ("jobId", jobId);
     httpPost ("/cancel", var (body));
+}
+
+double GenerativeJobManager::stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                                            double targetSeconds, double xfadeMs)
+{
+    if (windowPaths.isEmpty() || ! ensureServiceRunning())
+        return 0.0;
+
+    Array<var> wins;
+    for (const auto& w : windowPaths) wins.add (w);
+    auto* body = new DynamicObject();
+    body->setProperty ("windows", wins);
+    body->setProperty ("outPath", outWav.getFullPathName());
+    body->setProperty ("targetSeconds", targetSeconds);
+    body->setProperty ("xfadeMs", xfadeMs);
+
+    auto r = httpPost ("/stitch_windows", var (body));
+    if (! (bool) r.getProperty ("ok", false)) return 0.0;
+    return (double) r.getProperty ("durationSeconds", 0.0);
 }
 
 juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const juce::String& mode)

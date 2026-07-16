@@ -191,7 +191,7 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
@@ -510,6 +510,10 @@ const COLORS = [
   { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
   { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
   { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
+];
+const LORAS = [
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental" },
 ];
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
@@ -1346,6 +1350,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
     case "list_colors": return ok(command, { colors: COLORS });
+    case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
+    case "list_rave_models":   // Lane B — RAVE model browser fixture
+      return ok(command, { models: [
+        { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
+        { name: "sax", sizeMB: 116 }, { name: "vocals", sizeMB: 156 },
+      ], available: true });
     case "list_transform_targets":
       return ok(command, { targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"], freeText: true });
     case "create_render_layer": {
@@ -1353,7 +1363,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.hasRenderLayer = true;
       const mode = str(args.mode, "reimagine");
-      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [],
+      f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [], loras: [],
         ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
@@ -1361,6 +1371,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
       const rl = f.clip.renderLayer;
       if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
+      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []).slice(0, 2);
+      if ("prompt" in args) rl.prompt = str(args.prompt, rl.prompt ?? "");
       if ("nl" in args) rl.nl = num(args.nl, rl.nl);
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);
       if ("target" in args) rl.target = str(args.target, rl.target ?? "");
@@ -1408,6 +1420,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       f.clip.renderLayer.userKept = true;
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
       invalidate(); return ok(command);
+    }
+    case "render_ahead_arm": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.type !== "wave") return err(command, "live render-ahead is wave-clip only (v1)");
+      const armed = args.armed === undefined ? true : Boolean(args.armed);
+      f.clip.renderLayer.liveArmed = armed;
+      if (armed) { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; f.clip.renderLayer.status = "ready"; }
+      invalidate(); return ok(command, { armed });
     }
     case "reject_render": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = "dirty"; f.clip.renderLayer.userKept = false; invalidate(); } return ok(command); }
     case "bypass_layer": { const f = findClip(str(args.clipId)); if (f?.clip.renderLayer) { f.clip.renderLayer.status = Boolean(args.bypassed) ? "bypassed" : "ready"; invalidate(); } return ok(command); }
