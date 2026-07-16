@@ -88,6 +88,9 @@ $envFile = Join-Path $ScriptDir ".sa3.cuda.ps1"
 `$env:MOSH_SERVICE_PYTHON = "$Python"
 `$env:MOSH_SA3_MODEL_DIR  = "$ModelDir"
 `$env:COLORRACK_DATA      = "$ColorRack"
+# Pins BOTH the native render-ahead window (ra.winLen) and the CUDA adapter's
+# per-window render length — they must agree or stitched coverage breaks.
+`$env:SA3_SECONDS         = "8.0"
 "@ | Set-Content -Encoding UTF8 $envFile
 Say "wrote $envFile"
 
