@@ -24,10 +24,12 @@ DISK="${VAST_DISK:-75}"
 # verified + rentable + a direct SSH port + enough disk/net; cheapest by $/hr.
 QUERY="${VAST_QUERY:-gpu_name=RTX_4090 num_gpus=1 verified=true rentable=true cuda_vers>=12.4 disk_space>=${DISK} direct_port_count>=1 inet_down>=200}"
 
-pick_offer() {   # -> "OFFER_ID DPH" (cheapest available)
+pick_offer() {   # -> "OFFER_ID DPH" (cheapest available; VAST_EXCLUDE skips flaky offer/machine ids)
   vastai search offers "$QUERY" -o 'dph' --raw 2>/dev/null | python3 -c '
-import json,sys
-offers=json.load(sys.stdin)
+import json,os,sys
+ex=set(os.environ.get("VAST_EXCLUDE","").split())
+offers=[o for o in json.load(sys.stdin)
+        if str(o.get("id")) not in ex and str(o.get("machine_id")) not in ex]
 if not offers: print("NONE 0"); sys.exit(0)
 o=offers[0]
 print(o["id"], round(float(o.get("dph_total",0)),3))'
