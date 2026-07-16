@@ -95,7 +95,7 @@ What changed before this round:
 Pack-001 fixes (PR #205): Audiobox axes protocol repair, melodic-variety floor,
 open-hat rule, kick↔808 sub-tail pairing, clip-guard/mix-audibility fixes, per-sample
 pack cap. Two reprises shipped — measured bit-identical (lesson: delta-gate every A/B).
-8/12 kept.
+9/12 kept.
 - `01_aggressive_152_Csminor.wav` keep
 - `02_dark_140_Eminor.wav` keep
 - `03_dark_140_Fminor.wav` kill
@@ -184,4 +184,35 @@ exemplars (multi-tag), 808-always-in-key under disrespectful, this journal.
 - `12_dark_140_Csminor.wav` keep
 - `13_aggressive_152_Csminor.wav` keep
 - `14_chill_132_Csminor.wav` kill
+
+## Taste Pack 006
+
+- **8/14 kept (57%)**
+
+What changed before this round:
+
+Era-1 begins (the Long Pass): the generation pipeline is PHYSICALLY FROZEN for
+packs 006–009 (git worktree + pinned priors/strikes/ranker) so labels finally
+accumulate on one stable distribution. Rode in with the era-0 dictated fixes:
+musical section endings (kick-only final-bar thin + divisor tiling — the
+"drums trail off" fix), the melody wrong-note fix (parallel-major carve-out +
+two-strike source exclusion), the taste-corpus drop folders (~/mosh-taste),
+listening-room v2 (idea/mix split verdict + star chips), ranker v2 (corpus
+similarity features, prequential reporting), and ratings-triggered next-pack
+builds. Rating drill unchanged: KEEP/KILL + chips + ONE top pick — plus
+idea/mix taps when they diverge.
+- `01_aggressive_152_Gminor.wav` keep
+- `02_aggressive_152_Aminor.wav` kill
+- `03_emotional_148_Dminor.wav` keep
+- `04_dark_140_Fminor.wav` kill
+- `05_dark_140_Dminor.wav` keep — ★ TOP PICK · “sounds like the producer BNYX”
+- `06_aggressive_152_Aminor.wav` keep
+- `07_dark_140_Aminor.wav` kill
+- `08_chill_132_Aminor.wav` kill
+- `09_chill_132_Csminor.wav` kill
+- `10_aggressive_152_Fminor.wav` keep
+- `11_chill_132_Csminor.wav` keep
+- `12_dark_140_Gminor.wav` kill
+- `13_emotional_148_Eminor.wav` keep — “needs a better backbeat clap/snare”
+- `14_aggressive_152_Csminor.wav` keep
 
