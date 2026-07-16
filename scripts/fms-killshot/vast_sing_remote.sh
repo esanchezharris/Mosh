@@ -43,7 +43,7 @@ for m in json.load(sys.stdin):
         print(m["ssh_host"], m["ssh_port"]); break' "$id"
 }
 
-destroy() { [[ -f "$STATE" ]] && { id=$(cat "$STATE"); echo "== destroying vast instance $id"; vastai destroy instance "$id" >/dev/null 2>&1 || true; rm -f "$STATE"; }; }
+destroy() { [[ -f "$STATE" ]] && { id=$(cat "$STATE"); echo "== destroying vast instance $id"; vastai destroy instance "$id" -y >/dev/null 2>&1 || true; rm -f "$STATE"; }; }
 
 case "${1:-up}" in
   search)  read -r OID DPH <<< "$(pick_offer)"; echo "cheapest available 4090: offer $OID at \$$DPH/hr"; exit 0 ;;
@@ -84,7 +84,7 @@ rsync -az -e "ssh -p $PORT -i $KEY" "$HANDOFF/scores" "$HANDOFF/refs" "root@$IP:
 rsync -az -e "ssh -p $PORT -i $KEY" "$RUNNER" "root@$IP:ksa/remote_sing_fresh.sh"
 
 echo "== launch (detached — survives SSH drops; ~25-40 min first run)"
-"${SSH[@]}" "rm -f ksa/DONE ksa/FAILED; cd ~ && nohup bash ksa/remote_sing_fresh.sh > ksa/run.log 2>&1 & echo launched"
+"${SSH[@]}" "rm -f ksa/DONE ksa/FAILED; cd ~ && setsid -f bash ksa/remote_sing_fresh.sh </dev/null > ksa/run.log 2>&1; echo launched"
 
 STATUS="timeout"
 for i in $(seq 1 100); do
