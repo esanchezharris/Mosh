@@ -210,9 +210,12 @@ if (MOSH_BUILD_APP)
         target_link_libraries(Mosh PRIVATE mosh_neural_backends)
         if (MSVC)
             # anira/anira.h pulls the full torch header surface into RaveEngine.cpp —
-            # a >65k-COFF-sections TU on MSVC without /bigobj.
+            # a >65k-COFF-sections TU on MSVC without /bigobj. /GL- opts this TU out
+            # of whole-program codegen: LTCG over the torch headers OOMs link.exe
+            # (LNK1257) and took the whole box down once; the rest of the app keeps
+            # LTO. Mixing a /GL- TU into an /LTCG link is supported.
             set_source_files_properties(src/plugins/transform/RaveEngine.cpp
-                PROPERTIES COMPILE_OPTIONS "/bigobj")
+                PROPERTIES COMPILE_OPTIONS "/bigobj;/GL-")
         endif()
         if (WIN32 AND DEFINED ANIRA_SHARED_LIBS_WIN)
             # Stage anira.dll + every LibTorch DLL next to Mosh.exe (the Windows
