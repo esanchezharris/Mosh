@@ -51,8 +51,14 @@ from typing import Any
 _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
-WORK_ROOT = Path(os.environ.get("MOSH_TRAINER_WORK", os.path.join(
-    os.environ.get("TMPDIR", "/tmp"), "mosh-runpod-train")))
+if os.name == "nt":
+    # Windows has no /tmp; %TMP%/%TEMP% via tempfile (FIT-013 local-4070 lane).
+    import tempfile
+    _tmp_default = tempfile.gettempdir()
+else:
+    _tmp_default = os.environ.get("TMPDIR", "/tmp")
+WORK_ROOT = Path(os.environ.get("MOSH_TRAINER_WORK",
+                                os.path.join(_tmp_default, "mosh-runpod-train")))
 # The proven SA3 code tree (holds scripts/pre_encode_dataset.py + scripts/train_lora.py).
 SA3_TRAIN_DIR = os.environ.get("SA3_TRAIN_DIR", "/workspace/stable-audio-3")
 
