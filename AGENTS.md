@@ -22,6 +22,19 @@ backward-compatible) and behind the same MoshOps seam.
 (`docs/archive/hardening/2026-06-12-pause-alignment.md`) is **archived/historical** —
 useful for old branch boundaries and parked work, not current status.
 
+## First-Stranger Program (active — the current work)
+The 6-week push to the first non-owner playtest. Entry point:
+`docs/first-stranger-program/README.md` + `SPEC.md` (decision-complete; §1–§2 are settled —
+do not re-open). Lanes (T/K/S/B/ST) live in `docs/first-stranger-program/backlog.jsonl`; each
+has a gate-registered plan in `docs/first-stranger-program/lanes/FS-*.md`; the live board is
+`docs/first-stranger-program/STATUS.md`.
+
+**Picking up a lane? Read `docs/first-stranger-program/CODEX_HANDOFF.md`.** In one line: choose a
+`ready` lane, read its `lanes/FS-*.md` plan, implement it in **its own git worktree** obeying
+SPEC §0, run `scripts/auto-loop/gate.sh native <worktree> origin/main`, open a PR — **never merge.**
+The owner merges; most lanes touch engine/auth/packaging/relay/state and are owner-gated by design.
+(`scripts/first-stranger/codex-lane.sh <FS-ID>` prints a ready-to-paste prompt for exactly this.)
+
 ## Verify before any merge
 ```sh
 cmake --build build
