@@ -175,7 +175,17 @@ public:
             && juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_FEED", "0") == "1")
         {
             const auto labToken = juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_TOKEN", "mosh-lab");
-            remoteServer->startLabFeed (labToken);
+            // Log the outcome either way: a silently-discarded bind failure here is
+            // indistinguishable from "MOSH_LAB_FEED never reached the process" (e.g. an
+            // `open` launch drops env vars), which has already cost a live-verification
+            // session a misdiagnosis (PR #267).
+            const auto labResult = remoteServer->startLabFeed (labToken);
+            if (labResult.getProperty ("ok", false))
+                std::cerr << "MOSH_LAB_FEED: companion server listening on port "
+                          << (int) labResult.getProperty ("data", {}).getProperty ("port", 0) << std::endl;
+            else
+                std::cerr << "MOSH_LAB_FEED: companion server FAILED to start: "
+                          << labResult.getProperty ("error", {}).toString().toStdString() << std::endl;
         }
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.

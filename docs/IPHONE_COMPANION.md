@@ -36,6 +36,12 @@ getting the recording session off the MacBook keyboard entirely:
 Pairing is unchanged: start pairing from the Mac topbar `iPhone` control and
 scan the Safari QR.
 
+> **First real-server verification + the 47873 bind-failure root cause (2026-07-16):**
+> [`docs/2026-07-16-dawn-pad-verification.md`](2026-07-16-dawn-pad-verification.md). The
+> pad drives the **Mac's own** recording via `arm_track` / `set_transport record` /
+> `keep_take` / `mark_take` / `undo` — distinct from the phone-mic `/take/*` import flow
+> documented below.
+
 ## Mac Remote Server
 
 - The `RemoteCompanionServer` is off by default.

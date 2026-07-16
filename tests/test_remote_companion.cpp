@@ -242,6 +242,41 @@ TEST_CASE ("web companion page is served without exposing a server-side token", 
     REQUIRE_FALSE (html.contains ("pair-token"));
 }
 
+TEST_CASE ("companion bind failure surfaces a diagnostic port + errno detail", "[remote][server][bind]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("mosh-remote-bind-test");
+    root.deleteRecursively();
+
+    // First server binds the port; a second server on the SAME port must fail with a
+    // message that names the port (and, on a real errno, the "Address already in use"
+    // cause) rather than a bare "could not start" — the observability fix for the
+    // PR #267 misdiagnosis, where a silent generic failure looked like a code bug.
+    RemoteCompanionServer first (root);
+    auto* firstArgs = new juce::DynamicObject();
+    firstArgs->setProperty ("port", 47879);
+    auto firstResult = first.startPairing (juce::var (firstArgs));
+    REQUIRE ((bool) firstResult.getProperty ("ok", false));
+
+    RemoteCompanionServer second (root.getSiblingFile ("mosh-remote-bind-test-2"));
+    auto* secondArgs = new juce::DynamicObject();
+    secondArgs->setProperty ("port", 47879);
+    auto secondResult = second.startPairing (juce::var (secondArgs));
+    REQUIRE_FALSE ((bool) secondResult.getProperty ("ok", true));
+    const auto error = secondResult.getProperty ("error", {}).toString();
+    INFO ("bind error: " << error);
+    REQUIRE (error.contains ("47879"));
+    // The self-probe re-binds the same port and surfaces the ACCURATE cause (JUCE's
+    // createListener has already clobbered errno by this point). "in use" is EADDRINUSE's
+    // strerror text on macOS/Linux ("Address already in use").
+    REQUIRE (error.containsIgnoreCase ("in use"));
+
+    first.stopServer();
+    second.stopServer();
+}
+
 TEST_CASE ("monitoring endpoints require auth and persist reports", "[remote][monitor]")
 {
     juce::ScopedJuceInitialiser_GUI juce;

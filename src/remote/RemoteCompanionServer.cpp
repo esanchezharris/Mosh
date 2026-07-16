@@ -1,9 +1,17 @@
 #include "RemoteCompanionServer.h"
 
+#include <cerrno>
+#include <cstring>
 #include <memory>
 
-#if JUCE_MAC
+#if ! JUCE_WINDOWS
  #include <arpa/inet.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
+#endif
+
+#if JUCE_MAC
  #include <dlfcn.h>
 #endif
 
@@ -43,6 +51,35 @@ namespace
         auto p = v.getProperty (id, juce::var());
         return p.isVoid() ? fallback : (double) p;
     }
+
+    // Bind diagnostic. JUCE's createListener returns a bare bool and, on failure, runs a
+    // cleanup shutdown()/close() that overwrites errno (ENOTCONN) before it returns — so the
+    // real cause (e.g. EADDRINUSE) can't be read back here. Instead we probe the port
+    // ourselves BEFORE handing it to JUCE: a raw bind that fails tells us accurately whether
+    // something already holds the port. Names the port either way (the observability fix for
+    // the PR #267 misdiagnosis, where a bare "could not start" hid whether the port was even
+    // the problem). Returns e.g. " (port 47873 already in use)".
+    juce::String probeBindFailure (int requestedPort)
+    {
+        juce::String detail = juce::String (" (port ") + juce::String (requestedPort);
+       #if ! JUCE_WINDOWS
+        const int probe = ::socket (AF_INET, SOCK_STREAM, 0);
+        if (probe >= 0)
+        {
+            int reuse = 1;
+            ::setsockopt (probe, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof (reuse));
+            sockaddr_in addr {};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl (INADDR_ANY);
+            addr.sin_port = htons ((uint16_t) requestedPort);
+            errno = 0;
+            if (::bind (probe, reinterpret_cast<sockaddr*> (&addr), sizeof (addr)) != 0 && errno != 0)
+                detail += juce::String (": ") + juce::String (strerror (errno));
+            ::close (probe);
+        }
+       #endif
+        return detail + ")";
+    }
 }
 
 RemoteCompanionServer::RemoteCompanionServer (juce::File takeRoot)
@@ -70,7 +107,7 @@ juce::var RemoteCompanionServer::startPairing (const juce::var& args)
         if (! listener->createListener (requestedPort, {}))
         {
             listener.reset();
-            return err ("could not start remote companion server");
+            return err ("could not start remote companion server" + probeBindFailure (requestedPort));
         }
 
         port = listener->getBoundPort();
@@ -97,7 +134,7 @@ juce::var RemoteCompanionServer::startLabFeed (const juce::String& token)
         if (! listener->createListener (requestedPort, {}))
         {
             listener.reset();
-            return err ("could not start lab feed server");
+            return err ("could not start lab feed server" + probeBindFailure (requestedPort));
         }
 
         port = listener->getBoundPort();
