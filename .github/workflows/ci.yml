@@ -60,7 +60,7 @@ jobs:
         run: jq --version >/dev/null 2>&1 || brew install jq
 
       - name: Install Python test deps
-        run: python3 -m pip install --upgrade pip numpy "pydantic>=2,<3" pytest soundfile
+        run: python3 -m pip install --upgrade pip numpy "pydantic>=2,<3" pytest soundfile typer rich safetensors
 
       - name: Install UI deps
         working-directory: ui
