@@ -3,14 +3,20 @@
 > **This is the "why" (scope) doc.** For the **"how" (implementation)**, read
 > [FINISH_MY_SONG_LYRICS_BUILD_SPEC.md](FINISH_MY_SONG_LYRICS_BUILD_SPEC.md) — it supersedes this on
 > implementation detail. The full mumble→own-voice arc is in
-> [FINISH_MY_SONG_ROADMAP.md](FINISH_MY_SONG_ROADMAP.md). **Status (2026-06-28): v1 shipped on `main`**
-> (L0–L3 + L1 + §7 + Bar-IQ via #174/#178); Phase 2 (mumble→skeleton) is the active build.
+> [FINISH_MY_SONG_ROADMAP.md](FINISH_MY_SONG_ROADMAP.md).
+>
+> **Status (2026-07-16): v1 SHIPPED and the arc has moved past it.** v1 (L0–L3 + L1 + §7 +
+> Bar-IQ) landed on `main` 2026-06-27/28 via #174/#178; Phase 2 (mumble→skeleton) landed
+> 2026-06-28 (#180); Phase 3 Stages 1–2 (skeleton promotion + the SoulX sing adapter) landed
+> 2026-07-04. The banner below preserves this spec's ORIGINAL proposal framing — read it as
+> history, not as an open proposal.
 
-> **Status: Proposed.** Scope locked to **lyrics only** (the writing). Voice synthesis,
-> arrangement "spice" (tape-stop / pitched-down intros, section fills), and full master are
-> **explicitly out of v1** and parked below. This spec is architecture-native to Mosh: the engine
-> runs as a Tier-B service job, every mutation crosses the MoshOps seam, the UI is a pure client.
-> Suggested home: `docs/` (peer to the `plans/wave-*` specs) — assign a number when you place it.
+> **Original status (2026-06-27): Proposed.** Scope locked to **lyrics only** (the writing).
+> Voice synthesis, arrangement "spice" (tape-stop / pitched-down intros, section fills), and full
+> master were **explicitly out of v1** and parked below (own-voice singing has since shipped
+> separately as the Phase-3 sing adapter — see the roadmap). This spec is architecture-native to
+> Mosh: the engine runs as a Tier-B service job, every mutation crosses the MoshOps seam, the UI
+> is a pure client.
 
 ---
 
