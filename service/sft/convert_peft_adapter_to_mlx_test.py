@@ -180,3 +180,9 @@ def test_directory_conversion_is_deterministic_and_self_auditing(tmp_path: Path)
     assert manifest["adapter"]["scale"] == 2.0
     assert manifest["outputs"]["adapters.safetensors"]["sha256"]
     assert manifest["outputs"]["adapter_config.json"]["sha256"]
+
+
+if __name__ == "__main__":
+    # gate.sh run_py_tests executes test files directly with python3 — without
+    # this block a pytest-style file would exit 0 having run nothing.
+    raise SystemExit(pytest.main([__file__, "-q"]))
