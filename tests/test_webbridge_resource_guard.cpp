@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "webview/UiResourcePathGuard.h"
-#include <unistd.h>
+#ifndef _WIN32
+ #include <unistd.h>   // ::symlink for the escape fixture (POSIX-only)
+#endif
 
 TEST_CASE ("WebBridge resource paths allow bundle-local assets", "[webbridge]")
 {
@@ -29,7 +31,11 @@ TEST_CASE ("WebBridge resource paths reject traversal and absolute escapes", "[w
     outside.createDirectory();
     outside.getChildFile ("secret.txt").replaceWithText ("no");
     root.getChildFile ("index.html").replaceWithText ("ok");
+#ifndef _WIN32
+    // symlink-escape fixture: POSIX-only (CreateSymbolicLink needs admin/dev-mode
+    // on Windows); every other rejection below still runs there.
     ::symlink (outside.getFullPathName().toRawUTF8(), root.getChildFile ("escape").getFullPathName().toRawUTF8());
+#endif
 
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "/../outside/secret.txt"));
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "/%2e%2e/outside/secret.txt"));
@@ -37,7 +43,9 @@ TEST_CASE ("WebBridge resource paths reject traversal and absolute escapes", "[w
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "//etc/passwd"));
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "C:/Windows/win.ini"));
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "/assets\\secret.txt"));
+#ifndef _WIN32
     REQUIRE_FALSE (mosh::ui_resource_guard::isSafePath (root, "/escape/secret.txt"));
+#endif
 
     parent.deleteRecursively();
 }
