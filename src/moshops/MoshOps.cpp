@@ -6911,6 +6911,32 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
 
     node.setProperty (ids::renderError, "", nullptr);   // clear on success
 
+    // Boundary-quantized swap: a render that finishes while the producer is LISTENING to
+    // the target clip must not swap mid-phrase — hold it until the next musical boundary
+    // (the loop wrap when looping, else the next bar), then land. Stopped transport /
+    // headless / sing (which never auto-applies) land immediately as before.
+    double boundarySec = 0.0, armedPosSec = 0.0;
+    if (node[ids::mode].toString() != "sing"
+        && shouldDeferSwap (clipId, boundarySec, armedPosSec))
+    {
+        pendingSwaps[clipId] = { outputWav, manifestFile, cacheKey, expectedEpoch,
+                                 boundarySec, armedPosSec };
+        if (swapTimer == nullptr)
+            swapTimer = std::make_unique<SwapTimer> (*this);
+        if (! swapTimer->isTimerRunning())
+            swapTimer->startTimerHz (30);   // the same decimation rate as the transport rail
+        return;   // status stays "rendering"; pollPendingSwaps() lands it at the boundary
+    }
+
+    applyFinalizedRender (clipId, outputWav, manifestFile, cacheKey);
+}
+
+void MoshOps::applyFinalizedRender (const juce::String& clipId, const juce::File& outputWav,
+                                    const juce::File& manifestFile, const juce::String& cacheKey)
+{
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+
     // Auto-apply the render (the new default): WAVE clips swap their own source in place; MIDI/drum
     // clips land a HIDDEN looping audio clip beneath the now-muted MIDI (Phase 2). Either way it's an
     // instant preview with no accept step. A sub-region render (or a clip with no track) falls through
@@ -6933,6 +6959,87 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+bool MoshOps::shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec)
+{
+    // Only meaningful when audio is actually audible: headless (selftest/run-script)
+    // never defers, so the harness stays deterministic by construction.
+    if (! eng.hasAudio())
+        return false;
+    if (juce::SystemStats::getEnvironmentVariable ("MOSH_SWAP_QUANTIZE", "1") == "0")
+        return false;   // escape hatch: land renders the instant they finish
+
+    auto& transport = eng.edit().getTransport();
+    if (! transport.isPlaying())
+        return false;
+
+    auto* clip = findClip (clipId);
+    if (clip == nullptr)
+        return false;
+    const auto cpos = clip->getPosition();
+    const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    posSec = transport.getPosition().inSeconds();
+    if (posSec < cs - 1.0e-3 || posSec >= ce - 1.0e-3)
+        return false;   // the playhead isn't in this clip — nothing audible interrupts
+
+    // Loop wrap when the transport loop is on and surrounds the playhead — "the change
+    // arrives when the loop comes around".
+    if (transport.looping.get())
+    {
+        const auto lr = transport.getLoopRange();
+        const double ls = lr.getStart().inSeconds(), le = lr.getEnd().inSeconds();
+        if (le > ls && posSec >= ls && posSec < le)
+        {
+            boundarySec = le;
+            return true;
+        }
+    }
+
+    // Otherwise the next BAR boundary from the tempo sequence.
+    const auto bb = eng.edit().tempoSequence.toBarsAndBeats (
+        tracktion::TimePosition::fromSeconds (posSec));
+    tracktion::tempo::BarsAndBeats next;
+    next.bars = bb.bars + 1;
+    boundarySec = eng.edit().tempoSequence.toTime (next).inSeconds();
+    return boundarySec > posSec + 1.0e-3;
+}
+
+void MoshOps::pollPendingSwaps()
+{
+    if (pendingSwaps.empty())
+    {
+        if (swapTimer != nullptr)
+            swapTimer->stopTimer();
+        return;
+    }
+    auto& transport = eng.edit().getTransport();
+    const bool playing = transport.isPlaying();
+    const double pos = transport.getPosition().inSeconds();
+
+    for (auto it = pendingSwaps.begin(); it != pendingSwaps.end();)
+    {
+        auto& ps = it->second;
+        const bool wrapped = pos < ps.armedPosSec - 0.05;         // loop wrap or seek-back
+        const bool reached = pos >= ps.boundarySec - 1.0e-3;
+        if (! playing || wrapped || reached)
+        {
+            // Same staleness rule as finalizeRender: a reactive render superseded while
+            // waiting at the boundary must not land.
+            auto node = findRenderLayer (it->first);
+            if (node.isValid()
+                && ! (ps.expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != ps.expectedEpoch))
+                applyFinalizedRender (it->first, ps.outputWav, ps.manifestFile, ps.cacheKey);
+            it = pendingSwaps.erase (it);
+        }
+        else
+        {
+            ps.armedPosSec = pos;   // track motion so a wrap reads as pos going backwards
+            ++it;
+        }
+    }
+    if (pendingSwaps.empty() && swapTimer != nullptr)
+        swapTimer->stopTimer();
 }
 
 bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
