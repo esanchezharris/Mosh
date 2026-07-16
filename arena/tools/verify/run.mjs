@@ -563,7 +563,7 @@ async function sequencerSuite(page, cand) {
   check(cand, "chrome-off: content runs edge-to-edge", restChrome.edLeft <= 2, `edLeft ${restChrome.edLeft}`);
   check(cand, "chrome-off: names stay hidden until hover (even when expanded)", restChrome.focusedNameOp < 0.1 && restChrome.compactNameOp < 0.1, `focused ${restChrome.focusedNameOp} · compact ${restChrome.compactNameOp}`);
   const hv = await rect('.lane[data-i="2"]');
-  await page.mouse.move(hv.x + hv.w * 0.5, hv.y + hv.h * 0.5); await page.waitForTimeout(280);
+  await page.mouse.move(hv.x + hv.w * 0.5, hv.y + hv.h * 0.5); await page.waitForTimeout(450);   // clear the 200ms reveal transition with margin
   const hover = await page.evaluate(() => { const l = document.querySelector('.lane[data-i="2"]'); return { nm: +getComputedStyle(l.querySelector(".nm")).opacity, ctl: +getComputedStyle(l.querySelector(".lctl")).opacity }; });
   check(cand, "chrome-off: hover reveals name + controls", hover.nm > 0.9 && hover.ctl > 0.9, JSON.stringify(hover));
   await page.mouse.move(6, 6); await page.waitForTimeout(120);   // move away → back to at-rest for later steps
@@ -648,6 +648,24 @@ async function sequencerSuite(page, cand) {
   const talk = await page.evaluate(() => ({ cls: document.querySelector("#sq-compwrap").classList.contains("talk"), txt: document.querySelector("#sq-pht").textContent }));
   await page.mouse.up();
   check(cand, "hold Moshi = talk (listening)", talk.cls && /listening/.test(talk.txt), talk.txt);
+
+  // R19: drag a lane by its grip to REORDER tracks
+  const gpos = await page.evaluate(() => { const l = document.querySelector('.lane[data-i="0"]'); const gr = l.querySelector(".grip"); const b = gr.getBoundingClientRect(), lb = l.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, laneH: lb.height }; });
+  const order0 = await page.evaluate(() => window.__seq.order.slice());
+  await page.mouse.move(gpos.x, gpos.y); await page.waitForTimeout(160);   // hover reveals + enables the grip
+  await page.mouse.down();
+  await page.mouse.move(gpos.x, gpos.y + gpos.laneH * 1.4, { steps: 10 }); await page.waitForTimeout(60);
+  await page.mouse.up(); await page.waitForTimeout(160);
+  const order1 = await page.evaluate(() => window.__seq.order.slice());
+  check(cand, "drag a lane's grip reorders the tracks", JSON.stringify(order0) !== JSON.stringify(order1) && order1[0] !== order0[0] && order1.length === 4, `${order0.join("·")} → ${order1.join("·")}`);
+
+  // R19: transport play/pause (drives the background slow-mo)
+  const p0 = await page.evaluate(() => window.__seq.playing);
+  await page.click("#sq-stop"); await page.waitForTimeout(80);
+  const p1 = await page.evaluate(() => window.__seq.playing);
+  await page.click("#sq-play"); await page.waitForTimeout(80);
+  const p2 = await page.evaluate(() => window.__seq.playing);
+  check(cand, "transport play/pause toggles (drives the bg slow-mo)", p0 === true && p1 === false && p2 === true, `${p0}→${p1}→${p2}`);
 }
 
 async function sequencerCloseups(page, cand) {

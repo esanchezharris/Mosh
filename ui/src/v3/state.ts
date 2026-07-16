@@ -13,7 +13,6 @@ export type RightDock = "mixer" | "inspect" | null;
 interface OpenLanesState {
   focusIdx: number;          // which lane is expanded in single-focus (accordion) mode
   zoom: ZoomBars;            // the visible bar-window (8 / 16 / full)
-  viewStartSec: number;      // left edge of the horizontal lane window (UI-local seconds)
   fadersEngaged: boolean;    // Shift-hold (or locked) → every lane shows a volume fader
   fadersLocked: boolean;     // settings toggle: make fader mode sticky
   leftDock: LeftDock;        // open left panel (SAMPLES / FILES) or none
@@ -21,7 +20,6 @@ interface OpenLanesState {
 
   setFocusIdx: (i: number) => void;
   setZoom: (z: ZoomBars) => void;
-  setViewStartSec: (seconds: number) => void;
   setFadersEngaged: (b: boolean) => void;
   toggleFadersLocked: () => void;
   setLeftDock: (d: LeftDock) => void;
@@ -31,7 +29,6 @@ interface OpenLanesState {
 export const useOpenLanes = create<OpenLanesState>((set) => ({
   focusIdx: 0,
   zoom: 16,
-  viewStartSec: 0,
   fadersEngaged: false,
   fadersLocked: false,
   leftDock: null,
@@ -39,7 +36,6 @@ export const useOpenLanes = create<OpenLanesState>((set) => ({
 
   setFocusIdx: (i) => set({ focusIdx: i }),
   setZoom: (z) => set({ zoom: z }),
-  setViewStartSec: (seconds) => set({ viewStartSec: Number.isFinite(seconds) ? Math.max(0, seconds) : 0 }),
   setFadersEngaged: (b) => set({ fadersEngaged: b }),
   toggleFadersLocked: () => set((s) => ({ fadersLocked: !s.fadersLocked, fadersEngaged: !s.fadersLocked })),
   setLeftDock: (d) => set((s) => ({ leftDock: s.leftDock === d ? null : d })),
