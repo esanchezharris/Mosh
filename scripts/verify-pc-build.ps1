@@ -7,6 +7,7 @@
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealLoRA       # runtime-LoRA smoke on the GPU (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealRave       # anira build + live-RAVE insert smoke (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealTrainer    # local trainer /health, real backend (FIT-013)
+#   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -PyGoldens      # service py goldens under PYTHONUTF8=1
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -Repeat 3       # determinism bar (3 isolated runs)
 #
 # Steps: configure (windows-x64-release) -> build app + tests + VST3 fixture ->
@@ -25,6 +26,7 @@ param(
     [switch]$RealLoRA,
     [switch]$RealRave,
     [switch]$RealTrainer,
+    [switch]$PyGoldens,
     [int]$Repeat = 1
 )
 
@@ -112,6 +114,36 @@ function Invoke-MoshSelfTest {
 
 Push-Location $Root
 try {
+    if ($PyGoldens) {
+        # Service py goldens (the gate.sh run_py_tests analogue; discovery mirrors
+        # its git-ls-files patterns). No build dependency — the cheap lane runs
+        # first so a red golden fails fast. PYTHONUTF8=1 is REQUIRED: the goldens
+        # print arrows/math glyphs in their check lines, and Windows Python
+        # encodes *redirected* stdout with the ANSI codepage (cp1252) — without
+        # it ~20 suites die in UnicodeEncodeError while printing PASS lines
+        # (2026-07-16 PC gate finding).
+        $goldens = @(& git -C $Root ls-files 'service/**/*_test.py' 'service/scripts/*test*.py' | Sort-Object -Unique)
+        if ($goldens.Count -eq 0) { throw "PyGoldens requested but git ls-files found no service goldens" }
+        $savedUtf8 = [Environment]::GetEnvironmentVariable("PYTHONUTF8")
+        $env:PYTHONUTF8 = "1"
+        try {
+            $failedGoldens = @()
+            foreach ($t in $goldens) {
+                Write-Host ""
+                Write-Host "==> py golden $t"
+                & py -3 $t
+                if ($LASTEXITCODE -ne 0) { $failedGoldens += $t }
+            }
+            if ($failedGoldens.Count -gt 0) {
+                throw ("py goldens failed ($($failedGoldens.Count)/$($goldens.Count)): " + ($failedGoldens -join ", "))
+            }
+            Write-Host "py goldens: all $($goldens.Count) suites passed" -ForegroundColor Green
+        } finally {
+            if ($null -eq $savedUtf8) { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue }
+            else { $env:PYTHONUTF8 = $savedUtf8 }
+        }
+    }
+
     $CMake = Find-CMake
 
     Invoke-Native "configure Windows x64 (Release)" { & $CMake --preset windows-x64-release }
