@@ -221,7 +221,8 @@ bool GenerativeJobManager::ensureServiceRunning()
     for (auto* key : { "MOSH_ENABLE_SA3", "SA3_MLX_DIR", "COLORRACK_DATA", "SA3_SECONDS",
                        "SA3_STEPS", "MOSH_SA3_QA", "MOSH_JUDGES_PY", "MOSH_QA_TIMEOUT",
                        "MOSH_SERVICE_HOST", "MOSH_SERVICE_PORT", "MOSH_SERVICE_PYTHON",
-                       "MOSH_RECIPE_LIBRARY", "MOSH_PALETTE_MANIFEST" })
+                       "MOSH_RECIPE_LIBRARY", "MOSH_PALETTE_MANIFEST",
+                       "MOSH_LORA_DIR", "MOSH_ENABLE_LORAS" })
         if (auto v = SystemStats::getEnvironmentVariable (key, {}); v.isNotEmpty())
             env << key << "=" << v.quoted() << " ";
 
@@ -251,6 +252,11 @@ juce::var GenerativeJobManager::listColors()
 juce::var GenerativeJobManager::listTransformTargets()
 {
     return httpGet ("/transform_targets");
+}
+
+juce::var GenerativeJobManager::listLoras()
+{
+    return httpGet ("/loras");
 }
 
 juce::String GenerativeJobManager::submitJob (const juce::String& adapter,

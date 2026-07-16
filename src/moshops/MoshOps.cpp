@@ -937,6 +937,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
+    if (name == "list_loras")        return cmdListLoras (args);
     if (name == "list_transform_targets") return cmdListTransformTargets (args);
    #if MOSH_HAVE_ANIRA
     if (name == "add_rave_insert")   return cmdAddRaveInsert (args);
@@ -5979,7 +5980,8 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
 }
 
 juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                         const juce::String& upstreamOverride)
+                                         const juce::String& upstreamOverride,
+                                         const juce::String& lorasKey)
 {
     // Wave clips hash the staged audio. MIDI/drum clips are auto-bounced, but the bounce
     // isn't bit-deterministic (a synth's free-running phase), so they pass a stable source
@@ -6004,7 +6006,66 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
         juce::String (bpm, 4) + "bpm/" + tonic + " " + keyMode;
 
     return RenderLayer::fingerprint (node, upstreamHash, tempoKeyContext, 44100, 2,
-                                     jobManager.serviceBuild());
+                                     jobManager.serviceBuild(), lorasKey);
+}
+
+// LoRA rack → the fingerprint's lorasKey, resolved at RENDER time (never cached on the
+// node): "name=value@sha12:trigger;" per active row. Content identity (sha12) makes a
+// retrained same-name file a cache MISS; the trigger is in the key because it changes
+// the effective prompt (auto-injection). For the sa3 adapter the registry is consulted
+// via /loras (the service is already up at this point in cmdRenderLayer); other
+// adapters (fake — hermetic selftest) key on name=value only. Returns false + err on
+// an unknown/invalid LoRA name so the render errors BEFORE any job submit.
+bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey, juce::String& err)
+{
+    lorasKey = {};
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto loras = params.getChildWithName (ids::LORAS);
+    if (! loras.isValid() || loras.getNumChildren() == 0)
+        return true;
+
+    juce::Array<juce::ValueTree> active;
+    for (int i = 0; i < loras.getNumChildren(); ++i)
+        if (auto row = loras.getChild (i); (double) row[ids::value] != 0.0)
+            active.add (row);
+    if (active.isEmpty())
+        return true;
+
+    const auto adapter = node[ids::modelAdapter].toString();
+    const bool isSa3 = adapter == "stable_audio3" || adapter == "sa3";
+    if (! isSa3)
+    {
+        for (auto& row : active)
+            lorasKey << row[ids::name].toString() << "=" << row[ids::value].toString() << ";";
+        return true;
+    }
+
+    auto reg = jobManager.listLoras();
+    if (! (bool) reg.getProperty ("ok", false))
+    {
+        err = "LoRA registry unavailable (generative service)";
+        return false;
+    }
+    std::map<juce::String, juce::var> byName;
+    if (auto* arr = reg.getProperty ("loras", var()).getArray())
+        for (auto& r : *arr)
+            byName[r.getProperty ("name", "").toString()] = r;
+
+    for (auto& row : active)
+    {
+        const auto name = row[ids::name].toString();
+        auto it = byName.find (name);
+        if (it == byName.end() || ! (bool) it->second.getProperty ("valid", false))
+        {
+            const auto dir = reg.getProperty ("dir", "~/Library/Mosh/loras").toString();
+            err = "LoRA '" + name + "' not found — drop the .safetensors in " + dir;
+            return false;
+        }
+        lorasKey << name << "=" << row[ids::value].toString()
+                 << "@" << it->second.getProperty ("sha12", "").toString()
+                 << ":" << it->second.getProperty ("trigger", "").toString() << ";";
+    }
+    return true;
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
@@ -6140,6 +6201,25 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
                 col.setProperty (ids::name, c.getProperty ("name", ""), nullptr);
                 col.setProperty (ids::value, c.getProperty ("value", 0), nullptr);
                 colors.appendChild (col, &undoManager());
+            }
+    }
+
+    if (args.hasProperty ("loras"))   // the LoRA rack: ordered, UNBOUNDED (owner call:
+    {                                 // no count cap, no strength clamp — memory is the limit)
+        auto loras = params.getChildWithName (ids::LORAS);
+        if (! loras.isValid())        // layers created before the rack existed
+        {
+            loras = juce::ValueTree (ids::LORAS);
+            params.appendChild (loras, &undoManager());
+        }
+        loras.removeAllChildren (&undoManager());
+        if (auto* arr = args.getProperty ("loras", var()).getArray())
+            for (auto& l : *arr)
+            {
+                juce::ValueTree row (ids::LORA);
+                row.setProperty (ids::name, l.getProperty ("name", ""), nullptr);
+                row.setProperty (ids::value, l.getProperty ("value", 0), nullptr);
+                loras.appendChild (row, &undoManager());
             }
     }
 
@@ -6582,7 +6662,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_layer", "generative service unavailable");
 
-    const auto fp = computeFingerprint (node, input, upstreamOverride);
+    // LoRA rack: resolve name → sha12/trigger via /loras (unknown name errors here,
+    // before any cache probe or job submit).
+    juce::String lorasKey, lorasErr;
+    if (! resolveLorasKey (node, lorasKey, lorasErr))
+        return errResult ("render_layer", lorasErr);
+
+    const auto fp = computeFingerprint (node, input, upstreamOverride, lorasKey);
 
     // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
     // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
@@ -6628,6 +6714,18 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         }
     p->setProperty ("colors", colors);
     p->setProperty ("lab", (bool) params.getProperty (juce::Identifier ("lab"), false));
+    if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid() && ls.getNumChildren() > 0)
+    {
+        Array<var> loras;   // the LoRA rack, in order (the adapter drops value==0 rows)
+        for (int i = 0; i < ls.getNumChildren(); ++i)
+        {
+            auto* lo = new DynamicObject();
+            lo->setProperty ("name", ls.getChild (i)[ids::name]);
+            lo->setProperty ("value", ls.getChild (i)[ids::value]);
+            loras.add (var (lo));
+        }
+        p->setProperty ("loras", loras);
+    }
     if (! singLines.isVoid())
         p->setProperty ("lines", singLines);   // sing: sheet text + lyricScore flow per line
 
@@ -7069,6 +7167,18 @@ juce::var MoshOps::cmdListColors (const juce::var&)
     if (! (bool) r.getProperty ("ok", false))
         return okResult ("list_colors", [] { auto* o = new DynamicObject(); o->setProperty ("colors", Array<var>{}); return var (o); }());
     return okResult ("list_colors", r);
+}
+
+juce::var MoshOps::cmdListLoras (const juce::var&)
+{
+    // The LoRA library (watched folder MOSH_LORA_DIR) for the rack UI. Read-only;
+    // absent/empty/disabled folder is an empty list, not an error.
+    if (! jobManager.ensureServiceRunning())
+        return errResult ("list_loras", "generative service unavailable");
+    auto r = jobManager.listLoras();
+    if (! (bool) r.getProperty ("ok", false))
+        return okResult ("list_loras", [] { auto* o = new DynamicObject(); o->setProperty ("loras", Array<var>{}); return var (o); }());
+    return okResult ("list_loras", r);
 }
 
 juce::var MoshOps::cmdListTransformTargets (const juce::var&)
@@ -8854,6 +8964,16 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                     colors.add (var (co));
                 }
             r->setProperty ("colors", colors);
+            Array<var> loras;   // the LoRA rack (ordered; strength = 0–100 value)
+            if (auto ls = params.getChildWithName (ids::LORAS); ls.isValid())
+                for (int i = 0; i < ls.getNumChildren(); ++i)
+                {
+                    auto* lo = new DynamicObject();
+                    lo->setProperty ("name", ls.getChild (i)[ids::name]);
+                    lo->setProperty ("value", (double) ls.getChild (i)[ids::value]);
+                    loras.add (var (lo));
+                }
+            r->setProperty ("loras", loras);
         }
         // The last compile_render verdict (transient) — lets the UI show what it chose +
         // surface an "unsupported" honest message. Parsed back from the JSON blob.

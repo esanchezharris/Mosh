@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderQA } from "../types";
+import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
@@ -164,9 +164,10 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const loadColors = useStore((s) => s.loadColors);
+  const loadLoras = useStore((s) => s.loadLoras);
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
   const qaByClip = useStore((s) => s.qaByClip);
-  useEffect(() => { loadColors(); loadTransformTargets(); }, [loadColors, loadTransformTargets]);
+  useEffect(() => { loadColors(); loadLoras(); loadTransformTargets(); }, [loadColors, loadLoras, loadTransformTargets]);
 
   // Generative runs on ANY clip type — a MIDI/drum clip is auto-bounced to audio by the
   // backend before the model. Target the SELECTED clip when it's on this track, else the
@@ -255,6 +256,52 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
   );
 }
 
+// The LoRA rack — stacked taste adapters with strength faders. Progressive disclosure:
+// an empty library is ONE quiet hint; triggers auto-inject server-side (tooltip only);
+// no count cap, no strength budget (owner call — memory is the limit). A subtle Σ
+// readout is informational, never blocking. Order matters (chained composition), so
+// rows keep rack order.
+function LoraRack({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const library = useStore((s) => s.availableLoras);
+  const rl = clip.renderLayer!;
+  const active: RenderLora[] = rl.loras ?? [];
+  const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next });
+  const addable = library.filter((l) => l.valid && !active.some((a) => a.name === l.name));
+  if (library.length === 0 && active.length === 0) return null;   // no library, nothing racked → invisible
+  const sum = active.reduce((s, a) => s + a.value / 100, 0);
+
+  return (
+    <div className="lora-rack" data-testid="lora-rack">
+      {active.map((l) => {
+        const meta = library.find((m) => m.name === l.name);
+        const tip = meta?.trigger
+          ? `trigger “${meta.trigger}” is added to the prompt automatically${meta.notes ? ` — ${meta.notes}` : ""} (0 = removed)`
+          : meta?.notes || "0 = removed";
+        return (
+          <label key={l.name} className="nparam" title={tip}>
+            <span className="nlabel">⧉ {meta?.displayName ?? l.name}</span>
+            <input type="range" min={0} max={100} step={1} value={Math.round(l.value)}
+              aria-label={`${meta?.displayName ?? l.name} LoRA strength`}
+              onChange={(e) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value: Number(e.target.value) } : a)))} />
+            <button className="btn x" onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
+          </label>
+        );
+      })}
+      {addable.length > 0 ? (
+        <select className="btn ghost color-add" data-testid="lora-add" value=""
+          onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: 80 }])}>
+          <option value="">+ LoRA…</option>
+          {addable.map((l) => <option key={l.name} value={l.name}>{l.displayName}</option>)}
+        </select>
+      ) : active.length === 0 ? (
+        <span className="rack-empty tc">drop .safetensors in ~/Library/Mosh/loras</span>
+      ) : null}
+      {active.length > 1 && <span className="tc lora-sum" data-testid="lora-sum">Σ {sum.toFixed(2)}</span>}
+    </div>
+  );
+}
+
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   const exec = useStore((s) => s.exec);
@@ -294,6 +341,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
+      <LoraRack clip={clip} />
       </>)}
       <div className="gen-status" role="status" aria-live="polite">
         <span className={`gen-badge st-${rl.status}`} data-testid="render-status">{rl.status}</span>

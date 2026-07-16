@@ -258,6 +258,7 @@ private:
     juce::var cmdBounceLayerToClip(const juce::var& args);
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);
+    juce::var cmdListLoras        (const juce::var& args);
     juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
    #if MOSH_HAVE_ANIRA
     // Route C.2 — real-time RAVE insert (built only with anira+LibTorch).
@@ -368,7 +369,13 @@ private:
     // Wave clips hash their staged audio; MIDI/drum clips pass a stable source signature
     // (notes + instrument/FX state) since their bounced audio isn't bit-deterministic.
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                        const juce::String& upstreamOverride = {});
+                                        const juce::String& upstreamOverride = {},
+                                        const juce::String& lorasKey = {});
+    // LoRA rack → fingerprint key ("name=value@sha12:trigger;"), resolved at render
+    // time via /loras for the sa3 adapter (name=value only otherwise). false + err on
+    // an unknown LoRA name.
+    bool            resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey,
+                                     juce::String& err);
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                                     const juce::File& manifestFile, const juce::String& cacheKey,
                                     const juce::String& serviceError = {}, int expectedEpoch = -1);

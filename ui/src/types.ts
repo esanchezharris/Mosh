@@ -2,6 +2,9 @@
 // renders this; no Tracktion/audio concepts leak across the seam.
 
 export type RenderColor = { name: string; value: number };
+// One LoRA rack row: value is the 0–100 strength fader (>100 = deliberate overdrive;
+// no cap by design — the rack is unbounded).
+export type RenderLora = { name: string; value: number };
 export type RenderLayer = {
   id: string;
   status: "empty" | "dirty" | "queued" | "rendering" | "ready" | "error" | "bypassed" | "frozen" | "bounced";
@@ -13,6 +16,7 @@ export type RenderLayer = {
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
+  loras?: RenderLora[];  // the LoRA rack (ordered — chained composition is order-dependent)
   target?: string;    // Route B: transform target (instrument or free-text)
   strength?: number;  // Route B: transform strength (0–100)
   // The render's time scope (seconds). A section-scoped render carries a sub-range of
@@ -109,6 +113,20 @@ export type AvailableColor = {
 
 // Route B transform target from GET /transform_targets (via list_transform_targets).
 export type AvailableTransformTarget = { name: string };
+
+// One library adapter from GET /loras (via list_loras) — the watched folder
+// ~/Library/Mosh/loras. The trigger auto-injects into the prompt server-side
+// (surfaced here only for the tooltip — the user never types it).
+export type AvailableLora = {
+  name: string;
+  displayName: string;
+  trigger: string;
+  notes: string;
+  rank: number;
+  sha12: string;
+  valid: boolean;
+  reason?: string;
+};
 
 // Quality readout from a completed render's manifest (judge panel, 05 §7).
 // `reasoning` is the Audiobox judge's one-line explanation of the score; `axes` are its

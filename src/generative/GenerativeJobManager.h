@@ -26,6 +26,7 @@ public:
 
     /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
     juce::var listColors();
+    juce::var listLoras();
 
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();

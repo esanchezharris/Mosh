@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
+  BuiltinPlugin, AvailableColor, AvailableLora, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
   WaveInput, MidiInput, TrackOutputs,
   PluginCounts,
 } from "./types";
@@ -78,6 +78,7 @@ type State = {
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  availableLoras: AvailableLora[];         // LoRA library (from list_loras — the watched folder)
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
   labMode: boolean;                        // ASTD unlock for generative colours
@@ -160,6 +161,7 @@ type State = {
   rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
   refreshPluginList: () => Promise<void>;
   loadColors: () => void;
+  loadLoras: () => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
@@ -247,6 +249,7 @@ export const useStore = create<State>((set, get) => ({
   transcribing: {},
   buildingLyrics: {},
   availableColors: [],
+  availableLoras: [],
   availableTransformTargets: [],
   transformFreeText: true,
   labMode: false,
@@ -688,6 +691,16 @@ export const useStore = create<State>((set, get) => ({
       args: {},
     }).then((res) => {
       if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+    });
+  },
+
+  loadLoras: () => {
+    if (get().availableLoras.length > 0) return;
+    void executeCommand<CommandResult<{ loras: AvailableLora[] }>>({
+      command: "list_loras",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.loras) set({ availableLoras: res.data.loras });
     });
   },
 

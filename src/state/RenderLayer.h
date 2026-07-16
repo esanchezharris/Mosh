@@ -52,6 +52,7 @@ struct RenderLayer
         params.setProperty (ids::target, "", nullptr);       // Route B transform target
         params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
         params.appendChild (juce::ValueTree (ids::COLORS), nullptr);
+        params.appendChild (juce::ValueTree (ids::LORAS), nullptr);   // LoRA rack (ordered, unbounded)
         v.appendChild (params, nullptr);
         return v;
     }
@@ -70,7 +71,8 @@ struct RenderLayer
                                      const juce::String& upstreamHash,
                                      const juce::String& tempoKeyContext,
                                      int sampleRate, int channels,
-                                     const juce::String& serviceBuild)
+                                     const juce::String& serviceBuild,
+                                     const juce::String& lorasKey = {})
     {
         auto params = v.getChildWithName (ids::PARAMS);
         juce::String colorsKey;
@@ -96,6 +98,9 @@ struct RenderLayer
             params[ids::target].toString(),        // Route B transform target — part of key
             params[ids::strength].toString(),      // Route B transform strength — part of key
             colorsKey,
+            lorasKey,                              // LoRA rack: name=value@sha12:trigger; — resolved at
+                                                   // RENDER time (a retrained same-name file or a sidecar
+                                                   // trigger edit must be a cache MISS)
             v[ids::seed].toString(),
             params[ids::cfg].toString() + "/" + params[ids::steps].toString() + "/" + params[ids::nl].toString(),
             v[ids::safetyMappingVersion].toString(),

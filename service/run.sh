@@ -64,6 +64,8 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
+# LoRA rack: the watched adapter folder (drop .safetensors + optional sidecar json in).
+export MOSH_LORA_DIR="${MOSH_LORA_DIR:-$HOME/Library/Mosh/loras}"
 
 # SA3 is on by default; the carve runs under the MLX venv when present, else this
 # silently falls back to system python3 (FakeAdapter only). Set MOSH_ENABLE_SA3=0

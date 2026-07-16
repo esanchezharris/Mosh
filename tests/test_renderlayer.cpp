@@ -74,6 +74,61 @@ TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)",
     }
 }
 
+TEST_CASE ("LoRA rack: LORAS child round-trips + lorasKey drives the fingerprint", "[loras][cache]")
+{
+    auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio3");
+
+    SECTION ("create() carries an empty LORAS child; rows round-trip through XML")
+    {
+        auto params = v.getChildWithName (ids::PARAMS);
+        auto loras = params.getChildWithName (ids::LORAS);
+        REQUIRE (loras.isValid());
+        REQUIRE (loras.getNumChildren() == 0);
+
+        // No count cap by design (owner call): 5 rows must survive verbatim, in order.
+        for (int i = 0; i < 5; ++i)
+        {
+            juce::ValueTree row (ids::LORA);
+            row.setProperty (ids::name, "adapter" + juce::String (i), nullptr);
+            row.setProperty (ids::value, 20 * (i + 1), nullptr);   // incl. >100? keep ≤100 here
+            loras.appendChild (row, nullptr);
+        }
+        loras.getChild (4).setProperty (ids::value, 125, nullptr); // overdrive survives too
+
+        auto back = RenderLayer::roundTripViaXml (v);
+        auto backLoras = back.getChildWithName (ids::PARAMS).getChildWithName (ids::LORAS);
+        REQUIRE (backLoras.getNumChildren() == 5);
+        REQUIRE (backLoras.getChild (0)[ids::name].toString() == "adapter0");
+        REQUIRE ((int) backLoras.getChild (4)[ids::value] == 125);
+    }
+
+    SECTION ("the lorasKey is a fingerprint input (rack change / retrain / trigger edit ⇒ MISS)")
+    {
+        const auto base = RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1");
+        const auto withRack = RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                                        "kxc=80@aabbccddeeff:kxc;");
+        REQUIRE (withRack != base);
+
+        // same key → same fingerprint (cache HIT on an unchanged rack)
+        REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                           "kxc=80@aabbccddeeff:kxc;") == withRack);
+        // strength change ⇒ MISS
+        REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                           "kxc=90@aabbccddeeff:kxc;") != withRack);
+        // retrained same-name file (sha12 changed) ⇒ MISS
+        REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                           "kxc=80@001122334455:kxc;") != withRack);
+        // sidecar trigger edit (changes the injected prompt) ⇒ MISS
+        REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                           "kxc=80@aabbccddeeff:kxc2;") != withRack);
+        // rack ORDER matters (chained composition is order-dependent)
+        REQUIRE (RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                           "a=50@111111111111:;b=50@222222222222:;")
+                 != RenderLayer::fingerprint (v, "up", "120/Cmaj", 44100, 2, "svc-1",
+                                              "b=50@222222222222:;a=50@111111111111:;"));
+    }
+}
+
 TEST_CASE ("compile_render's transient compiledEnvelope round-trips + does NOT touch the cache key",
            "[stage5][compiler]")
 {
