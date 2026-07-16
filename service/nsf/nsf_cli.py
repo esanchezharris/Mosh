@@ -3,15 +3,20 @@
 
 Resynthesize a wav from its mel at an explicit F0 — the vocoder's headline: hand it a
 DIFFERENT (corrected) pitch contour and it re-sings at the new pitch, formant-preserving,
-no autotune smear. Two modes prove the technique on a real render:
+no autotune smear. Modes:
   revoice : resynth at the render's OWN measured F0 (a clean re-vocode baseline)
   tune    : resynth at that F0 snapped to the nearest semitone (dead-in-tune, no artifacts)
+  perform : resynth at the TAKE's measured F0 — the owner's actual sung performance drives
+            the pitch (the render must already be timing-snapped to the take); where the
+            take is silent the render's own F0 is the fallback, so no voiced frame goes
+            unpitched mid-word. 3-frame median at source handoffs kills switch clicks.
 
-F0 comes from the input itself (librosa.pyin) so it is perfectly frame-aligned to the mel —
-zero pitch-misalignment risk. Weights are CC BY-NC-SA (spike/owner-only, never shipped).
+F0 comes from audio via librosa.pyin on the mel's own hop grid — zero misalignment risk.
+Weights are CC BY-NC-SA (spike/owner-only, never shipped).
 
 Run under the nsf venv:
   ~/Library/Mosh/venvs/nsf/bin/python3 service/nsf/nsf_cli.py <in.wav> <out.wav> [revoice|tune]
+  ~/Library/Mosh/venvs/nsf/bin/python3 service/nsf/nsf_cli.py <in.wav> <out.wav> perform <take.wav>
 """
 from __future__ import annotations
 
@@ -57,14 +62,40 @@ def snap_semitone(f0):
     return out.astype(np.float32)
 
 
-def resynth(in_wav, out_wav, mode="revoice"):
-    gen, h = nsf.load_model(model_path())
-    sr, hop = h.sampling_rate, h.hop_size
-    y, in_sr = sf.read(str(in_wav), dtype="float32", always_2d=False)
+def combine_take_f0(render_f0, take_f0):
+    """Take-voiced frames win; take-silent frames keep the render's own F0. A 3-frame
+    voiced-median around each source handoff smooths the switch (no pitch clicks)."""
+    n = len(render_f0)
+    take = np.zeros(n, dtype=np.float32)
+    take[: min(n, len(take_f0))] = take_f0[:n]
+    out = render_f0.copy()
+    use = take > 0
+    out[use] = take[use]
+    for s in np.flatnonzero(np.diff(use.astype(np.int8)) != 0):
+        lo, hi = max(0, s - 1), min(n, s + 2)
+        seg = out[lo:hi]
+        voiced = seg[seg > 0]
+        if len(voiced):
+            seg[seg > 0] = np.median(voiced)
+            out[lo:hi] = seg
+    return out.astype(np.float32)
+
+
+def _load_mono(path, sr):
+    y, in_sr = sf.read(str(path), dtype="float32", always_2d=False)
     if y.ndim > 1:
         y = y.mean(axis=1)
     if in_sr != sr:
         y = librosa.resample(y, orig_sr=in_sr, target_sr=sr).astype(np.float32)
+    return y
+
+
+def resynth(in_wav, out_wav, mode="revoice", f0_wav=None):
+    if mode == "perform" and f0_wav is None:
+        raise ValueError("perform mode needs the take wav (f0_wav) — its F0 drives the pitch")
+    gen, h = nsf.load_model(model_path())
+    sr, hop = h.sampling_rate, h.hop_size
+    y = _load_mono(in_wav, sr)
     peak = float(np.max(np.abs(y))) or 1.0
     y = y / peak * 0.9
     stft = nsf.STFT(sr=sr, n_mels=h.num_mels, n_fft=h.n_fft, win_size=h.win_size,
@@ -79,6 +110,9 @@ def resynth(in_wav, out_wav, mode="revoice"):
     f0 = f0[:T]
     if mode == "tune":
         f0 = snap_semitone(f0)
+    elif mode == "perform":
+        take_f0 = measure_f0(_load_mono(f0_wav, sr), sr, hop)
+        f0 = combine_take_f0(f0, take_f0)
     with torch.no_grad():
         wav = gen(mel, torch.from_numpy(f0).float().unsqueeze(0)).squeeze().cpu().numpy()
     p = float(np.max(np.abs(wav))) or 1.0
@@ -93,6 +127,7 @@ def resynth(in_wav, out_wav, mode="revoice"):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        raise SystemExit("usage: nsf_cli.py <in.wav> <out.wav> [revoice|tune]")
+        raise SystemExit("usage: nsf_cli.py <in.wav> <out.wav> [revoice|tune|perform <take.wav>]")
     resynth(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]),
-            sys.argv[3] if len(sys.argv) > 3 else "revoice")
+            sys.argv[3] if len(sys.argv) > 3 else "revoice",
+            f0_wav=pathlib.Path(sys.argv[4]) if len(sys.argv) > 4 else None)

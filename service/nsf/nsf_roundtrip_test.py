@@ -121,5 +121,52 @@ if p_lo and p_hi:
     check("measured period @260Hz is near 1/260 s (pitch respected)",
           abs(p_hi - 1 / 260.0) < 0.0015, f"{p_hi:.5f} vs {1/260.0:.5f}")
 
+# ── PERFORM mode: resynth the render's mel at the TAKE's own F0 (the owner's performance) ──
+# Contract: where the take is VOICED its F0 drives the output; where the take is silent the
+# render's OWN F0 is the fallback (never zero a voiced frame mid-word). Proven on synthetic
+# tones: render proxy at 200 Hz; take proxy at 260 Hz with a silent middle gap.
+import hashlib  # noqa: E402
+import tempfile  # noqa: E402
+
+import soundfile as sf  # noqa: E402
+
+import nsf_cli  # noqa: E402
+
+td = pathlib.Path(tempfile.mkdtemp(prefix="nsf-perform-"))
+render_wav = td / "render.wav"
+take_wav = td / "take.wav"
+sf.write(str(render_wav), synth_tone(200.0, dur_s=1.0), SR)
+take_sig = synth_tone(260.0, dur_s=1.0)
+take_sig[int(0.40 * SR):int(0.60 * SR)] = 0.0            # the take rests mid-word
+sf.write(str(take_wav), take_sig, SR)
+
+out_wav = td / "perform.wav"
+nsf_cli.resynth(render_wav, out_wav, mode="perform", f0_wav=take_wav)
+perf, out_sr = sf.read(str(out_wav), dtype="float32")
+check("perform: non-silent output at the model SR", out_sr == SR and float(np.max(np.abs(perf))) > 0.05,
+      f"sr={out_sr} peak={float(np.max(np.abs(perf))):.3f}")
+check("perform: length tracks the render", abs(len(perf) - int(1.0 * SR)) <= h.hop_size * 3,
+      f"{len(perf)} vs {SR}")
+
+p_head = dominant_period_s(perf[int(0.05 * SR):int(0.35 * SR)])
+p_gap = dominant_period_s(perf[int(0.44 * SR):int(0.56 * SR)])
+check("perform: voiced take frames drive the pitch (head tracks 260 Hz, not 200)",
+      p_head is not None and abs(p_head - 1 / 260.0) < 0.0015, f"{p_head} vs {1/260.0:.5f}")
+check("perform: take-silent gap falls back to the RENDER's own F0 (tracks 200 Hz)",
+      p_gap is not None and abs(p_gap - 1 / 200.0) < 0.0015, f"{p_gap} vs {1/200.0:.5f}")
+
+digs = set()
+for _ in range(3):
+    nsf_cli.resynth(render_wav, out_wav, mode="perform", f0_wav=take_wav)
+    digs.add(hashlib.sha256(out_wav.read_bytes()).hexdigest())
+check("perform: 3x byte-identical", len(digs) == 1, str([d[:10] for d in digs]))
+
+try:
+    nsf_cli.resynth(render_wav, td / "x.wav", mode="perform")
+    missing_raises = False
+except ValueError:
+    missing_raises = True
+check("perform: missing f0_wav raises (never silently revoices)", missing_raises)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)
