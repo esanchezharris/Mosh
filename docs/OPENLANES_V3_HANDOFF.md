@@ -1,8 +1,13 @@
 # Open Lanes (v3) shell — build handoff
 
-**Status:** Stage 1 fidelity recovery in progress. Branch `claude/daw-ui-upgrade-317ab2`.
-The functional navigator/playhead slice is preserved; production visuals are being brought back
-to the judged Graphite target before editing gestures land.
+**Status:** Stage 1 functionally complete + fidelity RESTORED to the judged Graphite target
+(2026-07-16). Branch `claude/daw-ui-upgrade-317ab2`. The Codex-era regression (color dots, left
+spines, pinned names — anchored to wrong-era pre-R14 reference captures) is fixed: the reference
+set under `docs/design/openlanes-v3/reference/` is now the R19-verified capture set, DESIGN.md
+carries the chrome-off doctrine explicitly, and the shell matches it live (verified: rest =
+zero chrome, hover/focus-within reveal, fill-all layout, slim navigator, real Moshi on the bar;
+tsc clean, 999 vitest green, 0 console errors). Next: the Stage-1 gate screenshot round with the
+owner, then Stage 2 (inline editing + `reorder_track` + faders).
 
 This doc is self-contained so any agent (Codex, Claude, etc.) can resume without external context.
 

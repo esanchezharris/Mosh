@@ -6,10 +6,19 @@ Open Lanes is a quiet obsidian instrument, not a conventional DAW chrome stack. 
 
 Canonical source:
 
-- `shell-rail-sequencer.html` is the desktop interaction and material reference.
+- `shell-rail-sequencer.html` is the desktop interaction and material reference — the FINAL
+  judged mockup (post-R19: chrome-off lanes, fill-all layout, slim navigator, reactive ambient,
+  drag-reorder). It is the only surviving copy; treat it as canonical.
 - `companion-pro-monument-v3.html` is the later companion reference.
 - `reference/01-rest.png` is the 1440 × 900 desktop composition target.
-- The remaining reference images lock focused drum/MIDI, zoom, navigator, Moshi, and companion states.
+- The remaining reference images lock focused drum/MIDI, zoom, fader, panel, navigator, Moshi,
+  and companion states.
+- **Provenance:** every `reference/*.png` is from the arena verify runner's R19-verified capture
+  set (`arena/.verify/seq-graphite/` + `pro-monument-v3/`, 2026-07-13) — rendered from the final
+  mockup above. Do NOT re-capture from older arena outputs: pre-R14 captures show per-lane color
+  dots, left spine bars, and pinned track names, all of which were explicitly REMOVED by the owner
+  in judging rounds R14–R19. If a capture shows a colored dot next to a track name, it is the
+  wrong era.
 
 ## 2. Color and material
 
@@ -18,7 +27,10 @@ Canonical source:
 - Lane: translucent `#181a21`; expanded lanes lift one tonal step rather than becoming a card.
 - Text: `#e8ebf1`; secondary and microcopy use alpha, never an unrelated gray.
 - Sacred accent: `#ccff36`, reserved for selection, play, playhead, viewport, focus, and commit.
-- Track identity: desaturated amber, lavender, rose, and mint from `trackHue()`; color lives in musical content and small identifiers.
+- Track identity: desaturated amber, lavender, rose, and mint from `trackHue()`; **color lives
+  ONLY in the musical content** (steps, notes, waveform) and in the revealed name text. There is
+  NO color dot, NO left spine bar, NO chrome identifier of any kind — the content IS the identity
+  (owner doctrine, locked in judging round R14).
 - Depth strategy: mixed tonal shift, hairline seams, and one soft long shadow. No stacked card shadows or glass blur.
 
 ## 3. Typography
@@ -50,6 +62,10 @@ Canonical source:
 ### Open lane
 
 - Structure: progressive header, type-specific surface, cached compositor playhead.
+- **Chrome-off at rest (non-negotiable):** a resting lane shows PURE content — no name, no dot,
+  no spine, no mute/solo, no grip. On hover or focus, a top gradient scrim fades in and reveals
+  the name (in the track hue), the grip, and the M/S controls (200ms ease-out reveal). Muted
+  state reads via content opacity (0.4), never via chrome.
 - Variants: drum, MIDI, audio; compact and expanded.
 - States: rest, hover, selected, focused/expanded, muted.
 - Motion: transform/opacity only; layout height changes use the existing 340ms instrument easing.

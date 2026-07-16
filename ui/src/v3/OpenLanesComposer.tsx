@@ -10,8 +10,9 @@ function MoshiTalkTarget(props: AgentTalkTargetProps) {
     if (!host || typeof window.Moshi !== "function") return;
     let api: ReturnType<NonNullable<Window["Moshi"]>> | null = null;
     try {
-      api = window.Moshi(host, { personality: "TAR", seed: 0.5, resDiv: 1, room: false, interactive: true });
-      api.setQuality("ps2").setAnatomy("A").setStyle("baked");
+      // The judged mockup's exact mount (docs/design/openlanes-v3/shell-rail-sequencer.html):
+      // TAR personality, seed .42, ps2+ quality, baked style, transparent (room:false).
+      api = window.Moshi(host, { personality: "TAR", seed: 0.42, quality: "ps2+", style: "baked", room: false, interactive: true });
     } catch { api = null; }
     return () => { try { api?.destroy(); } catch {} };
   }, []);
