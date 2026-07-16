@@ -19,9 +19,12 @@ flips it — this read only reports against the two bars.
 | artifact | construction | size |
 |---|---|---|
 | `~/AI/adapters/a3b-r5-mlx` | PEFT→MLX conversion (`convert_peft_adapter_to_mlx.py`), 128 tensors, scale 2.0 | 18 MB |
-| `~/AI/models/fused/a3b-r5-4bit` | `mlx_lm fuse` into the 4-bit base (the r3/r4 lane) | 16 GB |
 | `~/AI/models/fused/a3b-r5-4bit-hd` | **attn-overlay** (`build_attn_overlay_model.py`): 4-bit base + exact bf16(base+Δ) attention Linears | 16.4 GB |
-| `~/AI/models/fused/a3b-r5-8bit-hd` | attn-overlay on the 8-bit base | TBD |
+| `~/AI/models/fused/a3b-r5-8bit-hd2` | attn-overlay on the 8-bit base + verbatim bf16 routers & lm_head | 33.0 GB |
+
+(Two probe-only intermediates were built and deleted after their attribution
+data was recorded: the plain `mlx_lm fuse` 4-bit lane and 4-bit/8-bit overlay
+variants isolating the router/lm_head contribution.)
 
 **Why the overlay exists — fuse-into-4bit measurably destroys this adapter.**
 r5 was trained against the *bf16* base (CUDA lane), unlike r3/r4 which were
@@ -125,10 +128,10 @@ Attribution (measured):
 - An experiment artifact adding **verbatim bf16 MoE routers (all 48
   `mlp.gate`) + bf16 `lm_head`** on top of the attn overlay (113 overlaid
   paths, +0.45 GB) still shows the identical 6/6 signature → routers and
-  lm_head precision are **exonerated**; the flip lives in the **4-bit
-  experts** (the FFN bulk — unfixable by any small overlay; higher-precision
-  experts, i.e. an 8-bit base, is the smallest structural fix). The fetched
-  bf16 routers/lm_head validated against the base at 8-bit/4-bit quant-noise
+  lm_head precision are **exonerated**; the flip lives in the **quantized
+  experts** (the FFN bulk — unfixable by any small overlay; 8-bit experts
+  only partially recover it, see the 8-bit section). The fetched bf16
+  routers/lm_head validated against the base at 8-bit/4-bit quant-noise
   levels (relerr ~1 % / ~9.5 %), same revision.
 
 ### Lane comparison — plain fuse-into-4bit (r3/r4 lane)
@@ -138,30 +141,68 @@ The tensor-level probe (script header) shows plain fuse keeps only ~17 % of
 family. Full-surface reads were run on 4bit-hd only; the fused lane served as
 the construction-bug control.
 
-### 8-bit
+### 8-bit (a3b-r5-8bit-hd2: overlay + bf16 routers/lm_head)
 
-TBD (mlx-community 8-bit base download in progress; overlay build + reads
-follow the identical procedure).
+- Fetched-tensor revision check vs the 8-bit base: relerr 0.74–0.76 % (pure
+  8-bit quant noise). ✓
+- **Latency: warm median 1.774 s** (p25 1.60 · p75 1.85 · max 3.09; 30/30
+  JSON-clean) — **also clears < 2 s**. Per-turn cost is prefill-dominated, so
+  the ~2× memory-bound decode barely moves a ~35-token reply. (The bench's
+  first-request 2.67 s is NOT a cold number — the signature probe had
+  pre-warmed the prompt cache; the honest cold prefill reference stays the
+  4-bit run's 6.5 s.)
+- **The add_note flip only partially recovers: 1/6** (4-bit: 0/6) — and the
+  bf16 routers + lm_head extras change nothing at 8-bit either (attn-only
+  8-bit probe: 1/6; with extras: 1/6). Precision-monotone but still broken:
+  the adapter's override of this base prior does not survive expert
+  quantization at any tested width.
+- Full surfaces: diag_floor4 **0.8947** (0 defer/19; split_clip 0.833 ✓) ·
+  evalA **0.9357** (0 defer/210 — exactly the bf16 aggregate; `add_note`
+  still 0.000, the 1/6 probe recovery is boundary noise that flips with
+  prompt-cache history) · frozen300 **0.7933** (1 defer/300; 58 of 61 zero
+  rows carry the add_drum_pattern signature) · §B **0.9189** (34/37,
+  wrong-defer 11, classes validation 2 / apply-error 4 / invented-file 2).
+
+### Final comparison
+
+| leg | bf16 (§P9, 07-10) | 4bit-hd | 8bit-hd2 | reference bar |
+|---|---|---|---|---|
+| warm median latency | (prior local 8.3 s) | **1.67 s ✓** | **1.77 s ✓** | < 2 s |
+| diag_floor4 | 0.895 | 0.930 | 0.895 | split_clip ≥ 0.5 ✓✓ |
+| evalA | 0.9357 | 0.9333 | 0.9357 | — |
+| frozen300 (§C) | 0.977 | 0.767 ✗ | 0.793 ✗ | ≥ 0.875 (cloud) |
+| aggregate (A,C) | 0.9563 | 0.850 | 0.865 | ≥ 0.75 ✓✓ |
+| §B grounded | 0.8919 | 0.9189 | 0.9189 | ≥ 0.85 ✓✓ |
+| `add_note` family | ≥ 0.667 | 0.000 ✗ | 0.000 ✗ | ≥ 0.5 |
 
 ## Recommendation
 
-**Interim (8-bit leg pending):** no measured artifact clears BOTH bars yet.
+**No quantized serve of a3b-r5 clears both bars — do not flip the serving
+default.** (Registered decision stays with the owner; this read just supplies
+the numbers.)
 
-- **4bit-hd**: latency ✓ (1.67 s warm median), quality ✗ — one behavior
-  (`add_note` population) collapses to a base prior, sinking §C to 0.767
-  (< the 0.875 cloud reference, so the "beats frozen-eval-v2" invariant
-  fails) and breaking one §P9 floor family. Everything else ≥ bf16.
-- **8-bit-hd**: the smallest structural fix for the flip (higher-precision
-  experts); decode is ~2× more memory-bound, so the < 2 s median is at risk —
-  measured read pending.
-
-**The durable lesson is train/serve precision matching.** r3 — trained
-QLoRA-style ON the 4-bit MLX base — held §C 0.960 when served fused-4-bit;
-r5 — trained bf16 on CUDA — loses exactly the near-base-prior behaviors when
-its base is quantized under it. §P9's registered caveat 3 anticipated this.
-If the owner wants the 4-bit latency point with r5-level quality, the clean
-path is an r6 trained against the 4-bit base (the §P8 local recipe), not more
-serving-side patching.
+- **Latency is SOLVED.** Both widths clear < 2 s decisively (1.67 s / 1.77 s
+  warm median vs the prior 8.3 s) — mlx_lm.server prompt-prefix caching plus
+  the A3B's 3.3 B-active decode make the M1 Max a viable serving seat. The
+  latency leg of the invariant is no longer the blocker.
+- **Quality fails on exactly one axis at both widths.** The bf16-trained
+  adapter's note-population behavior (`add_note` sequences) collapses back to
+  the base's `add_drum_pattern` prior under a quantized base: §C 0.767 /
+  0.793 vs the 0.875 cloud reference and 0.977 bf16. Every other surface is
+  at or above the bf16 gate read (§B actually improves to 0.919).
+- **If forced to pick one artifact today: 4bit-hd** — same broken family as
+  8-bit, faster, half the memory (17 GB vs 33 GB leaves headroom for SA3 +
+  the app), and diag_floor4/§B at-or-above bf16. But it does not meet the
+  registered quality bar, so it should not ship as default.
+- **The fix is r6 trained against the 4-bit MLX base** (the §P8 local recipe,
+  the r3 precedent: §C 0.960 served fused-4-bit). Train/serve precision
+  matching is the durable lesson — §P9 caveat 3 anticipated it. Everything
+  else is now in place for that cycle: conversion lane, overlay builder (not
+  even needed when training on the quantized base — plain fuse suffices),
+  latency bench, probes, and the re-staged frozen surfaces.
+- Measured dead ends, so nobody re-tries them: plain fuse-into-4bit (~17 % of
+  ‖Δ‖ survives), bf16 routers+lm_head overlays (behavior-neutral), 0.6B-draft
+  speculative decoding (hurts short-turn median 1.67→2.84 s).
 
 ## BrainProxy wiring sketch (owner decision — NOT changed here)
 
