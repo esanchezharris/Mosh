@@ -22,7 +22,9 @@ STATE="$HOME/.mosh-vast-instance"
 IMAGE="${VAST_IMAGE:-pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel}"
 DISK="${VAST_DISK:-75}"
 # verified + rentable + a direct SSH port + enough disk/net; cheapest by $/hr.
-QUERY="${VAST_QUERY:-gpu_name=RTX_4090 num_gpus=1 verified=true rentable=true cuda_vers>=12.4 disk_space>=${DISK} direct_port_count>=1 inet_down>=200}"
+# disk_bw floor: a cheap HDD-class box spent 38 min on pip alone (2026-07-16) — env setup
+# is small-file IO-bound, so require NVMe-class disk (typical listings are 1000+ MB/s).
+QUERY="${VAST_QUERY:-gpu_name=RTX_4090 num_gpus=1 verified=true rentable=true cuda_vers>=12.4 disk_space>=${DISK} direct_port_count>=1 inet_down>=200 disk_bw>=500}"
 
 pick_offer() {   # -> "OFFER_ID DPH" (cheapest available; VAST_EXCLUDE skips flaky offer/machine ids)
   vastai search offers "$QUERY" -o 'dph' --raw 2>/dev/null | python3 -c '
@@ -68,13 +70,25 @@ echo "$CID" > "$STATE"
 trap destroy EXIT                                  # DESTROY on any exit (success/failure/interrupt)
 echo "== instance $CID created; waiting for SSH …"
 
+boot_state() {   # one line of boot diagnostics per poll (why "not ready" — pull? scheduling?)
+  vastai show instances --raw 2>/dev/null | python3 -c '
+import json,sys
+iid=int(sys.argv[1])
+for m in json.load(sys.stdin):
+    if int(m.get("id",-1))==iid:
+        msg=str(m.get("status_msg") or "").strip().replace("\n"," ")[:90]
+        print(f"status={m.get(\"actual_status\")} ssh_host={m.get(\"ssh_host\")} msg={msg}")
+        break' "$1" || true
+}
+
 IP=""; PORT=""
-for i in $(seq 1 40); do
+for i in $(seq 1 60); do
   read -r IP PORT <<< "$(ssh_endpoint "$CID" || true)"
   [[ -n "${IP:-}" && -n "${PORT:-}" ]] && break
+  (( i % 4 == 0 )) && echo "[boot $((i*15))s] $(boot_state "$CID")"
   sleep 15
 done
-[[ -n "${IP:-}" && -n "${PORT:-}" ]] || { echo "instance never became SSH-ready"; exit 1; }
+[[ -n "${IP:-}" && -n "${PORT:-}" ]] || { echo "instance never became SSH-ready — last state: $(boot_state "$CID")"; exit 1; }
 SSH=(ssh -p "$PORT" -i "$KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12 "root@$IP")
 echo "== instance: root@$IP:$PORT"
 for i in $(seq 1 24); do "${SSH[@]}" true 2>/dev/null && break; sleep 10; done
@@ -88,8 +102,11 @@ rsync -az -e "ssh -p $PORT -i $KEY" "$RUNNER" "root@$IP:ksa/remote_sing_fresh.sh
 echo "== launch (detached — survives SSH drops; ~25-40 min first run)"
 "${SSH[@]}" "rm -f ksa/DONE ksa/FAILED; cd ~ && setsid -f bash ksa/remote_sing_fresh.sh </dev/null > ksa/run.log 2>&1; echo launched"
 
+# Poll budget: 180 min. A slow-disk box spent 100 min in env setup ALONE (2026-07-16) and
+# the old 100-poll cap destroyed a healthy, progressing instance — the cap must comfortably
+# exceed worst-case setup + render, not the happy path.
 STATUS="timeout"
-for i in $(seq 1 100); do
+for i in $(seq 1 "${VAST_POLLS:-180}"); do
   sleep 60
   line=$("${SSH[@]}" "tail -1 ksa/run.log 2>/dev/null; ls ksa/DONE ksa/FAILED 2>/dev/null" 2>/dev/null || echo "<ssh blip>")
   echo "[poll $i] $line"

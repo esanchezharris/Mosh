@@ -46,7 +46,11 @@ if ! "$PY" -c "import soundfile" >/dev/null 2>&1; then
   "$PY" -m pip install -q "huggingface_hub[cli]" >>"$LOG/pip.log" 2>&1
 fi
 PYPRE="$ENVPRE/bin/python"
-if ! "$PYPRE" -c "import nemo.collections.asr" >/dev/null 2>&1; then
+# The whole preprocess stack (NeMo env + preprocess models) exists ONLY to produce the
+# ref metadata JSON — when the handoff already carries refs/own-30s.json the preprocess
+# step is skipped, so building it wastes 40-80 min of paid GPU time. Skip it wholesale.
+NEED_PRE=1; [[ -f "$HANDOFF/refs/own-30s.json" ]] && { NEED_PRE=0; say "ref metadata present — skipping the ENTIRE preprocess stack (env + models)"; }
+if [[ "$NEED_PRE" == 1 ]] && ! "$PYPRE" -c "import nemo.collections.asr" >/dev/null 2>&1; then
   say "building preprocess env (NeMo; heavy — logs/pip-pre.log) …"
   [[ -x "$PYPRE" ]] || "$CONDA" create -y -p "$ENVPRE" -c conda-forge python=3.10 >"$LOG/env-pre.log" 2>&1 || die "env-pre create failed"
   "$PYPRE" -m pip install -q -r "$SOULX/requirements.txt" >"$LOG/pip-pre.log" 2>&1 || die "env-pre requirements failed (logs/pip-pre.log)"
@@ -63,7 +67,7 @@ if [[ ! -f "$SOULX/pretrained_models/SoulX-Singer/model.pt" ]]; then
   "$PY" -m huggingface_hub.commands.huggingface_cli download Soul-AILab/SoulX-Singer --local-dir "$SOULX/pretrained_models/SoulX-Singer" >"$LOG/hf.log" 2>&1 \
     || "$ENVDIR/bin/hf" download Soul-AILab/SoulX-Singer --local-dir "$SOULX/pretrained_models/SoulX-Singer" >"$LOG/hf.log" 2>&1 || die "weights download failed (logs/hf.log)"
 fi
-if [[ ! -d "$SOULX/pretrained_models/SoulX-Singer-Preprocess" ]]; then
+if [[ "$NEED_PRE" == 1 && ! -d "$SOULX/pretrained_models/SoulX-Singer-Preprocess" ]]; then
   say "downloading preprocess models …"
   "$ENVDIR/bin/hf" download Soul-AILab/SoulX-Singer-Preprocess --local-dir "$SOULX/pretrained_models/SoulX-Singer-Preprocess" >"$LOG/hf2.log" 2>&1 \
     || "$PY" -m huggingface_hub.commands.huggingface_cli download Soul-AILab/SoulX-Singer-Preprocess --local-dir "$SOULX/pretrained_models/SoulX-Singer-Preprocess" >"$LOG/hf2.log" 2>&1 || die "preprocess models download failed (logs/hf2.log)"
