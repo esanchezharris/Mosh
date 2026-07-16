@@ -77,12 +77,15 @@ iid=int(sys.argv[1])
 for m in json.load(sys.stdin):
     if int(m.get("id",-1))==iid:
         msg=str(m.get("status_msg") or "").strip().replace("\n"," ")[:90]
-        print(f"status={m.get(\"actual_status\")} ssh_host={m.get(\"ssh_host\")} msg={msg}")
+        print("status=%s ssh_host=%s msg=%s" % (m.get("actual_status"), m.get("ssh_host"), msg))
         break' "$1" || true
 }
 
+# 30 min boot budget: the pytorch devel image is ~8GB compressed — a host without it cached
+# needs >15 min to pull+extract (attempt 4 died here). Waiting costs pennies; a re-rent
+# starts the pull from zero on yet another cold host.
 IP=""; PORT=""
-for i in $(seq 1 60); do
+for i in $(seq 1 "${VAST_BOOT_POLLS:-120}"); do
   read -r IP PORT <<< "$(ssh_endpoint "$CID" || true)"
   [[ -n "${IP:-}" && -n "${PORT:-}" ]] && break
   (( i % 4 == 0 )) && echo "[boot $((i*15))s] $(boot_state "$CID")"
