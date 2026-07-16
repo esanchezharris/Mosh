@@ -210,20 +210,37 @@ if (MOSH_BUILD_APP)
         target_link_libraries(Mosh PRIVATE mosh_neural_backends)
         if (MSVC)
             # anira/anira.h pulls the full torch header surface into RaveEngine.cpp —
-            # a >65k-COFF-sections TU on MSVC without /bigobj.
+            # a >65k-COFF-sections TU on MSVC without /bigobj. /GL- opts this TU out
+            # of whole-program codegen: LTCG over the torch headers OOMs link.exe
+            # (LNK1257) and took the whole box down once; the rest of the app keeps
+            # LTO. Mixing a /GL- TU into an /LTCG link is supported.
             set_source_files_properties(src/plugins/transform/RaveEngine.cpp
-                PROPERTIES COMPILE_OPTIONS "/bigobj")
+                PROPERTIES COMPILE_OPTIONS "/bigobj;/GL-")
         endif()
-        if (WIN32 AND DEFINED ANIRA_SHARED_LIBS_WIN)
-            # Stage anira.dll + every LibTorch DLL next to Mosh.exe (the Windows
-            # analogue of run-mosh.sh selfcontain_anira). run-mosh.ps1 -Package's
-            # wildcard *.dll copy then ships them automatically. Full list first;
-            # prune via dumpbin /dependents only if zip size ever matters.
-            add_custom_command(TARGET Mosh POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        ${ANIRA_SHARED_LIBS_WIN} "$<TARGET_FILE_DIR:Mosh>"
-                COMMENT "Staging anira + LibTorch DLLs next to Mosh.exe"
-                VERBATIM)
+        if (WIN32)
+            # Stage the LibTorch runtime DLLs next to Mosh.exe (the Windows analogue
+            # of run-mosh.sh selfcontain_anira; run-mosh.ps1 -Package's wildcard
+            # *.dll copy then ships them). anira builds STATIC as our subdirectory
+            # (BUILD_SHARED_LIBS unset) but links LibTorch dynamically, so the exe
+            # needs torch.dll & co at load — 0xC0000135 without them. Glob the
+            # fetched libtorch directly: anira's ANIRA_SHARED_LIBS_WIN PARENT_SCOPE
+            # export does not reliably reach this scope.
+            file(GLOB MOSH_ANIRA_RUNTIME_DLLS
+                 "${anira_SOURCE_DIR}/modules/libtorch-*/lib/*.dll")
+            if (MOSH_ANIRA_RUNTIME_DLLS)
+                # $<TARGET_FILE:anira> = the built anira.dll (it defaults to a
+                # SHARED lib even as a subdirectory), living under the CPM _deps
+                # build dir where no glob at configure time can see it.
+                add_custom_command(TARGET Mosh POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                            $<TARGET_FILE:anira>
+                            ${MOSH_ANIRA_RUNTIME_DLLS} "$<TARGET_FILE_DIR:Mosh>"
+                    COMMENT "Staging anira + LibTorch runtime DLLs next to Mosh.exe"
+                    VERBATIM)
+            else()
+                message(WARNING "MOSH_ENABLE_ANIRA: no LibTorch DLLs found under "
+                    "${anira_SOURCE_DIR}/modules — Mosh.exe will fail to load (0xC0000135).")
+            endif()
         endif()
     endif()
 

@@ -138,7 +138,17 @@ void RaveInsertPlugin::applyToBuffer (const te::PluginRenderContext& fc)
 
 void RaveInsertPlugin::restorePluginStateFromValueTree (const juce::ValueTree& v)
 {
-    te::copyPropertiesToCachedValues (v, mixValue, modelPath, modelName);
+    te::copyPropertiesToCachedValues (v, mixValue);
+    // MSVC rejects te::copyPropertiesToCachedValues for CachedValue<String>:
+    // the helper's ValueType(*p) cast is ambiguous there (juce::var's several
+    // conversion operators). Copy the string properties explicitly instead.
+    for (auto* cv : { &modelPath, &modelName })
+    {
+        if (auto* p = v.getPropertyPointer (cv->getPropertyID()))
+            *cv = p->toString();
+        else
+            cv->resetToDefault();
+    }
     for (auto p : getAutomatableParameters())
         p->updateFromAttachedValue();
     // The model file is re-loaded in initialise() (message thread, after prepare).
