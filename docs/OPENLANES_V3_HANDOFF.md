@@ -1,7 +1,8 @@
 # Open Lanes (v3) shell — build handoff
 
-**Status:** Stage 1 in progress. Branch `claude/daw-ui-upgrade-317ab2`. Last verified 2026-07-13
-(tsc clean, 110 affected vitest green, live-previewed over the dev mock backend).
+**Status:** Stage 1 fidelity recovery in progress. Branch `claude/daw-ui-upgrade-317ab2`.
+The functional navigator/playhead slice is preserved; production visuals are being brought back
+to the judged Graphite target before editing gestures land.
 
 This doc is self-contained so any agent (Codex, Claude, etc.) can resume without external context.
 
@@ -9,9 +10,10 @@ This doc is self-contained so any agent (Codex, Claude, etc.) can resume without
 
 Porting the winning "Designer Arena" mockup — the **Open Lanes Sequencer** (a loop-first,
 inline-lane-editor arrangement) + its **Monument companion** — into a REAL production DAW shell
-at `ui/src/v3/`. The mockup source of truth is
-`scratchpad/fable-candidates/shell-rail-sequencer.html` and `companion-pro-monument-v3.html`
-(under the session scratchpad; not committed). The design language: near-black obsidian,
+at `ui/src/v3/`. The durable mockup source of truth is tracked under
+`docs/design/openlanes-v3/`: `shell-rail-sequencer.html`, `companion-pro-monument-v3.html`,
+the scoped `DESIGN.md`, and canonical verification captures in `reference/`. The design
+language: near-black obsidian,
 one sacred lime accent (`#ccff36`), desaturated per-track hues, mono micro-caps, hairline seams,
 **progressive disclosure** (surface controls only on hover/focus).
 

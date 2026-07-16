@@ -1,0 +1,235 @@
+<div class="m3">
+<style>
+/* MONUMENT v3 · companion — consolidated & calm, one product with the desktop RAIL.
+   Everything that shouted is gone: no fake status bar, no take-status caption row, no
+   friend text lines (the beads carry presence), no hold-to-talk caption (Moshi is inviting
+   on his own), no render-register toggle (REFINED is committed). Take state lives IN the
+   deck: the take number rides the REC key and KEEP/REDO light their rings when a verdict
+   is pending. Same obsidian material, mono micro-caps, and the SAME arrangement-navigator
+   component as the desktop (phone form: the hero scrub band). */
+.m3{position:absolute;inset:0;font-family:var(--font-body);color:#dfe2e8;overflow:hidden;isolation:isolate;
+  background-color:#06070a;
+  background-image:
+    radial-gradient(120% 60% at 50% -10%, rgba(150,158,182,.09) 0%, rgba(116,124,150,.035) 24%, transparent 54%),
+    radial-gradient(130% 100% at 8% 20%, rgba(78,58,128,.09), transparent 55%),
+    radial-gradient(120% 80% at 92% 108%, rgba(34,96,92,.08), transparent 52%),
+    radial-gradient(150% 120% at 50% 116%, rgba(4,5,8,0) 40%, rgba(3,4,7,.7) 100%),
+    linear-gradient(180deg,#0f1218 0%,#0a0b0e 48%,#06070a 100%)}
+.m3 *{box-sizing:border-box;margin:0;-webkit-user-select:none;user-select:none}
+@media (prefers-reduced-motion: reduce){.m3 *{transition-duration:0ms!important;animation:none!important}}
+.m3 .grain{position:absolute;inset:0;pointer-events:none;z-index:0;opacity:.05;mix-blend-mode:soft-light;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:140px 140px}
+.m3 > *{position:relative;z-index:1}
+.m3 .home{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:130px;height:5px;border-radius:3px;background:rgba(255,255,255,.2);z-index:9}
+/* glance — one quiet instrument line */
+.m3 .glance{position:absolute;top:28px;left:28px;right:28px;padding-bottom:13px;display:flex;justify-content:space-between;align-items:baseline}
+.m3 .glance::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.1) 22%,rgba(255,255,255,.1) 78%,transparent)}   /* hairline seam, faded at the ends */
+.m3 .song{font:600 9px var(--font-mono);letter-spacing:.2em;color:#5e6169}
+.m3 .posr{font:500 11px var(--font-mono);letter-spacing:.06em;color:#7a7e88;font-variant-numeric:tabular-nums}
+.m3 .posr b{color:#2f3238;font-weight:400}
+
+/* ===== SHARED ARRANGEMENT NAVIGATOR (identical component to the RAIL; @container flips it to phone) ===== */
+.arr-navc{container-type:inline-size}
+.arr-nav{--nav-h:44px;--bead:20px;--head-w:2px;--show-labels:block;
+  position:relative;height:var(--nav-h);border-radius:10px;overflow:hidden;isolation:isolate;font-family:var(--font-mono);
+  background:linear-gradient(180deg,#0e0f12,#090a0c);touch-action:none;cursor:ew-resize;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),inset 0 -1px 0 rgba(0,0,0,.6),inset 0 0 0 1px rgba(204,255,54,.08),inset 0 10px 22px rgba(0,0,0,.55)}
+.arr-nav::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E")}
+.arr-nav > *{position:absolute;top:0;bottom:0}
+.arr-nav .section{top:14%;bottom:14%;border-radius:6px;pointer-events:none;
+  left:calc(var(--a) * 1%);width:calc((var(--b) - var(--a)) * 1%);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--hue) 24%,transparent),color-mix(in srgb,var(--hue) 9%,transparent));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05),inset 0 -5px 9px rgba(0,0,0,.2)}   /* top sheen + depth — machined block, matches the sequencer nav */
+.arr-nav .section::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--hue);opacity:.95;border-radius:6px 6px 0 0}
+.arr-nav .section > b{display:var(--show-labels);position:absolute;left:8px;top:4px;white-space:nowrap;
+  font:600 8.5px/1 var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:rgba(223,226,232,.7)}
+.arr-nav .fill{left:0;width:calc(var(--pct) * 1%);z-index:1;pointer-events:none;
+  background:linear-gradient(180deg,rgba(204,255,54,.13),rgba(204,255,54,.045));border-right:1px solid rgba(204,255,54,.35);mix-blend-mode:screen}
+.arr-nav .viewport{top:0;bottom:0;z-index:3;cursor:grab;touch-action:none;
+  left:calc(var(--a) * 1%);width:calc((var(--b) - var(--a)) * 1%);border-radius:8px;
+  background:rgba(204,255,54,.04);
+  box-shadow:inset 0 0 0 1px rgba(204,255,54,.4),inset 0 1px 3px rgba(0,0,0,.4),0 0 0 1px rgba(0,0,0,.4),0 0 5px rgba(204,255,54,.16)}
+.arr-nav .viewport::before,.arr-nav .viewport::after{content:"";position:absolute;top:26%;bottom:26%;width:2px;background:rgba(204,255,54,.65);border-radius:2px}
+.arr-nav .viewport::before{left:3px}.arr-nav .viewport::after{right:3px}
+.arr-nav .playhead{left:calc(var(--pct) * 1%);width:var(--head-w);transform:translateX(-50%);z-index:4;will-change:left;
+  background:#ccff36;box-shadow:0 0 6px rgba(204,255,54,.55)}
+.arr-nav .playhead::before{content:"";position:absolute;top:-1px;left:50%;translate:-50% 0;width:calc(var(--head-w) + 6px);height:calc(var(--head-w) + 6px);border-radius:50%;background:#ccff36;box-shadow:0 0 8px rgba(204,255,54,.65)}
+.arr-nav .bead{left:calc(var(--pct) * 1%);top:66%;translate:-50% -50%;width:var(--bead);height:var(--bead);z-index:5;border-radius:50%;
+  display:grid;place-items:center;color:#0a0f04;font:700 calc(var(--bead) * .42)/1 var(--font-mono);letter-spacing:.02em;background:var(--who,#9684e8);
+  box-shadow:0 0 0 2px #0a0b0e,0 0 0 var(--ring,2px) var(--st,#58c2a9),0 2px 6px rgba(0,0,0,.5)}
+.arr-nav .bead[data-idle]{--st:#5c5f66;opacity:.72}
+@container (max-width:480px){                      /* PHONE hero, same DOM */
+  .arr-nav{--nav-h:64px;--bead:26px;--head-w:3px;--show-labels:none;border-radius:16px}
+  .arr-nav .fill{background:linear-gradient(180deg,rgba(204,255,54,.28),rgba(204,255,54,.11));mix-blend-mode:normal}
+  .arr-nav .viewport{display:none}
+  .arr-nav .bead{top:50%}   /* labels are hidden on phone — beads recentre */
+}
+.m3 .nav{position:absolute;top:68px;left:28px;right:28px}
+.m3 .nav .navlab{display:flex;justify-content:space-between;font:600 7px var(--font-mono);letter-spacing:.24em;color:#4a4d54;margin-bottom:9px}
+
+/* MOSHI — bigger, caption-free; the line under him lights while he listens */
+.m3 .mz{position:absolute;top:210px;left:0;right:0;height:200px}
+.m3 .mbtn{position:absolute;left:50%;top:0;transform:translateX(-50%);width:196px;height:158px;cursor:pointer;transition:transform .1s;touch-action:none}
+.m3 .mbtn:active,.m3 .mbtn.on{transform:translateX(-50%) scale(.95)}
+/* a resting halo lifts him off the obsidian (neutral + a whisper of lime) so he reads as a touch target */
+.m3 .mbtn::before{content:"";position:absolute;inset:8% 16% 6%;border-radius:50%;pointer-events:none;
+  background:radial-gradient(52% 46% at 50% 54%,rgba(214,224,238,.07),rgba(204,255,54,.07) 44%,transparent 74%)}
+.m3 .mhost{position:absolute;inset:0;pointer-events:none}
+.m3 .mfall{position:absolute;inset:10% 20%;border-radius:46% 54% 52% 48%/58% 50% 50% 42%;background:#111318;border:1px solid rgba(204,255,54,.22);display:none}
+.m3 .mfall:after{content:"> <";position:absolute;top:36%;left:50%;transform:translateX(-50%);font:700 14px var(--font-mono);color:#ccff36;letter-spacing:3px}
+.m3 .mline{position:absolute;left:50%;top:170px;transform:translateX(-50%);width:210px;height:1px;background:rgba(255,255,255,.07)}
+.m3 .mline:after{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(204,255,54,0),transparent);transition:background .3s}
+.m3 .mbtn.on~.mline:after{background:linear-gradient(90deg,transparent,rgba(204,255,54,.95),transparent);box-shadow:0 0 8px rgba(204,255,54,.5);height:2px;top:-1px}
+
+/* THE DECK — matte machined; take state lives here now */
+.m3 .deck{position:absolute;left:24px;right:24px;top:430px;bottom:54px;display:flex;flex-direction:column;gap:12px}
+.m3 .krow{display:flex;gap:10px}
+.m3 .key{position:relative;border-radius:10px;background:#13161c;border:1px solid rgba(255,255,255,.06);
+  box-shadow:inset 0 1px 0 rgba(196,210,230,.07),inset 0 -1px 0 rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.5);
+  display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;transition:transform .06s,box-shadow .2s,background .2s}
+.m3 .key:active{transform:translateY(1px);box-shadow:inset 0 1px 3px rgba(0,0,0,.5)}
+.m3 .key .kl{font-family:var(--font-mono);font-weight:600;letter-spacing:.32em;color:#6a6d75}
+/* compact transport strip */
+.m3 .row-transport{height:76px;flex:none}
+.m3 .row-transport .key{flex:1;flex-direction:row;gap:9px}
+.m3 .row-transport .kl{font-size:8.5px;letter-spacing:.16em}
+.m3 .key.stop .sq{width:14px;height:14px;border-radius:3px;background:#aeb1b8}
+.m3 .key.rec .ring{width:30px;height:30px;border-radius:50%;border:2px solid #c8463a;display:flex;align-items:center;justify-content:center}
+.m3 .key.rec .ring i{width:12px;height:12px;border-radius:50%;background:#c8463a;transition:transform .2s}
+.m3 .key.rec.on{border-color:rgba(200,70,58,.45);background:#191316}
+.m3 .key.rec.on .ring i{transform:scale(1.25)}
+.m3 .key.rec.on .kl{color:#d4685a}
+/* the take number rides the REC key — no caption row */
+.m3 .key.rec .tn{position:absolute;top:8px;right:10px;font:600 6.5px var(--font-mono);letter-spacing:.18em;color:#4a4d54;transition:color .3s}
+.m3 .key.rec.on .tn{color:#d4685a}
+.m3 .key.play svg path{fill:#8c8f98;transition:fill .2s} /* lime only while rolling — it's a LIVE accent */
+.m3 .key.play.on svg path{fill:#ccff36}
+/* THE MONUMENT ROW — KEEP & REDO. Progressive disclosure applies to STATE too: the verdict
+   pair rests QUIET (dimmed — nothing to judge yet) and comes to full life only when a take
+   is pending; that's also when KEEP's lime earns its moment. Hit areas never change. */
+.m3 .row-verdict{flex:1;min-height:150px}
+.m3 .row-verdict .key{flex-direction:column;gap:13px;opacity:.42;transition:opacity .35s,box-shadow .2s,background .2s}
+.m3 .deck.pend .row-verdict .key,.m3 .row-verdict .key.flash,.m3 .row-verdict .key:active{opacity:1}
+.m3 .key.keep{flex:1}
+.m3 .key.redo{flex:1.5;background:#181b21}
+.m3 .row-verdict .kl{font-size:12px;letter-spacing:.42em;color:#9aa0aa}
+.m3 .key.keep svg{stroke:#9adf20} /* the green CHECK carries KEEP's identity — the label stays neutral */
+.m3 .key.redo svg{stroke:#b7bbc3} /* luminance-matched to KEEP's check at rest */
+.m3 .deck.pend .key.keep{box-shadow:inset 0 0 0 1px rgba(204,255,54,.34),inset 0 -1px 0 rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.5);
+  animation:m3-pend 1.875s ease-in-out infinite} /* 4 beats at 128 BPM — the commit affordance breathes in tempo */
+.m3 .deck.pend .key.redo{box-shadow:inset 0 0 0 1px rgba(228,231,236,.22),inset 0 -1px 0 rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.5)}
+@keyframes m3-pend{50%{box-shadow:inset 0 0 0 1px rgba(204,255,54,.52),inset 0 -1px 0 rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.5)}}
+.m3 .key.keep.flash{background:#161a0c;box-shadow:inset 0 0 0 1px rgba(204,255,54,.45),inset 0 -1px 0 rgba(0,0,0,.5)}
+.m3 .key.redo.flash{background:#20232a;box-shadow:inset 0 0 0 1px rgba(255,255,255,.28),inset 0 -1px 0 rgba(0,0,0,.5)}
+</style>
+<div class="grain"></div>
+<div class="glance">
+  <span class="song">NOCTURNE_04 · 128 · A&#9837; MIN</span>
+  <span class="posr" id="m3-pos">005<b>·</b>2<b>·</b>04</span>
+</div>
+<div class="nav arr-navc">
+  <div class="navlab"><span>ARRANGEMENT</span><span>DRAG TO SCRUB</span></div>
+  <div class="arr-nav" id="m3-nav"></div>
+</div>
+<div class="mz">
+  <div class="mbtn" id="m3-mbtn" title="hold Moshi to talk">
+    <div class="mhost" id="m3-mhost"></div>
+    <div class="mfall" id="m3-fb"></div>
+  </div>
+  <span class="mline"></span>
+</div>
+<div class="deck" id="m3-deck">
+  <div class="krow row-transport">
+    <div class="key rec" id="m3-rec"><span class="tn" id="m3-tn">TAKE 3</span><span class="ring"><i></i></span><span class="kl">REC</span></div>
+    <div class="key stop" id="m3-stop"><span class="sq"></span><span class="kl">STOP</span></div>
+    <div class="key play" id="m3-play"><svg width="20" height="20" viewBox="0 0 46 46"><path d="M14 8l24 15-24 15z"/></svg><span class="kl">PLAY</span></div>
+  </div>
+  <div class="krow row-verdict">
+    <div class="key keep" id="m3-keep"><svg width="42" height="33" viewBox="0 0 34 26" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14l9 8L31 3"/></svg><span class="kl">KEEP</span></div>
+    <div class="key redo" id="m3-redo"><svg width="48" height="44" viewBox="0 0 30 28" fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M25 6a12 10.5 0 1 0 3 8"/><path d="M28 2v6h-6" stroke-linejoin="round"/></svg><span class="kl">REDO</span></div>
+  </div>
+</div>
+<div class="home"></div>
+<script>
+(function(){
+  var root=document.currentScript.parentElement;
+  var m=null;
+  if(window.Moshi){try{m=window.Moshi(root.querySelector('#m3-mhost'),{personality:'TAR',seed:.42,quality:'ps2+',style:'baked',interactive:true,room:false});}catch(e){}}
+  if(!m){root.querySelector('#m3-fb').style.display='block'}
+  if(m){try{m.set('mood',.72);m.set('energy',.34)}catch(e){}} // rest with warmth + a little life — visible against the obsidian — he should look glad you're here
+  // build the shared arrangement navigator (phone form)
+  var nav=root.querySelector('#m3-nav');
+  var sections=[['INTRO',0,12,'#5fae9d'],['VERSE',12,38,'#9684e8'],['CHORUS',38,60,'#e28aa1'],['VERSE',60,80,'#9684e8'],['OUT',80,100,'#d89e4f']];
+  var nh='';
+  sections.forEach(function(s){nh+='<div class="section" style="--a:'+s[1]+';--b:'+s[2]+';--hue:'+s[3]+'"><b>'+s[0]+'</b></div>'});
+  nh+='<div class="fill" id="m3-fill"></div><div class="playhead" id="m3-nph"></div>';
+  nh+='<div class="bead at" id="m3-bk" style="--who:#bf9769;--pct:58">KA</div>';
+  nh+='<div class="bead at" id="m3-bj" style="--who:#7f97a8;--pct:81" data-idle>JU</div>';
+  nav.innerHTML=nh;
+  var playing=false,scrub=null,pos=.32,talking=false,recording=false,take=3,pending=false;
+  var mbtn=root.querySelector('#m3-mbtn');
+  var keep=root.querySelector('#m3-keep'),redo=root.querySelector('#m3-redo'),stop=root.querySelector('#m3-stop');
+  var rec=root.querySelector('#m3-rec'),play=root.querySelector('#m3-play');
+  var deck=root.querySelector('#m3-deck'),tn=root.querySelector('#m3-tn');
+  function setPending(v){pending=v;deck.classList.toggle('pend',v)}
+  function setTakeNum(){tn.textContent='TAKE '+take}
+  mbtn.addEventListener('pointerdown',function(e){
+    if(mbtn.setPointerCapture){try{mbtn.setPointerCapture(e.pointerId)}catch(_){}}
+    talking=true;mbtn.classList.add('on');
+    if(m){try{m.setState('LISTENING');m.set('mood',.9);m.set('heat',.35)}catch(e){}} // his lime brightens while he listens
+  },true);
+  var endTalk=function(){if(!talking)return;talking=false;mbtn.classList.remove('on');
+    if(m){try{m.setState(recording?'RECORDING':'IDLE');m.set('heat',recording?.85:0);m.set('mood',.68)}catch(e){}}};
+  mbtn.addEventListener('pointerup',endTalk,true);mbtn.addEventListener('pointercancel',endTalk,true);
+  rec.addEventListener('click',function(){
+    recording=!recording;rec.classList.toggle('on',recording);
+    if(recording){playing=true;setPending(false);if(m){try{m.setState('RECORDING');m.set('heat',.85)}catch(e){}}}
+    else{playing=false;setPending(true);if(m){try{m.setState('IDLE');m.set('heat',.1)}catch(e){}}}
+  });
+  stop.addEventListener('click',function(){
+    playing=false;
+    if(recording){recording=false;rec.classList.remove('on');setPending(true);if(m){try{m.set('heat',.1)}catch(e){}}}
+    if(m){try{m.setState('IDLE')}catch(e){}}
+  });
+  keep.addEventListener('click',function(){
+    if(recording){recording=false;playing=false;rec.classList.remove('on');if(m){try{m.set('heat',.1)}catch(e){}}}
+    keep.classList.add('flash');setPending(false);
+    setTimeout(function(){keep.classList.remove('flash');take++;setTakeNum()},900);
+    if(m){try{m.setState('IDLE');m.set('mood',.95);if(m.celebrate)m.celebrate()}catch(e){}}
+  });
+  redo.addEventListener('click',function(){
+    if(recording){recording=false;playing=false;rec.classList.remove('on');if(m){try{m.set('heat',.1)}catch(e){}}}
+    redo.classList.add('flash');setPending(false);
+    setTimeout(function(){redo.classList.remove('flash')},900);
+    pos=Math.max(0,pos-.1);
+    if(m){try{m.setState('IDLE')}catch(e){}}
+  });
+  play.addEventListener('click',function(){playing=!playing;if(m){try{m.setState(playing?'LISTENING':'IDLE')}catch(e){}}});
+  // scrub the navigator to seek
+  nav.addEventListener('pointerdown',function(e){
+    if(nav.setPointerCapture){try{nav.setPointerCapture(e.pointerId)}catch(_){}}
+    var set=function(ev){var r=nav.getBoundingClientRect();scrub=Math.min(1,Math.max(0,(ev.clientX-r.left)/r.width))};
+    set(e);
+    var mv=function(ev){set(ev)};
+    var up=function(){if(scrub!==null)pos=scrub;scrub=null;nav.removeEventListener('pointermove',mv);nav.removeEventListener('pointerup',up);nav.removeEventListener('pointercancel',up)};
+    nav.addEventListener('pointermove',mv);nav.addEventListener('pointerup',up);nav.addEventListener('pointercancel',up);
+  });
+  var fill=root.querySelector('#m3-fill'),nph=root.querySelector('#m3-nph'),posr=root.querySelector('#m3-pos');
+  var bk=root.querySelector('#m3-bk'),bj=root.querySelector('#m3-bj');
+  var fk=.58,fj=.81,last=null;
+  function tick(ts){
+    if(last===null)last=ts;var dt=(ts-last)/1000;last=ts;
+    if((playing||recording)&&scrub===null)pos=(pos+dt/46)%1;
+    play.classList.toggle('on',playing); // PLAY earns its lime only while rolling
+    var p=scrub!==null?scrub:pos;
+    fill.style.setProperty('--pct',(p*100));nph.style.setProperty('--pct',(p*100));
+    var b=1+Math.floor(p*16),bt=1+Math.floor((p*16%1)*4);
+    posr.innerHTML=('00'+b).slice(-3)+'<b>·</b>'+bt+'<b>·</b>'+('0'+Math.floor((p*64%1)*96)).slice(-2);
+    fk=(fk+dt/52)%1;fj=(fj+dt/49)%1;bk.style.setProperty('--pct',(fk*100));bj.style.setProperty('--pct',(fj*100));
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</div>

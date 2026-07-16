@@ -3,7 +3,7 @@
 // runs the edits as ONE undo step, and the result lands in Monster changes. Voice
 // and text feed the very same run() funnel; nothing downstream knows the difference.
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, type PointerEvent, type ReactNode } from "react";
 import { useStore } from "../store";
 import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
@@ -100,7 +100,20 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
   };
 }
 
-export function AgentComposer() {
+export type AgentTalkTargetProps = {
+  readonly disabled: boolean;
+  readonly listening: boolean;
+  readonly label: string;
+  readonly onPointerDown: (event: PointerEvent<HTMLElement>) => void;
+  readonly onPointerUp: () => void;
+  readonly onPointerCancel: () => void;
+};
+
+type AgentComposerProps = {
+  readonly renderTalkTarget?: (props: AgentTalkTargetProps) => ReactNode;
+};
+
+export function AgentComposer({ renderTalkTarget }: AgentComposerProps) {
   const agentBusy = useStore((s) => s.agentBusy);
   const setAgentBusy = useStore((s) => s.setAgentBusy);
   const setAgentChangeSet = useStore((s) => s.setAgentChangeSet);
@@ -205,33 +218,40 @@ export function AgentComposer() {
   const micLabel = !voiceSupported ? "Voice unavailable here — type instead"
     : listening ? "Listening… release to send" : "Hold to talk";
 
+  const talkTarget: AgentTalkTargetProps = {
+    disabled: !voiceSupported || agentBusy,
+    listening,
+    label: micLabel,
+    onPointerDown: (event) => {
+      if (agentBusy || !voiceSupported) return;
+      handsFree.pauseForPushToTalk();
+      if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
+      const voice = ensureVoice();
+      if (!voice) return;
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* noop */ }
+      voice.start();
+    },
+    onPointerUp: () => voiceRef.current?.stop(),
+    onPointerCancel: () => voiceRef.current?.stop(),
+  };
+
   return (
     <div className="agent-composer">
       {say && <div className="agent-say" role="status" aria-live="polite">{say}</div>}
       <div className={`agent-input${listening ? " listening" : ""}`}>
-        <button
+        {renderTalkTarget ? renderTalkTarget(talkTarget) : <button
           className={`agent-mic${listening ? " on" : ""}`}
           title={micLabel} aria-label={micLabel} aria-pressed={listening}
           disabled={!voiceSupported || agentBusy}
           data-testid="agent-mic"
-          onPointerDown={(e) => {
-            if (agentBusy || !voiceSupported) return;
-            // Holding the talk button to address Moshi pauses always-on hands-free (so the
-            // two recognizers never fight for the mic; it resumes on release) and STOPS an
-            // in-progress take first (performer mode → assistant mode), then listens.
-            handsFree.pauseForPushToTalk();
-            if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
-            const v = ensureVoice(); if (!v) return;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
-            v.start();
-          }}
-          onPointerUp={() => voiceRef.current?.stop()}
-          onPointerCancel={() => voiceRef.current?.stop()}
+          onPointerDown={talkTarget.onPointerDown}
+          onPointerUp={talkTarget.onPointerUp}
+          onPointerCancel={talkTarget.onPointerCancel}
         >
           {listening
             ? <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />
             : <IconMic size={16} />}
-        </button>
+        </button>}
         <input
           data-testid="agent-input"
           value={input}
