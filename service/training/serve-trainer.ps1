@@ -43,7 +43,7 @@ if (-not $Sa3TrainDir) {
 }
 foreach ($s in @("scripts\pre_encode_dataset.py", "scripts\train_lora.py")) {
     if (-not (Test-Path -LiteralPath (Join-Path $Sa3TrainDir $s))) {
-        Fail "training script missing: $Sa3TrainDir\$s (need the proven SA3 code tree — same one runpod_serve.sh uses)."
+        Fail "training script missing: $Sa3TrainDir\$s (need the proven SA3 code tree - same one runpod_serve.sh uses)."
     }
 }
 Say "training scripts OK"

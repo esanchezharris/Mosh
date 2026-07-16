@@ -114,5 +114,5 @@ if ($Feature -eq "all") {
 }
 
 Write-Host ""
-Write-Host "done. The venv lives at the conventional location server.py resolves on Windows —" -ForegroundColor Green
+Write-Host "done. The venv lives at the conventional location server.py resolves on Windows -" -ForegroundColor Green
 Write-Host "no exports needed. Restart Mosh (or the service) if it was already running."
