@@ -6,6 +6,7 @@
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealSA3        # exercise the CUDA SA3 path
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealLoRA       # runtime-LoRA smoke on the GPU (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealRave       # anira build + live-RAVE insert smoke (FIT-013)
+#   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealTrainer    # local trainer /health, real backend (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -Repeat 3       # determinism bar (3 isolated runs)
 #
 # Steps: configure (windows-x64-release) -> build app + tests + VST3 fixture ->
@@ -23,6 +24,7 @@ param(
     [switch]$RealSA3,
     [switch]$RealLoRA,
     [switch]$RealRave,
+    [switch]$RealTrainer,
     [int]$Repeat = 1
 )
 
@@ -142,6 +144,38 @@ try {
         # rack is empty (service/loras/install.py).
         Invoke-Native "run runtime-LoRA smoke (CUDA)" {
             & $py (Join-Path $Root "service\scripts\sa3_cuda_lora_smoke.py")
+        }
+    }
+
+    if ($RealTrainer) {
+        $tpy = if ($env:MOSH_TRAINER_PYTHON) { $env:MOSH_TRAINER_PYTHON } else { $env:MOSH_SERVICE_PYTHON }
+        if (-not ($tpy -and (Test-Path -LiteralPath $tpy))) {
+            throw "RealTrainer requested but no trainer venv (MOSH_TRAINER_PYTHON / MOSH_SERVICE_PYTHON)."
+        }
+        if (-not $env:SA3_TRAIN_DIR) {
+            throw "RealTrainer requested but SA3_TRAIN_DIR is unset (the stable-audio-3 code tree)."
+        }
+        # Launch loopback-only on a free port, poll /health, assert the REAL backend
+        # was selected (proves stable_audio_3 + CUDA import in that venv), tear down.
+        $tport = Get-FreeTcpPort
+        Write-Host ""
+        Write-Host "==> trainer server /health probe (real backend) on 127.0.0.1:$tport"
+        $tproc = Start-Process -FilePath $tpy -PassThru -WindowStyle Hidden -ArgumentList @(
+            (Join-Path $Root "service\training\runpod_server.py"), "--port", "$tport", "--host", "127.0.0.1")
+        try {
+            $health = $null
+            foreach ($i in 1..30) {
+                Start-Sleep -Seconds 1
+                try { $health = Invoke-RestMethod -Uri "http://127.0.0.1:$tport/health" -TimeoutSec 2; break } catch { }
+            }
+            if (-not $health) { throw "trainer server never answered /health" }
+            if (-not $health.ok) { throw "trainer /health not ok: $($health | ConvertTo-Json -Compress)" }
+            if ($health.backend -ne "real") {
+                throw "trainer selected the FAKE backend (stable_audio_3/CUDA missing in $tpy): $($health | ConvertTo-Json -Compress)"
+            }
+            Write-Host "trainer /health OK (backend=real)"
+        } finally {
+            if ($tproc -and -not $tproc.HasExited) { Stop-Process -Id $tproc.Id -Force }
         }
     }
 

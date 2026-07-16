@@ -114,6 +114,32 @@ launchctl unsetenv MOSH_TRAINING_REMOTE_URL
 
 ---
 
+## Alternative: local PC trainer (FIT-013 — $0 small runs)
+
+The same server runs on the owner's Windows/CUDA box instead of a pod — no rental, no
+tunnel, plain LAN HTTP. On the PC (needs the SA3 code tree + the CUDA venv):
+
+```powershell
+.\service\training\serve-trainer.ps1 -Sa3TrainDir E:\stable-audio-3 -BindHost <pc-lan-ip>
+```
+
+Mac side — same env contract as the pod, just the LAN URL, no SSH tunnel:
+
+```bash
+launchctl setenv MOSH_TRAINING_BACKEND remote_http
+launchctl setenv MOSH_TRAINING_REMOTE_URL http://<pc-lan-ip>:8799
+open /Applications/Mosh.app          # sanity: curl -s <url>/health → "backend":"real"
+```
+
+**Security (read this):** the trainer server is unauthenticated and executes training
+subprocesses on submitted bundles. Bind the LAN IPv4 (not 0.0.0.0), allow inbound TCP 8799
+only on the Private firewall profile scoped to the local subnet, never port-forward it, and
+stop the server when not training. Teardown is the same `launchctl unsetenv` pair as §5
+(there is no pod to terminate). Pick the pod for big runs (the 4070 is 12 GB); pick the PC
+for small/iterative ones.
+
+---
+
 ## Contract reference (for maintainers)
 
 `runpod_server.py` honors exactly what `trainer_job._remote_train` sends/expects:
