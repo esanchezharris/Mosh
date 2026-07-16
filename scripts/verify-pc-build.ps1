@@ -4,15 +4,19 @@
 #
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealSA3        # exercise the CUDA SA3 path
+#   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealLoRA       # runtime-LoRA smoke on the GPU (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -Repeat 3       # determinism bar (3 isolated runs)
 #
 # Steps: configure (windows-x64-release) -> build app + tests + VST3 fixture ->
 # run MoshTests (Catch2) -> run `Mosh.exe --selftest` (device-free, isolated port)
 # N times asserting exit 0. -RealSA3 additionally wires the CUDA venv + weights and
-# runs the SA3-gated selftest.
+# runs the SA3-gated selftest. -RealLoRA (implies the -RealSA3 env wiring) runs
+# service\scripts\sa3_cuda_lora_smoke.py: stock vs two LoRA strengths must differ,
+# tensors must match the numpy disk-merge oracle, restore must be bit-clean.
 param(
     [switch]$SkipAppBuild,
     [switch]$RealSA3,
+    [switch]$RealLoRA,
     [int]$Repeat = 1
 )
 
@@ -121,6 +125,18 @@ try {
 
     if ($RealSA3) {
         Invoke-Native "run real SA3 (CUDA) selftest" { Invoke-MoshSelfTest -Exe $MoshExe -WithRealSA3 }
+    }
+
+    if ($RealLoRA) {
+        $py = if ($env:MOSH_SERVICE_PYTHON) { $env:MOSH_SERVICE_PYTHON } else { "C:\ComfyUI\venv\Scripts\python.exe" }
+        if (-not (Test-Path -LiteralPath $py)) {
+            throw "RealLoRA requested but the CUDA venv ($py) is missing. Run service\setup-sa3-cuda.ps1."
+        }
+        # The smoke needs >=1 enrolled LoRA; it prints the enroll hint itself if the
+        # rack is empty (service/loras/install.py).
+        Invoke-Native "run runtime-LoRA smoke (CUDA)" {
+            & $py (Join-Path $Root "service\scripts\sa3_cuda_lora_smoke.py")
+        }
     }
 
     Write-Host ""
