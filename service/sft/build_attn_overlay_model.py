@@ -18,7 +18,8 @@ opt a path out of quantization, and layers without `.scales` in the weight file
 stay regular Linears (verified against mlx_lm 0.31.3 utils.load_model).
 
 Usage:
-  python build_attn_overlay_model.py BASE_DIR BF16_ATTN_DIR MLX_ADAPTER_DIR OUT_DIR
+  python build_attn_overlay_model.py BASE_DIR BF16_ATTN_DIR MLX_ADAPTER_DIR OUT_DIR \
+      [EXTRA_BF16_DIR]
 
   BASE_DIR        quantized MLX base (e.g. ...-4bit or ...-8bit)
   BF16_ATTN_DIR   dir of single-tensor .safetensors files holding the bf16
@@ -27,6 +28,10 @@ Usage:
   MLX_ADAPTER_DIR output of convert_peft_adapter_to_mlx.py (adapters.safetensors
                   + adapter_config.json with lora_parameters.scale)
   OUT_DIR         new model dir (refuses to overwrite)
+  EXTRA_BF16_DIR  optional: dir of single-tensor `<path>.weight.safetensors`
+                  files overlaid VERBATIM (no LoRA delta) — e.g. MoE routers
+                  (`mlp.gate`) or `lm_head`, whose quantization sits directly
+                  on routing / token-tie decisions
 """
 from __future__ import annotations
 
@@ -45,7 +50,13 @@ def touched_paths(adapter_weights: dict) -> list[str]:
     return paths
 
 
-def main(base_dir: Path, attn_dir: Path, adapter_dir: Path, out_dir: Path) -> None:
+def main(
+    base_dir: Path,
+    attn_dir: Path,
+    adapter_dir: Path,
+    out_dir: Path,
+    extra_dir: Path | None = None,
+) -> None:
     if out_dir.exists():
         raise SystemExit(f"refusing to overwrite {out_dir}")
     adapter = mx.load(str(adapter_dir / "adapters.safetensors"))
@@ -68,6 +79,18 @@ def main(base_dir: Path, attn_dir: Path, adapter_dir: Path, out_dir: Path) -> No
         if delta.shape != w.shape:
             raise SystemExit(f"{path}: delta {delta.shape} != weight {w.shape}")
         fused[path + ".weight"] = (w + delta).astype(mx.bfloat16)
+
+    extra_paths: list[str] = []
+    if extra_dir is not None:
+        for f in sorted(extra_dir.glob("*.weight.safetensors")):
+            path = f.name[: -len(".weight.safetensors")]
+            if path in paths:
+                raise SystemExit(f"{path} is both adapter-touched and extra")
+            fused[path + ".weight"] = mx.load(str(f))[path + ".weight"].astype(mx.bfloat16)
+            extra_paths.append(path)
+        if not extra_paths:
+            raise SystemExit(f"no *.weight.safetensors files in {extra_dir}")
+        paths = sorted(paths + extra_paths)
 
     out_dir.mkdir(parents=True)
     index = json.loads((base_dir / "model.safetensors.index.json").read_text())
@@ -119,6 +142,7 @@ def main(base_dir: Path, attn_dir: Path, adapter_dir: Path, out_dir: Path) -> No
         "adapter_dir": str(adapter_dir),
         "scale": scale,
         "overlaid_paths": paths,
+        "extra_verbatim_paths": extra_paths,
         "stored_dtype": "bfloat16",
     }
     (out_dir / "overlay_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -126,6 +150,6 @@ def main(base_dir: Path, attn_dir: Path, adapter_dir: Path, out_dir: Path) -> No
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
+    if len(sys.argv) not in (5, 6):
         raise SystemExit(__doc__)
-    main(*(Path(a).expanduser() for a in sys.argv[1:5]))
+    main(*(Path(a).expanduser() for a in sys.argv[1:6]))

@@ -114,6 +114,24 @@ def run() -> None:
         else:
             raise AssertionError("expected refusal on existing output dir")
 
+        # Extra verbatim overlay (router/lm_head style): tensor replaced as-is,
+        # quant triplet dropped, config opted out, manifest records it.
+        extra = root / "extra"
+        extra.mkdir()
+        w_router = (mx.random.normal((64, 64)) * 0.02).astype(mx.bfloat16)
+        mx.save_safetensors(str(extra / f"{UNTOUCHED}.weight.safetensors"),
+                            {f"{UNTOUCHED}.weight": w_router})
+        out2 = root / "out2"
+        build_overlay(base, attn, adapter, out2, extra)
+        s1b = mx.load(str(out2 / "model-00001-of-00002.safetensors"))
+        assert set(s1b) == {f"{UNTOUCHED}.weight"}, sorted(s1b)
+        assert mx.array_equal(s1b[f"{UNTOUCHED}.weight"], w_router).item()
+        config2 = json.loads((out2 / "config.json").read_text())
+        assert config2["quantization"][UNTOUCHED] is False
+        manifest2 = json.loads((out2 / "overlay_manifest.json").read_text())
+        assert manifest2["extra_verbatim_paths"] == [UNTOUCHED]
+        assert manifest2["overlaid_paths"] == sorted([TOUCHED, UNTOUCHED])
+
     print("build_attn_overlay_model_test: ALL PASS")
 
 
