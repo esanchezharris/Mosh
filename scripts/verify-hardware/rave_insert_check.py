@@ -47,23 +47,46 @@ def _max_zero_run(sig):
     return int(runs.max()) if runs.size else 0
 
 
+def _real_model_fallback():
+    """First real .ts from the rack ($RAVE_MODEL_DIR, else ~/AI/rave-models). Used when
+    no transform venv can build the synthetic model — e.g. the Windows PC, where real
+    models exist but the transform venv is a deferred parity row (FIT-013)."""
+    rack = os.environ.get("RAVE_MODEL_DIR") or os.path.expanduser("~/AI/rave-models")
+    try:
+        for f in sorted(os.listdir(rack)):
+            if f.lower().endswith(".ts"):
+                return os.path.join(rack, f)
+    except OSError:
+        pass
+    return None
+
+
 def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
     name = "RAVE insert offline render (Route C.2)"
-    conventional = os.path.expanduser("~/Library/Mosh/venvs/transform/bin/python")
+    if os.name == "nt":
+        conventional = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                                    "Mosh", "venvs", "transform", "Scripts", "python.exe")
+    else:
+        conventional = os.path.expanduser("~/Library/Mosh/venvs/transform/bin/python")
     py = os.environ.get("TRANSFORM_PY") or (
         conventional if os.path.isfile(conventional) else str(REPO / "service/transform/.venv/bin/python"))
-    if not os.path.exists(py):
-        return {"check": name, "pass": True,
-                "detail": {"skipped": "transform venv absent — run service/transform/setup-transform.sh"}}
 
-    # Build the synthetic scripted model (needs only torch, from the transform venv).
-    d = tempfile.mkdtemp()
-    builder = os.path.join(d, "_build.py"); Path(builder).write_text(_BUILDER)
-    model = os.path.join(d, "rave_fake.ts")
-    b = subprocess.run([py, builder, model], capture_output=True, text=True, timeout=180)
-    if b.returncode != 0 or not os.path.isfile(model):
-        return {"check": name, "pass": False,
-                "detail": {"stage": "build synthetic model", "stderr": b.stderr[-400:]}}
+    model = None
+    if os.path.exists(py):
+        # Build the synthetic scripted model (needs only torch, from the transform venv).
+        d = tempfile.mkdtemp()
+        builder = os.path.join(d, "_build.py"); Path(builder).write_text(_BUILDER)
+        model = os.path.join(d, "rave_fake.ts")
+        b = subprocess.run([py, builder, model], capture_output=True, text=True, timeout=180)
+        if b.returncode != 0 or not os.path.isfile(model):
+            return {"check": name, "pass": False,
+                    "detail": {"stage": "build synthetic model", "stderr": b.stderr[-400:]}}
+    else:
+        model = _real_model_fallback()
+        if model is None:
+            return {"check": name, "pass": True,
+                    "detail": {"skipped": "no transform venv (service/transform/setup-transform.sh) "
+                                          "and no real .ts in the RAVE rack to fall back to"}}
 
     dry = ART / "04c_rave_insert_dry.wav"
     wet = ART / "04c_rave_insert_wet.wav"
@@ -108,24 +131,26 @@ def check_rave_insert(ctx, ART, run_script, stats, diff_rms, failed_commands):
 
     def _analyze(path):
         m = mono(load_wav(path)[0]); srr = load_wav(path)[1]
+        finite = bool(np.isfinite(m).all())     # NaN/inf = a broken inference path
         st = stats(path)
         t = diff_rms(str(dry), str(path))
         mid = m[skip: max(skip, m.size - skip)]
         g = _max_zero_run(mid) if mid.size else 0
-        return srr, st, t, g
+        return srr, st, t, g, finite
 
-    sr, sw, transformed, gap = _analyze(wet)
+    sr, sw, transformed, gap, finite = _analyze(wet)
     # Post-reset export must ALSO be non-silent, transformed vs dry, and gap-free — i.e. the
     # reset rebuilt a working pipeline (not a dead/half-reset handler nor a lost model).
-    sr2, sw2, transformed2, gap2 = _analyze(wet2)
+    sr2, sw2, transformed2, gap2, finite2 = _analyze(wet2)
 
-    ok = bool(sw["rms"] > 0.01 and transformed > 0.01 and gap < 256
-              and sw2["rms"] > 0.01 and transformed2 > 0.01 and gap2 < 256)
+    ok = bool(finite and sw["rms"] > 0.01 and transformed > 0.01 and gap < 256
+              and finite2 and sw2["rms"] > 0.01 and transformed2 > 0.01 and gap2 < 256)
     return {"check": name, "pass": ok,
             "detail": {"wav": str(wet), **sw, "diff_from_dry_rms": transformed,
                        "max_zero_run_samples": gap, "gap_threshold": 256, "samplerate": sr,
+                       "finite": finite,
                        "postreset": {"wav": str(wet2), **sw2, "diff_from_dry_rms": transformed2,
-                                     "max_zero_run_samples": gap2},
+                                     "max_zero_run_samples": gap2, "finite": finite2},
                        "note": "synthetic scripted RAVE-shaped model through anira+LibTorch; "
                                "gap-free export proves non-real-time mode during render; the "
                                "post-reset export proves RaveEngine::reset()'s RT-safe "

@@ -5,6 +5,7 @@
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealSA3        # exercise the CUDA SA3 path
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealLoRA       # runtime-LoRA smoke on the GPU (FIT-013)
+#   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -RealRave       # anira build + live-RAVE insert smoke (FIT-013)
 #   pwsh -NoProfile -File scripts\verify-pc-build.ps1 -Repeat 3       # determinism bar (3 isolated runs)
 #
 # Steps: configure (windows-x64-release) -> build app + tests + VST3 fixture ->
@@ -13,10 +14,15 @@
 # runs the SA3-gated selftest. -RealLoRA (implies the -RealSA3 env wiring) runs
 # service\scripts\sa3_cuda_lora_smoke.py: stock vs two LoRA strengths must differ,
 # tensors must match the numpy disk-merge oracle, restore must be bit-clean.
+# -RealRave configures + builds the anira tree (windows-x64-release-anira; first
+# configure downloads LibTorch ~190 MB), reruns the selftest against the anira exe,
+# then drives verify.py --rave-insert (needs a .ts in %USERPROFILE%\AI\rave-models
+# or a transform venv; `py -3 -m pip install numpy` is a prerequisite).
 param(
     [switch]$SkipAppBuild,
     [switch]$RealSA3,
     [switch]$RealLoRA,
+    [switch]$RealRave,
     [int]$Repeat = 1
 )
 
@@ -136,6 +142,22 @@ try {
         # rack is empty (service/loras/install.py).
         Invoke-Native "run runtime-LoRA smoke (CUDA)" {
             & $py (Join-Path $Root "service\scripts\sa3_cuda_lora_smoke.py")
+        }
+    }
+
+    if ($RealRave) {
+        Invoke-Native "configure anira tree (Release-only; first run downloads LibTorch)" {
+            & $CMake --preset windows-x64-release-anira
+        }
+        Invoke-Native "build anira Mosh app" { & $CMake --build --preset windows-x64-release-anira-app --parallel }
+        $AniraExe = Get-ChildItem -Path (Join-Path $Root "build-windows-x64-anira") -Recurse -Filter "Mosh.exe" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $AniraExe) { throw "anira Mosh.exe not found under build-windows-x64-anira" }
+        Invoke-Native "run Mosh --selftest (anira exe)" { Invoke-MoshSelfTest -Exe $AniraExe.FullName }
+        # The insert smoke: loads a .ts through anira+LibTorch, asserts transformed,
+        # gap-free, finite output and a working post-reset_rave pipeline.
+        Invoke-Native "run RAVE insert smoke (verify.py --rave-insert)" {
+            py -3 (Join-Path $Root "scripts\verify-hardware\verify.py") --rave-insert --bin $AniraExe.FullName
         }
     }
 

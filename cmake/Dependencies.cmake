@@ -54,6 +54,14 @@ endif()
 option(MOSH_ENABLE_ANIRA "Fetch anira + LibTorch for the real-time RAVE insert (heavy)" OFF)
 
 if (MOSH_ENABLE_ANIRA)
+    # anira's msvc-support.cmake FATAL_ERRORs without CMAKE_BUILD_TYPE (it also
+    # selects the release-vs-debug LibTorch download / CRT). Our Windows presets use
+    # the multi-config VS generator and set none — fail here with a useful message.
+    if (WIN32 AND NOT CMAKE_BUILD_TYPE)
+        message(FATAL_ERROR "MOSH_ENABLE_ANIRA on Windows requires CMAKE_BUILD_TYPE=Release "
+            "(anira's msvc-support.cmake + LibTorch CRT selection). "
+            "Use the windows-x64-release-anira preset.")
+    endif()
     # LibTorch only (skip the other inference backends to keep the download tractable).
     set(ANIRA_WITH_LIBTORCH    ON  CACHE BOOL "" FORCE)
     set(ANIRA_WITH_ONNXRUNTIME OFF CACHE BOOL "" FORCE)

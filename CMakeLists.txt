@@ -208,6 +208,23 @@ if (MOSH_BUILD_APP)
     # Route C.2 — real-time RAVE insert via anira + LibTorch (gated; default build OFF).
     if (MOSH_ENABLE_ANIRA AND TARGET mosh_neural_backends)
         target_link_libraries(Mosh PRIVATE mosh_neural_backends)
+        if (MSVC)
+            # anira/anira.h pulls the full torch header surface into RaveEngine.cpp —
+            # a >65k-COFF-sections TU on MSVC without /bigobj.
+            set_source_files_properties(src/plugins/transform/RaveEngine.cpp
+                PROPERTIES COMPILE_OPTIONS "/bigobj")
+        endif()
+        if (WIN32 AND DEFINED ANIRA_SHARED_LIBS_WIN)
+            # Stage anira.dll + every LibTorch DLL next to Mosh.exe (the Windows
+            # analogue of run-mosh.sh selfcontain_anira). run-mosh.ps1 -Package's
+            # wildcard *.dll copy then ships them automatically. Full list first;
+            # prune via dumpbin /dependents only if zip size ever matters.
+            add_custom_command(TARGET Mosh POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        ${ANIRA_SHARED_LIBS_WIN} "$<TARGET_FILE_DIR:Mosh>"
+                COMMENT "Staging anira + LibTorch DLLs next to Mosh.exe"
+                VERBATIM)
+        endif()
     endif()
 
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
