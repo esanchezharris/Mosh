@@ -68,10 +68,15 @@ class _Engine:
         self.enc = S.T5Gemma.from_npz(str(S.ensure_local(S.T5GEMMA_NPZ_REL)))
         self.padding_emb, self.secs_embedder = S.load_conditioner_from_npz(
             str(S.ensure_local(S.DIT_CHOICES["medium"]["ckpt"])), prefix="cond.")
-        self.dit_model, _ = S.load_dit("medium", T_lat=self.T_LAT, dtype=self.DTYPE)
+        self.dit_model, self._dit_ckpt = S.load_dit("medium", T_lat=self.T_LAT, dtype=self.DTYPE)
         self.decoder, _chunk_fn, _ = S.load_decoder("same-l", self.DEC_DTYPE)
         self._tf = self.dit_model.transformer
         self._encoder = None
+        # LoRA rack state (merge-at-rack-change; see sa3/lora_runtime.py).
+        # _lora_sig identifies the currently-merged rack; _lora_keys are the
+        # DiT param keys a merge touched (what restore_base must reload).
+        self._lora_sig = None
+        self._lora_keys = []
 
     # ── carved from mlx_inproc._encode_audio ──
     def encode_init(self, path):
@@ -122,6 +127,44 @@ class _Engine:
         if audio_np.shape[-1] > req:
             audio_np = audio_np[..., :req]
         S.save_wav(out_wav, audio_np)
+
+    # ── LoRA rack (merge-at-rack-change; single worker thread only) ──
+    def apply_lora_rack(self, rack):
+        """Merge a resolved LoRA rack into the DiT (or restore base for []).
+
+        rack: [{"path", "sha256", "strength"}, ...] in rack order, strength>0.
+        Signature-gated: re-merges only when the rack actually changed, so
+        back-to-back renders with the same rack pay nothing. Returns
+        {"ms", "targets", "cached"}.
+        """
+        from . import lora_runtime as LR
+        sig = LR.rack_signature(rack)
+        if sig == self._lora_sig:
+            return {"ms": 0, "targets": 0, "cached": True}
+
+        import time as _time
+        t0 = _time.time()
+        if not rack:
+            if self._lora_keys:
+                LR.restore_base(self.dit_model, self._dit_ckpt, self._lora_keys,
+                                mx=self.mx)
+            self._lora_keys = []
+            self._lora_sig = sig
+            return {"ms": int((_time.time() - t0) * 1000), "targets": 0,
+                    "cached": False}
+
+        stats = LR.merge_rack(self.dit_model, self._dit_ckpt, rack, mx=self.mx)
+        new_keys = stats.pop("keys")
+        # Keys the PREVIOUS rack touched but this one doesn't must revert to
+        # pristine, or they'd keep stale merged values.
+        stale = [k for k in self._lora_keys if k not in set(new_keys)]
+        if stale:
+            LR.restore_base(self.dit_model, self._dit_ckpt, stale, mx=self.mx)
+        self._lora_keys = new_keys
+        self._lora_sig = sig
+        stats["ms"] = int((_time.time() - t0) * 1000)
+        stats["cached"] = False
+        return stats
 
     # ── public API ──
     def generate(self, prompt, seed, steers=None, out_wav=None):
