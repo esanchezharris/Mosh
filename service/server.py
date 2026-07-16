@@ -266,8 +266,11 @@ def _colorrack_hash() -> str:
 # service_build feeds the native render-cache fingerprint: changing the engine/colors
 # must invalidate cached renders, so it encodes the carve identity.
 if SA3_ENABLED:
+    # +loraruntime1 = the LoRA-rack merge math generation; bump it whenever
+    # service/sa3/lora_runtime.py changes semantics so cached renders MISS.
     SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
-                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}")
+                     f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
+                     f"+loraruntime1")
 else:
     SERVICE_BUILD = "fake-0.1.0"
 
@@ -750,6 +753,17 @@ class Handler(BaseHTTPRequestHandler):
                                  "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
+        elif path == "/loras":
+            # LoRA-rack discovery: list the watched folder (MOSH_LORA_DIR).
+            # Absent/empty/disabled is a graceful empty list — mirror the
+            # ~/AI/rave-models posture, never a 5xx.
+            try:
+                from loras import registry as _lr
+                self._send(200, {"ok": True, "loras": _lr.descriptor(),
+                                 "dir": _lr.lora_dir()})
+            except Exception as e:  # noqa: BLE001
+                self._send(200, {"ok": True, "loras": [],
+                                 "error": f"lora registry unavailable: {e}"})
         elif path == "/transform_targets":
             # Route C discovery: when the REAL RAVE backend is installed, list the
             # installed .ts model stems (concrete targets, no free-text). Otherwise the

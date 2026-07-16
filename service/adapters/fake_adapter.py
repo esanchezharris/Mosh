@@ -93,7 +93,7 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
     # default (FakeAdapter) green path also surfaces it. The stub's pq is a 0–1 score, so
     # scale to the judge's 0–10 axis for the shared reasoning helper.
     reasoning = quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags)
-    return {
+    manifest = {
         "ok": True,
         "adapter": "fake",
         "pq": pq,
@@ -104,3 +104,11 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
         "sample_rate": framerate,
         "channels": n_channels,
     }
+    # LoRA rack honesty: the fake never applies adapters, but it must echo what
+    # was asked so the loop (params → job → manifest) is provable hermetically.
+    if params.get("loras"):
+        manifest["loras"] = [{"name": str(l.get("name", "")),
+                              "strength": float(l.get("value", 0)) / 100.0}
+                             for l in params["loras"]]
+        manifest["loras_applied"] = False
+    return manifest

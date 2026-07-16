@@ -180,7 +180,7 @@ bundle_service() {                              # $1 = installed app
   # `compiler` = the prompt compiler (/compile_render, imported in-process by server.py);
   # its real-LLM path lazy-imports brain_client (bundled separately) and degrades to the
   # deterministic fake when that's absent, so the fake path works whole-dir on its own.
-  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler; do
+  for d in adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras; do
     [ -d "$ROOT/service/$d" ] && cp -R "$ROOT/service/$d" "$SVC/$d"
   done
   cp "$ROOT/service/teardown/recipe.py" "$SVC/teardown/"
