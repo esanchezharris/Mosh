@@ -56,6 +56,21 @@
       }
     },
     {
+      "name": "windows-x64-release-anira",
+      "displayName": "Windows x64 Release + anira/LibTorch RAVE (FIT-013)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-windows-x64-anira",
+      "cacheVariables": {
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "OFF",
+        "MOSH_ENABLE_ANIRA": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "linux-x64-debug",
       "displayName": "Linux x64 Debug (exploratory spike)",
       "generator": "Ninja",
@@ -181,6 +196,23 @@
       "configuration": "Release",
       "targets": [
         "MoshTestTonePlugin_VST3"
+      ]
+    },
+    {
+      "name": "windows-x64-release-anira-app",
+      "configurePreset": "windows-x64-release-anira",
+      "configuration": "Release",
+      "targets": [
+        "Mosh",
+        "MoshStageUI"
+      ]
+    },
+    {
+      "name": "windows-x64-release-anira-tests",
+      "configurePreset": "windows-x64-release-anira",
+      "configuration": "Release",
+      "targets": [
+        "MoshTests"
       ]
     },
     {
