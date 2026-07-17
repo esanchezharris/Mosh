@@ -268,9 +268,9 @@ function TakesTab({ clip }: { clip: Clip }) {
   return (
     <div className="v2-takes">
       {lanes.map((ln) => (
-        <button key={ln.index} className={`v2-take${ln.isCurrent ? " on" : ""}`} title={ln.title}
+        <button key={ln.index} className={`v2-take${ln.isCurrent ? " on" : ""}`} title={ln.title} aria-pressed={ln.isCurrent}
           onClick={() => { if (!ln.isCurrent) void exec("set_current_take", { clipId: clip.id, takeIndex: ln.index }); }}>
-          {ln.label}{ln.isCurrent && <span className="cur">●</span>}
+          {ln.label}{ln.isCurrent && <span className="cur" aria-hidden="true">●</span>}
         </button>
       ))}
       {lanes.some((l) => l.isCurrent) && (
