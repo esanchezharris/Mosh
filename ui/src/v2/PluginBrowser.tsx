@@ -105,7 +105,7 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
         <span className="v2-pb-listhead-count">{rows.filter((r) => r.kind === "plugin").length} results</span>
       </div>
       {rows.length === 0 ? (
-        <div className="v2-pb-empty">{emptyLabel}</div>
+        <div className="v2-pb-empty" role="status" aria-live="polite">{emptyLabel}</div>
       ) : (
         <div className="v2-pb-vlist" style={{ height: rows.length * ROW_H, position: "relative" }}>
           {rows.slice(start, end).map((row, i) => {
