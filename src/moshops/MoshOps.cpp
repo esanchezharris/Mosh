@@ -2771,7 +2771,7 @@ juce::var MoshOps::cmdSetCountIn (const juce::var& args)
     // which TransportControl's record-start logic already consults
     // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an
     // audible click through the pre-roll before capture actually begins — see
-    // tracktion_TransportControl.cpp's performPlay. No new recording machinery was
+    // tracktion_TransportControl.cpp's performRecord. No new recording machinery was
     // needed; Mosh just exposes + persists the setting the engine already honors.
     if (! args.hasProperty ("bars"))
         return errResult ("set_count_in", "bars is required");

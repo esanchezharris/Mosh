@@ -1183,7 +1183,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_count_in": {
       const bars = num(args.bars, snapshot.session.countInBars ?? 0);
       if (![0, 1, 2].includes(bars)) return err(command, "bars must be 0 (off), 1 (one bar), or 2 (two bars)");
-      pushUndo(); snapshot.session.countInBars = bars; invalidate(); return ok(command);
+      // Preference — NOT undoable (mirrors native's logLine(..., false); see cmdSetCountIn
+      // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
+      snapshot.session.countInBars = bars; invalidate(); return ok(command);
     }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 

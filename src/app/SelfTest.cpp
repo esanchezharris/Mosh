@@ -4424,6 +4424,10 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 1))), "set_count_in (1 bar) ok");
         check ((int) proj().getProperty ("countInBars", -1) == 1, "session.project.countInBars == 1 after set");
         check ((int) sess().getProperty ("countInBars", -1) == 1, "session.countInBars mirror == 1 after set");
+        // ENGINE-WIRED, not just stored: the stored preference actually reaches the
+        // live Edit's real pre-roll (applyCountInToEdit → te::Edit::setCountInMode).
+        check (eng.edit().getCountInMode() == te::Edit::CountIn::oneBar,
+               "set_count_in (1 bar) lands on the live engine (te::Edit::getCountInMode)");
 
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 2))), "set_count_in (2 bars) ok");
         check ((int) proj().getProperty ("countInBars", -1) == 2, "session.project.countInBars == 2 after set");

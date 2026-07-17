@@ -2,6 +2,7 @@
 // Pure command-surface assertions: BPM and time-signature are editable fields and a
 // metronome toggle, each going through store.exec (set_tempo / set_time_signature /
 // set_metronome). No backend concepts leak in.
+// G2b — a count-in selector alongside them, going through set_count_in.
 
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -119,5 +120,32 @@ describe("classic Topbar tempo / time-sig / metronome controls", () => {
     const call = execCalls.find((c) => c.command === "set_metronome");
     expect(call).toBeTruthy();
     expect(call!.args).toMatchObject({ enabled: true });
+  });
+
+  it("defaults the count-in selector to Off (0) when the snapshot omits it", () => {
+    render(makeSnapshot());
+    const ci = host.querySelector<HTMLSelectElement>('select[aria-label="Count-in"]');
+    expect(ci).not.toBeNull();
+    expect(ci!.value).toBe("0");
+  });
+
+  it("reflects a non-zero count-in from the snapshot", () => {
+    render(makeSnapshot({ countInBars: 2 }));
+    const ci = host.querySelector<HTMLSelectElement>('select[aria-label="Count-in"]');
+    expect(ci).not.toBeNull();
+    expect(ci!.value).toBe("2");
+  });
+
+  it("changing the count-in selector execs set_count_in with the chosen bars", () => {
+    render(makeSnapshot({ countInBars: 0 }));
+    const ci = host.querySelector<HTMLSelectElement>('select[aria-label="Count-in"]');
+    expect(ci).not.toBeNull();
+    act(() => {
+      ci!.value = "1";
+      ci!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const call = execCalls.find((c) => c.command === "set_count_in");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ bars: 1 });
   });
 });

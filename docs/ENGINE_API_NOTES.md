@@ -168,8 +168,8 @@ needed, only exposing + persisting the setting:
   it into the live `Edit::setCountInMode` both immediately (`cmdSetCountIn`) and right before
   every `record` action (`cmdSetTransport`), so the engine's live state always matches the
   stored project preference regardless of load order.
-- **Where the engine actually consults it:** `TransportControl::performPlay`'s recording
-  branch (`playback/tracktion_TransportControl.cpp:~1483`) reads `edit.getNumCountInBeats()`,
+- **Where the engine actually consults it:** `TransportControl::performRecord()`
+  (`playback/tracktion_TransportControl.cpp:~1483`) reads `edit.getNumCountInBeats()`,
   rolls `prerollStart` back that many beats from the punch-in time, and — when count-in beats
   > 0 — calls `edit.setClickTrackRange(...)` so the click track audibly counts in through the
   pre-roll; `playbackContext->prepareForRecording(prerollStart, punchInTime)` is what actually

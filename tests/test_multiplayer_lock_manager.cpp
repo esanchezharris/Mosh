@@ -188,8 +188,10 @@ namespace
             "set_key",
             "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
             "set_metronome", "delete_time_range",
-            // G2b — count-in / pre-roll bars is a project-wide recording preference
-            // (same MOSH_PROJECT node + template as set_key), not per-track.
+            // G2b — count-in / pre-roll bars is a project-wide recording preference,
+            // same fail-closed SessionGlobal default as set_metronome/set_tempo above
+            // (unlike set_key, which is classified Unguarded in LockManager.cpp), not
+            // per-track.
             "set_count_in",
             // The master bus is not "a track" -- it is the session's one mix bus.
             "set_master_volume", "set_master_pan",

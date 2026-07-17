@@ -9,7 +9,7 @@
 // REAL, engine-native pre-roll (te::Edit::setCountInMode / getNumCountInBeats,
 // consulted by TransportControl's record-start logic to roll the playhead
 // back N beats and play an audible click through the pre-roll before capture
-// actually begins — see tracktion_TransportControl.cpp's performPlay). Its
+// actually begins — see tracktion_TransportControl.cpp's performRecord). Its
 // own te::Edit::CountIn enum offers none/oneBar/twoBar (plus oneBeat/twoBeat,
 // not exposed here — a future extension, not a v0 need), and those three
 // values happen to be 0/1/2 — so a bars value validated here casts straight
