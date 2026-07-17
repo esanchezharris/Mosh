@@ -305,6 +305,25 @@ test("right-click → split increases the clip count", async ({ page }) => {
   await expect(page.getByTestId("v2-clip")).toHaveCount(before + 1);
 });
 
+test("the in-flight clip badge honors prefers-reduced-motion (no blink)", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await bootV2(page);
+  // drive the async "transcribing…" badge on via the dev store handle (keyed by clip id),
+  // the same path enterPeersMode uses.
+  const id = await page.getByTestId("v2-clip").first().getAttribute("data-clip-id");
+  expect(id).toBeTruthy();
+  await page.evaluate((clipId) => {
+    const store = (window as unknown as { __moshStore?: { setState: (s: object) => void } }).__moshStore;
+    store?.setState({ transcribing: { [clipId!]: true } });
+  }, id);
+  const badge = page.getByTestId("clip-transcribing");
+  await expect(badge).toBeVisible();
+  // the v2-blink infinite animation must be neutralized under reduced-motion
+  await expect
+    .poll(() => badge.evaluate((el) => getComputedStyle(el).animationName))
+    .toBe("none");
+});
+
 test("the arrangement shrink-wraps to its tracks; the add-track row creates a track", async ({ page }) => {
   await bootV2(page);
   // sparse session: the stage is content-sized (shorter than the body) so cream shows below it
