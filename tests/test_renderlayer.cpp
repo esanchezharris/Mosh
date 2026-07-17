@@ -72,6 +72,18 @@ TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)",
         v.getChildWithName (ids::PARAMS).setProperty (ids::strength, 90.0, nullptr);
         REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") != base);
     }
+    SECTION ("legacy sampler cfg/steps props are NOT cache inputs (no audible effect)")
+    {
+        // cfg/steps were retired as render params (2026-07-17): the canonical MLX engine
+        // never read them, and on CUDA they are engine-level env tuning. A project saved by
+        // an older build may still carry `cfg`/`steps` on its PARAMS tree — they must not
+        // change the key (no spurious cache MISS; cross-version cache stays stable). We set
+        // them by RAW Identifier precisely because the ids:: decls no longer exist.
+        auto params = v.getChildWithName (ids::PARAMS);
+        params.setProperty (juce::Identifier ("cfg"), 3.5, nullptr);
+        params.setProperty (juce::Identifier ("steps"), 99, nullptr);
+        REQUIRE (RenderLayer::fingerprint (v, "upstreamHashAAA", "120bpm/Cmaj", 44100, 2, "svc-1") == base);
+    }
 }
 
 TEST_CASE ("LoRA rack: LORAS child round-trips + lorasKey drives the fingerprint", "[loras][cache]")

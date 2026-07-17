@@ -6373,8 +6373,7 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
     beginTxn ("set_render_param");
     auto params = node.getChildWithName (ids::PARAMS);
     if (args.hasProperty ("prompt")) params.setProperty (ids::prompt, args.getProperty ("prompt", ""), &undoManager());
-    if (args.hasProperty ("cfg"))    params.setProperty (ids::cfg, args.getProperty ("cfg", 7.0), &undoManager());
-    if (args.hasProperty ("steps"))  params.setProperty (ids::steps, args.getProperty ("steps", 30), &undoManager());
+    // cfg/steps are engine-level sampler tuning (env), not per-render controls — not accepted here.
     if (args.hasProperty ("nl"))     params.setProperty (ids::nl, args.getProperty ("nl", 0.4), &undoManager());
     if (args.hasProperty ("target"))   params.setProperty (ids::target, args.getProperty ("target", ""), &undoManager());      // Route B
     if (args.hasProperty ("strength")) params.setProperty (ids::strength, args.getProperty ("strength", 65.0), &undoManager());  // Route B
@@ -6891,8 +6890,8 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     p->setProperty ("prompt", params[ids::prompt]);
     p->setProperty ("seed", node[ids::seed]);
     p->setProperty ("nl", params[ids::nl]);
-    p->setProperty ("cfg", params[ids::cfg]);
-    p->setProperty ("steps", params[ids::steps]);
+    // cfg/steps intentionally NOT sent — sampler tuning is engine-level env on both
+    // backends (MLX SA3_STEPS / CUDA MOSH_SA3_STEPS·MOSH_SA3_CFG), not a per-render param.
     p->setProperty ("mode", node[ids::mode]);          // Route B: route the adapter (reimagine|generate|transform)
     p->setProperty ("target", params[ids::target]);    // Route B transform target
     p->setProperty ("strength", params[ids::strength]); // Route B transform strength (0–100)
@@ -7477,8 +7476,7 @@ juce::var MoshOps::buildRenderAheadParams (const juce::ValueTree& node) const
     p->setProperty ("prompt", params[ids::prompt]);
     p->setProperty ("seed", node[ids::seed]);          // stable across windows → consistent "voice"
     p->setProperty ("nl", params[ids::nl]);
-    p->setProperty ("cfg", params[ids::cfg]);
-    p->setProperty ("steps", params[ids::steps]);
+    // cfg/steps intentionally NOT sent — engine-level sampler tuning (see cmdRenderLayer).
     p->setProperty ("mode", node[ids::mode]);          // reimagine (Live is wave-clip re-imagine)
     p->setProperty ("target", params[ids::target]);
     p->setProperty ("strength", params[ids::strength]);
