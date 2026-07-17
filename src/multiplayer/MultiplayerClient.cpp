@@ -65,14 +65,20 @@ juce::var MultiplayerClient::httpGet (const String& path)
     return {};
 }
 
-juce::var MultiplayerClient::httpPost (const String& path, const juce::var& body)
+juce::var MultiplayerClient::httpPost (const String& path, const juce::var& body, int* outStatus)
 {
     URL url = URL (base_ + path).withPOSTData (JSON::toString (body));
+    int statusCode = 0;
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
                     .withConnectionTimeoutMs (5000)
-                    .withExtraHeaders (extraHeaders (true));
+                    .withExtraHeaders (extraHeaders (true))
+                    .withStatusCode (&statusCode);
     if (auto s = url.createInputStream (opts))
+    {
+        if (outStatus != nullptr) *outStatus = statusCode;
         return JSON::parse (s->readEntireStreamAsString());
+    }
+    if (outStatus != nullptr) *outStatus = 0;
     setError ("POST " + path + " failed (no relay?)");
     return {};
 }
@@ -243,12 +249,27 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
         o->setProperty ("code", code); o->setProperty ("peerId", peerId_);
         o->setProperty ("hash", hash); o->setProperty ("ext", ext); return var (o); };
 
-    if ((bool) httpPost ("/mp/blob/head", body()).getProperty ("exists", false))
+    // Adversarial-review BLOCKER (PR-2 review): every step below now checks the
+    // HTTP status explicitly rather than trusting "did I get a response object
+    // with the field I expected" — a 4xx/5xx JSON error body can coincidentally
+    // lack the field (falling through as if it were a legitimate "not found"/
+    // "no url"), and createInputStream() itself returns non-null for 4xx/5xx on
+    // macOS regardless. See httpPost's outStatus doc comment.
+    int headStatus = 0;
+    const auto headRes = httpPost ("/mp/blob/head", body(), &headStatus);
+    if (headStatus / 100 == 2 && (bool) headRes.getProperty ("exists", false))
         return true;   // already on the server (content-addressed dedup)
     if (shouldAbort && shouldAbort())
         { setError ("upload aborted"); return false; }
 
-    const auto putUrl = httpPost ("/mp/blob/put-url", body()).getProperty ("url", var()).toString();
+    int putUrlStatus = 0;
+    const auto putUrlRes = httpPost ("/mp/blob/put-url", body(), &putUrlStatus);
+    if (putUrlStatus / 100 != 2)
+    {
+        setError ("blob put-url failed (HTTP " + String (putUrlStatus) + ")");
+        return false;
+    }
+    const auto putUrl = putUrlRes.getProperty ("url", var()).toString();
     if (putUrl.isEmpty())
     {
         setError ("no put-url (cloud relay only)");
@@ -266,17 +287,26 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
     // withProgressCallback (PR-2): JUCE calls this during the POST/PUT body send
     // (WebInputStream::postDataSendProgress); returning false there aborts the
     // in-flight request instead of only checking between the coarse steps above.
+    int putStatus = 0;
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
                     .withConnectionTimeoutMs (60000)
                     .withHttpRequestCmd ("PUT")
                     .withExtraHeaders ("content-type: application/octet-stream")
-                    .withProgressCallback ([shouldAbort] (int, int) { return ! (shouldAbort && shouldAbort()); });
+                    .withProgressCallback ([shouldAbort] (int, int) { return ! (shouldAbort && shouldAbort()); })
+                    .withStatusCode (&putStatus);
     if (auto s = u.createInputStream (opts))
     {
-        s->readEntireStreamAsString();   // drain the small JSON ack
-        return true;
+        const auto ack = s->readEntireStreamAsString();   // drain the (small) JSON body
+        // BLOCKER fix: createInputStream() returns a non-null stream for 4xx/5xx on
+        // macOS (only a total connection failure is null — same caveat poll() already
+        // documents) — a rejected upload (quota/auth/a transient 5xx) must NOT be
+        // reported as success just because a stream came back.
+        if (putStatus / 100 == 2)
+            return true;
+        setError ("blob PUT rejected (HTTP " + String (putStatus) + "): " + ack);
+        return false;
     }
-    setError ("blob PUT failed");
+    setError ("blob PUT failed (no connection)");
     return false;
 }
 
@@ -293,15 +323,33 @@ bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, con
     auto* o = new DynamicObject();
     o->setProperty ("code", code); o->setProperty ("peerId", peerId_);
     o->setProperty ("hash", hash); o->setProperty ("ext", ext);
-    const auto getUrl = httpPost ("/mp/blob/get-url", var (o)).getProperty ("url", var()).toString();
+    int getUrlStatus = 0;
+    const auto getUrlRes = httpPost ("/mp/blob/get-url", var (o), &getUrlStatus);
+    if (getUrlStatus / 100 != 2)
+    {
+        setError ("blob get-url failed (HTTP " + String (getUrlStatus) + ")");
+        return false;
+    }
+    const auto getUrl = getUrlRes.getProperty ("url", var()).toString();
     if (getUrl.isEmpty())
         return false;
     if (shouldAbort && shouldAbort())
         { setError ("download aborted"); return false; }
 
-    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress).withConnectionTimeoutMs (60000);
+    int getStatus = 0;
+    auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
+                    .withConnectionTimeoutMs (60000)
+                    .withStatusCode (&getStatus);
     if (auto s = URL (getUrl).createInputStream (opts))
     {
+        // Belt-and-suspenders alongside the SHA-256 verify below: a rejected raw GET
+        // (4xx/5xx) is caught HERE directly instead of relying on the downloaded
+        // bytes (an error page body) happening to fail the hash check further down.
+        if (getStatus != 0 && getStatus / 100 != 2)
+        {
+            setError ("blob GET rejected (HTTP " + String (getStatus) + ")");
+            return false;
+        }
         dest.getParentDirectory().createDirectory();
         dest.deleteFile();
         FileOutputStream os (dest);

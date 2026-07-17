@@ -94,7 +94,15 @@ public:
 
 private:
     juce::var httpGet  (const juce::String& path);
-    juce::var httpPost (const juce::String& path, const juce::var& body);
+    // `outStatus` (optional): when non-null, receives the HTTP status code JUCE saw —
+    // 0 if the request never reached the network at all (createInputStream returned
+    // nullptr). Adversarial-review BLOCKER (PR-2 review): createInputStream() returns
+    // a NON-null stream for 4xx/5xx on macOS (only a total connection failure is
+    // null — the same caveat poll() already documents), so callers that need to
+    // distinguish "got an error response" from "got a real success" MUST check this,
+    // not just "did I get a stream back". Every pre-existing call site passes nullptr
+    // and is unaffected.
+    juce::var httpPost (const juce::String& path, const juce::var& body, int* outStatus = nullptr);
     // Extra request headers. Adds the Supabase `apikey` (from MOSH_RELAY_APIKEY)
     // when set — required by the cloud Edge Function relay, harmlessly ignored by
     // the local self-host relay, so one binary targets either backend via env.

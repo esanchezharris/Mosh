@@ -3,6 +3,7 @@
 #include "moshops/MoshOps.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
+#include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
@@ -5744,6 +5745,81 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             syncPeer.leave();
 
             cmd (syncOps, "mp_leave_session");
+        }
+
+        // ── PR-2 BLOCKER: a rejected upload must surface as mp_commit_done{ok:false} ──
+        // Adversarial review: MultiplayerClient::uploadBlob's raw PUT never checked the
+        // HTTP status code (createInputStream() returns non-null for 4xx/5xx on macOS),
+        // so a REJECTED upload (quota/auth/a transient 5xx from the relay) was reported
+        // back as a false success -- mp_commit_done would fire ok:true for a commit
+        // whose stem never actually landed on the relay. Drives MultiplayerSession
+        // directly (constructible standalone, no MoshOps/engine needed) with a
+        // synthetic audioRef under the reserved ".failtest" ext that relay/server.py's
+        // MOSH_RELAY_BLOB_FAIL hook (armed for this whole gate run, like
+        // MOSH_RELAY_BLOB_CORRUPT) rejects with a 503 -- proving the failure actually
+        // propagates end-to-end through commit() -> uploadBlob() -> emitCommitDone(),
+        // the exact chain cmdMpCommitTrack relies on. The adjacent success-path test
+        // above already proves ok:true for a real commit, so this closes the other half.
+        section ("Multiplayer PR-2 BLOCKER: rejected upload surfaces as mp_commit_done{ok:false}");
+        {
+            juce::Array<juce::var> failEvents;
+            MultiplayerSession failSess (
+                [] (const juce::var&) {},                                              // applyCommit (unused)
+                [&failEvents] (const juce::String& type, juce::var payload)
+                {
+                    if (type == "mp_commit_done") failEvents.add (payload);
+                },
+                [] (bool, const juce::String&, const std::map<juce::String, juce::String>&) {},   // syncLocks
+                [] () -> juce::var { return {}; },                                       // provideBootstrap
+                [] (const juce::var&) {},                                               // applyBootstrap
+                [] (const juce::var&) {});                                              // applyStructural
+
+            const auto failCode = failSess.createSession ("FailHost", "#facade");
+            check (failCode.isNotEmpty(), "commit-fail: session created");
+
+            // A synthetic audioRef: the ext is the reserved sentinel the relay's fail
+            // hook targets. The uploaded bytes/hash don't need to be a real WAV --
+            // uploadBlob is rejected by the relay before any hash/content matters.
+            const juce::String failPayload ("bytes-for-the-rejected-commit-upload-check");
+            juce::File failSrc = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                     .getChildFile ("mosh-selftest-commitfail-src.failtest");
+            failSrc.replaceWithText (failPayload);
+            juce::FileInputStream failFis (failSrc);
+            const auto failHash = juce::SHA256 (failFis).toHexString();
+
+            auto* refObj = new DynamicObject();
+            refObj->setProperty ("hash", failHash);
+            refObj->setProperty ("ext", "failtest");
+            juce::Array<juce::var> failRefs; failRefs.add (var (refObj));
+            juce::Array<juce::File> failStemFiles; failStemFiles.add (failSrc);
+
+            const juce::String failLid ("commit-fail-logical-id");
+            failSess.commit (failLid, "{\"fake\":\"blob\"}", var (failRefs), failStemFiles);
+
+            // Bounded drain for mp_commit_done (async worker unless MOSH_MP_SYNC_TRANSFER
+            // is set, in which case commit() has already returned synchronously and the
+            // event was pushed inline -- either way this loop is a correct, cheap wait).
+            auto* mmFail = juce::MessageManager::getInstanceWithoutCreating();
+            const auto failDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (failEvents.isEmpty() && juce::Time::getMillisecondCounter() < failDeadline)
+            {
+                if (mmFail != nullptr) mmFail->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+            }
+            check (! failEvents.isEmpty(), "commit-fail: mp_commit_done was emitted");
+            if (! failEvents.isEmpty())
+            {
+                const auto& done = failEvents.getReference (0);
+                check (done.getProperty ("logicalId", juce::var()).toString() == failLid,
+                       "commit-fail: mp_commit_done carries the right logicalId");
+                check (! (bool) done.getProperty ("ok", true),
+                       "commit-fail: mp_commit_done reports ok:false (the rejected upload was NOT a false success)");
+                check (done.getProperty ("error", juce::var()).toString().isNotEmpty(),
+                       "commit-fail: mp_commit_done carries an error string");
+            }
+
+            failSrc.deleteFile();
+            failSess.leaveSession();
         }
 
         // Async outbox (anti-jank): a fire-and-forget broadcast does NOT block the
