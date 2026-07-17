@@ -100,6 +100,46 @@ def author_score(item, f0_frames, t0, t1, *, name="nus"):
             "note_type": " ".join(str(n) for n in ntype)}
 
 
+PHON_PY = os.path.expanduser("~/Library/Mosh/venvs/phonology/bin/python3")
+REF_WAV = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing-handoff/refs/own-30s.wav")
+REF_JSON = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing-handoff/refs/own-30s.json")
+
+
+def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None):
+    """THE real `pipeline` generator: NUS true words + clean F0 → product author_score
+    (phonology venv) → local SoulX render → out_wav. Returns (out_wav, true_words).
+    Oracle-lyrics (true words), single ≤12s window. Cross-voice (owner's ref) for now."""
+    import mumble_probe as mp
+    ref_wav, ref_json = ref_wav or REF_WAV, ref_json or REF_JSON
+    work = os.path.dirname(out_wav) or "."
+    os.makedirs(work, exist_ok=True)
+    base = os.path.splitext(os.path.basename(out_wav))[0]
+
+    # 1. F0 of the clean vocal (in-process pyin)
+    clean, sr = mp._read_mono(item["clean_vocal"])
+    f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(clean, sr)]
+    inj = os.path.join(work, base + "_in.json")
+    json.dump({"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}, open(inj, "w"))
+
+    # 2. author the SoulX score under the phonology venv (real words + author_score)
+    scorej = os.path.join(work, base + "_score.json")
+    r = subprocess.run([PHON_PY, os.path.join(HERE, "bench_soulx_author.py"), inj, scorej],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.isfile(scorej):
+        raise RuntimeError(f"author_score failed: {r.stderr[-400:] or r.stdout[-400:]}")
+    true_words = []
+    for line in r.stdout.splitlines():
+        if line.startswith("WORDS "):
+            true_words = json.loads(line[6:])
+
+    # 3. render via the local SoulX bridge, move generated.wav to out_wav
+    outd = os.path.join(work, base + "_render")
+    gen = render_chunk(scorej, outd, ref_wav, ref_json)
+    import shutil
+    shutil.copyfile(gen, out_wav)
+    return out_wav, true_words
+
+
 def render_chunk(score_json_path, out_dir, ref_wav, ref_json):
     """Render one SoulX target score to out_dir/generated.wav via the local MLX bridge."""
     os.makedirs(out_dir, exist_ok=True)

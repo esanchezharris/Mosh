@@ -25,17 +25,23 @@ sys.path.insert(0, HERE)
 
 
 # ── generators (pluggable) ──────────────────────────────────────────────────────────────
-def gen_oracle(mumbled_wav, clean_wav, out_wav):
+def gen_oracle(mumbled_wav, clean_wav, out_wav, item=None):
     shutil.copyfile(clean_wav, out_wav)
 
 
-def gen_passthrough(mumbled_wav, clean_wav, out_wav):
+def gen_passthrough(mumbled_wav, clean_wav, out_wav, item=None):
     shutil.copyfile(mumbled_wav, out_wav)
 
 
-def gen_pipeline(mumbled_wav, clean_wav, out_wav):
-    raise RuntimeError("the real FMS sing pipeline generator is owner/GPU-gated (SoulX) — "
-                       "arm it via the local MLX / PC lane, then wire it here")
+def gen_pipeline(mumbled_wav, clean_wav, out_wav, item=None):
+    """The REAL FMS sing pipeline: author_score(true words + F0) → local SoulX render.
+    Renders the first 12 s window (the SoulX chunk unit); for the windowed 3-way scoreboard
+    (oracle/passthrough/pipeline scored on the same window with the forced-align ruler) use
+    bench_third_curve.py, which scores like-for-like. Needs the item (words + clean vocal)."""
+    if item is None:
+        raise RuntimeError("gen_pipeline needs the dataset item (true words + clean vocal)")
+    import bench_pipeline_render as pr
+    pr.pipeline_generate(item, out_wav, t0=0.0, t1=12.0)
 
 
 GENERATORS = {"oracle": gen_oracle, "passthrough": gen_passthrough, "pipeline": gen_pipeline}
@@ -84,7 +90,7 @@ def run_item(item, ratio, generator, out_dir, *, seed=0, true_words=None, deps=N
     mumbled = os.path.join(out_dir, base + "_mumble.wav")
     d["mumble"](item["clean_vocal"], item["words"], ratio, mumbled, seed=seed)
     gen_wav = os.path.join(out_dir, f"{base}_{generator}.wav")
-    GENERATORS[generator](mumbled, item["clean_vocal"], gen_wav)
+    GENERATORS[generator](mumbled, item["clean_vocal"], gen_wav, item)
     # true_words defaults to the NUS reconstruction (fallback); the CLI passes Whisper-on-clean.
     tw = true_words if true_words is not None else [w["word"] for w in item["words"] if w["word"].isalpha()]
     stats = d["score"](item["clean_vocal"], gen_wav, true_words=tw)
