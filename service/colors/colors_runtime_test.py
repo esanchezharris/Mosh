@@ -84,6 +84,45 @@ two = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "brightne
 check("two DISTINCT colors → two steers (dedup does not touch unique names)",
       len(two) == 2, f"got {len(two)} steers")
 
+# ── Orthogonalization opt-in (default OFF ⇒ byte-identical) ────────────────────
+import numpy as np  # noqa: E402
+
+
+def _cos(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+# futuristic + tension share peak_layer 4 and are correlated (~51° / cos 0.62).
+_pair = [{"name": "futuristic", "value": 100}, {"name": "tension", "value": 100}]
+_base = runtime.resolve_steers(_pair)                        # default: orthogonalize=False
+_orth = runtime.resolve_steers(_pair, orthogonalize=True)
+
+check("default keeps the correlated same-layer pair as the RAW vecs (not orthogonalized)",
+      len(_base) == 2 and abs(_cos(_base[0][2], _base[1][2])) > 0.5,
+      f"cos={abs(_cos(_base[0][2], _base[1][2])):.3f}")
+check("orthogonalize=True makes the same-layer pair orthogonal",
+      len(_orth) == 2 and abs(_cos(_orth[0][2], _orth[1][2])) < 1e-4,
+      f"cos={abs(_cos(_orth[0][2], _orth[1][2])):.2e}")
+check("orthogonalize preserves each vec's L2 norm",
+      all(abs(np.linalg.norm(o[2]) - np.linalg.norm(b[2])) / np.linalg.norm(b[2]) < 1e-4
+          for o, b in zip(_orth, _base)))
+check("orthogonalize leaves alphas + layers untouched",
+      [(o[0], round(o[1], 6)) for o in _orth] == [(b[0], round(b[1], 6)) for b in _base])
+
+# grit (layer 14) is solo across the rack — even orthogonalize=True can't change a
+# single-per-layer vec (no same-layer partner to de-correlate against).
+_solo = runtime.resolve_steers([{"name": "grit", "value": 100}], orthogonalize=True)
+_solo_off = runtime.resolve_steers([{"name": "grit", "value": 100}])
+check("a solo colour is unchanged under orthogonalize=True",
+      len(_solo) == 1 and np.array_equal(_solo[0][2], _solo_off[0][2]))
+
+# grit (L14) + brightness (L4) live on DIFFERENT layers → each solo-per-layer → untouched.
+_cross = runtime.resolve_steers(
+    [{"name": "grit", "value": 100}, {"name": "brightness", "value": 100}], orthogonalize=True)
+_cross_off = runtime.resolve_steers(
+    [{"name": "grit", "value": 100}, {"name": "brightness", "value": 100}])
+check("a cross-layer pair is untouched (orthogonalization is same-layer only)",
+      len(_cross) == 2 and all(np.array_equal(a[2], b[2]) for a, b in zip(_cross, _cross_off)))
 # ── Time-scheduled steering: the "sustain" color carries an envelope ──────────
 assert "sustain" in REG, "test needs the committed 'sustain' color"
 SUS_LAYER = int(REG["sustain"]["peak_layer"])
@@ -111,6 +150,22 @@ check("non-envelope color → 4th element None", grit4 and grit4[0][3] is None,
 # with_envelopes must not change layer/alpha vs the default path.
 check("with_envelopes leaves (layer, alpha) identical to default",
       sus4 and sus3 and sus4[0][0] == sus3[0][0] and abs(sus4[0][1] - sus3[0][1]) < 1e-9)
+
+# ── Orthogonalize + envelopes compose (the #359×#362 crash-case) ──────────────
+# A same-layer (L17) stack where one member (sustain) carries a hold envelope, with
+# BOTH orthogonalize AND with_envelopes on: must not crash on the 4-tuples, must
+# orthogonalize the vecs, and must PRESERVE sustain's envelope (not silently strip it).
+oe = runtime.resolve_steers(
+    [{"name": "sustain", "value": 100}, {"name": "distortion", "value": 100}],
+    orthogonalize=True, with_envelopes=True)
+check("ortho+envelopes: no crash, 2 four-tuples",
+      len(oe) == 2 and all(len(t) == 4 for t in oe), f"lens={[len(t) for t in oe]}")
+check("ortho+envelopes: same-layer vecs orthogonalized",
+      abs(_cos(oe[0][2], oe[1][2])) < 1e-4, f"cos={abs(_cos(oe[0][2], oe[1][2])):.2e}")
+_sus_oe = next((t for t in oe if t[0] == SUS_LAYER and isinstance(t[3], dict)), None)
+check("ortho+envelopes: sustain's hold envelope is PRESERVED (not stripped)",
+      _sus_oe is not None and _sus_oe[3].get("kind") == "hold",
+      f"sustain 4th={_sus_oe[3] if _sus_oe else None}")
 
 # ── Determinism ───────────────────────────────────────────────────────────────
 again = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "grit", "value": 100}])
