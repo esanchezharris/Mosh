@@ -42,6 +42,16 @@ case "$mode" in
   fail)
     printf '<TRACK name="SmokeDrums"/>\n' > "$HOME/Library/Mosh/$session/edit/smoke.tracktionedit"
     ;;
+  self_heal_stuck)
+    # P4 self-heal (PR-1): stem + edit both look fine (STEM_OK/DRUMS/TONE would all be
+    # 1), but B's own __snapshot -- taken right after mp_fetch_missing_stems{wait:true}
+    # -- still shows a wave clip sourceMissing. That must FAIL the verdict even though
+    # every other signal looks like a pass; it's the exact regression this PR closes.
+    printf 'stem\n' > "$HOME/Library/Mosh/$session/by-hash/stemhash.wav"
+    printf '<TRACK name="SmokeDrums"/>\n<TRACK name="SmokeTone"/>\n' > "$HOME/Library/Mosh/$session/edit/smoke.tracktionedit"
+    printf '{"command":"mp_fetch_missing_stems","ok":true,"data":{"fetched":0,"failed":1,"stillMissing":["stemhash"]}}\n' >> "$out"
+    printf '{"command":"__snapshot","ok":true,"data":{"tracks":[{"clips":[{"id":"c1","type":"wave","sourceMissing":true}]}]}}\n' >> "$out"
+    ;;
   *)
     echo "unknown SMOKE_FIXTURE_MODE=$mode" >&2
     exit 64
@@ -76,5 +86,6 @@ run_case pass 0 "PASS"
 run_case pass_no_a_out 0 "PASS"
 run_case partial 1 "PARTIAL"
 run_case fail 1 "FAIL"
+run_case self_heal_stuck 1 "sourceMissing"
 
 echo "mp-live-smoke verdict selftest PASS"

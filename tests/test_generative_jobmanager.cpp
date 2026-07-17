@@ -99,3 +99,69 @@ TEST_CASE ("GenerativeJobManager read surface is concurrency-safe", "[generative
     CHECK (nonEmptyBuilds.load() == 0);
     CHECK (mgr.serviceBuild().isEmpty());
 }
+
+// A confirmed playtest-blocker: on a guest Mac with no working python3 (or a broken venv),
+// the spawned child dies almost instantly, but ensureServiceRunning()'s warmup loop had NO
+// liveness check on the child — it polled blindly for up to ~30s (150 x 200ms Thread::sleep)
+// regardless. Opening the Gen inspector fires THREE such calls back-to-back (list_colors,
+// list_transform_targets, list_loras), all synchronously on the message thread via
+// execute_command → MoshOps::execute → cmdList*() → jobManager.ensureServiceRunning() — so a
+// single Gen-tab open could beachball the whole app for ~90s, repeated on every re-open.
+//
+// This test spawns a REAL python3 (present on the test machine) running a throwaway script
+// that exits immediately — the "child dies right away" failure mode — and asserts
+// ensureServiceRunning() returns unavailable in well under a second, not ~30s. It also proves
+// the failure is cached for a short backoff window: a second call right after the first must
+// not re-spawn a fresh child (the counter file the script writes is touched only once).
+TEST_CASE ("ensureServiceRunning bails fast when the spawned child dies immediately", "[generative][spawn]")
+{
+    juce::File tmpDir = juce::File::createTempFile ("mosh-dead-child");
+    tmpDir.deleteFile();
+    tmpDir.createDirectory();
+    struct Cleanup { juce::File d; ~Cleanup() { d.deleteRecursively(); } } cleanup { tmpDir };
+
+    auto counterFile = tmpDir.getChildFile ("spawn_count.txt");
+    const juce::String counterPath = counterFile.getFullPathName().replace ("\\", "\\\\");
+
+    // No "run.sh" sibling next to this script, so ensureServiceRunning's POSIX fallback execs
+    // the literal system `python3` directly on it (see GenerativeJobManager.cpp) — a real
+    // interpreter that dies right away, exactly like a broken/absent-venv guest install.
+    // Each invocation appends one line to counterFile before exiting, so the test can prove
+    // the failure-backoff window prevents a second spawn.
+    auto script = tmpDir.getChildFile ("server.py");
+    script.replaceWithText (
+        juce::String ("import sys\n")
+        + "with open(\"" + counterPath + "\", \"a\") as f:\n"
+        + "    f.write(\"1\\n\")\n"
+        + "sys.exit(1)\n");
+
+    ScopedEnv host   ("MOSH_SERVICE_HOST", "127.0.0.1");
+    ScopedEnv port   ("MOSH_SERVICE_PORT", "59993");            // nothing listens here
+    ScopedEnv svc    ("MOSH_SERVICE_SCRIPT", script.getFullPathName());
+
+    mosh::GenerativeJobManager mgr;
+
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    const bool ok = mgr.ensureServiceRunning();
+    const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - t0;
+
+    CHECK_FALSE (ok);
+    // The old code's ceiling was ~30000ms (150 x 200ms); the early-bail must land far under
+    // that. Generous bound for slow CI machines while still proving the freeze is gone.
+    CHECK (elapsedMs < 5000.0);
+
+    // Immediately call again: within the failure backoff window this must return fast AND
+    // without spawning a second child.
+    const auto t1 = juce::Time::getMillisecondCounterHiRes();
+    const bool ok2 = mgr.ensureServiceRunning();
+    const auto elapsedMs2 = juce::Time::getMillisecondCounterHiRes() - t1;
+
+    CHECK_FALSE (ok2);
+    CHECK (elapsedMs2 < 1000.0);
+
+    // The backoff must have skipped a second spawn attempt entirely: the script ran exactly
+    // once (one "1\n" line), not twice.
+    const auto spawns = juce::StringArray::fromLines (counterFile.loadFileAsString());
+    const int spawnCount = [&] { int n = 0; for (auto& l : spawns) if (l.trim().isNotEmpty()) ++n; return n; }();
+    CHECK (spawnCount == 1);
+}

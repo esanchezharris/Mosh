@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
@@ -134,6 +135,15 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // P4 self-heal (PR-1) — every uploadBlob/downloadBlob result above is ignored at
+    // its call site, so a single transient HTTP failure otherwise strands a clip's
+    // audio `sourceMissing` forever (the only prior recovery was the host re-committing
+    // that track). This re-derives the missing hash/ext from a wave clip's own by-hash
+    // source ref and retries the download for every clip currently missing its audio.
+    // Backend-only (Unguarded), non-undoable (writes bytes to disk only, no ValueTree
+    // mutation). `wait:true` runs synchronously (harness/agents/the bootstrap auto-
+    // trigger's callers don't need this); otherwise async (mirrors cmdTranscribeClip).
+    juce::var cmdMpFetchMissingStems (const juce::var& args);
     // Structural channel — scalar session-global ops (tempo/timesig/master/key)
     // broadcast to the peer; mp_apply_structural re-executes a peer's op locally,
     // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
@@ -599,6 +609,16 @@ private:
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
+    // P4 self-heal (adversarial-review finding #3) — hashes cmdMpFetchMissingStems is
+    // CURRENTLY fetching (sync or async). A concurrent pass (a resync tick racing a
+    // manual retry, or two overlapping bootstraps) skips a hash already in here rather
+    // than spawning a second downloadBlob into the SAME dest file, whose delete-then-
+    // create-then-stream could otherwise let one pass observe the other's in-flight
+    // (partial) bytes. Message-thread-only: every insert/erase happens either inline
+    // (the wait:true/empty-missing sync path) or inside the async path's
+    // MessageManager::callAsync completion — never from the background std::thread
+    // itself, so no lock is needed.
+    std::set<juce::String> inFlightStems_;
     juce::int64 seq = 0;
     juce::File  logFile;
     juce::CriticalSection commandLogCacheLock_;
@@ -624,6 +644,17 @@ private:
     bool        wasPlaying = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
     double      lastPresenceBroadcastMs = 0.0;
+
+    // FIT-003 — live running-count progress for an in-flight async plugin rescan
+    // (cmdRescanPlugins' AU/deep branch). Touched ONLY on the message thread (set
+    // right before the detached scan thread is spawned / cleared in its callAsync
+    // completion; sampled + emitted from timerCallback()), so no atomics needed —
+    // the scan thread itself never reads or writes these. See ScanProgress.h.
+    bool        scanSampling_    = false;
+    juce::String scanFormat_;
+    double      scanStartMs_    = 0.0;
+    int         lastScanCount_  = -1;
+    double      lastScanEmitMs_ = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOps)
 };

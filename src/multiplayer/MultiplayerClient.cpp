@@ -1,4 +1,5 @@
 #include "MultiplayerClient.h"
+#include <juce_cryptography/juce_cryptography.h>
 
 namespace mosh
 {
@@ -292,7 +293,31 @@ bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, con
         {
             os.writeFromInputStream (*s, -1);
             os.flush();
-            return dest.existsAsFile() && dest.getSize() > 0;
+            if (! (dest.existsAsFile() && dest.getSize() > 0))
+            {
+                setError ("blob GET produced no bytes");
+                return false;
+            }
+
+            // Integrity check (adversarial-review finding): this transfer is
+            // content-addressed -- `hash` IS the SHA-256 the caller already expects,
+            // so verify the bytes that actually landed before ever calling this a
+            // successful fetch. Without this, a dropped/truncated GET (the exact
+            // transient failure self-heal exists to recover from) would pass the bare
+            // exists+size>0 check, get marked resolved by the caller (sourceMediaChanged),
+            // and then the resolver's OWN "already exists -> skip" gate would PERMANENTLY
+            // exempt the corrupt file from ever being retried: silent garbage audio with
+            // sourceMissing:false, worse than the pre-fix "still missing" state. On a
+            // mismatch: delete the bad file and report failure so the clip is left
+            // genuinely missing for a future retry, never blessed as resolved.
+            juce::FileInputStream verify (dest);
+            if (! verify.openedOk() || ! hash.equalsIgnoreCase (juce::SHA256 (verify).toHexString()))
+            {
+                dest.deleteFile();
+                setError ("blob GET hash mismatch (corrupt/truncated download)");
+                return false;
+            }
+            return true;
         }
     }
     setError ("blob GET failed");

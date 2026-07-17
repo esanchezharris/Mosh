@@ -31,6 +31,14 @@ import subprocess
 import sys
 import tempfile
 
+if sys.platform == "win32":
+    print(
+        "skip venv_locations_test: it exercises the 8 setup-*.sh BASH scripts (POSIX-only"
+        " by nature); the Windows analogue setup-feature-venv.ps1 is covered by"
+        " service/scripts/venv_python_path_test.py"
+    )
+    sys.exit(0)
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVICE = os.path.join(REPO, "service")
 

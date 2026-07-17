@@ -37,7 +37,7 @@ import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-MAIN_CHECKOUT = os.path.expanduser("~/Documents/ClaudeMosh")
+MAIN_CHECKOUT = os.path.expanduser(os.environ.get("MOSH_CHECKOUT", "~/Mosh"))
 
 sys.path.insert(0, os.path.join(REPO, "service"))
 sys.path.insert(0, HERE)

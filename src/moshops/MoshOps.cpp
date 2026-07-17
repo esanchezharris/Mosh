@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "ScanProgress.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -774,6 +775,33 @@ void MoshOps::timerCallback()
     const bool spectrumLive = playing && transport.getCurrentPlaybackContext() != nullptr;
     if (spectrumLive)            { emitSpectrum (true);  spectrumActive = true; }
     else if (spectrumActive)     { emitSpectrum (false); spectrumActive = false; }
+
+    // FIT-003 — live running-count progress for an in-flight async plugin rescan.
+    // cmdRescanPlugins' AU/deep branch sets scanSampling_ before spawning its detached
+    // scan thread and clears it in that thread's callAsync completion; both of those
+    // run on the message thread, same as this timer, so scanSampling_/scanFormat_/
+    // scanStartMs_/lastScanCount_/lastScanEmitMs_ (all MoshOps-private) need no
+    // synchronization. getNumTypes() itself IS a genuine cross-thread read: the
+    // background scan thread concurrently mutates the SAME KnownPluginList via
+    // addType()/scanAndAddFile() inside PluginHost::rescan(). That's safe because
+    // KnownPluginList internally guards its type array with its own CriticalSection
+    // (typesArrayLock in juce_KnownPluginList.h) — getNumTypes()/addType() both take
+    // it, so this is an ordinary locked read, not a race. Decimated: emit only when
+    // the catalog grew, or ~500 ms have passed, so a fast VST3 tail doesn't spam 30 Hz
+    // and a stalled AU still ticks `elapsedMs` forward for the UI.
+    if (scanSampling_)
+    {
+        const auto now = Time::getMillisecondCounterHiRes();
+        const int count = eng.engine().getPluginManager().knownPluginList.getNumTypes();
+        if (count != lastScanCount_ || (now - lastScanEmitMs_) >= 500.0)
+        {
+            lastScanCount_ = count;
+            lastScanEmitMs_ = now;
+            emit ("plugin_scan_progress",
+                  makeScanProgressPayload (scanFormat_, count, /*done=*/false,
+                                            (int) (now - scanStartMs_)));
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -982,6 +1010,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "mp_send_signal")    return cmdMpSendSignal (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
+    if (name == "mp_fetch_missing_stems") return cmdMpFetchMissingStems (args);
     if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
@@ -3082,7 +3111,9 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
         {
             // Fetch any by-hash stems this track references (into audio/by-hash/) BEFORE
             // applying, so its pre-existing wave clips resolve without a host re-commit —
-            // the late-join analogue of the commit-apply download. No-op on the local relay.
+            // the late-join analogue of the commit-apply download. The result is ignored
+            // here (a transient failure just leaves the clip sourceMissing) — the
+            // self-heal pass below retries anything still missing once the tracks land.
             if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
                 for (auto& a : *refs)
                 {
@@ -3109,9 +3140,154 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
 
     eng.markDirty();
     emitSnapshotInvalidated();
+
+    // P4 self-heal (PR-1): the download loop above ignores its result, so a transient
+    // upload/download failure during THIS bootstrap (or a peer's blob that hadn't
+    // finished landing) can leave a just-applied clip sourceMissing. Kick off a retry
+    // pass so the guest doesn't need the host to notice and re-commit that track — a
+    // no-op (synchronous, effectively free) when nothing is missing.
+    cmdMpFetchMissingStems (var (new DynamicObject()));
+
     auto* d = new DynamicObject();
     d->setProperty ("applied", applied);
     return okResult ("mp_apply_bootstrap", var (d));
+}
+
+juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
+{
+    // Self-heal (P4/PR-1): every uploadBlob/downloadBlob result in mp_commit_track,
+    // mp_serialize_project, mp_apply_bootstrap, and applyMultiplayerCommitMessage is
+    // ignored at its call site — a single transient HTTP failure otherwise leaves a
+    // clip's audio sourceMissing forever, with the host manually re-committing that
+    // track as the only prior recovery ("nudging"). This command self-heals: it
+    // enumerates every wave clip whose source is currently missing, recognizes the
+    // ones referencing a content-addressed by-hash stem (repointWaveClipSource's own
+    // form: ".../audio/by-hash/<64-hex-sha256>.<ext>" — the hash IS the fetch key, no
+    // separate bookkeeping needed), and retries the download for exactly those. A
+    // clip missing its source for any OTHER reason (a plain moved/deleted local file)
+    // is untouched — that is relink_clip's job, not a peer blob store's.
+    struct Missing
+    {
+        juce::String clipId, hash, ext;
+        juce::File dest;
+    };
+    juce::Array<Missing> missing;
+
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+            {
+                const auto resolved = w->getCurrentSourceFile();
+                if (resolved.existsAsFile()) continue;
+
+                if (resolved.getParentDirectory().getFileName() != "by-hash") continue;
+                const auto stem = resolved.getFileNameWithoutExtension();
+                if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
+
+                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
+                // a manual retry, or two overlapping bootstraps) is already fetching this
+                // exact hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state the
+                // other pass's existsAsFile()/size check could otherwise observe.
+                if (inFlightStems_.count (stem) > 0) continue;
+
+                missing.add ({ c->itemID.toString(), stem,
+                              resolved.getFileExtension().removeCharacters ("."), resolved });
+            }
+    }
+
+    for (auto& m : missing)
+        inFlightStems_.insert (m.hash);
+
+    // Runs on the message thread: re-resolve each clip by id (it may have been
+    // removed/undone since the scan above — findClip returns nullptr, skipped), write
+    // the fetched bytes' arrival into the clip's cached source (sourceMediaChanged,
+    // mirroring repointWaveClipSource's own post-repoint call), and emit exactly one
+    // snapshot_invalidated if anything actually landed. downloadBlob (adversarial-review
+    // finding #1) now verifies the downloaded bytes' SHA-256 against `hash` itself before
+    // reporting success, so a truncated/corrupt transfer is never blessed as resolved here.
+    auto land = [this] (const juce::Array<Missing>& items) -> juce::var
+    {
+        int fetched = 0, failed = 0;
+        juce::Array<var> stillMissing;
+        for (auto& m : items)
+        {
+            const bool got = mpSession_ != nullptr
+                             && mpSession_->downloadBlob (m.hash, m.ext, m.dest)
+                             && m.dest.existsAsFile();
+            if (got)
+            {
+                if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (m.clipId)))
+                    w->sourceMediaChanged();
+                ++fetched;
+            }
+            else
+            {
+                ++failed;
+                stillMissing.add (m.hash);
+            }
+            inFlightStems_.erase (m.hash);
+        }
+        if (fetched > 0)
+            emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("fetched", fetched);
+        d->setProperty ("failed", failed);
+        d->setProperty ("stillMissing", var (stillMissing));
+        return okResult ("mp_fetch_missing_stems", var (d));
+    };
+
+    const bool wait = (bool) args.getProperty ("wait", false);
+    if (missing.isEmpty() || wait)
+        return land (missing);
+
+    // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
+    // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
+    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
+    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
+    // round-trip runs on the background thread; results land back via callAsync.
+    std::thread ([this, missing]
+    {
+        if (mpSession_ == nullptr || ! mpSession_->active())
+        {
+            // Bailed before attempting anything -- still release the in-flight marks
+            // (on the message thread) so a later pass isn't permanently skipped.
+            juce::MessageManager::callAsync ([this, missing]
+            {
+                for (auto& m : missing) inFlightStems_.erase (m.hash);
+            });
+            return;
+        }
+
+        struct Result { juce::String clipId, hash; bool ok; };
+        juce::Array<Result> results;
+        for (auto& m : missing)
+            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+
+        juce::MessageManager::callAsync ([this, results]
+        {
+            int fetched = 0;
+            for (auto& r : results)
+            {
+                if (r.ok)
+                {
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (r.clipId)))
+                        w->sourceMediaChanged();
+                    ++fetched;
+                }
+                inFlightStems_.erase (r.hash);
+            }
+            if (fetched > 0)
+                emitSnapshotInvalidated();
+        });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("mp_fetch_missing_stems", var (data));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
@@ -4917,8 +5093,15 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
 
     // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
     // std::thread, marshal the result back to the message thread.
-    emit ("plugin_scan_progress", [&] { auto* o = new DynamicObject();
-        o->setProperty ("format", format); o->setProperty ("done", false); return var (o); }());
+    //
+    // FIT-003 — arm the live progress sampler BEFORE spawning the scan thread (message
+    // thread only; see timerCallback()) so the UI gets periodic running-count events
+    // for the whole sweep, not just this start/done pair.
+    scanSampling_  = true;
+    scanFormat_    = format;
+    scanStartMs_   = Time::getMillisecondCounterHiRes();
+    lastScanCount_ = -1;
+    emit ("plugin_scan_progress", makeScanProgressPayload (format, /*count=*/0, /*done=*/false, 0));
     // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
     // will run together below (async path).  Pass clearFirst=false and includeVST3 in
     // the async lambda only if we didn't already do them above.
@@ -4934,9 +5117,9 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true, /*slowVST3=*/true);
         juce::MessageManager::callAsync ([this, total, format]
         {
-            emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();
-                o->setProperty ("format", format); o->setProperty ("count", total);
-                o->setProperty ("done", true); return juce::var (o); }());
+            const int elapsed = (int) (Time::getMillisecondCounterHiRes() - scanStartMs_);
+            scanSampling_ = false;   // stop the timerCallback() sampler before the terminal emit
+            emit ("plugin_scan_progress", makeScanProgressPayload (format, total, /*done=*/true, elapsed));
             emitSnapshotInvalidated();
         });
     }).detach();
@@ -4976,7 +5159,13 @@ juce::var MoshOps::cmdGetPluginBlocklist (const juce::var&)
         auto* o = new DynamicObject();
         o->setProperty ("id",    uiId);
         o->setProperty ("rawId", rawId);   // the actual blacklist key, for debugging
-        o->setProperty ("reason", "blocked");   // crashed-scan vs manual not tracked separately
+        // FIT-003 — PluginHost now records WHY each entry was blocked: "crash_or_hang"
+        // for a dead-mans-pedal auto-quarantine (the scan crashed or hung loading it),
+        // "manual" for an explicit block_plugin call. Entries blocked before this
+        // tracking existed (or a fresh manual block missing the tag) default to
+        // "manual" — the safe assumption absent contrary evidence.
+        const auto reason = pluginHost.blockReasonFor (rawId);
+        o->setProperty ("reason", reason.isNotEmpty() ? reason : juce::String ("manual"));
         entries.add (var (o));
     }
     auto* data = new DynamicObject();

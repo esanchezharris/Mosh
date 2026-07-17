@@ -15,6 +15,7 @@ import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
 import { Inspector } from "./inspector/Inspector";
+import { MultiplayerLauncher } from "./MultiplayerLauncher";
 
 export function RightRail() {
   const open = useShell((s) => s.rightOpen);
@@ -75,7 +76,6 @@ function MoshStatusLine() {
 function CollaboratorsCard() {
   const mp = useStore((s) => s.mp);
   const peers = useStore((s) => s.peers);
-  const mpCreate = useStore((s) => s.mpCreateSession);
   const cameraOn = useVideo((s) => s.cameraOn);
   const localStream = useVideo((s) => s.localStream);
   const remoteStreams = useVideo((s) => s.remoteStreams);
@@ -115,10 +115,12 @@ function CollaboratorsCard() {
               <strong>Share when you need a second seat.</strong>
               <span>Camera stays off until you explicitly join collaboration.</span>
             </div>
-            <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
-              <IconUsers size={15} />
-              <span>Invite collaborator</span>
-            </button>
+            <MultiplayerLauncher
+              className="v2-invite"
+              testId="v2-invite"
+              ariaLabel="Create or join a multiplayer session"
+              label={<><IconUsers size={15} /><span>Invite collaborator</span></>}
+            />
           </div>
         ) : (
           <>
@@ -148,10 +150,12 @@ function CollaboratorsCard() {
               );
             })}
             <div className="v2-collab-actions">
-              <button className="v2-invite" data-testid="v2-invite" onClick={() => { if (!mp.active) void mpCreate(); }}>
-                <IconUsers size={15} />
-                <span>{mp.active ? "Share session" : "Invite collaborator"}</span>
-              </button>
+              <MultiplayerLauncher
+                className="v2-invite"
+                testId="v2-invite"
+                ariaLabel={mp.active ? "Multiplayer session — view room code" : "Create or join a multiplayer session"}
+                label={<><IconUsers size={15} /><span>{mp.active ? "Share session" : "Invite collaborator"}</span></>}
+              />
               {!cameraOn && <span className="v2-collab-hint">Camera stays off until you decide to share it.</span>}
             </div>
           </>

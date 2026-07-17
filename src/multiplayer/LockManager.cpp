@@ -34,6 +34,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "mp_create_session", "mp_join_session", "mp_leave_session",
         "mp_claim_track", "mp_commit_track", "mp_broadcast_selection",
         "mp_serialize_project", "mp_apply_bootstrap", "mp_apply_structural",
+        "mp_fetch_missing_stems",
         "import_training_source", "approve_training_source", "build_training_corpus",
         "submit_training_job", "training_job_status", "cancel_training_job",
         "import_lora_adapter", "activate_lora_adapter",

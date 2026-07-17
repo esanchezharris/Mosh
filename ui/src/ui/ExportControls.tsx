@@ -6,6 +6,8 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import type { ExportFormat } from "../types";
+import { copyText } from "../clipboard";
+import { parentDir } from "../exportPath";
 
 const FORMATS: { value: ExportFormat; depths: number[] }[] = [
   { value: "wav", depths: [16, 24, 32] }, { value: "aiff", depths: [16, 24, 32] }, { value: "flac", depths: [16, 24] },
@@ -17,12 +19,20 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const [bitDepth, setBitDepth] = useState(24);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
+  // "Copied" flash — there's no native "Reveal in Finder" bridge command (JUCE's
+  // File::revealToUser() has no MoshOps surface today), so a guest tester's best path to
+  // their export is: see the full path, copy it, then Cmd+Shift+G it into Finder.
+  const [copied, setCopied] = useState<"file" | "folder" | null>(null);
   const depths = FORMATS.find((f) => f.value === format)!.depths;
   const onExport = async () => {
-    setBusy(true); setDone("");
+    setBusy(true); setDone(""); setCopied(null);
     const r = await exec("export_audio", { format, bitDepth });
     setBusy(false);
     if (r.ok) setDone((r.data as { file?: string } | undefined)?.file ?? "exported");
+  };
+  const copy = async (which: "file" | "folder") => {
+    const ok = await copyText(which === "file" ? done : parentDir(done));
+    if (ok) { setCopied(which); window.setTimeout(() => setCopied(null), 1600); }
   };
   return (
     <>
@@ -40,7 +50,17 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
       <div className="pop-actions">
         <button className="btn" data-testid="export-run" disabled={busy || !audioEnabled} onClick={onExport}>{busy ? "Exporting…" : "Export"}</button>
       </div>
-      {done && <div className="pop-note tc" title={done}>Exported: {done}</div>}
+      {done && (
+        <div className="pop-note export-done" data-testid="export-done">
+          <div>Exported to:</div>
+          <div className="tc export-path" title={done}>{done}</div>
+          <div className="pop-actions">
+            <button className="btn" data-testid="export-copy-path" onClick={() => void copy("file")}>{copied === "file" ? "Copied ✓" : "Copy path"}</button>
+            <button className="btn" data-testid="export-copy-folder" onClick={() => void copy("folder")}>{copied === "folder" ? "Copied ✓" : "Copy folder"}</button>
+          </div>
+          <div className="pop-note">Folder hidden by default — in Finder press ⌘⇧G (Go to Folder) and paste it.</div>
+        </div>
+      )}
     </>
   );
 }

@@ -19,7 +19,7 @@ const MOCK = path.join(SRC, "bridge.mock.ts");
 /** Commands intentionally allowed to fall through to the mock's default-ok. */
 const ALLOWLIST = new Set<string>([
   // Live-only data with no dev-mock state to mutate (UI degrades gracefully):
-  "rescan_plugins",
+  // (rescan_plugins now has a real case — FIT-003 — so it is intentionally NOT here.)
   "import_clip_data", // dev imports via the import_clip path; bytes-over-bridge is native-only
   // A3 crash recovery is a native-only flow (no crash journal in the in-memory dev mock):
   "recover_session",

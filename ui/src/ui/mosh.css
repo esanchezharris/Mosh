@@ -252,6 +252,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .btn.on, .btn[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }
 .btn.rec[data-state="recording"] { background: var(--rec); border-color: var(--rec); color: #fff; }
 .btn.ghost { background: transparent; }
+.btn.primary { background: var(--lime); border-color: var(--lime); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover { background: var(--lime-glow); border-color: var(--lime-glow); color: var(--on-accent); }
+.btn.danger { background: var(--rec); border-color: var(--rec); color: #fff; }
+.btn.danger:hover { border-color: var(--rec); color: #fff; filter: brightness(1.08); }
 .seg { display: inline-flex; border: 1px solid var(--ink-line); border-radius: 8px; overflow: hidden; }
 .seg .btn { border: none; border-radius: 0; }
 .seg .btn + .btn { border-left: 1px solid var(--ink-line); }
@@ -730,6 +734,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-create-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .xform-controls { display: flex; flex-direction: column; gap: 4px; }
 .xform-text { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 11px; }
+/* Guest degradation — no RAVE model installed, this renders the fake tilt/saturation
+   stand-in. Self-contained pill (mirrors .cap-tag's register), not gated to any other
+   guest-clarity work touching the GenDrawer header. */
+.xform-preview { align-self: flex-start; font-size: 8px; text-transform: uppercase; color: var(--on-accent); background: var(--warn); border-radius: 3px; padding: 1px 4px; }
 
 /* ── mixer ──────────────────────────────────────────────────────────────────*/
 .mixer { flex: 1 1 auto; display: flex; gap: 10px; padding: 14px; overflow: auto; background: var(--ink); }
@@ -755,6 +763,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--ink-line); }
 .modal-head .pr-meta { margin-left: auto; color: var(--bone-dim); font-size: 11px; }
+.confirm-modal { width: min(92vw, 380px); }
+.confirm-body { padding: 4px 14px 0; font-size: 12px; line-height: 1.5; }
+.confirm-actions { padding: 12px 14px 14px; justify-content: flex-end; }
 .modal-filters { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line-soft); }
 .modal-filters input { flex: 1 1 auto; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 7px; padding: 6px 9px; }
 .modal-list { overflow: auto; padding: 8px 10px; flex: 1 1 auto; min-height: 0; }
@@ -786,6 +797,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
   padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 8px;
 }
 .pop-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.04em; }
+/* Guest degradation — e.g. the Type-beat Training popover's "preview" tag (fake backend,
+   no GPU on this Mac). Generic so any pop-head can carry one. */
+.pop-head-badge { font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--on-accent); background: var(--warn); border-radius: 3px; padding: 1px 4px; }
 .pop-group { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px solid var(--ink-line-soft); }
 .pop-group:first-of-type { border-top: none; padding-top: 0; }
 .pop-label { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-dim); }
@@ -793,6 +807,11 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-row select { background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .pop-note { font-size: 10px; color: var(--bone-dim); word-break: break-all; }
+/* Post-export "where did my file go" block — no native Reveal-in-Finder command exists,
+   so the full path stays prominent + copyable (file and folder) instead. */
+.export-done { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--bone-dim); }
+.export-done .export-path { color: var(--bone); word-break: break-all; }
+.export-done .pop-actions { gap: 6px; }
 
 /* File menu (WebView mirror of the native macOS File menu). Anchored LEFT — it sits
    at the left of the topbar tools, unlike the right-anchored utility popovers. */
@@ -1199,6 +1218,9 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-field input { font: inherit; padding: 4px 6px; }
 .mp-field.mp-color { flex-direction: row; align-items: center; gap: 8px; }
 .mp-code { font-family: var(--font-mono); font-size: 11px; }
+.mp-code-row { display: flex; gap: 6px; }
+.mp-code-row .mp-code { flex: 1; min-width: 0; }
+.mp-code-row .btn { flex: none; }
 .mp-roster { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .mp-peer { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .mp-peer-name { flex: 1; }
@@ -1208,6 +1230,10 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
 .mp-join { display: flex; gap: 6px; }
 .mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+/* v2 shell's modal-based launcher (MultiplayerLauncher) — same panel, more room than
+   the classic shell's small anchored popover. */
+.mp-launcher-modal { width: min(92vw, 420px); }
+.mp-launcher-body { padding: 12px 14px 14px; }
 
 /* A peer-held track: dim + a coloured lock chip; not editable here (the backend
    guard is the real enforcement, this is the visual affordance). */

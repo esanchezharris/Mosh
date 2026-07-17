@@ -158,6 +158,12 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
 // ── The dock — collections as a chip row, then the shared list. The one v2 plugin surface. ──
 export function PluginDock() {
   const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
+  // FIT-003 — v2 previously had ZERO rescan control and no progress UI at all (the
+  // classic modal already had both). This brings the default shell to parity: a
+  // compact Rescan button (VST3-only — always safe; AU stays an opt-in env var, same
+  // posture as the classic modal) + a live indeterminate progress line while scanning.
+  const rescan = useStore((s) => s.rescanPlugins);
+  const scanProgress = useStore((s) => s.scanProgress);
   const collectionSections = useMemo(
     () =>
       collectionGroupOrder
@@ -173,8 +179,26 @@ export function PluginDock() {
           <strong className="v2-pdock-title">Plugins</strong>
           <span className="v2-pdock-subtitle">Search collections and load onto the selected track.</span>
         </div>
-        <span className="v2-pdock-selected">{pk.selectedTrackId ? "Track ready" : "Select a track first"}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+          <button
+            className="btn"
+            data-testid="v2-pb-rescan"
+            disabled={!!scanProgress}
+            title="Re-scan installed VST3 plugins (out-of-process; hung plugins are quarantined)"
+            onClick={() => void rescan("vst3")}
+          >
+            {scanProgress ? "Scanning…" : "Rescan"}
+          </button>
+          <span className="v2-pdock-selected">{pk.selectedTrackId ? "Track ready" : "Select a track first"}</span>
+        </div>
       </div>
+      {scanProgress && (
+        <div className="v2-pdock-scan-status" data-testid="v2-pb-scan-status" role="status" aria-live="polite">
+          Scanning {scanProgress.format}
+          {typeof scanProgress.count === "number" ? ` — ${scanProgress.count} found` : ""}
+          {typeof scanProgress.elapsedMs === "number" ? ` · ${(scanProgress.elapsedMs / 1000).toFixed(1)}s` : ""}
+        </div>
+      )}
       <label className="v2-pb-search v2-pdock-search">
         <span className="v2-pb-search-label">Search</span>
         <input

@@ -9,6 +9,7 @@ import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA }
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
+import { isTransformPreview } from "../capabilities";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -486,6 +487,7 @@ function TransformControls({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const targets = useStore((s) => s.availableTransformTargets);
   const freeText = useStore((s) => s.transformFreeText);
+  const preview = useStore((s) => isTransformPreview(s.capabilities));
   const rl = clip.renderLayer!;
   const target = rl.target ?? "";
   const strength = rl.strength ?? 65;
@@ -493,6 +495,10 @@ function TransformControls({ clip }: { clip: Clip }) {
   const setTarget = (t: string) => void exec("set_render_param", { clipId: clip.id, target: t });
   return (
     <div className="xform-controls">
+      {preview && (
+        <span className="xform-preview tc" data-testid="xform-preview"
+          title="No RAVE model installed on this Mac — this renders a deterministic placeholder tilt/saturation, not a real instrument transform">preview</span>
+      )}
       <label className="nparam">
         <span className="nlabel">target</span>
         <select className="btn ghost" data-testid="xform-target" value={known ? target : ""}

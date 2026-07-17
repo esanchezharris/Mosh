@@ -135,13 +135,20 @@ finally:
 
 with tempfile.TemporaryDirectory() as td:
     ro = os.path.join(td, "ro")
-    os.mkdir(ro)
-    os.chmod(ro, 0o500)
+    if sys.platform == "win32":
+        # Windows ignores the read-only bit on DIRECTORIES, so chmod 0o500 doesn't
+        # deny writes — occupy the archive path with a FILE instead (makedirs and
+        # the row write both fail, the same best-effort branch).
+        open(ro, "w").close()
+    else:
+        os.mkdir(ro)
+        os.chmod(ro, 0o500)
     draws = [reply([note(64)]), reply([note(67)]), reply([note(72)])]
     chat = lambda messages, temperature=None: draws.pop(0)  # noqa: E731
     r = runtime.escalate(payload([note(60)]), chat=chat, now=NOW, pairs_dir=ro)
     check("unwritable archive dir: ok, archived:false", r["ok"] is True and r["archived"] is False)
-    os.chmod(ro, 0o700)
+    if sys.platform != "win32":
+        os.chmod(ro, 0o700)
 
 # ── corrective-retry pair appender (the /archive_pair body) ─────────────────
 

@@ -17,7 +17,17 @@ public:
     ~GenerativeJobManager();
 
     /** Ensure the service is reachable: probe /health, spawning the bundled
-        Python service (service/server.py) if needed. Returns true if healthy. */
+        Python service (service/server.py) if needed. Returns true if healthy.
+
+        Two guards keep a broken interpreter from freezing the CALLER (often the message
+        thread — list_colors/list_transform_targets/list_loras/render_layer/get_rhymes all
+        call this synchronously via execute_command): (1) the warmup loop bails the instant
+        the spawned child DIES (e.g. no working python3 / a broken venv on a guest Mac),
+        rather than blindly polling for the full ~30s ceiling; (2) a failed attempt is cached
+        for a short backoff window so re-opening the Gen inspector (which fires three of
+        these back-to-back) doesn't re-trigger a doomed spawn+warmup on every call. Neither
+        guard delays a slow-but-alive startup — only a confirmed-dead child or a very recent
+        failure short-circuits early. */
     bool ensureServiceRunning();
     /** Probe GET /health. connectMs bounds the worst-case block on the CALLING thread when
         the service is reachable-but-wedged (a dead service refuses immediately); pass a short
@@ -188,6 +198,11 @@ private:
     juce::ChildProcess serviceProcess;          // guarded by spawnLock
     bool spawnedByUs = false;                   // guarded by spawnLock
     juce::String svcBuild;                      // guarded by stateLock
+
+    // Failure-backoff clock (guarded by spawnLock): the millisecond-counter timestamp of the
+    // most recent failed ensureServiceRunning() attempt, or 0 if the last attempt succeeded /
+    // none has run yet. See ensureServiceRunning()'s doc comment.
+    juce::uint32 lastFailedSpawnMs = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GenerativeJobManager)
 };

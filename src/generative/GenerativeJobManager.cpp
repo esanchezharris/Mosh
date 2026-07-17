@@ -9,6 +9,14 @@ namespace
 {
     constexpr int serviceDiscardedOutputStreams = 0;
 
+    // How long a failed ensureServiceRunning() attempt is cached before the next caller is
+    // allowed to retry a spawn. Opening the Gen inspector fires THREE list_* calls back-to-back
+    // (list_colors/list_transform_targets/list_loras), all synchronously on the message thread —
+    // without this, each one would re-attempt (and re-wait on) a spawn that is doomed to fail
+    // again the same way. Short enough that a mid-session fix (e.g. the owner runs
+    // setup-guest.sh) recovers on the next Gen-tab open a few seconds later.
+    constexpr juce::uint32 kSpawnFailureBackoffMs = 5000;
+
     // Stable, spawner-agnostic handshake locations in the Mosh app-data dir (matches
     // MoshEngine's session base) so a FRESH launch can find a PRIOR run's service.
     File serviceStateDir()  { return File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"); }
@@ -186,13 +194,25 @@ bool GenerativeJobManager::ensureServiceRunning()
     const juce::ScopedLock sl (spawnLock);
     if (isHealthy()) return true;
 
+    // A recent attempt already failed to bring the service up (dead python3, broken venv,
+    // missing script...). isHealthy() above is already cheap on a closed/refused port, but
+    // spawning is not: don't re-attempt a doomed spawn+warmup on every call within the backoff
+    // window (the Gen inspector alone fires three of these on every tab open).
+    const auto now = juce::Time::getMillisecondCounter();
+    if (lastFailedSpawnMs != 0 && (now - lastFailedSpawnMs) < kSpawnFailureBackoffMs)
+        return false;
+
     // C2 — health failed: a wedged/orphaned service from a crashed Mosh may be squatting the
     // port. Reap it (PID handshake + identity check) before spawning a fresh one.
     reapStaleService();
-    if (isHealthy()) return true;     // (another instance may have raced in)
+    if (isHealthy()) { lastFailedSpawnMs = 0; return true; }     // (another instance may have raced in)
 
     auto script = locateServiceScript();
-    if (! script.existsAsFile()) return false;
+    if (! script.existsAsFile())
+    {
+        lastFailedSpawnMs = juce::Time::getMillisecondCounter();
+        return false;
+    }
 
     // Hand the child the handshake paths: it records its PID (C2, so a future launch can reap
     // it) and the actual bound port (C3). Set in our env so the child inherits them on both
@@ -236,12 +256,20 @@ bool GenerativeJobManager::ensureServiceRunning()
         spawnedByUs = true;
         for (int i = 0; i < 150; ++i)    // up to ~30s for warmup
         {
+            // Early-bail: a DEAD child (e.g. no working python3, or a broken venv on a guest
+            // Mac) will never answer /health — stop polling a corpse for the remaining
+            // ~30s. A merely SLOW-but-alive startup (real model warmup) keeps isRunning()
+            // true throughout, so this never cuts short a legitimate cold start.
+            if (! serviceProcess.isRunning())
+                break;
             Thread::sleep (200);
             adoptPortFromHandshake();     // C3 — switch to the actual bound port if it differs
-            if (isHealthy()) return true;
+            if (isHealthy()) { lastFailedSpawnMs = 0; return true; }
         }
     }
-    return isHealthy();
+    const bool ok = isHealthy();
+    lastFailedSpawnMs = ok ? 0 : juce::Time::getMillisecondCounter();
+    return ok;
 }
 
 juce::var GenerativeJobManager::listColors()
