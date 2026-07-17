@@ -575,6 +575,14 @@
 }
 .v2-clipmenu button:hover { background: var(--v2-accent-soft); }
 .v2-clipmenu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 16%, transparent); color: var(--status-danger-text); }
+/* Guest degradation — an AI-menu action with no transcribe venv on this Mac. Stays
+   visible + hoverable (its title tooltip is the discoverability path) rather than
+   vanishing outright. Literal fallback (not just var(--v2-faint)): .v2-clipmenu is
+   portaled to document.body, OUTSIDE .v2-shell's scope for the --v2-* custom
+   properties, so an unresolved var() here would silently no-op the dimming (a
+   pre-existing characteristic of every portaled v2 popover, not new to this rule). */
+.v2-clipmenu button:disabled { color: var(--v2-faint, rgba(240, 239, 233, 0.4)); cursor: not-allowed; }
+.v2-clipmenu button:disabled:hover { background: transparent; }
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
 .v2-clip.wave { background: var(--v2-clip-wave); }
 .v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
@@ -582,6 +590,14 @@
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
 /* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
 .v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+/* An audio→MIDI/lyrics/flow build is in flight for this source clip (guest-degradation
+   pass — v2 previously gave zero feedback for any of these three async actions). */
+.v2-clip-badge.working {
+  position: absolute; left: 4px; bottom: 3px; z-index: 5;
+  background: var(--v2-accent); color: var(--v2-accent-ink); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.03em; padding: 1px 6px; border-radius: 999px; pointer-events: none;
+  animation: v2-blink 1100ms ease-in-out infinite;
+}
 .v2-clip canvas { display: block; width: 100%; height: 100%; }
 
 /* playhead overlay */

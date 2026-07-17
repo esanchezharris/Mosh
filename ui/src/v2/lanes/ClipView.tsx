@@ -26,6 +26,7 @@ import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
 // grid + MIDI shows note blocks (identical to the classic shell), not sparse dots.
 import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/Arrange";
 import type { Clip, Snapshot } from "../../types";
+import { AI_SETUP_HINT, transcriptionMenuEnabled } from "../../capabilities";
 
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
 const TABLE = () => getGestureTable("mosh"); // v2 = single Mosh interaction model
@@ -49,6 +50,14 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   const ensurePeaks = useStore((s) => s.ensurePeaks);
   const peaks = useStore((s) => s.peaks[clip.id]);
+  // In-flight status for the three clip-menu AI actions below (transcode/lyrics/flow) —
+  // v2 had zero visual feedback for any of these (the classic shell's "transcribing…"
+  // badge is classic-only); a guest-degradation gap since these actions error/hang
+  // silently otherwise. transcribing/buildingLyrics/buildingSkeleton are keyed by the
+  // source clip id and cleared on done/error by the store's event handlers.
+  const transcribing = useStore((s) => !!s.transcribing[clip.id]);
+  const buildingLyrics = useStore((s) => !!s.buildingLyrics[clip.id]);
+  const buildingSkeleton = useStore((s) => !!s.buildingSkeleton[clip.id]);
   const pxToSec = (px: number) => px / pxPerSec;
   const secToPx = (s: number) => s * pxPerSec;
   const bs = beatSeconds(meterOf(snapshot)); // seconds per beat (renderers map beats→px)
@@ -161,6 +170,9 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
         <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"
           title="A re-imagined render is playing beneath this clip; the MIDI is muted but still editable. Reset in the generative drawer to restore it.">✨</span>
       )}
+      {transcribing && <span className="v2-clip-badge working" data-testid="clip-transcribing">transcribing…</span>}
+      {buildingLyrics && <span className="v2-clip-badge working" data-testid="clip-building-lyrics">lyrics…</span>}
+      {buildingSkeleton && <span className="v2-clip-badge working" data-testid="clip-building-skeleton">flow…</span>}
       {/* edge cursor affordance — pointerdown bubbles up to the clip handler, which
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />
@@ -172,6 +184,12 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
 function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: number; time: number; onClose: () => void }) {
   const exec = useStore((s) => s.exec);
+  // Guest degradation: these three actions all ultimately need Basic Pitch (transcribe)
+  // to detect notes — on a Mac without the per-feature venvs they used to fail
+  // cryptically. Stay VISIBLE (progressive disclosure — discoverable, not hidden) but
+  // disabled with a tooltip naming the fix.
+  const aiReady = useStore((s) => transcriptionMenuEnabled(s.capabilities));
+  const aiHint = aiReady ? undefined : AI_SETUP_HINT;
   useEffect(() => {
     const close = () => onClose();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -184,14 +202,15 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
       <button role="menuitem" onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>Split here</button>
       <button role="menuitem" onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
       {clip.type === "wave" && (
-        <button role="menuitem" onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
+        <button role="menuitem" disabled={!aiReady} title={aiHint}
+          onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
       )}
       {clip.type === "wave" && (
-        <button role="menuitem" data-testid="clip-build-lyrics"
+        <button role="menuitem" data-testid="clip-build-lyrics" disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("build_lyrics_from_clip", { clipId: clip.id }))}>Build lyrics from this take</button>
       )}
       {clip.type === "wave" && (
-        <button role="menuitem" data-testid="clip-build-flow"
+        <button role="menuitem" data-testid="clip-build-flow" disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("build_skeleton_from_clip", { clipId: clip.id }))}>Build flow from this take</button>
       )}
       <div className="v2-clipmenu-sep" />
