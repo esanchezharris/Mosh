@@ -6751,15 +6751,58 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         p->setProperty ("xfade_ms", 8.0);
     }
 
+    // Streaming lookahead: when the producer is LISTENING to this clip, the service renders
+    // stitch windows playhead-ahead and snapshots progressive artifacts; the poll loops below
+    // land each at a musical boundary (landProgressiveArtifact) while later windows render.
+    // Explicit args (progressive/playheadS) let the headless harness exercise the path.
+    {
+        bool progressive = (bool) args.getProperty ("progressive", false);
+        double playheadS = (double) args.getProperty ("playheadS", -1.0);
+        if (! progressive && eng.hasAudio()
+            && juce::SystemStats::getEnvironmentVariable ("MOSH_SWAP_QUANTIZE", "1") != "0")
+        {
+            auto& transport = eng.edit().getTransport();
+            if (transport.isPlaying())
+            {
+                const auto cpos = clip->getPosition();
+                const double pcs = cpos.getStart().inSeconds(), pce = cpos.getEnd().inSeconds();
+                const double tp = transport.getPosition().inSeconds();
+                if (tp >= pcs && tp < pce)
+                {
+                    progressive = true;
+                    playheadS = juce::jmax (0.0, tp - rs);   // relative to the staged input
+                }
+            }
+        }
+        if (progressive)
+        {
+            p->setProperty ("progressive", true);
+            if (playheadS >= 0.0)
+                p->setProperty ("playhead_s", playheadS);
+        }
+        // Harness-only: cap the fake adapter's window per job so multi-window streaming is
+        // hermetically testable without perturbing other renders in the same service.
+        if (args.hasProperty ("windowS"))
+            p->setProperty ("window_s", args.getProperty ("windowS", 0.0));
+    }
+
     // The job dir is REUSED across renders of a layer, and the wait/async pollers treat
     // an existing output+manifest pair as the durable completion signal (real SA3 can
     // finish while /status is unreachable during teardown). Clear the PREVIOUS render's
     // pair before submitting, or a RE-render "completes" on the first poll with the old
     // audio (proven: an SA3 rack re-render landed the base render verbatim). Safe: the
     // accepted/applied audio lives in durable copies (audio/rl-*.wav, accept_render's
-    // project copy) — these two files are per-job transients.
-    // output.deleteFile();  // ATTRIB-TEST
-    // manifest.deleteFile();
+    // project copy) — these files are per-job transients, progressive chunks included.
+    // (This deletion is the fix commit 4e0ca0b3 DESCRIBES; an attribution experiment's
+    // comment-out was accidentally committed there — re-enabled here for good.)
+    output.deleteFile();
+    manifest.deleteFile();
+    for (int k = 1; ; ++k)
+    {
+        juce::File pf (output.getFullPathName() + ".progressive." + juce::String (k) + ".wav");
+        if (! pf.existsAsFile()) break;
+        pf.deleteFile();
+    }
 
     const auto jobId = jobManager.submitJob (node[ids::modelAdapter].toString(),
                                              input, output, manifest, var (p));
@@ -6792,9 +6835,28 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         const int healthConnectMs = 250;
         const int maxSilentStatusPolls = adapter == "soulx" ? 3 : 5;
         int silentStatusPolls = 0;
+        int landedProg = 0;   // streaming: highest progressive chunk landed so far
         juce::String lastErr;
+        const auto latestProgressive = [&output] (int after) -> std::pair<int, juce::File>
+        {
+            int best = after; juce::File bf;
+            for (int k = after + 1; ; ++k)   // chunks appear in strict sequence (atomic renames)
+            {
+                juce::File f (output.getFullPathName() + ".progressive." + juce::String (k) + ".wav");
+                if (! f.existsAsFile()) break;
+                best = k; bf = f;
+            }
+            return { best, bf };
+        };
         for (int i = 0; i < maxPolls; ++i)   // default ~120s; PC CUDA cold loads can opt into longer waits
         {
+            // Streaming: land the freshest progressive chunk BEFORE the completion check —
+            // wait:true runs on the message thread, so the call is direct.
+            if (auto [pk, pf] = latestProgressive (landedProg); pk > landedProg)
+            {
+                landedProg = pk;
+                landProgressiveArtifact (clipId, pf, fp, submitEpoch);
+            }
             auto st = jobManager.jobStatus (jobId, statusConnectMs);
             const bool statusReachable = st.isObject();
             if (! statusReachable)
@@ -6845,9 +6907,29 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
         const int healthConnectMs = 250;
         const int maxSilentStatusPolls = asyncAdapter == "soulx" ? 3 : 5;
         int silentStatusPolls = 0;
+        int landedProg = 0;   // streaming: highest progressive chunk handed to the message thread
         juce::String lastErr;
         for (int i = 0; i < asyncPolls; ++i)   // 100ms ticks: ~180s default, ~960s soulx
         {
+            // Streaming: hand the freshest progressive chunk to the message thread for a
+            // boundary-quantized provisional landing while later windows still render.
+            {
+                int best = landedProg; juce::File bf;
+                for (int k = landedProg + 1; ; ++k)
+                {
+                    juce::File f (output.getFullPathName() + ".progressive." + juce::String (k) + ".wav");
+                    if (! f.existsAsFile()) break;
+                    best = k; bf = f;
+                }
+                if (best > landedProg)
+                {
+                    landedProg = best;
+                    juce::MessageManager::callAsync ([this, clipId, bf, fp, submitEpoch]
+                    {
+                        landProgressiveArtifact (clipId, bf, fp, submitEpoch);
+                    });
+                }
+            }
             auto st = jobManager.jobStatus (jobId, statusConnectMs);
             const bool statusReachable = st.isObject();
             if (! statusReachable)
@@ -6963,12 +7045,52 @@ void MoshOps::applyFinalizedRender (const juce::String& clipId, const juce::File
         node.setProperty (ids::status, "ready", nullptr);
     }
 
+    // Streaming: the provisional chunk copies are superseded by the final — drop them after
+    // a beat (the audio graph needs a moment to release the last provisional reader). In a
+    // headless run the delayed timer may never fire; the copies are session-local temp.
+    {
+        const auto audioDir = eng.sessionDir().getChildFile ("audio");
+        const auto pattern = node[ids::id].toString() + "-*-prog*.wav";
+        juce::Timer::callAfterDelay (2000, [audioDir, pattern]
+        {
+            for (auto& f : audioDir.findChildFiles (juce::File::findFiles, false, pattern))
+                f.deleteFile();
+        });
+    }
+
     var qa = manifestFile.existsAsFile() ? JSON::parse (manifestFile.loadFileAsString()) : var();
     emit ("layer_status", [&] { auto* o = new DynamicObject();
         o->setProperty ("clipId", clipId); o->setProperty ("layerId", node[ids::id]);
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+void MoshOps::landProgressiveArtifact (const juce::String& clipId, const juce::File& artifact,
+                                       const juce::String& cacheKey, int expectedEpoch)
+{
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid() || ! artifact.existsAsFile()) return;
+    if (expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != expectedEpoch) return;
+    if (node[ids::status].toString() != "rendering") return;   // finished or superseded already
+    if (node[ids::mode].toString() == "sing") return;          // sing never auto-applies
+
+    double boundarySec = 0.0, armedPosSec = 0.0;
+    if (shouldDeferSwap (clipId, boundarySec, armedPosSec))
+    {
+        // A newer chunk replaces an older pending one (fresher audio, same boundary rule);
+        // the final render's own defer later replaces the last chunk the same way.
+        pendingSwaps[clipId] = { artifact, {}, cacheKey, expectedEpoch,
+                                 boundarySec, armedPosSec, true };
+        if (swapTimer == nullptr)
+            swapTimer = std::make_unique<SwapTimer> (*this);
+        if (! swapTimer->isTimerRunning())
+            swapTimer->startTimerHz (30);
+        return;
+    }
+    if (applyRenderInPlace (clipId, node, artifact, cacheKey, /*provisional*/ true)
+        || applyRenderBeneathMidi (clipId, node, artifact, cacheKey, /*provisional*/ true))
+        emitSnapshotInvalidated();
 }
 
 bool MoshOps::shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec)
@@ -7037,8 +7159,17 @@ void MoshOps::pollPendingSwaps()
             // Same staleness rule as finalizeRender: a reactive render superseded while
             // waiting at the boundary must not land.
             auto node = findRenderLayer (it->first);
-            if (node.isValid()
-                && ! (ps.expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != ps.expectedEpoch))
+            const bool fresh = node.isValid()
+                && ! (ps.expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != ps.expectedEpoch);
+            if (fresh && ps.provisional)
+            {
+                // Streaming chunk: swap only while the render is still in flight.
+                if (node[ids::status].toString() == "rendering"
+                    && (applyRenderInPlace (it->first, node, ps.outputWav, ps.cacheKey, true)
+                        || applyRenderBeneathMidi (it->first, node, ps.outputWav, ps.cacheKey, true)))
+                    emitSnapshotInvalidated();
+            }
+            else if (fresh)
                 applyFinalizedRender (it->first, ps.outputWav, ps.manifestFile, ps.cacheKey);
             it = pendingSwaps.erase (it);
         }
@@ -7053,7 +7184,8 @@ void MoshOps::pollPendingSwaps()
 }
 
 bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
-                                  const juce::File& artifact, const juce::String& cacheKey)
+                                  const juce::File& artifact, const juce::String& cacheKey,
+                                  bool provisional)
 {
     auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
     if (wave == nullptr || ! artifact.existsAsFile()) return false;   // non-wave → legacy lane path
@@ -7070,9 +7202,15 @@ bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree no
 
     // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render
     // writes a NEW file instead of overwriting the one the clip currently plays/displays.
+    // Streaming provisionals get a distinct -prog<seq> name per chunk (cleaned up when the
+    // final render lands — see applyFinalizedRender).
+    juce::String destStem = node[ids::id].toString() + "-" + cacheKey.substring (0, 12);
+    if (provisional)
+        destStem << "-prog" << artifact.getFileName()
+                       .fromLastOccurrenceOf (".progressive.", false, false)
+                       .upToLastOccurrenceOf (".wav", false, false);
     auto dest = eng.sessionDir().getChildFile ("audio")
-                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
-                    .withFileExtension ("wav");
+                    .getChildFile (destStem).withFileExtension ("wav");
     dest.getParentDirectory().createDirectory();
     if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
         return false;
@@ -7091,6 +7229,9 @@ bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree no
     const bool local = dest.isAChildOf (eng.editFile().getParentDirectory());
     mosh::repointWaveClipSource (*wave, dest, eng.editFile().getParentDirectory(), local);
     node.setProperty (ids::appliedInPlace, true, nullptr);
+    if (provisional)
+        return true;   // streaming chunk: the clip plays fresh audio, but the CACHE and the
+                       // layer status belong to the FINAL render only
     // cacheArtifact stored ABSOLUTE; cmdSaveAs's consolidateRenderArtifacts copies it into
     // audio/renders/ + re-points it relative (so the saved project carries no absolute pool path).
     node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
@@ -7100,7 +7241,8 @@ bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree no
 }
 
 bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
-                                      const juce::File& artifact, const juce::String& cacheKey)
+                                      const juce::File& artifact, const juce::String& cacheKey,
+                                      bool provisional)
 {
     auto* midi = findClip (clipId);
     if (midi == nullptr || dynamic_cast<te::WaveAudioClip*> (midi) != nullptr) return false;   // wave → in-place path
@@ -7117,10 +7259,15 @@ bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTre
     }
 
     // Durable per-render copy (a disposable artifact), named by the fingerprint so a re-render writes
-    // a NEW file rather than overwriting the one the hidden clip currently plays.
+    // a NEW file rather than overwriting the one the hidden clip currently plays. Streaming
+    // provisionals get a distinct -prog<seq> name per chunk (cleaned when the final lands).
+    juce::String destStem = node[ids::id].toString() + "-" + cacheKey.substring (0, 12);
+    if (provisional)
+        destStem << "-prog" << artifact.getFileName()
+                       .fromLastOccurrenceOf (".progressive.", false, false)
+                       .upToLastOccurrenceOf (".wav", false, false);
     auto dest = eng.sessionDir().getChildFile ("audio")
-                    .getChildFile (node[ids::id].toString() + "-" + cacheKey.substring (0, 12))
-                    .withFileExtension ("wav");
+                    .getChildFile (destStem).withFileExtension ("wav");
     dest.getParentDirectory().createDirectory();
     if (dest != artifact && ! dest.existsAsFile() && ! artifact.copyFileTo (dest))
         return false;
@@ -7132,11 +7279,18 @@ bool MoshOps::applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTre
         if (auto* hidden = dynamic_cast<te::WaveAudioClip*> (findClip (hiddenId)))
         {
             mosh::repointWaveClipSource (*hidden, dest, eng.editFile().getParentDirectory(), local);
+            if (provisional)
+                return true;   // streaming chunk: hot-swap only; cache/status wait for the final
             node.setProperty (ids::cacheArtifact, dest.getFullPathName(), nullptr);
             node.setProperty (ids::cacheKey, cacheKey, nullptr);
             node.setProperty (ids::status, "ready", nullptr);
             return true;
         }
+
+    // A provisional chunk with NO hidden clip yet must not do the structural first-landing
+    // (an undoable txn per streaming chunk = undo churn) — the final render lands it.
+    if (provisional)
+        return false;
 
     // FIRST apply: land the hidden full-span audio on a dedicated HIDDEN, INSTRUMENT-FREE track (NOT
     // the source track — its synth would overwrite the buffer and silence the clip) at the MIDI clip's

@@ -390,6 +390,7 @@ private:
         int expectedEpoch = -1;
         double boundarySec = 0.0;   // land when the playhead reaches/wraps past this
         double armedPosSec = 0.0;   // last observed position (wrap detection)
+        bool provisional = false;   // streaming: a progressive artifact, not the final render
     };
     struct SwapTimer : juce::Timer
     {
@@ -403,6 +404,11 @@ private:
                                           const juce::File& manifestFile, const juce::String& cacheKey);
     bool            shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec);
     void            pollPendingSwaps();
+    // Streaming lookahead: land one progressive artifact (fresh windows over the original
+    // audio) provisionally — boundary-quantized, epoch-guarded, cache untouched until the
+    // final render lands.
+    void            landProgressiveArtifact (const juce::String& clipId, const juce::File& artifact,
+                                             const juce::String& cacheKey, int expectedEpoch);
 
     // Phase 3 — reactive auto-re-render. reactiveTouch(clipId) bumps the layer's reactiveEpoch and
     // (debounced) fires a background re-render when an applied render is live (wave in-place or MIDI
@@ -418,7 +424,8 @@ private:
     // reset_render_layer can restore it. Returns false for non-wave clips / missing artifact
     // (caller falls back to the legacy lane-landing path). Message-thread only; undoable txn.
     bool            applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
-                                        const juce::File& artifact, const juce::String& cacheKey);
+                                        const juce::File& artifact, const juce::String& cacheKey,
+                                        bool provisional = false);
     // Phase 2 — auto-apply a completed render BENEATH a MIDI/drum clip: land a hidden, full-span
     // looping audio clip on the SAME track and MUTE the source MIDI, so the producer hears the
     // re-imagined audio in place while the editable MIDI stays beneath. A re-render HOT-SWAPS the
@@ -426,7 +433,8 @@ private:
     // / missing artifact (caller falls back to applyRenderInPlace or the legacy lane). Message-thread
     // only; the first apply is one undoable txn (undo == reset_render_layer).
     bool            applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
-                                            const juce::File& artifact, const juce::String& cacheKey);
+                                            const juce::File& artifact, const juce::String& cacheKey,
+                                            bool provisional = false);
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);

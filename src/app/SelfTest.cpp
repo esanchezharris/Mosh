@@ -1712,6 +1712,57 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e; });
     }
 
+    // ─── Streaming lookahead: progressive windowed render (fake, hermetic) ───
+    // A long-clip re-render streams: windows render playhead-ahead, each chunk lands
+    // provisionally (clip audio freshens mid-render, cache/status untouched), the final
+    // render lands last and is the only thing the cache remembers. Headless is the
+    // land-immediately path (no boundary wait), so this stays deterministic. The fake's
+    // per-job window cap (windowS) forces multi-window coverage with no real model.
+    section ("Streaming: progressive windowed render (fake)");
+    {
+        auto stTrk = cmd (ops, "create_track", args1 ("name", "Stream"))["data"].getProperty ("trackId", var()).toString();
+        auto stTone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", stTrk }, { "seconds", 4.0 }, { "freq", 261.0 }}));
+        const auto stCid = stTone["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", stCid }, { "adapter", "fake" }, { "mode", "reimagine" }}))),
+               "create_render_layer for streaming ok");
+        cmd (ops, "set_render_param", objN ({{ "clipId", stCid }, { "seed", 5 }, { "nl", 0.4 }, { "coverage", "stitch" }}));
+
+        auto sr1 = cmd (ops, "render_layer", objN ({{ "clipId", stCid }, { "wait", true },
+                                                    { "progressive", true }, { "playheadS", 1.5 }, { "windowS", 1.0 }}));
+        check (ok (sr1) && sr1["data"].getProperty ("cache", var()).toString() == "miss",
+               "progressive render ok (MISS)");
+
+        auto stLayer = [&] () -> var {
+            auto trk = trackById (stTrk);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == stCid)
+                    return c.getProperty ("renderLayer", var());
+            return {};
+        };
+        check (stLayer().getProperty ("status", var()).toString() == "ready",
+               "final render landed -> ready");
+        check ((bool) stLayer().getProperty ("appliedInPlace", false),
+               "streamed render applied in place");
+
+        // Provisional chunk copies landed alongside the final durable copy.
+        auto audioDir = eng.sessionDir().getChildFile ("audio");
+        int progCopies = 0, finalCopies = 0;
+        for (auto& f : audioDir.findChildFiles (juce::File::findFiles, false, "rl-*.wav"))
+        {
+            if (f.getFileNameWithoutExtension().contains ("-prog")) ++progCopies;
+            else if (f.getFileName().startsWith ("rl-"))            ++finalCopies;
+        }
+        check (progCopies >= 1, "provisional chunk(s) landed while rendering ("
+                                    + String (progCopies) + " chunk copies)");
+        check (finalCopies >= 1, "final durable copy present");
+
+        // progressive/playheadS/windowS are RENDER args, not layer params — the
+        // fingerprint must not see them: an identical plain re-render is a cache HIT.
+        auto sr2 = cmd (ops, "render_layer", objN ({{ "clipId", stCid }, { "wait", true }}));
+        check (sr2["data"].getProperty ("cache", var()).toString() == "hit",
+               "plain re-render after streaming is a cache HIT (args not in the fingerprint)");
+    }
+
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
     // "Generative on ANY track": render_layer on a MIDI clip BOUNCES the track's
     // instrument output to audio first, then runs the same FakeAdapter pipeline. The

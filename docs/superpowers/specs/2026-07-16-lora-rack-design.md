@@ -110,3 +110,30 @@ Streaming lookahead (generate the next 4/8 bars ahead of the playhead); v2 in-ap
 training (real backend behind the scaffold, output lands in the watched folder);
 ACE-Step as adapter #4 (native multi-adapter support maps onto the same rack UI);
 mud-threshold sweep (docs/defaults only — no clamp exists to tune).
+
+## Addendum (same day): Streaming lookahead v1 — SHIPPED
+
+The "generate the next 4/8 bars ahead of the playhead" follow-up landed immediately after
+v1 (owner call). `coverage.window_order` renders stitch windows starting at the window
+AFTER the one under the playhead (wrapping); each completed window snapshots a full-length
+progressive artifact (`<output>.progressive.<seq>.wav`, atomic) = fresh windows overlaid
+on the ORIGINAL audio at absolute clip positions (`stitch.overlay_window`, equal-power
+seams inside the replaced region). The native pollers (wait + async) land each chunk
+provisionally — boundary-quantized through the P5 pendingSwaps machinery, epoch-guarded,
+`appliedInPlace` only; `cacheKey`/status belong to the FINAL render, which also cleans the
+`-prog<seq>` durable copies. Auto-armed when the transport is playing inside the clip;
+`progressive`/`playheadS`/`windowS` render args exist for the harness and are deliberately
+NOT fingerprint inputs (plain re-render after a streamed render = cache HIT, asserted).
+The final stitched output stays byte-identical to the non-progressive path (asserted);
+progressive artifacts keep absolute alignment (the stitch compaction drift is a
+pre-existing stitch_windows property, noted not changed). MIDI-beneath streams via the
+hidden-clip hot-swap only (no structural txn per chunk — the final lands the structure).
+
+Verified: coverage_progressive_test.py 19 checks 3×-det; `--selftest` 1284/1284 (7 new
+streaming checks — 4 provisional chunks land hermetically via the fake + per-job windowS);
+end-to-end run-script proof (4 prog durable copies + final + HIT-after).
+
+GOTCHA (cost a debug cycle): `ensureServiceRunning` reuses ANY healthy service on the
+port — a long-lived service from earlier in the session runs STALE service-side Python
+after edits. Kill the port-8770 service after editing service/ code, or run with a fresh
+MOSH_SERVICE_PORT.
