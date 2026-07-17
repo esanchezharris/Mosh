@@ -708,6 +708,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
 .gen-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.06em; }
 .gen-clip { font-size: 10px; color: var(--bone-dim); }
+/* Guest-clarity engine badge (2026-07-16) — is THIS Mac's service running the real SA3
+   model, or the deterministic preview engine? Honest per-Mac truth, not a colour-rack proxy. */
+.engine-badge { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--ink-line); cursor: default; }
+.engine-badge.eb-sa3 { color: var(--on-accent); background: var(--lime); border-color: var(--lime); }
+.engine-badge.eb-preview { color: var(--warn); background: transparent; border-color: var(--warn); }
+.gen-rendered-by { font-size: 10px; color: var(--warn); }
 .gen-body { display: flex; flex-direction: column; gap: 6px; }
 .gen-status { display: flex; align-items: center; gap: 8px; }
 .gen-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 5px; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone-dim); }
