@@ -19,3 +19,19 @@ describe("v2 shell.css .v2-btn disabled affordance", () => {
     expect(css).toContain(".v2-btn:active:not(:disabled)");
   });
 });
+
+describe("v2 shell.css floating-panel radius token", () => {
+  it("uses --v2-radius for the composer panel (matches sibling floating panels)", () => {
+    // The composer was the single remaining hardcoded `border-radius: 16px`; every
+    // other floating panel references var(--v2-radius) (defined as 16px). Swapping to
+    // the intended token is a visual no-op that keeps the radius scale single-sourced.
+    const start = css.indexOf(".v2-composer {");
+    const composerRule = css.slice(start, css.indexOf("}", start) + 1);
+    expect(composerRule).toContain("border-radius: var(--v2-radius);");
+    expect(composerRule).not.toContain("border-radius: 16px");
+  });
+
+  it("no longer hardcodes `border-radius: 16px` anywhere in the shell", () => {
+    expect(css).not.toContain("border-radius: 16px");
+  });
+});

@@ -804,7 +804,7 @@
      (grid items ignore margin:auto — center via justify-self) */
   display: flex; align-items: stretch; gap: 12px; padding: 10px 12px;
   background: linear-gradient(180deg, rgba(33, 33, 36, 0.98), rgba(24, 24, 27, 0.98));
-  border: 1px solid var(--v2-line); border-radius: 16px;
+  border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
   box-shadow: var(--v2-glow);
 }
 .v2-composer-side { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
