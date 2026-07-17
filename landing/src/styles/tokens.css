@@ -1,0 +1,152 @@
+/*
+ * Design tokens. Semantic custom properties only — components reference
+ * --color-* / --font-* / --space-* names, never raw hex, so no component
+ * rule needs to know or care which theme is active.
+ *
+ * Theme resolution order (same pattern used for claude.ai Artifacts, applied
+ * here because it's the correct robust technique for any manually-toggleable
+ * theme): :root sets the dark palette as the default (baseline + pre-JS
+ * fallback). A prefers-color-scheme:light query supplies light values when
+ * the OS says light AND the user hasn't explicitly forced dark. Explicit
+ * :root[data-theme="light"|"dark"] rules — stamped onto <html> by the inline
+ * bootstrap script in index.html <head>, before first paint — win in BOTH
+ * directions over the system preference once the user has picked a side.
+ */
+
+:root {
+  /* ---- dark palette (default) ---- */
+  --color-bg: #0b0c0d;
+  --color-bg-raised: #141618;
+  --color-bg-inset: #060707;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-fg: #f2efe7;
+  --color-fg-muted: #a7a79d;
+  --color-fg-faint: #67685f;
+  --color-accent: #8cff6b;
+  --color-accent-strong: #c3ffb0;
+  --color-accent-ink: #06170a;
+  --color-amber: #ffb238;
+  --color-danger: #ff9184;
+  --color-focus: #8cff6b;
+  --color-scrim: rgba(6, 7, 7, 0.72);
+
+  /* the hero "scope screen" is always a dark recessed panel, in both themes —
+     a physical instrument's LCD/CRT stays dark even on a light chassis, and
+     it gives the signature waveform one guaranteed-legible home. */
+  --scope-bg: #060807;
+  --scope-bg-2: #0c130f;
+  --scope-grid: rgba(140, 255, 107, 0.09);
+  --scope-trace: #8cff6b;
+  --scope-trace-dim: #4f9c46;
+  --scope-trace-glow: rgba(140, 255, 107, 0.55);
+
+  /* ---- type ---- */
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --fs-hero: clamp(2.75rem, 1.9rem + 4.4vw, 6.75rem);
+  --fs-h2: clamp(2rem, 1.5rem + 2.1vw, 3.4rem);
+  --fs-h3: clamp(1.3rem, 1.15rem + 0.6vw, 1.75rem);
+  --fs-body-lg: clamp(1.05rem, 0.98rem + 0.3vw, 1.3rem);
+  --fs-body: 1rem;
+  --fs-small: 0.875rem;
+  --fs-label: 0.75rem;
+
+  --lh-tight: 1.04;
+  --lh-snug: 1.25;
+  --lh-normal: 1.55;
+
+  /* ---- space (4px base) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  --space-9: 6.5rem;
+  --space-10: 9rem;
+
+  --container-max: 1240px;
+  --container-pad: clamp(1.25rem, 1rem + 2vw, 3rem);
+
+  /* ---- shape ---- */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-panel: 26px;
+  --radius-pill: 999px;
+
+  /* ---- motion ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 150ms;
+  --dur-base: 320ms;
+  --dur-slow: 640ms;
+
+  --z-nav: 50;
+  --z-overlay: 100;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --color-bg: #f3f0e6;
+    --color-bg-raised: #fffdf7;
+    --color-bg-inset: #e8e2d0;
+    --color-border: rgba(21, 19, 12, 0.11);
+    --color-border-strong: rgba(21, 19, 12, 0.22);
+    --color-fg: #16150f;
+    --color-fg-muted: #5b5849;
+    --color-fg-faint: #8e8a76;
+    --color-accent: #1e7a34;
+    --color-accent-strong: #145a1f;
+    --color-accent-ink: #f3ffec;
+    --color-amber: #8a5200;
+    --color-danger: #a8331e;
+    --color-focus: #1e7a34;
+    --color-scrim: rgba(22, 21, 15, 0.4);
+    color-scheme: light;
+  }
+}
+
+:root[data-theme='light'] {
+  --color-bg: #f3f0e6;
+  --color-bg-raised: #fffdf7;
+  --color-bg-inset: #e8e2d0;
+  --color-border: rgba(21, 19, 12, 0.11);
+  --color-border-strong: rgba(21, 19, 12, 0.22);
+  --color-fg: #16150f;
+  --color-fg-muted: #5b5849;
+  --color-fg-faint: #8e8a76;
+  --color-accent: #1e7a34;
+  --color-accent-strong: #145a1f;
+  --color-accent-ink: #f3ffec;
+  --color-amber: #8a5200;
+  --color-danger: #a8331e;
+  --color-focus: #1e7a34;
+  --color-scrim: rgba(22, 21, 15, 0.4);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #0b0c0d;
+  --color-bg-raised: #141618;
+  --color-bg-inset: #060707;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+  --color-fg: #f2efe7;
+  --color-fg-muted: #a7a79d;
+  --color-fg-faint: #67685f;
+  --color-accent: #8cff6b;
+  --color-accent-strong: #c3ffb0;
+  --color-accent-ink: #06170a;
+  --color-amber: #ffb238;
+  --color-danger: #ff9184;
+  --color-focus: #8cff6b;
+  --color-scrim: rgba(6, 7, 7, 0.72);
+  color-scheme: dark;
+}

@@ -1,0 +1,85 @@
+/* Motion. Reduced-motion is neutralized globally in base.css (all durations
+   collapse to ~0), so every rule below is automatically safe. */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Hero: one staggered load-in, no JS required (progressive enhancement —
+   works even if the script fails to load). */
+.hero__readout {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.02s;
+}
+.hero__title {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.12s;
+}
+.hero__thesis {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.26s;
+}
+.hero__body {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.38s;
+}
+.hero__form-wrap {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.5s;
+}
+.hero__scope {
+  animation: fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: 0.62s;
+}
+
+/* Below-the-fold reveals, driven by IntersectionObserver (src/reveal.ts). */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out);
+  transition-delay: calc(var(--reveal-i, 0) * 80ms);
+}
+
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Slow scanline sweep across the scope screen — an ambient, always-on detail
+   rather than a scroll/hover trigger, like a CRT's refresh. */
+.scope-panel__screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--scope-trace) 10%, transparent) 48%,
+    transparent 100%
+  );
+  background-size: 100% 340%;
+  animation: scanline 7s linear infinite;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+@keyframes scanline {
+  0% {
+    background-position: 0 -240%;
+  }
+  100% {
+    background-position: 0 100%;
+  }
+}
+
+/* Button/link micro-interaction shared with .btn but usable standalone. */
+.tap-press:active {
+  transform: translateY(1px) scale(0.99);
+}

@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // No-flash theme bootstrap: runs synchronously, before first paint.
+      // STORAGE_KEY must match the literal in src/theme.ts.
+      (function () {
+        try {
+          var KEY = 'mosh-landing-theme';
+          var saved = localStorage.getItem(KEY);
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mosh — a native macOS DAW that transforms what's real</title>
+    <meta
+      name="description"
+      content="Mosh is a native macOS DAW: arrange real takes, host your own VST3/AU plugins, and re-render a take's timbre with an AI transform layer. No text-to-song. Join the waitlist for the first playtest."
+    />
+    <meta name="theme-color" content="#0b0c0d" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f3f0e6" media="(prefers-color-scheme: light)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Mosh" />
+    <meta property="og:title" content="Mosh — a native macOS DAW that transforms what's real" />
+    <meta
+      property="og:description"
+      content="A native macOS DAW with a generative render layer that transforms and recombines the audio you already made. No text-to-song."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Mosh — a native macOS DAW that transforms what's real" />
+    <meta
+      name="twitter:description"
+      content="A native macOS DAW with a generative render layer that transforms and recombines the audio you already made. No text-to-song."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-nav">
+      <div class="container site-nav__inner">
+        <a class="brand" href="#top">
+          <span class="brand__dot" aria-hidden="true"></span>
+          MOSH
+        </a>
+        <nav class="nav-actions" aria-label="Primary">
+          <a class="btn btn--ghost btn--sm" href="#waitlist">Join waitlist</a>
+          <button class="theme-toggle" data-theme-toggle type="button" aria-label="Toggle color theme">
+            <svg
+              class="icon-moon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
+            </svg>
+            <svg
+              class="icon-sun"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4.2" />
+              <path
+                d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"
+              />
+            </svg>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="container">
+          <div class="hero__readout">
+            <span>ENGINE <b>JUCE 8 + TRACKTION</b></span>
+            <span>PLATFORM <b>macOS · APPLE SILICON</b></span>
+            <span>STATUS <b>PRE-RELEASE · PLAYTESTING</b></span>
+          </div>
+
+          <div class="hero__content">
+            <h1 class="hero__title">Make it. <span class="hero__title-accent">Mosh it.</span></h1>
+            <p class="hero__thesis">
+              &ldquo;Mosh doesn&rsquo;t invent &mdash; it transforms and recombines what&rsquo;s real.&rdquo;
+            </p>
+            <p class="hero__body">
+              A native macOS DAW &mdash; record, arrange, and host your own VST3 and AU plugins &mdash;
+              with a generative render layer that reworks the audio you already made. No prompt typed
+              into a void. No instruments invented out of thin air.
+            </p>
+
+            <div class="hero__form-wrap">
+              <form class="waitlist-form" data-waitlist-form novalidate aria-label="Join the waitlist">
+                <div class="waitlist-form__row">
+                  <div class="field">
+                    <label class="visually-hidden" for="email-hero">Email address</label>
+                    <input
+                      class="field__input"
+                      id="email-hero"
+                      type="email"
+                      name="email"
+                      placeholder="you@yourdomain.com"
+                      autocomplete="email"
+                      required
+                      data-waitlist-email
+                    />
+                  </div>
+                  <div class="field field--trap" aria-hidden="true">
+                    <label for="company-hero">Company</label>
+                    <input
+                      id="company-hero"
+                      type="text"
+                      name="company"
+                      tabindex="-1"
+                      autocomplete="off"
+                      data-waitlist-trap
+                    />
+                  </div>
+                  <button class="btn btn--primary waitlist-form__submit" type="submit" data-waitlist-submit>
+                    Join the waitlist
+                  </button>
+                </div>
+                <p class="waitlist-form__status" role="status" aria-live="polite" data-waitlist-status></p>
+                <p class="waitlist-form__hint">
+                  First builds go to a small group of testers. No spam &mdash; just an invite when it&rsquo;s
+                  your turn.
+                </p>
+              </form>
+            </div>
+          </div>
+
+          <div class="hero__scope">
+            <div class="scope-panel">
+              <div class="scope-panel__screen" data-scope>
+                <canvas></canvas>
+                <div class="scope-panel__grid" aria-hidden="true"></div>
+                <div class="scope-panel__hud" aria-hidden="true">
+                  <div class="scope-panel__hud-row">
+                    <span>SIG. MONITOR &mdash; CH. L/R</span>
+                    <span id="scope-state">HOLDING</span>
+                  </div>
+                  <div class="scope-panel__hud-row">
+                    <span>SOURCE: YOUR TAKE</span>
+                    <span>MODE: RE-IMAGINE</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="scope-panel__caption">
+              Same sixteen bars, re-sequenced on loop &mdash; nothing added, nothing invented.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="rack" aria-labelledby="rack-heading">
+        <div class="container">
+          <div class="section__head" data-reveal>
+            <span class="eyebrow eyebrow--accent">The signal chain</span>
+            <h2 id="rack-heading">One instrument. A few real modules.</h2>
+            <p>
+              Everything below runs natively on your Mac &mdash; no browser tab standing in for a DAW, no
+              server round-trip for the parts that need to be fast.
+            </p>
+          </div>
+
+          <div class="rack__grid">
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">01 / ENGINE</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="7" y="7" width="10" height="10" rx="1.5" />
+                    <line x1="9" y1="3" x2="9" y2="7" />
+                    <line x1="15" y1="3" x2="15" y2="7" />
+                    <line x1="9" y1="17" x2="9" y2="21" />
+                    <line x1="15" y1="17" x2="15" y2="21" />
+                    <line x1="3" y1="9" x2="7" y2="9" />
+                    <line x1="3" y1="15" x2="7" y2="15" />
+                    <line x1="17" y1="9" x2="21" y2="9" />
+                    <line x1="17" y1="15" x2="21" y2="15" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Native, not a tab</h3>
+              <p>
+                Built on JUCE 8 and Tracktion Engine, running natively on Apple Silicon &mdash; not
+                Electron, not a website, no server standing between you and the audio.
+              </p>
+            </article>
+
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">02 / ARRANGE</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="5" width="12" height="4" rx="1" />
+                    <rect x="3" y="11" width="18" height="4" rx="1" />
+                    <rect x="3" y="17" width="8" height="4" rx="1" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Real multitrack arrangement</h3>
+              <p>Record, drag, trim, split. Full automation, snap, and undo &mdash; built for actual production, not a demo timeline.</p>
+            </article>
+
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">03 / HOST</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="12" y1="2" x2="12" y2="15" />
+                    <line x1="8" y1="6.5" x2="16" y2="6.5" />
+                    <line x1="8" y1="10" x2="16" y2="10" />
+                    <path d="M9 15h6l-1.2 4.8a1.8 1.8 0 0 1-3.6 0L9 15Z" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Your own VST3 &amp; AU</h3>
+              <p>Load the instruments and effects you already own, with native plugin editor windows &mdash; not a walled-off preset list.</p>
+            </article>
+
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">04 / RE-IMAGINE</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 7h4l3 4 3-4h5.5" />
+                    <path d="M17 4l3.5 3-3.5 3" />
+                    <path d="M3 17h4l3-4" />
+                    <path d="M13 17h4.5" />
+                    <path d="M17 14l3.5 3-3.5 3" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Transform, don&rsquo;t invent</h3>
+              <p>An offline render layer &mdash; built on Stable Audio 3 &mdash; reworks a take&rsquo;s timbre and texture. It edits audio you recorded, not a prompt.</p>
+            </article>
+
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">05 / AGENT</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4 3.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
+                    <line x1="8" y1="9" x2="8" y2="13" />
+                    <line x1="12" y1="7.5" x2="12" y2="14.5" />
+                    <line x1="16" y1="9.5" x2="16" y2="12.5" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Moshi, by voice or text</h3>
+              <p>Ask for a track, a fill, a render. The agent drives the same command path your own clicks do &mdash; nothing happens off to the side.</p>
+            </article>
+
+            <article class="rack-module panel" data-reveal>
+              <div class="rack-module__top">
+                <span class="rack-module__index">06 / JAM</span>
+                <span class="rack-module__icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="9" cy="9" r="4.5" />
+                    <circle cx="16" cy="14" r="4.5" />
+                  </svg>
+                </span>
+              </div>
+              <h3>Two-player <span class="badge badge--amber">Early</span></h3>
+              <p>One session, two people, each holding a track at a time. Actively being played and hardened ahead of outside testing.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="philosophy" aria-labelledby="philosophy-heading">
+        <div class="container">
+          <div class="section__head" data-reveal>
+            <span class="eyebrow eyebrow--accent">Why &ldquo;transform,&rdquo; not &ldquo;generate&rdquo;</span>
+            <h2 id="philosophy-heading">Most AI music tools start from nothing. Mosh starts from your take.</h2>
+          </div>
+
+          <div class="compare">
+            <div class="compare__col compare__col--dim" data-reveal>
+              <span class="eyebrow compare__label">Text-to-song</span>
+              <ul class="compare__list">
+                <li><span class="compare__marker" aria-hidden="true">&mdash;</span> Type a prompt</li>
+                <li><span class="compare__marker" aria-hidden="true">&mdash;</span> A model assembles a full song</li>
+                <li><span class="compare__marker" aria-hidden="true">&mdash;</span> No relationship to anything you played</li>
+              </ul>
+            </div>
+            <div class="compare__col compare__col--accent" data-reveal>
+              <span class="eyebrow eyebrow--accent compare__label">Mosh</span>
+              <ul class="compare__list">
+                <li><span class="compare__marker" aria-hidden="true">&rarr;</span> Record or import a real take</li>
+                <li><span class="compare__marker" aria-hidden="true">&rarr;</span> Re-render its timbre, texture, character</li>
+                <li><span class="compare__marker" aria-hidden="true">&rarr;</span> The result is still yours &mdash; built from what you made</li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="philosophy__closing" data-reveal>
+            It&rsquo;s a render layer, not a songwriter.
+            <strong>You bring the performance; Mosh transforms and recombines it.</strong>
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="waitlist" aria-labelledby="waitlist-heading">
+        <div class="container">
+          <div class="waitlist-section" data-reveal>
+            <div class="waitlist-section__inner">
+              <span class="eyebrow eyebrow--accent">Waitlist</span>
+              <h2 id="waitlist-heading">Get the invite when it&rsquo;s your turn.</h2>
+              <p class="waitlist-section__intro">
+                Mosh is heading into its first outside playtests. Join the list and we&rsquo;ll email you
+                when there&rsquo;s a build to try &mdash; no newsletter, just the invite.
+              </p>
+
+              <form class="waitlist-form" data-waitlist-form novalidate aria-label="Join the waitlist">
+                <div class="waitlist-form__row">
+                  <div class="field">
+                    <label class="visually-hidden" for="email-bottom">Email address</label>
+                    <input
+                      class="field__input"
+                      id="email-bottom"
+                      type="email"
+                      name="email"
+                      placeholder="you@yourdomain.com"
+                      autocomplete="email"
+                      required
+                      data-waitlist-email
+                    />
+                  </div>
+                  <div class="field field--trap" aria-hidden="true">
+                    <label for="company-bottom">Company</label>
+                    <input
+                      id="company-bottom"
+                      type="text"
+                      name="company"
+                      tabindex="-1"
+                      autocomplete="off"
+                      data-waitlist-trap
+                    />
+                  </div>
+                  <button class="btn btn--primary waitlist-form__submit" type="submit" data-waitlist-submit>
+                    Join the waitlist
+                  </button>
+                </div>
+                <p class="waitlist-form__status" role="status" aria-live="polite" data-waitlist-status></p>
+              </form>
+
+              <div class="waitlist-section__requirements">
+                <span class="badge">Apple Silicon Mac required for the playtest build</span>
+                <span class="badge">We store only your email &mdash; no tracking, no third parties</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container site-footer__inner">
+        <p class="site-footer__brand">MOSH &mdash; a native macOS DAW.</p>
+        <p class="site-footer__meta">
+          <span>&copy; <span data-year>2026</span></span>
+          <span>Built on JUCE, Tracktion Engine &amp; Stable Audio 3.</span>
+        </p>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
