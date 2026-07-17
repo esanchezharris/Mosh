@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+import uuid as _uuid
 from typing import Dict, List, Optional
 
 _PROVIDERS = [("deepseek", "DEEPSEEK"), ("openai", "OPENAI"), ("xai", "GROK")]
 _BRAIN_ENV_CACHE: Optional[Dict[str, str]] = None
+_INSTALL_ID_CACHE: Optional[str] = None
 
 
 def _load_brain_env() -> Dict[str, str]:
@@ -103,13 +105,103 @@ def _is_reasoning(model: str) -> bool:
             or (len(model) >= 2 and model[0] == "o" and model[1].isdigit()))
 
 
+def _install_id() -> str:
+    """Per-install id sent to the brain proxy for its daily token-cap bookkeeping
+    (migrations/0003_brain_usage.sql) — an opaque bookkeeping key, never a secret.
+    Reused from the SAME ~/Library/Mosh/<session>/identity.json "uuid" field
+    src/brain/BrainProxy.cpp's installId() and vite.config.ts's installId() read/
+    write, so whichever of the three processes runs first mints it and the others
+    converge on it. MOSH_BRAIN_INSTALL_ID overrides outright (skips the filesystem —
+    the test/CI seam); MOSH_SELFTEST_SESSION picks the session leaf, mirroring the
+    native harness's own isolation boundary, so a hermetic run never touches the
+    real ~/Library/Mosh/session/identity.json."""
+    global _INSTALL_ID_CACHE
+    override = os.environ.get("MOSH_BRAIN_INSTALL_ID")
+    if override:
+        return override
+    if _INSTALL_ID_CACHE is not None:
+        return _INSTALL_ID_CACHE
+    leaf = os.environ.get("MOSH_SELFTEST_SESSION", "").strip() or "session"
+    identity_dir = os.path.join(os.path.expanduser("~"), "Library", "Mosh", leaf)
+    identity_file = os.path.join(identity_dir, "identity.json")
+    try:
+        with open(identity_file, encoding="utf-8") as f:
+            data = json.load(f)
+        existing = data.get("uuid", "")
+        if existing:
+            _INSTALL_ID_CACHE = existing
+            return existing
+    except (OSError, ValueError):
+        pass  # absent / unreadable / malformed -> mint one below
+    fresh = str(_uuid.uuid4())
+    try:
+        if not os.path.isfile(identity_file):
+            os.makedirs(identity_dir, exist_ok=True)
+            with open(identity_file, "w", encoding="utf-8") as f:
+                json.dump({"uuid": fresh}, f)
+    except OSError:
+        pass  # best-effort persistence only; an ephemeral id still lets the request through
+    _INSTALL_ID_CACHE = fresh
+    return fresh
+
+
+def proxy_enabled() -> bool:
+    """True when MOSH_BRAIN_PROXY_URL is set — the signal to prefer the server-side
+    proxy (supabase/functions/brain) over reading a provider key directly. See
+    docs/brain-proxy/RUNBOOK.md."""
+    return bool(_env("MOSH_BRAIN_PROXY_URL"))
+
+
+def _chat_via_proxy(messages: List[dict], requested: str = "", timeout: int = 60,
+                     temperature: Optional[float] = None) -> dict:
+    """POST to the brain proxy. Returns the SAME {ok, content, provider, model} /
+    {ok:false, error} shape as the direct-provider path below, normalized so callers
+    never need to know which path served the request. Never sends or receives a
+    provider key."""
+    proxy_url = _env("MOSH_BRAIN_PROXY_URL")
+    payload: Dict[str, object] = {"messages": messages, "install_id": _install_id()}
+    if requested:
+        payload["provider"] = requested
+    if temperature is not None:
+        payload["temperature"] = float(temperature)
+    headers = {"Content-Type": "application/json"}
+    apikey = _env("MOSH_BRAIN_PROXY_APIKEY")
+    if apikey:
+        headers["apikey"] = apikey
+    req = urllib.request.Request(
+        proxy_url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 (owner-configured proxy URL)
+            body = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 (network/proxy down -> caller falls back)
+        return {"ok": False, "error": f"brain proxy request failed: {e}"}
+    if not body.get("ok"):
+        return {"ok": False, "error": body.get("error") or "brain proxy error"}
+    # The proxy deliberately never discloses which upstream provider served it.
+    return {"ok": True, "content": body.get("content", ""), "provider": "proxy", "model": ""}
+
+
 def chat_json(messages: List[dict], requested: str = "", max_tokens: int = 800,
               timeout: int = 60, temperature: Optional[float] = None) -> dict:
     """POST an OpenAI-compatible chat (json_object response, capped tokens). Returns
     { ok, content, provider, model } or { ok:false, error }. Reasoning models use
     max_completion_tokens + no temperature (mirrors BrainProxy). `temperature`
     overrides the 0.6 default on the non-reasoning path only (best-of-n exploratory
-    draws); reasoning providers ignore sampling params — callers record that."""
+    draws); reasoning providers ignore sampling params — callers record that.
+
+    Proxy-first: when proxy_enabled(), this POSTs to the server-side brain proxy
+    instead of calling a provider directly with a locally-configured key. Any proxy
+    failure (unreachable / non-ok / malformed reply) falls through to the direct-
+    provider path below — additive, never a regression from the pre-proxy behaviour
+    (proxy_enabled()==False skips the branch entirely)."""
+    if proxy_enabled():
+        result = _chat_via_proxy(messages, requested, timeout, temperature)
+        if result.get("ok"):
+            return result
+        # fall through to the direct-provider path (dev/local-key fallback; a deployed
+        # service that relies on the proxy carries no keys, so resolve() below will
+        # itself report "no provider configured" — the existing degrade path)
+
     p = resolve(requested)
     if not _complete(p):
         return {"ok": False, "error": "no brain provider configured "
