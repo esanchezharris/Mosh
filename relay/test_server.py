@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -241,6 +242,180 @@ def _raw_request(host, port, raw_bytes):
         return b"".join(chunks)
     finally:
         s.close()
+
+
+# ── P4 self-heal (PR-1): dev-relay blob endpoints ────────────────────────────
+# The cloud relay (supabase/functions/relay/index.ts) has always had /mp/blob/head,
+# /mp/blob/put-url, /mp/blob/get-url + a real signed-URL object store. The local
+# dev/test relay had none, so the whole stem round-trip was invisible to the
+# hermetic `--selftest` gate. These mirror the cloud contract (membership-gated
+# head/put-url/get-url + PUT/GET raw bytes) for local/CI use only.
+
+def _put(base, path, data, content_type="application/octet-stream"):
+    req = urllib.request.Request(
+        base + path, data=data, method="PUT",
+        headers={"Content-Type": content_type})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def _get_raw(base, path):
+    try:
+        with urllib.request.urlopen(base + path, timeout=5) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def _room(relay):
+    _, b = _post(relay, "/mp/create", {"peerId": "a"})
+    code = b["code"]
+    _post(relay, "/mp/join", {"code": code, "peerId": "b"})
+    return code
+
+
+def test_blob_head_false_for_unknown_hash(relay):
+    code = _room(relay)
+    status, body = _post(relay, "/mp/blob/head",
+                         {"code": code, "peerId": "a", "hash": "ab" * 32, "ext": "wav"})
+    assert status == 200
+    assert body["exists"] is False
+
+
+def test_blob_head_rejects_non_member_403(relay):
+    code = _room(relay)
+    status, body = _post(relay, "/mp/blob/head",
+                         {"code": code, "peerId": "ghost", "hash": "ab" * 32, "ext": "wav"})
+    assert status == 403
+    assert body["error"] == "not_a_member"
+
+
+def test_blob_put_url_rejects_non_member_403(relay):
+    code = _room(relay)
+    status, body = _post(relay, "/mp/blob/put-url",
+                         {"code": code, "peerId": "ghost", "hash": "cd" * 32, "ext": "wav"})
+    assert status == 403
+    assert body["error"] == "not_a_member"
+
+
+def test_blob_get_url_404_when_absent(relay):
+    code = _room(relay)
+    status, body = _post(relay, "/mp/blob/get-url",
+                         {"code": code, "peerId": "a", "hash": "ef" * 32, "ext": "wav"})
+    assert status == 404
+
+
+def test_blob_put_url_then_put_then_head_then_get_url_then_get_round_trip(relay):
+    code = _room(relay)
+    h = "11" * 32
+    payload = b"\x00\x01RIFF-fake-wav-bytes\xff" * 100
+
+    status, body = _post(relay, "/mp/blob/head", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    assert status == 200 and body["exists"] is False
+
+    status, body = _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    assert status == 200
+    put_url = body["url"]
+    assert put_url.startswith("http://127.0.0.1:")
+    assert f"/mp/blob/raw/{h}.wav" in put_url
+
+    status, _b = _put(put_url, "", payload)
+    assert status == 200
+
+    status, body = _post(relay, "/mp/blob/head", {"code": code, "peerId": "b", "hash": h, "ext": "wav"})
+    assert status == 200 and body["exists"] is True
+
+    status, body = _post(relay, "/mp/blob/get-url", {"code": code, "peerId": "b", "hash": h, "ext": "wav"})
+    assert status == 200
+    get_url = body["url"]
+
+    status, got = _get_raw(get_url, "")
+    assert status == 200
+    assert got == payload
+
+
+def test_blob_get_url_rejects_non_member_403(relay):
+    code = _room(relay)
+    h = "22" * 32
+    _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    status, body = _post(relay, "/mp/blob/get-url",
+                         {"code": code, "peerId": "ghost", "hash": h, "ext": "wav"})
+    assert status == 403
+    assert body["error"] == "not_a_member"
+
+
+def test_blob_raw_put_over_max_blob_bytes_is_rejected_413(monkeypatch):
+    import server as srv
+    monkeypatch.setattr(srv, "MAX_BLOB_BYTES", 64)
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "33" * 32
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+        put_url = body["url"]
+        status, _b = _put(put_url, "", b"x" * 4096)
+        assert status == 413
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_blob_raw_get_missing_key_404(relay):
+    # A valid token (minted via get-url's sibling, put-url — the raw endpoint checks
+    # the token before existence, so it never leaks exists/not-exists to a request
+    # without one) for a key that was never actually PUT -> 404, not a crash/500.
+    code = _room(relay)
+    h = "66" * 32
+    _, body = _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    put_url = body["url"]
+    status, _b = _get_raw(put_url, "")
+    assert status == 404
+
+
+def test_blob_raw_get_rejects_bad_token(relay):
+    status, _b = _get_raw(relay, "/mp/blob/raw/deadbeef.wav?tok=nope")
+    assert status == 403
+
+
+def test_blob_raw_put_bad_token_is_rejected(relay):
+    code = _room(relay)
+    h = "44" * 32
+    _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    # A forged/garbage token must not authorize the write.
+    status, _b = _put(relay + f"/mp/blob/raw/{h}.wav?tok=forged", "", b"nope")
+    assert status in (401, 403)
+
+
+def test_blob_delay_hook_env_slows_raw_put(monkeypatch):
+    # PR-2 (async transfer, stacked on this PR) needs a way to make a stem transfer
+    # artificially slow so a no-UI-freeze test can observe it in flight. Wire the hook
+    # now (trivial) even though nothing here exercises the no-freeze behavior itself.
+    import server as srv
+    monkeypatch.setenv("MOSH_RELAY_BLOB_DELAY_MS", "150")
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "55" * 32
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+        put_url = body["url"]
+        t0 = time.monotonic()
+        status, _b = _put(put_url, "", b"hi")
+        elapsed = time.monotonic() - t0
+        assert status == 200
+        assert elapsed >= 0.14
+    finally:
+        monkeypatch.delenv("MOSH_RELAY_BLOB_DELAY_MS", raising=False)
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_chunked_body_is_rejected_not_silently_emptied(relay):

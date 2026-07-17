@@ -17,6 +17,20 @@ Endpoints:
   GET  /mp/events?code=&peerId=&since=N         -> {frames, latest, resync}
   POST /mp/leave  {code, peerId}                -> {ok}
 
+  P4 self-heal (PR-1) — dev/test blob endpoints mirroring the cloud relay's
+  contract (supabase/functions/relay/index.ts), so the stem round-trip is
+  exercisable hermetically (no network) via the local relay:
+  POST /mp/blob/head     {code, peerId, hash, ext} -> {exists}
+  POST /mp/blob/put-url  {code, peerId, hash, ext} -> {url}   (PUT the bytes there)
+  POST /mp/blob/get-url  {code, peerId, hash, ext} -> {url}   (404 if absent)
+  PUT  /mp/blob/raw/<key>?tok=...                  -> {ok}    (raw octet-stream)
+  GET  /mp/blob/raw/<key>?tok=...                  -> raw bytes (404 if absent)
+  Storage is an in-memory, bounded (count + total bytes), content-addressed dict
+  on the RelayState — a LOOPBACK DEV/TEST posture only: no persistence, no real
+  signed-URL security (the `tok` query param is a per-mint random string for
+  request-shape parity with the cloud's signed URL, not a security boundary).
+  Never deploy this as a public relay; the cloud Edge Function is production.
+
 Run:  python3 relay/server.py            # PORT env, default 8771
 """
 from __future__ import annotations
@@ -44,6 +58,15 @@ RATE_WINDOW_S = float(os.environ.get("MOSH_RELAY_RATE_WINDOW", 60))
 SOCKET_TIMEOUT_S = float(os.environ.get("MOSH_RELAY_SOCKET_TIMEOUT", 30))  # slow-loris guard
 _LOOPBACK = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 
+# ── P4 self-heal (PR-1) blob-store limits (env-tunable). Audio stems are real
+# files (not small control-plane JSON), so the per-blob cap is its OWN, much
+# larger, ceiling than MAX_BODY_BYTES — comfortably above typical clip sizes but
+# still bounded (a memory-exhaustion backstop for the in-memory dev store). The
+# count/total-bytes caps bound the whole process's resident blob memory. ──
+MAX_BLOB_BYTES = int(os.environ.get("MOSH_RELAY_MAX_BLOB", 256 * 1024 * 1024))
+MAX_BLOB_COUNT = int(os.environ.get("MOSH_RELAY_MAX_BLOB_COUNT", 512))
+MAX_BLOB_TOTAL_BYTES = int(os.environ.get("MOSH_RELAY_MAX_BLOB_TOTAL", 1024 * 1024 * 1024))
+
 
 class BodyTooLarge(Exception):
     pass
@@ -53,6 +76,67 @@ class LengthRequired(Exception):
     """A request carried a chunked/streamed body with no Content-Length, so the
     body cap can't bound it — refuse it (411) rather than silently empty it."""
     pass
+
+
+def _blob_key(hash_, ext):
+    # Mirrors the cloud relay's keyFor (supabase/functions/relay/index.ts): a
+    # content-addressed key, alnum-only extension, default "wav" like the cloud.
+    ext = "".join(ch for ch in (ext or "wav") if ch.isalnum())
+    return f"{hash_}.{ext}"
+
+
+class BlobStore:
+    """In-memory content-addressed stem store for the LOCAL dev/test relay only
+    (mirrors the cloud `mp-stems` Supabase Storage bucket's contract: head / a
+    put-url to PUT bytes to / a get-url to GET bytes from). Bounded by blob COUNT
+    and TOTAL bytes (a crude memory backstop, not a per-room quota — content
+    addressing means the same stem is stored once regardless of how many rooms
+    reference it, same as the cloud bucket). NOT for production: no persistence
+    across a restart, no real signed-URL cryptography — the per-mint `tok` is a
+    random string for request-shape parity with the cloud's signed URL, checked
+    only so a stray/forged raw request can't write or read (see check_token)."""
+
+    def __init__(self, max_blob_bytes=None, max_count=None, max_total_bytes=None):
+        self.max_blob_bytes = MAX_BLOB_BYTES if max_blob_bytes is None else max_blob_bytes
+        self.max_count = MAX_BLOB_COUNT if max_count is None else max_count
+        self.max_total_bytes = MAX_BLOB_TOTAL_BYTES if max_total_bytes is None else max_total_bytes
+        self._blobs = {}     # key -> bytes
+        self._tokens = {}    # key -> the most recently minted token for it
+        self._lock = threading.Lock()
+
+    def exists(self, key):
+        with self._lock:
+            return key in self._blobs
+
+    def mint(self, key):
+        tok = secrets.token_urlsafe(16)
+        with self._lock:
+            self._tokens[key] = tok
+        return tok
+
+    def check_token(self, key, tok):
+        if not tok:
+            return False
+        with self._lock:
+            return self._tokens.get(key) == tok
+
+    def put(self, key, data):
+        """Store `data` under `key`. Raises BodyTooLarge if it would breach any
+        bound (per-blob size, blob count, or total resident bytes)."""
+        if len(data) > self.max_blob_bytes:
+            raise BodyTooLarge(f"blob too large ({len(data)} bytes, cap {self.max_blob_bytes})")
+        with self._lock:
+            if key not in self._blobs:
+                if len(self._blobs) >= self.max_count:
+                    raise BodyTooLarge(f"blob store full ({self.max_count} blobs)")
+                total = sum(len(v) for v in self._blobs.values())
+                if total + len(data) > self.max_total_bytes:
+                    raise BodyTooLarge(f"blob store full ({self.max_total_bytes} bytes)")
+            self._blobs[key] = data
+
+    def get(self, key):
+        with self._lock:
+            return self._blobs.get(key)
 
 
 class FixedWindowLimiter:
@@ -98,6 +182,15 @@ class RelayState:
     def __init__(self):
         self._reg = RoomRegistry()
         self._lock = threading.Lock()
+        # P4 self-heal (PR-1): the blob store is process-global (content-addressed,
+        # not per-room — mirrors the cloud's single `mp-stems` bucket), so it lives
+        # alongside the room registry rather than inside any one Room.
+        self.blobs = BlobStore()
+
+    def is_member(self, code, peer_id):
+        with self._lock:
+            room = self._reg.get(code)
+            return room is not None and room.has_peer(peer_id)
 
     def create(self, peer_id, name="", color=""):
         with self._lock:
@@ -215,6 +308,41 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                 return {}
             return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
 
+        def _raw_body(self, max_bytes):
+            # Like _body() but returns raw bytes (a blob PUT), not JSON — same
+            # chunked/oversize refusal posture, a separate (larger) cap.
+            if self.headers.get("Transfer-Encoding"):
+                raise LengthRequired("chunked/streamed bodies are not accepted")
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                raise BodyTooLarge("invalid Content-Length")
+            if n < 0 or n > max_bytes:
+                raise BodyTooLarge(f"bad/oversize blob length {n} (cap {max_bytes})")
+            if n == 0:
+                return b""
+            return self.rfile.read(n)
+
+        def _send_raw(self, code, data):
+            self.send_response(code)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _blob_delay(self):
+            # PR-2 (async transfer) test hook: an env-tunable artificial delay on the
+            # raw PUT/GET path so a "does the UI freeze during a slow stem transfer"
+            # test can observe one in flight. 0 (default) = no delay.
+            try:
+                ms = float(os.environ.get("MOSH_RELAY_BLOB_DELAY_MS", 0) or 0)
+            except ValueError:
+                ms = 0
+            if ms > 0:
+                time.sleep(ms / 1000.0)
+
         def do_GET(self):
             u = urlparse(self.path)
             # The /mp/events long-poll is the designed steady-state heartbeat (~4/s per
@@ -233,7 +361,52 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                     return self._send(200, state.events(code, peer, since))
                 except RoomError as e:
                     return self._send(404, {"error": str(e)})
+            if u.path.startswith("/mp/blob/raw/"):
+                key = u.path[len("/mp/blob/raw/"):]
+                q = parse_qs(u.query)
+                tok = (q.get("tok") or [""])[0]
+                if not state.blobs.check_token(key, tok):
+                    return self._send(403, {"error": "bad_token"})
+                self._blob_delay()
+                data = state.blobs.get(key)
+                if data is None:
+                    return self._send(404, {"error": "not_found"})
+                return self._send_raw(200, data)
             return self._send(404, {"error": "not found"})
+
+        def do_PUT(self):
+            if not self._rate_ok():
+                return self._send(429, {"error": "rate_limited"})
+            u = urlparse(self.path)
+            if not u.path.startswith("/mp/blob/raw/"):
+                return self._send(404, {"error": "not found"})
+            key = u.path[len("/mp/blob/raw/"):]
+            q = parse_qs(u.query)
+            tok = (q.get("tok") or [""])[0]
+            if not state.blobs.check_token(key, tok):
+                # Drain a well-framed body before refusing so the connection can be
+                # reused (mirrors the JSON body-cap path's own close-on-desync rule
+                # only when the body ISN'T safely drainable — here it's still small
+                # enough to read up to the blob cap before rejecting the token).
+                try:
+                    self._raw_body(state.blobs.max_blob_bytes)
+                except (LengthRequired, BodyTooLarge):
+                    self.close_connection = True
+                return self._send(403, {"error": "bad_token"})
+            try:
+                data = self._raw_body(state.blobs.max_blob_bytes)
+            except LengthRequired as e:
+                self.close_connection = True
+                return self._send(411, {"error": str(e)})
+            except BodyTooLarge as e:
+                self.close_connection = True
+                return self._send(413, {"error": str(e)})
+            self._blob_delay()
+            try:
+                state.blobs.put(key, data)
+            except BodyTooLarge as e:
+                return self._send(413, {"error": str(e)})
+            return self._send(200, {"ok": True})
 
         def do_POST(self):
             if not self._rate_ok():
@@ -273,6 +446,27 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                 if u.path == "/mp/leave":
                     state.leave(b["code"], b["peerId"])
                     return self._send(200, {"ok": True})
+                if u.path == "/mp/blob/head":
+                    if not state.is_member(b.get("code", ""), b.get("peerId", "")):
+                        return self._send(403, {"error": "not_a_member"})
+                    key = _blob_key(b.get("hash", ""), b.get("ext", ""))
+                    return self._send(200, {"exists": state.blobs.exists(key)})
+                if u.path == "/mp/blob/put-url":
+                    if not state.is_member(b.get("code", ""), b.get("peerId", "")):
+                        return self._send(403, {"error": "not_a_member"})
+                    key = _blob_key(b.get("hash", ""), b.get("ext", ""))
+                    tok = state.blobs.mint(key)
+                    url = f"http://127.0.0.1:{self.server.server_port}/mp/blob/raw/{key}?tok={tok}"
+                    return self._send(200, {"url": url})
+                if u.path == "/mp/blob/get-url":
+                    if not state.is_member(b.get("code", ""), b.get("peerId", "")):
+                        return self._send(403, {"error": "not_a_member"})
+                    key = _blob_key(b.get("hash", ""), b.get("ext", ""))
+                    if not state.blobs.exists(key):
+                        return self._send(404, {"error": "not_found"})
+                    tok = state.blobs.mint(key)
+                    url = f"http://127.0.0.1:{self.server.server_port}/mp/blob/raw/{key}?tok={tok}"
+                    return self._send(200, {"url": url})
             except StaleCommit as e:
                 return self._send(409, {"error": str(e), "stale": True})
             except RoomFull as e:
