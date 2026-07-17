@@ -237,6 +237,11 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     if not authored.get("ok"):
         if authored.get("error") == "no_asserted_scored_lines":
             raise RuntimeError("no asserted words to sing — assert the lyric line first")
+        if authored.get("error") == "line_overflow":
+            raise RuntimeError(
+                f"line has more words than flow slots ({authored.get('words')} words / "
+                f"{authored.get('slots')} slots): \"{authored.get('lineText', '')}\" — "
+                "shorten the line or re-confirm the flow grid")
         raise RuntimeError("no scored lines to sing — build a flow from a take first "
                            "(build_skeleton_from_clip), then accept/write the words")
 

@@ -116,14 +116,13 @@ def _asserted_text(line: dict) -> str:
 
 
 def _word_units(words: List[str], slots: List[dict]):
-    """Allocate slots to words per the v0 policy -> [(word, [slot, ...]), ...]; when
-    words outnumber slots the final unit is ([word, ...], [last_slot]) — the surplus
-    words as a LIST sharing the one remaining slot (the squeeze tail)."""
+    """Allocate slots to words -> [(word, [slot, ...]), ...]. Words may never outnumber
+    slots — the old "surplus words share the last slot" squeeze was removed (B2.1,
+    2026-07-17): it crammed syllables no singer could articulate; author_score rejects
+    the line upstream (`line_overflow`) instead of singing the bug."""
     n = len(slots)
     if len(words) > n:
-        units = [(words[i], [slots[i]]) for i in range(n - 1)]
-        units.append((words[n - 1:], [slots[n - 1]]))          # squeeze: words share the last slot
-        return units
+        raise ValueError("words outnumber slots — author_score must reject this line")
     pr = _pron()
     syls = [max(1, pr.syllables(_clean(w)) or 1) for w in words]
     units, pos = [], 0
@@ -172,6 +171,12 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
         slots = sorted(ln["score"]["slots"], key=lambda s: float(s.get("start", 0.0)))
         raw_words = [w for w in _asserted_text(ln).split() if w]
         words = raw_words or ["la"]
+        if len(words) > len(slots):
+            # B2.1: never cram — a count-exact upstream cannot produce this, so it is an
+            # authoring bug to surface, not a texture to sing
+            return {"ok": False, "error": "line_overflow",
+                    "lineText": _asserted_text(ln),
+                    "words": len(words), "slots": len(slots)}
         for unit_word, unit_slots in _word_units(words, slots):
             u_start = float(unit_slots[0]["start"])
             u_end = float(unit_slots[-1]["end"])
@@ -179,25 +184,16 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
             if gap >= _REST_MIN_S:
                 emit("<SP>", "<SP>", 0, 1, gap)
                 n_rests += 1
-            if isinstance(unit_word, list):                     # squeeze tail: share the slot evenly
-                span = (u_end - u_start) / len(unit_word)
-                pitch = int(unit_slots[0]["segments"][0].get("pitch", 69)) \
-                    if unit_slots[0].get("segments") else 69
-                for w in unit_word:
-                    display, phon = _display_and_phoneme(w)
-                    emit(display, phon, pitch, 2, span)
-                    n_words += 1
-            else:
-                # Flatten the allocated slots' segments, legato-bridging intra-word
-                # slot gaps: each segment's duration runs to the NEXT segment's start
-                # (the last runs to the unit end) so the timeline never drifts.
-                segs = [dict(s) for sl in unit_slots
-                        for s in (sl.get("segments") or [{"start": sl["start"], "end": sl["end"],
-                                                          "pitch": 69}])]
-                for j, s in enumerate(segs):
-                    s_end = float(segs[j + 1]["start"]) if j + 1 < len(segs) else u_end
-                    s["end"] = max(float(s["end"]), s_end)
-                emit_word(unit_word, segs)
+            # Flatten the allocated slots' segments, legato-bridging intra-word
+            # slot gaps: each segment's duration runs to the NEXT segment's start
+            # (the last runs to the unit end) so the timeline never drifts.
+            segs = [dict(s) for sl in unit_slots
+                    for s in (sl.get("segments") or [{"start": sl["start"], "end": sl["end"],
+                                                      "pitch": 69}])]
+            for j, s in enumerate(segs):
+                s_end = float(segs[j + 1]["start"]) if j + 1 < len(segs) else u_end
+                s["end"] = max(float(s["end"]), s_end)
+            emit_word(unit_word, segs)
             cursor = max(cursor, u_end)
 
     # Duration formatting with ERROR DIFFUSION: the timeline is reconstructed by SUMMING

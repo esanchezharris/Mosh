@@ -72,7 +72,7 @@ SHEET = {
     ],
     "lineScores": [
         SC(SLOT(0.0, 0.5, 60), SLOT(0.5, 1.8, 60), SLOT(1.2, 1.6, 60)),   # over-hold + a silent note
-        SC(SLOT(2.0, 2.5, 62), SLOT(2.5, 2.9, 62)),
+        SC(SLOT(2.0, 2.5, 62), SLOT(2.5, 2.7, 62), SLOT(2.7, 2.9, 62)),   # count-fit: 3 words / 3 slots
     ],
 }
 res = rs.author_resing_score(SHEET, env=ENV, hop_s=HOP)
@@ -91,6 +91,19 @@ check("his kept words survive in the score", "hold" in clip["text"] and "let" in
 digs = {hashlib.sha256(json.dumps(rs.author_resing_score(SHEET, env=ENV, hop_s=HOP), sort_keys=True).encode()).hexdigest()
         for _ in range(3)}
 check("author_resing_score 3× deterministic", len(digs) == 1, str(len(digs)))
+
+# B2.1 (2026-07-17): a line whose words outnumber its (possibly voicing-clamped) slots is
+# REJECTED with the author's named error — the old squeeze crammed it silently. The clamp
+# can legitimately shrink a line's slot count (dropped silent notes), so overflow must
+# surface for a re-write, never sing.
+OVERFLOW_SHEET = {
+    "lines": [{"index": 0, "text": "let it go", "origin": "generated"}],
+    "lineScores": [SC(SLOT(0.0, 0.5, 60), SLOT(0.5, 0.9, 60))],
+}
+res_of = rs.author_resing_score(OVERFLOW_SHEET, env=ENV, hop_s=HOP)
+check("words > slots propagates line_overflow (no cram)",
+      not res_of.get("ok") and res_of.get("error") == "line_overflow"
+      and res_of.get("words") == 3 and res_of.get("slots") == 2, str(res_of))
 
 
 # ── 3. a fully-silent section renders nothing (no audio where he never sang) ────────────

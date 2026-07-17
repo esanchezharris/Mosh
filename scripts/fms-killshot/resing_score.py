@@ -96,7 +96,10 @@ def author_resing_score(sheet: dict, env=None, hop_s: float = 0.01,
     author_lines = []
     for ln, sc in zip(lines, scores):
         if isinstance(sc, dict) and sc.get("slots"):
-            author_lines.append({"text": _line_text(ln), "score": sc})
+            # author_score sings only ASSERTED lines (_asserted_text) — without this flag
+            # every line was filtered and the author returned no_asserted_scored_lines
+            # (pre-existing; RED-proven by resing_score_test on the unfixed code)
+            author_lines.append({"text": _line_text(ln), "score": sc, "asserted": True})
     if not author_lines:
         return {"ok": False, "error": "no_voiced_slots"}
     res = sx.author_score(author_lines, name=name)

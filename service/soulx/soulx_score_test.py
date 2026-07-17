@@ -94,15 +94,19 @@ check("'forever' (3 syl) takes 3 slots: type 2 + two type 3; 'gold' takes the 4t
 check("multi-syllable word distributes its syllable phonemes across the slots",
       toks(clip, "phoneme")[:3] == ["en_F-ER0", "en_EH1", "en_V-ER0"], str(clip["phoneme"]))
 
-# ── 4. Squeeze: more word-syllables than slots -> words share the last slot evenly ─────
+# ── 4. Overflow: more WORDS than slots -> REJECTED, never crammed (B2.1, 2026-07-17) ───
+# The old "surplus words share the last slot evenly" squeeze was a mechanical
+# unnaturalness generator (mechanism-verify handoff §6b); a count-exact upstream can
+# never produce words > slots, so reaching this state is an authoring bug — surface it.
 r = sx.author_score([LINE("hold the flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.1, 60)])])
-clip = r["score"][0]
-check("squeeze: every word still sung (3 type-2 events over 2 slots)",
-      toks(clip, "text") == ["hold", "the", "flame"] and toks(clip, "note_type") == ["2", "2", "2"],
-      f"{clip['text']} {clip['note_type']}")
-check("squeeze: the shared slot splits evenly",
-      abs(float(toks(clip, "duration")[1]) - 0.3) < 0.011 and abs(float(toks(clip, "duration")[2]) - 0.3) < 0.011,
-      str(clip["duration"]))
+check("overflow: words > slots is REJECTED with a named error",
+      not r.get("ok") and r.get("error") == "line_overflow", str(r))
+check("overflow error carries the counts + offending text",
+      r.get("words") == 3 and r.get("slots") == 2 and "hold the flame" in str(r.get("lineText", "")),
+      str(r))
+# control: words == slots still authors fine
+r_ok = sx.author_score([LINE("hold flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.1, 60)])])
+check("control: words == slots authors normally", r_ok.get("ok") is True, str(r_ok.get("ok")))
 
 # ── 5. Leftover slots become a held continuation of the last word (never dropped) ──────
 r = sx.author_score([LINE("flame", [SLOT(0.0, 0.5, 57), SLOT(0.5, 1.0, 59), SLOT(1.0, 1.5, 60)])])
