@@ -10,7 +10,7 @@
 | V4b melisma probe | RUN (2026-07-16) | **PASS 6/6** (owner ear-confirm pending) — melisma available to B2 |
 | V1 gold sing | RUN (2026-07-16, line 2) | words natural in the mouth (owner sang both nominated lines without complaint); line-1 export was digitally silent — re-record pending |
 | V2 oracle durations | RUN (2026-07-17, line 2) | **gold > oracle > baseline blind; "better, still synthetic"** — durations confirmed as a contributor, NOT sufficient. B1 not built |
-| V3 assembly ablation | **NOW THE LIVE PROBE** | motivated twice: V0-S3 + V2's residual gap |
+| V3 assembly ablation | RUN (2026-07-17) | **per-word snap ranked WORST in both blind passages; no-snap best/tied-best** — the snap machinery is a confirmed naturalness cost |
 
 ---
 
@@ -123,6 +123,44 @@ than-raw numbers — is the next probe. The strict park-signal clause was writte
 oracle that showed NO improvement; the measured outcome (clear blind win + metric collapse,
 residual gap) reads as "duration fix necessary, not sufficient" — the park decision is
 deferred until V3 localizes the residual.
+
+## V3 — assembly ablation (2026-07-17)
+
+One plain sum of the u2 chunk renders through stage 5 three ways via the PRODUCT
+`perform.py` (only variable = the snap stage; provenance corr 0.974 vs the lab assembly);
+two judge passages, independently blind-shuffled, level-matched, no NSF.
+
+**Owner rankings: line2 nosnap = phrase > word · line1 nosnap > phrase > word.**
+The full per-word snap (±120ms, 10ms crossfades at every word event) ranked WORST in both
+passages, while it RAISES take-envelope correlation (0.438 → 0.523 → 0.562 across
+nosnap/phrase/word) — the snap optimizes the metric by damaging the sound, corroborating
+V0-S3's instrument numbers (snapped output +30…50ms later vowels, dur_ratio 0.73–0.80).
+Phrase-level alignment is at worst neutral (tied-best once, middle once).
+
+**Consequence:** the per-word `snap_to_events` stage should be REMOVED from the product
+chain (phrase-level alignment stays); the ~9ms word-snap gate it served is already
+condemned by B3. Note V2's residual gap is INDEPENDENT of this finding — neither V2 arm
+went through the per-word snap — so the remaining synthetic-ness after duration+snap fixes
+sits in the render engine's articulation realism (SoulX phoneme-transition character),
+which is the registered park territory.
+
+## Phase V — closing synthesis
+
+Two confirmed, independent naturalness costs, both ear-verified blind and both
+instrument-corroborated:
+1. **Stage 3's verbatim mumble-slot durations** (V2: oracle durations beat baseline blind;
+   vowel-onset error vs human reference collapsed 40 → 10ms). Fix = derive durations from
+   phrase-level anchors + a phrasing rule layer (B1-lite), knowing it improves but does not
+   close the gap alone.
+2. **Stage 5's per-word snap** (V3: worst in both blind passages). Fix = delete
+   `snap_to_events` from the chain, keep phrase alignment — a subtraction.
+
+Supporting: B2 capped at cram-kill + soft singability terms (V1: words sang fine), melisma
+available for tol-±1 (V4b PASS), B3 metric fix (vowel-onset alignment; V0 proved the
+word-start metric measures the wrong landmark and V3 proved optimizing it hurts).
+**Residual (parked):** after both fixes the gap to a human take is expected to narrow but
+not close — the remainder is SoulX articulation character, a render-engine question, parked
+until after first-stranger per the runway rule.
 
 ## Decision-rule state after V0/V4
 
