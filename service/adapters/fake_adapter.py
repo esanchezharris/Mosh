@@ -24,8 +24,11 @@ import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
 
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     """Whole-clip aware entry: the fake has no length cap, so it renders the full input in one
-    window for the default/stitch path and tiles one cycle for the loop path."""
-    return coverage.render(_render_window, input_wav, output_wav, params, coverage.WINDOW_UNCAPPED)
+    window for the default/stitch path and tiles one cycle for the loop path.
+    MOSH_FAKE_WINDOW_S forces a small window so multi-window coverage (incl. the streaming
+    progressive path) is testable hermetically — no real model needed."""
+    window_s = float(os.environ.get("MOSH_FAKE_WINDOW_S") or coverage.WINDOW_UNCAPPED)
+    return coverage.render(_render_window, input_wav, output_wav, params, window_s)
 
 
 def _transform_samples(samples, n_channels, seed, nl, drive):
