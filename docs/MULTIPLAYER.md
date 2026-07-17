@@ -167,6 +167,36 @@ The session control lives in the topbar's **2-player (B-5) pop**
     you've already left doesn't keep running.
   - **Kill switch:** `MOSH_MP_SYNC_TRANSFER=1` reverts every path above to the original fully
     synchronous/inline behaviour — cheap insurance if the async path ever misbehaves live.
+  - **Consolidated fix batch (2026-07-17, adversarial review of PR-2):** two BLOCKERs + three
+    should-fixes closed. **BLOCKER — a rejected upload was reported as a false success:**
+    `uploadBlob`'s raw PUT never checked the HTTP status (`createInputStream()` returns
+    non-null for 4xx/5xx on macOS — the same caveat `poll()` already documents), so a
+    quota/auth/transient-5xx rejection looked identical to a real success; `httpPost` now
+    threads an optional status-code out-param and every blob call site (`head`/`put-url`/the
+    raw PUT/`get-url`/the raw GET) checks it explicitly. Proven by a dedicated `mp_commit_done{ok:false}`
+    selftest section driving `MultiplayerSession` directly against `relay/server.py`'s new
+    ext-scoped `MOSH_RELAY_BLOB_FAIL` hook (armed for the whole gate run, safe like
+    `MOSH_RELAY_BLOB_CORRUPT`). **BLOCKER — mp_commit_done had no frontend consumer:** the
+    event was silently dropped by `store.ts`'s dispatch chain; a failed upload left a track
+    `sourceMissing` for the peer with no visible signal. Fixed: a new `mp_commit_done` reducer
+    surfaces `ok:false` via the shared `lastError` toast + `console.warn`, and `MultiplayerPanel`
+    shows a per-track "failed to sync — Retry" row (`pendingCommits`/`failedCommits`, keyed by
+    `logicalId`) alongside a "Syncing N…" line while an upload is in flight.
+    **Should-fix — the worker's own prefetch bypassed the in-flight-stem guard:**
+    `prefetchAudioRefs` (worker thread) called `downloadBlob` directly without consulting the
+    self-heal pass's in-flight registry, so the two could race a `downloadBlob` into the same
+    dest file concurrently; the registry moved from a `MoshOps`-local, message-thread-only
+    `std::set` to a thread-safe `claimStem`/`releaseStem` pair on `MultiplayerSession` itself,
+    shared by both callers. **Should-fix — job.apply closures lacked the `running_` teardown
+    guard:** `pollLoop`'s own callAsync already drops a stale tick after `leaveSession()`
+    (`if (! running_.load()) return;`); the TransferQueue job.apply closures
+    (`emitCommitDone`/`applyCommit_`/`applyBootstrap_`/`applyStructural_`) now carry the same
+    guard, so a job already handed to `callAsync` before a `leaveSession()` can't fire stale
+    engine mutations after teardown. **Should-fix — `stemBaseDir` was re-read per-job instead
+    of captured at enqueue:** a slow job ahead of it in the FIFO could let `stemBaseDir()` drift
+    (a `save_as`/`new_project`/`open_project` in between) before the worker actually ran the
+    prefetch; the base directory is now captured on the message thread at enqueue time and
+    threaded through explicitly.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
   briefly until the relay sweeps it. Self-corrects.
 - **Buses/groups don't replicate yet:** tracks sync; aux/group buses do not.
@@ -177,10 +207,12 @@ The session control lives in the topbar's **2-player (B-5) pop**
 
 - `Mosh --selftest` with `MOSH_SELFTEST_MP=1` (`relay/run-mp-selftest.sh`, two/four
   simulated peers across several in-process engines) passes against the **local**
-  relay — **1349/1349 ×3 deterministic** (2026-07-17, self-healing stems PR +
-  consolidated fix batch: corruption-rejection coverage below). The default
-  `--selftest` (no MP env) is unaffected — **1274/1274**. This is the FIRST time
-  the whole stem round-trip (upload/download/self-heal/bootstrap) runs
+  relay — **1367/1367 ×3 deterministic** (2026-07-17, self-healing stems PR + async
+  transfer PR + the consolidated fix batch above: corruption-rejection +
+  upload-rejection coverage). Also verified ×3 under `MOSH_MP_SYNC_TRANSFER=1`
+  (**1375/1375**) and ×3 with `MOSH_RELAY_BLOB_DELAY_MS=600` armed (**1376/1376**).
+  The default `--selftest` (no MP env) is unaffected — **1274/1274**. This is the
+  FIRST time the whole stem round-trip (upload/download/self-heal/bootstrap) runs
   hermetically, since the local relay previously had no blob store at all.
 - **Corrupted-transfer rejection is now executable, not just "correct by
   inspection":** `relay/server.py`'s `MOSH_RELAY_BLOB_CORRUPT` hook (ext-scoped —
