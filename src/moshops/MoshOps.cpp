@@ -8699,6 +8699,28 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     return okResult ("export_audio", var (data));
 }
 
+bool MoshOps::writeSilentStemFile (const juce::File& dest, juce::AudioFormat* format, int bitDepth,
+                                   double sampleRate, double lengthSeconds)
+{
+    if (format == nullptr) return false;
+    dest.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> os (dest.createOutputStream());
+    if (os == nullptr) return false;
+
+    const int numChannels = 2;   // stereo, matching the rest of the stem set
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        format->createWriterFor (os.get(), sampleRate, (unsigned) numChannels, bitDepth, {}, 0));
+    if (writer == nullptr) return false;
+    os.release();   // the writer owns the stream now
+
+    const int numSamples = juce::jmax (1, (int) std::ceil (lengthSeconds * sampleRate));
+    juce::AudioBuffer<float> silence (numChannels, numSamples);
+    silence.clear();
+    const bool wrote = writer->writeFromAudioSampleBuffer (silence, 0, numSamples);
+    writer.reset();   // flush + close before the caller reads the file back
+    return wrote;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // G7 — cmdExportStems: one WAV/AIFF/FLAC per visible, non-empty audio track, ALL
 // sharing the same {0, editLength} render window (the "common zero point" — a
@@ -8711,6 +8733,35 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
 // single-track render primitive in a loop instead of a single all-tracks render.
 // NON-undoable (read/render, no ValueTree mutation the undo system needs to
 // know about) — same posture as export_audio.
+//
+// ── CORRECTNESS FIX (found by adversarial review, empirically reproduced): the
+// original version of this command set ONLY `params.tracksToDo = te::toBitSet(one)`
+// to try to isolate the single target track, per the spec's "NO allowedClips —
+// we render the whole track" design. That design was built on a false premise:
+// `te::toBitSet()` in the PINNED tracktion_engine clone (2877b621,
+// modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp:179-193) does
+// NOT restrict the bitset to the tracks passed in — it's an upstream bug. Its body
+// loops `t` over `getAllTracks(edit)` and sets the bit whenever
+// `allTracks.indexOf(t) >= 0`, which is trivially true for every t (t is drawn
+// FROM allTracks), so it unconditionally sets every track's bit regardless of the
+// `tracks` array argument. `params.tracksToDo` therefore evaluated to "every
+// track in the edit" no matter which single track was passed in, and
+// `cnp.allowedTracks` (tracktion_Renderer.cpp:38/140) ended up permitting ALL
+// tracks — so every "stem" actually rendered the full mix. Verified by reading
+// the upstream source (see the exact lines above); `bounceClipToWav` (:6867)
+// never hit this because it ALSO sets `params.allowedClips` to the one clip it
+// wants, and `allowedClips` is filtered independently, per-clip, in
+// EditNodeBuilder.cpp regardless of tracksToDo/allowedTracks — so its bug was
+// silently masked. The fix: populate `params.allowedClips` with every clip that
+// belongs to the target track (not just one), which genuinely isolates it the
+// same proven way bounceClipToWav does. `tracksToDo` is left set (harmless —
+// it's not load-bearing for isolation) only because the render-gate check below
+// reads `tracksToDo.countNumberOfSetBits() > 0`.
+//
+// One wrinkle: `allowedClips` can't express "zero clips" — an EMPTY array means
+// "no filter" (ALL clips), not "no clips." So a genuinely clip-less track
+// (`includeEmpty:true`) is written directly as silence via writeSilentStemFile,
+// bypassing te::Renderer for that one stem.
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdExportStems (const juce::var& args)
 {
@@ -8830,27 +8881,39 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
         if (t == nullptr) continue;
         if ((bool) t->state.getProperty (ids::moshHidden, false)) continue;   // Phase-2 hidden beneath-render track — never a stem
         const int myIndex = index++;
-        if (! includeEmpty && t->getClips().isEmpty()) continue;             // skip silent tracks by default
+        const juce::Array<te::Clip*> trackClips = t->getClips();             // THIS track's own clips (may be empty)
+        if (! includeEmpty && trackClips.isEmpty()) continue;                // skip silent tracks by default
 
         auto file = dir.getChildFile (stemFileBaseName (myIndex, t->getName())).withFileExtension (extension);
         file.deleteFile();
 
-        te::Renderer::Parameters params (edit);
-        params.destFile           = file;
-        params.audioFormat        = audioFormat;
-        params.bitDepth           = bitDepth;
-        params.sampleRateForAudio = sampleRate;
-        params.blockSizeForAudio  = blockSize;
-        params.time               = { tracktion::TimePosition(), edit.getLength() };   // COMMON zero point — every stem shares this window
-        juce::Array<te::Track*> one; one.add (t);
-        params.tracksToDo         = te::toBitSet (one);   // ONLY this track; no allowedClips — the WHOLE track, all its clips
-        params.usePlugins         = true;                 // instrument + insert FX = the track's own post-fader sound
-        params.useMasterPlugins   = false;                // pre-master — sum of stems + master chain reproduces the mix
-        params.createMidiFile     = false;
-        params.realTimeRender     = realtime;
-
         juce::String renderError;
+
+        if (trackClips.isEmpty())
         {
+            // includeEmpty:true on a genuinely clip-less track — allowedClips can't express
+            // "zero clips" (see the comment above this function), so write silence directly
+            // at the common-zero-point length instead of going through te::Renderer.
+            if (! writeSilentStemFile (file, audioFormat, bitDepth, sampleRate, len))
+                renderError = "could not write a silent stem file";
+        }
+        else
+        {
+            te::Renderer::Parameters params (edit);
+            params.destFile           = file;
+            params.audioFormat        = audioFormat;
+            params.bitDepth           = bitDepth;
+            params.sampleRateForAudio = sampleRate;
+            params.blockSizeForAudio  = blockSize;
+            params.time               = { tracktion::TimePosition(), edit.getLength() };   // COMMON zero point — every stem shares this window
+            juce::Array<te::Track*> one; one.add (t);
+            params.tracksToDo         = te::toBitSet (one);   // kept for the countNumberOfSetBits() gate below; NOT load-bearing for isolation (see the comment above cmdExportStems)
+            params.allowedClips.addArray (trackClips);        // ← the ACTUAL per-track isolation mechanism
+            params.usePlugins         = true;                 // instrument + insert FX = the track's own post-fader sound
+            params.useMasterPlugins   = false;                // pre-master — sum of stems + master chain reproduces the mix
+            params.createMidiFile     = false;
+            params.realTimeRender     = realtime;
+
             const te::Edit::ScopedRenderStatus srs (edit, true);
             te::TransportControl::stopAllTransports (edit.engine, false, true);
             te::Renderer::turnOffAllPlugins (edit);
