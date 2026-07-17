@@ -1362,7 +1362,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
-    case "list_colors": return ok(command, { colors: COLORS });
+    // sa3: true matches the mock's existing posture (a populated colour rack always implied
+    // SA3 before this field existed) — dev/e2e keep seeing the "SA3" badge, not a spurious
+    // "preview" one now that the badge reads /colors' honest field instead of the old proxy.
+    case "list_colors": return ok(command, { colors: COLORS, sa3: true });
     case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
     case "list_rave_models":   // Lane B — RAVE model browser fixture
       return ok(command, { models: [

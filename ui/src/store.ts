@@ -82,6 +82,12 @@ type State = {
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   buildingSkeleton: Record<string, boolean>; // source clipId → "Build flow from this take" in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  // Whether THIS Mac's generative service is actually running the real Stable Audio 3
+  // model, straight from /colors' `sa3` field (server.py's SA3_ENABLED). undefined means
+  // the service didn't report it — an older service, or /colors errored internally — and
+  // callers fall back to the colour-rack-nonempty proxy (see ui/src/ui/engineBadge.ts)
+  // rather than silently claiming SA3.
+  sa3Available: boolean | undefined;
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
   availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
@@ -262,6 +268,7 @@ export const useStore = create<State>((set, get) => ({
   buildingLyrics: {},
   buildingSkeleton: {},
   availableColors: [],
+  sa3Available: undefined,
   availableTransformTargets: [],
   availableLoras: [],
   availableRaveModels: [],
@@ -730,11 +737,11 @@ export const useStore = create<State>((set, get) => ({
 
   loadColors: () => {
     if (get().availableColors.length > 0) return;
-    void executeCommand<CommandResult<{ colors: AvailableColor[] }>>({
+    void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean }>>({
       command: "list_colors",
       args: {},
     }).then((res) => {
-      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors, sa3Available: res.data.sa3 });
     });
   },
 
