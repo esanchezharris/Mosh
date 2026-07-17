@@ -14,7 +14,7 @@ export type RenderLayer = {
   prompt?: string;
   nl?: number;
   colors?: RenderColor[];
-  loras?: RenderLora[];  // LoRA rack selection (≤2, ordered — stacks merge sequentially)
+  loras?: RenderLora[];  // LoRA rack selection (unbounded, ordered — stacks merge sequentially)
   target?: string;    // Route B: transform target (instrument or free-text)
   strength?: number;  // Route B: transform strength (0–100)
   // The render's time scope (seconds). A section-scoped render carries a sub-range of
@@ -117,8 +117,13 @@ export type AvailableTransformTarget = { name: string };
 export type AvailableLora = {
   name: string;
   displayName: string;
-  trigger: string;   // prompt token that activates the style ("" when none)
+  trigger: string;   // prompt token — auto-injected server-side (tooltip-only)
   hint: string;      // suggested prompt vocabulary
+  notes?: string;    // free-form sidecar notes (tooltip)
+  valid?: boolean;   // false = listed but unusable (corrupt/unsupported file)
+  reason?: string;   // why it's unusable (when valid === false)
+  rank?: number;     // adapter rank from the safetensors header
+  sha12?: string;    // content identity (retrain-in-place ⇒ new sha ⇒ cache MISS)
 };
 
 // Lane B — a RAVE model in the library (RAVE_MODEL_DIR / ~/AI/rave-models), from list_rave_models.

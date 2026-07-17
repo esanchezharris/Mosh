@@ -5988,7 +5988,8 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
 }
 
 juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                         const juce::String& upstreamOverride)
+                                         const juce::String& upstreamOverride,
+                                         const juce::String& lorasKey)
 {
     // Wave clips hash the staged audio. MIDI/drum clips are auto-bounced, but the bounce
     // isn't bit-deterministic (a synth's free-running phase), so they pass a stable source
@@ -6013,7 +6014,64 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
         juce::String (bpm, 4) + "bpm/" + tonic + " " + keyMode;
 
     return RenderLayer::fingerprint (node, upstreamHash, tempoKeyContext, 44100, 2,
-                                     jobManager.serviceBuild());
+                                     jobManager.serviceBuild(), lorasKey);
+}
+
+bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey, juce::String& err)
+{
+    // "name=value@sha12:trigger;" per ACTIVE (value != 0) row, rack order — resolved at
+    // RENDER time via GET /loras so the key carries content identity: a retrained
+    // same-name file (new sha) or a sidecar trigger edit is a cache MISS, and an
+    // unknown name errors BEFORE any job submit. Non-SA3 adapters key name=value only
+    // (the fake never applies adapters) — hermetic, no service round-trip.
+    lorasKey = {};
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto loras = params.getChildWithName (ids::LORAS);
+    if (! loras.isValid() || loras.getNumChildren() == 0)
+        return true;
+
+    juce::Array<juce::ValueTree> active;
+    for (int i = 0; i < loras.getNumChildren(); ++i)
+        if (auto row = loras.getChild (i); (double) row[ids::value] != 0.0)
+            active.add (row);
+    if (active.isEmpty())
+        return true;
+
+    const auto adapter = node[ids::modelAdapter].toString();
+    const bool isSa3 = adapter == "stable_audio3" || adapter == "sa3";
+    if (! isSa3)
+    {
+        for (auto& row : active)
+            lorasKey << row[ids::name].toString() << "=" << row[ids::value].toString() << ";";
+        return true;
+    }
+
+    auto reg = jobManager.listLoras();
+    if (! (bool) reg.getProperty ("ok", false))
+    {
+        err = "LoRA registry unavailable (generative service)";
+        return false;
+    }
+    std::map<juce::String, juce::var> byName;
+    if (auto* arr = reg.getProperty ("loras", var()).getArray())
+        for (auto& r : *arr)
+            byName[r.getProperty ("name", "").toString()] = r;
+
+    for (auto& row : active)
+    {
+        const auto name = row[ids::name].toString();
+        auto it = byName.find (name);
+        if (it == byName.end() || ! (bool) it->second.getProperty ("valid", false))
+        {
+            const auto dir = reg.getProperty ("dir", "~/Library/Mosh/loras/sa3").toString();
+            err = "LoRA '" + name + "' not found — drop the .safetensors in " + dir;
+            return false;
+        }
+        lorasKey << name << "=" << row[ids::value].toString()
+                 << "@" << it->second.getProperty ("sha12", "").toString()
+                 << ":" << it->second.getProperty ("trigger", "").toString() << ";";
+    }
+    return true;
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
@@ -6152,13 +6210,14 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
             }
     }
 
-    if (args.hasProperty ("loras"))   // LoRA rack: ≤2, ordered (stacks merge sequentially)
+    if (args.hasProperty ("loras"))   // LoRA rack: unbounded, ordered (stacks merge sequentially)
     {
         // getOrCreate: layers created before the rack shipped have no LORAS child.
+        // No count cap / strength clamp (owner call): value > 100 = deliberate overdrive.
         auto loras = params.getOrCreateChildWithName (ids::LORAS, &undoManager());
         loras.removeAllChildren (&undoManager());
         if (auto* arr = args.getProperty ("loras", var()).getArray())
-            for (int i = 0; i < juce::jmin (2, arr->size()); ++i)
+            for (int i = 0; i < arr->size(); ++i)
             {
                 auto& l = arr->getReference (i);
                 juce::ValueTree lo (ids::LORA);
@@ -6607,7 +6666,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_layer", "generative service unavailable");
 
-    const auto fp = computeFingerprint (node, input, upstreamOverride);
+    // Resolve the LoRA rack to its content identity (sha12 + trigger via /loras) —
+    // an unknown adapter name fails HERE, before any submit or cache probe.
+    juce::String lorasKey, lorasErr;
+    if (! resolveLorasKey (node, lorasKey, lorasErr))
+        return errResult ("render_layer", lorasErr);
+
+    const auto fp = computeFingerprint (node, input, upstreamOverride, lorasKey);
 
     // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
     // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
