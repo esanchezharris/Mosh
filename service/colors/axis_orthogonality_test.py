@@ -54,8 +54,8 @@ def layer_of(name):
 # ── (a) regression snapshot of the shipped rack ───────────────────────────────
 check("L4 shares 3 colours (brightness, futuristic, tension)",
       sorted(n for n in REG if layer_of(n) == 4) == ["brightness", "futuristic", "tension"])
-check("L17 shares 4 colours (air, distortion, epic, grid_tightness)",
-      sorted(n for n in REG if layer_of(n) == 17) == ["air", "distortion", "epic", "grid_tightness"])
+check("L17 shares 5 colours (air, distortion, epic, grid_tightness, sustain)",
+      sorted(n for n in REG if layer_of(n) == 17) == ["air", "distortion", "epic", "grid_tightness", "sustain"])
 
 a_ft = angle_deg(vec("futuristic"), vec("tension"))
 a_de = angle_deg(vec("distortion"), vec("epic"))
@@ -85,7 +85,7 @@ def assert_group_orthogonal(label, names):
 
 
 assert_group_orthogonal("L4 group", ["brightness", "futuristic", "tension"])
-assert_group_orthogonal("L17 group", ["air", "distortion", "epic", "grid_tightness"])
+assert_group_orthogonal("L17 group", ["air", "distortion", "epic", "grid_tightness", "sustain"])
 
 # ── (c) guards: singleton + near-parallel pass through unchanged ───────────────
 solo = [vec("grit")]
@@ -101,7 +101,7 @@ check("near-parallel group is left unchanged (ill-conditioned overlap guard)",
       f"angle={angle_deg(base, near):.4f}°")
 
 # ── (d) determinism ───────────────────────────────────────────────────────────
-g = ["air", "distortion", "epic", "grid_tightness"]
+g = ["air", "distortion", "epic", "grid_tightness", "sustain"]
 o1 = ortho.orthogonalize_group([vec(n) for n in g])
 o2 = ortho.orthogonalize_group([vec(n) for n in g])
 check("orthogonalize_group is deterministic", all(np.array_equal(a, b) for a, b in zip(o1, o2)))

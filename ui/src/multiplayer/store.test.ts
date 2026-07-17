@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStore } from "../store";
-import { __resetMockForTests } from "../bridge.mock";
+import { __resetMockForTests, __emitMockEvent } from "../bridge.mock";
 import { isTrackLockedByOther } from "./sync";
 
 // Drives the real store through the mock peer harness: a multiplayer session with
@@ -13,6 +13,7 @@ describe("multiplayer presence (store + mock peer)", () => {
     useStore.setState({
       mp: { active: false, roomCode: null, selfPeer: null, connected: false },
       peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null,
+      pendingCommits: {}, failedCommits: {},
     });
     useStore.getState().init();
   });
@@ -138,5 +139,84 @@ describe("multiplayer presence (store + mock peer)", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+});
+
+// PR-2 adversarial-review BLOCKER: mp_commit_done previously had NO frontend
+// consumer at all -- store.ts's event dispatch chain had no branch for it and no
+// default, so a failed stem upload (commit-on-move, PR-2's async transfer) was
+// silently dropped. A track could sit sourceMissing for the peer forever with
+// nothing telling the producer anything had gone wrong. These tests drive the
+// reducer directly via __emitMockEvent (the mock backend has no realistic way to
+// fail an upload itself -- there is no upload to fail in the dev mock).
+describe("mp_commit_done (PR-2 adversarial-review BLOCKER)", () => {
+  beforeEach(() => {
+    __resetMockForTests();
+    useStore.setState({
+      mp: { active: true, roomCode: "R", selfPeer: "me", connected: true },
+      pendingCommits: {}, failedCommits: {}, lastError: null,
+    });
+    useStore.getState().init();   // subscribe the mosh_event listener __emitMockEvent drives
+  });
+
+  it("ok:false surfaces visibly: failedCommits + lastError, and clears pendingCommits", () => {
+    useStore.setState({ pendingCommits: { "lid-1": true } });
+    __emitMockEvent("mp_commit_done", { logicalId: "lid-1", ok: false, error: "relay rejected the upload" });
+
+    const s = useStore.getState();
+    expect(s.pendingCommits["lid-1"]).toBeUndefined();
+    expect(s.failedCommits["lid-1"]).toBe("relay rejected the upload");
+    expect(s.lastError).toBe("relay rejected the upload");
+  });
+
+  it("ok:false with no error string still surfaces a non-empty message (never a silent drop)", () => {
+    __emitMockEvent("mp_commit_done", { logicalId: "lid-2", ok: false });
+    const s = useStore.getState();
+    expect(s.failedCommits["lid-2"]).toBeTruthy();
+    expect(s.lastError).toBeTruthy();
+  });
+
+  it("ok:true clears both pendingCommits and any stale failedCommits entry", () => {
+    useStore.setState({
+      pendingCommits: { "lid-3": true },
+      failedCommits: { "lid-3": "a previous failure" },
+    });
+    __emitMockEvent("mp_commit_done", { logicalId: "lid-3", ok: true });
+
+    const s = useStore.getState();
+    expect(s.pendingCommits["lid-3"]).toBeUndefined();
+    expect(s.failedCommits["lid-3"]).toBeUndefined();
+  });
+
+  it("an event with no logicalId is a harmless no-op (doesn't throw, doesn't touch state)", () => {
+    useStore.setState({ pendingCommits: { keep: true } });
+    expect(() => __emitMockEvent("mp_commit_done", { ok: false })).not.toThrow();
+    expect(useStore.getState().pendingCommits).toEqual({ keep: true });
+  });
+
+  it("retryFailedCommit re-fires mp_commit_track for the resolved trackId and marks it pending", async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    useStore.setState({
+      failedCommits: { "lid-4": "upload failed" },
+      snapshot: { tracks: [{ id: "T9", logicalId: "lid-4", name: "Drums" }] } as never,
+      exec: (async (command: string, args?: Record<string, unknown>) => {
+        calls.push({ command, args });
+        return { ok: true, command };
+      }) as never,
+    });
+
+    await useStore.getState().retryFailedCommit("lid-4");
+
+    expect(calls).toEqual([{ command: "mp_commit_track", args: { trackId: "T9" } }]);
+    expect(useStore.getState().pendingCommits["lid-4"]).toBe(true);
+  });
+
+  it("retryFailedCommit on a logicalId with no matching track just drops the stale entry", async () => {
+    useStore.setState({
+      failedCommits: { "gone-lid": "upload failed" },
+      snapshot: { tracks: [] } as never,
+    });
+    await useStore.getState().retryFailedCommit("gone-lid");
+    expect(useStore.getState().failedCommits["gone-lid"]).toBeUndefined();
   });
 });

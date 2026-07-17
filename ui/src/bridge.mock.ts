@@ -517,6 +517,7 @@ const COLORS = [
   { name: "grit", astd_max: 0.55, peak_layer: 2, more_sign: 1, verdict: "STRONG", no_stack_with: [] as string[] },
   { name: "brightness", astd_max: 0.5, peak_layer: 3, more_sign: 1, verdict: "STRONG", no_stack_with: ["air"] },
   { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
+  { name: "sustain", astd_max: 0.4, peak_layer: 17, more_sign: 1, verdict: "REAL", no_stack_with: [] as string[] },
 ];
 const LORAS = [
   { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa" },
@@ -1058,10 +1059,47 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       const on = Boolean(args.autoTempo);
       f.clip.autoTempo = on;
-      if (on) f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
-      else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
+      if (on) {
+        f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
+        // sourceBpm: explicit → detected (stub) → prior → map tempo. Mirrors the native
+        // serialiser carrying sourceBpm while warp is on (detect is a no-op offline stub).
+        const detected = args.detect && !("sourceBpm" in args) ? 120 : undefined;
+        f.clip.sourceBpm = "sourceBpm" in args ? num(args.sourceBpm) : (detected ?? f.clip.sourceBpm ?? snapshot.session.tempo);
+      } else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
       invalidate();
       return ok(command, { clipId: f.clip.id, autoTempo: on, stretchMode: f.clip.stretchMode });
+    }
+    // Stretch a wave clip to a target warped length (seconds) or bar count by deriving
+    // sourceBpm + enabling auto-tempo. Powers drag-to-stretch + Fit/×2 helpers. Undoable.
+    case "stretch_clip": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "not an audio clip");
+      if (!("length" in args) && !("bars" in args)) return err(command, "missing 'length' or 'bars'");
+      const sourceLen = num(f.clip.sourceLength, f.clip.length) || f.clip.length || 1;
+      const projectBpm = snapshot.session.tempo || 120;
+      pushUndo();
+      let target: number;
+      if ("bars" in args) {
+        const bars = num(args.bars, 0);
+        if (bars <= 0) return err(command, "'bars' must be > 0");
+        target = (bars * (snapshot.session.timeSigNumerator ?? 4) * 60) / projectBpm;
+      } else {
+        target = num(args.length, f.clip.length);
+        if (target <= 0) return err(command, "'length' must be > 0");
+      }
+      const sourceBpm = Math.max(20, Math.min(999, (projectBpm * target) / sourceLen));
+      f.clip.autoTempo = true;
+      f.clip.stretchMode = f.clip.stretchMode ?? "SoundTouch (Better)";
+      f.clip.sourceBpm = sourceBpm;
+      f.clip.length = (sourceLen * sourceBpm) / projectBpm; // == target (unless clamped)
+      invalidate();
+      return ok(command, { clipId: f.clip.id, sourceBpm, length: f.clip.length });
+    }
+    // Read-only BPM estimate. No real audio in the dev mock → deterministic stub.
+    case "detect_clip_bpm": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "no wave clip: " + str(args.clipId));
+      if (f.clip.type !== "wave") return err(command, "no wave clip: " + str(args.clipId));
+      return ok(command, { clipId: f.clip.id, bpm: num(f.clip.sourceBpm, 120) || 120, confidence: 0.8 });
     }
 
     // ── recording transport + take lanes (comp tree) ─────────────────────────
@@ -1954,4 +1992,13 @@ export function __resetMockForTests(): void {
   future.length = 0;
   inBatch = false;
   cmdLog.length = 0;
+}
+
+// Test-only: inject a synthetic "mosh_event" of the given type/payload straight
+// through the mock's listener set, exactly as the native bridge would deliver one.
+// Used to cover reducers for events the mock backend doesn't otherwise simulate a
+// realistic end-to-end trigger for (e.g. mp_commit_done — the native
+// MultiplayerSession::emitCommitDone path has no mock-side upload to fail).
+export function __emitMockEvent(type: string, payload?: unknown): void {
+  emit(type, payload);
 }

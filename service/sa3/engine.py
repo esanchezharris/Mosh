@@ -75,6 +75,11 @@ class _Engine:
         self.dit_model, self._stock_dit_ckpt = S.load_dit("medium", T_lat=self.T_LAT, dtype=self.DTYPE)
         self.decoder, _chunk_fn, _ = S.load_decoder("same-l", self.DEC_DTYPE)
         self._tf = self.dit_model.transformer
+        # Time-scheduled steering: replace the transformer forward with a version
+        # that honors an optional per-latent-position schedule on each steer (the
+        # "Sustain" color). Byte-identical to stock when no steer carries a schedule.
+        from sa3.scheduled_steer import install_scheduled_steer_patch
+        install_scheduled_steer_patch()
         self._encoder = None
         # Runtime LoRA application (no disk bake, no reload): the DiT stays the stock
         # model; apply_loras reassigns just the touched weights IN PLACE and
@@ -236,8 +241,20 @@ class _Engine:
         cross_attn, global_cond = self._cond(prompt)
         self._tf._dump = None
         self._tf._steer_layer = -1; self._tf._steer_alpha = 0.0; self._tf._steer_vec = None
-        self._tf._steers = [(int(L), float(a), mx.array(np.asarray(v, dtype=np.float32)))
-                            for (L, a, v) in (steers or [])]
+        # A steer may be (L, alpha, vec) [uniform] or (L, alpha, vec, envelope_spec).
+        # The T-independent envelope is materialized to a [T_lat] per-position schedule
+        # here (the engine owns T_lat); the patched forward multiplies it in.
+        from sa3.scheduled_steer import build_envelope
+        lat_s = self.SAMPLES_PER_LATENT / S.SAMPLE_RATE
+        built = []
+        for t in (steers or []):
+            L, a, v = t[0], t[1], t[2]
+            entry = (int(L), float(a), mx.array(np.asarray(v, dtype=np.float32)))
+            sched = build_envelope(t[3] if len(t) > 3 else None, self.T_LAT, lat_s)
+            if sched is not None:
+                entry = entry + (mx.array(sched.astype(np.float32)),)
+            built.append(entry)
+        self._tf._steers = built
         sigma_max = float(init_noise_level)
         sigmas = S.build_pingpong_schedule(self.STEPS, sigma_max=sigma_max, use_logsnr_shift=True)
         pure = mx.random.normal((1, 256, self.T_LAT), dtype=self.DTYPE, key=mx.random.key(seed))

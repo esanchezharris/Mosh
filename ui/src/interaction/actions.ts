@@ -16,6 +16,7 @@ export const EditorAction = {
   DESELECT: "deselect",
   MOVE: "move",
   TRIM: "trim",
+  STRETCH: "stretch", // meta+edge-drag on a wave clip: time-stretch (warp) instead of trim
   TIME_SELECT: "time_select",
   MARQUEE: "marquee",
   SPLIT: "split",

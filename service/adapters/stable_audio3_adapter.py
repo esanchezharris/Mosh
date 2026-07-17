@@ -76,8 +76,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     # MOSH_COLOR_ORTHO (experiment, default OFF ⇒ byte-identical): de-correlate same-layer
     # colour stacks. Owner-gated by ear via the A/B harness before it can become a default;
     # promoting it to a real toggle later MUST fold the flag into the cache fingerprint.
-    ortho_on = os.environ.get("MOSH_COLOR_ORTHO", "").strip().lower() not in ("", "0", "false", "no")
-    steers = CR.resolve_steers(colors, lab=lab, orthogonalize=ortho_on)   # validated / clamped / composed
+    ortho_on = os.environ.get("MOSH_COLOR_ORTHO", "").strip().lower() not in ("", "0", "false", "no", "off")
+    steers = CR.resolve_steers(colors, lab=lab, orthogonalize=ortho_on, with_envelopes=True)   # 4-tuples: (L, α, vec, envelope)
 
     eng = E.get_engine()                                    # singleton; first call loads the model
 
@@ -132,7 +132,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "sample_rate": sr, "channels": ch,
             "seconds_pinned": eng.SECONDS,
             "init_cache": init_status,
-            "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
+            "steers": [{"layer": t[0], "alpha": round(t[1], 4),
+                        "scheduled": len(t) > 3 and t[3] is not None} for t in steers],
             "loras": [{"name": n, "strength": s,
                        "sha12": lora_recs.get(n, {}).get("sha12", "")}
                       for (n, _f, s) in lora_sel],

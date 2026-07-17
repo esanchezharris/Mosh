@@ -446,9 +446,15 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
             if (active) { lockManager_.activate (self); lockManager_.setLocks (locks); }
             else        { lockManager_.deactivate(); }
         },
-        [this] { return cmdMpSerializeProject (var()).getProperty ("data", var()); },   // provide
+        // PR-2: the message-thread part ONLY (content-address + serialize; NO
+        // upload) -- the session's own worker uploads the returned stemFiles[]
+        // before publishing bootstrap_state. cmdMpSerializeProject (the public,
+        // directly-callable command) is UNCHANGED and keeps uploading synchronously
+        // itself, so existing direct-call tests stay valid.
+        [this] { return serializeProjectForBootstrapAnswer(); },   // provide
         [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); },             // adopt
         [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
+    refreshMpStemDir();
 }
 
 void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
@@ -456,19 +462,26 @@ void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
     applyMultiplayerCommitMessage (msg);
 }
 
+// PR-2: MultiplayerSession's stemBaseDir_ (worker-thread-only, mutex-guarded) must
+// be refreshed from the message thread whenever eng.editFile() can change (a fresh
+// project, an open, a Save As) or a session starts — the worker must NEVER call
+// eng.editFile() itself (same torn-refcount reasoning as MultiplayerClient.h's
+// roomCode_/etc: a juce::String is refcounted, so an unsynchronized cross-thread
+// read/write is a crash risk, not just staleness).
+void MoshOps::refreshMpStemDir()
+{
+    if (mpSession_ != nullptr)
+        mpSession_->setStemBaseDir (eng.editFile().getParentDirectory().getFullPathName());
+}
+
 void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
 {
-    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
-    if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
-        for (auto& a : *arr)
-        {
-            const auto h = a.getProperty ("hash", var()).toString();
-            const auto e = a.getProperty ("ext", var()).toString();
-            if (h.isEmpty()) continue;
-            if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                mpSession_->downloadBlob (h, e, dest);
-        }
-
+    // PR-2: the session's transfer worker has ALREADY prefetched every audioRef this
+    // commit carries (routeStateMutatingJob's prefetch stage, before this apply stage
+    // runs) — no download loop needed here anymore. applyMultiplayerCommitForSelfTest
+    // calling this directly (bypassing the session/worker) therefore no longer
+    // downloads stems either; a future direct-callback test needs its own prefetch
+    // (mirroring what the session does) or should drive the download separately first.
     auto* applyArgs = new DynamicObject();
     applyArgs->setProperty ("blob", msg.getProperty ("blob", var()));
     auto* command = new DynamicObject();
@@ -900,6 +913,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
+    if (name == "stretch_clip")      return cmdStretchClip (args);
+    if (name == "detect_clip_bpm")   return cmdDetectClipBpm (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "delete_time_range") return cmdDeleteTimeRange (args);
     if (name == "paste_clip")        return cmdPasteClip (args);
@@ -2890,6 +2905,7 @@ juce::var MoshOps::cmdMpCreateSession (const juce::var& args)
                                                  args.getProperty ("color", var()).toString());
     if (code.isEmpty())
         return errResult ("mp_create_session", "could not reach the relay (MOSH_RELAY_URL)");
+    refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("code", code);
     o->setProperty ("selfPeer", mpSession_->selfPeer());
@@ -2902,6 +2918,7 @@ juce::var MoshOps::cmdMpJoinSession (const juce::var& args)
                                    args.getProperty ("name", var()).toString(),
                                    args.getProperty ("color", var()).toString()))
         return errResult ("mp_join_session", "join failed (bad code / relay unreachable)");
+    refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("selfPeer", mpSession_->selfPeer());
     return okResult ("mp_join_session", var (o));
@@ -2937,6 +2954,7 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
     // resolve the same path once the bytes are fetched.
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     Array<var> audioRefs;
+    juce::Array<juce::File> stemFiles;   // parallel to audioRefs; local paths only, PR-2's worker uploads these
     for (auto* c : t->getClips())
         if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
         {
@@ -2960,26 +2978,29 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
                 repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
             auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
             audioRefs.add (var (r));
+            stemFiles.add (dest);
         }
 
     eng.edit().flushState();
     const auto blob = trackcommit::serialize (*t);
     const auto lid  = logicalid::ensureTrack (t->state);
 
-    // Upload the stems (server-side content-addressed dedup), then publish the
-    // commit carrying their hashes so the peer can fetch what it lacks.
-    for (auto& r : audioRefs)
-    {
-        const auto h = r.getProperty ("hash", var()).toString();
-        const auto e = r.getProperty ("ext", var()).toString();
-        mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
-    }
+    // PR-2: everything above is synchronous engine work (an immutable content-
+    // addressed snapshot, so further edits during the upload are safe by
+    // construction). mpSession_->commit() does the upload + publish + lock release
+    // on its transfer worker (or inline under MOSH_MP_SYNC_TRANSFER=1) and reports
+    // completion via an additive `mp_commit_done` event — this returns immediately.
+    bool asyncTransfer = false;
     if (blob.isNotEmpty())
-        mpSession_->commit (lid, blob, var (audioRefs));
+    {
+        asyncTransfer = ! mpSession_->syncTransferMode();
+        mpSession_->commit (lid, blob, var (audioRefs), stemFiles);
+    }
 
     auto* o = new DynamicObject();
     o->setProperty ("logicalId", lid);
     o->setProperty ("audioRefs", var (audioRefs));
+    o->setProperty ("status", asyncTransfer ? "uploading" : "committed");
     return okResult ("mp_commit_track", var (o));
 }
 
@@ -3024,16 +3045,23 @@ juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
     return okResult ("mp_apply_structural", r);
 }
 
-juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+// PR-2: shared by cmdMpSerializeProject (the public, directly-callable command,
+// which uploads synchronously itself right after — kept behavior-compatible for
+// existing direct-call tests) and serializeProjectForBootstrapAnswer (the live-
+// session bootstrap-answer path, whose worker uploads instead). Content-addresses
+// + rewrites + serializes every track's clips; uploads NOTHING itself. Returns
+// {tracks:[{logicalId,blob,audioRefs}], count, annotations, stemFiles:[{hash,ext,path}]}
+// — stemFiles is the flattened list across all tracks (what a bootstrap-answer
+// upload job needs; audioRefs stays nested per-track for the wire message, as before).
+juce::var MoshOps::contentAddressWholeProjectNoUpload()
 {
-    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
     // Each track's wave clips are content-addressed into <editDir>/audio/by-hash/ and
-    // uploaded (server-side dedup) before serialize, with the by-hash refs attached to
-    // the track entry — so a guest who joins mid-session adopts pre-existing AUDIO, not
-    // just structure/MIDI. Mirrors the commit path (cmdMpCommitTrack); closes the old
-    // "bootstrap audio not wired" gap. Graceful on the local relay (uploadBlob no-ops).
+    // rewritten to that RELATIVE ref, with the by-hash refs attached to the track
+    // entry — so a guest who joins mid-session adopts pre-existing AUDIO, not just
+    // structure/MIDI. Mirrors the commit path (cmdMpCommitTrack).
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     juce::Array<var> tracks;
+    juce::Array<var> stemFiles;
     for (auto* t : te::getAudioTracks (eng.edit()))
     {
         if (t == nullptr) continue;
@@ -3061,6 +3089,12 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
                     repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
                 auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
                 audioRefs.add (var (r));
+
+                auto* sf = new DynamicObject();
+                sf->setProperty ("hash", hash);
+                sf->setProperty ("ext", ext);
+                sf->setProperty ("path", dest.getFullPathName());
+                stemFiles.add (var (sf));
             }
 
         eng.edit().flushState();   // AFTER the repoints, so the serialized state carries the by-hash refs
@@ -3071,25 +3105,50 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
         // only `tracks`/`annotations`, so a top-level refs field would be dropped on the wire.
         o->setProperty ("audioRefs", var (audioRefs));
         tracks.add (var (o));
-
-        // Upload the stems (content-addressed dedup) so the joiner can fetch what it lacks.
-        for (auto& r : audioRefs)
-        {
-            const auto h = r.getProperty ("hash", var()).toString();
-            const auto e = r.getProperty ("ext", var()).toString();
-            mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
-        }
     }
     auto* d = new DynamicObject();
     d->setProperty ("tracks", tracks);
     d->setProperty ("count", tracks.size());
+    d->setProperty ("stemFiles", var (stemFiles));
     // Annotations are a top-level Edit child (a sibling of the tracks), so the per-track
     // blobs above don't carry them — serialize the subtree so a late-joiner adopts the
     // host's existing pins, not just the ones created live after they join.
     if (auto a = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS); a.isValid())
         if (auto xml = a.createXml())
             d->setProperty ("annotations", xml->toString());
-    return okResult ("mp_serialize_project", var (d));
+    return var (d);
+}
+
+juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+{
+    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
+    // Closes the old "bootstrap audio not wired" gap. Graceful on the local relay
+    // (uploadBlob no-ops there pre-PR-1; now the local relay has a blob store too).
+    auto d = contentAddressWholeProjectNoUpload();
+
+    // Upload the stems (content-addressed dedup) so the joiner can fetch what it
+    // lacks. Kept SYNCHRONOUS here (unlike the live-session bootstrap-answer path,
+    // PR-2, whose worker uploads instead) so this public, directly-callable command
+    // stays behavior-compatible with existing direct-call tests.
+    if (auto* sf = d.getProperty ("stemFiles", var()).getArray())
+        for (auto& s : *sf)
+        {
+            const auto h = s.getProperty ("hash", var()).toString();
+            const auto e = s.getProperty ("ext", var()).toString();
+            const auto p = s.getProperty ("path", var()).toString();
+            mpSession_->uploadBlob (h, e, juce::File (p));
+        }
+    return okResult ("mp_serialize_project", d);
+}
+
+juce::var MoshOps::serializeProjectForBootstrapAnswer()
+{
+    // PR-2: the message-thread part of the host's bootstrap answer -- content-
+    // address + serialize (touches the engine, so it must run here, on the message
+    // thread) WITHOUT uploading; the session's transfer worker uploads the returned
+    // stemFiles[] and then publishes bootstrap_state (see MultiplayerSession::pollLoop's
+    // "bootstrap_request" handling).
+    return contentAddressWholeProjectNoUpload();
 }
 
 juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
@@ -3104,6 +3163,14 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             st.getParent().removeChild (st, nullptr);
         }
 
+    // PR-2: bundles arriving through the LIVE SESSION path (MultiplayerSession's
+    // "bootstrap_state" handling) have already had every stem prefetched by the
+    // transfer worker before this is called — stemsPrefetched:true skips the inline
+    // download loop below entirely. Direct calls (the harness/agents/`mp_apply_bootstrap`
+    // outside a live session) never set this flag, so their own inline download runs
+    // exactly as before — the direct-command contract is unchanged.
+    const bool stemsPrefetched = (bool) args.getProperty ("stemsPrefetched", false);
+
     int applied = 0;
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     if (auto* arr = args.getProperty ("tracks", var()).getArray())
@@ -3114,15 +3181,16 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             // the late-join analogue of the commit-apply download. The result is ignored
             // here (a transient failure just leaves the clip sourceMissing) — the
             // self-heal pass below retries anything still missing once the tracks land.
-            if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
-                for (auto& a : *refs)
-                {
-                    const auto h = a.getProperty ("hash", var()).toString();
-                    const auto e = a.getProperty ("ext", var()).toString();
-                    if (h.isEmpty()) continue;
-                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                        mpSession_->downloadBlob (h, e, dest);
-                }
+            if (! stemsPrefetched)
+                if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
+                    for (auto& a : *refs)
+                    {
+                        const auto h = a.getProperty ("hash", var()).toString();
+                        const auto e = a.getProperty ("ext", var()).toString();
+                        if (h.isEmpty()) continue;
+                        if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                            mpSession_->downloadBlob (h, e, dest);
+                    }
             const auto blob = tv.getProperty ("blob", var()).toString();
             if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
                 ++applied;
@@ -3186,20 +3254,27 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 const auto stem = resolved.getFileNameWithoutExtension();
                 if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
 
-                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
-                // a manual retry, or two overlapping bootstraps) is already fetching this
-                // exact hash; skip it here rather than spawn a second downloadBlob into the
-                // SAME dest file (delete-then-create-then-stream), whose partial state the
-                // other pass's existsAsFile()/size check could otherwise observe.
-                if (inFlightStems_.count (stem) > 0) continue;
+                // Adversarial-review finding #3 (originally a MoshOps-local, message-
+                // thread-only set) — a concurrent pass is already fetching this exact
+                // hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state
+                // the other pass's existsAsFile()/size check could otherwise observe.
+                // SHOULD-FIX (PR-2 review): this registry now lives on mpSession_
+                // (thread-safe, mutex-guarded) instead of a MoshOps-local set, because
+                // the transfer worker's OWN prefetch (MultiplayerSession::prefetchAudioRefs,
+                // a DIFFERENT OS thread) can want the SAME hash concurrently — a
+                // message-thread-only set couldn't see across that boundary.
+                // claimStem() atomically tests-and-claims: a false here means someone
+                // else (this same scan's earlier duplicate, or the worker thread) has
+                // it, so skip rather than add it to `missing` at all. A null mpSession_
+                // can't claim anything -- fall through and add it anyway (the download
+                // attempt below safely no-ops on a null session).
+                if (mpSession_ != nullptr && ! mpSession_->claimStem (stem)) continue;
 
                 missing.add ({ c->itemID.toString(), stem,
                               resolved.getFileExtension().removeCharacters ("."), resolved });
             }
     }
-
-    for (auto& m : missing)
-        inFlightStems_.insert (m.hash);
 
     // Runs on the message thread: re-resolve each clip by id (it may have been
     // removed/undone since the scan above — findClip returns nullptr, skipped), write
@@ -3228,7 +3303,7 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 ++failed;
                 stillMissing.add (m.hash);
             }
-            inFlightStems_.erase (m.hash);
+            if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
         }
         if (fetched > 0)
             emitSnapshotInvalidated();
@@ -3246,26 +3321,31 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
 
     // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
     // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
-    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
-    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
-    // round-trip runs on the background thread; results land back via callAsync.
+    // The clip lookup + sourceMediaChanged()/emitSnapshotInvalidated() are message-
+    // thread-only, so only the network round-trip runs on the background thread;
+    // results land back via callAsync. releaseStem() is thread-safe (SHOULD-FIX, PR-2
+    // review), so each item's claim is released right on the background thread,
+    // immediately after its own download attempt — shorter hold time than batching
+    // every release into the final callAsync.
     std::thread ([this, missing]
     {
         if (mpSession_ == nullptr || ! mpSession_->active())
         {
             // Bailed before attempting anything -- still release the in-flight marks
-            // (on the message thread) so a later pass isn't permanently skipped.
-            juce::MessageManager::callAsync ([this, missing]
-            {
-                for (auto& m : missing) inFlightStems_.erase (m.hash);
-            });
+            // so a later pass isn't permanently skipped.
+            for (auto& m : missing)
+                if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
             return;
         }
 
         struct Result { juce::String clipId, hash; bool ok; };
         juce::Array<Result> results;
         for (auto& m : missing)
-            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+        {
+            const bool got = mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile();
+            results.add ({ m.clipId, m.hash, got });
+            mpSession_->releaseStem (m.hash);
+        }
 
         juce::MessageManager::callAsync ([this, results]
         {
@@ -3278,7 +3358,6 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                         w->sourceMediaChanged();
                     ++fetched;
                 }
-                inFlightStems_.erase (r.hash);
             }
             if (fetched > 0)
                 emitSnapshotInvalidated();
@@ -3779,6 +3858,92 @@ juce::var MoshOps::cmdRelinkClip (const juce::var& args)
     return okResult ("relink_clip");
 }
 
+// Minimum normalized-autocorrelation peak (0..1) for a detected BPM to be trusted
+// over the map-tempo default. A pure tone / silence scores ~0 and falls back.
+static constexpr double kBpmDetectConfidence = 0.10;
+
+// Offline loop-BPM estimate from an audio file: build a coarse onset-energy
+// envelope (positive first-difference of per-hop RMS), autocorrelate it across a
+// musical tempo range, argmax. Pure + deterministic (no service) so it runs inside
+// --selftest. Returns {bpm, confidence}; confidence is the normalized autocorrelation
+// at the winning lag (0 == flat/no beat, up toward 1 == a strong periodic pulse).
+static std::pair<double, double> detectBpmFromFile (const juce::File& file)
+{
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
+        return { 0.0, 0.0 };
+
+    const double sr = reader->sampleRate;
+    const int chans = (int) reader->numChannels;
+    // Analyse at most the first 30s — plenty for a loop, and it bounds the cost.
+    const juce::int64 maxSamples = (juce::int64) juce::jmin ((double) reader->lengthInSamples, sr * 30.0);
+    const int hop = juce::jmax (1, (int) std::llround (sr / 200.0)); // ~5ms hops → ~200 Hz envelope
+    const int nHops = (int) (maxSamples / hop);
+    if (nHops < 16) return { 0.0, 0.0 };
+
+    // Per-hop RMS energy.
+    std::vector<float> energy ((size_t) nHops, 0.0f);
+    juce::AudioBuffer<float> buf (juce::jmax (1, chans), hop);
+    for (int h = 0; h < nHops; ++h)
+    {
+        buf.clear();
+        reader->read (&buf, 0, hop, (juce::int64) h * hop, true, chans > 1);
+        double e = 0.0;
+        for (int c = 0; c < buf.getNumChannels(); ++c)
+        {
+            const float* p = buf.getReadPointer (c);
+            for (int i = 0; i < hop; ++i) e += (double) p[i] * (double) p[i];
+        }
+        energy[(size_t) h] = (float) std::sqrt (e / (double) juce::jmax (1, hop * juce::jmax (1, chans)));
+    }
+
+    // Onset function: positive first difference of the energy envelope, zero-meaned.
+    std::vector<float> onset ((size_t) nHops, 0.0f);
+    double mean = 0.0;
+    for (int h = 1; h < nHops; ++h)
+    {
+        const float d = energy[(size_t) h] - energy[(size_t) h - 1];
+        onset[(size_t) h] = d > 0.0f ? d : 0.0f;
+        mean += (double) onset[(size_t) h];
+    }
+    mean /= (double) juce::jmax (1, nHops - 1);
+    if (mean <= 1.0e-9) return { 0.0, 0.0 };  // silence / DC
+    double var0 = 0.0;
+    for (auto& v : onset) { v = (float) ((double) v - mean); var0 += (double) v * (double) v; }
+    var0 /= (double) nHops;
+    if (var0 <= 1.0e-12) return { 0.0, 0.0 };
+
+    const double hopRate = sr / (double) hop; // hops per second
+    auto autocorrAtLag = [&] (double lag) -> double
+    {
+        // Linear-interpolated autocorrelation at a fractional lag (in hops).
+        const int L = (int) std::floor (lag);
+        const double frac = lag - (double) L;
+        double acc = 0.0; int cnt = 0;
+        for (int i = 0; i + L + 1 < nHops; ++i)
+        {
+            const double shifted = (double) onset[(size_t) (i + L)] * (1.0 - frac)
+                                 + (double) onset[(size_t) (i + L + 1)] * frac;
+            acc += (double) onset[(size_t) i] * shifted;
+            ++cnt;
+        }
+        return cnt > 0 ? acc / (double) cnt : 0.0;
+    };
+
+    // Scan a musical tempo range; the reported tempo stays in [70,180].
+    double bestScore = -1.0e30, bestBpm = 0.0;
+    for (double bpm = 70.0; bpm <= 180.0 + 1.0e-6; bpm += 0.5)
+    {
+        const double lag = 60.0 / bpm * hopRate;
+        if (lag < 1.0 || lag >= (double) (nHops - 2)) continue;
+        const double s = autocorrAtLag (lag);
+        if (s > bestScore) { bestScore = s; bestBpm = bpm; }
+    }
+    if (bestBpm <= 0.0) return { 0.0, 0.0 };
+    return { bestBpm, juce::jlimit (0.0, 1.0, bestScore / var0) };
+}
+
 juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
 {
     // Audio warp (auto-tempo): the clip re-anchors in BEATS so its audio
@@ -3807,7 +3972,16 @@ juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
 
         // Source BPM: explicit when given; else default to the map tempo at the
         // clip's start, so enabling warp is a 1:1 no-op until the map changes.
-        const double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
+        // With detect:true (and no explicit sourceBpm) we estimate the loop's own
+        // BPM offline and lock it to the grid — the "easy" Ableton behaviour. This
+        // is GUARDED so the default (detect absent) path stays byte-identical.
+        double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
+        if (! args.hasProperty ("sourceBpm") && (bool) args.getProperty ("detect", false))
+            if (auto* wav = dynamic_cast<te::WaveAudioClip*> (ac))
+            {
+                const auto est = detectBpmFromFile (wav->getCurrentSourceFile());
+                if (est.first > 0.0 && est.second >= kBpmDetectConfidence) defaultBpm = est.first;
+            }
         const double sourceBpm = juce::jlimit (20.0, 999.0,
             (double) args.getProperty ("sourceBpm", defaultBpm));
         auto info = ac->getAudioFile().getInfo();
@@ -3822,6 +3996,81 @@ juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
     data->setProperty ("autoTempo", ac->getAutoTempo());
     data->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (ac->getTimeStretchMode()));
     return okResult ("set_clip_warp", var (data));
+}
+
+juce::var MoshOps::cmdStretchClip (const juce::var& args)
+{
+    // Time-stretch a wave clip to a target WARPED length (seconds) or a bar count,
+    // by enabling auto-tempo and deriving the sourceBpm that makes it fit. Powers
+    // the drag-to-stretch gesture and the Inspector "Fit N bars / ×2 / ÷2" helpers.
+    // warpedLen = sourceLen × sourceBpm / projectBpm  ⇒  sourceBpm = projectBpm × target / sourceLen.
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("stretch_clip", "not an audio clip");
+    if (! args.hasProperty ("length") && ! args.hasProperty ("bars"))
+        return errResult ("stretch_clip", "missing 'length' or 'bars'");
+
+    const double sourceLen = ac->getAudioFile().getLength();
+    if (sourceLen <= 0.0) return errResult ("stretch_clip", "source has no length");
+
+    auto& tempoSeq = eng.edit().tempoSequence;
+    const auto startPos = ac->getPosition().getStart();
+    const double projectBpm = tempoSeq.getBpmAt (startPos);
+    if (projectBpm <= 0.0) return errResult ("stretch_clip", "invalid project tempo");
+
+    double sourceBpm = 0.0;
+    if (args.hasProperty ("bars"))
+    {
+        const double bars = (double) args.getProperty ("bars", 0.0);
+        if (bars <= 0.0) return errResult ("stretch_clip", "'bars' must be > 0");
+        const int beatsPerBar = juce::jmax (1, tempoSeq.getTimeSigAt (startPos).numerator.get());
+        // The source should span exactly bars×beatsPerBar beats.
+        sourceBpm = (bars * (double) beatsPerBar * 60.0) / sourceLen;
+    }
+    else
+    {
+        const double target = (double) args.getProperty ("length", sourceLen);
+        if (target <= 0.0) return errResult ("stretch_clip", "'length' must be > 0");
+        sourceBpm = projectBpm * target / sourceLen;
+    }
+    sourceBpm = juce::jlimit (20.0, 999.0, sourceBpm);
+    const double warpedLen = sourceLen * sourceBpm / projectBpm;
+
+    beginTxn ("stretch_clip");
+    ac->setTimeStretchMode (te::TimeStretcher::checkModeIsAvailable (te::TimeStretcher::defaultMode));
+    auto info = ac->getAudioFile().getInfo();
+    ac->getLoopInfo().setBpm (sourceBpm, info);
+    ac->setAutoTempo (true);
+    // Fill the target span explicitly so the clip visibly stretches to the dragged
+    // length (the whole source maps across warpedLen at this sourceBpm).
+    ac->setPosition ({ { startPos, tracktion::TimeDuration::fromSeconds (warpedLen) },
+                       ac->getPosition().getOffset() });
+
+    logLine ("stretch_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (ac->itemID.toString());
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", ac->itemID.toString());
+    data->setProperty ("sourceBpm", sourceBpm);
+    data->setProperty ("length", ac->getPosition().getLength().inSeconds());
+    return okResult ("stretch_clip", var (data));
+}
+
+juce::var MoshOps::cmdDetectClipBpm (const juce::var& args)
+{
+    // Read-only offline BPM estimate of a wave clip's source loop (no txn / log,
+    // mirrors get_clip_peaks). Feeds the Inspector "Detect BPM" affordance.
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (id));
+    if (wave == nullptr) return errResult ("detect_clip_bpm", "no wave clip: " + id);
+
+    const auto est = detectBpmFromFile (wave->getCurrentSourceFile());
+    if (est.first <= 0.0) return errResult ("detect_clip_bpm", "cannot estimate BPM (unreadable or no pulse)");
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", id);
+    data->setProperty ("bpm", est.first);
+    data->setProperty ("confidence", est.second);
+    return okResult ("detect_clip_bpm", var (data));
 }
 
 juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
@@ -8856,6 +9105,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8881,6 +9131,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8945,6 +9196,7 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     // MoshEngine, a prime-directive seam) and after the engine consolidation.
     mosh::consolidateRenderArtifacts (eng.edit().state, eng.editFile().getParentDirectory());
     eng.save();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed (saveProjectAs adopts the new backing file)
     emitSnapshotInvalidated();
 
     auto* data = new DynamicObject();

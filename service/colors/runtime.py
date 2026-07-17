@@ -65,13 +65,19 @@ def _ui_to_alpha(value_0_100: float, astd_max: float, more_sign: float, lab: boo
     return raw * float(more_sign)
 
 
-def resolve_steers(colors, lab: bool = False, orthogonalize: bool = False):
+def resolve_steers(colors, lab: bool = False, orthogonalize: bool = False, with_envelopes: bool = False):
     """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...].
+
+    with_envelopes=True appends a 4th element per steer: the color's `envelope`
+    spec (a T-independent dict, e.g. {"kind":"hold","knee_s":1.5}) or None. Only
+    the MLX SA3 engine consumes it (time-scheduled steering). Default stays 3-tuples
+    so existing callers (the CUDA path, the manifest summary, goldens) are unchanged.
 
     orthogonalize (opt-in, default OFF ⇒ byte-identical): de-correlate the vecs of the
     ACTIVE colours that SHARE a peak_layer (they add linearly in the residual stream, so
     correlated same-layer axes mud each other). A solo-per-layer colour is never touched
-    ("separate"); only ≥2-in-a-layer stacks are orthogonalized ("together"). See ortho.py.
+    ("separate"); only ≥2-in-a-layer stacks are orthogonalized ("together"). The vec swap
+    preserves any envelope (4th element), so it composes with with_envelopes. See ortho.py.
     """
     reg = registry()
     picked, seen = [], set()                                             # dedup by name (keep first)
@@ -100,20 +106,28 @@ def resolve_steers(colors, lab: bool = False, orthogonalize: bool = False):
             continue                                          # neutral → no steer
         if mag_cap is not None:                               # multi-color backoff
             a = max(-mag_cap, min(mag_cap, a))
-        steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"])))
+        if with_envelopes:
+            steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"]),
+                           e.get("envelope") or None))
+        else:
+            steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"])))
 
     if orthogonalize and len(steers) > 1:
         from collections import defaultdict
 
         from . import ortho
         groups: dict[int, list[int]] = defaultdict(list)      # peak_layer → indices into steers
-        for idx, (layer, _a, _v) in enumerate(steers):
-            groups[layer].append(idx)
+        # Index-based, tuple-arity-robust: steers may be 3- or 4-tuples (with_envelopes).
+        for idx, t in enumerate(steers):
+            groups[t[0]].append(idx)
         for idxs in groups.values():
             if len(idxs) < 2:
                 continue                                      # solo-per-layer → untouched
             ov = ortho.orthogonalize_group([steers[i][2] for i in idxs])
             for k, i in enumerate(idxs):
-                layer_i, alpha_i, _ = steers[i]               # keep layer + alpha; swap the vec
-                steers[i] = (layer_i, alpha_i, ov[k])
+                t = steers[i]
+                # Keep layer + alpha, swap the vec, and PRESERVE any 4th element (the
+                # `hold` envelope): else orthogonalizing an L17 stack containing `sustain`
+                # would silently strip its schedule (mirrors engine.py's t[3:] idiom).
+                steers[i] = (t[0], t[1], ov[k], *t[3:])
     return steers

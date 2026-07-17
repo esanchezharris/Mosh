@@ -94,6 +94,11 @@ describe("mosh preset — current behavior preserved", () => {
     expect(r("mosh", { region: "clip.edge", gesture: "drag", tool: "move" })).toBe(A.TRIM);
     expect(r("mosh", { region: "clip.edge", gesture: "drag", tool: "range" })).toBe(A.MOVE);
   });
+  it("meta+edge-drag in the move tool STRETCHes (warp), beating plain-drag TRIM", () => {
+    expect(r("mosh", { region: "clip.edge", gesture: "drag", tool: "move", mods: { meta: true } })).toBe(A.STRETCH);
+    // plain edge-drag stays TRIM (the extra modifier is what selects stretch)
+    expect(r("mosh", { region: "clip.edge", gesture: "drag", tool: "move" })).toBe(A.TRIM);
+  });
   it("empty: click DESELECT, drag MARQUEE; range tool drag → TIME_SELECT", () => {
     expect(r("mosh", { region: "empty", gesture: "click" })).toBe(A.DESELECT);
     expect(r("mosh", { region: "empty", gesture: "drag" })).toBe(A.MARQUEE);
