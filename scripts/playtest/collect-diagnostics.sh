@@ -154,8 +154,15 @@ fi
   echo "--- codesign -dv ---"
   codesign -dv "$APP_ROOT" 2>&1 || true
   echo
-  echo "--- xattr -l (app bundle) ---"
-  xattr -l "$APP_ROOT" 2>&1 || true
+  echo "--- xattr (attribute NAMES only — see note) ---"
+  # Names only, deliberately NOT `xattr -l` (which dumps VALUES too): macOS can attach
+  # com.apple.metadata:kMDItemWhereFroms to a downloaded/AirDropped app, and its value
+  # is often a live, still-usable download URL (e.g. a tokenized WeTransfer/S3 link).
+  # This zip is designed to be forwarded to the host, so leaking that would hand a
+  # stranger a working link into whatever delivered the file. Attribute NAMES (just
+  # which ones are present, e.g. com.apple.quarantine) are diagnostically useful and
+  # carry no such risk.
+  xattr "$APP_ROOT" 2>&1 || true
   echo
   echo "--- df -h / ---"
   df -h / 2>&1
@@ -180,6 +187,7 @@ if ditto -c -k --keepParent "$STAGE" "$ZIP_PATH" 2>/dev/null; then
   SIZE="$(du -sh "$ZIP_PATH" 2>/dev/null | awk '{print $1}')"
   echo
   echo "$(printf '\033[32m✓\033[0m') wrote $ZIP_PATH ($SIZE)"
+  echo "  Note: paths inside this zip include your macOS username ($(whoami)) — normal, but worth knowing before you send it."
   echo "  Send this file to your host."
   exit 0
 else

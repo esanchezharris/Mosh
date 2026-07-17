@@ -45,6 +45,28 @@ GUEST_VENDOR_DIR="$SERVICE_DIR/sa3/guest"
 CONTENTS_DIR="$(dirname "$RESOURCES_DIR")"
 APP_ROOT="$(dirname "$CONTENTS_DIR")"
 
+# ── interrupted-setup safety net ──────────────────────────────────────────────────
+# If Ctrl-C (or a crash) lands mid-install — most likely during the ~6.4 GB weights
+# download, but also possible mid feature-venv-install — the bundle is left with fresh
+# .*.env pointer files (breaking the codesign seal) and no cleanup. Any exit path once
+# an install step has actually started re-runs the SAME bundle-seal hygiene the happy
+# path runs at the end, so a guest never has to know or care that they were interrupted
+# — `--status` also reports the seal state directly so it's diagnosable either way.
+INSTALL_STARTED=0
+HYGIENE_DONE=0
+cleanup_on_exit() {
+  local rc=$?
+  trap - EXIT INT TERM   # avoid re-entering this handler from the exit call below
+  if [[ "$INSTALL_STARTED" == 1 && "$HYGIENE_DONE" == 0 ]]; then
+    echo >&2
+    say "$(yellow "⚠ interrupted mid-install — resealing the bundle before exit …")" >&2
+    run_bundle_hygiene
+    HYGIENE_DONE=1
+  fi
+  exit "$rc"
+}
+trap cleanup_on_exit EXIT INT TERM
+
 PIN_URL_DEFAULT="https://github.com/Stability-AI/stable-audio-3/archive/636f906.tar.gz"
 TARBALL_URL="${MOSH_SA3_SRC_TARBALL:-$PIN_URL_DEFAULT}"
 # Derive a short pin label from the tarball ref (e.g. ".../archive/636f906.tar.gz" -> "636f906").
@@ -73,6 +95,41 @@ header(){ printf '\n%s\n' "$(bold "── $* ──")"; }
 say()   { printf '  %s\n' "$*"; }
 hsize() { # human-readable size of a path (file or dir), best-effort
   du -sh "$1" 2>/dev/null | awk '{print $1}' || echo "?"
+}
+
+# The setup-<name>.sh scripts (feature installs + setup-sa3.sh) write .{name}.env
+# pointer files INSIDE the app bundle (Contents/Resources/service/**/.{name}.env) as
+# their single source of truth for a DEV checkout. That's harmless here because our
+# venvs land at the CONVENTIONAL path (${MOSH_VENVS_DIR:-~/Library/Mosh/venvs}/<name>)
+# that server.py's _venv_py() already falls back to without any .env — but the new
+# files DO invalidate the app's codesign seal (content changed after signing). Strip
+# them and re-verify. Defined here (early, before any install step runs) — not down
+# by its call site — so BOTH the normal end-of-run call AND the interrupted-setup trap
+# (registered above) can call it no matter where an interrupt lands mid-install.
+run_bundle_hygiene() {
+  if [[ -d "$SERVICE_DIR" ]]; then
+    local hygiene_env_count=0
+    while IFS= read -r -d '' f; do
+      rm -f "$f"
+      hygiene_env_count=$((hygiene_env_count + 1))
+    done < <(find "$SERVICE_DIR" -type f -name '.*.env' -print0 2>/dev/null)
+    say "removed $hygiene_env_count machine-local .*.env pointer file(s) from the bundle"
+  else
+    say "$(dim "no service/ dir next to this script — skipping")"
+  fi
+
+  if [[ -f "$CONTENTS_DIR/Info.plist" && "$APP_ROOT" == *.app ]]; then
+    say "re-signing $APP_ROOT (ad-hoc) …"
+    xattr -cr "$APP_ROOT" 2>/dev/null || true
+    if codesign --force --deep --sign - "$APP_ROOT" 2>/dev/null \
+       && codesign --verify --deep --strict "$APP_ROOT" 2>/dev/null; then
+      say "$(green "✓") signature valid after re-seal"
+    else
+      say "$(yellow "⚠") codesign re-verify did not come back clean — the app still runs (ad-hoc/unsigned), but report this if you hit odd Gatekeeper prompts"
+    fi
+  else
+    say "$(dim "not running from inside an .app bundle — skipping codesign re-verify")"
+  fi
 }
 
 usage() {
@@ -193,6 +250,31 @@ except Exception:
   else
     say "service        : $(dim "not running (will spawn on demand — quit and reopen Mosh, or use/create a render)")"
   fi
+
+  header "bundle seal"
+  local leftover_envs=0 codesign_state="skipped"
+  if [[ -d "$SERVICE_DIR" ]]; then
+    leftover_envs="$(find "$SERVICE_DIR" -type f -name '.*.env' 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+  if [[ "$leftover_envs" != 0 ]]; then
+    say "leftover pointer files : $(red "$leftover_envs") .*.env file(s) present (bundle seal likely stale)"
+  else
+    say "leftover pointer files : $(green "none")"
+  fi
+  if [[ -f "$CONTENTS_DIR/Info.plist" && "$APP_ROOT" == *.app ]]; then
+    if codesign --verify --deep --strict "$APP_ROOT" >/dev/null 2>&1; then
+      codesign_state="valid"
+      say "codesign --verify      : $(green "valid")"
+    else
+      codesign_state="failed"
+      say "codesign --verify      : $(red "FAILED")"
+    fi
+  else
+    say "codesign --verify      : $(dim "skipped (not inside an .app bundle)")"
+  fi
+  if [[ "$leftover_envs" != 0 || "$codesign_state" == "failed" ]]; then
+    say "$(yellow "⚠ bundle looks like an interrupted or unfinished install") — re-run: bash $(basename "$0") --sa3   (or --all) to finish and re-seal"
+  fi
 }
 
 if [[ "$MODE" == "status" ]]; then
@@ -224,6 +306,7 @@ if [[ "$MODE" == "all" ]]; then
   FEATURES=("${ALL_FEATURES[@]}")
 fi
 if [[ "$MODE" == "all" || "$MODE" == "features" ]]; then
+  INSTALL_STARTED=1
   for f in "${FEATURES[@]}"; do
     [[ -z "$f" ]] && continue
     if ! printf '%s\n' "${ALL_FEATURES[@]}" | grep -qx "$f"; then
@@ -237,6 +320,7 @@ fi
 # ───────────────────────────────── SA3 lane ─────────────────────────────────────
 SA3_FAILED=0
 if [[ "$MODE" == "all" || "$MODE" == "sa3" ]]; then
+  INSTALL_STARTED=1
   header "SA3 model source"
   PIN_FILE="$SA3_SRC_DIR/.mosh_guest_setup_pin"
   MARKER="$SA3_MLX_DIR/scripts/sa3_mlx.py"
@@ -316,36 +400,12 @@ if [[ "$MODE" == "all" || "$MODE" == "sa3" ]]; then
 fi
 
 # ───────────────────────── bundle-seal hygiene ──────────────────────────────────
-# The setup-<name>.sh scripts above write .{name}.env pointer files INSIDE the app
-# bundle (Contents/Resources/service/**/.{name}.env) as their single source of truth
-# for a DEV checkout. That's harmless here because our venvs land at the CONVENTIONAL
-# path (${MOSH_VENVS_DIR:-~/Library/Mosh/venvs}/<name>) that server.py's _venv_py()
-# already falls back to without any .env — but the new files DO invalidate the app's
-# codesign seal (content changed after signing). Strip them and re-verify.
+# run_bundle_hygiene() is defined EARLY (right after the color/print helpers, before
+# any install step) so the interrupted-setup trap can call it no matter where in the
+# feature-install or SA3 lanes an interrupt lands — see the definition + comment above.
 header "bundle-seal hygiene"
-if [[ -d "$SERVICE_DIR" ]]; then
-  ENV_COUNT=0
-  while IFS= read -r -d '' f; do
-    rm -f "$f"
-    ENV_COUNT=$((ENV_COUNT + 1))
-  done < <(find "$SERVICE_DIR" -type f -name '.*.env' -print0 2>/dev/null)
-  say "removed $ENV_COUNT machine-local .*.env pointer file(s) from the bundle"
-else
-  say "$(dim "no service/ dir next to this script — skipping")"
-fi
-
-if [[ -f "$CONTENTS_DIR/Info.plist" && "$APP_ROOT" == *.app ]]; then
-  say "re-signing $APP_ROOT (ad-hoc) …"
-  xattr -cr "$APP_ROOT" 2>/dev/null || true
-  if codesign --force --deep --sign - "$APP_ROOT" 2>/dev/null \
-     && codesign --verify --deep --strict "$APP_ROOT" 2>/dev/null; then
-    say "$(green "✓") signature valid after re-seal"
-  else
-    say "$(yellow "⚠") codesign re-verify did not come back clean — the app still runs (ad-hoc/unsigned), but report this if you hit odd Gatekeeper prompts"
-  fi
-else
-  say "$(dim "not running from inside an .app bundle — skipping codesign re-verify")"
-fi
+run_bundle_hygiene
+HYGIENE_DONE=1
 
 # ─────────────────────────────────── finish ─────────────────────────────────────
 header "finish"

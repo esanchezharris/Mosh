@@ -21,7 +21,16 @@
 #   MOSH_BRAIN_ENV_ZIP  — dotenv to load for the bundled brain key (default:
 #     $ROOT/ui/.env.local — NEVER the ambient MOSH_BRAIN_ENV; see the landmine note below)
 #   SKIP_BUILD=1        — reuse the newest existing Release build instead of rebuilding
-set -uo pipefail
+#
+# `set -e` matters here beyond the usual reasons: we `eval` several functions verbatim
+# out of run-mosh.sh (below), and those were AUTHORED assuming run-mosh.sh's own
+# `set -euo pipefail`. Without -e in THIS script, a mid-function failure (e.g.
+# install_app's `cp -R` failing) can fall through to a later, unrelated `if` with no
+# `else` and return 0 anyway — the failure then surfaces confusingly, misattributed to
+# whatever step happens to notice missing output several steps later. Keeping this
+# script's options identical to run-mosh.sh's is what makes "eval the real function"
+# actually safe to rely on.
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT" || exit 1
@@ -37,6 +46,21 @@ FAILS=()
 note_ok()   { say "$(green "✓") $*"; }
 note_bad()  { say "$(red "✗") $*"; FAILS+=("$*"); }
 note_warn() { say "$(yellow "⚠") $*"; }
+
+# STAGE_ROOT is set once the staging dir is created (step 2); a failed run before or
+# after that point should not leave a half-built staged app lying around under dist/ —
+# clean it up whenever we exit non-zero (mirrors collect-diagnostics.sh's own trap,
+# which always removes its temp stage — here we only remove it on FAILURE, since on
+# success dist/stage/Mosh.app is a legitimate, inspectable intermediate artifact).
+STAGE_ROOT=""
+cleanup_stage_on_failure() {
+  local rc=$?
+  if [[ "$rc" != 0 && -n "$STAGE_ROOT" ]]; then
+    rm -rf "$STAGE_ROOT" 2>/dev/null || true
+  fi
+  exit "$rc"
+}
+trap cleanup_stage_on_failure EXIT
 
 # ── extract a function's literal text out of run-mosh.sh so we call the REAL deploy
 # logic against a staging path, instead of hand-duplicating it (and drifting later) ──
@@ -64,11 +88,15 @@ if [[ ! -d "$ROOT/ui/node_modules" ]]; then
   # Worktree gotcha (docs/superpowers memory: mosh-worktree-ui-build-esbuild-sigkill):
   # a fresh `npm install` in a worktree can SIGKILL esbuild's postinstall. Reuse the
   # main checkout's already-installed node_modules via symlink (never cp — the
-  # esbuild/vite .bin symlinks break under a copy).
+  # esbuild/vite .bin symlinks break under a copy). Non-fatal if it can't be created —
+  # the ui build's own npm install will just populate a real node_modules instead.
   MAIN_CHECKOUT="$HOME/Mosh"
   if [[ -d "$MAIN_CHECKOUT/ui/node_modules" && "$MAIN_CHECKOUT" != "$ROOT" ]]; then
-    ln -s "$MAIN_CHECKOUT/ui/node_modules" "$ROOT/ui/node_modules"
-    note_ok "symlinked ui/node_modules -> $MAIN_CHECKOUT/ui/node_modules (worktree esbuild-SIGKILL workaround)"
+    if ln -s "$MAIN_CHECKOUT/ui/node_modules" "$ROOT/ui/node_modules" 2>/dev/null; then
+      note_ok "symlinked ui/node_modules -> $MAIN_CHECKOUT/ui/node_modules (worktree esbuild-SIGKILL workaround)"
+    else
+      note_warn "could not symlink ui/node_modules (non-fatal — npm install will populate a real one)"
+    fi
   fi
 fi
 
@@ -133,9 +161,9 @@ else
   note_warn "no dotenv at $ENV_FILE — the bundled app will ship WITHOUT a brain key"
 fi
 
-bundle_service "$STAGED"
+bundle_service "$STAGED" || { note_bad "bundle_service failed (partial/broken service bundle)"; exit 1; }
 note_ok "service bundled"
-bundle_brain_key "$STAGED"
+bundle_brain_key "$STAGED" || { note_bad "bundle_brain_key failed"; exit 1; }
 
 # ───────────────────── 3. strip machine-local .*.env pointers ───────────────────
 header "3/10  strip machine-local venv/model pointer files"
@@ -202,6 +230,23 @@ else
   note_bad "service/sa3/guest/UPSTREAM_PIN MISSING — the whole-dir 'sa3' copy in bundle_service() did not carry it"
 fi
 
+# Every whole-dir module bundle_service() copies (run-mosh.sh's own `for d in ...`
+# whitelist, line ~183) must have actually landed non-empty. A partial/broken copy here
+# would only otherwise surface as a runtime ModuleNotFoundError deep in a route handler
+# on the guest's machine — catch it here instead.
+SERVICE_MODULE_DIRS=(adapters colors recipes sa3 scripts training lyrics phonology skeleton whisper soulx bestofn compiler loras)
+MODULE_DIR_FAIL=0
+for d in "${SERVICE_MODULE_DIRS[@]}"; do
+  moddir="$SVC_DIR/$d"
+  if [[ -d "$moddir" && -n "$(find "$moddir" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    :
+  else
+    note_bad "service/$d MISSING or empty in the staged bundle (bundle_service()'s whole-dir copy)"
+    MODULE_DIR_FAIL=1
+  fi
+done
+[[ "$MODULE_DIR_FAIL" == 0 ]] && note_ok "all ${#SERVICE_MODULE_DIRS[@]} whitelisted service module dirs present + non-empty"
+
 LIVE_SA3="$HOME/AI/stable-audio-3"
 if [[ -d "$LIVE_SA3" ]]; then
   DRIFT=0
@@ -234,6 +279,18 @@ else
   RESULT="$(tail -20 "$ST_LOG")"
   note_bad "staged-app selftest FAILED — see $ST_LOG"
   echo "$RESULT" | sed 's/^/    /'
+fi
+
+# ────────────── fail-fast: never zip a bundle that failed verification ──────────
+# A zip's existence must mean it passed everything — a broken bundle handed to a
+# friend is worse than no bundle at all (the earlier version zipped regardless and
+# only reported failures in the final summary; a guest could still receive it).
+if [[ "${#FAILS[@]}" -gt 0 ]]; then
+  header "ABORTING — ${#FAILS[@]} check(s) failed before packaging"
+  printf '   - %s\n' "${FAILS[@]}"
+  echo
+  echo "$(red "✗ package-guest-zip: refusing to produce a zip from a bundle that failed verification.")"
+  exit 1
 fi
 
 # ─────────────────────────────── 8. zip it ──────────────────────────────────────
@@ -302,6 +359,21 @@ else
 fi
 rm -rf "$SIM_DIR"
 
+# The guest-simulation step above can ALSO discover a problem (it re-tests the actual
+# zip contents, post-extraction) even when everything before it was clean — honor the
+# same "a zip's existence must mean it passed everything" invariant from step 8: if
+# FAILS grew during step 9, the zip we already wrote is NOT trustworthy. Delete it
+# rather than leave a known-broken zip sitting in dist/ that a future run (or a human
+# skimming dist/) could mistake for a good one.
+if [[ "${#FAILS[@]}" -gt 0 ]]; then
+  header "guest simulation found problems — deleting the zip"
+  printf '   - %s\n' "${FAILS[@]}"
+  rm -f "$ZIP_PATH"
+  echo
+  echo "$(red "✗ package-guest-zip: guest simulation failed — $ZIP_PATH was deleted (not a trustworthy handoff).")"
+  exit 1
+fi
+
 # ──────────────────────────────── 10. summary ───────────────────────────────────
 header "10/10  summary"
 SIZE="$(du -sh "$ZIP_PATH" 2>/dev/null | awk '{print $1}')"
@@ -341,6 +413,8 @@ if [[ "${#FAILS[@]}" -eq 0 ]]; then
   echo "$(green "✓ package-guest-zip: all checks passed.")"
   exit 0
 else
+  # Unreachable in practice (the fail-fast gate above already aborts before the zip
+  # step whenever FAILS is non-empty) — kept as a defensive final check.
   printf '%s\n' "$(red "✗ package-guest-zip: ${#FAILS[@]} check(s) failed:")"
   printf '   - %s\n' "${FAILS[@]}"
   exit 1
