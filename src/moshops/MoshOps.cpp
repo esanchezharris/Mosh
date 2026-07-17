@@ -3158,16 +3158,28 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 const auto stem = resolved.getFileNameWithoutExtension();
                 if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
 
+                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
+                // a manual retry, or two overlapping bootstraps) is already fetching this
+                // exact hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state the
+                // other pass's existsAsFile()/size check could otherwise observe.
+                if (inFlightStems_.count (stem) > 0) continue;
+
                 missing.add ({ c->itemID.toString(), stem,
                               resolved.getFileExtension().removeCharacters ("."), resolved });
             }
     }
 
+    for (auto& m : missing)
+        inFlightStems_.insert (m.hash);
+
     // Runs on the message thread: re-resolve each clip by id (it may have been
     // removed/undone since the scan above — findClip returns nullptr, skipped), write
     // the fetched bytes' arrival into the clip's cached source (sourceMediaChanged,
     // mirroring repointWaveClipSource's own post-repoint call), and emit exactly one
-    // snapshot_invalidated if anything actually landed.
+    // snapshot_invalidated if anything actually landed. downloadBlob (adversarial-review
+    // finding #1) now verifies the downloaded bytes' SHA-256 against `hash` itself before
+    // reporting success, so a truncated/corrupt transfer is never blessed as resolved here.
     auto land = [this] (const juce::Array<Missing>& items) -> juce::var
     {
         int fetched = 0, failed = 0;
@@ -3188,6 +3200,7 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 ++failed;
                 stillMissing.add (m.hash);
             }
+            inFlightStems_.erase (m.hash);
         }
         if (fetched > 0)
             emitSnapshotInvalidated();
@@ -3206,28 +3219,39 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
     // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
     // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
     // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
-    // are message-thread-only, so only the network round-trip runs on the background
-    // thread; results land back via callAsync.
+    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
+    // round-trip runs on the background thread; results land back via callAsync.
     std::thread ([this, missing]
     {
         if (mpSession_ == nullptr || ! mpSession_->active())
-            return;   // the session ended before the fetch could run — nothing to self-heal onto
+        {
+            // Bailed before attempting anything -- still release the in-flight marks
+            // (on the message thread) so a later pass isn't permanently skipped.
+            juce::MessageManager::callAsync ([this, missing]
+            {
+                for (auto& m : missing) inFlightStems_.erase (m.hash);
+            });
+            return;
+        }
 
-        struct Result { juce::String clipId; bool ok; };
+        struct Result { juce::String clipId, hash; bool ok; };
         juce::Array<Result> results;
         for (auto& m : missing)
-            results.add ({ m.clipId, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
 
         juce::MessageManager::callAsync ([this, results]
         {
             int fetched = 0;
             for (auto& r : results)
+            {
                 if (r.ok)
                 {
                     if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (r.clipId)))
                         w->sourceMediaChanged();
                     ++fetched;
                 }
+                inFlightStems_.erase (r.hash);
+            }
             if (fetched > 0)
                 emitSnapshotInvalidated();
         });

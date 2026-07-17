@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
@@ -578,6 +579,16 @@ private:
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
+    // P4 self-heal (adversarial-review finding #3) — hashes cmdMpFetchMissingStems is
+    // CURRENTLY fetching (sync or async). A concurrent pass (a resync tick racing a
+    // manual retry, or two overlapping bootstraps) skips a hash already in here rather
+    // than spawning a second downloadBlob into the SAME dest file, whose delete-then-
+    // create-then-stream could otherwise let one pass observe the other's in-flight
+    // (partial) bytes. Message-thread-only: every insert/erase happens either inline
+    // (the wait:true/empty-missing sync path) or inside the async path's
+    // MessageManager::callAsync completion — never from the background std::thread
+    // itself, so no lock is needed.
+    std::set<juce::String> inFlightStems_;
     juce::int64 seq = 0;
     juce::File  logFile;
     juce::CriticalSection commandLogCacheLock_;
