@@ -409,3 +409,92 @@ r5 deltas**, so the r5 report separates fixture recovery from model gains. The
 0.8919). frozen300 `0.989→0.977` (trivial). §B ran against a **faithful rebuild**
 of the P1-carrying binary (the pre-registered `build-233` dir had been deleted by
 a stray build-clean; the rebuild's HEAD carries P1 as a verified ancestor).
+
+---
+
+## r5-freeze memo (First-Stranger Program, 2026-07-11)
+
+*Written by FS-B0 (`docs/first-stranger-program/lanes/fs-b0.md`), per
+[`SPEC.md`](../first-stranger-program/SPEC.md) §7 B0. This section records a **program-level**
+decision made one day after the §P9 result above and does not re-litigate it (spec §1: "record the
+decision as given"). It supersedes the §P9 tail's serving framing for the 6-week playtest window
+only — the technical read stands unchanged. Owner approves the wording below before this section
+merges (backlog `FS-B0`, `ownerMerge:true`).*
+
+### Decision
+
+**SFT r5 is CLOSED** at the program level (spec §2 ledger: `SFT r5 run — CLOSED — 2026-07-11 —
+revisit: never (target deprecated)`). The technical result immediately above stands — r5 cleared the
+full §P9 gate that r4 missed, on the same lane and comparison harness — but it is **superseded as a
+serving choice**: for the 6-week First-Stranger window the brain is served exclusively via the cloud
+model through the T1 proxy (spec §1.8, `FS-T1`), so **no local router-model work ships in the
+window**. r5 is not deployed; it is closed and archived.
+
+### r5 identity (model / adapter / dataset)
+
+| field | value |
+|---|---|
+| Model id | `a3b-r5-cuda` |
+| Base | `Qwen/Qwen3-30B-A3B-Instruct-2507` (bf16, CUDA lane) |
+| Recipe | LoRA, batch 1, lr 1e-5, lora-r 16, last-16-layers (32–47), seq 4096, assistant-only loss, grad-checkpoint |
+| Dataset | `s2-mix-v5`, train sha `3c4e2e8b2ecc3562…` — 12,994 train rows / 1,650 valid rows |
+| Adapter artifact | `adapter_model.safetensors` sha256 `76f8db52…`, archived at `~/AI/adapters/a3b-r5-cuda-pull` (sha-verified Mac↔pod before pod `szln5r26qdy66j` termination) |
+| Full technical read | [`GATE_READ_a3b-r5-cuda.md`](../../service/sft/GATE_READ_a3b-r5-cuda.md) |
+
+### Gate-result summary
+
+r5 **PASSED** the pre-registered §P9 gate on one clean read, 2026-07-10: `diag_floor4 0.895` ·
+`evalA 0.9357` · `frozen300 0.977` → **agg(A,C) = 0.9563 ✓ (≥0.75)**; **§B grounded = 0.8919 ✓
+(≥0.85)**. Both floors that motivated the run cleared: `assign_sample 0.333→0.667 ✓`,
+`load_drum_kit 0.333→0.750 ✓` (`set_track_type` also improved, `0.500→0.750`). Every measurable
+evalA family finished ≥ 0.5. This gate PASS is the reason r5, not r4, is the adapter of technical
+record — but "gate PASS" and "serving choice" are separate questions, and §1.8 answers the second one
+for this window independent of the first.
+
+### What is frozen for the playtest
+
+- **No local router-model work in the 6-week window** (spec §1.8). Neither r4 nor r5 is put in the
+  serving path; the brain the playtest testers talk to is the cloud model behind the `FS-T1`
+  brain-key proxy.
+- **r4 is retained as the interim brain** — the local fallback of record: `~/AI/adapters/a3b-r4-cuda-pull`,
+  adapter sha256 `2f29b655…` (spec §1.1). It stays on disk, untouched, as the known-good local
+  fallback for any path that still needs an offline/local model; it is not re-trained or re-read
+  this window.
+- **r5 is archived, kept-not-served.** `~/AI/adapters/a3b-r5-cuda-pull` (sha `76f8db52…`) is
+  retained so the artifact is not lost, but it does not replace r4 as the interim brain and is not
+  wired into any serving path during the window.
+- **The 12,994 `s2-mix-v5` rows (train sha `3c4e2e8b2ecc3562…`) are retained as a workflow corpus,
+  parked** for future skill mining (spec §2: `Skill learning v2 / sharing v3 (incl. mining the
+  12,994 rows) — PARKED — revisit post-playtest`). No mining work proceeds this window.
+- RunPod pod `szln5r26qdy66j` (r5's training pod) is terminated; its volume no longer exists. Only
+  the local sha-verified adapter pull survives.
+
+### Known limits
+
+1. **r4, the interim brain that stays in service, does not itself clear the original §P8 gate.**
+   Its fix-first rerun (`R4_RERUN_AMENDMENT.md`, 2026-07-10) recovered the two harness-caused floors
+   (`split_clip 0.0→0.833`, `set_track_type 0.42→0.500`) but the two **model-caused** floors it
+   motivated r5 to fix — `assign_sample` and `load_drum_kit`, both `0.333` — are **not** fixed in r4
+   itself; only r5 fixes them, and r5 is not served. Anyone relying on r4 as a local fallback should
+   expect over-deferral on those two command families.
+2. **r5's gap-closing gains do not reach the playtest.** The window serves via the cloud brain only
+   (§1.8), so r5's cleared floors and improved `negativeDeferRate` (`0.45→0.40` vs r4) are not
+   user-visible this window — they are preserved for a future revisit, not deployed.
+3. **Reconciliation with the §P9 tail above:** the r5 disposition line immediately above this memo
+   calls r5 "the new best A3B adapter" — that is still true technically (§P9 result, unchanged). The
+   program decision here is orthogonal: it is a serving-window choice (cloud-only per §1.8), not a
+   retraction of the gate read. r4 remains the interim *local* brain because it is the prior
+   known-good fallback already on that path, not because it out-performs r5.
+4. **evalA floor families are thin (n=3–6 rows).** Per §P9 amendment 1's RE-BASELINE note, pre-fix
+   reads (all r4 reads, including the rerun) predate the 2026-07-10 fixture-id repair
+   (`evalA.eval.jsonl` sha `d68ec63696ee…`) and carry fixture ceilings on some families; a
+   like-for-like r4 re-read on the repaired file was recommended in that amendment but, per the
+   §1.8 decision above, will **not** be run this window (no local router work proceeds). Any r4-vs-r5
+   floor comparison should be read with that caveat, not as a clean apples-to-apples delta.
+5. **The corpus is parked, not mined.** The 12,994-row `s2-mix-v5` set (superset of r4's `s2-mix-v4`
+   plus a 90-row drum-sampler batch and 15 assist rows) is retained on disk as a workflow corpus but
+   no skill-mining work happens against it until the post-playtest revisit (spec §2).
+
+This memo does not reopen §P9 or the gate read above — it records where the program landed the day
+after, per spec §1 and §7 B0, so a reader of this file sees the First-Stranger decision alongside the
+raw training result.
