@@ -43,3 +43,44 @@ _(entries appended below by the loop)_
 - **Class:** cheap · gate: typecheck:ok,vitest:ok,e2e:ok,swappability:ok (re-gated onto AL-001-merged main)
 - **Review:** diffs read by Emilio's agent + loop adversarial review = APPROVE
 - **Item:** AL-002 per-keymap rebind persistence (no cross-keymap bleed; v1→v2 migration)
+
+**Gap in this ledger (2026-06-24 → 2026-07-16):** this file stopped being appended to per-round
+after AL-002, even though dozens more `docs/auto-loop/backlog.jsonl` items merged in that window
+(AL-003…AL-029, DRM-001/002, the 2026-07-10/11 hardening-sprint batch #289–#317, etc.) — see
+[`PROGRESS.md`](../PROGRESS.md) for the authoritative per-milestone record of that work. Restoring
+this file's per-round discipline is tracked informally; the entry below resumes it for the one
+item in this session that came from `docs/auto-loop/backlog.jsonl` proper.
+
+### 2026-07-17 11:31:59 PDT — PR #382: claude/auto-al-018  [MERGED ✅]
+- **Branch:** claude/auto-al-018 → PR #382
+- **Base:** origin/main @ bf3c1166 → squash-merged as 1d1930c5
+- **Class:** cheap · gate: tsc:ok, vitest:ok (new `projectActionsUnification.test.ts` regression-covers
+  a project action from each surface), no label/payload change
+- **Review:** diffs read + adversarial review = APPROVE
+- **Item:** AL-018 unify duplicated UI project-action dispatch (menu / shortcut / settings-panel
+  now flow through one dispatcher; `ui/src/settings/SettingsPanel.tsx` + `ui/src/ui/TopbarTools.tsx`)
+
+---
+
+## Session digest — 2026-07-17 (throughput session, all merged to `main` same day)
+
+Most of this session's merges came from sibling automation lanes outside this file's strict
+`docs/auto-loop/backlog.jsonl` scope (an agentic/SFT lane using an `AG-*`/`FS-*` item-id
+convention, and the `polish-loop`, which keeps its own log at
+[`docs/polish-loop/polish-log.jsonl`](../polish-loop/polish-log.jsonl)) — logged here as a single
+digest for one-stop throughput visibility rather than fabricated per-round entries this file's
+generator (`scripts/auto-loop/merge-one.sh`) did not itself produce. Full descriptions are in the
+[`PROGRESS.md`](../PROGRESS.md) 2026-07-17 entry.
+
+- **Agentic/SFT lane, 12 PRs merged:** #365 AG-GUARD1, #366 FS-B0 (ownerMerge, wording
+  pre-approved), #367 AG-ASSIST1, #368 AG-EVAL1, #369 AG-KB1, #370 AG-NOTE1, #371 AG-SK1,
+  #372 AG-DOCS1, #373 FS-B1, #383 AG-KB-R2, #385 AG-KB3, #386 AG-EXEC1.
+- **This ledger's own backlog, 1 PR merged:** #382 AL-018 (logged as its own round above).
+- **polish-loop, 3 PRs merged (2 armed runs):** #377, #378, #380.
+- **Open, native, owner-merge — explicitly NOT auto-merged:** #374 G7, #375 G1, #376 G4A, #384 G4b
+  (stacked on #376). All four ran a partial local gate (Catch2/`MoshTests` + tsc/vitest green) but
+  could not run the full `Mosh --selftest ×3` / `verify.py --gate` / e2e in-worktree — deferred to
+  the owner per this ledger's fail-closed posture for native/high-stakes work.
+- **Confirmed already-shipped, no PR opened:** FIT-003 (bounded plugin-scan — already landed via
+  #348) and FS-T3 (project-file schema versioning — already satisfied by the June A1 hardening
+  pass), both re-verified against `origin/main` rather than re-built.
