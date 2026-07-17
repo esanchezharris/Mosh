@@ -70,7 +70,8 @@ struct RenderLayer
         engine-level tuning (MLX SA3_STEPS / CUDA MOSH_SA3_STEPS·MOSH_SA3_CFG env),
         not per-render creative controls — the canonical MLX path never even reads a
         `cfg`/`steps` param — so keying on them would only cause spurious cache misses
-        for zero audible change. An engine re-tune is a service-build class of change.
+        for zero audible change. Instead every sampler knob is folded into the service
+        build (server.py), so an engine re-tune still invalidates cached renders.
 
         Stage 1 takes the documented inputs that exist now; Stage 5 fills the
         upstream-audio hash + tempo/key/service-build once the render flow exists.

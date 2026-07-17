@@ -35,7 +35,8 @@ WINDOW_SECONDS = min(MAX_DURATION, float(os.environ.get("SA3_SECONDS", "8.0")))
 # (they had no audible effect on the canonical MLX path and only busted the cache),
 # so read them here and default to this backend's validated values (30 steps / cfg 7.0,
 # the config the Windows SA3-CUDA selftest passed). They are deliberately out of the
-# render-cache fingerprint; re-tuning the env is a service-build class of change.
+# per-render params, but folded into SERVICE_BUILD (server.py) so re-tuning the env
+# still invalidates cached renders — a service-build class of change.
 STEPS = max(1, int(os.environ.get("MOSH_SA3_STEPS", "30")))
 CFG_SCALE = float(os.environ.get("MOSH_SA3_CFG", "7.0"))
 
