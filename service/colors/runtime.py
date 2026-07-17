@@ -65,8 +65,13 @@ def _ui_to_alpha(value_0_100: float, astd_max: float, more_sign: float, lab: boo
     return raw * float(more_sign)
 
 
-def resolve_steers(colors, lab: bool = False):
-    """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...]."""
+def resolve_steers(colors, lab: bool = False, with_envelopes: bool = False):
+    """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...].
+
+    with_envelopes=True appends a 4th element per steer: the color's `envelope`
+    spec (a T-independent dict, e.g. {"kind":"hold","knee_s":1.5}) or None. Only
+    the MLX SA3 engine consumes it (time-scheduled steering). Default stays 3-tuples
+    so existing callers (the CUDA path, the manifest summary, goldens) are unchanged."""
     reg = registry()
     picked, seen = [], set()                                             # dedup by name (keep first)
     for c in (colors or []):                                            # then ≤3, drop unknowns
@@ -94,5 +99,9 @@ def resolve_steers(colors, lab: bool = False):
             continue                                          # neutral → no steer
         if mag_cap is not None:                               # multi-color backoff
             a = max(-mag_cap, min(mag_cap, a))
-        steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"])))
+        if with_envelopes:
+            steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"]),
+                           e.get("envelope") or None))
+        else:
+            steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"])))
     return steers

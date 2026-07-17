@@ -73,7 +73,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     seed = int(params.get("seed", 0))
     colors = params.get("colors") or []
     lab = bool(params.get("lab", False))
-    steers = CR.resolve_steers(colors, lab=lab)             # validated / clamped / composed
+    steers = CR.resolve_steers(colors, lab=lab, with_envelopes=True)   # 4-tuples: (L, α, vec, envelope)
 
     eng = E.get_engine()                                    # singleton; first call loads the model
 
@@ -113,7 +113,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "sample_rate": sr, "channels": ch,
             "seconds_pinned": eng.SECONDS,
             "init_cache": init_status,
-            "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
+            "steers": [{"layer": t[0], "alpha": round(t[1], 4),
+                        "scheduled": len(t) > 3 and t[3] is not None} for t in steers],
             "loras": [{"name": n, "strength": s} for (n, _f, s) in lora_sel],
             "lora_apply": "runtime",
             "apply_ms": apply_ms,

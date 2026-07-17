@@ -103,7 +103,24 @@ def main() -> int:
         print(f"  + {name:16s} L{peak_layer:<2d} astd_max={astd_max:.3f} "
               f"sign={more_sign:+.0f} {verdict}")
 
+    # Preserve research-derived colors that DON'T come from the spike tree (their
+    # vec is committed directly, not sliced from a spike axis). "sustain" is the
+    # time-scheduled onset-hold axis (diff-of-means direction + a hold envelope) —
+    # a re-run must not drop it. Carry forward its registry entry + keep its vec if
+    # both are already present in OUT.
     out_json = os.path.join(OUT, "colors.json")
+    EXTERNAL = ("sustain",)
+    if os.path.exists(out_json):
+        try:
+            prev = json.load(open(out_json)).get("colors", {})
+            for name in EXTERNAL:
+                if name in prev and os.path.exists(os.path.join(OUT, prev[name].get("vec_path", ""))) \
+                        and name not in registry:
+                    registry[name] = prev[name]
+                    print(f"  = {name:16s} (preserved research-derived color)")
+        except (ValueError, OSError) as e:
+            print(f"  ! could not preserve external colors: {e}", file=sys.stderr)
+
     json.dump({"schema": 1, "lab_alpha_max": 0.40, "compose": {"a2": 0.25, "a3": 0.20},
                "colors": registry}, open(out_json, "w"), indent=2)
     print(f"wrote {len(registry)} colors → {out_json}")
