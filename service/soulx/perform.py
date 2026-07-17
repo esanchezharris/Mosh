@@ -99,11 +99,10 @@ def snap_to_events(take: List[float], render: List[float], sr: int,
                    events: List[tuple], hop_s: float = HOP_S,
                    max_shift_s: float = SNAP_MAX_SHIFT_S) -> List[float]:
     """Slot-level timing snap: each word event (start, end) — absolute on the take's
-    timeline — gets its render audio shifted onto the slot's exact start. The lag is
-    measured per event by envelope cross-correlation against the TAKE (whose syllables
-    sit on the slots by construction) in the window bounded by the neighboring events;
-    audio between events (legato continuations) rides with its parent word. Phrase snap
-    fixes phrase STARTS; this fixes the syllables inside."""
+    timeline — gets its render audio shifted onto the slot's exact start. NOT in the
+    product chain since mechanism-verify V3 (2026-07-17): blind-ranked worst in both
+    ablation passages (see snap_render_to_take). Retained for ablation harnesses
+    (scripts/fms-killshot/v3_assembly.py) and future re-evaluation only."""
     if not events:
         return list(render)
     ev = sorted((float(a), float(b)) for a, b in events)
@@ -184,24 +183,21 @@ def apply_shifts(render: List[float], sr: int, windows: List[tuple], shifts: Lis
 
 def snap_render_to_take(take: List[float], render: List[float], sr: int, clip: dict,
                         hop_s: float = HOP_S) -> List[float]:
-    """The product timing-snap (the spike backhalf_perform.lock() snap, single-clip): from
-    the authored SoulX `clip`, phrase-align the render onto the take's clock, then snap each
-    word event onto its slot's exact start. `take`/`render` are same-rate mono lists. No-op
-    safe: an empty clip (no windows/events) returns the render unchanged."""
-    from soulx.score import phrase_windows, word_event_spans
+    """The product timing-snap (single-clip): from the authored SoulX `clip`, phrase-align
+    the render onto the take's clock — PHRASE level only. The per-word snap_to_events
+    stage was REMOVED after mechanism-verify V3 (2026-07-17): it ranked WORST in both
+    blind ablation passages while raising env_corr, and V0 measured it adding +30…50ms of
+    vowel lateness — it optimized the alignment metric by damaging the sound. Word-level
+    residuals are MEASURED (event_lags) for reporting, never enforced. `take`/`render`
+    are same-rate mono lists. No-op safe: an empty clip returns the render unchanged."""
+    from soulx.score import phrase_windows
     windows = phrase_windows(clip)
-    events = word_event_spans(clip)
-    if not windows and not events:
+    if not windows:
         return list(render)
-    aligned = list(render)
-    if windows:
-        env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
-        env_r = energy_envelope(render, sr, hop_ms=hop_s * 1000.0)
-        shifts = phrase_shifts(env_t, env_r, windows, hop_s=hop_s)
-        aligned = apply_shifts(render, sr, windows, shifts, total_s=len(take) / sr)
-    if events:
-        aligned = snap_to_events(take, aligned, sr, events, hop_s=hop_s)
-    return aligned
+    env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
+    env_r = energy_envelope(render, sr, hop_ms=hop_s * 1000.0)
+    shifts = phrase_shifts(env_t, env_r, windows, hop_s=hop_s)
+    return apply_shifts(render, sr, windows, shifts, total_s=len(take) / sr)
 
 
 def env_corr(ref: List[float], other: List[float], sr: int,

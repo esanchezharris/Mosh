@@ -107,15 +107,24 @@ check("event_lags reports each word's measured lag (0/+80/+40ms here)",
 # ── 5. metric sanity ──────────────────────────────────────────────────────────────────
 check("env_corr(x, x) ~= 1", perform.env_corr(take, take, SR) > 0.999)
 
-# ── 6. snap_render_to_take: the product single-clip snap (phrase-align + word-snap) ────
-# The adapter hands the WHOLE authored clip; snap derives its own windows/events (via
-# soulx.score) — no chunk offsets. On the drifted render (#2 +80ms, #3 +40ms) the residual
-# event lags must fall to ~0; an already-aligned render stays on-grid; deterministic ×3.
+# ── 6. snap_render_to_take: the product single-clip snap (PHRASE alignment ONLY) ──────
+# Mechanism-verify V3 (2026-07-17): the per-word snap_to_events stage ranked WORST in
+# both blind passages (while raising env_corr) — it is REMOVED from the product chain.
+# The pin is equality with the pure phrase-only construction: windows from the clip,
+# phrase_shifts measured, apply_shifts applied — and NOTHING word-level after it.
 CLIP = {"duration": "0.20 0.22 0.08 0.22 0.08 0.22 0.20", "note_type": "1 2 1 2 1 2 1"}
+from soulx.score import phrase_windows as _pw  # noqa: E402
+_windows = _pw(CLIP)
+_env_t = perform.energy_envelope(take_s, SR, hop_ms=perform.HOP_S * 1000.0)
+_env_r = perform.energy_envelope(rend_s, SR, hop_ms=perform.HOP_S * 1000.0)
+_expected = perform.apply_shifts(rend_s, SR, _windows, perform.phrase_shifts(_env_t, _env_r, _windows),
+                                 total_s=len(take_s) / SR)
 snapped2 = perform.snap_render_to_take(take_s, rend_s, SR, CLIP)
+check("snap_render_to_take == phrase-only alignment (no word-level stage)",
+      snapped2 == _expected, f"len {len(snapped2)} vs {len(_expected)}")
 resid = perform.event_lags(take_s, snapped2, SR, EVENTS)
-check("snap_render_to_take: residual event lags near zero after phrase+word snap",
-      len(resid) == 3 and all(abs(x) <= 0.02 for x in resid), str([round(x * 1000) for x in resid]))
+check("per-word residual lags are MEASURED, not enforced (word snap is gone)",
+      len(resid) == 3, str([round(x * 1000) for x in resid]))
 resid_id = perform.event_lags(take_s, perform.snap_render_to_take(take_s, take_s, SR, CLIP), SR, EVENTS)
 check("snap_render_to_take on an already-aligned render keeps events on-grid",
       all(abs(x) <= 0.02 for x in resid_id), str([round(x * 1000) for x in resid_id]))

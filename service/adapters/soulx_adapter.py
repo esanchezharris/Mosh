@@ -196,9 +196,12 @@ def _render_real(output_wav: str, score_json: str) -> None:
 
 def _snap_output_to_take(output_wav: str, take_path: str, clip: dict):
     """Timing-snap the rendered output onto the take (the certified recipe's step 5, now
-    in the product path): phrase-align + word-snap via soulx.perform, derived from the
-    authored `clip`. Best-effort — any unreadable/empty input returns (False, None) and
-    leaves the output untouched. Returns (timing_snapped: bool, syl_snap_median_ms: float)."""
+    in the product path): PHRASE-level alignment via soulx.perform, derived from the
+    authored `clip` (the per-word stage was removed after mechanism-verify V3 — see
+    perform.snap_render_to_take). Best-effort — any unreadable/empty input returns
+    (False, None) and leaves the output untouched. Returns (timing_snapped: bool,
+    syl_snap_median_ms: float) where the median is the MEASURED residual word-event lag
+    after phrase alignment — observability, not an enforced target."""
     import statistics
 
     from skeleton.core import read_pcm_mono
