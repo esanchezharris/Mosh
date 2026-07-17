@@ -35,3 +35,19 @@ describe("v2 shell.css floating-panel radius token", () => {
     expect(css).not.toContain("border-radius: 16px");
   });
 });
+
+describe("v2 shell.css transport-clock font-size token", () => {
+  it("routes the .v2-time BBS clock through --v2-fs-xl (the sole 20px readout)", () => {
+    // .v2-time was the single remaining `font-size: 20px` literal, and it's the exact
+    // value of --v2-fs-xl (20px). Swapping to the intended token is a visual no-op that
+    // single-sources the largest chrome readout size.
+    const start = css.indexOf(".v2-time {");
+    const timeRule = css.slice(start, css.indexOf("}", start) + 1);
+    expect(timeRule).toContain("font-size: var(--v2-fs-xl)");
+    expect(timeRule).not.toContain("font-size: 20px");
+  });
+
+  it("no longer hardcodes `font-size: 20px` anywhere in the shell", () => {
+    expect(css).not.toContain("font-size: 20px");
+  });
+});

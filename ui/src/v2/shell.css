@@ -228,7 +228,7 @@
   padding: 7px 14px; border-radius: 14px;
   background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line);
 }
-.v2-time { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.04em; color: var(--v2-ground-text); line-height: 1; }
+.v2-time { font-family: var(--font-mono); font-size: var(--v2-fs-xl); letter-spacing: 0.04em; color: var(--v2-ground-text); line-height: 1; }
 .v2-bars { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.12em; color: var(--v2-ground-dim); text-transform: uppercase; }
 .v2-loop-on { color: var(--v2-accent); }
 
