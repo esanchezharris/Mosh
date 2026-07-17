@@ -239,6 +239,7 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
         {line.rhymeGroup && <span className="v2-lyric-rgroup">{line.rhymeGroup}</span>}
         {fillable && !line.proposals?.length && (
           <button className="btn" data-testid={`lyric-fill-${line.index}`} disabled={busy} title="fill this line"
+            aria-label={`Fill line ${line.index + 1}`}
             onClick={() => void run("fill_lyric_gap", { lineIndex: line.index })}>✨</button>
         )}
         {canAssert && !line.asserted && (
