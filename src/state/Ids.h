@@ -45,6 +45,17 @@ namespace mosh::ids
     MOSH_DECLARE_ID (musicalTonic)     // pitch-class name: "C".."B" incl. sharps/flats
     MOSH_DECLARE_ID (musicalMode)      // scale mode: "major" | "minor" | ... (SCALES)
 
+    // G2b — count-in / pre-roll BARS before recording starts. Stored on the same
+    // MOSH_PROJECT node as timeBase/key (producer INTENT), so it saves/reloads
+    // with the .tracktionedit. Domain is deliberately {0,1,2} bars, matching
+    // tracktion_engine's own te::Edit::CountIn enum (none/oneBar/twoBar — whose
+    // underlying values are 0/1/2, so a validated bars value casts straight
+    // across with no lookup table; see mosh::countin::isValidBars in
+    // state/CountIn.h + MoshOps::cmdSetCountIn/applyCountInToEdit). Absent ⇒ 0
+    // (off). NON-undoable preference (written without the undo manager, like
+    // timeBase/musicalTonic).
+    MOSH_DECLARE_ID (countInBars)
+
     // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
     // A plain property on the track's own state tree so the choice saves/reloads
     // with the edit; arm_track prefers it over first-match. NON-undoable

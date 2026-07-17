@@ -324,6 +324,12 @@ private:
     // validated against the voice.js NOTE_PC/SCALES domains; feeds the snapshot
     // (session.project.key) + the RenderLayer fingerprint (a key change = cache MISS).
     juce::var cmdSetKey (const juce::var& args);
+    // G2b — count-in / pre-roll bars before recording, same MOSH_PROJECT node +
+    // NON-undoable-preference template as cmdSetKey. Domain {0,1,2} validated by
+    // mosh::countin::isValidBars (state/CountIn.h); applyCountInToEdit() syncs the
+    // live Edit's real tracktion_engine pre-roll (te::Edit::setCountInMode) so the
+    // setting is ENGINE-WIRED, not just stored.
+    juce::var cmdSetCountIn (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -362,6 +368,13 @@ private:
     // INTENT where set, falling back to the live device readout when a field is
     // unset (timeBase falls back to "seconds"). Used by the snapshot + cmd result.
     juce::var projectSettingsToVar();
+    // G2b — re-applies the stored countInBars preference to the LIVE Edit's real
+    // tracktion_engine pre-roll (te::Edit::setCountInMode). Called from
+    // cmdSetCountIn (immediate effect) and from cmdSetTransport's "record" branch
+    // (so recording always honors the CURRENT project setting even across a
+    // save/reload that swapped in a different Edit instance). Cheap + headless-safe
+    // (writes engine property storage, no audio device required).
+    void applyCountInToEdit();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.

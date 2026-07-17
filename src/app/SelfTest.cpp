@@ -1052,6 +1052,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_metronome", args1 ("enabled", false));
         check (! (bool) sess().getProperty ("metronome", true), "metronome disabled in snapshot");
 
+        // G2b — count-in / pre-roll bars (smoke; full coverage in its own section below).
+        cmd (ops, "set_count_in", args1 ("bars", 1));
+        check ((int) sess().getProperty ("countInBars", -1) == 1, "countInBars reflects set_count_in in the Wave 2 smoke");
+        cmd (ops, "set_count_in", args1 ("bars", 0));   // restore default for the rest of Wave 2
+
         // Navigation: go-to-end / go-to-start.
         const double len = (double) sess().getProperty ("length", 0.0);
         cmd (ops, "set_transport", args1 ("action", "to_end"));
@@ -4388,6 +4393,64 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Restore the default so later blocks see a clean project.
         check (ok (cmd (ops, "set_key", objN ({{ "tonic", "A" }, { "mode", "minor" }}))), "set_key restore default (A minor) ok");
+    }
+
+    // ─── G2b — count-in / pre-roll bars before recording ───
+    // Stored on the same MOSH_PROJECT node as key/timeBase (saves/reloads with the
+    // .tracktionedit); set_count_in is a NON-undoable preference (cmdSetKey template
+    // exactly). ENGINE-WIRED, not just stored: MoshOps::applyCountInToEdit() pushes the
+    // value into tracktion_engine's own pre-roll (te::Edit::setCountInMode), which
+    // TransportControl's record-start logic already consults
+    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an audible
+    // click before capture actually begins. bars is deliberately {0,1,2}, matching
+    // te::Edit::CountIn::none/oneBar/twoBar (headless selftest can't exercise the
+    // audible/timing behavior itself — that needs a real audio device — but proves the
+    // command's validation/snapshot/persistence/non-undoable-preference contract).
+    section ("G2b: count-in / pre-roll (set_count_in, snapshot.project.countInBars, persistence)");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto proj = [&] { return sess().getProperty ("project", var()); };
+
+        // Snapshot ALWAYS exposes session.project.countInBars with the 0 (off) default,
+        // mirrored to session.countInBars (like session.key / session.project.key).
+        check (proj().hasProperty ("countInBars"), "snapshot session.project.countInBars present");
+        check ((int) proj().getProperty ("countInBars", -1) == 0, "session.project.countInBars defaults to 0 (off)");
+        check ((int) sess().getProperty ("countInBars", -1) == 0, "session.countInBars mirror defaults to 0 (off)");
+
+        // Required arg.
+        check (! ok (cmd (ops, "set_count_in")), "set_count_in requires bars");
+
+        // Valid sets → ok + reflected in both the nested + mirrored snapshot fields.
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 1))), "set_count_in (1 bar) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 1, "session.project.countInBars == 1 after set");
+        check ((int) sess().getProperty ("countInBars", -1) == 1, "session.countInBars mirror == 1 after set");
+
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 2))), "set_count_in (2 bars) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "session.project.countInBars == 2 after set");
+
+        // Invalid bars rejected; storage stays at the last good value.
+        check (! ok (cmd (ops, "set_count_in", args1 ("bars", 3))), "set_count_in rejects bars > 2");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "rejected bars (3) left storage untouched (still 2)");
+        check (! ok (cmd (ops, "set_count_in", args1 ("bars", -1))), "set_count_in rejects negative bars");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "rejected negative bars left storage untouched (still 2)");
+
+        // Save → reload → the setting round-trips with the .tracktionedit.
+        check (ok (cmd (ops, "save")),   "save (count-in) ok");
+        check (ok (cmd (ops, "reload")), "reload (count-in) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "session.project.countInBars survived save+reload");
+
+        // NON-undoable preference: logged undoable:false, and an undo right after must NOT
+        // revert it (no transaction was pushed) — mirrors the set_key check above.
+        auto ciLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool ciPref = false;
+        for (auto& ln : juce::StringArray::fromLines (ciLog))
+            if (ln.contains ("\"command\": \"set_count_in\"") && ln.contains ("\"undoable\": false")) ciPref = true;
+        check (ciPref, "set_count_in logged undoable:false (preference)");
+        cmd (ops, "undo");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "undo after set_count_in does NOT revert it (non-undoable)");
+
+        // Restore the default so later blocks/gates see a clean project.
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
     }
 
     // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───

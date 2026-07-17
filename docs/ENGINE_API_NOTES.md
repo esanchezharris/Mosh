@@ -152,6 +152,37 @@ Verified against the pinned clone for the composite grid command:
   `cmdAddMidiClip`; clip-note beats are clip-local (no clip-start offset).
 - clipId→track resolution: `clip->getTrack()` (proven via `lockKeyFor`'s Clip branch).
 
+## Count-in / pre-roll before recording (G2b `set_count_in`) — RESOLVED, engine ALREADY had it
+
+`tracktion_engine` ships a REAL, engine-native pre-roll — no new recording machinery was
+needed, only exposing + persisting the setting:
+
+- **`te::Edit::CountIn`** (`model/edit/tracktion_Edit.h:707`): `enum class CountIn { none=0,
+  oneBar=1, twoBar=2, twoBeat=3, oneBeat=4 }`; `void setCountInMode (CountIn)` / `CountIn
+  getCountInMode() const` / `int getNumCountInBeats() const` (`tracktion_Edit.cpp:2500`).
+  `setCountInMode` writes through `engine.getPropertyStorage()` — engine-global storage, NOT
+  part of the Edit's own ValueTree, so it does NOT persist with a specific project on its own.
+  Mosh's `countInBars` (0/1/2, matching `none`/`oneBar`/`twoBar`'s literal underlying values —
+  see `state/CountIn.h`) is instead the durable, per-project, on-tree source of truth (same
+  `MOSH_PROJECT` node as `timeBase`/`musicalTonic`); `MoshOps::applyCountInToEdit()` re-pushes
+  it into the live `Edit::setCountInMode` both immediately (`cmdSetCountIn`) and right before
+  every `record` action (`cmdSetTransport`), so the engine's live state always matches the
+  stored project preference regardless of load order.
+- **Where the engine actually consults it:** `TransportControl::performPlay`'s recording
+  branch (`playback/tracktion_TransportControl.cpp:~1483`) reads `edit.getNumCountInBeats()`,
+  rolls `prerollStart` back that many beats from the punch-in time, and — when count-in beats
+  > 0 — calls `edit.setClickTrackRange(...)` so the click track audibly counts in through the
+  pre-roll; `playbackContext->prepareForRecording(prerollStart, punchInTime)` is what actually
+  delays capture until the real punch-in point. This is exactly "N bars of pre-roll before
+  capture begins" — Mosh gets it for free once `setCountInMode` is set correctly.
+- **v0 scope:** only `none`/`oneBar`/`twoBar` are exposed (bars 0/1/2); `oneBeat`/`twoBeat`
+  exist in the engine but aren't surfaced — a small future extension, not a v0 need.
+- **Verification ceiling:** headless (`--selftest`/`--run-script`) can prove the command's
+  validation/snapshot/persistence/non-undoable-preference contract, but NOT the audible click
+  or the actual delayed capture start — that needs a live audio device (`transport.record()`'s
+  branch is gated on `eng.hasAudio()`), same posture as `fam_transport_play` in
+  `scripts/daw-conformance/conformance.py`.
+
 ## Still to verify at their stages
 
 - **Renderer::Parameters** field names + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`) — Stage 5. Grep `modules/tracktion_engine/.../tracktion_Renderer.h`.
