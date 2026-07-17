@@ -5,7 +5,13 @@ import type { Snapshot } from "../types";
 import { runAgentBatch, undoAgentBatch } from "./executor";
 import { runSkill, type SkillHarnessDeps } from "./skillHarness";
 import {
+  ADD_VOCAL_WITH_LYRICS_SKILL,
+  ARRANGE_BEAT_SKILL,
+  BUILD_DRUM_PATTERN_SKILL,
+  HOST_PLUGIN_SKILL,
+  REIMAGINE_CLIP_SKILL,
   SET_TRACK_LEVEL_SKILL,
+  WARP_LOOP_TO_GRID_SKILL,
   type SkillDefinition,
   type SkillSlotValues,
 } from "./skills";
@@ -223,5 +229,183 @@ describe("skill harness", () => {
 
     expect((await runSkill(SET_TRACK_LEVEL_SKILL, slots, mockDeps)).ok).toBe(true);
     expect(slots).toEqual(copy);
+  });
+});
+
+describe("workflow skill catalog", () => {
+  beforeEach(async () => {
+    __resetMockForTests();
+    await useStore.getState().refresh();
+  });
+
+  it("runs arrange_beat end-to-end: tempo, time signature, and a starter groove", async () => {
+    const before = await snapshot();
+
+    const result = await runSkill(
+      ARRANGE_BEAT_SKILL,
+      { bpm: 140, numerator: 3, denominator: 4, pattern: "kick: x...x...x...x...", metronome: true },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    const after = await snapshot();
+    expect(after.session.tempo).toBe(140);
+    expect(after.session.timeSigNumerator).toBe(3);
+    expect(after.session.timeSigDenominator).toBe(4);
+    expect(after.session.metronome).toBe(true);
+    expect(after.tracks.length).toBe(before.tracks.length + 1);
+  });
+
+  it("runs build_drum_pattern end-to-end and force-unmutes the target track", async () => {
+    const before = await snapshot();
+    const track = before.tracks[1];
+    if (!track) throw new Error("fixture is missing a second track");
+    await useStore.getState().exec("set_track_mute", { trackId: track.id, mute: true });
+    await useStore.getState().refresh();
+
+    const seen: string[] = [];
+    const deps: SkillHarnessDeps = {
+      ...mockDeps,
+      runBatch: async (label, calls) => {
+        seen.push(...calls.map((call) => call.command));
+        return runAgentBatch(label, calls);
+      },
+    };
+
+    const result = await runSkill(
+      BUILD_DRUM_PATTERN_SKILL,
+      { trackId: track.id, pattern: "hat: x.x.x.x.x.x.x.x.", unmute: true },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual(["add_drum_pattern", "set_track_mute"]);
+    const afterTrack = trackById(await snapshot(), track.id);
+    expect(afterTrack.mute).toBe(false);
+    expect(
+      afterTrack.clips.filter((clip) => clip.type === "midi" && (clip.notes?.length ?? 0) > 0).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("rejects build_drum_pattern on a track that holds wave audio", async () => {
+    const before = await snapshot();
+    const waveTrack = before.tracks.find((track) => track.clips.some((clip) => clip.type === "wave"));
+    if (!waveTrack) throw new Error("fixture is missing a wave-audio track");
+    const runBatch = vi.fn();
+
+    const result = await runSkill(
+      BUILD_DRUM_PATTERN_SKILL,
+      { trackId: waveTrack.id, pattern: "kick: x..." },
+      { snapshot, runBatch, rollbackBatch: vi.fn() },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.stage).toBe("precondition");
+    expect(runBatch).not.toHaveBeenCalled();
+  });
+
+  it("runs add_vocal_with_lyrics end-to-end: sheet + seeded first line", async () => {
+    const before = await snapshot();
+    const track = before.tracks[2];
+    if (!track) throw new Error("fixture is missing a third track");
+
+    const result = await runSkill(
+      ADD_VOCAL_WITH_LYRICS_SKILL,
+      {
+        trackId: track.id,
+        seedText: "on my own ___ tonight",
+        role: "hook",
+        topic: "heartbreak",
+        mood: "defiant",
+      },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    const afterTrack = trackById(await snapshot(), track.id);
+    const sheet = afterTrack.lyricSheet;
+    expect(sheet?.topic).toBe("heartbreak");
+    expect(sheet?.mood).toBe("defiant");
+    const firstLine = sheet?.lines.find((line) => line.index === 0);
+    expect(firstLine?.seedText).toBe("on my own ___ tonight");
+    expect(firstLine?.role).toBe("hook");
+  });
+
+  it("runs reimagine_clip end-to-end: layer, noise, render, accept", async () => {
+    const before = await snapshot();
+    const track = before.tracks.find((candidate) => candidate.clips.some((clip) => clip.type === "wave"));
+    const clip = track?.clips.find((candidate) => candidate.type === "wave");
+    if (!track || !clip) throw new Error("fixture is missing a wave clip");
+
+    const result = await runSkill(
+      REIMAGINE_CLIP_SKILL,
+      { clipId: clip.id, nl: 0.6, prompt: "lo-fi tape", autoAccept: true },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    const afterTrack = trackById(await snapshot(), track.id);
+    const afterClip = afterTrack.clips.find((candidate) => candidate.id === clip.id);
+    expect(afterClip?.renderLayer?.nl).toBeCloseTo(0.6);
+    expect(afterClip?.renderLayer?.prompt).toBe("lo-fi tape");
+    expect(afterClip?.renderLayer?.hasArtifact).toBe(true);
+    expect(afterClip?.renderLayer?.userKept).toBe(true);
+  });
+
+  it("runs host_plugin end-to-end: load, set a param, bypass", async () => {
+    const before = await snapshot();
+    const track = firstTrack(before);
+    const startIndex = track.plugins?.length ?? 0;
+
+    const result = await runSkill(
+      HOST_PLUGIN_SKILL,
+      { trackId: track.id, pluginId: "vital", index: startIndex, paramIndex: 0, value: 0.75, bypassed: true },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    const afterTrack = trackById(await snapshot(), track.id);
+    const plugin = afterTrack.plugins?.find((candidate) => candidate.index === startIndex);
+    expect(plugin?.enabled).toBe(false);
+    const param = plugin?.params.find((candidate) => candidate.index === 0);
+    expect(param?.value).toBeCloseTo(0.75);
+  });
+
+  it("runs warp_loop_to_grid end-to-end: detect + stretch + rename", async () => {
+    const before = await snapshot();
+    const track = before.tracks.find((candidate) => candidate.clips.some((clip) => clip.type === "wave"));
+    const clip = track?.clips.find((candidate) => candidate.type === "wave");
+    if (!track || !clip) throw new Error("fixture is missing a wave clip");
+
+    const result = await runSkill(
+      WARP_LOOP_TO_GRID_SKILL,
+      { clipId: clip.id, bars: 4, rename: "Keys Loop" },
+      mockDeps,
+    );
+
+    expect(result.ok).toBe(true);
+    const afterTrack = trackById(await snapshot(), track.id);
+    const afterClip = afterTrack.clips.find((candidate) => candidate.id === clip.id);
+    expect(afterClip?.autoTempo).toBe(true);
+    expect(afterClip?.sourceBpm).toBeGreaterThan(0);
+    expect(afterClip?.name).toBe("Keys Loop");
+  });
+
+  it("rejects warp_loop_to_grid on a MIDI clip", async () => {
+    const before = await snapshot();
+    const track = before.tracks.find((candidate) => candidate.clips.some((clip) => clip.type === "midi"));
+    const clip = track?.clips.find((candidate) => candidate.type === "midi");
+    if (!clip) throw new Error("fixture is missing a MIDI clip");
+    const runBatch = vi.fn();
+
+    const result = await runSkill(
+      WARP_LOOP_TO_GRID_SKILL,
+      { clipId: clip.id, bars: 4 },
+      { snapshot, runBatch, rollbackBatch: vi.fn() },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.stage).toBe("precondition");
+    expect(runBatch).not.toHaveBeenCalled();
   });
 });
