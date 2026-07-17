@@ -5496,11 +5496,40 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         auto commitRes = cmd (ops, "mp_commit_track", args1 ("trackId", stemTrk));
         check (ok (commitRes), "mp_commit_track ok (with audio)");
+        // MOSH_MP_SYNC_TRANSFER (the PR-2 kill switch, gated separately below) pins this
+        // to "committed" instead; that combination is exercised in its own dedicated
+        // section, so this just accepts whichever mode is actually active here.
+        const auto commitStatus = commitRes.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString();
+        check (commitStatus == "uploading" || commitStatus == "committed",
+               "PR-2: mp_commit_track returns a recognized status (\"" + commitStatus + "\")");
         auto refs = commitRes.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
         check (refs.isArray() && refs.size() >= 1, "commit content-addressed the clip's stem");
         const auto h0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("hash", juce::var()).toString() : juce::String();
         const auto e0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("ext", juce::var()).toString() : juce::String();
         check (h0.length() == 64, "stem hash is a sha256");
+        const auto stemLogicalId = commitRes.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+
+        // PR-2: the upload + publish now run on the transfer worker (mp_commit_track
+        // returns status:"uploading" immediately) instead of inline — wait for the
+        // additive mp_commit_done event before assuming the stem has actually landed
+        // on the relay's blob store (a bounded drain, mirroring the async-outbox
+        // check below; the shared event sink set at the top of this function
+        // captures it into lastEvent).
+        {
+            auto* mmc = juce::MessageManager::getInstanceWithoutCreating();
+            bool committed = false;
+            const auto commitDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (! committed && juce::Time::getMillisecondCounter() < commitDeadline)
+            {
+                if (mmc != nullptr) mmc->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                committed = lastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done"
+                            && lastEvent.getProperty ("payload", juce::var()).getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
+            }
+            check (committed, "mp_commit_track's async transfer completed (mp_commit_done observed)");
+            check ((bool) lastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+                   "mp_commit_done reports ok:true");
+        }
 
         {
             MultiplayerClient peer;
@@ -5514,6 +5543,208 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             peer.leave();
         }
         cmd (ops, "mp_leave_session");
+
+        // PR-2 — stem transfer off the message thread. Proves global apply ORDER
+        // survives two quick successive commits of the SAME track (a fast second
+        // commit must never jump ahead of a still-in-flight first one) through a
+        // REAL live guest session (mp_join_session, not a direct apply_remote_track
+        // command) — exercising the guest's own commit-frame prefetch -> apply path
+        // (routeStateMutatingJob) end-to-end, including the received clip's audio
+        // resolving via the worker's prefetch stage (the "receive path" case).
+        section ("Multiplayer PR-2: stem transfer order + receive path (live session)");
+        {
+            MoshEngine ordHostEng (false, true, "pr2-order-host");
+            MoshOps    ordHostOps (ordHostEng);
+            MoshEngine ordGuestEng (false, true, "pr2-order-guest");
+            MoshOps    ordGuestOps (ordGuestEng);
+
+            auto ordSess = cmd (ordHostOps, "mp_create_session", objN ({ { "name", "OrdHost" }, { "color", "#101010" } }));
+            check (ok (ordSess), "order: host created a session");
+            const auto ordCode = ordSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            check (ok (cmd (ordGuestOps, "mp_join_session",
+                            objN ({ { "code", ordCode }, { "name", "OrdGuest" }, { "color", "#202020" } }))),
+                   "order: guest joined the host's room (a REAL live session, not a direct apply)");
+            // Settle joinSession()'s own auto-fired (harmless, 0-track) bootstrap_request
+            // before creating real content -- see the identical comment in the self-heal
+            // section below for why this matters once a bootstrap answer can carry a
+            // (possibly slow, under MOSH_RELAY_BLOB_DELAY_MS) stem upload.
+            {
+                auto* mmSettle = juce::MessageManager::getInstanceWithoutCreating();
+                const auto settleDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 1000;
+                while (juce::Time::getMillisecondCounter() < settleDeadline)
+                {
+                    if (mmSettle != nullptr) mmSettle->runDispatchLoopUntil (50);
+                    else juce::Thread::sleep (50);
+                }
+            }
+
+            auto ordMk = cmd (ordHostOps, "create_track", args1 ("name", "Order Src"));
+            const auto ordTrackId = ordMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (ordHostOps, "add_test_tone_clip", objN ({ { "trackId", ordTrackId }, { "seconds", 1.0 } }))),
+                   "order: host added a wave clip");
+
+            juce::String ordLid;
+            {
+                auto snap = ordHostOps.snapshot();
+                if (auto* arr = snap["tracks"].getArray())
+                    for (auto& tv : *arr)
+                        if (tv.getProperty ("name", juce::var()).toString() == "Order Src")
+                            ordLid = tv.getProperty ("logicalId", juce::var()).toString();
+            }
+            check (ordLid.isNotEmpty(), "order: host track logicalId resolved");
+
+            // Commit #1 (original name), then IMMEDIATELY mutate + commit #2 (renamed)
+            // — back-to-back, no wait in between, so both are in flight close together.
+            auto ordCommit1 = cmd (ordHostOps, "mp_commit_track", args1 ("trackId", ordTrackId));
+            check (ok (ordCommit1), "order: commit #1 ok");
+            check (ok (cmd (ordHostOps, "rename_track", objN ({ { "trackId", ordTrackId }, { "name", "Order Src RENAMED" } }))),
+                   "order: host renamed the track");
+            auto ordCommit2 = cmd (ordHostOps, "mp_commit_track", args1 ("trackId", ordTrackId));
+            check (ok (ordCommit2), "order: commit #2 ok");
+
+            // Bounded drain: the guest's own live poll loop receives BOTH commit
+            // frames, each routed prefetch (download the stem) -> apply
+            // (apply_remote_track) through the SAME single-worker FIFO — proving the
+            // second (later) commit's apply can never be scheduled ahead of the
+            // first's, even though both reference the IDENTICAL stem (so the
+            // second's prefetch is a fast already-downloaded no-op, unlike the first).
+            auto* ordMm = juce::MessageManager::getInstanceWithoutCreating();
+            bool ordSettled = false;
+            const auto ordDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            juce::String ordGuestName;
+            bool ordGuestClipMissing = true;
+            while (! ordSettled && juce::Time::getMillisecondCounter() < ordDeadline)
+            {
+                if (ordMm != nullptr) ordMm->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                auto t = trackSnapshotByLogicalId (ordGuestOps, ordLid);
+                ordGuestName = t.getProperty ("name", juce::var()).toString();
+                ordGuestClipMissing = true;
+                if (auto* cs = t.getProperty ("clips", juce::var()).getArray())
+                    for (auto& c : *cs)
+                        if (c.getProperty ("type", juce::var()).toString() == "wave")
+                            ordGuestClipMissing = (bool) c.getProperty ("sourceMissing", false);
+                ordSettled = (ordGuestName == "Order Src RENAMED") && ! ordGuestClipMissing;
+            }
+            check (ordSettled, "order+receive: guest settles at the SECOND (later) commit's name with its clip resolved, within the bound");
+            check (ordGuestName == "Order Src RENAMED",
+                   "order: guest never regresses to (or gets stuck on) the FIRST commit's name -- global apply order preserved");
+            check (! ordGuestClipMissing,
+                   "receive path: guest's clip is NOT sourceMissing (the worker's prefetch stage downloaded the stem before commit's apply ran)");
+
+            cmd (ordGuestOps, "mp_leave_session");
+            cmd (ordHostOps, "mp_leave_session");
+        }
+
+        // PR-2 — no-freeze proxy. Gated additionally on MOSH_RELAY_BLOB_DELAY_MS (set
+        // for the WHOLE relay process by relay/run-mp-selftest.sh's caller — the local
+        // relay has no per-call toggle, so this only runs in a dedicated gate
+        // invocation with the delay armed) so the default MOSH_SELFTEST_MP=1 run stays
+        // fast. Proves mp_commit_track returns — and a second, unrelated command
+        // executes — well before the artificially slow upload could possibly have
+        // completed inline, deterministically demonstrating the message thread never
+        // blocked on it.
+        if (std::getenv ("MOSH_RELAY_BLOB_DELAY_MS") != nullptr)
+        {
+            section ("Multiplayer PR-2: no-freeze proxy (MOSH_RELAY_BLOB_DELAY_MS)");
+
+            MoshEngine nfEng (false, true, "pr2-nofreeze-host");
+            MoshOps    nfOps (nfEng);
+            juce::var nfLastEvent;
+            nfOps.setEventSink ([&] (const juce::var& e) { nfLastEvent = e; });
+
+            auto nfSess = cmd (nfOps, "mp_create_session", objN ({ { "name", "NF" }, { "color", "#ffffff" } }));
+            check (ok (nfSess), "no-freeze: host created a session");
+
+            auto nfMk = cmd (nfOps, "create_track", args1 ("name", "NF Src"));
+            const auto nfTrackId = nfMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (nfOps, "add_test_tone_clip", objN ({ { "trackId", nfTrackId }, { "seconds", 1.0 } }))),
+                   "no-freeze: host added a wave clip");
+
+            const auto nfT0 = juce::Time::getMillisecondCounterHiRes();
+            auto nfCommit = cmd (nfOps, "mp_commit_track", args1 ("trackId", nfTrackId));
+            const auto nfCommitElapsedMs = juce::Time::getMillisecondCounterHiRes() - nfT0;
+            check (ok (nfCommit), "no-freeze: mp_commit_track ok");
+            check (nfCommit.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "uploading",
+                   "no-freeze: async branch taken");
+            check (nfCommitElapsedMs < 400.0,
+                   "no-freeze: mp_commit_track returned near-instantly despite the delayed upload ("
+                       + juce::String (nfCommitElapsedMs, 1) + "ms)");
+
+            const auto nfT1 = juce::Time::getMillisecondCounterHiRes();
+            check (ok (cmd (nfOps, "create_track", args1 ("name", "NF Trivial"))),
+                   "no-freeze: a trivial command executes while the upload is still in flight");
+            const auto nfTrivialElapsedMs = juce::Time::getMillisecondCounterHiRes() - nfT1;
+            check (nfTrivialElapsedMs < 400.0,
+                   "no-freeze: the trivial command was ALSO fast ("
+                       + juce::String (nfTrivialElapsedMs, 1) + "ms) — the message thread stayed free");
+
+            auto* nfMm = juce::MessageManager::getInstanceWithoutCreating();
+            bool nfCommitted = false;
+            const auto nfDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (! nfCommitted && juce::Time::getMillisecondCounter() < nfDeadline)
+            {
+                if (nfMm != nullptr) nfMm->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                nfCommitted = nfLastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done";
+            }
+            check (nfCommitted, "no-freeze: the delayed upload eventually completes in the background (mp_commit_done observed)");
+            check ((bool) nfLastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+                   "no-freeze: the delayed upload succeeded");
+
+            cmd (nfOps, "mp_leave_session");
+        }
+
+        // PR-2 — MOSH_MP_SYNC_TRANSFER kill switch. Gated on the env var being set
+        // (read once at MultiplayerSession construction, so it can't be toggled
+        // mid-process — a dedicated gate invocation, like the no-freeze check above).
+        // Proves the switch actually reverts to the original fully synchronous/
+        // inline behaviour: mp_commit_track reports status:"committed" (not
+        // "uploading") and the stem is ALREADY on the relay by the time it returns
+        // — no waiting for mp_commit_done required.
+        if (std::getenv ("MOSH_MP_SYNC_TRANSFER") != nullptr)
+        {
+            section ("Multiplayer PR-2: MOSH_MP_SYNC_TRANSFER kill switch");
+
+            MoshEngine syncEng (false, true, "pr2-syncswitch-host");
+            MoshOps    syncOps (syncEng);
+
+            auto syncSess = cmd (syncOps, "mp_create_session", objN ({ { "name", "Sync" }, { "color", "#666666" } }));
+            check (ok (syncSess), "sync-switch: host created a session");
+            const auto syncCode = syncSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            auto syncMk = cmd (syncOps, "create_track", args1 ("name", "Sync Src"));
+            const auto syncTrackId = syncMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (syncOps, "add_test_tone_clip", objN ({ { "trackId", syncTrackId }, { "seconds", 1.0 } }))),
+                   "sync-switch: host added a wave clip");
+
+            auto syncCommit = cmd (syncOps, "mp_commit_track", args1 ("trackId", syncTrackId));
+            check (ok (syncCommit), "sync-switch: mp_commit_track ok");
+            check (syncCommit.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "committed",
+                   "sync-switch: status is \"committed\" (synchronous), NOT \"uploading\" — the kill switch reverted the async path");
+
+            auto syncRefs = syncCommit.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
+            const auto syncHash = (syncRefs.isArray() && syncRefs.size() > 0) ? syncRefs[0].getProperty ("hash", juce::var()).toString() : juce::String();
+            const auto syncExt  = (syncRefs.isArray() && syncRefs.size() > 0) ? syncRefs[0].getProperty ("ext", juce::var()).toString() : juce::String();
+            check (syncHash.length() == 64, "sync-switch: stem hash is a sha256");
+
+            // No wait/drain here at all — under the kill switch, mp_commit_track only
+            // returns once the upload+publish already completed inline, so a peer can
+            // fetch the stem IMMEDIATELY.
+            MultiplayerClient syncPeer;
+            check (syncPeer.joinSession (syncCode, "SyncPeer", "#777777"), "sync-switch: peer joined the session");
+            auto syncTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                               .getChildFile ("mosh-mp-syncswitch-" + syncHash + "." + syncExt);
+            syncTmp.deleteFile();
+            check (syncPeer.downloadBlob (syncHash, syncExt, syncTmp),
+                   "sync-switch: peer fetched the stem immediately, no drain needed [" + syncPeer.lastError() + "]");
+            check (syncTmp.existsAsFile() && syncTmp.getSize() > 0, "sync-switch: fetched stem is non-empty");
+            syncTmp.deleteFile();
+            syncPeer.leave();
+
+            cmd (syncOps, "mp_leave_session");
+        }
 
         // Async outbox (anti-jank): a fire-and-forget broadcast does NOT block the
         // message thread on HTTP — it enqueues, and the background poll thread drains
@@ -5536,7 +5767,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // the session's callAsyncs drain too.
             auto* mm = juce::MessageManager::getInstanceWithoutCreating();
             bool gotSel = false;
-            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
             while (! gotSel && juce::Time::getMillisecondCounter() < deadline)
             {
                 for (auto& f : watcher.poll())
@@ -5602,6 +5833,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (guestOps, "mp_join_session",
                             objN ({ { "code", shCode }, { "name", "SHGuest" }, { "color", "#222222" } }))),
                    "self-heal: guest joined the host's room");
+            // joinSession() unconditionally fires its own bootstrap_request (the
+            // normal late-join path) the instant it joins -- at this point the host
+            // has zero tracks, so the round-trip answer is harmless (0 tracks -> 0
+            // tracks) PROVIDED it lands before the host creates real content below.
+            // Drain it here (bounded) rather than risk it landing LATE (e.g. because
+            // MOSH_RELAY_BLOB_DELAY_MS is slowing down some unrelated stem upload
+            // elsewhere) and overwriting the guest's own apply_remote_track state
+            // via a now-stale cmdMpApplyBootstrap mid-test.
+            {
+                auto* mmSettle = juce::MessageManager::getInstanceWithoutCreating();
+                const auto settleDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 1000;
+                while (juce::Time::getMillisecondCounter() < settleDeadline)
+                {
+                    if (mmSettle != nullptr) mmSettle->runDispatchLoopUntil (50);
+                    else juce::Thread::sleep (50);
+                }
+            }
 
             auto mk = cmd (hostOps, "create_track", args1 ("name", "SH Src"));
             const auto shTrackId = mk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
@@ -5709,7 +5957,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // completion (sourceMediaChanged + emitSnapshotInvalidated) to land.
             auto* mm2 = juce::MessageManager::getInstanceWithoutCreating();
             bool resolved2 = false;
-            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
             while (! resolved2 && juce::Time::getMillisecondCounter() < deadline2)
             {
                 if (mm2 != nullptr) mm2->runDispatchLoopUntil (50);
@@ -5717,8 +5965,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 resolved2 = ! clipSourceMissing (guestOps, shLid2Applied);
             }
             check (resolved2, "self-heal (async): guest's clip resolved via the background thread + callAsync (previously untested code path)");
-            check (ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", waveClipIdOf (guestOps, shLid2Applied)))),
-                   "self-heal (async): get_clip_peaks succeeds after the async fetch");
+            const auto shClipId2 = waveClipIdOf (guestOps, shLid2Applied);
+            auto peaksRes2 = cmd (guestOps, "get_clip_peaks", args1 ("clipId", shClipId2));
+            check (ok (peaksRes2),
+                   "self-heal (async): get_clip_peaks succeeds after the async fetch [clipId=" + shClipId2
+                       + " err=" + peaksRes2.getProperty ("error", juce::var()).toString() + "]");
 
             cmd (guestOps, "mp_leave_session");
             cmd (hostOps, "mp_leave_session");

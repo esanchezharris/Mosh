@@ -106,6 +106,12 @@ The session control lives in the topbar's **2-player (B-5) pop**
   above), so audio syncs on it too — but it only binds `127.0.0.1`, so it's for same-machine
   dev/CI use, not an actual two-machine session (use the cloud relay for that).
 - `MOSH_RELAY_APIKEY` overrides the cloud relay's anon key (rarely needed).
+- `MOSH_MP_SYNC_TRANSFER=1` (native, not a relay env) pins every stem transfer back to the
+  original fully synchronous/inline behaviour (PR-2's kill switch) — a cheap way to rule the
+  async transfer path in/out if something looks off live.
+- `MOSH_RELAY_BLOB_DELAY_MS` (dev relay only) artificially delays every raw stem PUT/GET —
+  a test hook (used by the hermetic "no-freeze proxy" selftest check) to make a transfer slow
+  enough to observe the message thread staying responsive during it.
 
 ## Known limits (updated 2026-07-17 — self-healing stems)
 
@@ -133,13 +139,34 @@ The session control lives in the topbar's **2-player (B-5) pop**
   - The **local self-host relay now has a blob store** too (mirroring the cloud contract), so
     this whole path — including the self-heal — is covered by the hermetic `--selftest` gate
     (`MOSH_SELFTEST_MP=1`), not just the cloud-gated smoke check.
-  - One caveat remains: the ORIGINAL upload/download attempt (inside `mp_commit_track` /
-    `mp_apply_bootstrap`'s own inline loop, and the host's bootstrap-answer upload) still runs
-    synchronously on the message thread, so a session with several audio clips can still
-    **briefly freeze** while stems move (keep imported clips modest) — a proper async/
-    background transfer for THAT path is a follow-up (PR-2, stacked on this fix).
-- **Stem transfer briefly blocks the UI:** upload/download runs on the message thread, so a
-  large audio file can freeze the window for a few seconds. Keep imported clips modest.
+- **Stem transfer is now off the message thread too (PR-2).** Every upload/download used to
+  run wherever it was called from — the message thread for an outbound commit's upload; INSIDE
+  the poll loop's callAsync for a received commit's download or the host's bootstrap-answer
+  upload — so a large file froze the UI for as long as the transfer took. A dedicated
+  **TransferQueue** worker thread now does all of it:
+  - `mp_commit_track` does its synchronous engine work (hash/copy/repoint/serialize — an
+    immutable content-addressed snapshot, so further edits during the upload are safe by
+    construction) and returns **immediately** with `status:"uploading"`; the upload + publish +
+    lock release run on the worker, reported via an additive `mp_commit_done {logicalId, ok,
+    error?}` event.
+  - A received `commit` / `bootstrap_state` / `structural` frame is turned into a worker job
+    (download any missing stems, then apply) routed through the SAME single-worker FIFO — even
+    `structural` (which has nothing to download) — so a fast tempo change enqueued right after a
+    slow commit upload can never apply before it: **global apply order is preserved** end-to-end.
+  - The host's bootstrap answer is split: the engine-touching content-address/serialize step
+    stays on the message thread; the worker uploads every stem and THEN publishes
+    `bootstrap_state`.
+  - Why a **dedicated** worker (not the existing poll thread): a multi-minute transfer on the
+    poll thread would stop it from calling `/mp/events` and so from refreshing this peer's own
+    held lock leases — the relay auto-frees a lock after **90s of silence**
+    (`supabase/migrations/0001_mp_relay.sql`, `relay/room.py`'s `LOCK_LEASE_S`) — which could let
+    a peer steal a lock this user is still actively using, mid-slow-transfer. The dedicated
+    worker keeps the poll loop (and the lease) alive throughout.
+  - `leaveSession()` aborts any in-flight/queued transfer and its `downloadBlob`/`uploadBlob`
+    calls are abort-aware (chunked, checked between steps) — a stale transfer for a session
+    you've already left doesn't keep running.
+  - **Kill switch:** `MOSH_MP_SYNC_TRANSFER=1` reverts every path above to the original fully
+    synchronous/inline behaviour — cheap insurance if the async path ever misbehaves live.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
   briefly until the relay sweeps it. Self-corrects.
 - **Buses/groups don't replicate yet:** tracks sync; aux/group buses do not.
