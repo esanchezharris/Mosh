@@ -72,11 +72,14 @@ coding, no accounts, nothing to sign up for.
   file transfer at all.
 - Have **each person take one track** — you can both work at once without stepping on each
   other (a small lock badge shows who's currently editing a track).
-- Try a **Re-imagine** on a clip — it's Mosh's AI re-render of a take. After it renders,
-  glance at the little **engine badge** in the generative panel: it says **SA3** when it
-  used the real Stable Audio 3 model, or **preview** when it used a fast stand-in engine
-  instead (normal on a guest Mac that hasn't installed the real model yet — see step 7 if
-  you want the real thing).
+- Try a **Re-imagine** on a clip — it's Mosh's AI re-render of a take. The little **engine
+  badge** at the top of the generative panel shows which engine **your Mac will use for your
+  next render**: **SA3** for the real Stable Audio 3 model, or **preview** for a fast
+  stand-in (normal on a guest Mac that hasn't installed the real model yet — see step 7 if
+  you want the real thing). Once a render finishes, look just below its status for a small
+  **"rendered by preview engine"** note — that's the truth for *that specific render* (the
+  badge up top can only tell you what's about to happen, not what already happened, e.g. if
+  the real model went down mid-session).
 
 ## 7. Optional: real AI on your Mac (10–30 minutes, ~10 GB)
 

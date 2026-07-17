@@ -84,8 +84,9 @@ type State = {
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   // Whether THIS Mac's generative service is actually running the real Stable Audio 3
   // model, straight from /colors' `sa3` field (server.py's SA3_ENABLED). undefined means
-  // an old service that predates the field — callers fall back to the colour-rack-nonempty
-  // proxy (see ui/src/ui/engineBadge.ts) rather than silently claiming SA3.
+  // the service didn't report it — an older service, or /colors errored internally — and
+  // callers fall back to the colour-rack-nonempty proxy (see ui/src/ui/engineBadge.ts)
+  // rather than silently claiming SA3.
   sa3Available: boolean | undefined;
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)

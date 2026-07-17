@@ -15,9 +15,12 @@ const PREVIEW_TITLE =
   "Renders use a fast preview engine — run setup-guest.sh (in the app bundle) to install the real model";
 
 /** Resolve whether SA3 is actually available on this Mac's service. `sa3Available` is the
- *  /colors `sa3` field (undefined ⇒ an old service that predates the field); `colorsAvailLength`
- *  is the pre-existing proxy (a non-empty colour rack), kept only as a fallback for old-service
- *  tolerance so a stale build doesn't regress to "always fake". */
+ *  /colors `sa3` field; it's undefined when the service didn't report it — either an older
+ *  service that predates the field, or a CURRENT service whose /colors errored internally
+ *  (cmdListColors synthesizes a bare `{colors: []}` on a non-ok response, with no `sa3` key).
+ *  `colorsAvailLength` is the pre-existing proxy (a non-empty colour rack), kept only as a
+ *  fallback for that case so a stale build or a transient error doesn't regress to "always
+ *  fake". */
 export function resolveSa3Available(sa3Available: boolean | undefined, colorsAvailLength: number): boolean {
   return sa3Available ?? colorsAvailLength > 0;
 }
