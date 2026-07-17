@@ -227,6 +227,35 @@ _ac = _ar["score"][0]
 check("word_event_spans on a real authored clip == its word count",
       len(sx.word_event_spans(_ac)) == _ar["words"], str(sx.word_event_spans(_ac)))
 
+# ── 12. durations mode (B1-lite, 2026-07-17): derived vs verbatim ───────────────────────
+# default == explicit verbatim, byte-identical (the shipped path never moves)
+_dl = [LINE("hold the flame", [SLOT(0.5, 1.0, 57), SLOT(1.0, 1.5, 59), SLOT(1.5, 2.0, 60)]),
+       LINE("cold nights fade", [SLOT(3.0, 3.4, 55), SLOT(3.4, 3.9, 57), SLOT(3.9, 4.6, 59)])]
+_rv = sx.author_score(_dl)
+_rv2 = sx.author_score(_dl, durations="verbatim")
+check("durations default == verbatim, byte-identical",
+      json.dumps(_rv, sort_keys=True) == json.dumps(_rv2, sort_keys=True))
+_rd = sx.author_score(_dl, durations="derived")
+check("derived mode ok", _rd.get("ok"), str(_rd)[:200])
+_cv, _cd = _rv["score"][0], _rd["score"][0]
+for _k in ("text", "phoneme", "note_pitch", "note_type", "time", "index"):
+    check(f"derived keeps {_k} byte-identical", _cv[_k] == _cd[_k],
+          f"{_cv[_k]} vs {_cd[_k]}")
+_dv = [float(x) for x in _cv["duration"].split()]
+_dd = [float(x) for x in _cd["duration"].split()]
+check("derived actually changes durations",
+      any(abs(a - b) > 0.0005 for a, b in zip(_dv, _dd)),
+      str(list(zip(_dv, _dd))))
+check("derived chain-sum == time span",
+      abs(sum(_dd) - _cd["time"][1] / 1000.0) <= 0.005, str(sum(_dd)))
+check("result records the mode", _rv.get("durations") == "verbatim"
+      and _rd.get("durations") == "derived", f"{_rv.get('durations')}/{_rd.get('durations')}")
+try:
+    sx.author_score(_dl, durations="nope")
+    check("unknown durations mode raises", False, "no raise")
+except ValueError:
+    check("unknown durations mode raises", True)
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

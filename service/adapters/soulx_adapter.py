@@ -233,7 +233,8 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
                 ln["score"] = json.loads(ln["score"])
             except (json.JSONDecodeError, ValueError):
                 ln["score"] = None
-    authored = soulx_score.author_score(lines)
+    authored = soulx_score.author_score(
+        lines, durations=str(params.get("durations") or "verbatim"))
     if not authored.get("ok"):
         if authored.get("error") == "no_asserted_scored_lines":
             raise RuntimeError("no asserted words to sing — assert the lyric line first")
@@ -305,6 +306,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "ok": True, "adapter": "soulx", "backend": "soulx-pc" if real else "fake-sing", "mode": "sing",
         "events": authored["events"], "words": authored["words"], "rests": authored["rests"],
         "linesUsed": authored["linesUsed"], "linesSkipped": authored["linesSkipped"],
+        "durations": authored.get("durations", "verbatim"),
         "voiceEnrolled": bool(voice_ref_path()),
         "timingSnapped": timing_snapped, "sylSnapMedianMs": syl_snap_ms,
         "nsfResynth": nsf_resynth,

@@ -137,13 +137,20 @@ def _word_units(words: List[str], slots: List[dict]):
     return units
 
 
-def author_score(lines: List[dict], language: str = "English", name: str = "mosh-sheet") -> dict:
+def author_score(lines: List[dict], language: str = "English", name: str = "mosh-sheet",
+                 durations: str = "verbatim") -> dict:
     """[{text, score: lyricScore-blob|None}, ...] -> {"ok", "score": [clip], stats}.
 
     Lines without a score blob are SKIPPED and counted (typed-later lines have no take
     flow — never invent timing). Emits ONE clip covering the whole sheet on the take's
     own timeline (leading/inter-line gaps are <SP> rests), so the rendered WAV lands
-    aligned with the source clip."""
+    aligned with the source clip.
+
+    durations: "verbatim" (default — slot durations transferred as-is, the shipped
+    behavior) or "derived" (B1-lite: phrase anchors kept, in-phrase durations re-derived
+    by soulx.duration's zero-sum rule layer; V2-blind-motivated, owner-ear-gated)."""
+    if durations not in ("verbatim", "derived"):
+        raise ValueError(f"unknown durations mode: {durations!r}")
     scored = [ln for ln in (lines or [])
               if isinstance(ln.get("score"), dict) and ln["score"].get("slots") and _asserted_text(ln)]
     if not scored:
@@ -219,10 +226,19 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
         "note_pitch": " ".join(str(p) for p in pitch_t),
         "note_type": " ".join(str(t) for t in type_t),
     }
-    return {"ok": True, "score": [clip],
-            "linesUsed": len(scored), "linesSkipped": len(lines) - len(scored),
-            "events": len(dur_t), "words": n_words, "rests": n_rests,
-            "duration_s": round(sum(dur_t), 3)}
+    result = {"ok": True, "score": [clip], "durations": durations,
+              "linesUsed": len(scored), "linesSkipped": len(lines) - len(scored),
+              "events": len(dur_t), "words": n_words, "rests": n_rests,
+              "duration_s": round(sum(dur_t), 3)}
+    if durations == "derived":
+        from soulx import duration as sxdur
+        new_clip, dlog = sxdur.derive_clip(clip, sxdur.load_params())
+        old = [float(d) for d in clip["duration"].split()]
+        new = [float(d) for d in new_clip["duration"].split()]
+        result["score"] = [new_clip]
+        result["deriveChanged"] = sum(1 for a, b in zip(old, new) if abs(a - b) > 0.0005)
+        result["deriveChainOk"] = bool(dlog.get("chain_check", {}).get("ok"))
+    return result
 
 
 # ── timing-snap inputs (Phase A consolidation) ─────────────────────────────────────────

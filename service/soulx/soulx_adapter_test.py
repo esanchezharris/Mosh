@@ -180,6 +180,23 @@ check("failed nsf keeps the fake render (not the 12345 marker)", set(fail_raw) !
 for _k in ("MOSH_ENABLE_NSF", "MOSH_NSF_PY", "MOSH_NSF_CLI", "NSF_MODEL"):
     os.environ.pop(_k, None)
 
+# ── 7. durations passthrough (B1-lite): params flow to the author, mode observable ─────
+dv = A.render("", os.path.join(td, "durv.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("default manifest reports durations=verbatim", dv.get("durations") == "verbatim",
+      str(dv.get("durations")))
+dd = A.render("", os.path.join(td, "durd.wav"),
+              {"lines": json.loads(json.dumps(LINES)), "durations": "derived"})
+check("derived manifest reports durations=derived", dd.get("durations") == "derived",
+      str(dd.get("durations")))
+from soulx import score as sxs  # noqa: E402
+with open(os.path.join(td, "target_score.json")) as _f:
+    _sc_d = json.load(_f)[0]
+_r_v = sxs.author_score(json.loads(json.dumps(LINES)))["score"][0]
+check("derived target_score keeps non-duration fields",
+      all(_sc_d[k] == _r_v[k] for k in ("text", "phoneme", "note_pitch", "note_type")))
+check("derived target_score durations differ from verbatim",
+      _sc_d["duration"] != _r_v["duration"])
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)
