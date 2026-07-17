@@ -140,7 +140,31 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cpm-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
+          # github.repository is folded into the key so a repo RENAME (which changes the
+          # runner checkout path /Users/runner/work/<repo>/<repo>) ROTATES the cache
+          # instead of restoring a pre-rename cache whose FetchContent sub-build
+          # CMakeCache.txt has the old absolute path baked in — cmake then refuses the
+          # mismatched dir ("current CMakeCache.txt directory ... is different than ...")
+          # and every branch's native gate dies at configure (this happened on the
+          # 2026-07-16 zeke431/ClaudeMosh -> zeke431/Mosh rename; see CLAUDE.md). No
+          # restore-keys: an exact-key miss must refetch, never prefix-fall-back to a
+          # foreign-path cache.
+          key: deps-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
+
+      - name: Purge a path-stale dep cache (self-heal)
+        # Defense-in-depth for the key rotation above: if a restored .cpm-cache carries a
+        # FetchContent sub-build CMakeCache.txt baked with a checkout path other than this
+        # run's ($GITHUB_WORKSPACE) — e.g. after any future move/rename — drop it so the
+        # build refetches fresh into the correct path instead of dying at cmake configure.
+        run: |
+          f=.cpm-cache/_fc/tracktion_engine-subbuild/CMakeCache.txt
+          if [ -f "$f" ]; then
+            baked="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$f" | head -1)"
+            case "$baked" in
+              "$GITHUB_WORKSPACE"/*|"") : ;;  # belongs to this checkout (or unknown fmt) — keep
+              *) echo "stale .cpm-cache baked at '$baked' (!= $GITHUB_WORKSPACE) — purging"; rm -rf .cpm-cache ;;
+            esac
+          fi
 
       - name: Install UI deps
         working-directory: ui
@@ -174,7 +198,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .cpm-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
+          # Key MUST match the restore step (incl. the github.repository segment).
+          key: deps-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'patches/**') }}
 
       - name: Gate summary
         if: always()
