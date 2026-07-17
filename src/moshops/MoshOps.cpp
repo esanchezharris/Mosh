@@ -446,9 +446,15 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
             if (active) { lockManager_.activate (self); lockManager_.setLocks (locks); }
             else        { lockManager_.deactivate(); }
         },
-        [this] { return cmdMpSerializeProject (var()).getProperty ("data", var()); },   // provide
+        // PR-2: the message-thread part ONLY (content-address + serialize; NO
+        // upload) -- the session's own worker uploads the returned stemFiles[]
+        // before publishing bootstrap_state. cmdMpSerializeProject (the public,
+        // directly-callable command) is UNCHANGED and keeps uploading synchronously
+        // itself, so existing direct-call tests stay valid.
+        [this] { return serializeProjectForBootstrapAnswer(); },   // provide
         [this] (const juce::var& bundle) { cmdMpApplyBootstrap (bundle); },             // adopt
         [this] (const juce::var& msg) { cmdMpApplyStructural (msg); });                 // structural
+    refreshMpStemDir();
 }
 
 void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
@@ -456,19 +462,26 @@ void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
     applyMultiplayerCommitMessage (msg);
 }
 
+// PR-2: MultiplayerSession's stemBaseDir_ (worker-thread-only, mutex-guarded) must
+// be refreshed from the message thread whenever eng.editFile() can change (a fresh
+// project, an open, a Save As) or a session starts — the worker must NEVER call
+// eng.editFile() itself (same torn-refcount reasoning as MultiplayerClient.h's
+// roomCode_/etc: a juce::String is refcounted, so an unsynchronized cross-thread
+// read/write is a crash risk, not just staleness).
+void MoshOps::refreshMpStemDir()
+{
+    if (mpSession_ != nullptr)
+        mpSession_->setStemBaseDir (eng.editFile().getParentDirectory().getFullPathName());
+}
+
 void MoshOps::applyMultiplayerCommitMessage (const juce::var& msg)
 {
-    auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
-    if (auto* arr = msg.getProperty ("audioRefs", var()).getArray())
-        for (auto& a : *arr)
-        {
-            const auto h = a.getProperty ("hash", var()).toString();
-            const auto e = a.getProperty ("ext", var()).toString();
-            if (h.isEmpty()) continue;
-            if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                mpSession_->downloadBlob (h, e, dest);
-        }
-
+    // PR-2: the session's transfer worker has ALREADY prefetched every audioRef this
+    // commit carries (routeStateMutatingJob's prefetch stage, before this apply stage
+    // runs) — no download loop needed here anymore. applyMultiplayerCommitForSelfTest
+    // calling this directly (bypassing the session/worker) therefore no longer
+    // downloads stems either; a future direct-callback test needs its own prefetch
+    // (mirroring what the session does) or should drive the download separately first.
     auto* applyArgs = new DynamicObject();
     applyArgs->setProperty ("blob", msg.getProperty ("blob", var()));
     auto* command = new DynamicObject();
@@ -2890,6 +2903,7 @@ juce::var MoshOps::cmdMpCreateSession (const juce::var& args)
                                                  args.getProperty ("color", var()).toString());
     if (code.isEmpty())
         return errResult ("mp_create_session", "could not reach the relay (MOSH_RELAY_URL)");
+    refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("code", code);
     o->setProperty ("selfPeer", mpSession_->selfPeer());
@@ -2902,6 +2916,7 @@ juce::var MoshOps::cmdMpJoinSession (const juce::var& args)
                                    args.getProperty ("name", var()).toString(),
                                    args.getProperty ("color", var()).toString()))
         return errResult ("mp_join_session", "join failed (bad code / relay unreachable)");
+    refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("selfPeer", mpSession_->selfPeer());
     return okResult ("mp_join_session", var (o));
@@ -2937,6 +2952,7 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
     // resolve the same path once the bytes are fetched.
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     Array<var> audioRefs;
+    juce::Array<juce::File> stemFiles;   // parallel to audioRefs; local paths only, PR-2's worker uploads these
     for (auto* c : t->getClips())
         if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
         {
@@ -2960,26 +2976,29 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
                 repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
             auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
             audioRefs.add (var (r));
+            stemFiles.add (dest);
         }
 
     eng.edit().flushState();
     const auto blob = trackcommit::serialize (*t);
     const auto lid  = logicalid::ensureTrack (t->state);
 
-    // Upload the stems (server-side content-addressed dedup), then publish the
-    // commit carrying their hashes so the peer can fetch what it lacks.
-    for (auto& r : audioRefs)
-    {
-        const auto h = r.getProperty ("hash", var()).toString();
-        const auto e = r.getProperty ("ext", var()).toString();
-        mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
-    }
+    // PR-2: everything above is synchronous engine work (an immutable content-
+    // addressed snapshot, so further edits during the upload are safe by
+    // construction). mpSession_->commit() does the upload + publish + lock release
+    // on its transfer worker (or inline under MOSH_MP_SYNC_TRANSFER=1) and reports
+    // completion via an additive `mp_commit_done` event — this returns immediately.
+    bool asyncTransfer = false;
     if (blob.isNotEmpty())
-        mpSession_->commit (lid, blob, var (audioRefs));
+    {
+        asyncTransfer = ! mpSession_->syncTransferMode();
+        mpSession_->commit (lid, blob, var (audioRefs), stemFiles);
+    }
 
     auto* o = new DynamicObject();
     o->setProperty ("logicalId", lid);
     o->setProperty ("audioRefs", var (audioRefs));
+    o->setProperty ("status", asyncTransfer ? "uploading" : "committed");
     return okResult ("mp_commit_track", var (o));
 }
 
@@ -3024,16 +3043,23 @@ juce::var MoshOps::cmdMpApplyStructural (const juce::var& args)
     return okResult ("mp_apply_structural", r);
 }
 
-juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+// PR-2: shared by cmdMpSerializeProject (the public, directly-callable command,
+// which uploads synchronously itself right after — kept behavior-compatible for
+// existing direct-call tests) and serializeProjectForBootstrapAnswer (the live-
+// session bootstrap-answer path, whose worker uploads instead). Content-addresses
+// + rewrites + serializes every track's clips; uploads NOTHING itself. Returns
+// {tracks:[{logicalId,blob,audioRefs}], count, annotations, stemFiles:[{hash,ext,path}]}
+// — stemFiles is the flattened list across all tracks (what a bootstrap-answer
+// upload job needs; audioRefs stays nested per-track for the wire message, as before).
+juce::var MoshOps::contentAddressWholeProjectNoUpload()
 {
-    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
     // Each track's wave clips are content-addressed into <editDir>/audio/by-hash/ and
-    // uploaded (server-side dedup) before serialize, with the by-hash refs attached to
-    // the track entry — so a guest who joins mid-session adopts pre-existing AUDIO, not
-    // just structure/MIDI. Mirrors the commit path (cmdMpCommitTrack); closes the old
-    // "bootstrap audio not wired" gap. Graceful on the local relay (uploadBlob no-ops).
+    // rewritten to that RELATIVE ref, with the by-hash refs attached to the track
+    // entry — so a guest who joins mid-session adopts pre-existing AUDIO, not just
+    // structure/MIDI. Mirrors the commit path (cmdMpCommitTrack).
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     juce::Array<var> tracks;
+    juce::Array<var> stemFiles;
     for (auto* t : te::getAudioTracks (eng.edit()))
     {
         if (t == nullptr) continue;
@@ -3061,6 +3087,12 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
                     repointWaveClipSource (*w, dest, eng.editFile().getParentDirectory(), true);
                 auto* r = new DynamicObject(); r->setProperty ("hash", hash); r->setProperty ("ext", ext);
                 audioRefs.add (var (r));
+
+                auto* sf = new DynamicObject();
+                sf->setProperty ("hash", hash);
+                sf->setProperty ("ext", ext);
+                sf->setProperty ("path", dest.getFullPathName());
+                stemFiles.add (var (sf));
             }
 
         eng.edit().flushState();   // AFTER the repoints, so the serialized state carries the by-hash refs
@@ -3071,25 +3103,50 @@ juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
         // only `tracks`/`annotations`, so a top-level refs field would be dropped on the wire.
         o->setProperty ("audioRefs", var (audioRefs));
         tracks.add (var (o));
-
-        // Upload the stems (content-addressed dedup) so the joiner can fetch what it lacks.
-        for (auto& r : audioRefs)
-        {
-            const auto h = r.getProperty ("hash", var()).toString();
-            const auto e = r.getProperty ("ext", var()).toString();
-            mpSession_->uploadBlob (h, e, byHashDir.getChildFile (h + "." + e));
-        }
     }
     auto* d = new DynamicObject();
     d->setProperty ("tracks", tracks);
     d->setProperty ("count", tracks.size());
+    d->setProperty ("stemFiles", var (stemFiles));
     // Annotations are a top-level Edit child (a sibling of the tracks), so the per-track
     // blobs above don't carry them — serialize the subtree so a late-joiner adopts the
     // host's existing pins, not just the ones created live after they join.
     if (auto a = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS); a.isValid())
         if (auto xml = a.createXml())
             d->setProperty ("annotations", xml->toString());
-    return okResult ("mp_serialize_project", var (d));
+    return var (d);
+}
+
+juce::var MoshOps::cmdMpSerializeProject (const juce::var&)
+{
+    // P6 — the whole project as a bundle of per-track blobs, for a late-joiner.
+    // Closes the old "bootstrap audio not wired" gap. Graceful on the local relay
+    // (uploadBlob no-ops there pre-PR-1; now the local relay has a blob store too).
+    auto d = contentAddressWholeProjectNoUpload();
+
+    // Upload the stems (content-addressed dedup) so the joiner can fetch what it
+    // lacks. Kept SYNCHRONOUS here (unlike the live-session bootstrap-answer path,
+    // PR-2, whose worker uploads instead) so this public, directly-callable command
+    // stays behavior-compatible with existing direct-call tests.
+    if (auto* sf = d.getProperty ("stemFiles", var()).getArray())
+        for (auto& s : *sf)
+        {
+            const auto h = s.getProperty ("hash", var()).toString();
+            const auto e = s.getProperty ("ext", var()).toString();
+            const auto p = s.getProperty ("path", var()).toString();
+            mpSession_->uploadBlob (h, e, juce::File (p));
+        }
+    return okResult ("mp_serialize_project", d);
+}
+
+juce::var MoshOps::serializeProjectForBootstrapAnswer()
+{
+    // PR-2: the message-thread part of the host's bootstrap answer -- content-
+    // address + serialize (touches the engine, so it must run here, on the message
+    // thread) WITHOUT uploading; the session's transfer worker uploads the returned
+    // stemFiles[] and then publishes bootstrap_state (see MultiplayerSession::pollLoop's
+    // "bootstrap_request" handling).
+    return contentAddressWholeProjectNoUpload();
 }
 
 juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
@@ -3104,6 +3161,14 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             st.getParent().removeChild (st, nullptr);
         }
 
+    // PR-2: bundles arriving through the LIVE SESSION path (MultiplayerSession's
+    // "bootstrap_state" handling) have already had every stem prefetched by the
+    // transfer worker before this is called — stemsPrefetched:true skips the inline
+    // download loop below entirely. Direct calls (the harness/agents/`mp_apply_bootstrap`
+    // outside a live session) never set this flag, so their own inline download runs
+    // exactly as before — the direct-command contract is unchanged.
+    const bool stemsPrefetched = (bool) args.getProperty ("stemsPrefetched", false);
+
     int applied = 0;
     auto byHashDir = eng.editFile().getParentDirectory().getChildFile ("audio").getChildFile ("by-hash");
     if (auto* arr = args.getProperty ("tracks", var()).getArray())
@@ -3114,15 +3179,16 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
             // the late-join analogue of the commit-apply download. The result is ignored
             // here (a transient failure just leaves the clip sourceMissing) — the
             // self-heal pass below retries anything still missing once the tracks land.
-            if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
-                for (auto& a : *refs)
-                {
-                    const auto h = a.getProperty ("hash", var()).toString();
-                    const auto e = a.getProperty ("ext", var()).toString();
-                    if (h.isEmpty()) continue;
-                    if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
-                        mpSession_->downloadBlob (h, e, dest);
-                }
+            if (! stemsPrefetched)
+                if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
+                    for (auto& a : *refs)
+                    {
+                        const auto h = a.getProperty ("hash", var()).toString();
+                        const auto e = a.getProperty ("ext", var()).toString();
+                        if (h.isEmpty()) continue;
+                        if (auto dest = byHashDir.getChildFile (h + "." + e); ! dest.existsAsFile())
+                            mpSession_->downloadBlob (h, e, dest);
+                    }
             const auto blob = tv.getProperty ("blob", var()).toString();
             if (blob.isNotEmpty() && trackcommit::apply (edit, blob).ok)
                 ++applied;
@@ -3186,20 +3252,27 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 const auto stem = resolved.getFileNameWithoutExtension();
                 if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
 
-                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
-                // a manual retry, or two overlapping bootstraps) is already fetching this
-                // exact hash; skip it here rather than spawn a second downloadBlob into the
-                // SAME dest file (delete-then-create-then-stream), whose partial state the
-                // other pass's existsAsFile()/size check could otherwise observe.
-                if (inFlightStems_.count (stem) > 0) continue;
+                // Adversarial-review finding #3 (originally a MoshOps-local, message-
+                // thread-only set) — a concurrent pass is already fetching this exact
+                // hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state
+                // the other pass's existsAsFile()/size check could otherwise observe.
+                // SHOULD-FIX (PR-2 review): this registry now lives on mpSession_
+                // (thread-safe, mutex-guarded) instead of a MoshOps-local set, because
+                // the transfer worker's OWN prefetch (MultiplayerSession::prefetchAudioRefs,
+                // a DIFFERENT OS thread) can want the SAME hash concurrently — a
+                // message-thread-only set couldn't see across that boundary.
+                // claimStem() atomically tests-and-claims: a false here means someone
+                // else (this same scan's earlier duplicate, or the worker thread) has
+                // it, so skip rather than add it to `missing` at all. A null mpSession_
+                // can't claim anything -- fall through and add it anyway (the download
+                // attempt below safely no-ops on a null session).
+                if (mpSession_ != nullptr && ! mpSession_->claimStem (stem)) continue;
 
                 missing.add ({ c->itemID.toString(), stem,
                               resolved.getFileExtension().removeCharacters ("."), resolved });
             }
     }
-
-    for (auto& m : missing)
-        inFlightStems_.insert (m.hash);
 
     // Runs on the message thread: re-resolve each clip by id (it may have been
     // removed/undone since the scan above — findClip returns nullptr, skipped), write
@@ -3228,7 +3301,7 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 ++failed;
                 stillMissing.add (m.hash);
             }
-            inFlightStems_.erase (m.hash);
+            if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
         }
         if (fetched > 0)
             emitSnapshotInvalidated();
@@ -3246,26 +3319,31 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
 
     // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
     // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
-    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
-    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
-    // round-trip runs on the background thread; results land back via callAsync.
+    // The clip lookup + sourceMediaChanged()/emitSnapshotInvalidated() are message-
+    // thread-only, so only the network round-trip runs on the background thread;
+    // results land back via callAsync. releaseStem() is thread-safe (SHOULD-FIX, PR-2
+    // review), so each item's claim is released right on the background thread,
+    // immediately after its own download attempt — shorter hold time than batching
+    // every release into the final callAsync.
     std::thread ([this, missing]
     {
         if (mpSession_ == nullptr || ! mpSession_->active())
         {
             // Bailed before attempting anything -- still release the in-flight marks
-            // (on the message thread) so a later pass isn't permanently skipped.
-            juce::MessageManager::callAsync ([this, missing]
-            {
-                for (auto& m : missing) inFlightStems_.erase (m.hash);
-            });
+            // so a later pass isn't permanently skipped.
+            for (auto& m : missing)
+                if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
             return;
         }
 
         struct Result { juce::String clipId, hash; bool ok; };
         juce::Array<Result> results;
         for (auto& m : missing)
-            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+        {
+            const bool got = mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile();
+            results.add ({ m.clipId, m.hash, got });
+            mpSession_->releaseStem (m.hash);
+        }
 
         juce::MessageManager::callAsync ([this, results]
         {
@@ -3278,7 +3356,6 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                         w->sourceMediaChanged();
                     ++fetched;
                 }
-                inFlightStems_.erase (r.hash);
             }
             if (fetched > 0)
                 emitSnapshotInvalidated();
@@ -8856,6 +8933,7 @@ juce::var MoshOps::cmdNewProject (const juce::var& args)
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine ("new_project", args, true, {}, false);   // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8881,6 +8959,7 @@ juce::var MoshOps::openProjectFile (const File& file, const juce::var& args, con
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed
     logLine (commandName, args, true, {}, false);  // replaces the Edit — not undoable
     emitSnapshotInvalidated();
 
@@ -8945,6 +9024,7 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     // MoshEngine, a prime-directive seam) and after the engine consolidation.
     mosh::consolidateRenderArtifacts (eng.edit().state, eng.editFile().getParentDirectory());
     eng.save();
+    refreshMpStemDir();   // PR-2: eng.editFile() just changed (saveProjectAs adopts the new backing file)
     emitSnapshotInvalidated();
 
     auto* data = new DynamicObject();

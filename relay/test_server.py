@@ -418,6 +418,70 @@ def test_blob_delay_hook_env_slows_raw_put(monkeypatch):
         httpd.server_close()
 
 
+def test_blob_fail_hook_env_rejects_raw_put_for_matching_ext(monkeypatch):
+    # Adversarial-review BLOCKER (PR-2): MultiplayerClient::uploadBlob's raw PUT never
+    # checked the HTTP status code -- createInputStream() returns a NON-null stream
+    # for 4xx/5xx on macOS (only a total connection failure is null), so a REJECTED
+    # upload (quota, auth, a transient 5xx) was reported back to the caller as a
+    # FALSE SUCCESS. This hook lets a selftest force that exact scenario
+    # deterministically. Ext-scoped like MOSH_RELAY_BLOB_CORRUPT (safe to leave
+    # armed for a whole gate run against a reserved ext without breaking every other
+    # test's real ".wav" upload).
+    import server as srv
+    monkeypatch.setenv("MOSH_RELAY_BLOB_FAIL", "failtest")
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "99" * 32
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "failtest"})
+        put_url = body["url"]
+        status, _b = _put(put_url, "", b"some-stem-bytes")
+        assert status == 503
+        # And the store must NOT have accepted it -- get-url itself 404s ("not_found"),
+        # not a phantom success (get-url refuses to even mint a URL for a missing blob).
+        status2, body2 = _post(base, "/mp/blob/get-url", {"code": code, "peerId": "b", "hash": h, "ext": "failtest"})
+        assert status2 == 404
+        assert body2.get("error") == "not_found"
+    finally:
+        monkeypatch.delenv("MOSH_RELAY_BLOB_FAIL", raising=False)
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_blob_fail_hook_leaves_other_extensions_untouched(monkeypatch):
+    # Same safety property as MOSH_RELAY_BLOB_CORRUPT: a real stem (ext="wav") must
+    # upload successfully while the hook is armed for a different, reserved ext.
+    import server as srv
+    monkeypatch.setenv("MOSH_RELAY_BLOB_FAIL", "failtest")
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "9a" * 32
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+        status, _b = _put(body["url"], "", b"clean-stem-bytes-unaffected")
+        assert status == 200
+    finally:
+        monkeypatch.delenv("MOSH_RELAY_BLOB_FAIL", raising=False)
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_blob_fail_hook_off_by_default(relay):
+    # Strictly opt-in, like the corruption hook -- an accidental default-on would
+    # break every real upload in every other test in this file.
+    code = _room(relay)
+    h = "9b" * 32
+    _, body = _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    status, _b = _put(body["url"], "", b"normal-upload-bytes")
+    assert status == 200
+
+
 def test_blob_corrupt_hook_env_flips_raw_get_bytes_for_matching_ext(monkeypatch):
     # Adversarial-review should-fix (PR-1): nothing previously proved the client-side
     # SHA-256 integrity check (MultiplayerClient::downloadBlob) actually rejects a

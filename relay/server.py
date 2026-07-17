@@ -358,6 +358,17 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                 return data
             return bytes (b ^ 0xFF for b in data)
 
+        def _should_fail_put(self, key):
+            # Adversarial-review BLOCKER test hook (PR-2): MOSH_RELAY_BLOB_FAIL=<ext>
+            # makes the raw PUT for keys ending in ".<ext>" fail with a 503 instead of
+            # storing the bytes -- simulates a rejected upload (quota/auth/a transient
+            # 5xx) so a selftest can prove MultiplayerClient::uploadBlob actually checks
+            # the HTTP status instead of treating "got a stream back" as success (JUCE's
+            # createInputStream() returns non-null for 4xx/5xx on macOS). Ext-scoped like
+            # MOSH_RELAY_BLOB_CORRUPT so it's safe to leave armed for the whole gate run.
+            target_ext = os.environ.get("MOSH_RELAY_BLOB_FAIL") or ""
+            return bool(target_ext) and key.endswith("." + target_ext)
+
         def do_GET(self):
             u = urlparse(self.path)
             # The /mp/events long-poll is the designed steady-state heartbeat (~4/s per
@@ -417,6 +428,8 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                 self.close_connection = True
                 return self._send(413, {"error": str(e)})
             self._blob_delay()
+            if self._should_fail_put(key):
+                return self._send(503, {"error": "forced_failure_for_test"})
             try:
                 state.blobs.put(key, data)
             except BodyTooLarge as e:

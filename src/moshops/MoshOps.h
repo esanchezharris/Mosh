@@ -135,6 +135,17 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // PR-2 — shared content-addressing/serialize body (no upload) for the whole
+    // project; cmdMpSerializeProject uploads synchronously right after (kept
+    // behavior-compatible with direct-call tests), serializeProjectForBootstrapAnswer
+    // does not (the live-session bootstrap-answer path's transfer worker uploads
+    // instead — see MultiplayerSession::pollLoop's "bootstrap_request" handling).
+    juce::var contentAddressWholeProjectNoUpload();
+    juce::var serializeProjectForBootstrapAnswer();
+    // Snapshot the directory stem transfers resolve `audio/by-hash/` under into
+    // mpSession_ (PR-2) — call whenever eng.editFile() can change (construction,
+    // new_project/open_project/save_as) or a session starts/joins.
+    void refreshMpStemDir();
     // P4 self-heal (PR-1) — every uploadBlob/downloadBlob result above is ignored at
     // its call site, so a single transient HTTP failure otherwise strands a clip's
     // audio `sourceMissing` forever (the only prior recovery was the host re-committing
@@ -609,16 +620,12 @@ private:
     LockManager lockManager_;          // MP-001 — multiplayer lock guard state
     std::unique_ptr<MultiplayerSession> mpSession_;   // MP-001 — live session + poll loop
     bool applyingRemote_ = false;      // MP-001 — true while applying a peer's structural op
-    // P4 self-heal (adversarial-review finding #3) — hashes cmdMpFetchMissingStems is
-    // CURRENTLY fetching (sync or async). A concurrent pass (a resync tick racing a
-    // manual retry, or two overlapping bootstraps) skips a hash already in here rather
-    // than spawning a second downloadBlob into the SAME dest file, whose delete-then-
-    // create-then-stream could otherwise let one pass observe the other's in-flight
-    // (partial) bytes. Message-thread-only: every insert/erase happens either inline
-    // (the wait:true/empty-missing sync path) or inside the async path's
-    // MessageManager::callAsync completion — never from the background std::thread
-    // itself, so no lock is needed.
-    std::set<juce::String> inFlightStems_;
+    // P4 self-heal (adversarial-review finding #3) in-flight-hash registry: moved to
+    // mpSession_->claimStem()/releaseStem() (SHOULD-FIX, PR-2 review) — a MoshOps-
+    // local, message-thread-only std::set couldn't see the transfer worker's OWN
+    // concurrent prefetch (MultiplayerSession::prefetchAudioRefs, a different OS
+    // thread), so the registry now lives on MultiplayerSession itself (thread-safe,
+    // mutex-guarded) where both callers can share it. See MultiplayerSession.h.
     juce::int64 seq = 0;
     juce::File  logFile;
     juce::CriticalSection commandLogCacheLock_;

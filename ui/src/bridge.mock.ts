@@ -1955,3 +1955,12 @@ export function __resetMockForTests(): void {
   inBatch = false;
   cmdLog.length = 0;
 }
+
+// Test-only: inject a synthetic "mosh_event" of the given type/payload straight
+// through the mock's listener set, exactly as the native bridge would deliver one.
+// Used to cover reducers for events the mock backend doesn't otherwise simulate a
+// realistic end-to-end trigger for (e.g. mp_commit_done — the native
+// MultiplayerSession::emitCommitDone path has no mock-side upload to fail).
+export function __emitMockEvent(type: string, payload?: unknown): void {
+  emit(type, payload);
+}
