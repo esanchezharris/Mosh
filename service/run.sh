@@ -12,11 +12,36 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if [[ -n "${MOSH_SERVICE_LOG:-}" ]]; then
-  mkdir -p "$(dirname "$MOSH_SERVICE_LOG")" 2>/dev/null || true
-  exec >> "$MOSH_SERVICE_LOG" 2>&1
-  printf '[run.sh] cwd=%s\n' "$PWD"
+# Service stderr/stdout default to a file under ~/Library/Mosh/logs (mkdir'd here) so
+# a spawn/crash/import-error is diagnosable after the fact (collect-diagnostics.sh
+# picks this up); MOSH_SERVICE_LOG still overrides the path when explicitly set.
+# Simple size cap: rotate the single previous file once past ~20 MB so a long-lived
+# install doesn't grow service.log unbounded.
+export MOSH_SERVICE_LOG="${MOSH_SERVICE_LOG:-$HOME/Library/Mosh/logs/service.log}"
+mkdir -p "$(dirname "$MOSH_SERVICE_LOG")" 2>/dev/null || true
+
+# Rotation race: two run.sh instances can start near-simultaneously (a stale-service
+# reap racing a fresh spawn, or a second launcher on the same machine) and both decide
+# to rotate the same oversized log, clobbering each other's ".old". The PID handshake
+# file (GenerativeJobManager's C2 reap mechanism: "<pid> <port>") tells us whether a
+# service is ALREADY alive; if so, that instance owns the log lifecycle and we skip
+# rotating out from under it — rotation is a nice-to-have size cap, not
+# correctness-critical, so skipping it in this rare race is the safe call. A missing or
+# stale (dead-PID) handshake file means no one else is alive, so rotating is safe.
+_other_instance_alive() {
+  local pidfile="$HOME/Library/Mosh/service.pid" live_pid
+  [[ -f "$pidfile" ]] || return 1
+  live_pid="$(awk '{print $1}' "$pidfile" 2>/dev/null)"
+  [[ -n "$live_pid" ]] && kill -0 "$live_pid" 2>/dev/null
+}
+if [[ -f "$MOSH_SERVICE_LOG" ]] && ! _other_instance_alive; then
+  SZ="$(stat -f%z "$MOSH_SERVICE_LOG" 2>/dev/null || stat -c%s "$MOSH_SERVICE_LOG" 2>/dev/null || echo 0)"
+  if [[ "$SZ" -gt $((20 * 1024 * 1024)) ]]; then
+    mv -f "$MOSH_SERVICE_LOG" "$MOSH_SERVICE_LOG.old" 2>/dev/null || true
+  fi
 fi
+exec >> "$MOSH_SERVICE_LOG" 2>&1
+printf '[run.sh] cwd=%s\n' "$PWD"
 
 REQUESTED_MOSH_ENABLE_SA3="${MOSH_ENABLE_SA3:-}"
 REQUESTED_MOSH_SERVICE_PYTHON="${MOSH_SERVICE_PYTHON:-}"

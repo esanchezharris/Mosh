@@ -1,0 +1,51 @@
+Mosh SA3 guest-setup vendor pin
+================================
+
+Upstream repo:   https://github.com/Stability-AI/stable-audio-3
+Pinned commit:   636f906fc0ee54b3f06edf974dc7d3aa99d6841b (short: 636f906)
+License:         MIT, Copyright (c) 2026 Stability AI — verbatim copy kept alongside
+                 this file at service/sa3/guest/LICENSE (MIT requires retaining the
+                 copyright + permission notice; we ship it rather than just cite it).
+
+What lives in this directory
+-----------------------------
+Exactly the 2 files the owner's ~/AI/stable-audio-3 checkout carries as uncommitted
+modifications against the pinned commit above (+89 lines total, verified via
+`git status`/`git diff --stat` in that checkout on 2026-07-16). These are
+OWNER-MODIFIED copies, not stock upstream files:
+
+  dit_mlx_medium.py   <- optimized/mlx/models/defs/dit_mlx_medium.py  (in the checkout)
+  sa3_mlx.py           <- optimized/mlx/scripts/sa3_mlx.py             (in the checkout)
+
+(The left column is the filename as vendored here; the right column is the relative
+destination path inside a checkout of the upstream repo — that's where
+scripts/playtest/setup-guest.sh overlays them back onto.)
+
+Why they're vendored (not just re-downloaded from upstream)
+-------------------------------------------------------------
+`setup-guest.sh --sa3` downloads the stock MIT-licensed upstream source straight from
+GitHub at the pinned commit — nothing about that step is special-cased. But a STOCK
+checkout of these 2 files silently no-ops Mosh's Tier-B colour rack: engine.py
+(service/sa3/engine.py:237-240) reads steering-hook attributes on
+`ContinuousTransformer` — `_dump` / `_steer_layer` / `_steer_alpha` / `_steer_vec` /
+`_steers` — that only exist in the owner's modified DiT/CLI. Without them the ASTD
+colour controls (grit/epic/brightness/...) would silently do nothing on a guest
+machine, which is a confusing, hard-to-diagnose gap for a playtest. So setup-guest.sh
+downloads stock upstream, then overlays THESE two owner-modified files on top before
+building the venv — reproducing the exact local checkout the host runs, without the
+host hand-copying files over a call.
+
+What changed vs. stock 636f906 (for context, not enforced by the overlay)
+----------------------------------------------------------------------------
+- dit_mlx_medium.py: adds steering-hook attributes to `ContinuousTransformer.__init__`
+  (`_dump`, `_steer_layer`, `_steer_alpha`, `_steer_vec`, `_steers`) plus the
+  read/apply sites in `ContinuousTransformer.__call__` (activation tap + residual-add
+  steering + multi-steer composition). All default to no-ops (None / -1 / 0.0 / []),
+  so a caller that never sets them gets byte-identical stock behaviour.
+- sa3_mlx.py: CLI wiring for the same feature — `--dump-activations`, `--dump-step`,
+  `--steer-layer`, `--steer-alpha`, `--steer-vec` flags, and the code that sets the
+  `ContinuousTransformer` attributes above from those flags before sampling.
+
+Nothing else from the stable-audio-3 repo is redistributed here. Everything else
+(model code, weights, the rest of the MLX port) comes from the upstream GitHub
+tarball at setup time, per the MIT license's own terms.
