@@ -58,14 +58,34 @@ void TransferQueue::workerLoop()
             queue_.pop_front();
         }
 
-        if (job.prefetch)
-            job.prefetch();   // may block (HTTP/file I/O) -- this thread exists so nothing else does
+        // An exception escaping this std::thread's entry function calls std::terminate()
+        // and takes down the whole app. JUCE's net/file API is non-throwing by
+        // convention, but this queue is long-lived infra built to make transfers MORE
+        // robust -- a single job that somehow throws must fail like any other failed
+        // job, not crash the process. On throw we skip apply (the work is incomplete,
+        // nothing coherent to hand the message thread).
+        bool prefetchOk = true;
+        try
+        {
+            if (job.prefetch)
+                job.prefetch();   // may block (HTTP/file I/O) -- this thread exists so nothing else does
+        }
+        catch (const std::exception& e)
+        {
+            prefetchOk = false;
+            juce::Logger::writeToLog ("TransferQueue: prefetch threw, job dropped: " + juce::String (e.what()));
+        }
+        catch (...)
+        {
+            prefetchOk = false;
+            juce::Logger::writeToLog ("TransferQueue: prefetch threw (non-std), job dropped");
+        }
 
         // If abort() fired WHILE this job's prefetch was running, its own
         // isAborting() check is expected to have bailed it out early -- the work
         // is incomplete/interrupted, so don't hand its apply stage to the message
-        // thread (nothing coherent to apply).
-        if (! aborting_.load() && job.apply && dispatch_)
+        // thread (nothing coherent to apply). Same reasoning for a prefetch that threw.
+        if (prefetchOk && ! aborting_.load() && job.apply && dispatch_)
             dispatch_ (job.apply);
 
         completed_.fetch_add (1);

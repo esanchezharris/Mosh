@@ -232,6 +232,15 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob, co
             if (! client_.uploadBlob (h, e, stemFiles[i], [this] { return transferAborting(); }))
                 { *ok = false; if (err->isEmpty()) *err = "upload failed"; }
         }
+        // PR-2 review: after the (abort-aware) upload loop, bail before the publish +
+        // releaseLock round-trips if a leave/teardown fired -- otherwise leaveSession()'s
+        // transferQueue_.reset() join() waits on them. Skipping releaseLock on abort is
+        // safe: leaveSession() calls client_.leave() straight after, and the relay's
+        // /mp/leave releases every lock this peer holds. (Residual: an abort landing
+        // *inside* the sub-second publish/releaseLock call still runs to its timeout --
+        // bounded, and the same class as the pre-existing client_.leave() call.)
+        if (transferAborting())
+            { *ok = false; if (err->isEmpty()) *err = "aborted"; return; }
         int seq = -1;
         if (*ok)
             seq = client_.publish (msgVar);
