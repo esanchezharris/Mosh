@@ -32,6 +32,8 @@ target_sources(MoshTests PRIVATE
     test_generative_jobmanager.cpp
     test_rave_engine.cpp
     test_stem_export.cpp
+    test_brain_proxy.cpp
+    ${CMAKE_SOURCE_DIR}/src/brain/BrainProxy.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
