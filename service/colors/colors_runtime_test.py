@@ -84,6 +84,46 @@ two = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "brightne
 check("two DISTINCT colors → two steers (dedup does not touch unique names)",
       len(two) == 2, f"got {len(two)} steers")
 
+# ── Orthogonalization opt-in (default OFF ⇒ byte-identical) ────────────────────
+import numpy as np  # noqa: E402
+
+
+def _cos(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+# futuristic + tension share peak_layer 4 and are correlated (~51° / cos 0.62).
+_pair = [{"name": "futuristic", "value": 100}, {"name": "tension", "value": 100}]
+_base = runtime.resolve_steers(_pair)                        # default: orthogonalize=False
+_orth = runtime.resolve_steers(_pair, orthogonalize=True)
+
+check("default keeps the correlated same-layer pair as the RAW vecs (not orthogonalized)",
+      len(_base) == 2 and abs(_cos(_base[0][2], _base[1][2])) > 0.5,
+      f"cos={abs(_cos(_base[0][2], _base[1][2])):.3f}")
+check("orthogonalize=True makes the same-layer pair orthogonal",
+      len(_orth) == 2 and abs(_cos(_orth[0][2], _orth[1][2])) < 1e-4,
+      f"cos={abs(_cos(_orth[0][2], _orth[1][2])):.2e}")
+check("orthogonalize preserves each vec's L2 norm",
+      all(abs(np.linalg.norm(o[2]) - np.linalg.norm(b[2])) / np.linalg.norm(b[2]) < 1e-4
+          for o, b in zip(_orth, _base)))
+check("orthogonalize leaves alphas + layers untouched",
+      [(o[0], round(o[1], 6)) for o in _orth] == [(b[0], round(b[1], 6)) for b in _base])
+
+# grit (layer 14) is solo across the rack — even orthogonalize=True can't change a
+# single-per-layer vec (no same-layer partner to de-correlate against).
+_solo = runtime.resolve_steers([{"name": "grit", "value": 100}], orthogonalize=True)
+_solo_off = runtime.resolve_steers([{"name": "grit", "value": 100}])
+check("a solo colour is unchanged under orthogonalize=True",
+      len(_solo) == 1 and np.array_equal(_solo[0][2], _solo_off[0][2]))
+
+# grit (L14) + brightness (L4) live on DIFFERENT layers → each solo-per-layer → untouched.
+_cross = runtime.resolve_steers(
+    [{"name": "grit", "value": 100}, {"name": "brightness", "value": 100}], orthogonalize=True)
+_cross_off = runtime.resolve_steers(
+    [{"name": "grit", "value": 100}, {"name": "brightness", "value": 100}])
+check("a cross-layer pair is untouched (orthogonalization is same-layer only)",
+      len(_cross) == 2 and all(np.array_equal(a[2], b[2]) for a, b in zip(_cross, _cross_off)))
+
 # ── Determinism ───────────────────────────────────────────────────────────────
 again = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "grit", "value": 100}])
 check("resolve_steers is deterministic",

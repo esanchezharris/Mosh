@@ -73,7 +73,11 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     seed = int(params.get("seed", 0))
     colors = params.get("colors") or []
     lab = bool(params.get("lab", False))
-    steers = CR.resolve_steers(colors, lab=lab)             # validated / clamped / composed
+    # MOSH_COLOR_ORTHO (experiment, default OFF ⇒ byte-identical): de-correlate same-layer
+    # colour stacks. Owner-gated by ear via the A/B harness before it can become a default;
+    # promoting it to a real toggle later MUST fold the flag into the cache fingerprint.
+    ortho_on = os.environ.get("MOSH_COLOR_ORTHO", "").strip().lower() not in ("", "0", "false", "no")
+    steers = CR.resolve_steers(colors, lab=lab, orthogonalize=ortho_on)   # validated / clamped / composed
 
     eng = E.get_engine()                                    # singleton; first call loads the model
 

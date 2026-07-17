@@ -65,8 +65,14 @@ def _ui_to_alpha(value_0_100: float, astd_max: float, more_sign: float, lab: boo
     return raw * float(more_sign)
 
 
-def resolve_steers(colors, lab: bool = False):
-    """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...]."""
+def resolve_steers(colors, lab: bool = False, orthogonalize: bool = False):
+    """colors: [{name, value 0-100}, ...]. Returns [(layer, alpha, vec[1536]), ...].
+
+    orthogonalize (opt-in, default OFF ⇒ byte-identical): de-correlate the vecs of the
+    ACTIVE colours that SHARE a peak_layer (they add linearly in the residual stream, so
+    correlated same-layer axes mud each other). A solo-per-layer colour is never touched
+    ("separate"); only ≥2-in-a-layer stacks are orthogonalized ("together"). See ortho.py.
+    """
     reg = registry()
     picked, seen = [], set()                                             # dedup by name (keep first)
     for c in (colors or []):                                            # then ≤3, drop unknowns
@@ -95,4 +101,19 @@ def resolve_steers(colors, lab: bool = False):
         if mag_cap is not None:                               # multi-color backoff
             a = max(-mag_cap, min(mag_cap, a))
         steers.append((int(e["peak_layer"]), float(a), _vec(c["name"], e["vec_path"])))
+
+    if orthogonalize and len(steers) > 1:
+        from collections import defaultdict
+
+        from . import ortho
+        groups: dict[int, list[int]] = defaultdict(list)      # peak_layer → indices into steers
+        for idx, (layer, _a, _v) in enumerate(steers):
+            groups[layer].append(idx)
+        for idxs in groups.values():
+            if len(idxs) < 2:
+                continue                                      # solo-per-layer → untouched
+            ov = ortho.orthogonalize_group([steers[i][2] for i in idxs])
+            for k, i in enumerate(idxs):
+                layer_i, alpha_i, _ = steers[i]               # keep layer + alpha; swap the vec
+                steers[i] = (layer_i, alpha_i, ov[k])
     return steers
