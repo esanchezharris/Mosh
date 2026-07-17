@@ -343,7 +343,7 @@ function RhymeTool() {
         </select>
         <button className="v2-btn" data-testid="rhyme-go" disabled={busy || !word.trim()} onClick={() => void lookup()}>{busy ? "…" : "Rhymes"}</button>
       </div>
-      {error && <span className="rack-empty" data-testid="rhyme-error">{error}</span>}
+      {error && <span className="rack-empty" role="alert" data-testid="rhyme-error">{error}</span>}
       {results && (
         <ul className="v2-rhyme-results" data-testid="rhyme-results">
           {results.length === 0 ? <li className="rack-empty">no rhymes found</li>
