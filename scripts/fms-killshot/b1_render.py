@@ -45,6 +45,25 @@ from soulx.score import phrase_windows       # noqa: E402
 ROOT = v3.ROOT
 B1 = os.path.join(ROOT, "asserted-proof", "mechanism", "b1")
 RENDERS = os.path.join(B1, "renders")
+TEARDOWN_PY = os.path.expanduser("~/Library/Mosh/venvs/teardown/bin/python")
+VIZ = os.path.join(REPO, "service", "viz", "waveform_compare.py")
+SCORE_JSON = os.path.join(ROOT, "fresh-render", "audit", "u2-full-score.json")
+
+
+def _panel(render_wav, out_png, t0, t1, label):
+    """take-vs-render waveform+spectrogram panel via the teardown venv (PIL). Best-effort:
+    a missing venv/PIL leaves the audio-only card intact."""
+    import subprocess
+    if not (os.path.isfile(TEARDOWN_PY) and os.path.isfile(VIZ)):
+        return False
+    cmd = [TEARDOWN_PY, VIZ, v3.TAKE, render_wav, out_png, "--label", label,
+           "--t0", str(round(t0, 2)), "--t1", str(round(t1, 2))]
+    if os.path.isfile(SCORE_JSON):
+        cmd += ["--score", SCORE_JSON]
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=180).returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
 _HANDOFF = os.path.join(ROOT, "asserted-proof", "back-half", "sing-handoff")
 SCORES = {
     "verbatim": os.path.join(_HANDOFF, "scores"),
@@ -203,9 +222,15 @@ def cmd_page() -> int:
             blind = os.path.join(B1, f"{wname}-clip-{lab}.wav")
             os.replace(p, blind)
             labels[wname][lab] = name
+            # blind-labeled take-vs-render panel (waveform + spectrogram) from this arm's
+            # final nsf wav, cropped to the group window; name reveals nothing.
+            png = os.path.join(B1, f"{wname}-clip-{lab}.png")
+            has_png = _panel(finals[name], png, a, b, f"{wname} — clip {lab}")
+            img = (f"<img loading='lazy' src='{html.escape(os.path.basename(png))}'>"
+                   if has_png else "")
             cards += (f"<div class='card'><h2>{html.escape(wname)} — clip {lab}</h2>"
                       f"<audio controls preload='none' "
-                      f"src='{html.escape(os.path.basename(blind))}'></audio></div>")
+                      f"src='{html.escape(os.path.basename(blind))}'></audio>{img}</div>")
         groups_html += f"<h1 class='grp'>{html.escape(wname)}</h1>{cards}"
 
     with open(os.path.join(B1, "b1-labels.json"), "w") as f:
@@ -217,20 +242,30 @@ def cmd_page() -> int:
 <style>
  :root{{color-scheme:dark}}
  body{{margin:0;background:#0f1116;color:#e8ebf3;font:15px/1.45 -apple-system,system-ui,sans-serif}}
- .wrap{{max-width:840px;margin:0 auto;padding:34px 18px 64px}}
+ .wrap{{max-width:1080px;margin:0 auto;padding:34px 18px 64px}}
  .card{{background:#16181f;border:1px solid #252934;border-radius:16px;padding:16px 18px;margin:0 0 16px}}
  h1{{margin:0 0 4px;font-size:24px}} h1.grp{{font-size:18px;margin:22px 0 10px}}
  h2{{margin:0 0 8px;font-size:16px}}
  .sub{{margin:0 0 16px;color:#9097a7;font-size:13px}}
  audio{{width:100%;margin:4px 0 10px}}
+ img{{width:100%;max-width:100%;border-radius:8px;margin-top:6px;display:block}}
+ .note{{background:#152018;border:1px solid #24402c;border-radius:12px;padding:12px 16px;margin:0 0 18px;color:#bfe6c9;font-size:13px}}
 </style></head><body><div class="wrap">
   <h1>B1-lite — duration derivation, blind {"3-way" if len(arms) > 2 else "A/B"}</h1>
+  <p class="note"><b>Squeak fixed.</b> The harsh squeak across every clip was HF imaging
+  from a linear-interpolation resampler (SoulX renders at 24k, upsampled to your 44.1k
+  take) — replaced with a band-limited resampler; spurious 12–20 kHz energy dropped ~30×
+  (0.00375→0.00012, now below the take's own). Each clip carries a <b>take-vs-render
+  waveform + spectrogram panel</b> (top rows = your mumble vs the render on a shared clock;
+  bottom rows = their spectrograms; green ticks = word onsets, grey = phrase edges). The
+  render's high band (top of its spectrogram) should now read dark like the take, not bright.</p>
   <p class="sub">The u2 back half {"three ways" if len(arms) > 2 else "two ways"} (random
   order per group, level-matched; every arm rendered locally through the identical chain:
   MLX → plain-sum assembly → phrase-only alignment → NSF perform). Same words, same
   melody — only the note DURATIONS differ{" (one arm derives at half strength)"
   if len(arms) > 2 else ""}. "full" is the whole passage; the two line groups are focused
-  re-listens of the same renders. Per group: which reads most natural / most human?
+  re-listens of the same renders. First: is the squeak gone? Then per group: which reads
+  most natural / most human, and does the render track your mumble's timing (green ticks)?
   {"Rank the clips per group" if len(arms) > 2 else "Pick one per group"} —
   reply like "full: A, line2: {'A>C>B' if len(arms) > 2 else 'A'}, line1: tie". Do not
   open b1-labels.json until done.</p>
