@@ -96,7 +96,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
       <>
         <div className="v2-nav" data-testid="v2-navigator" />
         <div className="v2-stage">
-          <div className="v2-empty" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>
+          <div className="v2-empty" role="status" aria-live="polite" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>
         </div>
       </>
     );

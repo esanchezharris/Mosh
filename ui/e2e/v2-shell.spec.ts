@@ -439,6 +439,21 @@ test("song navigator: shows bar numbers and click jumps the playhead", async ({ 
   await expect.poll(() => page.getByTestId("v2-time").textContent()).not.toBe("1.1.1");
 });
 
+test("the empty-arrangement placeholder is announced as a live region (role=status)", async ({ page }) => {
+  await bootV2(page);
+  // Reach the empty stage (also shown when the last track is removed) via the dev store
+  // handle — the same pattern e2e/multiplayer.spec.ts uses for a fresh/empty project.
+  await page.evaluate(() => {
+    const store = (window as unknown as { __moshStore?: { getState: () => { snapshot: unknown }; setState: (s: object) => void } }).__moshStore;
+    const snap = store?.getState().snapshot as { tracks?: unknown[] } | null | undefined;
+    if (snap) store?.setState({ snapshot: { ...snap, tracks: [] } });
+  });
+  // The onboarding cue must announce itself, matching its sibling .v2-drop status region.
+  const empty = page.getByTestId("v2-empty");
+  await expect(empty).toBeVisible();
+  await expect(empty).toHaveAttribute("role", "status");
+});
+
 test("the timeline zoom segmented control is grouped with an accessible name (a11y)", async ({ page }) => {
   await bootV2(page);
   // the 8b/16b/Full buttons are mutually-exclusive aria-pressed toggles — group them so a
