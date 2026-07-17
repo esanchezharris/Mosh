@@ -15,6 +15,20 @@ NL_MAX_RECOGNIZABLE = 0.5   # >0.5 stops resembling the source (re-imagine guard
 NL_MIN = 0.01               # <0.01 is a near-identity encode round-trip → not worth a render
 
 
+def clamp_nl(nl: float, lab: bool) -> float:
+    """Authoritative re-imagine noise guard (05 §6). Reject a degenerate sub-NL_MIN value
+    (a near-identity no-op) in BOTH modes. Normal mode clamps to NL_MAX_RECOGNIZABLE (0.5):
+    above it the render stops resembling the source AND the onset prior reasserts as a
+    per-window pulse in whole-clip stitch (measured 2026-07-17). Lab UNLOCKS the raw range
+    (no upper clamp): nl=1.0 == generate-from-scratch (the engine blends
+    `init_lat*(1-nl) + noise*nl`, so at 1.0 the source is fully gone); nl>1.0 is degenerate
+    but the user's call. Kept in lockstep with ui/src/ui/reimagineAmount.ts (NL_MIN/NL_MAX)."""
+    nlv = float(nl)
+    if nlv < NL_MIN:
+        raise ValueError(f"nl={nlv} below {NL_MIN}: degenerate (no audible change)")
+    return nlv if lab else min(nlv, NL_MAX_RECOGNIZABLE)
+
+
 def _wav_meta(path):
     with wave.open(path, "rb") as w:
         return w.getframerate(), w.getnchannels(), w.getnframes()
@@ -96,10 +110,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         nl = p.get("nl", None)
         init_status = "n/a"
         if win_src and nl is not None:
-            nlv = float(nl)
-            if nlv < NL_MIN:
-                raise ValueError(f"nl={nlv} below {NL_MIN}: degenerate (no audible change)")
-            nlv = min(nlv, NL_MAX_RECOGNIZABLE)
+            nlv = clamp_nl(nl, lab)     # 0.5 cap in normal mode, uncapped in Lab
             init_lat, init_status = init_cache.get_or_encode(eng, in_wav)
             eng.reimagine(prompt, seed, init_lat, init_noise_level=nlv, steers=steers, out_wav=out_wav)
             mode = "audio_to_audio"
