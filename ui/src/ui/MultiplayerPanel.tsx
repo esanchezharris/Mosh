@@ -15,6 +15,16 @@ export function MultiplayerPanel() {
   const create = useStore((s) => s.mpCreateSession);
   const join = useStore((s) => s.mpJoinSession);
   const leave = useStore((s) => s.mpLeaveSession);
+  // PR-2 adversarial-review BLOCKER: mp_commit_done had no frontend consumer —
+  // surface a stem-upload failure (commit-on-move or a manual commit) here rather
+  // than let a track silently stay sourceMissing for the peer with no visible sign.
+  const pendingCommits = useStore((s) => s.pendingCommits);
+  const failedCommits = useStore((s) => s.failedCommits);
+  const retryFailedCommit = useStore((s) => s.retryFailedCommit);
+  const tracks = useStore((s) => s.snapshot?.tracks ?? []);
+  const trackNameForLogicalId = (lid: string) => tracks.find((t) => t.logicalId === lid)?.name ?? lid;
+  const pendingCount = Object.keys(pendingCommits).length;
+  const failedEntries = Object.entries(failedCommits);
   // Joining adopts the HOST's project onto this Mac — cmdMpApplyBootstrap drops every
   // local track (non-undoably) before rebuilding from the host's bundle. If this Mac
   // already has real work, gate the join behind a confirm so nobody loses a session by
@@ -98,6 +108,23 @@ export function MultiplayerPanel() {
             </div>
           ))}
         </div>
+        {pendingCount > 0 && (
+          <div className="pop-note" data-testid="mp-commit-pending">
+            Syncing {pendingCount} track{pendingCount === 1 ? "" : "s"}…
+          </div>
+        )}
+        {failedEntries.length > 0 && (
+          <div className="mp-commit-failed" data-testid="mp-commit-failed">
+            {failedEntries.map(([lid, error]) => (
+              <div className="mp-commit-failed-row" key={lid} title={error}>
+                <span>⚠ {trackNameForLogicalId(lid)} failed to sync</span>
+                <button type="button" className="btn" onClick={() => void retryFailedCommit(lid)}>
+                  Retry
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <button className="btn" onClick={() => void leave()}>Leave session</button>
       </div>
     );
