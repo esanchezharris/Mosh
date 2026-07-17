@@ -519,8 +519,10 @@ const COLORS = [
   { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
 ];
 const LORAS = [
-  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental" },
-  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental" },
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb" },
+  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc" },
+  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "" },
 ];
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
@@ -1366,7 +1368,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // SA3 before this field existed) — dev/e2e keep seeing the "SA3" badge, not a spurious
     // "preview" one now that the badge reads /colors' honest field instead of the old proxy.
     case "list_colors": return ok(command, { colors: COLORS, sa3: true });
-    case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
+    // list_loras keeps #343's no-cap shape (maxActive removed per the owner "no cap" directive;
+    // the LorasResponse type no longer carries maxActive, so re-adding it would not typecheck).
+    case "list_loras": return ok(command, { loras: LORAS });
     case "list_rave_models":   // Lane B — RAVE model browser fixture
       return ok(command, { models: [
         { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
@@ -1395,7 +1399,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
       const rl = f.clip.renderLayer;
       if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
-      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []).slice(0, 2);
+      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []);
       if ("prompt" in args) rl.prompt = str(args.prompt, rl.prompt ?? "");
       if ("nl" in args) rl.nl = num(args.nl, rl.nl);
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);
