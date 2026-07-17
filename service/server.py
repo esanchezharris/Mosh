@@ -294,8 +294,17 @@ def _colorrack_hash() -> str:
 # must invalidate cached renders, so it encodes the carve identity.
 if SA3_ENABLED:
     from sa3 import engine as _sa3_engine
+    # Sampler tuning (steps/cfg) is engine-level env config, NOT a per-render creative
+    # param (see stable_audio3_cuda.py / RenderLayer.h) — so it stays OUT of the
+    # fingerprint's per-render params. But a re-tune still changes the audio, so every
+    # sampler knob is folded into service_build here: SA3_STEPS is the MLX knob,
+    # MOSH_SA3_STEPS/MOSH_SA3_CFG are the CUDA knobs (each backend leaves the other's
+    # at its constant default). This is what makes "re-tuning is a service-build class
+    # of change" actually true.
     SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
                      f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
+                     f"+steps{os.environ.get('SA3_STEPS', '8')}-{os.environ.get('MOSH_SA3_STEPS', '30')}"
+                     f"+cfg{os.environ.get('MOSH_SA3_CFG', '7.0')}"
                      f"+lora{_sa3_engine.LORA_APPLY_VERSION}")
 else:
     SERVICE_BUILD = "fake-0.1.0"
@@ -794,12 +803,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
         elif path == "/loras":
             # LoRA rack discovery (drop-in library dir, RAVE_MODEL_DIR posture).
+            # Unbounded rack (no maxActive — owner call); rows carry sha12 + trigger
+            # for the native render fingerprint and the UI tooltip.
             try:
                 from loras import registry as LORA_R
-                self._send(200, {"ok": True, "loras": [
-                    {k: v for k, v in e.items() if k != "file"}
-                    for e in LORA_R.list_loras()
-                ], "maxActive": LORA_R.MAX_ACTIVE})
+                self._send(200, {"ok": True, "loras": LORA_R.descriptor(),
+                                 "dir": LORA_R.lora_dir()})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"loras unavailable: {e}", "loras": []})
         elif path == "/transform_targets":

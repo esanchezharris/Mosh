@@ -36,10 +36,10 @@ public:
 
     /** The available SA3 colours + their ASTD ceilings (GET /colors), for the UI. */
     juce::var listColors();
+    juce::var listLoras();
 
     /** Route B: the transform target list (instruments / models), GET /transform_targets. */
     juce::var listTransformTargets();
-    juce::var listLoras();
 
     /** Submit a render job to a named adapter ("fake" | "stable_audio3").
         Returns the jobId (empty on failure). Non-blocking. */

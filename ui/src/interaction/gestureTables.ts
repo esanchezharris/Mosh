@@ -33,6 +33,9 @@ const MOSH: GestureTable = [
   // trim handles only bite in the move tool (matches the move-tool-only .trim divs);
   // in other tools the edge falls back to the clip's move/select behavior
   { region: "clip.edge", gesture: "drag", tool: "move", action: A.TRIM },
+  // meta (⌘) + edge-drag time-STRETCHES instead of trimming (Ableton warp handle).
+  // More specific than TRIM (same region/tool, +1 modifier) so it wins on ⌘-drag.
+  { region: "clip.edge", gesture: "drag", tool: "move", mods: { meta: true }, action: A.STRETCH },
   // empty lanes
   { region: "empty", gesture: "click", action: A.DESELECT },
   { region: "empty", gesture: "drag", action: A.MARQUEE },

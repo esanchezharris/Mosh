@@ -6,7 +6,7 @@
 // seam) — only Mix/MIDI/Takes are small v2 surfaces. Deep editors (piano-roll, drum,
 // automation) open as floating overlays from here.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
@@ -210,11 +210,20 @@ function WarpTab({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const on = !!clip.autoTempo;
   const mode = clip.stretchMode ?? STRETCH_MODES[0];
+  // Detected-BPM readout (on demand — never auto-run; detection reads the whole source).
+  const [detected, setDetected] = useState<{ bpm: number; confidence: number } | null>(null);
+  const detect = async () => {
+    const r = (await exec("detect_clip_bpm", { clipId: clip.id })) as
+      { ok?: boolean; data?: { bpm?: number; confidence?: number } } | null;
+    if (r?.ok && typeof r.data?.bpm === "number")
+      setDetected({ bpm: r.data.bpm, confidence: r.data.confidence ?? 0 });
+  };
   return (
     <div className="v2-mix v2-warp">
       <div className="v2-mix-btns">
+        {/* Enabling warp auto-detects the loop's BPM and locks it to the grid. */}
         <button className={on ? "on" : ""} aria-pressed={on} data-testid="v2-warp-toggle"
-          onClick={() => void exec("set_clip_warp", { clipId: clip.id, autoTempo: !on })}>Warp</button>
+          onClick={() => void exec("set_clip_warp", { clipId: clip.id, autoTempo: !on, detect: !on })}>Warp</button>
       </div>
       <label className="v2-field">
         <span>Stretch</span>
@@ -223,6 +232,32 @@ function WarpTab({ clip }: { clip: Clip }) {
           {STRETCH_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </label>
+      {/* Progressive disclosure — the "easy warp" helpers appear only once warp is on. */}
+      {on && (
+        <>
+          {typeof clip.sourceBpm === "number" && (
+            <div className="v2-warp-bpm" data-testid="v2-warp-bpm">Source ≈ {clip.sourceBpm.toFixed(1)} BPM</div>
+          )}
+          <div className="v2-mix-btns v2-warp-fit">
+            <button data-testid="v2-warp-detect" onClick={() => void detect()}>Detect BPM</button>
+            {[1, 2, 4, 8].map((b) => (
+              <button key={b} data-testid={`v2-warp-fit-${b}`} title={`Stretch to fill ${b} bar${b > 1 ? "s" : ""}`}
+                onClick={() => void exec("stretch_clip", { clipId: clip.id, bars: b })}>Fit {b}</button>
+            ))}
+            <button data-testid="v2-warp-half" title="Halve the clip length (double-time)"
+              onClick={() => void exec("stretch_clip", { clipId: clip.id, length: clip.length / 2 })}>½×</button>
+            <button data-testid="v2-warp-double" title="Double the clip length (half-time)"
+              onClick={() => void exec("stretch_clip", { clipId: clip.id, length: clip.length * 2 })}>2×</button>
+          </div>
+          {detected && (
+            <div className="v2-warp-detected" data-testid="v2-warp-detected">
+              Detected {detected.bpm.toFixed(1)} BPM ({Math.round(detected.confidence * 100)}%)
+              <button data-testid="v2-warp-apply"
+                onClick={() => void exec("set_clip_warp", { clipId: clip.id, autoTempo: true, sourceBpm: detected.bpm })}>Apply</button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

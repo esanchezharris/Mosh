@@ -84,6 +84,34 @@ two = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "brightne
 check("two DISTINCT colors → two steers (dedup does not touch unique names)",
       len(two) == 2, f"got {len(two)} steers")
 
+# ── Time-scheduled steering: the "sustain" color carries an envelope ──────────
+assert "sustain" in REG, "test needs the committed 'sustain' color"
+SUS_LAYER = int(REG["sustain"]["peak_layer"])
+
+# Default (with_envelopes=False): 3-tuples, BYTE-IDENTICAL to before (existing callers).
+sus3 = runtime.resolve_steers([{"name": "sustain", "value": 100}])
+check("default resolve_steers stays 3-tuples (backward-compatible)",
+      len(sus3) == 1 and len(sus3[0]) == 3, f"tuple len={len(sus3[0]) if sus3 else 0}")
+check("sustain lands a steer on its peak_layer", sus3 and sus3[0][0] == SUS_LAYER)
+check("sustain alpha within its ASTD ceiling",
+      sus3 and abs(sus3[0][1]) <= float(REG["sustain"]["astd_max"]) + 1e-6)
+
+# with_envelopes=True: 4-tuples; sustain's 4th element is its hold envelope.
+sus4 = runtime.resolve_steers([{"name": "sustain", "value": 100}], with_envelopes=True)
+check("with_envelopes → 4-tuple", sus4 and len(sus4[0]) == 4, f"len={len(sus4[0]) if sus4 else 0}")
+check("sustain envelope is the hold spec",
+      sus4 and isinstance(sus4[0][3], dict) and sus4[0][3].get("kind") == "hold",
+      f"env={sus4[0][3] if sus4 else None}")
+
+# A color WITHOUT an envelope (grit) → 4th element None (uniform steer).
+grit4 = runtime.resolve_steers([{"name": "grit", "value": 100}], with_envelopes=True)
+check("non-envelope color → 4th element None", grit4 and grit4[0][3] is None,
+      f"env={grit4[0][3] if grit4 else '—'}")
+
+# with_envelopes must not change layer/alpha vs the default path.
+check("with_envelopes leaves (layer, alpha) identical to default",
+      sus4 and sus3 and sus4[0][0] == sus3[0][0] and abs(sus4[0][1] - sus3[0][1]) < 1e-9)
+
 # ── Determinism ───────────────────────────────────────────────────────────────
 again = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "grit", "value": 100}])
 check("resolve_steers is deterministic",

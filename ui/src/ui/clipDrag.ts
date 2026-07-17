@@ -20,13 +20,24 @@ type Exec = (command: string, args?: Record<string, unknown>) => Promise<unknown
 const rejected = (r: unknown): boolean => !(r as { ok?: boolean } | null)?.ok;
 
 export function commitClipDrag(
-  kind: "move" | "trim-l" | "trim-r",
+  kind: "move" | "trim-l" | "trim-r" | "stretch",
   preview: DragPos | null,
   origStart: number,
   clipId: string,
   exec: Exec,
   setPreview: (p: DragPos | null) => void,
 ): void {
+  if (kind === "stretch") {
+    // Time-stretch (warp) to the dragged length instead of trimming the source.
+    if (preview && preview.length > 0) {
+      void exec("stretch_clip", { clipId, length: preview.length }).then((r) => {
+        if (rejected(r)) setPreview(null); // rejected → revert the stretch preview
+      });
+    } else {
+      setPreview(null);
+    }
+    return;
+  }
   if (kind === "move") {
     if (preview && Math.abs(preview.start - origStart) > 1e-4) {
       void exec("move_clip", { clipId, start: preview.start }).then((r) => {

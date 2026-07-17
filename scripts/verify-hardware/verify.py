@@ -35,13 +35,15 @@ GOLDEN_MANIFEST = GOLDEN_DIR / "manifest.json"
 def find_binary(explicit=None):
     if explicit:
         return Path(explicit)
-    for c in [
+    # "newest local build" for real: a stale Debug tree must not shadow a fresh
+    # Release rebuild (it silently verified 6-day-old code once — pick by mtime).
+    candidates = [c for c in [
         REPO / "build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh",
         REPO / "build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
         Path("/Applications/Mosh.app/Contents/MacOS/Mosh"),
-    ]:
-        if c.exists():
-            return c
+    ] if c.exists()]
+    if candidates:
+        return max(candidates, key=lambda c: c.stat().st_mtime)
     sys.exit("Mosh binary not found — build it (./run-mosh.sh build) or pass --bin")
 
 
@@ -831,6 +833,7 @@ def main():
     ap.add_argument("--bin", help="path to the Mosh binary (default: newest local build)")
     ap.add_argument("--sa3", action="store_true", help="also run the SA3 generative-transform check (needs the service)")
     ap.add_argument("--rave", action="store_true", help="also run the real RAVE transform-path check (needs the transform venv — setup-transform.sh)")
+    ap.add_argument("--lora", action="store_true", help="also run the LoRA-rack real-merge check (needs the SA3 service + a lab adapter — see lora_check.py)")
     ap.add_argument("--rave-insert", action="store_true", help="also run the real-time RAVE insert offline-render check (needs an anira build + the transform venv)")
     ap.add_argument("--gate", action="store_true", help="also enforce the golden-audio checksum baselines (pre-merge gate)")
     ap.add_argument("--update-golden", action="store_true", help="regenerate the golden baselines from this run (intentional DSP/adapter change)")
@@ -852,6 +855,13 @@ def main():
     if args.sa3:
         from sa3_check import check_sa3_transform   # noqa: lazy import, optional
         r = check_sa3_transform(ctx, ART, run_script, stats, diff_rms, failed_commands)
+        rows.append(r)
+        print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
+        print(f"         {json.dumps(r['detail'])}")
+
+    if args.lora:
+        from lora_check import check_lora_rack   # noqa: lazy import, optional
+        r = check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands)
         rows.append(r)
         print(f"  [{'PASS' if r['pass'] else 'FAIL'}] {r['check']}")
         print(f"         {json.dumps(r['detail'])}")

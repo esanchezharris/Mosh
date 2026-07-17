@@ -3,6 +3,7 @@
 #include "moshops/MoshOps.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
+#include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
@@ -500,6 +501,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Same pin for the FMS sing adapter: a machine with MOSH_SOULX_SSH_HOST + an enrolled
     // voice configured must still run the deterministic fake legato-beep backend here.
     mosh::setEnvVar ("MOSH_ENABLE_SOULX", "0");
+    // LoRA rack double lock: the fake path never consults the registry (names key the
+    // fingerprint directly), but pin the kill switch AND an empty library dir anyway so
+    // the user's real ~/Library/Mosh/loras can never leak into a hermetic run.
+    mosh::setEnvVar ("MOSH_ENABLE_LORAS", "0");
+    {
+        auto emptyLoraDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("mosh-selftest-loras-empty");
+        emptyLoraDir.createDirectory();
+        mosh::setEnvVar ("MOSH_LORA_DIR", emptyLoraDir.getFullPathName().toRawUTF8());
+    }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
@@ -1757,14 +1768,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lr4 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
         check (lr4["data"].getProperty ("cache", var()).toString() == "miss", "clearing the LoRA rack -> cache MISS");
 
-        // The command clamps to <=2 entries (compose limit).
+        // The rack is UNBOUNDED and UNCLAMPED (owner call — no budget rule): all
+        // entries stick in order, and value > 100 (deliberate overdrive) survives.
         Array<var> sel3;
+        int v3 = 50;
         for (auto* nm : { "a", "b", "c" })
-        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", 50); sel3.add (var (lo)); }
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", v3); sel3.add (var (lo)); v3 += 40; }
         cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel3) }}));
         { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
           auto* larr = lv.getArray();
-          check (larr != nullptr && larr->size() == 2, "LoRA rack clamps to two entries"); }
+          check (larr != nullptr && larr->size() == 3
+                 && larr->getReference (0).getProperty ("name", var()).toString() == "a"
+                 && larr->getReference (2).getProperty ("name", var()).toString() == "c",
+                 "LoRA rack is unbounded (3 entries, order preserved)");
+          check (larr != nullptr && larr->size() == 3
+                 && (double) larr->getReference (2).getProperty ("value", 0) == 130.0,
+                 "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
@@ -4863,6 +4882,135 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
     }
 
+    // Ableton-style "easy warp": stretch a clip to a target length / bar count
+    // (deriving sourceBpm) and detect a loop's BPM offline. stretch_clip drives the
+    // drag-to-stretch gesture + the Inspector Fit/×2/÷2 helpers; detect_clip_bpm feeds
+    // the auto-lock-to-grid path. Deterministic — the detector is pure C++ (no service).
+    section ("Wave V2: stretch_clip + detect_clip_bpm (easy warp)");
+    {
+        auto st = cmd (ops, "create_track", args1 ("name", "StretchTrack"))["data"].getProperty ("trackId", var()).toString();
+        auto sc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        check (ok (sc), "stretch: 2s tone clip ok");
+        const auto scid = sc["data"].getProperty ("clipId", var()).toString();
+        auto len = [&]() -> double {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == scid)
+                        return (double) c.getProperty ("length", 0.0);
+            return -1.0;
+        };
+        auto warpedOn = [&]() -> bool {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == scid)
+                        return (bool) c.getProperty ("autoTempo", false);
+            return false;
+        };
+        check (std::abs (len() - 2.0) < 0.05, "stretch: clip starts at 2.0s");
+
+        // Stretch to a 3.0s warped length -> the clip fills 3.0s and warp turns on.
+        auto s1 = cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "length", 3.0 }}));
+        check (ok (s1), "stretch: to 3.0s ok");
+        check (std::abs (len() - 3.0) < 0.1, "stretch: clip is now 3.0s");
+        check (warpedOn(), "stretch: enabling stretch turns auto-tempo on");
+        check (std::abs ((double) s1["data"].getProperty ("length", 0.0) - 3.0) < 0.1, "stretch: result reports 3.0s length");
+
+        // ÷2 (stretch to 1.5s), then fit-to-bars at 120bpm 4/4 (1 bar = 2.0s, 2 bars = 4.0s).
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "length", 1.5 }}))), "stretch: to 1.5s ok");
+        check (std::abs (len() - 1.5) < 0.1, "stretch: halved to 1.5s");
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "bars", 1.0 }}))), "stretch: fit 1 bar ok");
+        check (std::abs (len() - 2.0) < 0.1, "stretch: 1 bar == 2.0s at 120bpm 4/4");
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "bars", 2.0 }}))), "stretch: fit 2 bars ok");
+        check (std::abs (len() - 4.0) < 0.1, "stretch: 2 bars == 4.0s at 120bpm 4/4");
+
+        // Undo restores the 1-bar length; the command is logged undoable.
+        check (ok (cmd (ops, "undo")), "stretch: undo ok");
+        check (std::abs (len() - 2.0) < 0.1, "stretch: undo restores 1-bar length (2.0s)");
+        {
+            auto slog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool stretchU = false;
+            for (auto& ln : juce::StringArray::fromLines (slog))
+                if (ln.contains ("\"command\": \"stretch_clip\"") && ln.contains ("\"undoable\": true")) stretchU = true;
+            check (stretchU, "stretch: stretch_clip logged undoable:true");
+        }
+
+        // Guards.
+        check (! ok (cmd (ops, "stretch_clip", args1 ("clipId", scid))), "stretch: missing length/bars rejected");
+        check (! ok (cmd (ops, "stretch_clip", objN ({{ "clipId", "nope" }, { "length", 2.0 }}))), "stretch: bad clipId rejected");
+
+        // detect_clip_bpm on a pure tone: read-only, no pulse -> either errors or low
+        // confidence. Must not crash and must not spuriously claim a strong beat.
+        auto dTone = cmd (ops, "detect_clip_bpm", args1 ("clipId", scid));
+        if (ok (dTone))
+            check ((double) dTone["data"].getProperty ("confidence", 1.0) < 0.5, "detect: pure tone -> low confidence");
+        else
+            check (true, "detect: pure tone reported no reliable pulse (ok)");
+
+        // detect_clip_bpm on a synthesized 120bpm click track -> ~120 with confidence.
+        auto makeClickWav = [&] (double bpm, double seconds, const juce::String& name) -> juce::File
+        {
+            const double sr = 44100.0;
+            const juce::int64 n = (juce::int64) (sr * seconds);
+            juce::AudioBuffer<float> buf (1, (int) n);
+            buf.clear();
+            const int clickLen = (int) (sr * 0.01);   // 10ms click
+            const double period = 60.0 / bpm;         // seconds per beat
+            for (double t = 0.0; t < seconds; t += period)
+            {
+                const juce::int64 s0 = (juce::int64) (t * sr);
+                for (int i = 0; i < clickLen && (s0 + i) < n; ++i)
+                {
+                    const float env = 1.0f - (float) i / (float) clickLen;
+                    buf.setSample (0, (int) (s0 + i), env * std::sin ((float) i * 0.9f));
+                }
+            }
+            auto dir = eng.sessionDir().getChildFile ("stretch-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile (name);
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (
+                    fmt.createWriterFor (os.get(), sr, 1u, 16, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, (int) n); }
+            }
+            return f;
+        };
+        auto clickFile = makeClickWav (120.0, 4.0, "click120.wav");
+        check (clickFile.existsAsFile(), "detect: synthesized a 120bpm click WAV");
+        auto imp = cmd (ops, "import_clip", objN ({{ "trackId", st }, { "file", clickFile.getFullPathName() }}));
+        check (ok (imp), "detect: import click track ok");
+        const auto clickId = imp["data"].getProperty ("clipId", var()).toString();
+        auto det = cmd (ops, "detect_clip_bpm", args1 ("clipId", clickId));
+        check (ok (det), "detect: 120bpm click detected ok");
+        const double dbpm = (double) det["data"].getProperty ("bpm", 0.0);
+        check (std::abs (dbpm - 120.0) < 3.0, "detect: reported BPM ~120");
+        check ((double) det["data"].getProperty ("confidence", 0.0) > 0.2, "detect: strong pulse -> good confidence");
+
+        // Enabling warp with detect:true on the click locks sourceBpm to the detected
+        // tempo (~120); the DEFAULT path (no detect) stays a 1:1 no-op (proven above).
+        auto wd = cmd (ops, "set_clip_warp", objN ({{ "clipId", clickId }, { "autoTempo", true }, { "detect", true }}));
+        check (ok (wd), "detect: set_clip_warp detect:true ok");
+        {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            double srcBpm = 0.0;
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == clickId)
+                        srcBpm = (double) c.getProperty ("sourceBpm", 0.0);
+            check (std::abs (srcBpm - 120.0) < 3.0, "detect: warp detect locked sourceBpm to ~120");
+        }
+        check (! ok (cmd (ops, "detect_clip_bpm", args1 ("clipId", "no-such"))), "detect: bad clipId rejected");
+
+        cmd (ops, "remove_track", args1 ("trackId", st));   // tidy
+    }
+
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.
@@ -5561,11 +5709,40 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         auto commitRes = cmd (ops, "mp_commit_track", args1 ("trackId", stemTrk));
         check (ok (commitRes), "mp_commit_track ok (with audio)");
+        // MOSH_MP_SYNC_TRANSFER (the PR-2 kill switch, gated separately below) pins this
+        // to "committed" instead; that combination is exercised in its own dedicated
+        // section, so this just accepts whichever mode is actually active here.
+        const auto commitStatus = commitRes.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString();
+        check (commitStatus == "uploading" || commitStatus == "committed",
+               "PR-2: mp_commit_track returns a recognized status (\"" + commitStatus + "\")");
         auto refs = commitRes.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
         check (refs.isArray() && refs.size() >= 1, "commit content-addressed the clip's stem");
         const auto h0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("hash", juce::var()).toString() : juce::String();
         const auto e0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("ext", juce::var()).toString() : juce::String();
         check (h0.length() == 64, "stem hash is a sha256");
+        const auto stemLogicalId = commitRes.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+
+        // PR-2: the upload + publish now run on the transfer worker (mp_commit_track
+        // returns status:"uploading" immediately) instead of inline — wait for the
+        // additive mp_commit_done event before assuming the stem has actually landed
+        // on the relay's blob store (a bounded drain, mirroring the async-outbox
+        // check below; the shared event sink set at the top of this function
+        // captures it into lastEvent).
+        {
+            auto* mmc = juce::MessageManager::getInstanceWithoutCreating();
+            bool committed = false;
+            const auto commitDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (! committed && juce::Time::getMillisecondCounter() < commitDeadline)
+            {
+                if (mmc != nullptr) mmc->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                committed = lastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done"
+                            && lastEvent.getProperty ("payload", juce::var()).getProperty ("logicalId", juce::var()).toString() == stemLogicalId;
+            }
+            check (committed, "mp_commit_track's async transfer completed (mp_commit_done observed)");
+            check ((bool) lastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+                   "mp_commit_done reports ok:true");
+        }
 
         {
             MultiplayerClient peer;
@@ -5578,6 +5755,283 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             peer.leave();
         }
         cmd (ops, "mp_leave_session");
+
+        // PR-2 — stem transfer off the message thread. Proves global apply ORDER
+        // survives two quick successive commits of the SAME track (a fast second
+        // commit must never jump ahead of a still-in-flight first one) through a
+        // REAL live guest session (mp_join_session, not a direct apply_remote_track
+        // command) — exercising the guest's own commit-frame prefetch -> apply path
+        // (routeStateMutatingJob) end-to-end, including the received clip's audio
+        // resolving via the worker's prefetch stage (the "receive path" case).
+        section ("Multiplayer PR-2: stem transfer order + receive path (live session)");
+        {
+            MoshEngine ordHostEng (false, true, "pr2-order-host");
+            MoshOps    ordHostOps (ordHostEng);
+            MoshEngine ordGuestEng (false, true, "pr2-order-guest");
+            MoshOps    ordGuestOps (ordGuestEng);
+
+            auto ordSess = cmd (ordHostOps, "mp_create_session", objN ({ { "name", "OrdHost" }, { "color", "#101010" } }));
+            check (ok (ordSess), "order: host created a session");
+            const auto ordCode = ordSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            check (ok (cmd (ordGuestOps, "mp_join_session",
+                            objN ({ { "code", ordCode }, { "name", "OrdGuest" }, { "color", "#202020" } }))),
+                   "order: guest joined the host's room (a REAL live session, not a direct apply)");
+            // Settle joinSession()'s own auto-fired (harmless, 0-track) bootstrap_request
+            // before creating real content -- see the identical comment in the self-heal
+            // section below for why this matters once a bootstrap answer can carry a
+            // (possibly slow, under MOSH_RELAY_BLOB_DELAY_MS) stem upload.
+            {
+                auto* mmSettle = juce::MessageManager::getInstanceWithoutCreating();
+                const auto settleDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 1000;
+                while (juce::Time::getMillisecondCounter() < settleDeadline)
+                {
+                    if (mmSettle != nullptr) mmSettle->runDispatchLoopUntil (50);
+                    else juce::Thread::sleep (50);
+                }
+            }
+
+            auto ordMk = cmd (ordHostOps, "create_track", args1 ("name", "Order Src"));
+            const auto ordTrackId = ordMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (ordHostOps, "add_test_tone_clip", objN ({ { "trackId", ordTrackId }, { "seconds", 1.0 } }))),
+                   "order: host added a wave clip");
+
+            juce::String ordLid;
+            {
+                auto snap = ordHostOps.snapshot();
+                if (auto* arr = snap["tracks"].getArray())
+                    for (auto& tv : *arr)
+                        if (tv.getProperty ("name", juce::var()).toString() == "Order Src")
+                            ordLid = tv.getProperty ("logicalId", juce::var()).toString();
+            }
+            check (ordLid.isNotEmpty(), "order: host track logicalId resolved");
+
+            // Commit #1 (original name), then IMMEDIATELY mutate + commit #2 (renamed)
+            // — back-to-back, no wait in between, so both are in flight close together.
+            auto ordCommit1 = cmd (ordHostOps, "mp_commit_track", args1 ("trackId", ordTrackId));
+            check (ok (ordCommit1), "order: commit #1 ok");
+            check (ok (cmd (ordHostOps, "rename_track", objN ({ { "trackId", ordTrackId }, { "name", "Order Src RENAMED" } }))),
+                   "order: host renamed the track");
+            auto ordCommit2 = cmd (ordHostOps, "mp_commit_track", args1 ("trackId", ordTrackId));
+            check (ok (ordCommit2), "order: commit #2 ok");
+
+            // Bounded drain: the guest's own live poll loop receives BOTH commit
+            // frames, each routed prefetch (download the stem) -> apply
+            // (apply_remote_track) through the SAME single-worker FIFO — proving the
+            // second (later) commit's apply can never be scheduled ahead of the
+            // first's, even though both reference the IDENTICAL stem (so the
+            // second's prefetch is a fast already-downloaded no-op, unlike the first).
+            auto* ordMm = juce::MessageManager::getInstanceWithoutCreating();
+            bool ordSettled = false;
+            const auto ordDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            juce::String ordGuestName;
+            bool ordGuestClipMissing = true;
+            while (! ordSettled && juce::Time::getMillisecondCounter() < ordDeadline)
+            {
+                if (ordMm != nullptr) ordMm->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                auto t = trackSnapshotByLogicalId (ordGuestOps, ordLid);
+                ordGuestName = t.getProperty ("name", juce::var()).toString();
+                ordGuestClipMissing = true;
+                if (auto* cs = t.getProperty ("clips", juce::var()).getArray())
+                    for (auto& c : *cs)
+                        if (c.getProperty ("type", juce::var()).toString() == "wave")
+                            ordGuestClipMissing = (bool) c.getProperty ("sourceMissing", false);
+                ordSettled = (ordGuestName == "Order Src RENAMED") && ! ordGuestClipMissing;
+            }
+            check (ordSettled, "order+receive: guest settles at the SECOND (later) commit's name with its clip resolved, within the bound");
+            check (ordGuestName == "Order Src RENAMED",
+                   "order: guest never regresses to (or gets stuck on) the FIRST commit's name -- global apply order preserved");
+            check (! ordGuestClipMissing,
+                   "receive path: guest's clip is NOT sourceMissing (the worker's prefetch stage downloaded the stem before commit's apply ran)");
+
+            cmd (ordGuestOps, "mp_leave_session");
+            cmd (ordHostOps, "mp_leave_session");
+        }
+
+        // PR-2 — no-freeze proxy. Gated additionally on MOSH_RELAY_BLOB_DELAY_MS (set
+        // for the WHOLE relay process by relay/run-mp-selftest.sh's caller — the local
+        // relay has no per-call toggle, so this only runs in a dedicated gate
+        // invocation with the delay armed) so the default MOSH_SELFTEST_MP=1 run stays
+        // fast. Proves mp_commit_track returns — and a second, unrelated command
+        // executes — well before the artificially slow upload could possibly have
+        // completed inline, deterministically demonstrating the message thread never
+        // blocked on it.
+        if (std::getenv ("MOSH_RELAY_BLOB_DELAY_MS") != nullptr)
+        {
+            section ("Multiplayer PR-2: no-freeze proxy (MOSH_RELAY_BLOB_DELAY_MS)");
+
+            MoshEngine nfEng (false, true, "pr2-nofreeze-host");
+            MoshOps    nfOps (nfEng);
+            juce::var nfLastEvent;
+            nfOps.setEventSink ([&] (const juce::var& e) { nfLastEvent = e; });
+
+            auto nfSess = cmd (nfOps, "mp_create_session", objN ({ { "name", "NF" }, { "color", "#ffffff" } }));
+            check (ok (nfSess), "no-freeze: host created a session");
+
+            auto nfMk = cmd (nfOps, "create_track", args1 ("name", "NF Src"));
+            const auto nfTrackId = nfMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (nfOps, "add_test_tone_clip", objN ({ { "trackId", nfTrackId }, { "seconds", 1.0 } }))),
+                   "no-freeze: host added a wave clip");
+
+            const auto nfT0 = juce::Time::getMillisecondCounterHiRes();
+            auto nfCommit = cmd (nfOps, "mp_commit_track", args1 ("trackId", nfTrackId));
+            const auto nfCommitElapsedMs = juce::Time::getMillisecondCounterHiRes() - nfT0;
+            check (ok (nfCommit), "no-freeze: mp_commit_track ok");
+            check (nfCommit.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "uploading",
+                   "no-freeze: async branch taken");
+            check (nfCommitElapsedMs < 400.0,
+                   "no-freeze: mp_commit_track returned near-instantly despite the delayed upload ("
+                       + juce::String (nfCommitElapsedMs, 1) + "ms)");
+
+            const auto nfT1 = juce::Time::getMillisecondCounterHiRes();
+            check (ok (cmd (nfOps, "create_track", args1 ("name", "NF Trivial"))),
+                   "no-freeze: a trivial command executes while the upload is still in flight");
+            const auto nfTrivialElapsedMs = juce::Time::getMillisecondCounterHiRes() - nfT1;
+            check (nfTrivialElapsedMs < 400.0,
+                   "no-freeze: the trivial command was ALSO fast ("
+                       + juce::String (nfTrivialElapsedMs, 1) + "ms) — the message thread stayed free");
+
+            auto* nfMm = juce::MessageManager::getInstanceWithoutCreating();
+            bool nfCommitted = false;
+            const auto nfDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (! nfCommitted && juce::Time::getMillisecondCounter() < nfDeadline)
+            {
+                if (nfMm != nullptr) nfMm->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                nfCommitted = nfLastEvent.getProperty ("type", juce::var()).toString() == "mp_commit_done";
+            }
+            check (nfCommitted, "no-freeze: the delayed upload eventually completes in the background (mp_commit_done observed)");
+            check ((bool) nfLastEvent.getProperty ("payload", juce::var()).getProperty ("ok", false),
+                   "no-freeze: the delayed upload succeeded");
+
+            cmd (nfOps, "mp_leave_session");
+        }
+
+        // PR-2 — MOSH_MP_SYNC_TRANSFER kill switch. Gated on the env var being set
+        // (read once at MultiplayerSession construction, so it can't be toggled
+        // mid-process — a dedicated gate invocation, like the no-freeze check above).
+        // Proves the switch actually reverts to the original fully synchronous/
+        // inline behaviour: mp_commit_track reports status:"committed" (not
+        // "uploading") and the stem is ALREADY on the relay by the time it returns
+        // — no waiting for mp_commit_done required.
+        if (std::getenv ("MOSH_MP_SYNC_TRANSFER") != nullptr)
+        {
+            section ("Multiplayer PR-2: MOSH_MP_SYNC_TRANSFER kill switch");
+
+            MoshEngine syncEng (false, true, "pr2-syncswitch-host");
+            MoshOps    syncOps (syncEng);
+
+            auto syncSess = cmd (syncOps, "mp_create_session", objN ({ { "name", "Sync" }, { "color", "#666666" } }));
+            check (ok (syncSess), "sync-switch: host created a session");
+            const auto syncCode = syncSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            auto syncMk = cmd (syncOps, "create_track", args1 ("name", "Sync Src"));
+            const auto syncTrackId = syncMk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (syncOps, "add_test_tone_clip", objN ({ { "trackId", syncTrackId }, { "seconds", 1.0 } }))),
+                   "sync-switch: host added a wave clip");
+
+            auto syncCommit = cmd (syncOps, "mp_commit_track", args1 ("trackId", syncTrackId));
+            check (ok (syncCommit), "sync-switch: mp_commit_track ok");
+            check (syncCommit.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "committed",
+                   "sync-switch: status is \"committed\" (synchronous), NOT \"uploading\" — the kill switch reverted the async path");
+
+            auto syncRefs = syncCommit.getProperty ("data", juce::var()).getProperty ("audioRefs", juce::var());
+            const auto syncHash = (syncRefs.isArray() && syncRefs.size() > 0) ? syncRefs[0].getProperty ("hash", juce::var()).toString() : juce::String();
+            const auto syncExt  = (syncRefs.isArray() && syncRefs.size() > 0) ? syncRefs[0].getProperty ("ext", juce::var()).toString() : juce::String();
+            check (syncHash.length() == 64, "sync-switch: stem hash is a sha256");
+
+            // No wait/drain here at all — under the kill switch, mp_commit_track only
+            // returns once the upload+publish already completed inline, so a peer can
+            // fetch the stem IMMEDIATELY.
+            MultiplayerClient syncPeer;
+            check (syncPeer.joinSession (syncCode, "SyncPeer", "#777777"), "sync-switch: peer joined the session");
+            auto syncTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                               .getChildFile ("mosh-mp-syncswitch-" + syncHash + "." + syncExt);
+            syncTmp.deleteFile();
+            check (syncPeer.downloadBlob (syncHash, syncExt, syncTmp),
+                   "sync-switch: peer fetched the stem immediately, no drain needed [" + syncPeer.lastError() + "]");
+            check (syncTmp.existsAsFile() && syncTmp.getSize() > 0, "sync-switch: fetched stem is non-empty");
+            syncTmp.deleteFile();
+            syncPeer.leave();
+
+            cmd (syncOps, "mp_leave_session");
+        }
+
+        // ── PR-2 BLOCKER: a rejected upload must surface as mp_commit_done{ok:false} ──
+        // Adversarial review: MultiplayerClient::uploadBlob's raw PUT never checked the
+        // HTTP status code (createInputStream() returns non-null for 4xx/5xx on macOS),
+        // so a REJECTED upload (quota/auth/a transient 5xx from the relay) was reported
+        // back as a false success -- mp_commit_done would fire ok:true for a commit
+        // whose stem never actually landed on the relay. Drives MultiplayerSession
+        // directly (constructible standalone, no MoshOps/engine needed) with a
+        // synthetic audioRef under the reserved ".failtest" ext that relay/server.py's
+        // MOSH_RELAY_BLOB_FAIL hook (armed for this whole gate run, like
+        // MOSH_RELAY_BLOB_CORRUPT) rejects with a 503 -- proving the failure actually
+        // propagates end-to-end through commit() -> uploadBlob() -> emitCommitDone(),
+        // the exact chain cmdMpCommitTrack relies on. The adjacent success-path test
+        // above already proves ok:true for a real commit, so this closes the other half.
+        section ("Multiplayer PR-2 BLOCKER: rejected upload surfaces as mp_commit_done{ok:false}");
+        {
+            juce::Array<juce::var> failEvents;
+            MultiplayerSession failSess (
+                [] (const juce::var&) {},                                              // applyCommit (unused)
+                [&failEvents] (const juce::String& type, juce::var payload)
+                {
+                    if (type == "mp_commit_done") failEvents.add (payload);
+                },
+                [] (bool, const juce::String&, const std::map<juce::String, juce::String>&) {},   // syncLocks
+                [] () -> juce::var { return {}; },                                       // provideBootstrap
+                [] (const juce::var&) {},                                               // applyBootstrap
+                [] (const juce::var&) {});                                              // applyStructural
+
+            const auto failCode = failSess.createSession ("FailHost", "#facade");
+            check (failCode.isNotEmpty(), "commit-fail: session created");
+
+            // A synthetic audioRef: the ext is the reserved sentinel the relay's fail
+            // hook targets. The uploaded bytes/hash don't need to be a real WAV --
+            // uploadBlob is rejected by the relay before any hash/content matters.
+            const juce::String failPayload ("bytes-for-the-rejected-commit-upload-check");
+            juce::File failSrc = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                     .getChildFile ("mosh-selftest-commitfail-src.failtest");
+            failSrc.replaceWithText (failPayload);
+            juce::FileInputStream failFis (failSrc);
+            const auto failHash = juce::SHA256 (failFis).toHexString();
+
+            auto* refObj = new DynamicObject();
+            refObj->setProperty ("hash", failHash);
+            refObj->setProperty ("ext", "failtest");
+            juce::Array<juce::var> failRefs; failRefs.add (var (refObj));
+            juce::Array<juce::File> failStemFiles; failStemFiles.add (failSrc);
+
+            const juce::String failLid ("commit-fail-logical-id");
+            failSess.commit (failLid, "{\"fake\":\"blob\"}", var (failRefs), failStemFiles);
+
+            // Bounded drain for mp_commit_done (async worker unless MOSH_MP_SYNC_TRANSFER
+            // is set, in which case commit() has already returned synchronously and the
+            // event was pushed inline -- either way this loop is a correct, cheap wait).
+            auto* mmFail = juce::MessageManager::getInstanceWithoutCreating();
+            const auto failDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
+            while (failEvents.isEmpty() && juce::Time::getMillisecondCounter() < failDeadline)
+            {
+                if (mmFail != nullptr) mmFail->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+            }
+            check (! failEvents.isEmpty(), "commit-fail: mp_commit_done was emitted");
+            if (! failEvents.isEmpty())
+            {
+                const auto& done = failEvents.getReference (0);
+                check (done.getProperty ("logicalId", juce::var()).toString() == failLid,
+                       "commit-fail: mp_commit_done carries the right logicalId");
+                check (! (bool) done.getProperty ("ok", true),
+                       "commit-fail: mp_commit_done reports ok:false (the rejected upload was NOT a false success)");
+                check (done.getProperty ("error", juce::var()).toString().isNotEmpty(),
+                       "commit-fail: mp_commit_done carries an error string");
+            }
+
+            failSrc.deleteFile();
+            failSess.leaveSession();
+        }
 
         // Async outbox (anti-jank): a fire-and-forget broadcast does NOT block the
         // message thread on HTTP — it enqueues, and the background poll thread drains
@@ -5600,7 +6054,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // the session's callAsyncs drain too.
             auto* mm = juce::MessageManager::getInstanceWithoutCreating();
             bool gotSel = false;
-            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
             while (! gotSel && juce::Time::getMillisecondCounter() < deadline)
             {
                 for (auto& f : watcher.poll())
@@ -5666,6 +6120,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (ok (cmd (guestOps, "mp_join_session",
                             objN ({ { "code", shCode }, { "name", "SHGuest" }, { "color", "#222222" } }))),
                    "self-heal: guest joined the host's room");
+            // joinSession() unconditionally fires its own bootstrap_request (the
+            // normal late-join path) the instant it joins -- at this point the host
+            // has zero tracks, so the round-trip answer is harmless (0 tracks -> 0
+            // tracks) PROVIDED it lands before the host creates real content below.
+            // Drain it here (bounded) rather than risk it landing LATE (e.g. because
+            // MOSH_RELAY_BLOB_DELAY_MS is slowing down some unrelated stem upload
+            // elsewhere) and overwriting the guest's own apply_remote_track state
+            // via a now-stale cmdMpApplyBootstrap mid-test.
+            {
+                auto* mmSettle = juce::MessageManager::getInstanceWithoutCreating();
+                const auto settleDeadline = juce::Time::getMillisecondCounter() + (juce::uint32) 1000;
+                while (juce::Time::getMillisecondCounter() < settleDeadline)
+                {
+                    if (mmSettle != nullptr) mmSettle->runDispatchLoopUntil (50);
+                    else juce::Thread::sleep (50);
+                }
+            }
 
             auto mk = cmd (hostOps, "create_track", args1 ("name", "SH Src"));
             const auto shTrackId = mk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
@@ -5773,7 +6244,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // completion (sourceMediaChanged + emitSnapshotInvalidated) to land.
             auto* mm2 = juce::MessageManager::getInstanceWithoutCreating();
             bool resolved2 = false;
-            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 20000;
             while (! resolved2 && juce::Time::getMillisecondCounter() < deadline2)
             {
                 if (mm2 != nullptr) mm2->runDispatchLoopUntil (50);
@@ -5781,8 +6252,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 resolved2 = ! clipSourceMissing (guestOps, shLid2Applied);
             }
             check (resolved2, "self-heal (async): guest's clip resolved via the background thread + callAsync (previously untested code path)");
-            check (ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", waveClipIdOf (guestOps, shLid2Applied)))),
-                   "self-heal (async): get_clip_peaks succeeds after the async fetch");
+            const auto shClipId2 = waveClipIdOf (guestOps, shLid2Applied);
+            auto peaksRes2 = cmd (guestOps, "get_clip_peaks", args1 ("clipId", shClipId2));
+            check (ok (peaksRes2),
+                   "self-heal (async): get_clip_peaks succeeds after the async fetch [clipId=" + shClipId2
+                       + " err=" + peaksRes2.getProperty ("error", juce::var()).toString() + "]");
 
             cmd (guestOps, "mp_leave_session");
             cmd (hostOps, "mp_leave_session");

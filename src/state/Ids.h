@@ -177,7 +177,7 @@ namespace mosh::ids
     MOSH_DECLARE_ID (adapterVersion)
     MOSH_DECLARE_ID (mode)             // generate | reimagine | inpaint | continue
     MOSH_DECLARE_ID (modelVariant)     // size/decoder variant
-    MOSH_DECLARE_ID (params)           // prompt, colors[], cfg, steps, nl (child tree)
+    MOSH_DECLARE_ID (params)           // prompt, colors[], nl, target, strength (child tree)
     MOSH_DECLARE_ID (seed)
     MOSH_DECLARE_ID (safetyMappingVersion)
     MOSH_DECLARE_ID (sourceFingerprint)
@@ -219,8 +219,6 @@ namespace mosh::ids
     MOSH_DECLARE_ID (COLOR)
     MOSH_DECLARE_ID (name)
     MOSH_DECLARE_ID (value)            // 0–100 ASTD UI value
-    MOSH_DECLARE_ID (cfg)
-    MOSH_DECLARE_ID (steps)
     MOSH_DECLARE_ID (nl)               // init_noise_level (reimagine)
     MOSH_DECLARE_ID (target)           // Route B transform target (instrument or free-text)
     MOSH_DECLARE_ID (strength)         // Route B transform strength (0–100 ASTD UI value)

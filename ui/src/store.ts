@@ -132,6 +132,13 @@ type State = {
   peerPresence: Record<string, PeerPresence>;
   locksByLogicalId: Record<string, string>;        // logicalId -> ownerPeerId
   activeTrackId: string | null;                    // derived; the commit-on-move trigger
+  // PR-2 adversarial-review BLOCKER: mp_commit_done previously had no frontend
+  // consumer at all — a failed stem upload (commit-on-move, PR-2's async transfer)
+  // was invisible; the track just silently stayed sourceMissing for the peer.
+  // Keyed by logicalId (what mp_commit_done carries), not trackId (transient/UI).
+  pendingCommits: Record<string, true>;            // logicalId -> mid-upload ("uploading")
+  failedCommits: Record<string, string>;           // logicalId -> last error (persists until a retry succeeds)
+  retryFailedCommit: (logicalId: string) => Promise<void>;
   mpCreateSession: (name?: string, color?: string) => Promise<void>;
   mpJoinSession: (code: string, name?: string, color?: string) => Promise<void>;
   mpLeaveSession: () => Promise<void>;
@@ -291,6 +298,8 @@ export const useStore = create<State>((set, get) => ({
   peerPresence: {},
   locksByLogicalId: {},
   activeTrackId: null,
+  pendingCommits: {},
+  failedCommits: {},
 
   refresh: async () => {
     if (!isNative()) return;
@@ -506,6 +515,40 @@ export const useStore = create<State>((set, get) => ({
             },
           };
         });
+      } else if (ev.type === "mp_commit_done") {
+        // PR-2 adversarial-review BLOCKER: previously had NO frontend consumer at all
+        // (dropped silently by the lack of an else-if branch here) — a failed stem
+        // upload (commit-on-move via syncActiveTrack, or a manual commit) left a
+        // track's audio sourceMissing for the peer with no visible signal to the
+        // producer that anything went wrong. Surface it: clear the "uploading"
+        // marker either way; on failure, keep a "failed — retry" entry (cleared by a
+        // later successful commit of the same logicalId, in syncActiveTrack/
+        // retryFailedCommit above) AND raise the shared lastError toast + a console
+        // warning (belt-and-suspenders — the error bar can be dismissed/missed).
+        const p = ev.payload as { logicalId?: string; ok?: boolean; error?: string };
+        const lid = p.logicalId;
+        if (!lid) return;
+        if (p.ok) {
+          set((s) => {
+            const pendingCommits = { ...s.pendingCommits };
+            const failedCommits = { ...s.failedCommits };
+            delete pendingCommits[lid];
+            delete failedCommits[lid];
+            return { pendingCommits, failedCommits };
+          });
+        } else {
+          const message = p.error || "stem upload failed — the peer may not receive this track's audio";
+          console.warn("[mp] mp_commit_done: commit failed for", lid, "-", message);
+          set((s) => {
+            const pendingCommits = { ...s.pendingCommits };
+            delete pendingCommits[lid];
+            return {
+              pendingCommits,
+              failedCommits: { ...s.failedCommits, [lid]: message },
+              lastError: message,
+            };
+          });
+        }
       }
     });
     // Keep the mirrored settings fields in sync with the schema-driven settings
@@ -661,7 +704,30 @@ export const useStore = create<State>((set, get) => ({
   mpLeaveSession: async () => {
     await get().exec("mp_leave_session");
     set({ mp: { active: false, roomCode: null, selfPeer: null, connected: false },
-          peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null });
+          peers: {}, peerSelection: {}, peerPresence: {}, locksByLogicalId: {}, activeTrackId: null,
+          pendingCommits: {}, failedCommits: {} });
+  },
+
+  // PR-2 adversarial-review BLOCKER: re-fire mp_commit_track for a track whose last
+  // commit failed (mp_commit_done{ok:false}). Looks up the CURRENT trackId for this
+  // logicalId in the live snapshot (the failure is recorded by logicalId, the only
+  // thing mp_commit_done carries; trackId is transient/UI). If the track is gone
+  // (removed/undone since the failure), just drop the stale entry.
+  retryFailedCommit: async (logicalId) => {
+    const s = get();
+    const track = s.snapshot?.tracks.find((t) => t.logicalId === logicalId);
+    if (!track) {
+      set((st) => {
+        const failedCommits = { ...st.failedCommits };
+        delete failedCommits[logicalId];
+        return { failedCommits };
+      });
+      return;
+    }
+    set((st) => ({ pendingCommits: { ...st.pendingCommits, [logicalId]: true } }));
+    await s.exec("mp_commit_track", { trackId: track.id });
+    // The eventual mp_commit_done event (ok:true/false) resolves pendingCommits/
+    // failedCommits below — no need to duplicate that bookkeeping here.
   },
 
   // Commit-on-move: when the actively-edited track changes, commit+release the
@@ -677,7 +743,24 @@ export const useStore = create<State>((set, get) => ({
       if (prev === next) return;
       set({ activeTrackId: next });
       const { release, claim } = computeSyncActions(prev, next);
-      if (release) await s.exec("mp_commit_track", { trackId: release });
+      if (release) {
+        const r = await s.exec("mp_commit_track", { trackId: release });
+        // PR-2 adversarial-review BLOCKER: mp_commit_track's own immediate return only
+        // reflects the SYNCHRONOUS engine work (content-address/serialize) — the actual
+        // upload success/failure lands later via mp_commit_done (exec() above already
+        // surfaces a synchronous-call failure via lastError; this only handles the
+        // async upload outcome). Mark it "uploading" now so a stale failure from a
+        // PRIOR commit of this same track is cleared the moment a new one starts,
+        // rather than lingering after it actually succeeds.
+        const lid = r.ok ? (r.data as { logicalId?: string } | undefined)?.logicalId : undefined;
+        if (lid) {
+          set((st) => {
+            const failedCommits = { ...st.failedCommits };
+            delete failedCommits[lid];
+            return { pendingCommits: { ...st.pendingCommits, [lid]: true }, failedCommits };
+          });
+        }
+      }
       if (claim) await s.exec("mp_claim_track", { trackId: claim });
       await s.exec("mp_broadcast_selection", { trackId: next, clipId: [...s.selection][0] ?? null });
     };

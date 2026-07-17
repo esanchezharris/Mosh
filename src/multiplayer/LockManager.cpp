@@ -17,9 +17,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // for a track and must always run (otherwise we'd block reading a peer's work).
     static const std::set<juce::String> unguarded {
         "list_plugins", "list_builtins", "list_audio_devices", "list_midi_inputs",
-        "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
+        "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors", "list_loras",
         "list_directory", "list_training_sources", "list_lora_adapters",
-        "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
+        "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
@@ -71,7 +71,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // logicalId, resolved by MoshOps.
     static const std::set<juce::String> clip {
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
+        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp", "stretch_clip",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
