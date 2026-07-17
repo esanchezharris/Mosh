@@ -229,12 +229,15 @@ bool MultiplayerClient::releaseLock (const String& key)
     return (bool) httpPost ("/mp/unlock", var (o)).getProperty ("released", false);
 }
 
-bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const File& file)
+bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const File& file,
+                                    std::function<bool()> shouldAbort)
 {
     String code;
     { const std::lock_guard<std::mutex> lk (m_); code = roomCode_; }
     if (code.isEmpty() || ! file.existsAsFile())
         return false;
+    if (shouldAbort && shouldAbort())
+        { setError ("upload aborted"); return false; }
 
     auto body = [&] { auto* o = new DynamicObject();
         o->setProperty ("code", code); o->setProperty ("peerId", peerId_);
@@ -242,6 +245,8 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
 
     if ((bool) httpPost ("/mp/blob/head", body()).getProperty ("exists", false))
         return true;   // already on the server (content-addressed dedup)
+    if (shouldAbort && shouldAbort())
+        { setError ("upload aborted"); return false; }
 
     const auto putUrl = httpPost ("/mp/blob/put-url", body()).getProperty ("url", var()).toString();
     if (putUrl.isEmpty())
@@ -249,6 +254,8 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
         setError ("no put-url (cloud relay only)");
         return false;
     }
+    if (shouldAbort && shouldAbort())
+        { setError ("upload aborted"); return false; }
 
     MemoryBlock mb;
     if (! file.loadFileAsData (mb))
@@ -256,10 +263,14 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
     URL u = URL (putUrl).withPOSTData (mb);
     // inAddress (NOT inPostData) so the signed URL's ?token=… stays in the address;
     // the file bytes still go in the body (postData is set). httpRequestCmd -> PUT.
+    // withProgressCallback (PR-2): JUCE calls this during the POST/PUT body send
+    // (WebInputStream::postDataSendProgress); returning false there aborts the
+    // in-flight request instead of only checking between the coarse steps above.
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
                     .withConnectionTimeoutMs (60000)
                     .withHttpRequestCmd ("PUT")
-                    .withExtraHeaders ("content-type: application/octet-stream");
+                    .withExtraHeaders ("content-type: application/octet-stream")
+                    .withProgressCallback ([shouldAbort] (int, int) { return ! (shouldAbort && shouldAbort()); });
     if (auto s = u.createInputStream (opts))
     {
         s->readEntireStreamAsString();   // drain the small JSON ack
@@ -269,12 +280,15 @@ bool MultiplayerClient::uploadBlob (const String& hash, const String& ext, const
     return false;
 }
 
-bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, const File& dest)
+bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, const File& dest,
+                                      std::function<bool()> shouldAbort)
 {
     String code;
     { const std::lock_guard<std::mutex> lk (m_); code = roomCode_; }
     if (code.isEmpty())
         return false;
+    if (shouldAbort && shouldAbort())
+        { setError ("download aborted"); return false; }
 
     auto* o = new DynamicObject();
     o->setProperty ("code", code); o->setProperty ("peerId", peerId_);
@@ -282,6 +296,8 @@ bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, con
     const auto getUrl = httpPost ("/mp/blob/get-url", var (o)).getProperty ("url", var()).toString();
     if (getUrl.isEmpty())
         return false;
+    if (shouldAbort && shouldAbort())
+        { setError ("download aborted"); return false; }
 
     auto opts = URL::InputStreamOptions (URL::ParameterHandling::inAddress).withConnectionTimeoutMs (60000);
     if (auto s = URL (getUrl).createInputStream (opts))
@@ -291,7 +307,29 @@ bool MultiplayerClient::downloadBlob (const String& hash, const String& ext, con
         FileOutputStream os (dest);
         if (os.openedOk())
         {
-            os.writeFromInputStream (*s, -1);
+            // PR-2: chunked read-then-write (was one blocking writeFromInputStream(*s,-1))
+            // so an abort mid-transfer is possible between chunks — a large stem no
+            // longer has to run to completion once the caller has given up on it.
+            constexpr int kChunkBytes = 65536;
+            juce::HeapBlock<char> buf ((size_t) kChunkBytes);
+            for (;;)
+            {
+                if (shouldAbort && shouldAbort())
+                {
+                    os.flush();
+                    dest.deleteFile();   // never leave a truncated stem on disk
+                    setError ("download aborted");
+                    return false;
+                }
+                const int n = s->read (buf, kChunkBytes);
+                if (n <= 0)
+                    break;
+                if (! os.write (buf, (size_t) n))
+                {
+                    setError ("blob GET write failed");
+                    return false;
+                }
+            }
             os.flush();
             if (! (dest.existsAsFile() && dest.getSize() > 0))
             {
