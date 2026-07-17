@@ -34,13 +34,20 @@ DEFAULT_PARAMS = os.path.join(B1, "params.json")
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--params", default=DEFAULT_PARAMS)
+    ap.add_argument("--strength", type=float, default=None,
+                    help="override params['strength'] (e.g. 0.5 for a half-strength arm)")
+    ap.add_argument("--dst", default=DST, help="output scores dir")
     args = ap.parse_args()
     ppath = os.path.abspath(os.path.expanduser(args.params))
-    params = sd.load_params(ppath if os.path.isfile(ppath) else None)
-    print(f"params: {ppath if os.path.isfile(ppath) else 'module defaults'}")
+    params = dict(sd.load_params(ppath if os.path.isfile(ppath) else None))
+    if args.strength is not None:
+        params["strength"] = args.strength
+    dst = os.path.abspath(os.path.expanduser(args.dst))
+    print(f"params: {ppath if os.path.isfile(ppath) else 'module defaults'} "
+          f"(strength={params.get('strength')}) -> {dst}")
     print(json.dumps({k: v for k, v in params.items() if k != "provenance"}, indent=1))
 
-    os.makedirs(DST, exist_ok=True)
+    os.makedirs(dst, exist_ok=True)
     summary = {"params_path": ppath if os.path.isfile(ppath) else None, "chunks": {}}
     for name in sorted(os.listdir(SRC)):
         if not name.endswith(".json"):
@@ -63,7 +70,7 @@ def main() -> int:
         new = [float(d) for d in new_clip["duration"].split()]
         deltas = [abs(a - b) for a, b in zip(old, new)]
         changed = sum(1 for d in deltas if d > 0.0005)
-        with open(os.path.join(DST, name), "w") as f:
+        with open(os.path.join(dst, name), "w") as f:
             json.dump(new_clip if one else [new_clip], f, indent=1)
         summary["chunks"][name] = {
             "notes": len(new), "changed": changed,
@@ -74,9 +81,10 @@ def main() -> int:
         print(f"{name}: {changed}/{len(new)} notes changed, "
               f"max |delta| {max(deltas)*1000:.0f}ms")
     os.makedirs(B1, exist_ok=True)
-    with open(os.path.join(B1, "b1-derive-summary.json"), "w") as f:
+    tag = os.path.basename(dst)
+    with open(os.path.join(B1, f"b1-derive-summary-{tag}.json"), "w") as f:
         json.dump(summary, f, indent=1, sort_keys=True)
-    print(json.dumps({"ok": True, "dst": DST}, indent=1))
+    print(json.dumps({"ok": True, "dst": dst}, indent=1))
     return 0
 
 

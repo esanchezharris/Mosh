@@ -45,12 +45,17 @@ from soulx.score import phrase_windows       # noqa: E402
 ROOT = v3.ROOT
 B1 = os.path.join(ROOT, "asserted-proof", "mechanism", "b1")
 RENDERS = os.path.join(B1, "renders")
+_HANDOFF = os.path.join(ROOT, "asserted-proof", "back-half", "sing-handoff")
 SCORES = {
-    "verbatim": os.path.join(ROOT, "asserted-proof", "back-half", "sing-handoff", "scores"),
-    "derived": os.path.join(ROOT, "asserted-proof", "back-half", "sing-handoff",
-                            "scores-derived"),
+    "verbatim": os.path.join(_HANDOFF, "scores"),
+    "derived": os.path.join(_HANDOFF, "scores-derived"),
+    "derived-half": os.path.join(_HANDOFF, "scores-derived-half"),  # strength 0.5
 }
-ARMS = ("verbatim", "derived")
+# the third (half-strength) arm is opt-in via B1_THREE_WAY=1 (needs scores-derived-half +
+# its renders); default stays the clean 2-way verbatim/derived contrast.
+ARMS = (("verbatim", "derived", "derived-half") if os.environ.get("B1_THREE_WAY") == "1"
+        else ("verbatim", "derived"))
+_LAB = "ABC"
 # judge windows: the whole back half (primary) + the two proven line windows
 WINDOWS = [("full", None, None), ("line2", 1.02, 3.90), ("line1", 37.925, 41.285)]
 NSF_PY = os.path.expanduser(os.environ.get("NSF_PY", "~/Library/Mosh/venvs/nsf/bin/python3"))
@@ -194,7 +199,7 @@ def cmd_page() -> int:
             f"{p}:{os.path.getsize(p)}" for _n, p in sorted(entries))).encode()).hexdigest()
         random.Random(seed).shuffle(entries)
         cards, labels[wname] = "", {}
-        for lab, (name, p) in zip("AB", entries):
+        for lab, (name, p) in zip(_LAB, entries):
             blind = os.path.join(B1, f"{wname}-clip-{lab}.wav")
             os.replace(p, blind)
             labels[wname][lab] = name
@@ -219,13 +224,16 @@ def cmd_page() -> int:
  .sub{{margin:0 0 16px;color:#9097a7;font-size:13px}}
  audio{{width:100%;margin:4px 0 10px}}
 </style></head><body><div class="wrap">
-  <h1>B1-lite — duration derivation, blind A/B</h1>
-  <p class="sub">The u2 back half two ways (random order per group, level-matched; both
-  arms rendered locally through the identical chain: MLX → plain-sum assembly →
-  phrase-only alignment → NSF perform). Same words, same melody — only the note
-  DURATIONS differ. "full" is the whole passage; the two line groups are focused
-  re-listens of the same renders. Per group: which reads more natural / more human?
-  Reply like "full: A, line2: A, line1: tie". Do not open b1-labels.json until done.</p>
+  <h1>B1-lite — duration derivation, blind {"3-way" if len(arms) > 2 else "A/B"}</h1>
+  <p class="sub">The u2 back half {"three ways" if len(arms) > 2 else "two ways"} (random
+  order per group, level-matched; every arm rendered locally through the identical chain:
+  MLX → plain-sum assembly → phrase-only alignment → NSF perform). Same words, same
+  melody — only the note DURATIONS differ{" (one arm derives at half strength)"
+  if len(arms) > 2 else ""}. "full" is the whole passage; the two line groups are focused
+  re-listens of the same renders. Per group: which reads most natural / most human?
+  {"Rank the clips per group" if len(arms) > 2 else "Pick one per group"} —
+  reply like "full: A, line2: {'A>C>B' if len(arms) > 2 else 'A'}, line1: tie". Do not
+  open b1-labels.json until done.</p>
   {groups_html}
 </div></body></html>"""
     ppath = os.path.join(B1, "b1-listen.html")
