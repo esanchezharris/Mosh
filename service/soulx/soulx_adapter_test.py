@@ -197,6 +197,35 @@ check("derived target_score keeps non-duration fields",
 check("derived target_score durations differ from verbatim",
       _sc_d["duration"] != _r_v["duration"])
 
+# ── 8. sing-viz QA hook: opt-in, default-off + hermetic; stub CLI proves the wiring ─────
+check("sing_viz_available() False by default (hermetic)", not A.sing_viz_available())
+dflt = A.render(take_wav, os.path.join(td, "noviz.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("default render: singViz False", dflt.get("singViz") is False, str(dflt.get("singViz")))
+viz_stub = os.path.join(td, "viz_stub.py")
+open(viz_stub, "w").write(
+    "import sys\n"
+    "open(sys.argv[3], 'wb').write(b'\\x89PNG stub')\n")   # argv: take render out_png ...
+os.environ["MOSH_SING_VIZ"] = "1"
+os.environ["MOSH_VIZ_PY"] = sys.executable
+os.environ["MOSH_VIZ_CLI"] = viz_stub
+check("sing_viz_available() True when opted-in + cli/py present", A.sing_viz_available())
+vm = A.render(take_wav, os.path.join(td, "vizout.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("singViz reports the panel filename when the hook runs",
+      vm.get("singViz") == "sing_viz.png", str(vm.get("singViz")))
+check("panel PNG written next to the render",
+      os.path.isfile(os.path.join(td, "sing_viz.png")))
+# a failing viz CLI must NOT break the render (observability only)
+open(os.path.join(td, "viz_fail.py"), "w").write("import sys; sys.exit(2)")
+os.environ["MOSH_VIZ_CLI"] = os.path.join(td, "viz_fail.py")
+fv = A.render(take_wav, os.path.join(td, "vizfail.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("failing viz cli -> singViz False, render still ok", fv.get("singViz") is False and fv["ok"])
+# no take -> no viz even when opted-in
+os.environ["MOSH_VIZ_CLI"] = viz_stub
+nov = A.render("", os.path.join(td, "vnotk.wav"), {"lines": json.loads(json.dumps(LINES))})
+check("no take -> singViz False even opted-in", nov.get("singViz") is False)
+for _k in ("MOSH_SING_VIZ", "MOSH_VIZ_PY", "MOSH_VIZ_CLI"):
+    os.environ.pop(_k, None)
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

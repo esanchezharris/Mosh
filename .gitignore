@@ -130,3 +130,7 @@ brain.env
 # Vector sample palette artifact (owner-private library paths + resampled audio)
 service/palette/palette/
 service/teardown/probe/.assets/
+
+# viz QA venv
+service/viz/.viz.env
+service/viz/.venv/

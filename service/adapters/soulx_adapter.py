@@ -61,6 +61,43 @@ def backend_name() -> str:
 
 _NSF_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "nsf", "nsf_cli.py")
+_VIZ_CLI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "viz", "waveform_compare.py")
+
+
+def _viz_py() -> str:
+    """The isolated viz venv python (numpy/scipy/Pillow). Overridable for tests; falls back
+    to the teardown dev venv when the dedicated one isn't set up."""
+    if os.environ.get("MOSH_VIZ_PY"):
+        return os.environ["MOSH_VIZ_PY"]
+    for p in ("~/Library/Mosh/venvs/viz/bin/python3", "~/Library/Mosh/venvs/teardown/bin/python"):
+        pp = os.path.expanduser(p)
+        if os.path.isfile(pp):
+            return pp
+    return os.path.expanduser("~/Library/Mosh/venvs/viz/bin/python3")
+
+
+def sing_viz_available() -> bool:
+    """The take-vs-render waveform+spectrogram QA panel (the 'true-to-the-mumble' visual).
+    Opt-in via MOSH_SING_VIZ=1 (default off → hermetic, no panel), needs a viz venv python
+    + the module. Purely observability; never affects the render."""
+    if os.environ.get("MOSH_SING_VIZ", "0") != "1":
+        return False
+    cli = os.environ.get("MOSH_VIZ_CLI", _VIZ_CLI)
+    return os.path.isfile(_viz_py()) and os.path.isfile(cli)
+
+
+def _emit_sing_viz(output_wav: str, take_wav: str, score_json: str):
+    """Best-effort: write <output_dir>/sing_viz.png comparing the take to the final render.
+    Returns the png path on success, else None (never raises to the caller)."""
+    cli = os.environ.get("MOSH_VIZ_CLI", _VIZ_CLI)
+    out_png = os.path.join(os.path.dirname(os.path.abspath(output_wav)), "sing_viz.png")
+    cmd = [_viz_py(), cli, take_wav, output_wav, out_png, "--label", "take vs render"]
+    if score_json and os.path.isfile(score_json):
+        cmd += ["--score", score_json]
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=int(os.environ.get("MOSH_VIZ_TIMEOUT_S", "180")))
+    return out_png if proc.returncode == 0 and os.path.isfile(out_png) else None
 
 
 def _nsf_py() -> str:
@@ -277,6 +314,15 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             nsf_resynth = False
         nsf_failed = not nsf_resynth
 
+    # take-vs-render QA panel (opt-in observability; the 'true-to-the-mumble' visual). Needs
+    # a readable take; never affects the render. Default off -> hermetic.
+    sing_viz = None
+    if sing_viz_available() and input_wav and os.path.isfile(input_wav):
+        try:
+            sing_viz = _emit_sing_viz(output_wav, input_wav, score_json)
+        except Exception:  # noqa: BLE001 — observability only, never fail the render
+            sing_viz = None
+
     dur = authored.get("duration_s", 0.0)
     probe_ok = True
     try:
@@ -314,6 +360,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "voiceEnrolled": bool(voice_ref_path()),
         "timingSnapped": timing_snapped, "sylSnapMedianMs": syl_snap_ms,
         "nsfResynth": nsf_resynth,
+        "singViz": os.path.basename(sing_viz) if sing_viz else False,
         "pq": pq, "pq_base": 0.85, "flags": flags,
         "reasoning": quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags),
         "duration_s": dur, "sample_rate": sr, "channels": ch,
