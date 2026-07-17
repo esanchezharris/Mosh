@@ -36,7 +36,7 @@ const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ct
 const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).setPointerCapture(id); } catch { /* no-op */ } };
 const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
 
-type DragKind = "move" | "trim-l" | "trim-r";
+type DragKind = "move" | "trim-l" | "trim-r" | "stretch";
 
 export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType: string; snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -103,6 +103,10 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     let dk: DragKind | null = null;
     if (dragAction === EA.MOVE) dk = "move";
     else if (dragAction === EA.TRIM) dk = localX <= edgePx ? "trim-l" : "trim-r";
+    // ⌘+edge-drag on a wave clip time-stretches (warp) from the RIGHT edge; the left
+    // edge and non-wave clips fall back to trimming (no source audio to stretch).
+    else if (dragAction === EA.STRETCH)
+      dk = clip.type === "wave" && localX > edgePx ? "stretch" : localX <= edgePx ? "trim-l" : "trim-r";
     if (!dk) return;
     capturePointer(e.target as HTMLElement, e.pointerId);
     drag.current = { kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
@@ -115,7 +119,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     const delta = pxToSec(dx), o = d.orig;
     if (d.kind === "move") {
       setPreview({ ...o, start: Math.max(0, snapTime(o.start + delta)) });
-    } else if (d.kind === "trim-r") {
+    } else if (d.kind === "trim-r" || d.kind === "stretch") {
+      // Both drag the right edge to a new length; the commit differs (trim vs warp).
       const end = snapTime(o.start + o.length + delta);
       setPreview({ ...o, length: Math.max(MIN_LEN, end - o.start) });
     } else {
@@ -156,7 +161,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   return (
     <div
-      className={`v2-clip ${kind}${selected ? " sel" : ""}`}
+      className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
       style={{ left, width }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onContextMenu={onContext}
       data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
@@ -169,6 +174,10 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       {clip.renderLayer?.reimagineActive && (
         <span className="v2-clip-badge reimagine" data-testid="v2-clip-reimagine"
           title="A re-imagined render is playing beneath this clip; the MIDI is muted but still editable. Reset in the generative drawer to restore it.">✨</span>
+      )}
+      {clip.type === "wave" && clip.autoTempo && (
+        <span className="v2-clip-badge warp" data-testid="v2-clip-warp"
+          title="Warped — this clip time-stretches to follow the project tempo. ⌘-drag the edge or use the Warp tab.">≈</span>
       )}
       {transcribing && <span className="v2-clip-badge working" data-testid="clip-transcribing">transcribing…</span>}
       {buildingLyrics && <span className="v2-clip-badge working" data-testid="clip-building-lyrics">lyrics…</span>}

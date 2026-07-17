@@ -913,6 +913,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
+    if (name == "stretch_clip")      return cmdStretchClip (args);
+    if (name == "detect_clip_bpm")   return cmdDetectClipBpm (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "delete_time_range") return cmdDeleteTimeRange (args);
     if (name == "paste_clip")        return cmdPasteClip (args);
@@ -3856,6 +3858,92 @@ juce::var MoshOps::cmdRelinkClip (const juce::var& args)
     return okResult ("relink_clip");
 }
 
+// Minimum normalized-autocorrelation peak (0..1) for a detected BPM to be trusted
+// over the map-tempo default. A pure tone / silence scores ~0 and falls back.
+static constexpr double kBpmDetectConfidence = 0.10;
+
+// Offline loop-BPM estimate from an audio file: build a coarse onset-energy
+// envelope (positive first-difference of per-hop RMS), autocorrelate it across a
+// musical tempo range, argmax. Pure + deterministic (no service) so it runs inside
+// --selftest. Returns {bpm, confidence}; confidence is the normalized autocorrelation
+// at the winning lag (0 == flat/no beat, up toward 1 == a strong periodic pulse).
+static std::pair<double, double> detectBpmFromFile (const juce::File& file)
+{
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
+        return { 0.0, 0.0 };
+
+    const double sr = reader->sampleRate;
+    const int chans = (int) reader->numChannels;
+    // Analyse at most the first 30s — plenty for a loop, and it bounds the cost.
+    const juce::int64 maxSamples = (juce::int64) juce::jmin ((double) reader->lengthInSamples, sr * 30.0);
+    const int hop = juce::jmax (1, (int) std::llround (sr / 200.0)); // ~5ms hops → ~200 Hz envelope
+    const int nHops = (int) (maxSamples / hop);
+    if (nHops < 16) return { 0.0, 0.0 };
+
+    // Per-hop RMS energy.
+    std::vector<float> energy ((size_t) nHops, 0.0f);
+    juce::AudioBuffer<float> buf (juce::jmax (1, chans), hop);
+    for (int h = 0; h < nHops; ++h)
+    {
+        buf.clear();
+        reader->read (&buf, 0, hop, (juce::int64) h * hop, true, chans > 1);
+        double e = 0.0;
+        for (int c = 0; c < buf.getNumChannels(); ++c)
+        {
+            const float* p = buf.getReadPointer (c);
+            for (int i = 0; i < hop; ++i) e += (double) p[i] * (double) p[i];
+        }
+        energy[(size_t) h] = (float) std::sqrt (e / (double) juce::jmax (1, hop * juce::jmax (1, chans)));
+    }
+
+    // Onset function: positive first difference of the energy envelope, zero-meaned.
+    std::vector<float> onset ((size_t) nHops, 0.0f);
+    double mean = 0.0;
+    for (int h = 1; h < nHops; ++h)
+    {
+        const float d = energy[(size_t) h] - energy[(size_t) h - 1];
+        onset[(size_t) h] = d > 0.0f ? d : 0.0f;
+        mean += (double) onset[(size_t) h];
+    }
+    mean /= (double) juce::jmax (1, nHops - 1);
+    if (mean <= 1.0e-9) return { 0.0, 0.0 };  // silence / DC
+    double var0 = 0.0;
+    for (auto& v : onset) { v = (float) ((double) v - mean); var0 += (double) v * (double) v; }
+    var0 /= (double) nHops;
+    if (var0 <= 1.0e-12) return { 0.0, 0.0 };
+
+    const double hopRate = sr / (double) hop; // hops per second
+    auto autocorrAtLag = [&] (double lag) -> double
+    {
+        // Linear-interpolated autocorrelation at a fractional lag (in hops).
+        const int L = (int) std::floor (lag);
+        const double frac = lag - (double) L;
+        double acc = 0.0; int cnt = 0;
+        for (int i = 0; i + L + 1 < nHops; ++i)
+        {
+            const double shifted = (double) onset[(size_t) (i + L)] * (1.0 - frac)
+                                 + (double) onset[(size_t) (i + L + 1)] * frac;
+            acc += (double) onset[(size_t) i] * shifted;
+            ++cnt;
+        }
+        return cnt > 0 ? acc / (double) cnt : 0.0;
+    };
+
+    // Scan a musical tempo range; the reported tempo stays in [70,180].
+    double bestScore = -1.0e30, bestBpm = 0.0;
+    for (double bpm = 70.0; bpm <= 180.0 + 1.0e-6; bpm += 0.5)
+    {
+        const double lag = 60.0 / bpm * hopRate;
+        if (lag < 1.0 || lag >= (double) (nHops - 2)) continue;
+        const double s = autocorrAtLag (lag);
+        if (s > bestScore) { bestScore = s; bestBpm = bpm; }
+    }
+    if (bestBpm <= 0.0) return { 0.0, 0.0 };
+    return { bestBpm, juce::jlimit (0.0, 1.0, bestScore / var0) };
+}
+
 juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
 {
     // Audio warp (auto-tempo): the clip re-anchors in BEATS so its audio
@@ -3884,7 +3972,16 @@ juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
 
         // Source BPM: explicit when given; else default to the map tempo at the
         // clip's start, so enabling warp is a 1:1 no-op until the map changes.
-        const double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
+        // With detect:true (and no explicit sourceBpm) we estimate the loop's own
+        // BPM offline and lock it to the grid — the "easy" Ableton behaviour. This
+        // is GUARDED so the default (detect absent) path stays byte-identical.
+        double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
+        if (! args.hasProperty ("sourceBpm") && (bool) args.getProperty ("detect", false))
+            if (auto* wav = dynamic_cast<te::WaveAudioClip*> (ac))
+            {
+                const auto est = detectBpmFromFile (wav->getCurrentSourceFile());
+                if (est.first > 0.0 && est.second >= kBpmDetectConfidence) defaultBpm = est.first;
+            }
         const double sourceBpm = juce::jlimit (20.0, 999.0,
             (double) args.getProperty ("sourceBpm", defaultBpm));
         auto info = ac->getAudioFile().getInfo();
@@ -3899,6 +3996,81 @@ juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
     data->setProperty ("autoTempo", ac->getAutoTempo());
     data->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (ac->getTimeStretchMode()));
     return okResult ("set_clip_warp", var (data));
+}
+
+juce::var MoshOps::cmdStretchClip (const juce::var& args)
+{
+    // Time-stretch a wave clip to a target WARPED length (seconds) or a bar count,
+    // by enabling auto-tempo and deriving the sourceBpm that makes it fit. Powers
+    // the drag-to-stretch gesture and the Inspector "Fit N bars / ×2 / ÷2" helpers.
+    // warpedLen = sourceLen × sourceBpm / projectBpm  ⇒  sourceBpm = projectBpm × target / sourceLen.
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("stretch_clip", "not an audio clip");
+    if (! args.hasProperty ("length") && ! args.hasProperty ("bars"))
+        return errResult ("stretch_clip", "missing 'length' or 'bars'");
+
+    const double sourceLen = ac->getAudioFile().getLength();
+    if (sourceLen <= 0.0) return errResult ("stretch_clip", "source has no length");
+
+    auto& tempoSeq = eng.edit().tempoSequence;
+    const auto startPos = ac->getPosition().getStart();
+    const double projectBpm = tempoSeq.getBpmAt (startPos);
+    if (projectBpm <= 0.0) return errResult ("stretch_clip", "invalid project tempo");
+
+    double sourceBpm = 0.0;
+    if (args.hasProperty ("bars"))
+    {
+        const double bars = (double) args.getProperty ("bars", 0.0);
+        if (bars <= 0.0) return errResult ("stretch_clip", "'bars' must be > 0");
+        const int beatsPerBar = juce::jmax (1, tempoSeq.getTimeSigAt (startPos).numerator.get());
+        // The source should span exactly bars×beatsPerBar beats.
+        sourceBpm = (bars * (double) beatsPerBar * 60.0) / sourceLen;
+    }
+    else
+    {
+        const double target = (double) args.getProperty ("length", sourceLen);
+        if (target <= 0.0) return errResult ("stretch_clip", "'length' must be > 0");
+        sourceBpm = projectBpm * target / sourceLen;
+    }
+    sourceBpm = juce::jlimit (20.0, 999.0, sourceBpm);
+    const double warpedLen = sourceLen * sourceBpm / projectBpm;
+
+    beginTxn ("stretch_clip");
+    ac->setTimeStretchMode (te::TimeStretcher::checkModeIsAvailable (te::TimeStretcher::defaultMode));
+    auto info = ac->getAudioFile().getInfo();
+    ac->getLoopInfo().setBpm (sourceBpm, info);
+    ac->setAutoTempo (true);
+    // Fill the target span explicitly so the clip visibly stretches to the dragged
+    // length (the whole source maps across warpedLen at this sourceBpm).
+    ac->setPosition ({ { startPos, tracktion::TimeDuration::fromSeconds (warpedLen) },
+                       ac->getPosition().getOffset() });
+
+    logLine ("stretch_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (ac->itemID.toString());
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", ac->itemID.toString());
+    data->setProperty ("sourceBpm", sourceBpm);
+    data->setProperty ("length", ac->getPosition().getLength().inSeconds());
+    return okResult ("stretch_clip", var (data));
+}
+
+juce::var MoshOps::cmdDetectClipBpm (const juce::var& args)
+{
+    // Read-only offline BPM estimate of a wave clip's source loop (no txn / log,
+    // mirrors get_clip_peaks). Feeds the Inspector "Detect BPM" affordance.
+    const auto id = args.getProperty ("clipId", var()).toString();
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (id));
+    if (wave == nullptr) return errResult ("detect_clip_bpm", "no wave clip: " + id);
+
+    const auto est = detectBpmFromFile (wave->getCurrentSourceFile());
+    if (est.first <= 0.0) return errResult ("detect_clip_bpm", "cannot estimate BPM (unreadable or no pulse)");
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", id);
+    data->setProperty ("bpm", est.first);
+    data->setProperty ("confidence", est.second);
+    return okResult ("detect_clip_bpm", var (data));
 }
 
 juce::var MoshOps::cmdDuplicateClip (const juce::var& args)

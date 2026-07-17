@@ -85,4 +85,61 @@ describe("bridge.mock set_clip_warp", () => {
     const notAudio = await mockExecute<CommandResult>({ command: "set_clip_warp", args: { clipId: midi, autoTempo: true } });
     expect(notAudio.ok).toBe(false);
   });
+
+  it("enabling warp carries a sourceBpm (detect:true is a no-op stub offline)", async () => {
+    const clipId = await waveClipId();
+    await mockExecute({ command: "set_clip_warp", args: { clipId, autoTempo: true, detect: true } });
+    const clip = await clipById(clipId);
+    expect(typeof clip?.sourceBpm).toBe("number");
+    expect(clip?.sourceBpm).toBeGreaterThan(0);
+  });
+});
+
+describe("bridge.mock stretch_clip + detect_clip_bpm (easy warp)", () => {
+  beforeEach(() => __resetMockForTests());
+
+  type StretchData = { clipId: string; sourceBpm: number; length: number };
+  type DetectData = { clipId: string; bpm: number; confidence: number };
+
+  it("stretch_clip length sets the clip length and turns warp on", async () => {
+    const clipId = await waveClipId();
+    const before = await clipById(clipId);
+    const res = await mockExecute<CommandResult<StretchData>>({
+      command: "stretch_clip", args: { clipId, length: (before!.length) + 1.0 },
+    });
+    expect(res.ok).toBe(true);
+    const after = await clipById(clipId);
+    expect(after?.autoTempo).toBe(true);
+    expect(after?.length).toBeCloseTo((before!.length) + 1.0, 3);
+    expect(res.data?.length).toBeCloseTo((before!.length) + 1.0, 3);
+  });
+
+  it("stretch_clip bars fills N bars at 120bpm 4/4 (1 bar = 2.0s)", async () => {
+    const clipId = await waveClipId();
+    await mockExecute({ command: "stretch_clip", args: { clipId, bars: 1 } });
+    expect((await clipById(clipId))?.length).toBeCloseTo(2.0, 2);
+    await mockExecute({ command: "stretch_clip", args: { clipId, bars: 2 } });
+    expect((await clipById(clipId))?.length).toBeCloseTo(4.0, 2);
+  });
+
+  it("stretch_clip is undoable and validates args", async () => {
+    const clipId = await waveClipId();
+    await mockExecute({ command: "stretch_clip", args: { clipId, bars: 2 } });
+    const u = await mockExecute<CommandResult>({ command: "undo", args: {} });
+    expect(u.ok).toBe(true);
+
+    expect((await mockExecute<CommandResult>({ command: "stretch_clip", args: { clipId } })).ok).toBe(false);
+    expect((await mockExecute<CommandResult>({ command: "stretch_clip", args: { clipId: "no-such", length: 2 } })).ok).toBe(false);
+    const midi = await midiClipId();
+    expect((await mockExecute<CommandResult>({ command: "stretch_clip", args: { clipId: midi, length: 2 } })).ok).toBe(false);
+  });
+
+  it("detect_clip_bpm returns a bpm + confidence for a wave clip and rejects non-wave", async () => {
+    const clipId = await waveClipId();
+    const d = await mockExecute<CommandResult<DetectData>>({ command: "detect_clip_bpm", args: { clipId } });
+    expect(d.ok).toBe(true);
+    expect(d.data?.bpm).toBeGreaterThan(0);
+    expect(d.data?.confidence).toBeGreaterThan(0);
+    expect((await mockExecute<CommandResult>({ command: "detect_clip_bpm", args: { clipId: "no-such" } })).ok).toBe(false);
+  });
 });
