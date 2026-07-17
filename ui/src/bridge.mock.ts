@@ -35,6 +35,9 @@ const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
 const nextAnnotationId = () => "ann-" + ++annotationSeq;
 
+// G4b — fade curve name -> te::AudioFadeCurve::Type int (1..4), mirroring the native enum.
+const FADE_CURVE_TYPE: Record<string, number> = { linear: 1, convex: 2, concave: 3, sCurve: 4 };
+
 function waveClip(name: string, start: number, length: number): Clip {
   return {
     id: nextClipId(),
@@ -46,6 +49,11 @@ function waveClip(name: string, start: number, length: number): Clip {
     sourceFile: `/mock/${name}.wav`,
     sourceLength: length,
     hasRenderLayer: false,
+    // G4b — default to 0/0 (linear) so the Clip tab's fade controls render deterministically.
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    fadeInType: 1,
+    fadeOutType: 1,
   };
 }
 
@@ -1048,6 +1056,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
+    // G4b — clip fades: clamps each dimension present in args to [0, clip.length]
+    // (mirrors the engine's no-boundary-move clamp). Curve names map to the same
+    // te::AudioFadeCurve::Type ints (1..4) the native snapshot carries. Like
+    // set_clip_gain above, the mock does not gate on clip type — the UI only ever
+    // calls this for wave clips (ClipTab), and the real audio-clip-only rejection
+    // is a backend contract proven by the native selftest, not re-derived here.
+    case "set_clip_fade": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      pushUndo();
+      if ("fadeInSec" in args) f.clip.fadeInSec = Math.max(0, Math.min(num(args.fadeInSec), f.clip.length));
+      if ("fadeOutSec" in args) f.clip.fadeOutSec = Math.max(0, Math.min(num(args.fadeOutSec), f.clip.length));
+      if ("curveIn" in args) f.clip.fadeInType = FADE_CURVE_TYPE[str(args.curveIn)] ?? 1;
+      if ("curveOut" in args) f.clip.fadeOutType = FADE_CURVE_TYPE[str(args.curveOut)] ?? 1;
+      invalidate();
+      return ok(command, { clipId: f.clip.id, fadeInSec: f.clip.fadeInSec, fadeOutSec: f.clip.fadeOutSec });
+    }
 
     // Audio warp (auto-tempo): the clip follows the tempo map + time-stretches (SoundTouch).
     // Wave clips only; `autoTempo` is required (mirrors cmdSetClipWarp). Enabling with no

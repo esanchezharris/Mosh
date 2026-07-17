@@ -911,6 +911,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "set_clip_fade")     return cmdSetClipFade (args);
     if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
     if (name == "stretch_clip")      return cmdStretchClip (args);
@@ -3829,6 +3830,44 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
     logLine ("set_clip_gain", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_gain");
+}
+
+// G4b — clip fades. String -> AudioFadeCurve::Type, default linear (mirrors the enum
+// tracktion_AudioFadeCurve.h ships: linear=1, convex=2, concave=3, sCurve=4).
+static te::AudioFadeCurve::Type fadeCurveFromName (const juce::String& name)
+{
+    if (name.equalsIgnoreCase ("convex"))  return te::AudioFadeCurve::convex;
+    if (name.equalsIgnoreCase ("concave")) return te::AudioFadeCurve::concave;
+    if (name.equalsIgnoreCase ("sCurve") || name.equalsIgnoreCase ("scurve")) return te::AudioFadeCurve::sCurve;
+    return te::AudioFadeCurve::linear;
+}
+
+juce::var MoshOps::cmdSetClipFade (const juce::var& args)
+{
+    // Clip-edge fades (reality-pack inv 30: "affect edges without moving clip boundaries").
+    // setFadeIn/setFadeOut (AudioClipBase.cpp) clamp to [0, clipLength] and rescale if
+    // fadeIn+fadeOut exceeds the clip length — no boundary move, ever. Audio-clip-only,
+    // mirrors set_clip_gain. Fades bind to the clip's own ValueTree via a plain
+    // CachedValue.referTo(state, id, um) — the SAME undo/persistence path as clip gain,
+    // so this is undoable + save/reload-durable with zero src/state schema change.
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_fade", "not an audio clip");
+    beginTxn ("set_clip_fade");
+    if (args.hasProperty ("fadeInSec"))
+        ac->setFadeIn  (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeInSec",  0.0))));
+    if (args.hasProperty ("fadeOutSec"))
+        ac->setFadeOut (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeOutSec", 0.0))));
+    if (args.hasProperty ("curveIn"))
+        ac->setFadeInType  (fadeCurveFromName (args.getProperty ("curveIn",  "linear").toString()));
+    if (args.hasProperty ("curveOut"))
+        ac->setFadeOutType (fadeCurveFromName (args.getProperty ("curveOut", "linear").toString()));
+    logLine ("set_clip_fade", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", ac->itemID.toString());
+    data->setProperty ("fadeInSec",  ac->getFadeIn().inSeconds());
+    data->setProperty ("fadeOutSec", ac->getFadeOut().inSeconds());
+    return okResult ("set_clip_fade", var (data));
 }
 
 juce::var MoshOps::cmdRelinkClip (const juce::var& args)
@@ -9822,6 +9861,14 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceMissing", ! w->getCurrentSourceFile().existsAsFile());   // gap 3 — relink cue
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
+        // G4b — clip fades: additive, unconditional (mirrors gainDb) so the snapshot always
+        // reflects the current fade even when it's the 0/0 default. getFadeIn()/getFadeOut()
+        // would auto-crossfade-adjust when autoCrossfade is on AND a neighbor overlaps; Mosh
+        // leaves autoCrossfade off, so this reads the raw stored fade in the common case.
+        o->setProperty ("fadeInSec",   w->getFadeIn().inSeconds());
+        o->setProperty ("fadeOutSec",  w->getFadeOut().inSeconds());
+        o->setProperty ("fadeInType",  (int) w->getFadeInType());   // 1..4 — UI only needs durations for v1
+        o->setProperty ("fadeOutType", (int) w->getFadeOutType());
         // Audio warp (auto-tempo): the clip follows the tempo map when on.
         o->setProperty ("autoTempo", w->getAutoTempo());
         if (w->getAutoTempo())
@@ -10327,7 +10374,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "create_track", "rename_track", "remove_track", "set_track_type",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
+        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
         "create_section", "rename_section", "move_section", "remove_section",

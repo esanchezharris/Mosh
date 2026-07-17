@@ -1,11 +1,11 @@
-// G4A — the clip Inspector's Clip tab (gain / mute / rename).
+// G4A/G4b — the clip Inspector's Clip tab (gain / mute / rename / fades).
 //
 // A selected clip gets a "Clip" tab: rename (name text field, commits on blur),
-// mute (all clip types), and gain (wave clips only — set_clip_gain is
-// audio-clip-only backend-side). Pure command-surface assertions (store.exec) —
-// no engine concepts leak. Fades are a separate, deferred ticket (G4b) and are
-// NOT part of this tab. Heavy sibling panels (FX/Gen/Lyrics) are stubbed so the
-// render stays focused on the Clip surface.
+// mute (all clip types), gain, and fade-in/fade-out (wave clips only —
+// set_clip_gain/set_clip_fade are audio-clip-only backend-side). Pure
+// command-surface assertions (store.exec) — no engine concepts leak. Heavy
+// sibling panels (FX/Gen/Lyrics) are stubbed so the render stays focused on the
+// Clip surface.
 
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -161,9 +161,83 @@ describe("v2 Inspector Clip tab", () => {
     expect(call!.args).toMatchObject({ clipId: "c1", gainDb: 6 });
   });
 
-  it("does not render a fadeIn/fadeOut control — fades are a separate ticket", () => {
+  it("shows fade-in/fade-out for a wave clip but not for a MIDI clip", () => {
     render(makeSnapshot(waveClip()));
+    expect(host.querySelector('[data-testid="v2-clip-fadein"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-fadeout"]')).not.toBeNull();
+
+    act(() => useShell.setState({ selectedClipId: "m1", inspectorTab: "clip" }));
+    render(makeSnapshot(midiClip()));
     expect(host.querySelector('[data-testid="v2-clip-fadein"]')).toBeNull();
     expect(host.querySelector('[data-testid="v2-clip-fadeout"]')).toBeNull();
+  });
+
+  it("dragging the fade-in slider execs set_clip_fade with fadeInSec", () => {
+    render(makeSnapshot(waveClip({ fadeInSec: 0 })));
+    const slider = host.querySelector<HTMLInputElement>('[data-testid="v2-clip-fadein"]');
+    expect(slider).not.toBeNull();
+    expect(slider!.value).toBe("0");
+    act(() => setInputValue(slider!, "1.5"));
+    const call = execCalls.find((c) => c.command === "set_clip_fade");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", fadeInSec: 1.5 });
+  });
+
+  it("dragging the fade-out slider execs set_clip_fade with fadeOutSec", () => {
+    render(makeSnapshot(waveClip({ fadeOutSec: 0 })));
+    const slider = host.querySelector<HTMLInputElement>('[data-testid="v2-clip-fadeout"]');
+    expect(slider).not.toBeNull();
+    expect(slider!.value).toBe("0");
+    act(() => setInputValue(slider!, "0.75"));
+    const call = execCalls.find((c) => c.command === "set_clip_fade");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", fadeOutSec: 0.75 });
+  });
+
+  it("shows fade curve pickers for a wave clip but not for a MIDI clip", () => {
+    render(makeSnapshot(waveClip()));
+    expect(host.querySelector('[data-testid="v2-clip-fadein-curve"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-fadeout-curve"]')).not.toBeNull();
+
+    act(() => useShell.setState({ selectedClipId: "m1", inspectorTab: "clip" }));
+    render(makeSnapshot(midiClip()));
+    expect(host.querySelector('[data-testid="v2-clip-fadein-curve"]')).toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-fadeout-curve"]')).toBeNull();
+  });
+
+  it("changing the fade-in curve execs set_clip_fade with curveIn", () => {
+    render(makeSnapshot(waveClip({ fadeInType: 1 })));
+    const select = host.querySelector<HTMLSelectElement>('[data-testid="v2-clip-fadein-curve"]');
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe("linear");
+    act(() => {
+      select!.value = "convex";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const call = execCalls.find((c) => c.command === "set_clip_fade");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", curveIn: "convex" });
+  });
+
+  it("changing the fade-out curve execs set_clip_fade with curveOut", () => {
+    render(makeSnapshot(waveClip({ fadeOutType: 3 })));
+    const select = host.querySelector<HTMLSelectElement>('[data-testid="v2-clip-fadeout-curve"]');
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe("concave");
+    act(() => {
+      select!.value = "sCurve";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const call = execCalls.find((c) => c.command === "set_clip_fade");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", curveOut: "sCurve" });
+  });
+
+  it("clamps the displayed fade value to the clip's own length", () => {
+    render(makeSnapshot(waveClip({ length: 2, fadeInSec: 5 })));
+    const slider = host.querySelector<HTMLInputElement>('[data-testid="v2-clip-fadein"]');
+    // The slider's max is the clip length, so an out-of-range stored value clamps
+    // when displayed (the engine clamps identically server-side on the next set).
+    expect(Number(slider!.value)).toBeLessThanOrEqual(2);
   });
 });

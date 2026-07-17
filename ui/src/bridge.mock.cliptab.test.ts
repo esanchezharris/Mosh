@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mockExecute, mockSnapshot, __resetMockForTests } from "./bridge.mock";
 import type { CommandResult, Snapshot } from "./types";
 
-// G4A — clip inspector gain/mute/rename mock-bridge coverage. These three
-// commands (rename_clip / set_clip_mute / set_clip_gain) already existed as
-// agent-only MoshOps commands and mock handlers; this pins their undo/redo
-// behavior through the mock bridge now that a UI surface (the Inspector's
-// "Clip" tab) drives them. Fades are a separate, deferred ticket (G4b).
+// G4A/G4b — clip inspector gain/mute/rename/fade mock-bridge coverage. These
+// commands (rename_clip / set_clip_mute / set_clip_gain / set_clip_fade)
+// already existed as agent-only MoshOps commands and mock handlers; this pins
+// their undo/redo behavior through the mock bridge now that a UI surface (the
+// Inspector's "Clip" tab) drives them.
 
 const exec = <T = CommandResult>(command: string, args: Record<string, unknown>) =>
   mockExecute<T>({ command, args });
@@ -94,5 +94,63 @@ describe("clip inspector: rename_clip / set_clip_mute / set_clip_gain via the mo
   it("errors on an unknown clipId rather than silently no-op'ing", async () => {
     const r = await exec("set_clip_gain", { clipId: "does-not-exist", gainDb: 3 });
     expect(r.ok).toBe(false);
+  });
+
+  it("set_clip_fade sets fadeInSec/fadeOutSec and undo restores the prior values", async () => {
+    const { clipId } = await waveClip();
+    expect((await findClip(clipId)).fadeInSec).toBe(0);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0);
+
+    const r = await exec("set_clip_fade", { clipId, fadeInSec: 0.5, fadeOutSec: 0.25 });
+    expect(r.ok).toBe(true);
+    expect((await findClip(clipId)).fadeInSec).toBe(0.5);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0.25);
+
+    await exec("undo", {});
+    expect((await findClip(clipId)).fadeInSec).toBe(0);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0);
+
+    await exec("redo", {});
+    expect((await findClip(clipId)).fadeInSec).toBe(0.5);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0.25);
+  });
+
+  it("set_clip_fade only touches the dimension present in args", async () => {
+    const { clipId } = await waveClip();
+    await exec("set_clip_fade", { clipId, fadeInSec: 1 });
+    expect((await findClip(clipId)).fadeInSec).toBe(1);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0);
+
+    await exec("set_clip_fade", { clipId, fadeOutSec: 0.5 });
+    expect((await findClip(clipId)).fadeInSec).toBe(1);
+    expect((await findClip(clipId)).fadeOutSec).toBe(0.5);
+  });
+
+  it("set_clip_fade clamps to [0, clip.length]", async () => {
+    const { clipId } = await waveClip();
+    const length = (await findClip(clipId)).length;
+
+    await exec("set_clip_fade", { clipId, fadeInSec: length + 999 });
+    expect((await findClip(clipId)).fadeInSec).toBe(length);
+
+    await exec("set_clip_fade", { clipId, fadeOutSec: -5 });
+    expect((await findClip(clipId)).fadeOutSec).toBe(0);
+  });
+
+  it("set_clip_fade errors on an unknown clipId", async () => {
+    const r = await exec("set_clip_fade", { clipId: "does-not-exist", fadeInSec: 0.5 });
+    expect(r.ok).toBe(false);
+  });
+
+  it("set_clip_fade sets curveIn/curveOut as fadeInType/fadeOutType ints", async () => {
+    const { clipId } = await waveClip();
+    expect((await findClip(clipId)).fadeInType).toBe(1);   // linear default
+    expect((await findClip(clipId)).fadeOutType).toBe(1);
+
+    await exec("set_clip_fade", { clipId, curveIn: "convex" });
+    expect((await findClip(clipId)).fadeInType).toBe(2);
+
+    await exec("set_clip_fade", { clipId, curveOut: "sCurve" });
+    expect((await findClip(clipId)).fadeOutType).toBe(4);
   });
 });

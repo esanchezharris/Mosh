@@ -185,6 +185,9 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    // G4b — clip fades (fade-in/fade-out + curve type). Audio-clip-only, mirrors
+    // cmdSetClipGain; fades render NATIVELY through AudioClipBase (no src/state change).
+    juce::var cmdSetClipFade    (const juce::var& args);
     juce::var cmdRelinkClip     (const juce::var& args);   // gap 3 — re-point a missing wave source
     // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
     // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).

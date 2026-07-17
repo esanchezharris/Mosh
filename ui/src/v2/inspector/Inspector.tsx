@@ -188,14 +188,23 @@ function OutputField({ track }: { track: Track }) {
   );
 }
 
+// G4b — fade curve names, index-aligned with te::AudioFadeCurve::Type
+// (1=linear 2=convex 3=concave 4=sCurve, per clipToVar's fadeInType/fadeOutType).
+const FADE_CURVES = ["linear", "convex", "concave", "sCurve"] as const;
+const fadeCurveName = (type: number | undefined): (typeof FADE_CURVES)[number] => FADE_CURVES[(type ?? 1) - 1] ?? "linear";
+
 // G4A — the clip-level Inspector tab: rename / mute / gain. These three commands
 // (rename_clip / set_clip_mute / set_clip_gain) already existed as agent-only
 // MoshOps commands; this is their first UI surface. Gain is wave-clip-only
 // (set_clip_gain rejects non-audio clips backend-side) — mute + rename apply to
-// every clip type. Clip fades are a separate, deferred ticket (G4b) — not here.
+// every clip type.
+// G4b — fade-in / fade-out sliders (+ curve picker), below gain. Also wave-clip-only
+// (set_clip_fade rejects non-audio clips backend-side, same as gain); clamped to the
+// clip's own length so the slider can never request more fade than the clip has room for.
 function ClipTab({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const isWave = clip.type === "wave";
+  const clampToLength = (v: number) => Math.max(0, Math.min(v, clip.length));
   return (
     <div className="v2-mix" data-testid="v2-clip-tab">
       <label className="v2-field">
@@ -223,6 +232,54 @@ function ClipTab({ clip }: { clip: Clip }) {
             onChange={(e) => void exec("set_clip_gain", { clipId: clip.id, gainDb: Number(e.target.value) })}
           />
           <span className="v2-val">{(clip.gainDb ?? 0).toFixed(1)}</span>
+        </label>
+      )}
+      {isWave && (
+        <label className="v2-field">
+          <span>Fade in</span>
+          <input
+            type="range"
+            min={0}
+            max={clip.length}
+            step={0.01}
+            value={clampToLength(clip.fadeInSec ?? 0)}
+            data-testid="v2-clip-fadein"
+            onChange={(e) => void exec("set_clip_fade", { clipId: clip.id, fadeInSec: Number(e.target.value) })}
+          />
+          <span className="v2-val">{(clip.fadeInSec ?? 0).toFixed(2)}s</span>
+          <select
+            className="btn ghost"
+            aria-label="Fade in curve"
+            data-testid="v2-clip-fadein-curve"
+            value={fadeCurveName(clip.fadeInType)}
+            onChange={(e) => void exec("set_clip_fade", { clipId: clip.id, curveIn: e.target.value })}
+          >
+            {FADE_CURVES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+      )}
+      {isWave && (
+        <label className="v2-field">
+          <span>Fade out</span>
+          <input
+            type="range"
+            min={0}
+            max={clip.length}
+            step={0.01}
+            value={clampToLength(clip.fadeOutSec ?? 0)}
+            data-testid="v2-clip-fadeout"
+            onChange={(e) => void exec("set_clip_fade", { clipId: clip.id, fadeOutSec: Number(e.target.value) })}
+          />
+          <span className="v2-val">{(clip.fadeOutSec ?? 0).toFixed(2)}s</span>
+          <select
+            className="btn ghost"
+            aria-label="Fade out curve"
+            data-testid="v2-clip-fadeout-curve"
+            value={fadeCurveName(clip.fadeOutType)}
+            onChange={(e) => void exec("set_clip_fade", { clipId: clip.id, curveOut: e.target.value })}
+          >
+            {FADE_CURVES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </label>
       )}
       <div className="v2-mix-btns">
