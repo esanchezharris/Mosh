@@ -224,13 +224,15 @@ def nsf_perform(in_wav, out_wav, f0_wav):
         raise RuntimeError(f"nsf perform failed: {(r.stderr or '')[-400:]}")
 
 
-def gold_word_slots(cache, gold_wav, words, syllables, marks=None):
+def gold_word_slots(cache, gold_wav, words, syllables, marks=None, min_ctc=0.2):
     """Forced-align gold; split each word span into syllable slots (even split, or by
     annotator --marks times falling inside the span)."""
     aligned = vl.align_words_probe(cache, gold_wav, words)
-    bad = [(w["word"], w["score"]) for w in aligned if float(w.get("score", 0)) < 0.2]
+    bad = [(w["word"], round(float(w.get("score", 0)), 3)) for w in aligned
+           if float(w.get("score", 0)) < min_ctc]
     if bad:
-        raise RuntimeError(f"gold alignment weak on {bad} — re-record or check the words")
+        raise RuntimeError(f"gold alignment weak on {bad} — re-record, check the words, or "
+                           "override --min-ctc after verifying spans/voicing by hand")
     out = []
     for al, m in zip(aligned, syllables):
         a, b = float(al["start"]), float(al["end"])
@@ -296,6 +298,8 @@ def main() -> int:
     ap.add_argument("--line", required=True, help="SECTION-clock window a:b (seconds)")
     ap.add_argument("--out", default=os.path.join(ROOT, "asserted-proof", "mechanism", "v2"))
     ap.add_argument("--marks", default=None, help="json with {'marks': [t,...]} on the gold clock")
+    ap.add_argument("--min-ctc", type=float, default=0.2,
+                    help="per-word alignment gate; lower ONLY after hand-verifying spans")
     ap.add_argument("--skip-render", action="store_true")
     ap.add_argument("--skip-nsf", action="store_true")
     args = ap.parse_args()
@@ -326,7 +330,7 @@ def main() -> int:
     if args.marks:
         with open(os.path.expanduser(args.marks)) as f:
             marks = json.load(f).get("marks", [])
-    gold_words = gold_word_slots(cache, gold, words, syls, marks)
+    gold_words = gold_word_slots(cache, gold, words, syls, marks, min_ctc=args.min_ctc)
 
     oracle_line, log = build_oracle_line(notes, i0, i1, gold_words)
     oracle_notes = splice_line(notes, i0, i1, oracle_line)
@@ -357,15 +361,24 @@ def main() -> int:
         if not args.skip_nsf and nsf_available():
             take_slice = os.path.join(out_dir, "take-line.wav")
             slice_wav(TAKE, take_slice, base_line_span[0] - 0.5, base_line_span[1] + 0.5)
+            # perform's F0 source must share the RENDER SLICE's clock: both slices start
+            # 0.5s before their line (oracle internal timing == gold's by construction),
+            # so cut the gold to [g0-0.5, g_end+0.5] — NOT the full gold recording.
+            gold_slice = os.path.join(out_dir, "gold-line-f0src.wav")
+            g0 = gold_words[0]["start"]
+            if g0 < 0.5:
+                raise RuntimeError(f"gold line starts {g0:.2f}s in — need >=0.5s of lead "
+                                   "silence for the aligned perform slice; re-trim the take")
+            slice_wav(gold, gold_slice, g0 - 0.5, gold_words[-1]["end"] + 0.5)
             for name, f0src, span in (("baseline", take_slice, base_line_span),
-                                      ("oracle", gold, ora_line_span)):
+                                      ("oracle", gold_slice, ora_line_span)):
                 # perform needs time-locked F0: slice the render to the line first, then
                 # re-vocode at the F0 of the human performance that defined its timing
                 sl = os.path.join(out_dir, f"{name}-line.wav")
                 slice_wav(arms[name], sl, span[0] - 0.5, span[1] + 0.5)
                 out = os.path.join(out_dir, f"{name}-nsf-perform.wav")
                 print(f"== nsf perform {name}", flush=True)
-                nsf_perform(sl, out, f0src if name == "oracle" else take_slice)
+                nsf_perform(sl, out, f0src)
                 arms[name] = out
         elif not args.skip_nsf:
             print("NSF model/venv not present — SoulX arms only", flush=True)
