@@ -1,6 +1,7 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
 #include "ScanProgress.h"
+#include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -997,6 +998,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "reset_rave")        return cmdResetRave (args);
    #endif
     if (name == "export_audio")      return cmdExportAudio (args);
+    if (name == "export_stems")      return cmdExportStems (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
@@ -8695,6 +8697,244 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     data->setProperty ("renderModeReason", renderModeReason);
     data->setProperty ("realTimeRender", params.realTimeRender);
     return okResult ("export_audio", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G7 — cmdExportStems: one WAV/AIFF/FLAC per visible, non-empty audio track, ALL
+// sharing the same {0, editLength} render window (the "common zero point" — a
+// track whose clips start at bar 8 yields a stem with 8 bars of leading silence,
+// so every stem is the same length and re-imports aligned). Mirrors
+// cmdExportAudio's format/bit-depth/sample-rate resolution (deliberately kept
+// self-contained rather than sharing a helper — see the spec §2 "shared-helper
+// refactor (recommended)" note; duplication is the smaller, lower-risk diff and
+// the golden/verify gate catches any drift) and reuses bounceClipToWav's
+// single-track render primitive in a loop instead of a single all-tracks render.
+// NON-undoable (read/render, no ValueTree mutation the undo system needs to
+// know about) — same posture as export_audio.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdExportStems (const juce::var& args)
+{
+    auto& edit = eng.edit();
+
+    // ── Format / extension resolution (trimmed-down cmdExportAudio copy — stems
+    // take a destination "dir", not a per-file "file", so there is no extension-
+    // inference-from-filename branch to mirror). ───────────────────────────────
+    auto& afm = edit.engine.getAudioFileFormatManager();
+    const auto requestedFormat = args.getProperty ("format", var()).toString().trim().toLowerCase();
+
+    struct FormatChoice { juce::AudioFormat* format = nullptr; juce::String extension; };
+    auto formatForKeyword = [&afm] (const juce::String& kw) -> FormatChoice
+    {
+        if (kw == "wav")  return { afm.getWavFormat(),  ".wav" };
+        if (kw == "aiff" || kw == "aif") return { afm.getAiffFormat(), ".aiff" };
+        if (kw == "flac") return { afm.getFlacFormat(), ".flac" };
+        return {};
+    };
+
+    juce::AudioFormat* audioFormat = afm.getWavFormat();
+    juce::String formatName = "wav";
+    juce::String extension = ".wav";
+    if (requestedFormat.isNotEmpty())
+    {
+        auto choice = formatForKeyword (requestedFormat);
+        if (choice.format == nullptr)
+            return errResult ("export_stems", "unsupported format: " + requestedFormat
+                              + " (supported: wav, aiff, flac)");
+        audioFormat = choice.format;
+        formatName  = requestedFormat == "aif" ? "aiff" : requestedFormat;
+        extension   = choice.extension;
+    }
+    if (audioFormat == nullptr)   // belt-and-braces: never render with a null format
+        audioFormat = afm.getDefaultFormat();
+
+    // ── Bit depth — PRJ-008: default from the stored per-project setting, same
+    // precedence as cmdExportAudio. ─────────────────────────────────────────────
+    auto projectSettings = edit.state.getChildWithName (ids::MOSH_PROJECT);
+    int bitDepth = projectSettings.hasProperty (ids::projectBitDepth)
+                       ? (int) projectSettings.getProperty (ids::projectBitDepth)
+                       : 24;
+    {
+        auto depths = audioFormat->getPossibleBitDepths();
+        if (args.hasProperty ("bitDepth"))
+        {
+            bitDepth = (int) args.getProperty ("bitDepth", 24);
+            if (! depths.contains (bitDepth))
+            {
+                juce::StringArray supported;
+                for (auto d : depths) supported.add (String (d));
+                return errResult ("export_stems", "format " + formatName + " does not support bit depth "
+                                  + String (bitDepth) + " (supported: " + supported.joinIntoString (", ") + ")");
+            }
+        }
+        else if (! depths.isEmpty() && ! depths.contains (bitDepth))
+        {
+            int best = depths[0];
+            for (auto d : depths) if (std::abs (d - 24) < std::abs (best - 24)) best = d;
+            bitDepth = best;
+        }
+    }
+
+    // ── Sample rate — same PRJ-008 precedence as cmdExportAudio. ────────────────
+    double sampleRate = edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0)
+        sampleRate = 44100.0;
+    if (! args.hasProperty ("sampleRate") && projectSettings.hasProperty (ids::projectSampleRate))
+    {
+        const double projSr = (double) projectSettings.getProperty (ids::projectSampleRate);
+        if (projSr >= 7000.0)
+            sampleRate = projSr;
+    }
+    if (args.hasProperty ("sampleRate"))
+    {
+        const double reqSr = (double) args.getProperty ("sampleRate", sampleRate);
+        if (reqSr >= 7000.0)
+            sampleRate = reqSr;
+    }
+
+    const auto requestedMode = args.getProperty ("renderMode", "auto").toString().toLowerCase();
+    if (requestedMode != "auto" && requestedMode != "fast" && requestedMode != "realtime")
+        return errResult ("export_stems", "renderMode must be 'auto', 'fast', or 'realtime'");
+
+    // Destination directory: explicit `dir` arg, else sessionDir/exports/stems-<ms>.
+    juce::File dir = args.getProperty ("dir", var()).toString().isNotEmpty()
+        ? juce::File (args.getProperty ("dir", var()).toString())
+        : eng.sessionDir().getChildFile ("exports")
+              .getChildFile ("stems-" + String (Time::getCurrentTime().toMilliseconds()));
+    dir.createDirectory();
+
+    const bool includeEmpty = (bool) args.getProperty ("includeEmpty", false);
+
+    // Render exclusivity (01 §5), done ONCE for the whole stem set — mirrors
+    // cmdExportAudio's teardown so the master meter re-attaches to the NEXT context.
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
+    // the edit forces ALL stems to render realtime — a safe superset, computed once
+    // rather than per-track (mirrors cmdExportAudio's "auto" resolution).
+    const bool realtime = requestedMode == "realtime"
+                          || (requestedMode == "auto" && findSerumRealtimeRenderReason (edit).isNotEmpty());
+
+    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+    int blockSize = edit.engine.getDeviceManager().getBlockSize();
+    if (blockSize <= 0) blockSize = 512;
+
+    juce::Array<var> stems;
+    juce::String firstError;
+    int index = 0;   // matches snapshot()'s track index (te::getAudioTracks, moshHidden filtered)
+
+    for (auto* t : te::getAudioTracks (edit))
+    {
+        if (t == nullptr) continue;
+        if ((bool) t->state.getProperty (ids::moshHidden, false)) continue;   // Phase-2 hidden beneath-render track — never a stem
+        const int myIndex = index++;
+        if (! includeEmpty && t->getClips().isEmpty()) continue;             // skip silent tracks by default
+
+        auto file = dir.getChildFile (stemFileBaseName (myIndex, t->getName())).withFileExtension (extension);
+        file.deleteFile();
+
+        te::Renderer::Parameters params (edit);
+        params.destFile           = file;
+        params.audioFormat        = audioFormat;
+        params.bitDepth           = bitDepth;
+        params.sampleRateForAudio = sampleRate;
+        params.blockSizeForAudio  = blockSize;
+        params.time               = { tracktion::TimePosition(), edit.getLength() };   // COMMON zero point — every stem shares this window
+        juce::Array<te::Track*> one; one.add (t);
+        params.tracksToDo         = te::toBitSet (one);   // ONLY this track; no allowedClips — the WHOLE track, all its clips
+        params.usePlugins         = true;                 // instrument + insert FX = the track's own post-fader sound
+        params.useMasterPlugins   = false;                // pre-master — sum of stems + master chain reproduces the mix
+        params.createMidiFile     = false;
+        params.realTimeRender     = realtime;
+
+        juce::String renderError;
+        {
+            const te::Edit::ScopedRenderStatus srs (edit, true);
+            te::TransportControl::stopAllTransports (edit.engine, false, true);
+            te::Renderer::turnOffAllPlugins (edit);
+
+            if (params.tracksToDo.countNumberOfSetBits() > 0
+                && params.destFile.hasWriteAccess()
+                && ! params.destFile.isDirectory())
+            {
+                te::Renderer::RenderTask task ("Mosh stem export", params, nullptr, nullptr);
+
+                // Same no-progress watchdog + absolute deadline as cmdExportAudio /
+                // bounceClipToWav, so ONE bad track's stalled render (e.g. an unreadable
+                // source) errors cleanly instead of hanging the whole stem set.
+                const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+                const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, len * 8000.0 + 60000.0);
+                const juce::uint32 stallMs    = 20000;
+                float  lastProgress   = -1.0f;
+                juce::uint32 lastProgressMs = startMs;
+
+                while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+                {
+                    const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+                    const float p = task.getCurrentTaskProgress();
+                    if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+
+                    if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+                    {
+                        if (task.errorMessage.isEmpty())
+                            task.errorMessage = "stem render stalled (a clip's audio source could not be read)";
+                        break;
+                    }
+                }
+
+                te::Renderer::turnOffAllPlugins (edit);
+
+                if (task.errorMessage.isNotEmpty())
+                {
+                    renderError = task.errorMessage;
+                    file.deleteFile();
+                }
+            }
+            else
+            {
+                renderError = "render target is not writable or no tracks are renderable";
+            }
+        }
+
+        if (renderError.isNotEmpty())
+        {
+            // Best-effort: one bad track must not abort the whole stem set — record the
+            // first failure (surfaced only if EVERY track ends up failing) and continue.
+            if (firstError.isEmpty())
+                firstError = t->getName() + ": " + renderError;
+            continue;
+        }
+
+        if (file.existsAsFile() && file.getSize() > 0)
+        {
+            auto* so = new DynamicObject();
+            so->setProperty ("trackId",   t->itemID.toString());
+            so->setProperty ("logicalId", logicalid::ensureTrack (t->state));
+            so->setProperty ("name",      t->getName());
+            so->setProperty ("index",     myIndex);
+            so->setProperty ("file",      file.getFullPathName());
+            so->setProperty ("bytes",     (juce::int64) file.getSize());
+            stems.add (var (so));
+        }
+    }
+
+    const bool ok = ! stems.isEmpty();
+    logLine ("export_stems", args, ok, ok ? String() : (firstError.isNotEmpty() ? firstError : String ("no renderable tracks")), false);
+    if (! ok)
+        return errResult ("export_stems", firstError.isNotEmpty() ? firstError
+                          : String ("no renderable tracks (all empty or hidden)"));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("dir",        dir.getFullPathName());
+    data->setProperty ("format",     formatName);
+    data->setProperty ("bitDepth",   bitDepth);
+    data->setProperty ("sampleRate", sampleRate);
+    data->setProperty ("seconds",    len);
+    data->setProperty ("count",      stems.size());
+    data->setProperty ("stems",      var (stems));
+    return okResult ("export_stems", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

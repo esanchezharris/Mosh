@@ -820,11 +820,60 @@ def check_crash_recovery(ctx):
                 "recovered_cmds": recovered, "beta_clips": beta_clips, "stderr": proc.stderr[-300:] if not ok else ""})
 
 
+def check_stem_export(ctx):
+    """G7 — per-track stem export, common zero point (reality-pack invariant 84:
+    "Stem export names and aligns each stem from the same zero point"). Two tracks
+    with DIFFERENT tone content export to distinct, non-silent stems that share the
+    SAME duration (both stems render over the identical {0, editLength} window —
+    the structural half of "common zero point"; alignment itself needs no cross-
+    correlation because both windows are literally the same range) and are
+    genuinely different signals from each other AND from the full mix (a stem is
+    not secretly the whole mix)."""
+    stem_dir = ART / "07_stems"
+    fullmix = ART / "07_stems_fullmix.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "A"}, "capture": {"TA": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TA}", "seconds": 2.0, "freq": 220.0}},
+        {"command": "create_track", "args": {"name": "B"}, "capture": {"TB": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TB}", "seconds": 2.0, "freq": 660.0}},
+        {"command": "export_stems", "args": {"dir": str(stem_dir)}},
+        {"command": "export_audio", "args": {"file": str(fullmix)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-stem-export")
+    fails = failed_commands(results)
+    if fails or not fullmix.exists() or len(results) < 6:
+        return row("Stem export (G7)", False, {"failed_commands": fails, "exists": fullmix.exists(),
+                                                "stderr": proc.stderr[-400:]})
+
+    # Command 5 (0-indexed 4) is export_stems — results are ordered 1:1 with cmds.
+    stems = results[4].get("data", {}).get("stems", [])
+    if len(stems) != 2:
+        return row("Stem export (G7)", False, {"error": f"expected 2 stems, got {len(stems)}",
+                                                "stems": stems, "stderr": proc.stderr[-400:]})
+
+    files = [Path(s["file"]) for s in stems]
+    if not all(f.exists() for f in files):
+        return row("Stem export (G7)", False, {"error": "a reported stem file is missing",
+                                                "stems": [str(f) for f in files]})
+
+    st = [stats(f) for f in files]
+    non_silent = all(s["peak"] > 0.05 and s["rms"] > 0.01 for s in st)
+    same_duration = abs(st[0]["duration_s"] - st[1]["duration_s"]) < 1e-3
+    d_stems = diff_rms(files[0], files[1])
+    d_mix = diff_rms(files[0], fullmix)
+    ok = non_silent and same_duration and d_stems > 0.05 and d_mix > 0.0
+
+    return row("Stem export (G7)", ok, {
+        "stems": [str(f) for f in files], "stats": st, "same_duration": same_duration,
+        "diff_rms_stems": d_stems, "diff_rms_vs_mix": d_mix,
+    })
+
+
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
                   check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
                   check_relative_ref_export, check_bypass_layer, check_render_artifact_portability,
-                  check_crash_recovery]
+                  check_crash_recovery, check_stem_export]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

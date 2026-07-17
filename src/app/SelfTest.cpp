@@ -2173,6 +2173,130 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
     }
 
+    // --- G7: per-track stem export (common zero point) ---------------------------
+    // Reality-pack invariant 84: "Stem export names and aligns each stem from the
+    // same zero point." export_stems mirrors export_audio's render but loops
+    // tracks (bounceClipToWav's single-track primitive); every stem shares the
+    // SAME {0, editLength} window, so re-imported stems land aligned by construction.
+    section ("G7: per-track stem export (common zero point)");
+    {
+        // Frame-count reader (mirrors DRM-001's wavMagnitude helper below) — proves
+        // the structural half of "common zero point": every stem is the SAME length.
+        auto wavFrames = [] (const File& f) -> int64
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+                return reader->lengthInSamples;
+            return -1;
+        };
+
+        // Fresh edit so the track/stem counts below are exact.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-selftest"))), "new_project (stem export isolation) ok");
+
+        auto ta = cmd (ops, "create_track", args1 ("name", "Track A"))["data"].getProperty ("trackId", var()).toString();
+        auto tb = cmd (ops, "create_track", args1 ("name", "Track B"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ta }, { "seconds", 1.0 }, { "freq", 220.0 }}))),
+               "stem test: Track A tone (220 Hz) added");
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tb }, { "seconds", 1.0 }, { "freq", 660.0 }}))),
+               "stem test: Track B tone (660 Hz) added");
+
+        auto stemDir = eng.sessionDir().getChildFile ("exports").getChildFile ("stems-selftest");
+        stemDir.deleteRecursively();
+
+        auto exp = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (exp), "export_stems ok");
+        check ((int) exp["data"].getProperty ("count", -1) == 2, "two stems for two non-empty tracks");
+        check (exp["data"].getProperty ("dir", var()).toString().isNotEmpty(), "export_stems reports the destination dir");
+
+        {
+            int64 firstLen = -1;
+            bool sawIndex0 = false, sawIndex1 = false;
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+            {
+                check (arr->size() == 2, "stems array has exactly 2 entries");
+                for (auto& s : *arr)
+                {
+                    File f (s.getProperty ("file", var()).toString());
+                    check (f.existsAsFile() && f.getSize() > 0, "stem file exists and is non-empty");
+                    check (f.getFileExtension().toLowerCase() == ".wav", "stem defaults to .wav");
+                    check (s.getProperty ("name", var()).toString().isNotEmpty(), "stem entry carries the track name");
+                    check (s.getProperty ("logicalId", var()).toString().isNotEmpty(), "stem entry carries a logicalId");
+                    check (s.getProperty ("trackId", var()).toString().isNotEmpty(), "stem entry carries a trackId");
+
+                    const int idx = (int) s.getProperty ("index", -1);
+                    check (idx == 0 || idx == 1, "stem index is 0 or 1 for a fresh two-track edit");
+                    if (idx == 0) sawIndex0 = true;
+                    if (idx == 1) sawIndex1 = true;
+                    check (f.getFileName().startsWith (String (idx).paddedLeft ('0', 2) + "-"),
+                           "stem filename starts with its zero-padded index");
+
+                    const auto frames = wavFrames (f);
+                    check (frames > 0, "stem WAV has readable audio frames");
+                    if (firstLen < 0) firstLen = frames;
+                    else check (frames == firstLen, "both stems share the SAME frame count (common zero point)");
+                }
+            }
+            else
+            {
+                check (false, "export_stems returned a stems array");
+            }
+            check (sawIndex0 && sawIndex1, "stem indices 0 and 1 each appear exactly once");
+        }
+
+        // Empty (clip-less) track is skipped by default; includeEmpty:true renders it too.
+        auto tc = cmd (ops, "create_track", args1 ("name", "Track C (empty)"))["data"].getProperty ("trackId", var()).toString();
+        juce::ignoreUnused (tc);
+        auto expSkip = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (expSkip) && (int) expSkip["data"].getProperty ("count", -1) == 2,
+               "clip-less track skipped by default (count stays 2)");
+
+        auto expInclude = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "includeEmpty", true }}));
+        check (ok (expInclude) && (int) expInclude["data"].getProperty ("count", -1) == 3,
+               "includeEmpty:true renders the clip-less track too (count 3)");
+
+        // Hidden-track exclusion: the Phase-2 beneath-render track (created by a MIDI
+        // re-imagine landing its hidden audio) must never produce a stem. Synthesized via
+        // the REAL production path (create_render_layer + render_layer on a MIDI clip),
+        // not a hand-rolled flag, so this proves the actual moshHidden gate in cmdExportStems.
+        {
+            auto mt = cmd (ops, "create_track", args1 ("name", "MidiGen"))["data"].getProperty ("trackId", var()).toString();
+            auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", mt }, { "length", 1.0 }}));
+            check (ok (mc), "stem test: MIDI clip added");
+            const auto mcid = mc["data"].getProperty ("clipId", var()).toString();
+            cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 60 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 100 }}));
+            cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
+            auto rr = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+            check (ok (rr), "stem test: MIDI re-imagine rendered (creates the hidden beneath-render track)");
+
+            auto expHidden = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+            check (ok (expHidden), "export_stems ok with a hidden render track present");
+            // Visible non-empty tracks: A, B, MidiGen (has a muted MIDI clip -> counted,
+            // silent by design — see the spec's mute/solo semantics note); C stays skipped
+            // (still clip-less). The hidden beneath-render track must NOT add a 4th.
+            check ((int) expHidden["data"].getProperty ("count", -1) == 3,
+                   "hidden beneath-render track excluded from the stem set (count 3, not 4)");
+            if (auto* arr2 = expHidden["data"].getProperty ("stems", var()).getArray())
+                for (auto& s : *arr2)
+                    check (! s.getProperty ("name", var()).toString().containsIgnoreCase ("hidden"),
+                           "no stem is named for the hidden render track");
+        }
+
+        // Format / bit-depth rejection — validated before any render (shared with
+        // export_audio's resolution logic, duplicated rather than extracted; see the
+        // comment above cmdExportStems).
+        auto badFormat = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "mp3" }}));
+        check (! ok (badFormat), "export_stems rejects an unsupported format (mp3)");
+        auto badDepth = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "wav" }, { "bitDepth", 7 }}));
+        check (! ok (badDepth), "export_stems rejects an unsupported bit depth (wav 7)");
+
+        // No renderable tracks -> a clean error, not a hang/crash.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-empty"))), "new_project (empty edit) ok");
+        auto expEmpty = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (! ok (expEmpty), "export_stems on an edit with no non-empty tracks returns a clean error");
+
+        stemDir.deleteRecursively();
+    }
+
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
     // Same shape as the SA3 "differs from input / silence stays silent" gate, but for
     // the drum instrument: a programmed beat exports NON-SILENT audio, an empty drum
