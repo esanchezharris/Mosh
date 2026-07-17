@@ -163,6 +163,16 @@ test("transport play toggles", async ({ page }) => {
   await expect(transport).toHaveAttribute("data-playing", "false");
 });
 
+test("transport Record exposes armed state via aria-pressed", async ({ page }) => {
+  await bootV2(page);
+  // Mirrors the Play/Metronome/Mute/Solo toggles: the Record button reflects its
+  // armed on/off state to assistive tech through aria-pressed, not just visually.
+  const rec = page.getByTestId("v2-record");
+  await expect(rec).toHaveAttribute("aria-pressed", "false");
+  await rec.click();
+  await expect(rec).toHaveAttribute("aria-pressed", "true");
+});
+
 test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page }) => {
   await bootV2(page);
   await page.locator("body").click();           // pointer baseline, then switch to keyboard modality

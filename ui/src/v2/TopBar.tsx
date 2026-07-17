@@ -81,7 +81,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
             onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconStop size={15} /></button>
-          <button className="v2-tbtn rec" data-on={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
+          <button className="v2-tbtn rec" data-on={t.recording} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
             onClick={() => void exec("set_transport", { action: "record" })}><span className="dot" /></button>
         </div>
 
