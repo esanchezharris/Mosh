@@ -179,9 +179,9 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
         <span className="v2-clip-badge warp" data-testid="v2-clip-warp"
           title="Warped — this clip time-stretches to follow the project tempo. ⌘-drag the edge or use the Warp tab.">≈</span>
       )}
-      {transcribing && <span className="v2-clip-badge working" data-testid="clip-transcribing">transcribing…</span>}
-      {buildingLyrics && <span className="v2-clip-badge working" data-testid="clip-building-lyrics">lyrics…</span>}
-      {buildingSkeleton && <span className="v2-clip-badge working" data-testid="clip-building-skeleton">flow…</span>}
+      {transcribing && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-transcribing">transcribing…</span>}
+      {buildingLyrics && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-lyrics">lyrics…</span>}
+      {buildingSkeleton && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-skeleton">flow…</span>}
       {/* edge cursor affordance — pointerdown bubbles up to the clip handler, which
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />
