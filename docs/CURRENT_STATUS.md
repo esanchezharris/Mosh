@@ -128,10 +128,12 @@ RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default build).
 
 ## Branch And Worktree Boundaries
 
-- Main program seat: `/Users/emiliosanchez-harris/Documents/ClaudeMosh` (the
-  checkout; the git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git`
-  via a `gitdir:` pointer — never move the store back under iCloud-synced
-  `~/Documents`).
+- Main program seat: **`~/Mosh`** (moved out of iCloud 2026-07-16; a
+  compatibility symlink remains at the old `~/Documents/ClaudeMosh` path). The
+  git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git` via a
+  `gitdir:` pointer — never move the store or the checkout back under
+  iCloud-synced `~/Documents`. The GitHub repo is now `zeke431/Mosh`
+  (renamed same day; old URLs redirect).
 - Design lab: `/Users/emiliosanchez-harris/Documents/ClaudeMosh-lab`, branch
   `design-lab`; do not use for program trunk hardening.
 - The former iOS continuation seat (`~/Documents/ClaudeMosh-ios`, branch
