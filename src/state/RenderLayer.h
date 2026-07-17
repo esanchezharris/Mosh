@@ -48,7 +48,7 @@ struct RenderLayer
         params.setProperty (ids::prompt, "", nullptr);
         params.setProperty (ids::cfg, 7.0, nullptr);
         params.setProperty (ids::steps, 30, nullptr);
-        params.setProperty (ids::nl, 0.4, nullptr);
+        params.setProperty (ids::nl, 0.4, nullptr);   // init_noise_level; ≤0.5 keeps whole-clip stitch pulse-free (service clamp_nl is the guard). UI surfaces it as a 0–100 "keep ↔ re-imagine" dial.
         params.setProperty (ids::target, "", nullptr);       // Route B transform target
         params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
         params.appendChild (juce::ValueTree (ids::COLORS), nullptr);
