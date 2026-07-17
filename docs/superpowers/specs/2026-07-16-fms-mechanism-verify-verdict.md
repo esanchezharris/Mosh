@@ -216,8 +216,18 @@ deliberately re-times inside phrases; V3 proved env_corr and ear can move opposi
 neither direction is a verdict). Numbers are post-review-fix (the infeasible-revert,
 strength=0, and rest-steal fixes; derived arm re-rendered).
 
-**Owner checkpoint (the lane's exit gate):** blind A/B at
-`mechanism/b1/b1-listen.html` (:8199) — the u2 back half two ways (full passage + the two
-proven line windows, independently shuffled, level-matched). Unblinding in
-`b1-labels.json` (not linked). Verdict decides whether `durations:"derived"` becomes the
-sing default.
+**Strength ladder (optional half-strength third arm, same pre-NSF snapped measurement):**
+the instrument moves monotonically with the strength dial, confirming the derivation is a
+tunable amount, not a binary — the owner can pick how much correction, not just yes/no.
+
+| arm | strength | median vowel-onset delta | dur_ratio | squeeze_frac |
+|---|---|---|---|---|
+| verbatim | — | +45.0 ms | 0.833 | 0.467 |
+| derived-half | 0.5 | +30.0 ms | 0.849 | 0.433 |
+| derived (full) | 1.0 | 0.0 ms | 0.905 | 0.40 |
+
+**Owner checkpoint (the lane's exit gate):** blind **3-way** at
+`mechanism/b1/b1-listen.html` (:8199) — the u2 back half three ways (verbatim / half /
+full derived; full passage + the two proven line windows, independently shuffled,
+level-matched). Unblinding in `b1-labels.json` (not linked). Verdict decides whether
+`durations:"derived"` becomes the sing default and at what strength.
