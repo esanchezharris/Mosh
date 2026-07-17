@@ -137,6 +137,7 @@ if (MOSH_BUILD_APP)
         src/multiplayer/MultiplayerClient.cpp
         src/multiplayer/LockManager.cpp
         src/multiplayer/OutboundQueue.cpp
+        src/multiplayer/TransferQueue.cpp
         src/multiplayer/MultiplayerSession.cpp
         # Stage 3 — VST3 hosting (04 PART 1)
         src/plugins/hosting/PluginHost.cpp
