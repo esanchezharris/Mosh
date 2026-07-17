@@ -113,6 +113,23 @@ export type AvailableColor = {
 // Route B transform target from GET /transform_targets (via list_transform_targets).
 export type AvailableTransformTarget = { name: string };
 
+// Guest-degradation capability summary — piggybacked onto GET /transform_targets'
+// `capabilities` field (service/server.py's _guest_capability_summary(); see its
+// docstring for why that endpoint specifically carries this). Honest, live-checked
+// "is the per-feature AI setup installed on THIS Mac" flags: a guest Mac with no
+// ~/Library/Mosh/venvs, no RAVE models, and no MOSH_TRAINING_REMOTE_URL sees every
+// venv-backed flag false and both backends "fake" — used to disable/label the
+// clip-menu transcription actions, the transform target picker, and the training
+// popover instead of letting them fail cryptically.
+export type ServiceCapabilities = {
+  transcribe: boolean;
+  skeleton: boolean;
+  whisper: boolean;
+  phonology: boolean;
+  transformReal: boolean;    // Route B/C: a real RAVE model is installed vs the fake tilt/saturation
+  trainingBackend: string;  // "fake" | "remote_http"
+};
+
 // LoRA library card from GET /loras (via list_loras) — the drop-in adapter dir.
 export type AvailableLora = {
   name: string;

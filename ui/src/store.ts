@@ -7,7 +7,7 @@ import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
   BuiltinPlugin, AvailableColor, AvailableTransformTarget, AvailableLora, AvailableRaveModel, RenderQA, Level, AudioDevices, Clip,
   WaveInput, MidiInput, TrackOutputs,
-  PluginCounts,
+  PluginCounts, ServiceCapabilities,
 } from "./types";
 import { versionBannerError } from "./types";
 import { isTrackPatch, applyTrackPatch } from "./snapshotPatch";
@@ -77,11 +77,16 @@ type State = {
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
+  buildingSkeleton: Record<string, boolean>; // source clipId → "Build flow from this take" in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
   availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
+  // Guest-degradation capability summary (from list_transform_targets' piggybacked
+  // `capabilities` field — see loadCapabilities below). null until the one-time fetch
+  // at init() resolves; callers treat null as "assume available" (see capabilities.ts).
+  capabilities: ServiceCapabilities | null;
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
@@ -165,6 +170,7 @@ type State = {
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
   loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
+  loadCapabilities: () => void;            // guest-degradation: fetch once at init (see capabilities field)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
@@ -250,11 +256,13 @@ export const useStore = create<State>((set, get) => ({
   renderProgress: {},
   transcribing: {},
   buildingLyrics: {},
+  buildingSkeleton: {},
   availableColors: [],
   availableTransformTargets: [],
   availableLoras: [],
   availableRaveModels: [],
   transformFreeText: true,
+  capabilities: null,
   labMode: false,
   qaByClip: {},
   remoteStatus: null,
@@ -386,6 +394,20 @@ export const useStore = create<State>((set, get) => ({
           return { buildingLyrics: next };
         });
         if (p.state === "error") set({ lastError: p.error ?? "could not build lyrics from the take" });
+      } else if (ev.type === "skeleton_status") {
+        // Mumble→skeleton status for a SOURCE clip: working | done | error. Mirrors
+        // build_lyrics_status above — was previously unhandled, so "Build flow from this
+        // take" showed no spinner and swallowed its error silently (guest-degradation
+        // pass: a venv-less guest Mac hits this constantly). On done the backend's
+        // snapshot_invalidated reveals the new lyric sheet (Inspector → Lyrics).
+        const p = ev.payload as { clipId: string; state: string; error?: string };
+        set((s) => {
+          const next = { ...s.buildingSkeleton };
+          if (p.state === "working") next[p.clipId] = true;
+          else delete next[p.clipId];
+          return { buildingSkeleton: next };
+        });
+        if (p.state === "error") set({ lastError: p.error ?? "could not build a flow from the take" });
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
@@ -492,6 +514,9 @@ export const useStore = create<State>((set, get) => ({
     void notifyUiReady();
     void get().refresh();
     void get().refreshRemote();
+    // Guest-degradation: fetch the AI-setup capability summary once, up front — well
+    // before the clip menu or generative drawer need it (see loadCapabilities above).
+    void get().loadCapabilities();
     // Start the live level meters: insert a post-fader LevelMeterPlugin on every track
     // so the backend begins emitting the 30 Hz `levels` telemetry the meters draw. Once
     // at init only — the command runs a Tracktion transaction, so re-issuing it on every
@@ -719,7 +744,7 @@ export const useStore = create<State>((set, get) => ({
 
   loadTransformTargets: () => {
     if (get().availableTransformTargets.length > 0) return;
-    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean }>>({
+    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean; real?: boolean; capabilities?: ServiceCapabilities }>>({
       command: "list_transform_targets",
       args: {},
     }).then((res) => {
@@ -728,6 +753,27 @@ export const useStore = create<State>((set, get) => ({
           availableTransformTargets: res.data.targets.map((name) => ({ name })),
           transformFreeText: res.data.freeText !== false,
         });
+      // Whichever caller (this or loadCapabilities) hits the service first lands the
+      // capability summary — both read the same GET, so this is a harmless overwrite.
+      if (res.ok && res.data?.capabilities) set({ capabilities: res.data.capabilities });
+    });
+  },
+
+  // Guest-degradation: the frontend has no per-C++ session flag for "is transcribe /
+  // skeleton / whisper / phonology / a real RAVE model / a real training backend
+  // installed on this Mac" (unlike session.raveAvailable etc., which ARE native
+  // session fields) — so it fetches the honest summary directly from the service via
+  // the existing list_transform_targets/`capabilities` carrier (see that endpoint's
+  // server.py comment) once at app init, well before any clip menu or generative drawer
+  // needs it. Guarded so a second call (e.g. loadTransformTargets firing later) is a
+  // no-op once resolved.
+  loadCapabilities: () => {
+    if (get().capabilities !== null) return;
+    void executeCommand<CommandResult<{ capabilities?: ServiceCapabilities }>>({
+      command: "list_transform_targets",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.capabilities) set({ capabilities: res.data.capabilities });
     });
   },
 

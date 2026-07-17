@@ -1357,7 +1357,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         { name: "sax", sizeMB: 116 }, { name: "vocals", sizeMB: 156 },
       ], available: true });
     case "list_transform_targets":
-      return ok(command, { targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"], freeText: true });
+      // Mock posture: a fully-equipped dev Mac (matches the fake transform tier's
+      // freeText:true — no real RAVE model — but every per-feature venv "installed").
+      // e2e/vitest that need a guest-Mac (degraded) posture set `capabilities` directly
+      // via the dev-only window.__moshStore handle rather than branching the mock here.
+      return ok(command, {
+        targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"],
+        freeText: true, real: false,
+        capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true, transformReal: false, trainingBackend: "fake" },
+      });
     case "create_render_layer": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo();
