@@ -300,6 +300,10 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         flags = [*flags, "snap_skipped"]
     if nsf_failed:
         flags = [*flags, "nsf_failed"]
+    if authored.get("durations") == "derived" and authored.get("deriveChainOk") is False:
+        # a derived score whose re-emitted chain drifted off the take grid must not present
+        # as clean (near-impossible with 4dp error-diffusion, but never ship it silently)
+        flags = [*flags, "derive_chain_drift"]
     return {
         # backend label from the SAME gate evaluation that picked the code path —
         # backend_name() would re-evaluate available() (TOCTOU vs mid-render env changes).

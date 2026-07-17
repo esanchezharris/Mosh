@@ -22,6 +22,7 @@ sys.path.insert(0, SERVICE)
 sys.path.insert(0, os.path.join(REPO, "scripts", "fms-killshot"))
 
 from soulx import duration as du  # noqa: E402
+from soulx.score import phrase_windows as sx_phrase_windows  # noqa: E402
 import vowel_landmark as vl  # noqa: E402
 
 fails = []
@@ -310,8 +311,62 @@ if os.path.isfile(REAL):
     # strict digest below environment-independent).
     reruns = [du.derive_clip(real_clip, real_params, rest_split_s=0.35)[0]["duration"] for _ in range(3)]
     check("real clip: 3x deterministic", len(set(reruns)) == 1, str(set(reruns)))
+
+    # review fix B: strength=0 must be byte-exact on the REAL chain (the small synthetic
+    # fixtures dodge the rescale epsilon; the real clip triggered ~8e-16 pre-fix).
+    real_notes = du._parse_clip_notes(real_clip)
+    p_str0 = dict(real_params); p_str0["strength"] = 0.0
+    id_notes, id_log = du.derive_note_durations(real_notes, p_str0, rest_split_s=0.35)
+    check("real clip: strength=0 is byte-exact (no rescale epsilon)",
+          all(id_notes[i]["dur"] == real_notes[i]["dur"] for i in range(len(real_notes)))
+          and id_log.get("strength0_identity") is True,
+          str(max(abs(id_notes[i]["dur"] - real_notes[i]["dur"]) for i in range(len(real_notes)))))
+
+    # review fix A: a segment reverted for infeasibility stays EXACTLY verbatim — the
+    # per-phrase rescale must not re-scale it (real c00 has one infeasible phrase whose
+    # rescale factor was ~1.025 pre-fix).
+    dnotes, dlog = du.derive_note_durations(real_notes, real_params, rest_split_s=0.35)
+    infeasible_phrase = next((ph for ph in dlog["phrases"]
+                              if any(fl.get("flag") == "segment_infeasible" for fl in ph["flags"])),
+                             None)
+    check("real clip: has an infeasible phrase to exercise the revert-vs-rescale fix",
+          infeasible_phrase is not None)
+    if infeasible_phrase is not None:
+        rev_units = set()
+        for fl in infeasible_phrase["flags"]:
+            if fl.get("flag") == "segment_infeasible":
+                rev_units.update(fl["units"])
+        # every note whose unit reverted must equal verbatim exactly
+        vmap = {i: float(real_notes[i]["dur"]) for i in range(len(real_notes))}
+        rev_note_idx = [i for i, nn in enumerate(real_notes)
+                        if nn["text"] in rev_units and int(nn["type"]) in (2, 3)]
+        # scope to the infeasible phrase's own reverted-count bookkeeping
+        check("real clip: infeasible phrase records reverted_notes >= 1",
+              infeasible_phrase.get("reverted_notes", 0) >= 1, str(infeasible_phrase))
+        exact = all(abs(dnotes[i]["dur"] - vmap[i]) < 1e-12
+                    for i in rev_note_idx) if rev_note_idx else True
+        check("real clip: reverted-segment notes stay exactly verbatim (not rescaled)", exact)
 else:
     print("[skip] real u2full-c00.json not present — synthetic checks only")
+
+# ── review fix C: rest-steal must not shrink a boundary rest below rest_split_s ─────────
+# rest(0.40) | anchor 'strike' (cluster S-T-R, budget 3*47.4=142ms > 50ms) | rest(0.40) |
+# anchor 'proud' — pre-fix the phrase-2 onset steals 0.35s (0.40-0.05) from its pre-rest,
+# dropping it to 0.05 < 0.35 and MERGING the two phrases on re-parse.
+FC = [
+    note("<SP>", "<SP>", 0.40, 1, 0),
+    note("strike", "en_S-T-R-AY1-K", 0.60, 2, 60),
+    note("<SP>", "<SP>", 0.40, 1, 0),
+    note("proud", "en_P-R-AW1-D", 0.60, 2, 62),
+]
+fc_clip = clip_from_notes(FC, name="mergefix")
+fc_new, _ = du.derive_clip(fc_clip, base_params(), rest_split_s=0.35)
+pw_before = sx_phrase_windows(fc_clip)
+pw_after = sx_phrase_windows(fc_new)
+check("rest-steal keeps the boundary rest >= rest_split_s (no phrase merge)",
+      len(pw_after) == len(pw_before) == 2, f"{len(pw_before)} -> {len(pw_after)}")
+_fc_durs = [float(x) for x in fc_new["duration"].split()]
+check("rest-steal fix: mid rest stays >= 0.35s", _fc_durs[2] >= 0.35 - 1e-9, str(_fc_durs))
 
 
 # ── determinism (3x), fully synthetic/environment-independent ───────────────────────────

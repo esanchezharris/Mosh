@@ -292,10 +292,17 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
     the full rule set (anchors, segments, floors, rest-steal, strength)."""
     p = dict(DEFAULT_PARAMS)
     p.update(params or {})
+    # strength=0 is an EXACT identity — short-circuit before any float arithmetic so no
+    # rescale epsilon (~1e-15) leaks into the output (registered contract; the general
+    # blend path is only sum-exact, not byte-exact, on an arbitrary chain).
+    if float(p.get("strength", 1.0)) == 0.0:
+        return ([dict(nn) for nn in notes],
+                {"rest_split_s": rest_split_s, "phrases": [], "strength0_identity": True})
     verbatim = [float(n["dur"]) for n in notes]
     n = len(notes)
     derived = list(verbatim)
     log: Dict = {"rest_split_s": rest_split_s, "phrases": []}
+    reverted_per_phrase: List[set] = []
 
     units = _word_units(notes)
     if not units:
@@ -322,6 +329,7 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
         p_flags: List[Dict] = []
         u_log: List[Dict] = []
 
+        reverted_idx: set = set()
         u0 = punits[0]
         u0_anchor = _anchor_test(notes, u0)
         steal = 0.0
@@ -331,8 +339,12 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
             budget0 = p["consonant_ms"] / 1000.0 * len(cluster0)
             if budget0 > 0:
                 if pre_rest_total >= rest_split_s:
+                    # cap so the boundary rest stays >= rest_split_s: stealing it below the
+                    # split threshold would MERGE this phrase with the previous one when the
+                    # derived clip is re-parsed (phrase_windows) — a structural change, not a
+                    # timing nudge. The onset stays partially unbudgeted instead (logged).
                     steal = max(0.0, min(budget0, p["rest_steal_max_ms"] / 1000.0,
-                                         pre_rest_total - 0.05))
+                                         pre_rest_total - rest_split_s))
                     if steal < budget0 - 1e-9:
                         p_flags.append({"flag": "onset_unbudgeted", "unit": u0["text"],
                                         "shortfall_ms": round((budget0 - steal) * 1000, 3)})
@@ -390,6 +402,7 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
                 if not ok:
                     for i in [ii for uu in seg_participants for ii in uu["idx"]]:
                         derived[i] = float(notes[i]["dur"])
+                        reverted_idx.add(i)
                     p_flags.append({"flag": "segment_infeasible",
                                     "units": [uu["text"] for uu in seg_participants]})
                     if budget_applied > 0:
@@ -418,9 +431,11 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
         if not ok:
             for i in [ii for uu in seg_participants for ii in uu["idx"]]:
                 derived[i] = float(notes[i]["dur"])
+                reverted_idx.add(i)
             p_flags.append({"flag": "segment_infeasible",
                             "units": [uu["text"] for uu in seg_participants], "final": True})
 
+        reverted_per_phrase.append(reverted_idx)
         log["phrases"].append({"start": round(phrase_start, 4), "end": round(phrase_end, 4),
                                "n_units": len(punits), "steal_s": round(steal, 4),
                                "flags": p_flags, "units": u_log})
@@ -433,7 +448,13 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
         punits = [units[k] for k in ph["unit_positions"]]
         phrase_start = unit_start(punits[0])
         phrase_end = unit_end(punits[-1])
-        sung_idx = [i for u in punits for i in u["idx"]]
+        # A reverted (segment_infeasible) note is pinned at verbatim and MUST be excluded
+        # from the rescale, or the per-phrase zero-sum correction would silently re-scale it
+        # (undoing the "revert to verbatim" guarantee and re-violating its floors). The
+        # remaining adjustable sung notes absorb the phrase-total delta instead.
+        reverted = reverted_per_phrase[idx]
+        sung_all = [i for u in punits for i in u["idx"]]
+        sung_idx = [i for i in sung_all if i not in reverted]
         rest_idx: List[int] = []
         for k in range(len(punits) - 1):
             ridxs, _ = _rests_between(notes, punits[k]["idx"][-1] + 1, punits[k + 1]["idx"][0])
@@ -441,7 +462,8 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
         steal_blended = strength * steals[idx]
         phrase_start_blended = phrase_start - steal_blended
         rest_sum_blended = sum(final[i] for i in rest_idx)
-        target_sung = (phrase_end - phrase_start_blended) - rest_sum_blended
+        reverted_sum = sum(final[i] for i in reverted)
+        target_sung = (phrase_end - phrase_start_blended) - rest_sum_blended - reverted_sum
         cur_sung = sum(final[i] for i in sung_idx)
         scale = 1.0
         if cur_sung > 1e-9:
@@ -449,6 +471,7 @@ def derive_note_durations(notes: List[Note], params: Dict[str, float],
             for i in sung_idx:
                 final[i] *= scale
         log["phrases"][idx]["sung_scale"] = round(scale, 6)
+        log["phrases"][idx]["reverted_notes"] = len(reverted)
 
     log["zero_sum_check"] = {"verbatim_total": round(sum(verbatim), 6),
                              "final_total": round(sum(final), 6),
