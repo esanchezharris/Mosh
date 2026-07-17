@@ -27,7 +27,10 @@ describe("PRODUCER_KNOWLEDGE store", () => {
     // AG-KB-R2: deepened the same categories (mixer routing, plugin params/chain/
     // editor, recording arm/takes, multiplayer, undo/save, transport/loop, drum
     // kit/assign_sample ordering, warp confidence) plus common producer mistakes.
-    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(46);
+    // AG-KB3: added set_clip_gain/set_clip_mute — real main-existing commands
+    // (commands.ts, since 2026-06-15) that AG-KB-R2 wrongly skipped believing
+    // they were unmerged; see the note on the AG-KB-R2 describe block below.
+    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(48);
     for (const c of PRODUCER_KNOWLEDGE) {
       expect(typeof c.id).toBe("string");
       expect(c.id.length).toBeGreaterThan(0);
@@ -224,10 +227,12 @@ describe("AG-KB1 expanded categories (warp/drums/lyrics/generative/mixer/vst3/re
 
 describe("AG-KB-R2 expanded categories (mixer/plugins/recording/multiplayer/history/transport/drums/warp/mistakes)", () => {
   // Round 2: deepens coverage of MAIN-EXISTING commands only (no export-range args,
-  // no export_stems, no set_clip_gain/set_clip_mute cards — those live in
-  // unmerged owner-review PRs, not this store). Same pin-the-retrieval pattern as
-  // the AG-KB1 block above: each query is how a producer would actually ask, and
-  // should surface the matching new card as the top result.
+  // no export_stems — those aren't agent-callable commands on main). set_clip_gain/
+  // set_clip_mute cards were originally skipped here on the mistaken belief they
+  // lived in unmerged owner-review PRs; they're real main-existing commands
+  // (commands.ts, since 2026-06-15) — see the AG-KB3 block below. Same pin-the-
+  // retrieval pattern as the AG-KB1 block above: each query is how a producer
+  // would actually ask, and should surface the matching new card as the top result.
   const top = (q: string) => retrieveCards(q)[0]?.id;
 
   it("mixer: hearing one track alone -> solo vs mute", () => {
@@ -329,6 +334,26 @@ describe("AG-KB-R2 expanded categories (mixer/plugins/recording/multiplayer/hist
   it("mistake: a follow-up plugin tweak hit the wrong plugin after a reorder", () => {
     expect(top("what happens to my next plugin edit's index if I reorder a plugin first")).toBe(
       "mistake-reorder-changes-indices",
+    );
+  });
+});
+
+describe("AG-KB3: set_clip_gain / set_clip_mute (real main-existing commands, wrongly skipped by AG-KB-R2)", () => {
+  // set_clip_gain and set_clip_mute are real agent-callable commands on main
+  // (commands.ts, since 2026-06-15) — AG-KB-R2 wrongly skipped cards for them
+  // believing they lived in unmerged owner-review PRs. Same pin-the-retrieval
+  // pattern as the AG-KB1/AG-KB-R2 blocks above.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("clips: trimming one clip's own level, not the whole track fader -> set_clip_gain", () => {
+    expect(top("this one clip is quieter than the others on the track, can I trim just that clip's level")).toBe(
+      "clip-gain-trim-one-clip",
+    );
+  });
+
+  it("clips: silencing a single clip without muting the whole track -> set_clip_mute", () => {
+    expect(top("I want to silence just this one clip without muting the whole track")).toBe(
+      "clip-mute-one-clip",
     );
   });
 });
