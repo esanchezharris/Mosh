@@ -150,10 +150,20 @@ The session control lives in the topbar's **2-player (B-5) pop**
 
 - `Mosh --selftest` with `MOSH_SELFTEST_MP=1` (`relay/run-mp-selftest.sh`, two/four
   simulated peers across several in-process engines) passes against the **local**
-  relay — **1328/1328 ×3 deterministic** (2026-07-17, self-healing stems PR). The
-  default `--selftest` (no MP env) is unaffected — **1273/1273**. This is the FIRST
-  time the whole stem round-trip (upload/download/self-heal/bootstrap) runs
+  relay — **1349/1349 ×3 deterministic** (2026-07-17, self-healing stems PR +
+  consolidated fix batch: corruption-rejection coverage below). The default
+  `--selftest` (no MP env) is unaffected — **1274/1274**. This is the FIRST time
+  the whole stem round-trip (upload/download/self-heal/bootstrap) runs
   hermetically, since the local relay previously had no blob store at all.
+- **Corrupted-transfer rejection is now executable, not just "correct by
+  inspection":** `relay/server.py`'s `MOSH_RELAY_BLOB_CORRUPT` hook (ext-scoped —
+  it only flips bytes for a reserved `.corrupttest` extension, so it's armed for
+  the WHOLE gate run by `run-mp-selftest.sh` without corrupting any real `.wav`
+  stem) backs a dedicated selftest section proving `MultiplayerClient::downloadBlob`
+  rejects a corrupted transfer (returns `false`, deletes the partial/corrupt
+  `dest` file, reports a hash-mismatch error) and that the rejection is retryable
+  (a clean download right after still succeeds) — see `SelfTest.cpp`'s
+  "downloadBlob rejects a corrupted transfer" section.
 - `scripts/playtest/mp-live-smoke.sh` (two SEPARATE OS processes, real HTTP) run
   against the **real cloud relay** — **PASS**: process B received A's MIDI + audio
   tracks, downloaded the stem, and `mp_fetch_missing_stems` confirmed nothing was

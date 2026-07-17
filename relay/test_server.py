@@ -418,6 +418,87 @@ def test_blob_delay_hook_env_slows_raw_put(monkeypatch):
         httpd.server_close()
 
 
+def test_blob_corrupt_hook_env_flips_raw_get_bytes_for_matching_ext(monkeypatch):
+    # Adversarial-review should-fix (PR-1): nothing previously proved the client-side
+    # SHA-256 integrity check (MultiplayerClient::downloadBlob) actually rejects a
+    # corrupted transfer -- this hook lets a selftest simulate exactly that
+    # deterministically (a dropped/flipped byte mid-transfer), without needing a
+    # real flaky network to produce one. When set, the raw GET handler returns the
+    # SAME LENGTH payload with its bytes corrupted (flipped) rather than the stored
+    # blob -- so a naive "did I get *some* bytes back" check would still pass, only
+    # a real content-hash check catches it. EXT-scoped (unlike the blanket delay
+    # hook): only keys ending in ".<the configured ext>" are corrupted, so a
+    # dedicated selftest can use a reserved sentinel ext and leave every other
+    # blob (all real stems use ext="wav") untouched in the SAME gate run.
+    import server as srv
+    monkeypatch.setenv("MOSH_RELAY_BLOB_CORRUPT", "corrupttest")
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "66" * 32
+        payload = b"\x01\x02\x03REAL-STEM-BYTES\xfe\xfd" * 50
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "corrupttest"})
+        put_url = body["url"]
+        status, _b = _put(put_url, "", payload)
+        assert status == 200
+
+        _, body = _post(base, "/mp/blob/get-url", {"code": code, "peerId": "b", "hash": h, "ext": "corrupttest"})
+        get_url = body["url"]
+        status, got = _get_raw(get_url, "")
+        assert status == 200
+        assert len(got) == len(payload)
+        assert got != payload   # corrupted -- a length-only check would miss this
+    finally:
+        monkeypatch.delenv("MOSH_RELAY_BLOB_CORRUPT", raising=False)
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_blob_corrupt_hook_leaves_other_extensions_untouched(monkeypatch):
+    # The safety property that makes it OK to leave this hook armed for a whole
+    # selftest gate run (not just a dedicated single-purpose invocation, unlike
+    # MOSH_RELAY_BLOB_DELAY_MS): with MOSH_RELAY_BLOB_CORRUPT=corrupttest, a real
+    # stem (ext="wav") must round-trip byte-perfect.
+    import server as srv
+    monkeypatch.setenv("MOSH_RELAY_BLOB_CORRUPT", "corrupttest")
+    httpd, port = srv.make_server(0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        code = _room(base)
+        h = "88" * 32
+        payload = b"clean-real-stem-bytes-unaffected" * 20
+        _, body = _post(base, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+        _put(body["url"], "", payload)
+        _, body = _post(base, "/mp/blob/get-url", {"code": code, "peerId": "b", "hash": h, "ext": "wav"})
+        status, got = _get_raw(body["url"], "")
+        assert status == 200
+        assert got == payload
+    finally:
+        monkeypatch.delenv("MOSH_RELAY_BLOB_CORRUPT", raising=False)
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_blob_corrupt_hook_off_by_default(relay):
+    # The corruption hook must be strictly opt-in -- every OTHER test in this file
+    # relies on a byte-perfect round trip, so an accidental default-on would be a
+    # much bigger regression than the thing it's meant to test.
+    code = _room(relay)
+    h = "77" * 32
+    payload = b"clean-bytes-no-corruption" * 20
+    _, body = _post(relay, "/mp/blob/put-url", {"code": code, "peerId": "a", "hash": h, "ext": "wav"})
+    _put(body["url"], "", payload)
+    _, body = _post(relay, "/mp/blob/get-url", {"code": code, "peerId": "b", "hash": h, "ext": "wav"})
+    status, got = _get_raw(body["url"], "")
+    assert status == 200
+    assert got == payload
+
+
 def test_chunked_body_is_rejected_not_silently_emptied(relay):
     # A POST with Transfer-Encoding: chunked carries NO Content-Length, so the
     # body-cap (which keys off Content-Length) can't bound it — an attacker could

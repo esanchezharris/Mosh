@@ -343,6 +343,21 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
             if ms > 0:
                 time.sleep(ms / 1000.0)
 
+        def _maybe_corrupt (self, key, data):
+            # Adversarial-review test hook (PR-1 should-fix): EXTENSION-scoped opt-in,
+            # unlike the blanket _blob_delay hook above. MOSH_RELAY_BLOB_CORRUPT=<ext>
+            # flips every byte of the raw GET response ONLY for keys ending in
+            # ".<ext>" -- every real stem in this codebase uses ext="wav", so setting
+            # this to some other reserved value (e.g. "corrupttest") lets one dedicated
+            # selftest check simulate a dropped/corrupted transfer (same length, wrong
+            # content -- a naive exists+size check would miss it; only a real content-
+            # hash check, MultiplayerClient::downloadBlob's SHA-256 verify, catches it)
+            # WITHOUT corrupting every other test's stem in the same gate run.
+            target_ext = os.environ.get("MOSH_RELAY_BLOB_CORRUPT") or ""
+            if not target_ext or not data or not key.endswith("." + target_ext):
+                return data
+            return bytes (b ^ 0xFF for b in data)
+
         def do_GET(self):
             u = urlparse(self.path)
             # The /mp/events long-poll is the designed steady-state heartbeat (~4/s per
@@ -371,7 +386,7 @@ def make_handler(state: RelayState, limiter: "FixedWindowLimiter | None" = None)
                 data = state.blobs.get(key)
                 if data is None:
                     return self._send(404, {"error": "not_found"})
-                return self._send_raw(200, data)
+                return self._send_raw(200, self._maybe_corrupt(key, data))
             return self._send(404, {"error": "not found"})
 
         def do_PUT(self):

@@ -6,12 +6,18 @@
 # Usage:  bash relay/run-mp-selftest.sh
 #   MOSH_BIN  override the Mosh binary (default: the debug build under build-macos-arm64)
 #   PORT      relay port (default 8799)
+#   MOSH_RELAY_BLOB_CORRUPT  ext-scoped corruption hook for the "downloadBlob rejects
+#             a corrupted transfer" selftest section (PR-1 should-fix). Defaults to
+#             the reserved "corrupttest" ext, which no real stem ever uses (all real
+#             stems are ext="wav") -- so it's safe to leave armed for the WHOLE run,
+#             unlike MOSH_RELAY_BLOB_DELAY_MS. Set to "" to disable entirely.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root
 PORT="${PORT:-8799}"
 APP="${MOSH_BIN:-$(find "$HERE/build-macos-arm64" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
 SESSION="${MOSH_SELFTEST_SESSION:-session-mp-selftest-$(date +%Y%m%d%H%M%S)-$$}"
+export MOSH_RELAY_BLOB_CORRUPT="${MOSH_RELAY_BLOB_CORRUPT-corrupttest}"
 
 if [ -z "${APP:-}" ] || [ ! -x "$APP" ]; then
   echo "Mosh binary not found. Build the app or set MOSH_BIN=/path/to/Mosh" >&2

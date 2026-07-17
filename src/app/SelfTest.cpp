@@ -5724,6 +5724,79 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (hostOps, "mp_leave_session");
         }
 
+        // ── PR-1 should-fix: downloadBlob rejects a corrupted transfer ───────
+        // Nothing previously proved the SHA-256 integrity check in
+        // MultiplayerClient::downloadBlob (see its .h doc comment) actually fires —
+        // it was "correct by inspection" only. relay/server.py's MOSH_RELAY_BLOB_CORRUPT
+        // hook (armed for this whole gate run by run-mp-selftest.sh, ext-scoped so it
+        // can be left on without corrupting every OTHER test's real ".wav" stem) flips
+        // the bytes of any raw GET whose key ends in ".corrupttest" — a reserved ext
+        // used nowhere else in this file. A direct MultiplayerClient-level check (not
+        // routed through MoshOps/a clip) isolates the exact mechanism cmdMpFetchMissingStems
+        // depends on: its `land` lambda (MoshOps.cpp) only calls sourceMediaChanged() /
+        // clears sourceMissing when downloadBlob returns true, and downloadBlob itself
+        // never leaves a corrupt/truncated file on disk on a hash mismatch — so proving
+        // downloadBlob's rejection here is precisely the guarantee the clip-level
+        // self-heal flow (proven working above) relies on to keep a corrupted clip
+        // sourceMissing (retryable) rather than falsely landing bad bytes as resolved.
+        section ("Multiplayer PR-1 should-fix: downloadBlob rejects a corrupted transfer (MOSH_RELAY_BLOB_CORRUPT)");
+        {
+            MultiplayerClient corruptHost;
+            const auto corruptCode = corruptHost.createSession ("CorruptHost", "#abcabc");
+            check (corruptCode.isNotEmpty(), "corrupt: host created a session [" + corruptHost.lastError() + "]");
+
+            MultiplayerClient corruptPeer;
+            check (corruptPeer.joinSession (corruptCode, "CorruptPeer", "#cbacba"),
+                   "corrupt: peer joined the room [" + corruptPeer.lastError() + "]");
+
+            // Upload a KNOWN payload under the reserved "corrupttest" ext -- the relay's
+            // hook targets exactly (and only) this ext for the whole run.
+            const juce::String payload ("known-stem-bytes-for-the-corruption-rejection-check");
+            juce::File srcTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                    .getChildFile ("mosh-selftest-corrupt-src.corrupttest");
+            srcTmp.replaceWithText (payload);
+            juce::FileInputStream fis (srcTmp);
+            const auto hash = juce::SHA256 (fis).toHexString();
+            check (corruptHost.uploadBlob (hash, "corrupttest", srcTmp),
+                   "corrupt: host uploaded the known payload [" + corruptHost.lastError() + "]");
+            srcTmp.deleteFile();
+
+            juce::File dest = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                  .getChildFile ("mosh-selftest-corrupt-dest-" + hash + ".corrupttest");
+            dest.deleteFile();
+            const bool got = corruptPeer.downloadBlob (hash, "corrupttest", dest);
+            check (! got, "corrupt: downloadBlob correctly REJECTS the corrupted transfer (returns false)");
+            check (! dest.existsAsFile(), "corrupt: the corrupted/truncated download was deleted, not left on disk");
+            check (corruptPeer.lastError().contains ("hash mismatch"),
+                   "corrupt: the error reports a hash mismatch [" + corruptPeer.lastError() + "]");
+
+            // Retryable: a clean download (a normal ".wav"-scoped ext, untouched by the
+            // hook) must still succeed right after -- the rejection above doesn't wedge
+            // the client or the relay into a permanently-broken state.
+            const juce::String payload2 ("clean-retry-bytes-prove-the-client-recovers");
+            juce::File srcTmp2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                     .getChildFile ("mosh-selftest-corrupt-retry-src.wav");
+            srcTmp2.replaceWithText (payload2);
+            juce::FileInputStream fis2 (srcTmp2);
+            const auto hash2 = juce::SHA256 (fis2).toHexString();
+            check (corruptHost.uploadBlob (hash2, "wav", srcTmp2),
+                   "corrupt: host uploaded a second (clean-path) payload [" + corruptHost.lastError() + "]");
+            srcTmp2.deleteFile();
+            juce::File dest2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                   .getChildFile ("mosh-selftest-corrupt-retry-dest-" + hash2 + ".wav");
+            dest2.deleteFile();
+            // NOTE: lastError() is sticky (only ever set, never cleared on success) --
+            // don't print it here, it would misleadingly show the PRIOR rejection's
+            // message even though this call succeeds.
+            check (corruptPeer.downloadBlob (hash2, "wav", dest2),
+                   "corrupt: a clean (non-corrupted-ext) retry still succeeds -- rejection is retryable, not wedged");
+            check (dest2.existsAsFile(), "corrupt: the clean retry landed a real file");
+            dest2.deleteFile();
+
+            corruptPeer.leave();
+            corruptHost.leave();
+        }
+
         // ── Bootstrap end-to-end on the local/dev relay ──────────────────────
         // The NORMAL (non-regression) path: a fresh late-joiner adopts the host's
         // whole project via mp_apply_bootstrap, and the stem arrives automatically
