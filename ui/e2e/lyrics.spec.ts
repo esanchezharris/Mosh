@@ -94,6 +94,16 @@ test("Finish gaps generates ranked proposals; accept commits one", async ({ page
   await expect(page.getByTestId("v2-error")).toHaveCount(0);
 });
 
+test("the fill-line ✨ button carries a screen-reader label", async ({ page }) => {
+  await bootV2(page);
+  await openLyrics(page);
+  await seedGappedLine(page);
+  // Icon-only ✨ control: it must announce the action, not "sparkles".
+  const fill = page.locator('[data-testid^="lyric-fill-"]').first();
+  await expect(fill).toBeVisible();
+  await expect(fill).toHaveAttribute("aria-label", /Fill line/);
+});
+
 test("reject clears the proposals", async ({ page }) => {
   await bootV2(page);
   await openLyrics(page);
