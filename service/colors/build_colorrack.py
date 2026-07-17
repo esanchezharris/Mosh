@@ -109,7 +109,7 @@ def main() -> int:
     # a re-run must not drop it. Carry forward its registry entry + keep its vec if
     # both are already present in OUT.
     out_json = os.path.join(OUT, "colors.json")
-    EXTERNAL = ("sustain",)
+    EXTERNAL = ("sustain", "sustain_swell")
     if os.path.exists(out_json):
         try:
             prev = json.load(open(out_json)).get("colors", {})

@@ -167,6 +167,34 @@ check("ortho+envelopes: sustain's hold envelope is PRESERVED (not stripped)",
       _sus_oe is not None and _sus_oe[3].get("kind") == "hold",
       f"sustain 4th={_sus_oe[3] if _sus_oe else None}")
 
+# ── Sustain toggle: Gentle (L17) ⇄ Swell (L8) share one control ──────────────
+_desc = {c["name"]: c for c in runtime.descriptor()}
+check("Sustain modes share a group",
+      _desc.get("sustain", {}).get("group") == "sustain"
+      and _desc.get("sustain_swell", {}).get("group") == "sustain",
+      f"gentle={_desc.get('sustain', {}).get('group')} swell={_desc.get('sustain_swell', {}).get('group')}")
+check("Gentle=L17, Swell=L8 (distinct layers)",
+      _desc.get("sustain", {}).get("mode") == "Gentle" and _desc["sustain"]["peak_layer"] == 17
+      and _desc.get("sustain_swell", {}).get("mode") == "Swell" and _desc["sustain_swell"]["peak_layer"] == 8)
+check("ungrouped colors carry no group key (byte-identical descriptor)", "group" not in _desc["grit"])
+# Swell lands its own steer on L8, carrying the same hold envelope.
+sw = runtime.resolve_steers([{"name": "sustain_swell", "value": 100}], with_envelopes=True)
+check("Swell steers on L8 with a hold envelope",
+      len(sw) == 1 and sw[0][0] == 8 and isinstance(sw[0][3], dict) and sw[0][3].get("kind") == "hold",
+      f"steer={sw[0][:2] if sw else None} env={sw[0][3] if sw else None}")
+# The two modes are mutually exclusive (same axis) — stacking both is rejected.
+try:
+    runtime.resolve_steers([{"name": "sustain", "value": 100}, {"name": "sustain_swell", "value": 100}])
+    check("Gentle+Swell together is rejected (pick one mode)", False, "did not raise")
+except ValueError:
+    check("Gentle+Swell together is rejected (pick one mode)", True)
+# On L8, Swell shares the layer with drum_aggression → orthogonalizes cleanly.
+_l8 = runtime.resolve_steers(
+    [{"name": "drum_aggression", "value": 100}, {"name": "sustain_swell", "value": 100}], orthogonalize=True)
+check("L8 stack (drum_aggression + Swell) orthogonalizes",
+      len(_l8) == 2 and abs(_cos(_l8[0][2], _l8[1][2])) < 1e-4,
+      f"cos={abs(_cos(_l8[0][2], _l8[1][2])):.2e}")
+
 # ── Determinism ───────────────────────────────────────────────────────────────
 again = runtime.resolve_steers([{"name": "grit", "value": 100}, {"name": "grit", "value": 100}])
 check("resolve_steers is deterministic",

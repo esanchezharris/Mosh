@@ -22,14 +22,20 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))   # service/ on the path
 
-# The two measured offenders (same peak_layer, correlated) + the four solos to A/B against.
+# The measured same-layer stacks (correlated, share a peak_layer) + solos to A/B against.
+# Refreshed for the sustain toggle: Gentle rides L17 (with distortion/epic/air/grid),
+# Swell rides L8 (with drum_aggression) — so orthogonalization now touches both layers.
 STACKS = [
     ("ft", "futuristic + tension  (L4, 51.3°)",
      [{"name": "futuristic", "value": 100}, {"name": "tension", "value": 100}]),
     ("de", "distortion + epic  (L17, 67.7°)",
      [{"name": "distortion", "value": 100}, {"name": "epic", "value": 100}]),
+    ("des", "distortion + epic + sustain·Gentle  (L17 triple)",
+     [{"name": "distortion", "value": 100}, {"name": "epic", "value": 100}, {"name": "sustain", "value": 100}]),
+    ("das", "drum_aggression + sustain·Swell  (L8)",
+     [{"name": "drum_aggression", "value": 100}, {"name": "sustain_swell", "value": 100}]),
 ]
-SOLOS = ["futuristic", "tension", "distortion", "epic"]
+SOLOS = ["futuristic", "tension", "distortion", "epic", "sustain", "sustain_swell"]
 
 
 def _render(eng, init_cache, CR, source, seed, nl, colors, orthogonalize, out_wav):

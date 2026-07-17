@@ -46,9 +46,15 @@ def descriptor() -> list[dict]:
     """The /colors payload: each color's ASTD ceiling + metadata for the UI."""
     out = []
     for name, e in registry().items():
-        out.append({"name": name, "astd_max": e["astd_max"], "peak_layer": e["peak_layer"],
-                    "more_sign": e["more_sign"], "verdict": e["verdict"],
-                    "no_stack_with": e.get("no_stack_with", [])})
+        d = {"name": name, "astd_max": e["astd_max"], "peak_layer": e["peak_layer"],
+             "more_sign": e["more_sign"], "verdict": e["verdict"],
+             "no_stack_with": e.get("no_stack_with", [])}
+        # Optional: colors sharing a `group` are one control with a `mode` toggle in the
+        # UI (e.g. Sustain · Gentle ⇄ Swell). Absent on ungrouped colors ⇒ byte-identical.
+        if e.get("group"):
+            d["group"] = e["group"]
+            d["mode"] = e.get("mode", "")
+        out.append(d)
     return out
 
 
