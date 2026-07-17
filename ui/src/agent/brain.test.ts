@@ -45,7 +45,9 @@ describe("createBrain injects producer knowledge for the user's turn", () => {
 
   it("adds no knowledge block for a request no card is about", async () => {
     const brain = createBrain(() => snap);
-    await brain.send("rename the drums track to Kicks");
+    // Not a production request at all — stays a true zero-overlap probe as the
+    // producer-knowledge store grows (see knowledge.test.ts for the rationale).
+    await brain.send("what's a good movie to watch this weekend");
     expect(systemOfLastCall()).not.toContain("Producer knowledge");
   });
 });

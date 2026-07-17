@@ -6,6 +6,7 @@ import {
   type KnowledgeCard,
 } from "./knowledge";
 import { buildSystemPrompt, systemPrompt, DEFAULT_RULES } from "./brainCore";
+import { AGENT_COMMAND_MAP } from "./commands";
 import type { Snapshot } from "../types";
 
 const snap: Snapshot = {
@@ -21,7 +22,9 @@ const snap: Snapshot = {
 
 describe("PRODUCER_KNOWLEDGE store", () => {
   it("parses the committed JSONL store into well-formed cards", () => {
-    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(2);
+    // AG-KB1: expanded past the original 2-card seed to cover warp, drums,
+    // lyrics, generative, mixer/sends, VST3, and recording/takes.
+    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(28);
     for (const c of PRODUCER_KNOWLEDGE) {
       expect(typeof c.id).toBe("string");
       expect(c.id.length).toBeGreaterThan(0);
@@ -60,7 +63,9 @@ describe("retrieveCards (deterministic tag/keyword match)", () => {
   });
 
   it("returns nothing for a request no card is about (irrelevant card is worse than none)", () => {
-    expect(retrieveCards("rename the drums track to Kicks")).toEqual([]);
+    // Not a production request at all (no track/clip/mixer/drum/lyric/render/warp
+    // vocabulary anywhere) — stays a true zero-overlap probe as the store grows.
+    expect(retrieveCards("what's a good movie to watch this weekend")).toEqual([]);
   });
 
   it("returns nothing for an empty query", () => {
@@ -133,6 +138,83 @@ describe("systemPrompt query-aware knowledge", () => {
   });
 
   it("adds no knowledge block for a request no card is about", () => {
-    expect(systemPrompt(snap, "rename the drums track to Kicks")).not.toContain("Producer knowledge");
+    expect(systemPrompt(snap, "what's a good movie to watch this weekend")).not.toContain("Producer knowledge");
+  });
+});
+
+describe("AG-KB1 expanded categories (warp/drums/lyrics/generative/mixer/vst3/recording)", () => {
+  // Each query is phrased the way a producer would actually ask; it should surface
+  // the card for the matching command as the top (highest-scoring) result. These
+  // pin retrieval for the new cards the same way the seed-card tests above pin the
+  // original two — a swap/typo in a command name or a dropped card would fail one
+  // of these deterministically.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("warp: fitting an imported loop to bars -> stretch_clip", () => {
+    expect(top("how do I get this imported loop to fit exactly 4 bars")).toBe("warp-stretch-clip-bars");
+  });
+
+  it("warp: BPM-detect confidence -> detect_clip_bpm", () => {
+    expect(top("the bpm detector doesn't seem sure about this sample's tempo")).toBe(
+      "warp-detect-clip-bpm-confidence",
+    );
+  });
+
+  it("drums: lane-string pattern syntax -> add_drum_pattern", () => {
+    expect(top("how do I write a whole kick and snare pattern in one go with hits and rests")).toBe(
+      "drum-pattern-lane-syntax",
+    );
+  });
+
+  it("drums: beatboxed take -> sketch_beatbox", () => {
+    expect(top("I beatboxed a drum idea into the mic, can it become an editable clip")).toBe(
+      "drum-sketch-beatbox",
+    );
+  });
+
+  it("lyrics: mumbled take -> build_skeleton_from_clip", () => {
+    expect(top("turn my mumbled take into a syllable flow skeleton")).toBe(
+      "lyrics-build-skeleton-from-clip",
+    );
+  });
+
+  it("lyrics: fill every gap -> complete_lyrics", () => {
+    expect(top("fill every gap in my lyric sheet at once")).toBe("lyrics-complete-lyrics");
+  });
+
+  it("lyrics: rhyme lookup -> get_rhymes", () => {
+    expect(top("I need rhymes for a specific word")).toBe("lyrics-get-rhymes");
+  });
+
+  it("generative: re-imagine vs transform -> create_render_layer modes", () => {
+    expect(top("should I re-imagine this or transform it into a violin")).toBe(
+      "generative-create-render-layer-modes",
+    );
+  });
+
+  it("generative: loose instruction -> compile_render", () => {
+    expect(top("just tell it to make this lo-fi in plain language")).toBe("generative-compile-render");
+  });
+
+  it("mixer: shared reverb across tracks -> sends/returns", () => {
+    expect(top("how do I add a shared reverb send across multiple tracks")).toBe("mixer-sends-returns");
+  });
+
+  it("vst3: hosting a synth -> load_plugin", () => {
+    expect(top("how do I add a hosted synth plugin to a track")).toBe("vst3-load-plugin");
+  });
+
+  it("recording: comparing stacked takes -> take lanes", () => {
+    expect(top("I recorded three takes of this line, how do I compare them")).toBe("recording-take-lanes");
+  });
+
+  it("every new card's maps_to names a real AGENT_COMMANDS entry or an accurate UI-only control", () => {
+    // Guards against inventing a command: every card that names a bare command
+    // token in maps_to (snake_case, no spaces) must resolve to AGENT_COMMANDS.
+    const bare = PRODUCER_KNOWLEDGE.filter((c) => /^[a-z][a-z0-9_]*$/.test(c.maps_to)).map((c) => c.maps_to);
+    for (const name of bare) {
+      expect(AGENT_COMMAND_MAP.has(name)).toBe(true);
+    }
+    expect(bare.length).toBeGreaterThan(0);
   });
 });
