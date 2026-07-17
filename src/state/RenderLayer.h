@@ -46,8 +46,11 @@ struct RenderLayer
 
         juce::ValueTree params (ids::PARAMS);
         params.setProperty (ids::prompt, "", nullptr);
-        params.setProperty (ids::cfg, 7.0, nullptr);
-        params.setProperty (ids::steps, 30, nullptr);
+        // NB: sampler cfg/steps are NOT render params — they are engine-level tuning
+        // (the MLX engine's SA3_STEPS env, the CUDA adapter's MOSH_SA3_STEPS/CFG env),
+        // never per-render controls, so they are deliberately absent here and out of the
+        // fingerprint (they had no audible effect on the canonical MLX path). Removed
+        // 2026-07-17 — see the fingerprint note below.
         params.setProperty (ids::nl, 0.4, nullptr);
         params.setProperty (ids::target, "", nullptr);       // Route B transform target
         params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
@@ -60,8 +63,14 @@ struct RenderLayer
     /** The FULL cache fingerprint (05 §5 / 01 §4.3) — NEVER shortcut to
         source+params. Hashes every input that can change the rendered audio:
         upstream hash · range · tempo/key · SR/channels · adapter · model/adapter
-        version · variant · mode (route) · prompt/controls · seed · sampling
-        hyperparams · safetyMappingVersion · service build. Any mismatch ⇒ dirty.
+        version · variant · mode (route) · prompt/controls · seed ·
+        safetyMappingVersion · service build. Any mismatch ⇒ dirty.
+
+        Sampler hyperparams (cfg/steps) are DELIBERATELY NOT in the key: they are
+        engine-level tuning (MLX SA3_STEPS / CUDA MOSH_SA3_STEPS·MOSH_SA3_CFG env),
+        not per-render creative controls — the canonical MLX path never even reads a
+        `cfg`/`steps` param — so keying on them would only cause spurious cache misses
+        for zero audible change. An engine re-tune is a service-build class of change.
 
         Stage 1 takes the documented inputs that exist now; Stage 5 fills the
         upstream-audio hash + tempo/key/service-build once the render flow exists.
@@ -105,7 +114,7 @@ struct RenderLayer
             lorasKey,                              // LoRA rack: name=value@sha12:trigger; — resolved at
                                                    // RENDER time (retrain / trigger edit ⇒ MISS)
             v[ids::seed].toString(),
-            params[ids::cfg].toString() + "/" + params[ids::steps].toString() + "/" + params[ids::nl].toString(),
+            params[ids::nl].toString(),           // init_noise_level (reimagine) — a real per-render control
             v[ids::safetyMappingVersion].toString(),
             serviceBuild
         };

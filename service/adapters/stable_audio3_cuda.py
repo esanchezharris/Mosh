@@ -30,6 +30,14 @@ LATENT_CACHE_MAX = int(os.environ.get("MOSH_SA3_LATENT_CACHE", "8"))
 # the MLX engine's pinned SA3_SECONDS — setup-sa3-cuda.ps1 persists SA3_SECONDS so
 # the coupling is explicit. Long clips are covered by coverage.render windows.
 WINDOW_SECONDS = min(MAX_DURATION, float(os.environ.get("SA3_SECONDS", "8.0")))
+# Sampler tuning is ENGINE-LEVEL config (env), NOT a per-render param — the exact
+# posture of the MLX engine's SA3_STEPS. The native side no longer sends cfg/steps
+# (they had no audible effect on the canonical MLX path and only busted the cache),
+# so read them here and default to this backend's validated values (30 steps / cfg 7.0,
+# the config the Windows SA3-CUDA selftest passed). They are deliberately out of the
+# render-cache fingerprint; re-tuning the env is a service-build class of change.
+STEPS = max(1, int(os.environ.get("MOSH_SA3_STEPS", "30")))
+CFG_SCALE = float(os.environ.get("MOSH_SA3_CFG", "7.0"))
 
 _MODEL_LOCK = None
 _MODEL = None
@@ -432,8 +440,9 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     prompt = params.get("prompt") or ""
     seed = int(params.get("seed", 0))
-    steps = int(params.get("steps", 8) or 8)
-    cfg = float(params.get("cfg", 1.0) or 1.0)
+    # Engine-level sampler tuning (env), not per-render params (see STEPS/CFG_SCALE above).
+    steps = STEPS
+    cfg = CFG_SCALE
 
     sa3, sr = _load_model()
     steers, colors_applied = _steers_for(params.get("colors"), params.get("lab", False))
