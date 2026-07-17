@@ -222,7 +222,11 @@ bundle_service() {                              # $1 = installed app
 bundle_brain_key() {                            # $1 = installed app
   local DEST="$1" BF="$1/Contents/Resources/brain.env" v
   : > "$BF"
+  # Proxy mode: when MOSH_BRAIN_PROXY_URL is set, the packaged BrainProxy hits the
+  # server-side proxy with MOSH_BRAIN_PROXY_APIKEY and the owner can OMIT the provider
+  # *_API_KEY lines below — so no extractable provider key ships in the bundle.
   for v in MOSHI_BRAIN_PROVIDER \
+           MOSH_BRAIN_PROXY_URL MOSH_BRAIN_PROXY_APIKEY \
            OPENAI_BASE_URL OPENAI_MODEL OPENAI_API_KEY \
            DEEPSEEK_BASE_URL DEEPSEEK_MODEL DEEPSEEK_API_KEY \
            XAI_BASE_URL XAI_MODEL XAI_API_KEY; do
