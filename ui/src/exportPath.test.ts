@@ -15,4 +15,8 @@ describe("parentDir", () => {
   it("returns '' for an empty string", () => {
     expect(parentDir("")).toBe("");
   });
+  it("strips the filename from a Windows backslash path (juce::File on the Windows target)", () => {
+    expect(parentDir("C:\\Users\\x\\AppData\\Local\\Mosh\\session\\exports\\mix-1.wav"))
+      .toBe("C:\\Users\\x\\AppData\\Local\\Mosh\\session\\exports");
+  });
 });
