@@ -255,13 +255,6 @@ def _loras_key(lora_sel) -> str:
     return "|".join(f"{n}@{s}" for n, _f, s in lora_sel)
 
 
-def _validated_nl(nlv: float, nl_min: float, nl_max: float) -> float:
-    """MLX-adapter NL guard parity: refuse degenerate renders, clamp the top."""
-    if nlv < nl_min:
-        raise ValueError(f"nl={nlv} below {nl_min}: degenerate (no audible change)")
-    return min(nlv, nl_max)
-
-
 def _lora_roots(sm):
     """Candidate modules the LoRA safetensors' torch names resolve against. The
     trained tree hangs off the diffusion wrapper; serving wraps it deeper."""
@@ -441,6 +434,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     prompt = params.get("prompt") or ""
     seed = int(params.get("seed", 0))
+    lab = bool(params.get("lab", False))   # Lab defeats the NL upper clamp (parity with the MLX adapter)
     # Engine-level sampler tuning (env), not per-render params (see STEPS/CFG_SCALE above).
     steps = STEPS
     cfg = CFG_SCALE
@@ -479,7 +473,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         )
         if win_src and nl is not None:
             mode = "audio_to_audio"
-            nlv = _validated_nl(float(nl), _canon.NL_MIN, _canon.NL_MAX_RECOGNIZABLE)
+            nlv = _canon.clamp_nl(float(nl), lab)   # shared guard: 0.5 cap normal, uncapped in Lab (MLX/CUDA parity)
             # Explicit slice params apply only to the caller's original file —
             # coverage windows arrive pre-sliced.
             is_orig = in_wav == orig_input

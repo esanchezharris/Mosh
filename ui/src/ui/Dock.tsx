@@ -11,6 +11,7 @@ import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
 import { isTransformPreview } from "../capabilities";
 import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
+import { amountToNl, nlToAmount } from "./reimagineAmount";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -308,6 +309,16 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
   return (
     <div className="gen-body" data-render-status={rl.status}>
       {isSing ? <SingControls track={track} /> : isTransform ? <TransformControls clip={clip} /> : (<>
+      <label className="nparam" data-testid="gen-nl-row"
+        title="How much to keep vs re-imagine — 0 keeps your original, 100 fully re-imagines. Lab unlocks up to a full generate-from-scratch.">
+        <span className="nlabel">re-imagine</span>
+        <span className="nslider"><input type="range" min={0} max={100} step={1}
+          aria-label="re-imagine amount"
+          data-testid="gen-nl"
+          value={nlToAmount(rl.nl ?? 0.4, labMode)}
+          onChange={(e) => void exec("set_render_param", { clipId: clip.id, nl: amountToNl(Number(e.target.value), labMode), lab: labMode })} /></span>
+        <span className="nval">{nlToAmount(rl.nl ?? 0.4, labMode)}</span>
+      </label>
       {active.map((c) => {
         const meta = colorsAvail.find((m) => m.name === c.name);
         return (

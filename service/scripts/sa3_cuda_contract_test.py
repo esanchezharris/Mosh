@@ -29,17 +29,18 @@ def main():
     from adapters import stable_audio3_adapter as canon
     from adapters import stable_audio3_cuda as cuda
 
-    # 1) NL guard parity: below NL_MIN raises (MLX refuses degenerate renders —
-    #    the old CUDA path silently clamped up, which hid a caller bug)
+    # 1) NL guard parity: the CUDA path now delegates to the shared canon.clamp_nl
+    #    (the exact guard the MLX path uses), so parity is by construction. Assert the
+    #    guard's contract — below NL_MIN raises; in-range passes; normal mode clamps the
+    #    top to NL_MAX_RECOGNIZABLE; Lab defeats the top clamp (the #360 CUDA parity fix).
     try:
-        cuda._validated_nl(canon.NL_MIN / 2.0, canon.NL_MIN, canon.NL_MAX_RECOGNIZABLE)
+        canon.clamp_nl(canon.NL_MIN / 2.0, False)
         check(False, "nl below NL_MIN did not raise")
     except ValueError:
         check(True, "")
-    check(cuda._validated_nl(0.3, canon.NL_MIN, canon.NL_MAX_RECOGNIZABLE) == 0.3,
-          "in-range nl altered")
-    check(cuda._validated_nl(0.9, canon.NL_MIN, canon.NL_MAX_RECOGNIZABLE)
-          == canon.NL_MAX_RECOGNIZABLE, "nl above max not clamped")
+    check(canon.clamp_nl(0.3, False) == 0.3, "in-range nl altered")
+    check(canon.clamp_nl(0.9, False) == canon.NL_MAX_RECOGNIZABLE, "nl above max not clamped (normal)")
+    check(canon.clamp_nl(0.9, True) == 0.9, "Lab did not defeat the top clamp (MLX/CUDA parity)")
 
     # 2) window pin follows SA3_SECONDS (and stays under MAX_DURATION)
     check(cuda.WINDOW_SECONDS == min(cuda.MAX_DURATION,

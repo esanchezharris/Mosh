@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mockExecute, mockSnapshot, __resetMockForTests } from "./bridge.mock";
+import { amountToNl, nlToAmount } from "./ui/reimagineAmount";
 import type { Snapshot, CommandResult } from "./types";
 
 // Phase 2 — re-imagining a MIDI/drum clip mutes the MIDI and plays a HIDDEN render beneath it (on a
@@ -75,5 +76,24 @@ describe("mock MIDI re-imagine — hidden audio beneath the muted MIDI (Phase 2)
     await exec("create_render_layer", { clipId: midi.id, adapter: "fake", mode: "reimagine" });
     const r = await exec("render_ahead_arm", { clipId: midi.id });
     expect(r.ok).toBe(false);
+  });
+
+  it("the keep↔reimagine dial round-trips through set_render_param; Lab unlocks past 0.5", async () => {
+    const s = await snap();
+    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave")!;
+    const clipId = wave.id;
+    await exec("create_render_layer", { clipId, adapter: "fake", mode: "reimagine" });
+    const nlOf = async () =>
+      (await snap()).tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)!.renderLayer!.nl!;
+
+    // Normal: dial 80 → nl ≈ 0.40 → reads back 80.
+    await exec("set_render_param", { clipId, nl: amountToNl(80, false), lab: false });
+    expect(nlToAmount(await nlOf(), false)).toBe(80);
+
+    // Lab: dial 100 → nl 1.0 (> the 0.5 normal cap) → reads back 100.
+    await exec("set_render_param", { clipId, nl: amountToNl(100, true), lab: true });
+    const labNl = await nlOf();
+    expect(labNl).toBeGreaterThan(0.5);
+    expect(nlToAmount(labNl, true)).toBe(100);
   });
 });
