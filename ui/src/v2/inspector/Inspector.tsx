@@ -252,7 +252,7 @@ function WarpTab({ clip }: { clip: Clip }) {
           {detected && (
             <div className="v2-warp-detected" data-testid="v2-warp-detected">
               Detected {detected.bpm.toFixed(1)} BPM ({Math.round(detected.confidence * 100)}%)
-              <button data-testid="v2-warp-apply"
+              <button className="btn" data-testid="v2-warp-apply"
                 onClick={() => void exec("set_clip_warp", { clipId: clip.id, autoTempo: true, sourceBpm: detected.bpm })}>Apply</button>
             </div>
           )}

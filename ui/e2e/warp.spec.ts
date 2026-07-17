@@ -61,4 +61,7 @@ test("Detect BPM surfaces a reading", async ({ page }) => {
   await page.getByTestId("v2-warp-detect").click();
   await expect(page.getByTestId("v2-warp-detected")).toBeVisible();
   await expect(page.getByTestId("v2-warp-apply")).toBeVisible();
+  // Apply carries the inspector's shared .btn class (styled + hover/disabled states)
+  // rather than falling through as a raw browser-default button.
+  await expect(page.getByTestId("v2-warp-apply")).toHaveClass(/btn/);
 });
