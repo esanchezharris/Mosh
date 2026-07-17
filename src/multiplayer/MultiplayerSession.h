@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 
 namespace mosh
@@ -153,6 +154,22 @@ public:
     bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
     bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);
 
+    /** Thread-safe in-flight-hash registry (adversarial-review SHOULD-FIX, PR-2
+        review). Two independent callers can want to downloadBlob() the SAME hash
+        into the SAME dest file concurrently: the message thread's self-heal pass
+        (MoshOps::cmdMpFetchMissingStems, sync inline or its own detached std::thread)
+        and this session's OWN transfer worker thread (prefetchAudioRefs, called from
+        a bootstrap_state/commit job). Before PR-2, only the message-thread self-heal
+        pass guarded against RE-ENTERING itself (a MoshOps-local, message-thread-only
+        std::set) — it had no way to see the worker thread's in-flight fetches, and
+        vice versa. This registry is SHARED and mutex-guarded so both sides
+        coordinate through one source of truth: claimStem() atomically tests-and-
+        inserts, returning false if someone else already claimed it (the caller must
+        SKIP, not race a second downloadBlob into the same dest); always pair with
+        releaseStem() (even on failure) so a later pass isn't permanently skipped. */
+    bool claimStem (const juce::String& hash);
+    void releaseStem (const juce::String& hash);
+
 private:
     void startPoll();
     void stopPoll();
@@ -163,7 +180,10 @@ private:
     juce::String stemBaseDir() const;
     juce::File   byHashDirFor (const juce::String& base) const;
     void         emitCommitDone (const juce::String& logicalId, bool ok, const juce::String& error);
-    void         prefetchAudioRefs (const juce::var& msgOrTrack);   // downloads any missing {hash,ext} stems
+    // Downloads any missing {hash,ext} stems referenced by `audioRefsArr` into
+    // `baseDir`/audio/by-hash/. `baseDir` MUST be captured by the caller at enqueue
+    // time (see the .cpp doc comment) rather than re-read from stemBaseDir() here.
+    void         prefetchAudioRefs (const juce::var& audioRefsArr, const juce::String& baseDir);
     // Route a state-mutating job (commit/bootstrap_state/structural/bootstrap-answer)
     // through the SAME ordered pipeline: the transfer worker in async mode, or run
     // inline (prefetch then apply, right here) under MOSH_MP_SYNC_TRANSFER=1.
@@ -195,6 +215,9 @@ private:
 
     mutable std::mutex stemBaseDirMutex_;
     juce::String       stemBaseDir_;              // guarded by stemBaseDirMutex_ -- see class doc
+
+    std::mutex              inFlightMutex_;
+    std::set<juce::String>  inFlightStems_;         // guarded by inFlightMutex_ -- see claimStem/releaseStem doc
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MultiplayerSession)
 };

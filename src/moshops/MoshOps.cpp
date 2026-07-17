@@ -3224,20 +3224,27 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 const auto stem = resolved.getFileNameWithoutExtension();
                 if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
 
-                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
-                // a manual retry, or two overlapping bootstraps) is already fetching this
-                // exact hash; skip it here rather than spawn a second downloadBlob into the
-                // SAME dest file (delete-then-create-then-stream), whose partial state the
-                // other pass's existsAsFile()/size check could otherwise observe.
-                if (inFlightStems_.count (stem) > 0) continue;
+                // Adversarial-review finding #3 (originally a MoshOps-local, message-
+                // thread-only set) — a concurrent pass is already fetching this exact
+                // hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state
+                // the other pass's existsAsFile()/size check could otherwise observe.
+                // SHOULD-FIX (PR-2 review): this registry now lives on mpSession_
+                // (thread-safe, mutex-guarded) instead of a MoshOps-local set, because
+                // the transfer worker's OWN prefetch (MultiplayerSession::prefetchAudioRefs,
+                // a DIFFERENT OS thread) can want the SAME hash concurrently — a
+                // message-thread-only set couldn't see across that boundary.
+                // claimStem() atomically tests-and-claims: a false here means someone
+                // else (this same scan's earlier duplicate, or the worker thread) has
+                // it, so skip rather than add it to `missing` at all. A null mpSession_
+                // can't claim anything -- fall through and add it anyway (the download
+                // attempt below safely no-ops on a null session).
+                if (mpSession_ != nullptr && ! mpSession_->claimStem (stem)) continue;
 
                 missing.add ({ c->itemID.toString(), stem,
                               resolved.getFileExtension().removeCharacters ("."), resolved });
             }
     }
-
-    for (auto& m : missing)
-        inFlightStems_.insert (m.hash);
 
     // Runs on the message thread: re-resolve each clip by id (it may have been
     // removed/undone since the scan above — findClip returns nullptr, skipped), write
@@ -3266,7 +3273,7 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                 ++failed;
                 stillMissing.add (m.hash);
             }
-            inFlightStems_.erase (m.hash);
+            if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
         }
         if (fetched > 0)
             emitSnapshotInvalidated();
@@ -3284,26 +3291,31 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
 
     // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
     // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
-    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
-    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
-    // round-trip runs on the background thread; results land back via callAsync.
+    // The clip lookup + sourceMediaChanged()/emitSnapshotInvalidated() are message-
+    // thread-only, so only the network round-trip runs on the background thread;
+    // results land back via callAsync. releaseStem() is thread-safe (SHOULD-FIX, PR-2
+    // review), so each item's claim is released right on the background thread,
+    // immediately after its own download attempt — shorter hold time than batching
+    // every release into the final callAsync.
     std::thread ([this, missing]
     {
         if (mpSession_ == nullptr || ! mpSession_->active())
         {
             // Bailed before attempting anything -- still release the in-flight marks
-            // (on the message thread) so a later pass isn't permanently skipped.
-            juce::MessageManager::callAsync ([this, missing]
-            {
-                for (auto& m : missing) inFlightStems_.erase (m.hash);
-            });
+            // so a later pass isn't permanently skipped.
+            for (auto& m : missing)
+                if (mpSession_ != nullptr) mpSession_->releaseStem (m.hash);
             return;
         }
 
         struct Result { juce::String clipId, hash; bool ok; };
         juce::Array<Result> results;
         for (auto& m : missing)
-            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+        {
+            const bool got = mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile();
+            results.add ({ m.clipId, m.hash, got });
+            mpSession_->releaseStem (m.hash);
+        }
 
         juce::MessageManager::callAsync ([this, results]
         {
@@ -3316,7 +3328,6 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
                         w->sourceMediaChanged();
                     ++fetched;
                 }
-                inFlightStems_.erase (r.hash);
             }
             if (fetched > 0)
                 emitSnapshotInvalidated();

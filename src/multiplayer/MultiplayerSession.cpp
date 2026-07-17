@@ -123,12 +123,19 @@ void MultiplayerSession::emitCommitDone (const String& logicalId, bool ok, const
         emit_ ("mp_commit_done", var (o));
 }
 
-void MultiplayerSession::prefetchAudioRefs (const juce::var& audioRefsArr)
+void MultiplayerSession::prefetchAudioRefs (const juce::var& audioRefsArr, const juce::String& baseDir)
 {
-    const auto base = stemBaseDir();
-    if (base.isEmpty())
+    // SHOULD-FIX (PR-2 review): `baseDir` is captured by the CALLER at enqueue time
+    // (when the job.prefetch closure is built), not re-read here. This runs on the
+    // worker thread, potentially long after enqueue if the FIFO has a backlog ahead
+    // of it (e.g. a slow upload) -- if stemBaseDir() changed in the meantime (a
+    // save_as/new_project/open_project while this job was still queued), reading it
+    // fresh here would download this job's stems into the WRONG (new) session's
+    // directory instead of the one that was current when the peer's message
+    // actually arrived.
+    if (baseDir.isEmpty())
         return;   // no session-stamped directory yet (shouldn't happen once a session is live)
-    auto byHashDir = byHashDirFor (base);
+    auto byHashDir = byHashDirFor (baseDir);
     if (auto* arr = audioRefsArr.getArray())
         for (auto& a : *arr)
         {
@@ -139,8 +146,17 @@ void MultiplayerSession::prefetchAudioRefs (const juce::var& audioRefsArr)
             if (h.isEmpty())
                 continue;
             auto dest = byHashDir.getChildFile (h + "." + e);
-            if (! dest.existsAsFile())
-                client_.downloadBlob (h, e, dest, [this] { return transferAborting(); });
+            if (dest.existsAsFile())
+                continue;
+            // SHOULD-FIX (PR-2 review): claim the hash before fetching -- the message
+            // thread's self-heal pass (MoshOps::cmdMpFetchMissingStems) can be trying
+            // to downloadBlob() this SAME hash/dest concurrently (a different OS
+            // thread). If someone else already claimed it, skip rather than race a
+            // second delete-then-create-then-stream into the same file.
+            if (! claimStem (h))
+                continue;
+            client_.downloadBlob (h, e, dest, [this] { return transferAborting(); });
+            releaseStem (h);
         }
 }
 
@@ -225,6 +241,16 @@ void MultiplayerSession::commit (const String& logicalId, const String& blob, co
     };
     job.apply = [this, logicalId, ok, err]
     {
+        // SHOULD-FIX (PR-2 review): pollLoop's own callAsync guards every dispatch
+        // with `if (! running_.load()) return;` (a stale tick after leaveSession()
+        // is dropped) -- this worker's job.apply closures need the SAME guard. The
+        // race: the worker thread can have ALREADY handed this apply to callAsync
+        // (queued on the message thread) before leaveSession() runs; leaveSession()
+        // sets running_ false and tears down transferQueue_/client_, but that
+        // teardown cannot retroactively cancel an apply already sitting in the
+        // message thread's queue -- without this guard it would fire AFTER the
+        // session is gone and emit a stale mp_commit_done.
+        if (! running_.load()) return;
         emitCommitDone (logicalId, *ok, *err);
     };
     transferQueue_->enqueue (std::move (job));
@@ -238,6 +264,18 @@ bool MultiplayerSession::uploadBlob (const String& hash, const String& ext, cons
 bool MultiplayerSession::downloadBlob (const String& hash, const String& ext, const File& dest)
 {
     return client_.downloadBlob (hash, ext, dest);
+}
+
+bool MultiplayerSession::claimStem (const String& hash)
+{
+    const std::lock_guard<std::mutex> lk (inFlightMutex_);
+    return inFlightStems_.insert (hash).second;   // true only if newly inserted (claimed)
+}
+
+void MultiplayerSession::releaseStem (const String& hash)
+{
+    const std::lock_guard<std::mutex> lk (inFlightMutex_);
+    inFlightStems_.erase (hash);
 }
 
 // All four broadcasts below are fire-and-forget (their publish result is ignored), so
@@ -344,8 +382,15 @@ void MultiplayerSession::pollLoop()
                     // by a later-arriving frame's own (possibly prefetch-free, fast)
                     // job.
                     TransferQueue::Job job;
-                    job.prefetch = [this, msg] { prefetchAudioRefs (msg.getProperty ("audioRefs", var())); };
-                    job.apply    = [this, msg] { applyCommit_ (msg); };
+                    // SHOULD-FIX (PR-2 review): capture stemBaseDir() NOW (message
+                    // thread, enqueue time), not inside prefetchAudioRefs -- see its
+                    // doc comment for why a re-read on the worker thread is wrong.
+                    const auto commitBaseDir = stemBaseDir();
+                    job.prefetch = [this, msg, commitBaseDir]
+                        { prefetchAudioRefs (msg.getProperty ("audioRefs", var()), commitBaseDir); };
+                    // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
+                    // commit()/emitCommitDone job.apply's doc comment above.
+                    job.apply    = [this, msg] { if (running_.load()) applyCommit_ (msg); };
                     routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "selection")
@@ -409,18 +454,25 @@ void MultiplayerSession::pollLoop()
                 else if (type == "bootstrap_state")
                 {
                     TransferQueue::Job job;
-                    job.prefetch = [this, msg]
+                    // SHOULD-FIX (PR-2 review): captured NOW (message thread, enqueue
+                    // time) -- see prefetchAudioRefs's doc comment.
+                    const auto bootstrapBaseDir = stemBaseDir();
+                    job.prefetch = [this, msg, bootstrapBaseDir]
                     {
                         if (auto* tarr = msg.getProperty ("tracks", var()).getArray())
                             for (auto& tv : *tarr)
                             {
                                 if (transferAborting())
                                     return;
-                                prefetchAudioRefs (tv.getProperty ("audioRefs", var()));
+                                prefetchAudioRefs (tv.getProperty ("audioRefs", var()), bootstrapBaseDir);
                             }
                     };
                     job.apply = [this, msg]
                     {
+                        // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
+                        // commit()/emitCommitDone job.apply's doc comment above.
+                        if (! running_.load())
+                            return;
                         if (! applyBootstrap_)
                             return;
                         // Tell cmdMpApplyBootstrap the worker already prefetched every
@@ -443,7 +495,9 @@ void MultiplayerSession::pollLoop()
                     // FIFO purely for ordering: a fast tempo change enqueued right
                     // after a slow commit upload must still apply strictly after it.
                     TransferQueue::Job job;
-                    job.apply = [this, msg] { if (applyStructural_) applyStructural_ (msg); };
+                    // SHOULD-FIX (PR-2 review): running_ teardown guard -- see the
+                    // commit()/emitCommitDone job.apply's doc comment above.
+                    job.apply = [this, msg] { if (running_.load() && applyStructural_) applyStructural_ (msg); };
                     routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "webrtc")
