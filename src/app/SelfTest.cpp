@@ -5657,6 +5657,69 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check ((int) refetch.getProperty ("data", juce::var()).getProperty ("fetched", 0) == 0,
                    "self-heal: nothing left to fetch");
 
+            // Adversarial-review finding #2: every check above uses wait:true (the
+            // SYNCHRONOUS branch) — the std::thread + callAsync ASYNC branch had ZERO
+            // coverage. Force it directly with a second missing-stem clip on the SAME
+            // host+guest room (the relay already holds the correct bytes, so this is a
+            // deterministic proof the background-thread path lands correctly, not a
+            // race against a deliberately-broken transfer).
+            auto mk2 = cmd (hostOps, "create_track", args1 ("name", "SH Src 2"));
+            const auto shTrackId2 = mk2.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (hostOps, "add_test_tone_clip",
+                            objN ({ { "trackId", shTrackId2 }, { "seconds", 1.0 }, { "freq", 440.0 } }))),
+                   "self-heal (async): host added a second wave clip");
+
+            auto ser2 = cmd (hostOps, "mp_serialize_project");
+            check (ok (ser2), "self-heal (async): host mp_serialize_project ok");
+            juce::String shLid2;
+            {
+                auto snap = hostOps.snapshot();
+                if (auto* arr = snap["tracks"].getArray())
+                    for (auto& tv : *arr)
+                        if (tv.getProperty ("name", juce::var()).toString() == "SH Src 2")
+                            shLid2 = tv.getProperty ("logicalId", juce::var()).toString();
+            }
+            check (shLid2.isNotEmpty(), "self-heal (async): host's second track logicalId resolved");
+
+            juce::var shTrackEntry2;
+            if (auto* tarr = ser2.getProperty ("data", juce::var()).getProperty ("tracks", juce::var()).getArray())
+                for (auto& tv : *tarr)
+                    if (tv.getProperty ("logicalId", juce::var()).toString() == shLid2)
+                        shTrackEntry2 = tv;
+            check (shTrackEntry2.isObject(), "self-heal (async): host's bundle carries the second track");
+            const auto shBlob2 = shTrackEntry2.getProperty ("blob", juce::var()).toString();
+            check (shBlob2.isNotEmpty(), "self-heal (async): second track blob non-empty");
+
+            auto applied2 = cmd (guestOps, "apply_remote_track", args1 ("blob", shBlob2));
+            check (ok (applied2), "self-heal (async): guest applied the second track structure (no stem download)");
+            const auto shLid2Applied = applied2.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+            check (shLid2Applied == shLid2, "self-heal (async): applied logicalId matches the host's second track");
+            check (clipSourceMissing (guestOps, shLid2Applied),
+                   "self-heal (async): guest's second clip is sourceMissing before fetch");
+
+            // THE ASYNC PATH: no `wait` arg -> cmdMpFetchMissingStems takes the
+            // std::thread + callAsync branch (mirrors cmdMpApplyBootstrap's own
+            // auto-trigger call, which also omits `wait`).
+            auto fetch2 = cmd (guestOps, "mp_fetch_missing_stems");
+            check (ok (fetch2), "self-heal (async): mp_fetch_missing_stems (no wait) returns ok immediately");
+            check (fetch2.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "started",
+                   "self-heal (async): took the async branch (status:\"started\")");
+
+            // Bounded drain for the background thread's downloadBlob + its callAsync
+            // completion (sourceMediaChanged + emitSnapshotInvalidated) to land.
+            auto* mm2 = juce::MessageManager::getInstanceWithoutCreating();
+            bool resolved2 = false;
+            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            while (! resolved2 && juce::Time::getMillisecondCounter() < deadline2)
+            {
+                if (mm2 != nullptr) mm2->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                resolved2 = ! clipSourceMissing (guestOps, shLid2Applied);
+            }
+            check (resolved2, "self-heal (async): guest's clip resolved via the background thread + callAsync (previously untested code path)");
+            check (ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", waveClipIdOf (guestOps, shLid2Applied)))),
+                   "self-heal (async): get_clip_peaks succeeds after the async fetch");
+
             cmd (guestOps, "mp_leave_session");
             cmd (hostOps, "mp_leave_session");
         }

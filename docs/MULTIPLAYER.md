@@ -119,17 +119,25 @@ The session control lives in the topbar's **2-player (B-5) pop**
     is missing, recognizes the ones referencing a content-addressed by-hash stem (a 64-hex-char
     filename under `audio/by-hash/`), and retries the download for exactly those — it can't
     "fix" an unrelated missing local file (that's `relink_clip`'s job).
-  - It fires **automatically** right after `mp_apply_bootstrap` lands the guest's tracks, so a
-    late-joiner's audio catches up on its own within moments — no manual nudge needed.
-  - It is also a manual command (`{wait:true}` for a synchronous retry, e.g. from a script or
-    the future UI) for any other transient miss (a regular commit, not just bootstrap).
+  - It fires **automatically** right after `mp_apply_bootstrap` lands the guest's tracks (fire-
+    and-forget, off the `wait` arg — it runs synchronously only when nothing is actually
+    missing, which is a cheap no-op; a genuine miss takes the background-thread path below), so
+    a late-joiner's audio catches up on its own within moments — no manual nudge needed.
+  - It is also a manual command: `{wait:true}` for a synchronous retry (e.g. from a script or
+    the future UI); otherwise (the default, and what the bootstrap auto-trigger uses) it runs
+    the download on a background thread and reports completion by re-invalidating the
+    snapshot — never blocking the caller on the network round-trip.
+  - Every downloaded stem's bytes are verified against its own content-address (SHA-256) before
+    being accepted — a dropped/truncated transfer is rejected and left genuinely missing (for a
+    future retry) rather than silently blessed as resolved.
   - The **local self-host relay now has a blob store** too (mirroring the cloud contract), so
     this whole path — including the self-heal — is covered by the hermetic `--selftest` gate
     (`MOSH_SELFTEST_MP=1`), not just the cloud-gated smoke check.
-  - Two caveats remain: the transfer (both the original attempt and the self-heal retry) runs
-    synchronously per call, so a session with several audio clips can still **briefly freeze**
-    while stems move (keep imported clips modest) — a proper async/background transfer is a
-    follow-up (PR-2, stacked on this fix).
+  - One caveat remains: the ORIGINAL upload/download attempt (inside `mp_commit_track` /
+    `mp_apply_bootstrap`'s own inline loop, and the host's bootstrap-answer upload) still runs
+    synchronously on the message thread, so a session with several audio clips can still
+    **briefly freeze** while stems move (keep imported clips modest) — a proper async/
+    background transfer for THAT path is a follow-up (PR-2, stacked on this fix).
 - **Stem transfer briefly blocks the UI:** upload/download runs on the message thread, so a
   large audio file can freeze the window for a few seconds. Keep imported clips modest.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
