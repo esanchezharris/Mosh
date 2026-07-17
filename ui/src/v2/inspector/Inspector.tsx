@@ -37,6 +37,7 @@ export function Inspector() {
     { id: "fx", label: "FX" },
     { id: "gen", label: "Gen" },
     { id: "lyrics", label: "Lyrics" },
+    ...(clip ? [{ id: "clip" as const, label: "Clip" }] : []),
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
     ...(isWave ? [{ id: "warp" as const, label: "Warp" }] : []),
     ...(hasTakes ? [{ id: "takes" as const, label: "Takes" }] : []),
@@ -57,6 +58,7 @@ export function Inspector() {
         {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
         {active === "lyrics" && <LyricPanel track={track} />}
+        {active === "clip" && clip && <ClipTab clip={clip} />}
         {active === "midi" && clip && <MidiTab clip={clip} drum={track.type === "drum"} />}
         {active === "warp" && clip && <WarpTab clip={clip} />}
         {active === "takes" && clip && <TakesTab clip={clip} />}
@@ -183,6 +185,57 @@ function OutputField({ track }: { track: Track }) {
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </label>
+  );
+}
+
+// G4A — the clip-level Inspector tab: rename / mute / gain. These three commands
+// (rename_clip / set_clip_mute / set_clip_gain) already existed as agent-only
+// MoshOps commands; this is their first UI surface. Gain is wave-clip-only
+// (set_clip_gain rejects non-audio clips backend-side) — mute + rename apply to
+// every clip type. Clip fades are a separate, deferred ticket (G4b) — not here.
+function ClipTab({ clip }: { clip: Clip }) {
+  const exec = useStore((s) => s.exec);
+  const isWave = clip.type === "wave";
+  return (
+    <div className="v2-mix" data-testid="v2-clip-tab">
+      <label className="v2-field">
+        <span>Name</span>
+        <input
+          type="text"
+          defaultValue={clip.name}
+          key={clip.name}
+          data-testid="v2-clip-name"
+          onBlur={(e) => {
+            if (e.target.value !== clip.name) void exec("rename_clip", { clipId: clip.id, name: e.target.value });
+          }}
+        />
+      </label>
+      {isWave && (
+        <label className="v2-field">
+          <span>Gain</span>
+          <input
+            type="range"
+            min={-48}
+            max={24}
+            step={0.5}
+            value={clip.gainDb ?? 0}
+            data-testid="v2-clip-gain"
+            onChange={(e) => void exec("set_clip_gain", { clipId: clip.id, gainDb: Number(e.target.value) })}
+          />
+          <span className="v2-val">{(clip.gainDb ?? 0).toFixed(1)}</span>
+        </label>
+      )}
+      <div className="v2-mix-btns">
+        <button
+          className={clip.mute ? "on" : ""}
+          aria-pressed={!!clip.mute}
+          data-testid="v2-clip-mute"
+          onClick={() => void exec("set_clip_mute", { clipId: clip.id, mute: !clip.mute })}
+        >
+          Mute clip
+        </button>
+      </div>
+    </div>
   );
 }
 

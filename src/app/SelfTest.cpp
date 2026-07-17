@@ -1140,6 +1140,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", cid }, { "name", "Renamed" }}))), "rename_clip ok");
         check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "clip name reflects rename");
+        // G4A — rename_clip is undoable (was uncovered): undo restores the prior name, redo re-applies.
+        check (ok (cmd (ops, "undo")), "undo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() != "Renamed", "undo restores clip's prior name");
+        check (ok (cmd (ops, "redo")), "redo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "redo re-applies clip rename");
 
         check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", cid }, { "mute", true }}))), "set_clip_mute ok");
         check ((bool) clipById (cid).getProperty ("mute", false), "clip mute reflects in snapshot");
