@@ -211,6 +211,38 @@ def ols_slope(xs, ys):
     return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / den
 
 
+def vowel_onset_report(clip, take_frames, render_frames, offset_s: float = 0.0):
+    """QA-grade vowel-landmark readout (B3 of the mechanism-verify Phase B): per word
+    instance of `clip`, voicing onsets are searched inside the SCORE span on BOTH sides
+    (no forced alignment — assumes the render is take-aligned, i.e. post phrase-snap).
+    Clean subset = all-voiceless onsets, where a voicing onset IS the vowel onset.
+    Positive delta = the rendered vowel is LATE vs the take's; dur_ratio < 1 = squeezed.
+    This is the landmark that replaces word-start snap medians as a quality readout (the
+    ~9ms word-snap number measured the wrong landmark — V0/V3). The instrument-grade
+    version (MMS_FA word spans + FCPE threshold sweep) is the V0 harness."""
+    deltas, ratios, clean_n, n = [], [], 0, 0
+    for e in word_events(clip):
+        a, b = e["start"] + offset_s, e["end"] + offset_s
+        n += 1
+        cluster, voiceless = onset_cluster(e["phon"])
+        if not (voiceless and len(cluster) >= 1):
+            continue
+        clean_n += 1
+        r_on, r_end = landmarks(render_frames, a, b, None)
+        t_on, t_end = landmarks(take_frames, a, b, None)
+        if r_on is None or t_on is None:
+            continue
+        deltas.append((r_on - t_on) * 1000.0)
+        if t_end - t_on > 0.01:
+            ratios.append((r_end - r_on) / (t_end - t_on))
+    return {
+        "available": True, "words": n, "clean": clean_n, "measured": len(deltas),
+        "median_vowel_onset_delta_ms": round(median(deltas), 1) if deltas else None,
+        "median_vowel_dur_ratio": round(median(ratios), 3) if ratios else None,
+        "squeeze_frac": round(sum(1 for r in ratios if r < 0.8) / len(ratios), 3) if ratios else None,
+    }
+
+
 # ── venv probes + caching ──────────────────────────────────────────────────────────────
 
 def _run_json(cmd, timeout=1800):

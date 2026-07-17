@@ -251,6 +251,19 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     flow_grounded = "breaks" in line
     wmap = _word_syl_map(text) if flow_grounded else []
 
+    # B2.2 melisma-backed count flex (mechanism-verify, 2026-07-17): tol stays 0 — the
+    # writer AIMS exact — but a flexed line also passes at target−1 (the score author
+    # holds the last word across the orphan slot: note_type=3 melisma, V4b-proven) and at
+    # target+1 ONLY when a multi-syllable word can fold into one slot (an all-monosyllable
+    # +1 would be words>slots, which the author rejects as line_overflow). Exact still
+    # outranks ±1 via the closeness term below.
+    if not syl_ok and line.get("melismaFlex"):
+        if nsyl == target - 1:
+            syl_ok = True
+        elif nsyl == target + 1:
+            wm = wmap or _word_syl_map(text)
+            syl_ok = any(n >= 2 for _w, _s, n in wm)
+
     # HARD gate: no word may run through a real breath (the take's intra-phrase rest).
     breaks_ok, breaks_reason = True, ""
     for p in (int(b) for b in (line.get("breaks") or [])):
@@ -680,8 +693,8 @@ def _analyze_line(line: dict, spec: dict, anchor: Optional[str]) -> dict:
     to what the generation gate would accept — the visualizer never disagrees with the
     loop. Analyzes finalized text if present, else the seed's written words (gaps dropped)."""
     target = _target(line, spec)
-    tol = int(line.get("syllableTol", 1) or 1)
-    strict = _strictness(line, spec)
+    tol = _syl_tol(line)   # the `or 1` idiom here silently voided explicit tol-0 (the
+    strict = _strictness(line, spec)   # same bug _syl_tol was built to fix, 2026-07-12)
     txt = (line.get("text") or "").strip()
     seed = line.get("seedText") or ""
     has_gap = _has_gap(seed)

@@ -354,9 +354,12 @@ def build_flow_spec(skeleton: dict, *, gap_s: float = 0.35, min_syllables: int =
             "seedText": seed,                        # TRUSTED kept words + gaps, or blank (invent)
             "breaks": breaks,                        # required word boundaries (real breaths)
             "syllableTarget": len(slots),
-            # EXACT count — the hand-fit discipline the owner certified by ear (demo d5,
-            # 2026-07-11): one syllable per measured note; ±1 slack re-introduces squeeze/hold.
+            # AIM exact (the d5 discipline) with melisma-backed grace (B2.2, 2026-07-17):
+            # the old "±1 re-introduces squeeze/hold" worry was re-litigated by mechanism-
+            # verify — hold IS a validated musical device (V4b melisma PASS) and squeeze is
+            # dead (the author rejects words>slots). −1 holds, +1 folds iff foldable.
             "syllableTol": 0,
+            "melismaFlex": True,
             "stress": _stress_from_velocity(slots),
             "pitchContour": _pitch_contour(slots),
             "themeHint": _theme_hint(ph["bars"], line_heard),

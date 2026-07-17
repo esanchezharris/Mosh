@@ -112,6 +112,21 @@ check("ols slope", abs(vl.ols_slope([0, 1, 2], [10, 30, 50]) - 20.0) < 1e-9)
 check("median even", vl.median([1, 2, 3, 4]) == 2.5)
 check("ranks average ties", vl._ranks([10, 10, 20]) == [1.5, 1.5, 3.0])
 
+# ── vowel_onset_report (B3: the QA-grade readout for overlap.py) ───────────────────────
+# Synthetic: 'time' (T onset, clean) commanded 0.2–0.5 — take vowel at 0.25, render at
+# 0.30 → +50ms delta; take run 0.25–0.45 (0.20s), render 0.30–0.44 (0.14s) → ratio 0.7.
+take_fr = grid([0] * 25 + [1] * 21 + [0] * 160)             # voiced 0.25..0.45
+rend_fr = grid([0] * 30 + [1] * 15 + [0] * 161)             # voiced 0.30..0.44
+rep = vl.vowel_onset_report(CLIP, take_fr, rend_fr)
+check("report available + counts words", rep["available"] and rep["words"] == 4, str(rep))
+check("report clean subset = time + first-so + shared (voiceless onsets; the melisma 'so' is vowel-initial)",
+      rep["clean"] == 3, str(rep))
+check("report measures the +50ms delta on the clean word",
+      rep["measured"] == 1 and abs(rep["median_vowel_onset_delta_ms"] - 50.0) <= 10.0, str(rep))
+check("report sees the squeeze (dur ratio < 0.8)",
+      rep["median_vowel_dur_ratio"] is not None and rep["median_vowel_dur_ratio"] < 0.8
+      and rep["squeeze_frac"] == 1.0, str(rep))
+
 # ── determinism (3×) ───────────────────────────────────────────────────────────────────
 def digest():
     payload = {

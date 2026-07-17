@@ -87,6 +87,8 @@ check("build_flow_spec ok + 3 lines", spec.get("ok") and len(lines) == 3)
 check("syllableTarget == real slot count per phrase", [l["syllableTarget"] for l in lines] == [3, 2, 2])
 check("syllableTol is EXACT (0) — the hand-fit discipline (owner-certified d5)",
       all(l["syllableTol"] == 0 for l in lines), str([l["syllableTol"] for l in lines]))
+check("melismaFlex is on (B2.2, mechanism-verify 2026-07-17) — ±1 via hold/fold, aim exact",
+      all(l.get("melismaFlex") is True for l in lines), str([l.get("melismaFlex") for l in lines]))
 check("seedText is CLEAN (no mumble word-salad as required words)", all(l["seedText"] == "" for l in lines))
 check("build_flow_spec is deterministic", spec == spec_b)
 check("carries chorus + theme for coherence", spec.get("chorus") == "got hella close" and spec.get("theme") == "drifted apart")

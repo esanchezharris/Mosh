@@ -471,6 +471,8 @@ def main() -> int:
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--no-f0", action="store_true")
     ap.add_argument("--no-asr", action="store_true")
+    ap.add_argument("--no-vowel", action="store_true",
+                    help="skip the B3 vowel-landmark gate (pyin via the nsf venv)")
     ap.add_argument("--whisper-model", default="small")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -507,6 +509,29 @@ def main() -> int:
             report = analyze(orig, sr_o, rend, sr_r, f0_o, f0_r, score_clip)
             digests.append(hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest())
         report["deterministic"] = len(set(digests)) == 1
+
+        # B3 (mechanism-verify, 2026-07-17): the VOWEL landmark is the quality readout —
+        # word-start snap medians measured the wrong landmark (V0) and optimizing them
+        # damaged the sound (V3). Dense pyin voicing (nsf venv) on both sides; degrades
+        # to {"available": false} when the instrument is absent.
+        if score_clip and not args.no_vowel:
+            report["vowelGate"] = {"available": False}
+            nsf_py = os.path.expanduser(os.environ.get("NSF_PY", "~/Library/Mosh/venvs/nsf/bin/python3"))
+            probe = os.path.join(HERE, "pyin_probe.py")
+            if os.path.isfile(nsf_py) and os.path.isfile(probe):
+                try:
+                    import vowel_landmark as _vl
+                    fa = diagnose._run_json(nsf_py, probe, orig_wav)
+                    fb = diagnose._run_json(nsf_py, probe, rend_wav)
+                    if fa.get("ok") and fb.get("ok"):
+                        take_fr = [(t, bool(v)) for t, _hz, v in fa["frames"]]
+                        rend_fr = [(t, bool(v)) for t, _hz, v in fb["frames"]]
+                        # word_events emits clip-local times; the QA contract feeds wavs
+                        # cut on the same clock as the score (full sheet or chunk slice)
+                        report["vowelGate"] = _vl.vowel_onset_report(
+                            score_clip, take_fr, rend_fr, offset_s=0.0)
+                except Exception as e:  # noqa: BLE001 — QA extra, never kills the report
+                    report["vowelGate"] = {"available": False, "error": str(e)[:200]}
 
         if score_clip and not args.no_asr:
             wp = diagnose._venv_python("whisper/.whisper.env", "WHISPER_PY")

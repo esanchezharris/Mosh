@@ -196,5 +196,29 @@ check("a sung word is never 0 syllables (mm/hmm floor to 1)",
       core.syllables("mm") == 1 and core.syllables("hmm") == 1,
       f"mm={core.syllables('mm')} hmm={core.syllables('hmm')}")
 
+# ── 13. B2.2 melisma-backed count flex (mechanism-verify, 2026-07-17): tol stays 0 (aim
+# EXACT) but a flexed line passes at target−1 (the author holds the last word across the
+# orphan slot — note_type=3 melisma, V4b-proven) and at target+1 ONLY when a
+# multi-syllable word can fold (all-monosyllable +1 would be words>slots, which the
+# author now REJECTS as line_overflow). Exact still outranks ±1 (the closeness term).
+FLEX = {"index": 0, "syllableTarget": 4, "syllableTol": 0, "melismaFlex": True}
+NOFLEX = {"index": 0, "syllableTarget": 4, "syllableTol": 0}
+SPEC0 = {"topic": "", "mood": ""}
+ev = lambda txt, ln: core._evaluate(txt, ln, SPEC0, None, ln["syllableTarget"], 0, "slant")
+check("flex: exact count passes", ev("hold the flame now", FLEX)["passes"] is True)
+check("flex: target-1 passes (melisma hold)", ev("hold the flame", FLEX)["syllableOk"] is True,
+      str(ev("hold the flame", FLEX)))
+check("flex: target+1 with a multi-syllable word passes (foldable)",
+      ev("holding the flame now", FLEX)["syllableOk"] is True, str(ev("holding the flame now", FLEX)))
+check("flex: target+1 ALL-monosyllable fails (would overflow words>slots)",
+      ev("hold the flame right now", FLEX)["syllableOk"] is False,
+      str(ev("hold the flame right now", FLEX)))
+check("flex: target-2 still fails", ev("the flame", FLEX)["syllableOk"] is False)
+check("no flex: tol-0 stays EXACT (target-1 fails)",
+      ev("hold the flame", NOFLEX)["syllableOk"] is False)
+check("flex: exact outranks the -1 hold (closeness term)",
+      ev("hold the flame now", FLEX)["score"] > ev("hold the flame", FLEX)["score"],
+      f"{ev('hold the flame now', FLEX)['score']} vs {ev('hold the flame', FLEX)['score']}")
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))
