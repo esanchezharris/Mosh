@@ -207,15 +207,24 @@ The session control lives in the topbar's **2-player (B-5) pop**
 
 - `Mosh --selftest` with `MOSH_SELFTEST_MP=1` (`relay/run-mp-selftest.sh`, two/four
   simulated peers across several in-process engines) passes against the **local**
-  relay — **1373/1373 ×3 deterministic** (2026-07-17, re-verified after merging
-  main's #347/#348/#350/#351 into this branch: self-healing stems PR + async
-  transfer PR + the consolidated fix batch above: corruption-rejection +
+  relay — **1374/1374 ×3 deterministic** (2026-07-17, re-verified after merging
+  main's #343/#347/#348/#350/#351/#353 into this branch: self-healing stems PR +
+  async transfer PR + the consolidated fix batch above: corruption-rejection +
   upload-rejection coverage). Also verified ×3 under `MOSH_MP_SYNC_TRANSFER=1`
-  (**1381/1381** — the kill switch's own section adds checks, hence the higher
-  count) and ×3 with `MOSH_RELAY_BLOB_DELAY_MS=600` armed (**1382/1382**). The
-  default `--selftest` (no MP env) is unaffected — **1279/1279**. This is the
+  (**1382/1382** — the kill switch's own section adds checks, hence the higher
+  count) and ×3 with `MOSH_RELAY_BLOB_DELAY_MS=600` armed (**1383/1383**). The
+  default `--selftest` (no MP env) is unaffected — **1280/1280**. This is the
   FIRST time the whole stem round-trip (upload/download/self-heal/bootstrap) runs
   hermetically, since the local relay previously had no blob store at all.
+  **Honest flake note:** in a 7-run sample of the `MOSH_RELAY_BLOB_DELAY_MS=600`
+  gate, one run scored 1381/1383 (2 failures, both in the same "audio stems"
+  commit-completion wait) while the machine was under heavy concurrent load
+  (several other Claude Code sessions building in parallel, load average >9 on
+  a 10-core box); 6 immediately-subsequent runs (3 before, 4 after) were clean.
+  Treated as an environmental flake, not a logic bug — the SAME 20s bound
+  already covers the exact scenario cleanly elsewhere in this file, and the
+  **kill-switch dual-run itself was clean 3/3 in both modes**, which is the
+  claim that actually matters for the playtest.
 - **Corrupted-transfer rejection is now executable, not just "correct by
   inspection":** `relay/server.py`'s `MOSH_RELAY_BLOB_CORRUPT` hook (ext-scoped —
   it only flips bytes for a reserved `.corrupttest` extension, so it's armed for
@@ -226,13 +235,13 @@ The session control lives in the topbar's **2-player (B-5) pop**
   (a clean download right after still succeeds) — see `SelfTest.cpp`'s
   "downloadBlob rejects a corrupted transfer" section.
 - `scripts/playtest/mp-live-smoke.sh` (two SEPARATE OS processes, real HTTP) run
-  against the **real cloud relay** — **PASS** (re-run 2026-07-17 post-merge):
+  against the **real cloud relay** — **PASS** (re-run twice, 2026-07-17 post-merge):
   process B received A's MIDI + audio tracks, downloaded the stem, and
   `mp_fetch_missing_stems` confirmed nothing was left `sourceMissing` (fetched:0
   failed:0 — the original download had already succeeded, so the self-heal ran
   as the harmless no-op it's designed to be).
 - Full local gate (2026-07-17, post-merge-with-main + review-fixes): Catch2
-  **611 assertions / 109 test cases**; relay `pytest` **58/58 ×3 deterministic**;
+  **622 assertions / 110 test cases**; relay `pytest` **58/58 ×3 deterministic**;
   `verify.py --gate` **17/17**; `tsc --noEmit` clean; `vitest` **1056 passed / 1
   skipped (1057)**; Playwright e2e (isolated config) **140/140**.
 - **Not yet proven:** two *separate* app instances, two humans, live, hearing the results.
