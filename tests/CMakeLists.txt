@@ -31,6 +31,12 @@ target_sources(MoshTests PRIVATE
     test_generative_jobmanager.cpp
     test_rave_engine.cpp
     test_stem_export.cpp
+    test_telemetry.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/Breadcrumbs.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/CrashReportFormatter.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/TelemetryConfig.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/Telemetry.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/CrashHandler.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp

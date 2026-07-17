@@ -8,6 +8,7 @@
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
+#include "telemetry/CrashHandler.h"
 #include "util/Env.h"
 #include <iostream>
 #include <thread>
@@ -71,6 +72,12 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // Crash/telemetry module (src/telemetry/, opt-in, privacy-respecting — see
+        // docs/telemetry/PRIVACY.md). Installed as the very first statement so it
+        // covers as much of the app's lifetime as possible. This is the ONE line
+        // that module owns in Main.cpp.
+        mosh::telemetry::installCrashHandler();
+
         // Out-of-process VST3 scan worker hook (04 §1.1): if this launch is a
         // scan child, handle it and bail before building any UI/engine.
         //
