@@ -78,6 +78,21 @@ test("plugins dock: rescan control exists and completes without error", async ({
   await expect(dock.getByTestId("v2-pb-row").first()).toBeVisible();
 });
 
+// a11y — a search that collapses the plugin dock to zero rows must be announced. The empty
+// message is a live region (matches the sibling scan-status line), so a screen-reader user
+// hears that results vanished instead of getting silence.
+test("plugins dock: the empty / no-results message is an aria-live region", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-plugins").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  await dock.getByTestId("v2-pb-search").fill("zzzznomatch");
+  const empty = dock.locator(".v2-pb-empty");
+  await expect(empty).toBeVisible();
+  await expect(empty).toHaveAttribute("role", "status");
+  await expect(empty).toHaveAttribute("aria-live", "polite");
+});
+
 test("right agent dock: collapses to a Moshi pull-tab and re-expands", async ({ page }) => {
   await bootV2(page);
   // open by default → the agent rail (the live WebGL Moshi) is mounted
