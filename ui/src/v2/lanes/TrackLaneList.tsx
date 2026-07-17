@@ -165,7 +165,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
 function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: SectionZoom) => void }) {
   const opts: [SectionZoom, string][] = [["8b", "8b"], ["16b", "16b"], ["full", "Full"]];
   return (
-    <div className="v2-zoom" data-testid="v2-zoom">
+    <div className="v2-zoom" data-testid="v2-zoom" role="group" aria-label="Timeline zoom">
       {opts.map(([v, label]) => (
         <button key={v} className={value === v ? "on" : ""} aria-pressed={value === v} onClick={() => onChange(v)}>{label}</button>
       ))}
