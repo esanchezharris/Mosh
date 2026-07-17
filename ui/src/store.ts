@@ -84,8 +84,9 @@ type State = {
   availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
   // Guest-degradation capability summary (from list_transform_targets' piggybacked
-  // `capabilities` field — see loadCapabilities below). null until the one-time fetch
-  // at init() resolves; callers treat null as "assume available" (see capabilities.ts).
+  // `capabilities` field — see loadCapabilities below). null until the lazy fetch
+  // (first clip-menu/Gen-drawer open — NEVER init(), which must stay service-free)
+  // resolves; callers treat null as "assume available" (see capabilities.ts).
   capabilities: ServiceCapabilities | null;
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
@@ -170,7 +171,7 @@ type State = {
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
   loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
   loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
-  loadCapabilities: () => void;            // guest-degradation: fetch once at init (see capabilities field)
+  loadCapabilities: () => void;            // guest-degradation: fetch lazily on first clip-menu/Gen-drawer open (see capabilities field)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
@@ -514,9 +515,17 @@ export const useStore = create<State>((set, get) => ({
     void notifyUiReady();
     void get().refresh();
     void get().refreshRemote();
-    // Guest-degradation: fetch the AI-setup capability summary once, up front — well
-    // before the clip menu or generative drawer need it (see loadCapabilities above).
-    void get().loadCapabilities();
+    // Guest-degradation: deliberately NOT fetched here. list_transform_targets' native
+    // handler (MoshOps::cmdListTransformTargets) calls jobManager.ensureServiceRunning(),
+    // which SYNCHRONOUSLY spawns the Python service and blocks on its /health handshake
+    // (WebBridge.cpp's execute_command native binding is not threaded, unlike brain_chat —
+    // it resolves the completion inline on the message thread). Firing it from init()
+    // would freeze the UI on EVERY launch (~1.3-2s on a healthy Mac, worse under
+    // MOSH_ENABLE_SA3=1), invisible to the mock backend used by vitest/e2e since it
+    // resolves instantly. loadCapabilities() is instead triggered lazily, at the same
+    // first-user-interaction points loadColors/loadTransformTargets already use (see
+    // ClipView.tsx's clip-menu mount and Dock.tsx's GenDrawer mount) — matching the
+    // existing, accepted cost of opening the generative drawer for the first time.
     // Start the live level meters: insert a post-fader LevelMeterPlugin on every track
     // so the backend begins emitting the 30 Hz `levels` telemetry the meters draw. Once
     // at init only — the command runs a Tracktion transaction, so re-issuing it on every
@@ -744,7 +753,7 @@ export const useStore = create<State>((set, get) => ({
 
   loadTransformTargets: () => {
     if (get().availableTransformTargets.length > 0) return;
-    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean; real?: boolean; capabilities?: ServiceCapabilities }>>({
+    void executeCommand<CommandResult<{ targets: string[]; freeText: boolean; capabilities?: ServiceCapabilities }>>({
       command: "list_transform_targets",
       args: {},
     }).then((res) => {
@@ -764,9 +773,18 @@ export const useStore = create<State>((set, get) => ({
   // installed on this Mac" (unlike session.raveAvailable etc., which ARE native
   // session fields) — so it fetches the honest summary directly from the service via
   // the existing list_transform_targets/`capabilities` carrier (see that endpoint's
-  // server.py comment) once at app init, well before any clip menu or generative drawer
-  // needs it. Guarded so a second call (e.g. loadTransformTargets firing later) is a
-  // no-op once resolved.
+  // server.py comment).
+  //
+  // CALLED LAZILY ONLY — never from init(). list_transform_targets' native handler
+  // calls jobManager.ensureServiceRunning(), which can synchronously spawn the Python
+  // service and block the (unthreaded) execute_command message-thread binding for
+  // 1-2+ seconds on a cold start. That's an accepted, pre-existing cost of opening the
+  // generative drawer for the first time (loadColors/loadTransformTargets/loadLoras all
+  // pay it already) — it must never become a guaranteed launch-time freeze. Trigger
+  // points: ClipView.tsx's clip-menu mount (so the AI-menu gating can resolve before a
+  // Gen-drawer visit) and Dock.tsx's GenDrawer mount (via loadTransformTargets, which
+  // lands the same `capabilities` field). Guarded so a second call once resolved is a
+  // no-op.
   loadCapabilities: () => {
     if (get().capabilities !== null) return;
     void executeCommand<CommandResult<{ capabilities?: ServiceCapabilities }>>({

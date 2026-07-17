@@ -190,6 +190,12 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
   // disabled with a tooltip naming the fix.
   const aiReady = useStore((s) => transcriptionMenuEnabled(s.capabilities));
   const aiHint = aiReady ? undefined : AI_SETUP_HINT;
+  const loadCapabilities = useStore((s) => s.loadCapabilities);
+  // LAZY, on first menu open only — never at app init (that would synchronously spawn
+  // the generative service and freeze the message thread on every launch; see
+  // store.ts's init()). A guest opening this menu before ever visiting the generative
+  // drawer briefly sees the AI actions enabled until this resolves, then corrects.
+  useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
   useEffect(() => {
     const close = () => onClose();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
