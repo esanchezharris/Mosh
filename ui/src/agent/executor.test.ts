@@ -13,6 +13,7 @@ import {
   runAgentBatch, isDestructiveCommand, screenDestructive,
   MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
 } from "./executor";
+import type { AgentCommandCall } from "./executor";
 import { validateCommand } from "./commands";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
@@ -157,5 +158,47 @@ describe("agent destructive-command scope limit (safety)", () => {
     const blocked = cs.entries.filter((e) => !e.ok && e.error === DESTRUCTIVE_BLOCK_REASON);
     expect(blocked).toHaveLength(MAX_DESTRUCTIVE_PER_BATCH + 1);   // every remove blocked
     expect(cs.applied).toBeGreaterThanOrEqual(1);                 // create_track still ran
+  });
+
+  it("keep_take is destructive — it discards every take lane but the kept one, and doesn't match the remove/delete/clear_ prefix", () => {
+    // keep_take is the genuine gap: the DEFAULT prefix regex only catches remove_/
+    // delete_/clear_, so this command needs an explicit entry in DESTRUCTIVE.
+    expect(isDestructiveCommand("keep_take")).toBe(true);
+  });
+
+  it("runAgentBatch: an over-limit MIXED-type destructive batch (remove_clip + keep_take) is fully blocked with the reason surfaced on every entry, while constructive commands still run and really mutate the session", async () => {
+    // Real setup track, mutated only by the batch under test (proves execution, not just entry.ok).
+    const setup = await useStore.getState().exec("create_track", { name: "Keep Me" });
+    const trackId = (setup.data as { trackId: string }).trackId;
+    await useStore.getState().refresh();
+
+    const destructive: AgentCommandCall[] = [
+      ...Array.from({ length: 6 }, (_, i) => ({ command: "remove_clip", args: { clipId: `c${i}` } })),
+      ...Array.from({ length: 5 }, (_, i) => ({ command: "keep_take", args: { clipId: `k${i}` } })),
+    ]; // 11 destructive calls, two different destructive commands, over the limit of 10
+    const constructive: AgentCommandCall[] = [
+      { command: "rename_track", args: { trackId, name: "Renamed Live" } },
+      { command: "create_track", args: { name: "New Constructive Track" } },
+    ];
+
+    const cs = await runAgentBatch("mixed wipe", [...destructive, ...constructive]);
+
+    // Every destructive call — BOTH kinds — is blocked, with the reason surfaced on each entry.
+    const destructiveEntries = cs.entries.filter((e) => e.command === "remove_clip" || e.command === "keep_take");
+    expect(destructiveEntries).toHaveLength(11);
+    expect(destructiveEntries.every((e) => !e.ok)).toBe(true);
+    expect(destructiveEntries.every((e) => e.error === DESTRUCTIVE_BLOCK_REASON)).toBe(true);
+
+    // Constructive commands are returned as applied…
+    const constructiveEntries = cs.entries.filter((e) => e.command === "rename_track" || e.command === "create_track");
+    expect(constructiveEntries).toHaveLength(2);
+    expect(constructiveEntries.every((e) => e.ok)).toBe(true);
+    expect(cs.applied).toBe(2);
+    expect(cs.entries).toHaveLength(13);
+
+    // …and they really executed against the backend, not just a green entry.ok.
+    const after = snap();
+    expect(after.tracks.find((t) => t.id === trackId)?.name).toBe("Renamed Live");
+    expect(after.tracks.some((t) => t.name === "New Constructive Track")).toBe(true);
   });
 });

@@ -47,6 +47,11 @@ export class AgentBatchBoundaryError extends Error {
 const DESTRUCTIVE = new Set<string>([
   "remove_track", "remove_clip", "remove_plugin", "remove_render_layer",
   "remove_section", "remove_annotation", "remove_note",
+  // Doesn't match the remove/delete/clear_ prefix below, but is a genuine data-loss
+  // op: keep_take discards every take lane except the kept one (MoshOps::cmdKeepTake
+  // → te::WaveAudioClip::deleteAllUnusedTakes) — a "delete everything but one" spree
+  // across many clips is exactly the runaway-tool-loop shape this guard exists for.
+  "keep_take",
 ]);
 
 /** A command is destructive if it's a known delete OR matches the remove/delete/clear_
