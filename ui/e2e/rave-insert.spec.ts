@@ -24,9 +24,13 @@ test("RAVE insert: + RAVE → card → load model", async ({ page }) => {
   await expect(card.getByTestId("rave-model-name")).toHaveText("no model loaded");
   await expect(card.getByTestId("rave-mix")).toBeVisible();
 
-  // Load a model name through the prompt dialog → the card reflects it.
+  // Lane B — pick a model from the BROWSER dropdown (list_rave_models); the card reflects it.
+  await card.getByTestId("rave-model-select").selectOption("guitar");
+  await expect(card.getByTestId("rave-model-name")).toHaveText("guitar");
+
+  // The "path…" escape hatch still loads a custom .ts via the prompt dialog.
   page.once("dialog", (d) => d.accept("flute"));
-  await card.getByTestId("rave-load-model").click();
+  await card.getByTestId("rave-load-custom").click();
   await expect(card.getByTestId("rave-model-name")).toHaveText("flute");
 
   await expect(page.getByTestId("error")).toHaveCount(0);

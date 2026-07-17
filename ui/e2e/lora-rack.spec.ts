@@ -1,15 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { boot, newProject, addAudioTrack, selectTrack } from "./helpers";
 
-// The LoRA rack — stacked taste adapters in the generative drawer (against the dev
-// mock's list_loras fixture). Progressive disclosure: adapters come from the watched
-// folder; triggers auto-inject server-side (tooltip only); no count cap or budget.
+// LoRA rack — trained style adapters in the re-imagine drawer (against the dev mock):
+// add a wave clip → "+ Re-imagine" → add a LoRA from the menu → strength slider →
+// trigger chip fills the prompt → a second LoRA maxes out the rack (≤2) → remove.
 
 test.beforeEach(async ({ page }) => {
   await boot(page);
 });
 
-test("LoRA rack: + LoRA → fader → second adapter → Σ readout → remove", async ({ page }) => {
+test("lora rack: add → strength → trigger chip → compose limit → remove", async ({ page }) => {
   await newProject(page);
   await addAudioTrack(page);
   await selectTrack(page, 0);
@@ -17,35 +17,37 @@ test("LoRA rack: + LoRA → fader → second adapter → Σ readout → remove",
 
   const gen = page.getByTestId("generative");
   await expect(gen).toBeVisible();
-  await gen.getByTestId("gen-create").click();   // + Re-imagine
+  await gen.getByTestId("gen-create").click();
 
-  // The rack offers the library via one quiet select.
+  // The rack menu lists the mock library; pick Ken.
   const add = gen.getByTestId("lora-add");
   await expect(add).toBeVisible();
-  await add.selectOption("kxc");
-
-  // A rack row appears with a fader; the trigger lives in the tooltip, not the label.
-  const rack = gen.getByTestId("lora-rack");
-  const row = rack.locator("label", { hasText: "Ken Carson" });
+  await add.selectOption("ken-sa3");
+  const row = gen.getByTestId("lora-row-ken-sa3");
   await expect(row).toBeVisible();
-  await expect(row).toHaveAttribute("title", /trigger “kxc” is added to the prompt automatically/);
-  await expect(row.locator("input[type=range]")).toHaveValue("80");
 
-  // Stack a second adapter → the informational Σ readout appears (never blocks).
-  await gen.getByTestId("lora-add").selectOption("micz");
-  await expect(rack.locator("label", { hasText: "The Microphones" })).toBeVisible();
-  await expect(gen.getByTestId("lora-sum")).toHaveText(/Σ 1\.60/);
+  // Strength slider is live (0–100).
+  const slider = row.getByRole("slider");
+  await expect(slider).toHaveValue("70");
+  await slider.fill("40");
+  await expect(slider).toHaveValue("40");
 
-  // Fader drives set_render_param — the layer goes dirty, then renders clean.
-  await row.locator("input[type=range]").fill("100");
-  await expect(gen.getByTestId("render-status")).toHaveText("dirty");
+  // The trigger word isn't in the (empty) prompt — the chip offers it, one tap adds it.
+  const chip = gen.getByTestId("lora-trigger-chip");
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText("kxc");
+  await chip.click();
+  await expect(chip).toHaveCount(0);
+
+  // Second LoRA fills the rack; the add menu disappears at the ≤2 limit.
+  await gen.getByTestId("lora-add").selectOption("bro-sa3");
+  await expect(gen.getByTestId("lora-row-bro-sa3")).toBeVisible();
+  await expect(gen.getByTestId("lora-add")).toHaveCount(0);
+
+  // Render still works with the rack armed; remove restores the menu.
   await gen.getByTestId("gen-render").click();
   await expect(gen.getByTestId("render-status")).toHaveText("ready");
-
-  // Remove both rows → the quiet "+ LoRA…" affordance returns; no errors surfaced.
-  await rack.locator("label", { hasText: "Ken Carson" }).locator("button.x").click();
-  await rack.locator("label", { hasText: "The Microphones" }).locator("button.x").click();
+  await gen.getByTestId("lora-row-bro-sa3").getByRole("button", { name: "✕" }).click();
   await expect(gen.getByTestId("lora-add")).toBeVisible();
-  await expect(gen.getByTestId("lora-sum")).toHaveCount(0);
   await expect(page.getByTestId("error")).toHaveCount(0);
 });

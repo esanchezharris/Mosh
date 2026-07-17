@@ -41,6 +41,15 @@ public:
     juce::var jobStatus (const juce::String& jobId, int connectMs = 3000);
     void cancelJob (const juce::String& jobId);
 
+    /** Render-ahead primitive (Lane A): overlap-add crossfade already-rendered window WAVs into
+        ONE continuous file (POST /stitch_windows; 1ms equal-power default — owner-tuned). Reuses
+        the measured-gapless service stitch. SYNCHRONOUS + fast (stdlib wave, local) — call on the
+        RenderAheadScheduler's background stitch step. Byte-stable: appending a window never perturbs
+        earlier seams, so repointing a clip's source to the grown file mid-play is glitch-free.
+        Returns the output duration seconds (> 0) on success, or 0.0 on failure. */
+    double stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                          double targetSeconds, double xfadeMs = 1.0);
+
     /** Audio->MIDI transcription via Basic Pitch (POST /transcribe). SYNCHRONOUS —
         call on a BACKGROUND thread (model load + inference is ~1-3s). Returns
         { ok, notes:[{pitch,start,end,velocity}] } (times in SECONDS), or a var whose

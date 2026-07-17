@@ -75,47 +75,18 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
     lab = bool(params.get("lab", False))
     steers = CR.resolve_steers(colors, lab=lab)             # validated / clamped / composed
 
-    # ── LoRA rack: resolve names via the watched-folder registry ──────────────
-    # rows {name, value 0-100} in rack (UI) order. NO clamp, NO count limit —
-    # strength = value/100 (so >100 = deliberate overdrive); s==0 rows drop
-    # (upstream short-circuit semantics: 0 == removed, not "renormed base").
-    rack, triggers = [], []
-    loras_req = params.get("loras") or []
-    if loras_req:
-        from loras import registry as lora_registry
-        seen_names = set()
-        for row in loras_req:
-            name = str(row.get("name", ""))
-            value = float(row.get("value", 0))
-            if value < 0:
-                raise ValueError(f"LoRA '{name}': negative strength {value}")
-            if not name or name in seen_names:
-                continue
-            seen_names.add(name)
-            if value == 0:
-                continue
-            rec = lora_registry.resolve(name)
-            if rec is None:
-                raise ValueError(
-                    f"LoRA '{name}' not found — drop the .safetensors in "
-                    f"{lora_registry.lora_dir()}")
-            rack.append({"name": name, "path": rec["path"],
-                         "sha256": rec["sha256"], "sha12": rec["sha12"],
-                         "strength": value / 100.0})
-            if rec.get("trigger"):
-                triggers.append(rec["trigger"])
-
-    # Trigger auto-injection (progressive disclosure: the user never types
-    # trigger tokens). Deterministic: dedup'd rack-order triggers prepended
-    # comma-separated; fingerprint-visible via the native lorasKey.
-    if triggers:
-        uniq = list(dict.fromkeys(triggers))
-        prompt = ", ".join(uniq + ([prompt] if prompt else []))
-
     eng = E.get_engine()                                    # singleton; first call loads the model
-    # Merge (or restore, for an emptied rack) BEFORE any window renders; the
-    # engine no-ops when the rack signature is unchanged.
-    lora_stats = eng.apply_lora_rack(rack)
+
+    # LoRA rack: apply the selection to the DiT weights at RUNTIME (in-memory, no
+    # disk bake, no reload) — idempotent on the selection key; empty == stock.
+    import time as _time
+    from loras import registry as LR
+    lora_sel = LR.resolve(params.get("loras") or [], lab=lab)
+    loras_key = "|".join(f"{n}@{s}" for n, _f, s in lora_sel)     # "" == stock
+    _t0 = _time.perf_counter()
+    eng.apply_loras(lora_sel, loras_key)
+    apply_ms = round((_time.perf_counter() - _t0) * 1000.0, 1)
+
     has_src = bool(input_wav) and os.path.exists(input_wav)
 
     def _render_window(in_wav, out_wav, p):
@@ -143,16 +114,13 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "seconds_pinned": eng.SECONDS,
             "init_cache": init_status,
             "steers": [{"layer": L, "alpha": round(a, 4)} for (L, a, _v) in steers],
+            "loras": [{"name": n, "strength": s} for (n, _f, s) in lora_sel],
+            "lora_apply": "runtime",
+            "apply_ms": apply_ms,
             "pq": None, "pq_base": None, "flags": [],
         }
 
     manifest = coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
-    if rack:
-        manifest["loras"] = [{"name": r["name"], "strength": r["strength"],
-                              "sha12": r["sha12"]} for r in rack]
-        manifest["loras_applied"] = True
-        manifest["triggers_injected"] = list(dict.fromkeys(triggers))
-        manifest["lora_merge_ms"] = lora_stats.get("ms", 0)
     # Best-effort QA on the FINAL (tiled/stitched) output (judges venv); never fails the render.
     qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
     return manifest

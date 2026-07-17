@@ -17,12 +17,25 @@
 #   .\run-mosh.ps1 -Package   build Release, then stage a self-contained dist\Mosh\ (exe +
 #                             ui\ + drumkits\ + service\ + a bundled brain.env) and zip it —
 #                             the Windows analogue of `run-mosh.sh deploy`. No keys in git.
+#   .\run-mosh.ps1 -Anira     use the anira/LibTorch RAVE tree (build-windows-x64-anira,
+#                             Release-only — see docs\WINDOWS_PARITY.md). Combine with
+#                             -Build / -Package: the PowerShell analogue of
+#                             `run-mosh.sh deploy-anira`. First configure downloads
+#                             LibTorch (~190 MB) — expect it to take a while.
 param(
     [switch]$Build,
     [switch]$Smoke,
     [switch]$Debug,
-    [switch]$Package
+    [switch]$Package,
+    [switch]$Anira
 )
+
+if ($Anira -and $Debug) {
+    # anira fetches release (/MD) LibTorch; a Debug (/MDd) app against it is a
+    # CRT/_ITERATOR_DEBUG_LEVEL mismatch across the DLL boundary.
+    Write-Host "-Anira is Release-only (LibTorch CRT); ignoring -Debug." -ForegroundColor Yellow
+    $Debug = $false
+}
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -158,7 +171,10 @@ function Write-BundledBrainKey {
 
 # --- build (optional; -Package always builds Release) ------------------------------
 if ($Build -or $Package) {
-    if ($Debug -and -not $Package) {
+    if ($Anira) {
+        cmake --preset windows-x64-release-anira
+        cmake --build --preset windows-x64-release-anira-app
+    } elseif ($Debug -and -not $Package) {
         cmake --preset windows-x64-debug
         cmake --build --preset windows-x64-app
     } else {
@@ -168,9 +184,12 @@ if ($Build -or $Package) {
 }
 
 # --- resolve the newest Mosh.exe ---------------------------------------------------
-# -Package always ships the Release build; otherwise honour -Debug.
+# -Package always ships the Release build; otherwise honour -Debug. -Anira pins its
+# own tree (the DLL-staged anira build must not be shadowed by a newer plain build).
 $searchDirs = @()
-if ($Package) {
+if ($Anira) {
+    $searchDirs += (Join-Path $Root "build-windows-x64-anira")
+} elseif ($Package) {
     $searchDirs += (Join-Path $Root "build-windows-x64-release")
 } else {
     if ($Debug) { $searchDirs += (Join-Path $Root "build-windows-x64") }
@@ -208,7 +227,9 @@ if ($Package) {
         else { Write-Host "  WARNING: $sub\ not found next to the exe (MoshStageUI / drumkits staging?)" -ForegroundColor Yellow }
     }
     # DLLs staged next to the exe: WebView2Loader.dll + the MSVC runtime redist (CMake's
-    # InstallRequiredSystemLibraries POST_BUILD). CUDA DLLs live in the Python venv, not here.
+    # InstallRequiredSystemLibraries POST_BUILD). CUDA DLLs live in the Python venv, not
+    # here — EXCEPT the anira tree, whose POST_BUILD stages anira.dll + the LibTorch CPU
+    # DLLs next to the exe; this wildcard ships them automatically under -Anira.
     Get-ChildItem -Path $exeDir -Filter *.dll -File -ErrorAction SilentlyContinue |
         ForEach-Object { Copy-Item $_.FullName -Destination $dist }
 
@@ -224,7 +245,7 @@ if ($Package) {
     Write-Host "  folder: $dist"
     Write-Host "  zip:    $zip"
     Write-Host "Copy the folder anywhere and run Mosh.exe. Real generative/FMS features need the"
-    Write-Host "per-feature venvs — see docs\WINDOWS_RUNBOOK.md (setup-feature-venv.ps1 / setup-sa3-cuda.ps1)."
+    Write-Host "per-feature venvs - see docs\WINDOWS_RUNBOOK.md (setup-feature-venv.ps1 / setup-sa3-cuda.ps1)."
     exit 0
 }
 

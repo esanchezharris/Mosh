@@ -52,7 +52,7 @@ struct RenderLayer
         params.setProperty (ids::target, "", nullptr);       // Route B transform target
         params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
         params.appendChild (juce::ValueTree (ids::COLORS), nullptr);
-        params.appendChild (juce::ValueTree (ids::LORAS), nullptr);   // LoRA rack (ordered, unbounded)
+        params.appendChild (juce::ValueTree (ids::LORAS), nullptr);
         v.appendChild (params, nullptr);
         return v;
     }
@@ -71,8 +71,7 @@ struct RenderLayer
                                      const juce::String& upstreamHash,
                                      const juce::String& tempoKeyContext,
                                      int sampleRate, int channels,
-                                     const juce::String& serviceBuild,
-                                     const juce::String& lorasKey = {})
+                                     const juce::String& serviceBuild)
     {
         auto params = v.getChildWithName (ids::PARAMS);
         juce::String colorsKey;
@@ -81,6 +80,13 @@ struct RenderLayer
             {
                 auto c = colors.getChild (i);
                 colorsKey << c[ids::name].toString() << "=" << c[ids::value].toString() << ";";
+            }
+        juce::String lorasKey;   // LoRA rack — order matters (stacks merge sequentially)
+        if (auto loras = params.getChildWithName (ids::LORAS); loras.isValid())
+            for (int i = 0; i < loras.getNumChildren(); ++i)
+            {
+                auto l = loras.getChild (i);
+                lorasKey << l[ids::name].toString() << "=" << l[ids::value].toString() << ";";
             }
 
         juce::StringArray parts {
@@ -98,9 +104,7 @@ struct RenderLayer
             params[ids::target].toString(),        // Route B transform target — part of key
             params[ids::strength].toString(),      // Route B transform strength — part of key
             colorsKey,
-            lorasKey,                              // LoRA rack: name=value@sha12:trigger; — resolved at
-                                                   // RENDER time (a retrained same-name file or a sidecar
-                                                   // trigger edit must be a cache MISS)
+            lorasKey,                              // LoRA rack selection — part of key
             v[ids::seed].toString(),
             params[ids::cfg].toString() + "/" + params[ids::steps].toString() + "/" + params[ids::nl].toString(),
             v[ids::safetyMappingVersion].toString(),

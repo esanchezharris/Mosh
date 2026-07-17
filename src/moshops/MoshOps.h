@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <vector>
 #include "engine/MoshEngine.h"
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
@@ -260,6 +261,7 @@ private:
     juce::var cmdListColors       (const juce::var& args);
     juce::var cmdListLoras        (const juce::var& args);
     juce::var cmdListTransformTargets (const juce::var& args);   // Route B discovery
+    juce::var cmdListRaveModels   (const juce::var& args);       // Lane B — RAVE model browser (non-gated fs scan)
    #if MOSH_HAVE_ANIRA
     // Route C.2 — real-time RAVE insert (built only with anira+LibTorch).
     juce::var cmdAddRaveInsert    (const juce::var& args);
@@ -390,7 +392,6 @@ private:
         int expectedEpoch = -1;
         double boundarySec = 0.0;   // land when the playhead reaches/wraps past this
         double armedPosSec = 0.0;   // last observed position (wrap detection)
-        bool provisional = false;   // streaming: a progressive artifact, not the final render
     };
     struct SwapTimer : juce::Timer
     {
@@ -404,11 +405,6 @@ private:
                                           const juce::File& manifestFile, const juce::String& cacheKey);
     bool            shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec);
     void            pollPendingSwaps();
-    // Streaming lookahead: land one progressive artifact (fresh windows over the original
-    // audio) provisionally — boundary-quantized, epoch-guarded, cache untouched until the
-    // final render lands.
-    void            landProgressiveArtifact (const juce::String& clipId, const juce::File& artifact,
-                                             const juce::String& cacheKey, int expectedEpoch);
 
     // Phase 3 — reactive auto-re-render. reactiveTouch(clipId) bumps the layer's reactiveEpoch and
     // (debounced) fires a background re-render when an applied render is live (wave in-place or MIDI
@@ -424,8 +420,7 @@ private:
     // reset_render_layer can restore it. Returns false for non-wave clips / missing artifact
     // (caller falls back to the legacy lane-landing path). Message-thread only; undoable txn.
     bool            applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
-                                        const juce::File& artifact, const juce::String& cacheKey,
-                                        bool provisional = false);
+                                        const juce::File& artifact, const juce::String& cacheKey);
     // Phase 2 — auto-apply a completed render BENEATH a MIDI/drum clip: land a hidden, full-span
     // looping audio clip on the SAME track and MUTE the source MIDI, so the producer hears the
     // re-imagined audio in place while the editable MIDI stays beneath. A re-render HOT-SWAPS the
@@ -433,8 +428,48 @@ private:
     // / missing artifact (caller falls back to applyRenderInPlace or the legacy lane). Message-thread
     // only; the first apply is one undoable txn (undo == reset_render_layer).
     bool            applyRenderBeneathMidi (const juce::String& clipId, juce::ValueTree node,
-                                            const juce::File& artifact, const juce::String& cacheKey,
-                                            bool provisional = false);
+                                            const juce::File& artifact, const juce::String& cacheKey);
+
+    // ── Lane A — render-ahead ("Live") ───────────────────────────────────────────
+    // Transport-driven progressive re-imagine. While a Live-armed WAVE clip plays, render the clip
+    // in windows FROM the playhead forward, incrementally stitch the completed windows (service
+    // /stitch_windows, 1ms crossfade — owner-tuned), and repoint the clip's source to the growing
+    // file: the re-imagined "train track" fills in ahead of the playhead. The stitched file's prefix
+    // is byte-stable (appending a window never perturbs earlier seams), so the region the playhead is
+    // reading never changes across a repoint — no glitch. A knob change bumps `epoch`, discarding
+    // in-flight/stale windows and re-laying from the current playhead forward with the new params.
+    // Message-thread only; each window render polls on a background thread and marshals completion
+    // back via callAsync. Wave-clip only in v1 (MIDI/drum keep the existing whole-clip beneath path).
+    struct RenderAhead
+    {
+        bool         active = false;         // a clip is armed + the scheduler is live
+        juce::String clipId, layerId;
+        int          epoch = 0;              // bumped on arm / param-change; a completed window with a stale epoch is dropped
+        double       winLen = 8.0;           // per-window seconds (the SA3 single-render window)
+        double       clipStart = 0.0, clipEnd = 0.0, srcOffset = 0.0;  // clip position on the timeline + source read offset
+        double       lastPlayheadSec = 0.0;  // most recent tick position (drives the current-window + re-lay origin)
+        juce::File   sourceFile;             // the PRISTINE original this clip re-imagines from
+        juce::File   jobDir;                 // renders/<layerId>/live/
+        juce::String adapter;                // "stable_audio3" | "fake" (frozen from the node at arm)
+        juce::var    jobParams;              // the render params (prompt/seed/nl/colors/loras/...) rebuilt on each param-change
+        int          numWindows = 0;
+        int          nextWindow = 0;         // next window index to render
+        int          growSeq = 0;            // render_ahead_<n>.wav sequence (a fresh name forces Tracktion to re-open the source)
+        bool         rendering = false;      // a window render is in flight (MLX is serial — one at a time)
+        bool         originalCaptured = false;
+        int          lookahead = 2;          // render up to (current window + lookahead) — bounds wasted work before a likely knob change
+        std::vector<juce::File> windows;     // completed window output files, indexed by window number (empty File = not done)
+    } renderAhead_;
+
+    juce::var       cmdRenderAheadArm  (const juce::var& args);   // arm/disarm the Live scheduler on a clip (UI "Live" toggle)
+    juce::var       cmdRenderAheadTick (const juce::var& args);   // explicit clock tick (a run-script drives a simulated playhead, wait:true renders inline)
+    void            renderAheadTick    (double playheadSec);      // advance the scheduler for a playhead position (GUI: async)
+    void            renderAheadStartWindow (int k);               // async: submit window k + poll on a bg thread → callAsync placement
+    bool            renderAheadSubmitWindow (int k, int epoch, juce::String& jobId, juce::File& outFile, juce::File& manifest);  // stage + submit (shared)
+    bool            renderAheadWindowDone  (int k, int epoch, const juce::File& outFile);  // record + re-stitch + repoint (message thread; returns placed?)
+    void            renderAheadParamChanged (const juce::String& clipId);  // knob change → re-lay from the current playhead forward
+    void            renderAheadDisarm  ();                        // stop the scheduler (the consolidated file stays as the clip's source)
+    juce::var       buildRenderAheadParams (const juce::ValueTree& node) const;  // node → single-window render params (fake/SA3)
 
     // ── helpers ──
     te::AudioTrack* createAudioTrack (const juce::String& name);

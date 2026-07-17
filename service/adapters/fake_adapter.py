@@ -24,18 +24,13 @@ import coverage  # noqa: E402  (whole-clip tile/stitch orchestration)
 
 def render(input_wav: str, output_wav: str, params: dict) -> dict:
     """Whole-clip aware entry: the fake has no length cap, so it renders the full input in one
-    window for the default/stitch path and tiles one cycle for the loop path.
-    A window cap (params["window_s"] per job, or MOSH_FAKE_WINDOW_S process-wide) forces
-    multi-window coverage so the streaming progressive path is testable hermetically —
-    per-job wins, so one harness render can stream without perturbing the others."""
-    window_s = float(params.get("window_s") or os.environ.get("MOSH_FAKE_WINDOW_S")
-                     or coverage.WINDOW_UNCAPPED)
-    return coverage.render(_render_window, input_wav, output_wav, params, window_s)
+    window for the default/stitch path and tiles one cycle for the loop path."""
+    return coverage.render(_render_window, input_wav, output_wav, params, coverage.WINDOW_UNCAPPED)
 
 
-def _transform_samples(samples, n_channels, seed, nl, drive):
+def _transform_samples(samples, n_channels, seed, nl, drive, lora_tilt=0.0):
     # Deterministic params from seed/nl (no randomness needed for a stub).
-    gain = 0.6 + (seed % 97) / 240.0          # 0.6..~1.0
+    gain = (0.6 + (seed % 97) / 240.0) * (1.0 + lora_tilt)   # 0.6..~1.0, tilted by loras
     lp = max(0.0, min(0.95, 0.15 + nl * 0.6)) # low-pass amount from init_noise_level
     sat = 1.0 + drive * 2.0
 
@@ -61,6 +56,13 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
         # Colors are 0–100 ASTD UI values; treat 'grit'/'aggression' as drive.
         if col.get("name") in ("grit", "aggression", "distortion"):
             drive = max(drive, float(col.get("value", 0)) / 100.0)
+    # LoRA rack (0–100 per adapter): a small deterministic per-name gain tilt so
+    # selections audibly/measurably change the stub output (hermetic-test hook).
+    lora_tilt = 0.0
+    loras_sel = params.get("loras", []) or []
+    for lo in loras_sel:
+        sign = 1.0 if (sum(ord(c) for c in str(lo.get("name", ""))) % 2 == 0) else -1.0
+        lora_tilt += sign * 0.12 * (float(lo.get("value", 0)) / 100.0)
 
     with wave.open(input_wav, "rb") as w:
         n_channels = w.getnchannels()
@@ -86,7 +88,7 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
         ints = struct.unpack("<%dh" % count, raw)
         samples = [v / 32768.0 for v in ints]
 
-    out = _transform_samples(samples, n_channels, seed, nl, drive)
+    out = _transform_samples(samples, n_channels, seed, nl, drive, lora_tilt)
 
     write_wav(output_wav, out, n_channels, framerate)
 
@@ -98,22 +100,17 @@ def _render_window(input_wav: str, output_wav: str, params: dict) -> dict:
     # default (FakeAdapter) green path also surfaces it. The stub's pq is a 0–1 score, so
     # scale to the judge's 0–10 axis for the shared reasoning helper.
     reasoning = quality_readout.judge_reasoning(axes={"PQ": pq * 10.0}, flags=flags)
-    manifest = {
+    return {
         "ok": True,
         "adapter": "fake",
         "pq": pq,
         "pq_base": 0.85,
         "flags": flags,
         "reasoning": reasoning,
+        "loras": [{"name": str(lo.get("name", "")),
+                   "strength": round(float(lo.get("value", 0)) / 100.0, 4)}
+                  for lo in loras_sel],
         "duration_s": round(n_frames / float(framerate), 3),
         "sample_rate": framerate,
         "channels": n_channels,
     }
-    # LoRA rack honesty: the fake never applies adapters, but it must echo what
-    # was asked so the loop (params → job → manifest) is provable hermetically.
-    if params.get("loras"):
-        manifest["loras"] = [{"name": str(l.get("name", "")),
-                              "strength": float(l.get("value", 0)) / 100.0}
-                             for l in params["loras"]]
-        manifest["loras_applied"] = False
-    return manifest

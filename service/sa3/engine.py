@@ -24,6 +24,10 @@ SA3_MLX_DIR = os.environ.get("SA3_MLX_DIR") or os.path.expanduser(
     "~/AI/stable-audio-3/optimized/mlx")
 SECONDS = float(os.environ.get("SA3_SECONDS", "8.0"))   # pins the latent grid (see header)
 
+# Bump when the runtime LoRA-apply math changes — folded into the service build so
+# the native render-cache invalidates (mirrors the old MERGE_VERSION role).
+LORA_APPLY_VERSION = "1"
+
 _engine = None
 _engine_lock = threading.Lock()
 
@@ -68,15 +72,141 @@ class _Engine:
         self.enc = S.T5Gemma.from_npz(str(S.ensure_local(S.T5GEMMA_NPZ_REL)))
         self.padding_emb, self.secs_embedder = S.load_conditioner_from_npz(
             str(S.ensure_local(S.DIT_CHOICES["medium"]["ckpt"])), prefix="cond.")
-        self.dit_model, self._dit_ckpt = S.load_dit("medium", T_lat=self.T_LAT, dtype=self.DTYPE)
+        self.dit_model, self._stock_dit_ckpt = S.load_dit("medium", T_lat=self.T_LAT, dtype=self.DTYPE)
         self.decoder, _chunk_fn, _ = S.load_decoder("same-l", self.DEC_DTYPE)
         self._tf = self.dit_model.transformer
         self._encoder = None
-        # LoRA rack state (merge-at-rack-change; see sa3/lora_runtime.py).
-        # _lora_sig identifies the currently-merged rack; _lora_keys are the
-        # DiT param keys a merge touched (what restore_base must reload).
-        self._lora_sig = None
-        self._lora_keys = []
+        # Runtime LoRA application (no disk bake, no reload): the DiT stays the stock
+        # model; apply_loras reassigns just the touched weights IN PLACE and
+        # restore_base reverts them. State that tracks the current application:
+        self._stock_npz = None          # lazily-opened NpzFile for pristine base reads
+        self._base_cache = {}           # npz_key -> pristine base as mx.array (or None)
+        self._applied_key = None        # loras key currently applied (None=fresh, ""=stock)
+        self._touched_keys = set()      # npz keys the current selection mutated
+
+    def stock_dit_ckpt(self) -> str:
+        """Absolute path of the unmodified DiT checkpoint (the LoRA base + cond.*)."""
+        return self._stock_dit_ckpt
+
+    # ── runtime LoRA application ────────────────────────────────────────────────
+    def _base_npz(self):
+        if self._stock_npz is None:
+            self._stock_npz = self.np.load(self._stock_dit_ckpt)   # lazy, per-key reads
+        return self._stock_npz
+
+    def _base_weight(self, key):
+        """Pristine stock weight for an npz key (numpy), or None if absent."""
+        z = self._base_npz()
+        return self.np.array(z[key]) if key in z.files else None
+
+    def _base_mx(self, key):
+        """Pristine stock weight as an mlx array (kept on device for the GPU math).
+        Cached so a strength change re-uses it instead of re-reading the npz."""
+        v = self._base_cache.get(key, False)
+        if v is False:
+            b = self._base_weight(key)
+            v = None if b is None else self.mx.array(b)
+            self._base_cache[key] = v
+        return v
+
+    def _compute_updated_mx(self, selection):
+        """Runtime weights for a selection, computed on the GPU via lora_merge's
+        shared apply_dora(xp=mx). Mirrors weights_for_selection exactly — reshapes
+        1x1 convs, rounds to the stored dtype BETWEEN stacked LoRAs — so the result
+        matches a disk bake to f16. Returns ({npz_key: mx.array}, report)."""
+        import json
+        from sa3 import lora_merge as LM
+        mx, np = self.mx, self.np
+        work = {}                       # key -> [mx weight (stored dtype), orig_shape]
+        applied, skipped = 0, []
+        for name, path, strength in selection:
+            tensors, meta = LM.read_safetensors(path)     # numpy (small: rank-16 factors)
+            cfg = json.loads(meta.get("lora_config", "{}")) if meta else {}
+            rank = float(cfg.get("rank", 16))
+            alpha = float(cfg.get("alpha", cfg.get("lora_alpha", rank)))
+            adapter_type = cfg.get("adapter_type", "dora-rows")
+            if adapter_type not in ("dora-rows", "dora", "lora"):
+                raise ValueError(f"{name}: unsupported adapter_type {adapter_type!r}")
+            scaling = alpha / rank
+            for module, parts in sorted(LM.group_lora(tensors).items()):
+                key = LM.map_module_to_npz_key(module)
+                if key is None:
+                    skipped.append(f"{name}:{module}")
+                    continue
+                if key not in work:
+                    base = self._base_mx(key)
+                    if base is None:
+                        skipped.append(f"{name}:{module}")
+                        continue
+                    work[key] = [base, tuple(base.shape)]
+                W, orig_shape = work[key]
+                if W.ndim == 3 and W.shape[1] == 1:
+                    W2 = W.reshape(W.shape[0], W.shape[2])
+                elif W.ndim == 2:
+                    W2 = W
+                else:
+                    skipped.append(f"{name}:{module}")
+                    continue
+                A, B = parts.get("lora_A"), parts.get("lora_B")
+                if A is None or B is None or B.shape[0] != W2.shape[0] or A.shape[1] != W2.shape[1]:
+                    skipped.append(f"{name}:{module}")
+                    continue
+                mag = None
+                if adapter_type in ("dora-rows", "dora"):
+                    m = parts.get("magnitude")
+                    if m is None or m.shape[0] != W2.shape[0]:
+                        skipped.append(f"{name}:{module}")
+                        continue
+                    mag = mx.array(m)
+                V = LM.apply_dora(mx, W2, mx.array(A), mx.array(B), mag, adapter_type,
+                                  scaling, strength)                     # f32, 2D
+                work[key] = [V.astype(W.dtype).reshape(orig_shape), orig_shape]
+                applied += 1
+        return {k: v[0] for k, v in work.items()}, {"applied": applied, "skipped": skipped}
+
+    def _assign(self, weights: dict) -> None:
+        """Assign {npz_key: array (mx or numpy)} onto the live DiT (f16) + seconds
+        conditioner (f32). Mirrors how load_dit / load_conditioner_from_npz consume
+        each key. Evals only the reassigned arrays (not the whole 2.9GB model)."""
+        mx = self.mx
+        dit_updates = []
+        for k, v in weights.items():
+            arr = v if isinstance(v, mx.array) else mx.array(v)
+            if k == "cond.seconds_total_weight":
+                self.secs_embedder.W = arr.astype(mx.float32)   # embedder holds W as f32
+            elif k.startswith("cond."):
+                continue                                        # no other cond.* is mappable
+            else:
+                dit_updates.append((k, arr.astype(self.DTYPE)))
+        if dit_updates:
+            self.dit_model.load_weights(dit_updates, strict=False)
+            mx.eval([a for _k, a in dit_updates])
+
+    def apply_loras(self, selection, loras_key: str) -> dict:
+        """Reassign DiT (+ cond) weights for a resolved LoRA selection, in place, on
+        the GPU (no disk bake, no reload). `selection` = [(name, path, strength)];
+        `loras_key` is a stable identity (idempotent — a repeat key is a no-op). An
+        empty selection restores the stock weights. Returns the apply report."""
+        if loras_key == self._applied_key:
+            return {"applied": None, "skipped": [], "reused": True}
+        self.restore_base()                                  # undo any prior application
+        if not selection:
+            self._applied_key = loras_key                    # now current (stock)
+            return {"applied": 0, "skipped": [], "reused": False}
+        updated, report = self._compute_updated_mx(selection)
+        self._assign(updated)
+        self._touched_keys = set(updated.keys())
+        self._applied_key = loras_key
+        report["reused"] = False
+        return report
+
+    def restore_base(self) -> None:
+        """Reassign every currently-touched key back to its stock value."""
+        if self._touched_keys:
+            restore = {k: self._base_mx(k) for k in self._touched_keys}
+            self._assign({k: v for k, v in restore.items() if v is not None})
+            self._touched_keys = set()
+        self._applied_key = None
 
     # ── carved from mlx_inproc._encode_audio ──
     def encode_init(self, path):
@@ -127,44 +257,6 @@ class _Engine:
         if audio_np.shape[-1] > req:
             audio_np = audio_np[..., :req]
         S.save_wav(out_wav, audio_np)
-
-    # ── LoRA rack (merge-at-rack-change; single worker thread only) ──
-    def apply_lora_rack(self, rack):
-        """Merge a resolved LoRA rack into the DiT (or restore base for []).
-
-        rack: [{"path", "sha256", "strength"}, ...] in rack order, strength>0.
-        Signature-gated: re-merges only when the rack actually changed, so
-        back-to-back renders with the same rack pay nothing. Returns
-        {"ms", "targets", "cached"}.
-        """
-        from . import lora_runtime as LR
-        sig = LR.rack_signature(rack)
-        if sig == self._lora_sig:
-            return {"ms": 0, "targets": 0, "cached": True}
-
-        import time as _time
-        t0 = _time.time()
-        if not rack:
-            if self._lora_keys:
-                LR.restore_base(self.dit_model, self._dit_ckpt, self._lora_keys,
-                                mx=self.mx)
-            self._lora_keys = []
-            self._lora_sig = sig
-            return {"ms": int((_time.time() - t0) * 1000), "targets": 0,
-                    "cached": False}
-
-        stats = LR.merge_rack(self.dit_model, self._dit_ckpt, rack, mx=self.mx)
-        new_keys = stats.pop("keys")
-        # Keys the PREVIOUS rack touched but this one doesn't must revert to
-        # pristine, or they'd keep stale merged values.
-        stale = [k for k in self._lora_keys if k not in set(new_keys)]
-        if stale:
-            LR.restore_base(self.dit_model, self._dit_ckpt, stale, mx=self.mx)
-        self._lora_keys = new_keys
-        self._lora_sig = sig
-        stats["ms"] = int((_time.time() - t0) * 1000)
-        stats["cached"] = False
-        return stats
 
     # ── public API ──
     def generate(self, prompt, seed, steers=None, out_wav=None):

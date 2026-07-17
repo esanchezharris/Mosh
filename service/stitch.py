@@ -89,7 +89,7 @@ def _xfade_join(a, b, ch, xfade_frames):
     return out
 
 
-def tile_to_length(in_path, out_path, target_s, xfade_ms=8.0):
+def tile_to_length(in_path, out_path, target_s, xfade_ms=1.0):
     """Repeat in_path (one cycle) to fill target_s, crossfading each loop seam so it doesn't
     click. The result is exactly target_s long (trimmed)."""
     samples, ch, sr, sw = _read(in_path)
@@ -105,7 +105,7 @@ def tile_to_length(in_path, out_path, target_s, xfade_ms=8.0):
     _write(out_path, buf[: target_frames * ch], ch, sr, sw)
 
 
-def stitch_windows(window_paths, out_path, target_s, xfade_ms=8.0):
+def stitch_windows(window_paths, out_path, target_s, xfade_ms=1.0):
     """Overlap-add crossfade consecutive window renders into one continuous file of target_s."""
     if not window_paths:
         raise ValueError("stitch_windows: no windows")
@@ -119,30 +119,3 @@ def stitch_windows(window_paths, out_path, target_s, xfade_ms=8.0):
     if len(buf) // ch < target_frames:              # pad with silence if short
         buf.extend([0] * ((target_frames - len(buf) // ch) * ch))
     _write(out_path, buf[: target_frames * ch], ch, sr, sw)
-
-
-def overlay_window(base, ch, seg, start_frame, slot_frames, xfade_frames):
-    """Streaming lookahead: replace base[start_frame ..) with seg (clamped to the window
-    slot + file end), equal-power crossfading into the surrounding base audio at both
-    seams. Mutates `base` (interleaved ints) in place. Seam fades stay INSIDE the
-    replaced region so untouched windows remain byte-identical to the original."""
-    total = len(base) // ch
-    n_seg = min(len(seg) // ch, slot_frames, max(0, total - start_frame))
-    if n_seg <= 0:
-        return
-    xf = max(0, min(xfade_frames, n_seg // 2))
-    for i in range(n_seg):
-        f = start_frame + i
-        gain_new = 1.0
-        if i < xf and start_frame > 0:                       # left seam (skip at file start)
-            go, gi = _equal_power(i, xf)
-            gain_new = gi
-        elif i >= n_seg - xf and start_frame + n_seg < total:  # right seam (skip at file end)
-            go, gi = _equal_power(n_seg - 1 - i, xf)
-            gain_new = gi
-        else:
-            go = 0.0
-        for c in range(ch):
-            old = base[f * ch + c]
-            new = seg[i * ch + c]
-            base[f * ch + c] = int(new) if gain_new >= 1.0 else int(old * go + new * gain_new)

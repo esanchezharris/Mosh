@@ -5,7 +5,7 @@ import {
 } from "./bridge";
 import type {
   Snapshot, Transport, MoshEvent, CommandResult, AvailablePlugin,
-  BuiltinPlugin, AvailableColor, AvailableLora, AvailableTransformTarget, RenderQA, Level, AudioDevices, Clip,
+  BuiltinPlugin, AvailableColor, AvailableTransformTarget, AvailableLora, AvailableRaveModel, RenderQA, Level, AudioDevices, Clip,
   WaveInput, MidiInput, TrackOutputs,
   PluginCounts,
 } from "./types";
@@ -78,8 +78,9 @@ type State = {
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
-  availableLoras: AvailableLora[];         // LoRA library (from list_loras — the watched folder)
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
+  availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
+  availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
   transformFreeText: boolean;              // Route B: does the transform tier allow free-text targets
   labMode: boolean;                        // ASTD unlock for generative colours
   qaByClip: Record<string, RenderQA>;      // last render's quality readout
@@ -161,8 +162,9 @@ type State = {
   rescanPlugins: (format?: "vst3" | "au" | "all") => Promise<void>;
   refreshPluginList: () => Promise<void>;
   loadColors: () => void;
-  loadLoras: () => void;
   loadTransformTargets: () => void;        // Route B: fetch transform targets (lazy)
+  loadLoras: () => void;                   // LoRA rack: fetch the adapter library (lazy)
+  loadRaveModels: () => void;              // Lane B: fetch the RAVE model library (lazy)
   loadAudioDevices: () => Promise<void>;   // lazy + on-demand (force re-fetch after a device change)
   loadRouting: () => Promise<void>;        // RTG-001/002 — wave inputs + track outputs
   loadMidiInputs: () => Promise<void>;     // CTL-001 — MIDI inputs for the instrument picker
@@ -249,8 +251,9 @@ export const useStore = create<State>((set, get) => ({
   transcribing: {},
   buildingLyrics: {},
   availableColors: [],
-  availableLoras: [],
   availableTransformTargets: [],
+  availableLoras: [],
+  availableRaveModels: [],
   transformFreeText: true,
   labMode: false,
   qaByClip: {},
@@ -701,6 +704,16 @@ export const useStore = create<State>((set, get) => ({
       args: {},
     }).then((res) => {
       if (res.ok && res.data?.loras) set({ availableLoras: res.data.loras });
+    });
+  },
+
+  loadRaveModels: () => {
+    if (get().availableRaveModels.length > 0) return;
+    void executeCommand<CommandResult<{ models: AvailableRaveModel[] }>>({
+      command: "list_rave_models",
+      args: {},
+    }).then((res) => {
+      if (res.ok && res.data?.models) set({ availableRaveModels: res.data.models });
     });
   },
 

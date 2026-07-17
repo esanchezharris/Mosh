@@ -69,6 +69,26 @@ def main():
     assert abs(stitch.wav_duration(s1) - 16.0) < 0.05, "stitch length"
     assert _md5(s1) == _md5(s2), "stitch deterministic"
 
+    # Default crossfade is 1ms (owner-tuned sweet spot). A 0ms stitch (hard cut) must
+    # differ from the default, confirming the default is actually applying a fade.
+    s_hard = os.path.join(td, "stitch_hard.wav"); stitch.stitch_windows([win0, win1], s_hard, 16.0, xfade_ms=0.0)
+    assert _md5(s_hard) != _md5(s1), "1ms default crossfade is applied (differs from 0ms hard cut)"
+
+    # BYTE-STABLE EXTENSION — the render-ahead safety guarantee. Appending a window
+    # crossfades only onto the END of the prior buffer (the last `xfade` frames), so the
+    # samples BEFORE that seam are IDENTICAL whether 2 or 3 windows were stitched. This is
+    # why the native scheduler can repoint the hidden clip's source to the extended file
+    # mid-playback: everything up to (and past) the current read position is unchanged.
+    win2 = os.path.join(td, "w2.wav"); _mk(win2, 8.0, freq=300.0)
+    s2win = os.path.join(td, "ext_2.wav"); stitch.stitch_windows([win0, win1], s2win, 16.0)
+    s3win = os.path.join(td, "ext_3.wav"); stitch.stitch_windows([win0, win1, win2], s3win, 24.0)
+    a2, ch2, sr2, sw2 = stitch._read(s2win)   # _read now returns (samples, ch, sr, sampwidth)
+    a3, ch3, sr3, sw3 = stitch._read(s3win)
+    # Compare frames strictly BEFORE the w1↔w2 seam at ~16s (leave a 2ms guard around it).
+    prefix_frames = int((16.0 - 0.002) * sr2)
+    n = prefix_frames * ch2
+    assert a2[:n] == a3[:n], "byte-stable extension: prefix before the new seam is identical (safe to repoint mid-play)"
+
     # 24-bit input (MIDI/drum bounces are bitDepth=24): slice must not raise, must stay
     # 24-bit, and round-trip the sliced PCM byte-for-byte (whole-clip stitch coverage feeds
     # slice_wav the DAW-staged input directly).

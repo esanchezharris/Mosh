@@ -134,10 +134,13 @@ public:
         // overrides the leaf so each run gets a private session dir (pair with a
         // distinct MOSH_SERVICE_PORT for full isolation). Also honored for scripted
         // GUI demos so UI automation never mutates or reads the owner's GUI session.
-        if (headless || runScript || voiceSmoke || demoGui)
-            if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
-                s.trim().isNotEmpty())
-                freshSessionName = s.trim();
+        // Honored for ANY launch — including the plain interactive GUI — whenever the env is
+        // EXPLICITLY set. Normal GUI use never sets it (→ stays "session"), so this is a no-op
+        // there; a set value lets UI automation / a live demo run on an ISOLATED session and never
+        // mutate or read the owner's real GUI "session".
+        if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
+            s.trim().isNotEmpty())
+            freshSessionName = s.trim();
 
         // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
@@ -172,7 +175,17 @@ public:
             && juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_FEED", "0") == "1")
         {
             const auto labToken = juce::SystemStats::getEnvironmentVariable ("MOSH_LAB_TOKEN", "mosh-lab");
-            remoteServer->startLabFeed (labToken);
+            // Log the outcome either way: a silently-discarded bind failure here is
+            // indistinguishable from "MOSH_LAB_FEED never reached the process" (e.g. an
+            // `open` launch drops env vars), which has already cost a live-verification
+            // session a misdiagnosis (PR #267).
+            const auto labResult = remoteServer->startLabFeed (labToken);
+            if (labResult.getProperty ("ok", false))
+                std::cerr << "MOSH_LAB_FEED: companion server listening on port "
+                          << (int) labResult.getProperty ("data", {}).getProperty ("port", 0) << std::endl;
+            else
+                std::cerr << "MOSH_LAB_FEED: companion server FAILED to start: "
+                          << labResult.getProperty ("error", {}).toString().toStdString() << std::endl;
         }
 
         // Headless command-surface harness (06 §4): `Mosh --selftest`.

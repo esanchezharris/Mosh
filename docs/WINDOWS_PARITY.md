@@ -1,6 +1,12 @@
 # Windows/PC parity — decision record
 
-*Last updated: 2026-07-07 (FIT-010 port refresh). Companion to [ARCHITECTURE.md §Platforms](../ARCHITECTURE.md#platforms-macos-canonical--windowscuda-additive) and [WINDOWS_RUNBOOK.md](WINDOWS_RUNBOOK.md).*
+*Last updated: 2026-07-16 (FIT-013 real-time parity pass). Companion to [ARCHITECTURE.md §Platforms](../ARCHITECTURE.md#platforms-macos-canonical--windowscuda-additive) and [WINDOWS_RUNBOOK.md](WINDOWS_RUNBOOK.md).*
+
+> **Run repo `.ps1` scripts with `pwsh` (PowerShell 7), not Windows PowerShell 5.1.**
+> The repo's BOM-less UTF-8 misdecodes under 5.1 (an em-dash becomes a CP1252
+> curly-quote byte that can terminate strings mid-file). Strings in `.ps1` files are
+> kept ASCII as belt-and-braces, but pwsh is the supported interpreter — it is also
+> what `verify-pc-build.ps1` examples use.
 
 **Posture (unchanged):** macOS / Apple Silicon (arm64) + MLX is **canonical**. Windows +
 NVIDIA/CUDA is an **additive port of the same codebase** — every fork is `#if JUCE_WINDOWS`
@@ -29,7 +35,11 @@ Three read-only audits over the ~220 commits since the port (`962a03fd`, 2026-06
 
 | Feature | Decision | Basis / mechanism |
 |---|---|---|
-| **SA3 generative (CUDA)** | ✅ Works now | `stable_audio3_adapter` dispatches MLX→CUDA; `service/setup-sa3-cuda.ps1` + `stable_audio3_cuda.py`. The one fully-wired adapter. |
+| **SA3 generative (CUDA)** | ✅ Works now | `stable_audio3_adapter` dispatches MLX→CUDA; `service/setup-sa3-cuda.ps1` + `stable_audio3_cuda.py`. The one fully-wired adapter. FIT-013 refresh: whole-clip `coverage.render` (loop/stitch), window pinned to `SA3_SECONDS` (persisted by setup), NL-guard + manifest parity with MLX. |
+| **Live render-ahead — Lane A (#319)** | ✅ Ported (FIT-013) | Orchestration (`MoshOps`/`GenerativeJobManager`/`stitch.py`) was already cross-platform; the gap was the CUDA adapter's 4s default window vs `ra.winLen`=8s — fixed by the `SA3_SECONDS` pin (#332). First-window poll ceiling honours `MOSH_RENDER_WAIT_TIMEOUT_MS` for CUDA cold loads (#335). `verify-pc-build.ps1 -RealSA3` green ×3 on the owner's 4070 (2026-07-16). |
+| **Runtime LoRA rack — Lane C (#319)** | ✅ Ported (FIT-013) | **Decision: torch in-memory apply** (supersedes the disk-fuse the old `lora_merge` comments anticipated) — shared `apply_dora` math (#331), engine-parity apply/restore in `stable_audio3_cuda.py` (#332). Evidence: `-RealLoRA` smoke on the 4070 — apply ≈350–450 ms, 228-param numpy-oracle match (max 1.9e-03, f16 tolerance), bit-clean restore (2026-07-16). |
+| **live-RAVE tier — Lane B (#319)** | ✅ Ported (FIT-013) | `windows-x64-release-anira` preset (Release-only: anira downloads /MD LibTorch; Debug would CRT-mismatch), **CPU LibTorch by design** (anira has no CUDA plumbing; RT block inference wants CPU latency stability; parity with the Mac build). anira.dll + LibTorch DLLs staged POST_BUILD via `$<TARGET_FILE:anira>` + glob, shipped by `run-mosh.ps1 -Package -Anira` (#333, #337: RaveEngine.cpp is `/GL-` — LTCG over the torch headers OOMs link.exe). Evidence 2026-07-16: 14/14 `verify.py` checks on the anira exe, insert smoke transformed/gap-free/reset-safe. Known limitations: `torch::jit::load` uses the ANSI codepage — keep `RAVE_MODEL_DIR` ASCII. **RESOLVED 2026-07-16 — the "real rack models load but render silence" finding was NOT a LibTorch-version issue:** it was `birds.ts` (the PC rack's only model at the time) self-silencing under EVERY torch runtime — encoder state runs away on out-of-domain input and the decoder underflows to exact zeros (bit-identical in Python torch 2.4.1 vs 2.13.0; 16/17 Mac rack models healthy under 2.4.1). The pinned LibTorch 2.4.1 is exonerated; `rave_insert_check.py` now iterates rack candidates, skipping+reporting silent-on-tone/unloadable models (`RAVE_INSERT_MODEL` pins one). PC re-verified 14/14: `pluma.ts` transformed/gap-free/reset-safe, `birds.ts` auto-skipped (`model_silent`). Full diagnosis: [2026-07-16-rave-rack-silence-diagnosis.md](2026-07-16-rave-rack-silence-diagnosis.md). |
+| **LoRA trainer — local PC lane** | ⚡ Asymmetric-plus (FIT-013) | RunPod path unchanged; NEW: `service/training/serve-trainer.ps1` runs the same server on the owner's 4070 for $0 small runs (`MOSH_TRAINING_REMOTE_URL=http://<pc>:8799`, no tunnel). Unauthenticated server ⇒ trusted-LAN-only posture (bind LAN IP, Private-profile firewall, never port-forward, stop when idle) — see RUNPOD_RUNBOOK §"local PC trainer" (#334). |
 | **Lyrics generation** | ✅ Works now | `service/lyrics/*` is stdlib + `brain_client` (portable); no venv, no OS assumption. |
 | **Native menu bar** | ✅ Works now | JUCE `MenuBarModel`/`ApplicationCommandManager` → an in-window menu bar; only `setMacMainMenu` is `#if JUCE_MAC`. Same command set, platform-idiomatic chrome. |
 | **Per-feature venvs: transcribe / whisper / phonology / skeleton** | ✅ Windows path now | `_venv_py()` Windows branch (`Scripts\python.exe`, `%LOCALAPPDATA%\Mosh\venvs`) + `service/setup-feature-venv.ps1` (manifest mirrors the bash deps). |

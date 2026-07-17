@@ -73,7 +73,7 @@ sys.exit(0 if torch.cuda.is_available() else 3)
 switch ($LASTEXITCODE) {
     0 { Say "venv OK (torch + stable_audio_3 + CUDA device visible)" }
     2 { Fail "the venv is missing a required module (see above). Install torch (CUDA), stable_audio_3, soundfile, numpy into $Python." }
-    3 { Fail "torch is installed but torch.cuda.is_available() is False — install a CUDA build of torch and check the NVIDIA driver." }
+    3 { Fail "torch is installed but torch.cuda.is_available() is False - install a CUDA build of torch and check the NVIDIA driver." }
     default { Fail "python probe failed (exit $LASTEXITCODE)." }
 }
 
@@ -88,6 +88,9 @@ $envFile = Join-Path $ScriptDir ".sa3.cuda.ps1"
 `$env:MOSH_SERVICE_PYTHON = "$Python"
 `$env:MOSH_SA3_MODEL_DIR  = "$ModelDir"
 `$env:COLORRACK_DATA      = "$ColorRack"
+# Pins BOTH the native render-ahead window (ra.winLen) and the CUDA adapter's
+# per-window render length — they must agree or stitched coverage breaks.
+`$env:SA3_SECONDS         = "8.0"
 "@ | Set-Content -Encoding UTF8 $envFile
 Say "wrote $envFile"
 

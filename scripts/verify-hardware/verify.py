@@ -81,6 +81,25 @@ def failed_commands(results):
     return [r for r in results if not r.get("ok", False)]
 
 
+def _service_port(preferred):
+    """The preferred service port if nothing is listening there, else a fresh OS-assigned
+    free port. Mosh ADOPTS any healthy service already on its port — including a foreign
+    session's, running with THAT session's env instead of this run's pins
+    (MOSH_ENABLE_TRANSFORM=0 etc.), which false-fails checks in undiagnosable ways
+    (proven: an orphaned real-RAVE service squatting 8801 broke check_reactive_rerender
+    with "no RAVE model for target ''"). Probing keeps the historical ports when quiet."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", int(preferred)))
+            return str(preferred)
+        except OSError:
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return str(s.getsockname()[1])
+
+
 # ── WAV analysis ────────────────────────────────────────────────────────────────
 def load_wav(path):
     """Return (samples[ndarray, shape=(frames,) or (frames,ch)], samplerate, channels)."""
@@ -313,7 +332,7 @@ def check_transform(ctx):
     # is unaffected by any real RAVE models installed in RAVE_MODEL_DIR (the real path is
     # covered by --rave). Mirrors the selftest's hermetic gate.
     results, proc = run_script(ctx.bin, cmds, SESSION,
-                               extra_env={"MOSH_SERVICE_PORT": "8795", "MOSH_ENABLE_TRANSFORM": "0"})
+                               extra_env={"MOSH_SERVICE_PORT": _service_port(8795), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
     outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
     if fails or not outputs:
@@ -364,7 +383,7 @@ def check_compile_render(ctx):
         {"command": "accept_render", "args": {"clipId": "${C}"}},
         {"command": "export_audio", "args": {"file": str(out)}},
     ]
-    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8796"})
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": _service_port(8796)})
     fails = failed_commands(results)
     comp = next((r for r in results if r.get("command") == "compile_render"), None)
     cdata = (comp or {}).get("data", {}) or {}
@@ -397,7 +416,7 @@ def check_compile_corrective(ctx):
         {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0}, "capture": {"C": "clipId"}},
         {"command": "compile_render", "args": {"clipId": "${C}", "instruction": "fix the tuning, it's pitchy", "backend": "fake", "wait": True}},
     ]
-    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": "8798"})
+    results, proc = run_script(ctx.bin, cmds, SESSION, extra_env={"MOSH_SERVICE_PORT": _service_port(8798)})
     fails = failed_commands(results)
     comp = next((r for r in results if r.get("command") == "compile_render"), None)
     cdata = (comp or {}).get("data", {}) or {}
@@ -492,7 +511,7 @@ def check_bypass_layer(ctx):
         {"command": "export_audio", "args": {"file": str(bypassed)}},                                  # C: bypassed -> original
     ]
     results, proc = run_script(ctx.bin, cmds, SESSION,
-                               extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+                               extra_env={"MOSH_SERVICE_PORT": _service_port(8796), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
     if fails or not (orig.exists() and rendered.exists() and bypassed.exists()):
         return row("Bypass layer re-route (A/B)", False,
@@ -533,7 +552,7 @@ def check_render_artifact_portability(ctx):
     runs offline alongside check_transform."""
     import shutil
     SESSION = "verify-renderport"
-    ENV = {"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"}
+    ENV = {"MOSH_SERVICE_PORT": _service_port(8796), "MOSH_ENABLE_TRANSFORM": "0"}
     dest_dir = ART / "al009-project"
     dest_edit = dest_dir / "renders.tracktionedit"
     out = ART / "07_render_portability.wav"
@@ -614,7 +633,7 @@ def check_midi_render(ctx):
         {"command": "accept_render", "args": {"clipId": "${C}"}},
     ]
     results, proc = run_script(ctx.bin, cmds, SESSION,
-                              extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+                              extra_env={"MOSH_SERVICE_PORT": _service_port(8796), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
     outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
     if fails or not outputs:
@@ -672,7 +691,7 @@ def check_midi_reimagine_beneath(ctx):
         {"command": "export_audio", "args": {"file": str(reset_wav)}},                                   # C: back to bare MIDI
     ]
     results, proc = run_script(ctx.bin, cmds, SESSION,
-                               extra_env={"MOSH_SERVICE_PORT": "8796", "MOSH_ENABLE_TRANSFORM": "0"})
+                               extra_env={"MOSH_SERVICE_PORT": _service_port(8796), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
     if fails or not (reimagined.exists() and reset_wav.exists()):
         return row("MIDI re-imagine beneath", False,
@@ -724,7 +743,7 @@ def check_reactive_rerender(ctx):
         {"command": "__snapshot", "args": {"label": "after_reactive"}},
     ]
     results, proc = run_script(ctx.bin, cmds, SESSION,
-                               extra_env={"MOSH_SERVICE_PORT": "8801", "MOSH_ENABLE_TRANSFORM": "0",
+                               extra_env={"MOSH_SERVICE_PORT": _service_port(8801), "MOSH_ENABLE_TRANSFORM": "0",
                                           "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
     fails = failed_commands(results)
     layer_id = _data_field(results, "create_render_layer", "layerId")
@@ -736,10 +755,16 @@ def check_reactive_rerender(ctx):
         for c in t.get("clips", []):
             if c.get("type") == "midi":
                 rl = c.get("renderLayer") or {}
-                st = {"mute": bool(c.get("mute")), "reimagineActive": bool(rl.get("reimagineActive")), "notes": len(c.get("notes", []))}
+                # status/error make a failure DIAGNOSABLE: render_layer returns ok=true with
+                # status:"error" when the service-side render fails, which failed_commands
+                # can't see (that opacity hid an orphan-service false-fail for weeks).
+                st = {"mute": bool(c.get("mute")), "reimagineActive": bool(rl.get("reimagineActive")),
+                      "notes": len(c.get("notes", [])),
+                      "layer_status": rl.get("status"), "layer_error": rl.get("error")}
     # The edit changes the stableSourceSig → the auto-render writes a SECOND durable file (the first
     # render's still on disk). One file ⇒ no reactive render fired.
     ok = (not fails and layer_id is not None and len(files) >= 2
+          and st.get("layer_status") == "ready"
           and st.get("mute") is True and st.get("reimagineActive") is True and st.get("notes") == 3)
     return row("Reactive auto-re-render on edit", ok,
                {"layer_audio_files": len(files), "state_after_edit": st, "failed_commands": fails})

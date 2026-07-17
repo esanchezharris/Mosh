@@ -3,8 +3,9 @@
 *Closing the gap between "passes `--selftest` plumbing" and "**actually** produces correct audio /
 responds to a mic / syncs between two peers."*
 
-Most of Mosh is proven by the deterministic command-surface harness (`Mosh --selftest`, ~784
-checks) plus the UI suites (vitest + Playwright). Those prove the *plumbing*. This runbook proves
+Most of Mosh is proven by the deterministic command-surface harness (`Mosh --selftest` —
+**~1200+ checks as of 2026-07, gate-dependent**; it was ~784 when this runbook was written) plus
+the UI suites (vitest + Playwright). Those prove the *plumbing*. This runbook proves
 the parts that only real hardware (or real audio rendering) can confirm.
 
 **Primary proof vehicle = offline render-to-WAV.** Rather than live-listening or BlackHole
@@ -50,8 +51,10 @@ runs `--gate`; an intentional DSP/adapter change regenerates the baseline with `
 
 ## Checks
 
-Results below from the 2026-06-20 pass (offline checks are deterministic — WAV checksums stable
-across runs).
+Results below record the **2026-06-20 baseline pass** (plus the dated fixes noted per-row);
+offline checks are deterministic — WAV checksums stable across runs — and are re-enforced on
+every merge via `verify.py --gate` in `scripts/auto-loop/gate.sh`, so the offline rows stay
+continuously proven even though this table's snapshot is from 2026-06-20.
 
 | # | Check | Kind | Asserts | Status |
 | --- | --- | --- | --- | --- |
@@ -76,8 +79,9 @@ MOSH_SELFTEST_SKETCH=1 MOSH_SKETCH_FIXTURE_DIR="$PWD/service/sketch/fixtures" \
   build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh --selftest   # run from the repo root
 ```
 
-The default `Mosh --selftest` (no env) stays **893/893** whether or not the librosa venv is present
-(graceful degradation). Remaining hands-on for Sketch: the by-ear "does it groove" confirm and a
+The default `Mosh --selftest` (no env) passes identically whether or not the librosa venv is
+present (graceful degradation) — it was 893/893 at this table's 2026-06-20 pass; the harness has
+since grown to ~1200+ gate-dependent checks. Remaining hands-on for Sketch: the by-ear "does it groove" confirm and a
 real beatbox-from-your-mouth take (the fixtures are synthesised, not recorded) — owner-side.
 
 Evidence WAVs + the analyzer `report.json` land in `verify-artifacts/` (git-ignored). The

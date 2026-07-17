@@ -263,6 +263,17 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)
 {
+    // Callers REUSE output paths across renders (a layer's job dir keeps the same
+    // output.wav; render-ahead window stems repeat across app restarts), and every
+    // poller treats an existing output+manifest pair as the durable completion signal
+    // (real SA3 can finish while /status is unreachable during teardown). Clear the
+    // previous render's pair before submitting or a re-render "completes" on the first
+    // poll with the stale audio. Safe: both files are per-job transients — the applied/
+    // accepted audio lives in durable copies (audio/<layerId>-<fp>.wav, accept_render's
+    // audio/<layerId>.wav) made at finalize.
+    outputWav.deleteFile();
+    manifest.deleteFile();
+
     auto* body = new DynamicObject();
     body->setProperty ("adapter", adapter.isNotEmpty() ? adapter : juce::String ("fake"));
     body->setProperty ("inputWav", inputWav.getFullPathName());
@@ -283,6 +294,25 @@ void GenerativeJobManager::cancelJob (const juce::String& jobId)
     auto* body = new DynamicObject();
     body->setProperty ("jobId", jobId);
     httpPost ("/cancel", var (body));
+}
+
+double GenerativeJobManager::stitchWindows (const juce::StringArray& windowPaths, const juce::File& outWav,
+                                            double targetSeconds, double xfadeMs)
+{
+    if (windowPaths.isEmpty() || ! ensureServiceRunning())
+        return 0.0;
+
+    Array<var> wins;
+    for (const auto& w : windowPaths) wins.add (w);
+    auto* body = new DynamicObject();
+    body->setProperty ("windows", wins);
+    body->setProperty ("outPath", outWav.getFullPathName());
+    body->setProperty ("targetSeconds", targetSeconds);
+    body->setProperty ("xfadeMs", xfadeMs);
+
+    auto r = httpPost ("/stitch_windows", var (body));
+    if (! (bool) r.getProperty ("ok", false)) return 0.0;
+    return (double) r.getProperty ("durationSeconds", 0.0);
 }
 
 juce::var GenerativeJobManager::transcribe (const juce::File& inputWav, const juce::String& mode)

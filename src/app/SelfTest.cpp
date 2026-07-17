@@ -6,6 +6,7 @@
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
+#include <juce_cryptography/juce_cryptography.h>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -480,18 +481,6 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Same pin for the FMS sing adapter: a machine with MOSH_SOULX_SSH_HOST + an enrolled
     // voice configured must still run the deterministic fake legato-beep backend here.
     mosh::setEnvVar ("MOSH_ENABLE_SOULX", "0");
-    // LoRA rack: double-lock the harness away from the user's real adapter folder —
-    // disable the registry AND point the dir at a temp empty dir (either alone would do;
-    // both means a future partial-unpin still can't scan ~/Library/Mosh/loras). The rack's
-    // state spine + fake-path echo below stay deterministic; the REAL merge path is
-    // covered by scripts/verify-hardware/lora_check.py.
-    mosh::setEnvVar ("MOSH_ENABLE_LORAS", "0");
-    {
-        auto tmpLoras = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getChildFile ("mosh-selftest-loras-empty");
-        tmpLoras.createDirectory();
-        mosh::setEnvVar ("MOSH_LORA_DIR", tmpLoras.getFullPathName().toRawUTF8());
-    }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
@@ -766,6 +755,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (ok (lp), "list_plugins ok");
     const int nPlugins = lp["data"].getProperty ("plugins", var()).size();
     std::cerr << "  ..    " << nPlugins << " VST3 plugin(s) scanned\n";
+
+    // Lane B — RAVE model browser (non-gated fs scan; works in the default light build). Assert the
+    // SHAPE (ok + a models array + an available flag), not the count — the model dir is machine-
+    // dependent, so a clean CI box with no ~/AI/rave-models returns {models:[], available:false}.
+    {
+        auto lr = cmd (ops, "list_rave_models");
+        check (ok (lr), "list_rave_models ok (fs scan, non-gated)");
+        check (lr["data"].getProperty ("models", var()).isArray(), "list_rave_models returns a models array");
+        check (lr["data"].hasProperty ("available"), "list_rave_models reports an available flag");
+    }
 
     String fxId, instId;
     if (auto* arr = lp["data"].getProperty ("plugins", var()).getArray())
@@ -1472,6 +1471,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
         check (hasArtifact, "render produced a cached artifact (output.wav)");
 
+        // Content fingerprint of the applied audio (the clip's in-place source). The MISS/HIT
+        // checks alone can't see stale job-dir reuse: the layer's job dir keeps the SAME
+        // output.wav path across renders, and the pollers treat an existing output+manifest
+        // pair as the durable completion signal — so a re-render that never clears the pair
+        // "completes" instantly with the PREVIOUS render's audio while still reporting MISS.
+        auto clipSource = [&] (const String& cid) -> File {
+            auto trk = trackById (gt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == cid)
+                        return File (c.getProperty ("sourceFile", var()).toString());
+            return {};
+        };
+        const auto srcA = clipSource (gcid);
+        check (srcA.existsAsFile(), "first render's applied source exists on disk");
+        const auto bytesA = juce::MD5 (srcA).toHexString();
+
         // Re-render with identical fingerprint -> cache HIT.
         auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical re-render is a cache HIT (full fingerprint)");
@@ -1480,6 +1496,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 2 }}));
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change -> dirty -> re-render (cache MISS)");
+        // The fake adapter's output depends on the seed, so the re-render's AUDIO must actually
+        // change — this is the assertion that catches stale job-dir reuse (a stale pair lands
+        // the old bytes under a fresh fingerprint name and MISS/HIT still looks correct).
+        const auto srcB = clipSource (gcid);
+        check (srcB.existsAsFile(), "param-change re-render's applied source exists on disk");
+        check (juce::MD5 (srcB).toHexString() != bytesA,
+               "param-change re-render produced DIFFERENT audio bytes (no stale job-dir reuse)");
 
         // --- NRL-004: render-layer management (in-place apply / reset / bypass / freeze / remove) ---
         section ("NRL-004: render-layer management");
@@ -1619,24 +1642,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) xLayer().getProperty ("appliedInPlace", true), "reset cleared the applied transform");
     }
 
-    // ─── LoRA rack: taste adapters on the render layer (state spine + fake path) ───
-    // The REAL merge (MLX weight patching) is covered by service goldens +
-    // scripts/verify-hardware/lora_check.py; here the harness proves the command
-    // surface hermetically: registry listing (pinned empty), rack state round-trip,
-    // fingerprint MISS/HIT on rack changes, manifest echo, undo.
-    section ("LoRA rack: state spine + fake-path echo");
+    // ── LoRA rack: selection round-trip + full-fingerprint cache (fake adapter, hermetic).
+    // The rack rides the re-imagine layer as a params modifier (like colours); the real
+    // SA3 merge path is covered by verify-hardware, not selftest (service-spawning).
+    section ("LoRA rack: params + fingerprint");
     {
-        // The env double-lock above pins an EMPTY registry — list_loras must be ok+empty.
-        auto ll = cmd (ops, "list_loras", var());
-        check (ok (ll), "list_loras ok (service up, empty watched folder)");
-        check (ll["data"].getProperty ("loras", var()).size() == 0,
-               "pinned MOSH_ENABLE_LORAS=0 -> empty LoRA library");
-
-        auto lt = cmd (ops, "create_track", args1 ("name", "LoraT"))["data"].getProperty ("trackId", var()).toString();
-        auto ltone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 1.5 }, { "freq", 233.0 }}));
+        auto lt = cmd (ops, "create_track", args1 ("name", "LoraRack"))["data"].getProperty ("trackId", var()).toString();
+        // freq 251 is unique to this section: add_test_tone_clip caches the generated
+        // WAV by int(freq) and reuses it (duration is NOT in the key), so sharing a
+        // frequency with another section that expects a different duration collides.
+        auto ltone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 1.2 }, { "freq", 251.0 }}));
         const auto lcid = ltone["data"].getProperty ("clipId", var()).toString();
         check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", lcid }, { "adapter", "fake" }, { "mode", "reimagine" }}))),
-               "create_render_layer (fake) for the rack ok");
+               "create_render_layer (reimagine, for LoRA rack) ok");
+
+        Array<var> sel;
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", "ken-sa3"); lo->setProperty ("value", 100); sel.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "seed", 3 }, { "nl", 0.4 }, { "loras", var (sel) }}));
 
         auto lLayer = [&] () -> var {
             auto trk = trackById (lt);
@@ -1645,122 +1667,39 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     return c.getProperty ("renderLayer", var());
             return {};
         };
-
-        // Rack rows are ordered + unbounded (no cap, no clamp — 4 rows incl. overdrive >100).
-        Array<var> rack;
-        auto addRow = [&rack] (const char* n, double v) { auto* o = new DynamicObject();
-            o->setProperty ("name", n); o->setProperty ("value", v); rack.add (var (o)); };
-        addRow ("kxc", 80); addRow ("micz", 55); addRow ("brozr", 40); addRow ("emzr", 125);
-        check (ok (cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", rack }}))),
-               "set_render_param {loras} ok");
-        {
-            auto ls = lLayer().getProperty ("loras", var());
-            check (ls.size() == 4, "snapshot carries the 4-row rack (unbounded)");
-            check (ls[0].getProperty ("name", var()).toString() == "kxc"
-                       && (double) ls[0].getProperty ("value", 0.0) == 80.0,
-                   "rack row 0 round-trips (kxc=80)");
-            check ((double) ls[3].getProperty ("value", 0.0) == 125.0,
-                   "overdrive strength (125) survives unclamped");
-            check (lLayer().getProperty ("status", var()).toString() == "dirty",
-                   "rack change marks the layer dirty");
-        }
-
-        // Capture the layer_status qa payload (the parsed manifest) to prove the echo.
-        var lastQa;
-        ops.setEventSink ([&] (const var& e) {
-            eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e;
-            if (e.getProperty ("type", var()).toString() == "layer_status"
-                && e.getProperty ("payload", var()).getProperty ("qa", var()).isObject())
-                lastQa = e.getProperty ("payload", var()).getProperty ("qa", var());
-        });
+        { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
+          auto* larr = lv.getArray();
+          check (larr != nullptr && larr->size() == 1
+                 && larr->getReference (0).getProperty ("name", var()).toString() == "ken-sa3"
+                 && (double) larr->getReference (0).getProperty ("value", 0) == 100.0,
+                 "loras selection round-trips through the snapshot"); }
 
         auto lr1 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
-        check (ok (lr1) && lr1["data"].getProperty ("cache", var()).toString() == "miss",
-               "first rack render is a cache MISS");
-        check (lastQa.isObject()
-                   && lastQa.getProperty ("loras", var()).size() == 4
-                   && ! (bool) lastQa.getProperty ("loras_applied", true),
-               "fake manifest echoes the rack + loras_applied:false (honesty)");
-        check (juce::approximatelyEqual ((double) lastQa.getProperty ("loras", var())[0]
-                                             .getProperty ("strength", 0.0), 0.8),
-               "manifest strength = value/100 (kxc 80 -> 0.8)");
-
+        check (ok (lr1), "render with a LoRA selection ok (fake)");
+        check (lr1["data"].getProperty ("cache", var()).toString() == "miss", "first LoRA render is a cache MISS");
         auto lr2 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
-        check (lr2["data"].getProperty ("cache", var()).toString() == "hit",
-               "identical rack re-render is a cache HIT");
+        check (lr2["data"].getProperty ("cache", var()).toString() == "hit", "identical LoRA re-render is a cache HIT");
 
-        // A strength change is a fingerprint input → MISS.
-        rack.clearQuick(); addRow ("kxc", 90); addRow ("micz", 55); addRow ("brozr", 40); addRow ("emzr", 125);
-        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", rack }}));
+        // Strength is in the fingerprint: 100 -> 40 must MISS.
+        Array<var> sel40;
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", "ken-sa3"); lo->setProperty ("value", 40); sel40.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel40) }}));
         auto lr3 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
-        check (lr3["data"].getProperty ("cache", var()).toString() == "miss",
-               "rack strength change -> cache MISS");
+        check (lr3["data"].getProperty ("cache", var()).toString() == "miss", "LoRA strength change -> cache MISS");
 
-        // Emptying the rack is a fingerprint input too.
+        // Clearing the rack changes the fingerprint too.
         cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", Array<var>{} }}));
         auto lr4 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
-        check (lr4["data"].getProperty ("cache", var()).toString() == "miss",
-               "emptied rack -> cache MISS (renders without adapters)");
-        check (lLayer().getProperty ("loras", var()).size() == 0, "snapshot shows the emptied rack");
+        check (lr4["data"].getProperty ("cache", var()).toString() == "miss", "clearing the LoRA rack -> cache MISS");
 
-        // set_render_param is undoable: undo restores the previous rack rows.
-        check (ok (cmd (ops, "undo", var())), "undo after rack clear ok");
-        check (lLayer().getProperty ("loras", var()).size() == 4, "undo restores the 4-row rack");
-
-        // Restore the plain event sink for the rest of the harness.
-        ops.setEventSink ([&] (const var& e) {
-            eventTypes.push_back (e.getProperty ("type", var()).toString()); lastEvent = e; });
-    }
-
-    // ─── Streaming lookahead: progressive windowed render (fake, hermetic) ───
-    // A long-clip re-render streams: windows render playhead-ahead, each chunk lands
-    // provisionally (clip audio freshens mid-render, cache/status untouched), the final
-    // render lands last and is the only thing the cache remembers. Headless is the
-    // land-immediately path (no boundary wait), so this stays deterministic. The fake's
-    // per-job window cap (windowS) forces multi-window coverage with no real model.
-    section ("Streaming: progressive windowed render (fake)");
-    {
-        auto stTrk = cmd (ops, "create_track", args1 ("name", "Stream"))["data"].getProperty ("trackId", var()).toString();
-        auto stTone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", stTrk }, { "seconds", 4.0 }, { "freq", 261.0 }}));
-        const auto stCid = stTone["data"].getProperty ("clipId", var()).toString();
-        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", stCid }, { "adapter", "fake" }, { "mode", "reimagine" }}))),
-               "create_render_layer for streaming ok");
-        cmd (ops, "set_render_param", objN ({{ "clipId", stCid }, { "seed", 5 }, { "nl", 0.4 }, { "coverage", "stitch" }}));
-
-        auto sr1 = cmd (ops, "render_layer", objN ({{ "clipId", stCid }, { "wait", true },
-                                                    { "progressive", true }, { "playheadS", 1.5 }, { "windowS", 1.0 }}));
-        check (ok (sr1) && sr1["data"].getProperty ("cache", var()).toString() == "miss",
-               "progressive render ok (MISS)");
-
-        auto stLayer = [&] () -> var {
-            auto trk = trackById (stTrk);
-            if (auto* arr = trk.getProperty ("clips", var()).getArray())
-                for (auto& c : *arr) if (c.getProperty ("id", var()).toString() == stCid)
-                    return c.getProperty ("renderLayer", var());
-            return {};
-        };
-        check (stLayer().getProperty ("status", var()).toString() == "ready",
-               "final render landed -> ready");
-        check ((bool) stLayer().getProperty ("appliedInPlace", false),
-               "streamed render applied in place");
-
-        // Provisional chunk copies landed alongside the final durable copy.
-        auto audioDir = eng.sessionDir().getChildFile ("audio");
-        int progCopies = 0, finalCopies = 0;
-        for (auto& f : audioDir.findChildFiles (juce::File::findFiles, false, "rl-*.wav"))
-        {
-            if (f.getFileNameWithoutExtension().contains ("-prog")) ++progCopies;
-            else if (f.getFileName().startsWith ("rl-"))            ++finalCopies;
-        }
-        check (progCopies >= 1, "provisional chunk(s) landed while rendering ("
-                                    + String (progCopies) + " chunk copies)");
-        check (finalCopies >= 1, "final durable copy present");
-
-        // progressive/playheadS/windowS are RENDER args, not layer params — the
-        // fingerprint must not see them: an identical plain re-render is a cache HIT.
-        auto sr2 = cmd (ops, "render_layer", objN ({{ "clipId", stCid }, { "wait", true }}));
-        check (sr2["data"].getProperty ("cache", var()).toString() == "hit",
-               "plain re-render after streaming is a cache HIT (args not in the fingerprint)");
+        // The command clamps to <=2 entries (compose limit).
+        Array<var> sel3;
+        for (auto* nm : { "a", "b", "c" })
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", 50); sel3.add (var (lo)); }
+        cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel3) }}));
+        { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
+          auto* larr = lv.getArray();
+          check (larr != nullptr && larr->size() == 2, "LoRA rack clamps to two entries"); }
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───

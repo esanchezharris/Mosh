@@ -45,6 +45,7 @@ if os.name == "nt" and os.environ.get("MOSH_SERVICE_CONSOLE", "") != "1":
         pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import stitch  # noqa: E402  (render-ahead incremental-stitch primitive; stdlib wave only)
 from adapters import fake_adapter  # noqa: E402
 from adapters import stable_audio3_adapter  # noqa: E402  (path-only checks; heavy imports stay lazy)
 from training import lora_trainer_adapter  # noqa: E402
@@ -266,11 +267,10 @@ def _colorrack_hash() -> str:
 # service_build feeds the native render-cache fingerprint: changing the engine/colors
 # must invalidate cached renders, so it encodes the carve identity.
 if SA3_ENABLED:
-    # +loraruntime1 = the LoRA-rack merge math generation; bump it whenever
-    # service/sa3/lora_runtime.py changes semantics so cached renders MISS.
+    from sa3 import engine as _sa3_engine
     SERVICE_BUILD = (f"sa3-1.0.0+{stable_audio3_adapter.backend_name()}"
                      f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
-                     f"+loraruntime1")
+                     f"+lora{_sa3_engine.LORA_APPLY_VERSION}")
 else:
     SERVICE_BUILD = "fake-0.1.0"
 
@@ -754,16 +754,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
         elif path == "/loras":
-            # LoRA-rack discovery: list the watched folder (MOSH_LORA_DIR).
-            # Absent/empty/disabled is a graceful empty list — mirror the
-            # ~/AI/rave-models posture, never a 5xx.
+            # LoRA rack discovery (drop-in library dir, RAVE_MODEL_DIR posture).
             try:
-                from loras import registry as _lr
-                self._send(200, {"ok": True, "loras": _lr.descriptor(),
-                                 "dir": _lr.lora_dir()})
+                from loras import registry as LORA_R
+                self._send(200, {"ok": True, "loras": [
+                    {k: v for k, v in e.items() if k != "file"}
+                    for e in LORA_R.list_loras()
+                ], "maxActive": LORA_R.MAX_ACTIVE})
             except Exception as e:  # noqa: BLE001
-                self._send(200, {"ok": True, "loras": [],
-                                 "error": f"lora registry unavailable: {e}"})
+                self._send(503, {"ok": False, "error": f"loras unavailable: {e}", "loras": []})
         elif path == "/transform_targets":
             # Route C discovery: when the REAL RAVE backend is installed, list the
             # installed .ts model stems (concrete targets, no free-text). Otherwise the
@@ -872,6 +871,34 @@ class Handler(BaseHTTPRequestHandler):
                 if jid in _jobs:
                     _jobs[jid]["cancel"] = True
             self._send(200, {"ok": True})
+        elif path == "/stitch_windows":
+            # Render-ahead primitive (Lane A): overlap-add crossfade a set of already-rendered
+            # window WAVs into ONE continuous file, reusing the exact owner-measured-gapless
+            # stitch.stitch_windows (1ms equal-power default). Pure + hermetic (stdlib wave) —
+            # the native RenderAheadScheduler calls this after each new window completes to
+            # extend the growing render-ahead file. Byte-stable: appending a window never
+            # perturbs earlier seams (each seam depends only on its two neighbours), so the
+            # region the playhead is reading stays identical across an extend.
+            wins = data.get("windows", []) or []
+            out = data.get("outPath", "")
+            if not wins or not out:
+                self._send(400, {"ok": False, "error": "windows[] and outPath required"})
+                return
+            missing = [w for w in wins if not (isinstance(w, str) and os.path.exists(w))]
+            if missing:
+                self._send(400, {"ok": False, "error": f"window(s) missing: {missing[:3]}"})
+                return
+            try:
+                target = float(data.get("targetSeconds") or 0.0)
+                if target <= 0.0:
+                    target = sum(stitch.wav_duration(w) for w in wins)
+                xfade = float(data.get("xfadeMs") or 1.0)
+                stitch.stitch_windows(wins, out, target, xfade_ms=xfade)
+                self._send(200, {"ok": True, "outPath": out,
+                                 "durationSeconds": round(stitch.wav_duration(out), 3),
+                                 "windows": len(wins), "xfadeMs": xfade})
+            except Exception as e:  # noqa: BLE001
+                self._send(500, {"ok": False, "error": f"stitch failed: {e}"})
         elif path == "/transcribe":
             # Audio -> MIDI via Basic Pitch, run as a subprocess under the dedicated
             # transcribe venv so its deps stay isolated. Synchronous: the server is

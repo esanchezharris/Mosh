@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mockExecute, mockSnapshot, __resetMockForTests } from "./bridge.mock";
-import type { Snapshot, CommandResult, AvailableLora, RenderLora } from "./types";
+import type { Snapshot, CommandResult, RenderLora } from "./types";
 
-// The LoRA rack — stacked taste adapters on the SA3 render layer. Mock parity with
-// the native surface: list_loras (read-only library), set_render_param {loras}
-// (ordered, UNBOUNDED — no count cap, no strength clamp), snapshot round-trip.
+// LoRA rack — trained style adapters ride the re-imagine layer as a params modifier
+// (like colours): list_loras discovery + a ≤2 ordered selection on set_render_param.
+// This exercises the dev mock the WebView/e2e run against.
 
 const exec = (command: string, args: Record<string, unknown> = {}) =>
   mockExecute<CommandResult>({ command, args });
@@ -15,61 +15,46 @@ const clipById = async (id: string) =>
 describe("mock LoRA rack", () => {
   beforeEach(() => __resetMockForTests());
 
-  it("list_loras returns the library with triggers + sha identity", async () => {
+  it("list_loras returns the library with cards", async () => {
     const r = await exec("list_loras");
     expect(r.ok).toBe(true);
-    const d = r.data as { loras: AvailableLora[]; dir: string };
-    expect(d.loras.length).toBeGreaterThan(0);
-    const kxc = d.loras.find((l) => l.name === "kxc");
-    expect(kxc?.trigger).toBe("kxc");
-    expect(kxc?.sha12?.length).toBe(12);
-    expect(kxc?.valid).toBe(true);
-    expect(d.dir).toContain("loras");
+    const d = r.data as { loras: { name: string; trigger: string }[]; maxActive: number };
+    expect(d.loras.map((l) => l.name)).toEqual(["ken-sa3", "bro-sa3"]);
+    expect(d.loras[0].trigger).toBe("kxc");
+    expect(d.maxActive).toBe(2);
   });
 
-  it("list_loras is read-only (no undo pollution)", async () => {
-    await exec("create_track", { name: "T" });
-    await exec("list_loras");
-    const r = await exec("undo");
-    expect(r.ok).toBe(true);
-    // the undo undid create_track, not list_loras — track gone
+  it("selection round-trips, dirties the layer, and clamps to two", async () => {
     const s = await snap();
-    expect(s.tracks.some((t) => t.name === "T")).toBe(false);
-  });
+    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave");
+    expect(wave).toBeTruthy();
+    const clipId = wave!.id;
 
-  it("set_render_param {loras} stores an ORDERED, UNBOUNDED rack + marks dirty", async () => {
-    const s = await snap();
-    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave")!;
-    await exec("create_render_layer", { clipId: wave.id, adapter: "stable_audio3", mode: "reimagine" });
+    expect((await exec("create_render_layer", { clipId, adapter: "fake", mode: "reimagine" })).ok).toBe(true);
+    expect((await clipById(clipId))?.renderLayer?.loras).toEqual([]);
 
-    // 5 rows incl. an overdrive strength >100 — nothing clamps, order preserved.
-    const rack: RenderLora[] = [
-      { name: "kxc", value: 80 }, { name: "micz", value: 60 },
-      { name: "emzr", value: 40 }, { name: "extra1", value: 20 },
-      { name: "extra2", value: 125 },
-    ];
-    const r = await exec("set_render_param", { clipId: wave.id, loras: rack });
-    expect(r.ok).toBe(true);
-
-    const rl = (await clipById(wave.id))?.renderLayer;
+    await exec("set_render_param", { clipId, loras: [{ name: "ken-sa3", value: 70 }] });
+    let rl = (await clipById(clipId))?.renderLayer;
+    expect(rl?.loras).toEqual([{ name: "ken-sa3", value: 70 }]);
     expect(rl?.status).toBe("dirty");
-    expect(rl?.loras?.length).toBe(5);
-    expect(rl?.loras?.map((l) => l.name)).toEqual(["kxc", "micz", "emzr", "extra1", "extra2"]);
-    expect(rl?.loras?.[4].value).toBe(125);
-  });
 
-  it("rack survives render; emptying the rack round-trips", async () => {
-    const s = await snap();
-    const wave = s.tracks.flatMap((t) => t.clips).find((c) => c.type === "wave")!;
-    await exec("create_render_layer", { clipId: wave.id, adapter: "stable_audio3", mode: "reimagine" });
-    await exec("set_render_param", { clipId: wave.id, loras: [{ name: "kxc", value: 100 }] });
-    await exec("render_layer", { clipId: wave.id, wait: true });
-    let rl = (await clipById(wave.id))?.renderLayer;
-    expect(rl?.loras?.[0]?.name).toBe("kxc");
+    await exec("render_layer", { clipId });
+    expect((await clipById(clipId))?.renderLayer?.status).toBe("ready");
 
-    await exec("set_render_param", { clipId: wave.id, loras: [] });
-    rl = (await clipById(wave.id))?.renderLayer;
-    expect(rl?.loras?.length ?? 0).toBe(0);
+    // Strength change re-dirties (fingerprint change on the native side).
+    await exec("set_render_param", { clipId, loras: [{ name: "ken-sa3", value: 30 }] });
+    rl = (await clipById(clipId))?.renderLayer;
     expect(rl?.status).toBe("dirty");
+    expect((rl?.loras as RenderLora[])[0].value).toBe(30);
+
+    // The mock mirrors the native ≤2 clamp.
+    await exec("set_render_param", { clipId, loras: [
+      { name: "a", value: 10 }, { name: "b", value: 20 }, { name: "c", value: 30 },
+    ] });
+    expect(((await clipById(clipId))?.renderLayer?.loras as RenderLora[]).length).toBe(2);
+
+    // Clearing the rack empties the selection.
+    await exec("set_render_param", { clipId, loras: [] });
+    expect((await clipById(clipId))?.renderLayer?.loras).toEqual([]);
   });
 });
