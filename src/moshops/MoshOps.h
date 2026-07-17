@@ -168,6 +168,11 @@ private:
     // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
     // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).
     juce::var cmdSetClipWarp    (const juce::var& args);
+    // Warp helpers that make auto-tempo feel like Ableton: stretch a wave clip to a
+    // target warped length (or N bars) by deriving sourceBpm; and detect the source
+    // loop BPM offline (read-only) so enabling warp can lock a loop to the grid.
+    juce::var cmdStretchClip    (const juce::var& args);
+    juce::var cmdDetectClipBpm  (const juce::var& args);
     juce::var cmdDuplicateClip  (const juce::var& args);
     juce::var cmdPasteClip      (const juce::var& args);
     // Wave C — ARR-010: time-range as a true delete target. One undoable

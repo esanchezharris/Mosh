@@ -41,6 +41,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
+  { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
+  { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
 
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
@@ -174,6 +176,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
+    case "stretch_clip": return a.bars ? `Stretched a clip to ${a.bars} bar${Number(a.bars) > 1 ? "s" : ""}` : `Stretched a clip to ${a.length}s`;
+    case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
     case "add_note": return `Added a note`;
     case "add_drum_pattern": return `Laid a drum pattern`;

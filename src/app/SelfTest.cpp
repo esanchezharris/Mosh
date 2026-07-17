@@ -4798,6 +4798,135 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", wt));   // tidy
     }
 
+    // Ableton-style "easy warp": stretch a clip to a target length / bar count
+    // (deriving sourceBpm) and detect a loop's BPM offline. stretch_clip drives the
+    // drag-to-stretch gesture + the Inspector Fit/×2/÷2 helpers; detect_clip_bpm feeds
+    // the auto-lock-to-grid path. Deterministic — the detector is pure C++ (no service).
+    section ("Wave V2: stretch_clip + detect_clip_bpm (easy warp)");
+    {
+        auto st = cmd (ops, "create_track", args1 ("name", "StretchTrack"))["data"].getProperty ("trackId", var()).toString();
+        auto sc = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st }, { "seconds", 2.0 }, { "freq", 220.0 }}));
+        check (ok (sc), "stretch: 2s tone clip ok");
+        const auto scid = sc["data"].getProperty ("clipId", var()).toString();
+        auto len = [&]() -> double {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == scid)
+                        return (double) c.getProperty ("length", 0.0);
+            return -1.0;
+        };
+        auto warpedOn = [&]() -> bool {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == scid)
+                        return (bool) c.getProperty ("autoTempo", false);
+            return false;
+        };
+        check (std::abs (len() - 2.0) < 0.05, "stretch: clip starts at 2.0s");
+
+        // Stretch to a 3.0s warped length -> the clip fills 3.0s and warp turns on.
+        auto s1 = cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "length", 3.0 }}));
+        check (ok (s1), "stretch: to 3.0s ok");
+        check (std::abs (len() - 3.0) < 0.1, "stretch: clip is now 3.0s");
+        check (warpedOn(), "stretch: enabling stretch turns auto-tempo on");
+        check (std::abs ((double) s1["data"].getProperty ("length", 0.0) - 3.0) < 0.1, "stretch: result reports 3.0s length");
+
+        // ÷2 (stretch to 1.5s), then fit-to-bars at 120bpm 4/4 (1 bar = 2.0s, 2 bars = 4.0s).
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "length", 1.5 }}))), "stretch: to 1.5s ok");
+        check (std::abs (len() - 1.5) < 0.1, "stretch: halved to 1.5s");
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "bars", 1.0 }}))), "stretch: fit 1 bar ok");
+        check (std::abs (len() - 2.0) < 0.1, "stretch: 1 bar == 2.0s at 120bpm 4/4");
+        check (ok (cmd (ops, "stretch_clip", objN ({{ "clipId", scid }, { "bars", 2.0 }}))), "stretch: fit 2 bars ok");
+        check (std::abs (len() - 4.0) < 0.1, "stretch: 2 bars == 4.0s at 120bpm 4/4");
+
+        // Undo restores the 1-bar length; the command is logged undoable.
+        check (ok (cmd (ops, "undo")), "stretch: undo ok");
+        check (std::abs (len() - 2.0) < 0.1, "stretch: undo restores 1-bar length (2.0s)");
+        {
+            auto slog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool stretchU = false;
+            for (auto& ln : juce::StringArray::fromLines (slog))
+                if (ln.contains ("\"command\": \"stretch_clip\"") && ln.contains ("\"undoable\": true")) stretchU = true;
+            check (stretchU, "stretch: stretch_clip logged undoable:true");
+        }
+
+        // Guards.
+        check (! ok (cmd (ops, "stretch_clip", args1 ("clipId", scid))), "stretch: missing length/bars rejected");
+        check (! ok (cmd (ops, "stretch_clip", objN ({{ "clipId", "nope" }, { "length", 2.0 }}))), "stretch: bad clipId rejected");
+
+        // detect_clip_bpm on a pure tone: read-only, no pulse -> either errors or low
+        // confidence. Must not crash and must not spuriously claim a strong beat.
+        auto dTone = cmd (ops, "detect_clip_bpm", args1 ("clipId", scid));
+        if (ok (dTone))
+            check ((double) dTone["data"].getProperty ("confidence", 1.0) < 0.5, "detect: pure tone -> low confidence");
+        else
+            check (true, "detect: pure tone reported no reliable pulse (ok)");
+
+        // detect_clip_bpm on a synthesized 120bpm click track -> ~120 with confidence.
+        auto makeClickWav = [&] (double bpm, double seconds, const juce::String& name) -> juce::File
+        {
+            const double sr = 44100.0;
+            const juce::int64 n = (juce::int64) (sr * seconds);
+            juce::AudioBuffer<float> buf (1, (int) n);
+            buf.clear();
+            const int clickLen = (int) (sr * 0.01);   // 10ms click
+            const double period = 60.0 / bpm;         // seconds per beat
+            for (double t = 0.0; t < seconds; t += period)
+            {
+                const juce::int64 s0 = (juce::int64) (t * sr);
+                for (int i = 0; i < clickLen && (s0 + i) < n; ++i)
+                {
+                    const float env = 1.0f - (float) i / (float) clickLen;
+                    buf.setSample (0, (int) (s0 + i), env * std::sin ((float) i * 0.9f));
+                }
+            }
+            auto dir = eng.sessionDir().getChildFile ("stretch-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile (name);
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (
+                    fmt.createWriterFor (os.get(), sr, 1u, 16, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, (int) n); }
+            }
+            return f;
+        };
+        auto clickFile = makeClickWav (120.0, 4.0, "click120.wav");
+        check (clickFile.existsAsFile(), "detect: synthesized a 120bpm click WAV");
+        auto imp = cmd (ops, "import_clip", objN ({{ "trackId", st }, { "file", clickFile.getFullPathName() }}));
+        check (ok (imp), "detect: import click track ok");
+        const auto clickId = imp["data"].getProperty ("clipId", var()).toString();
+        auto det = cmd (ops, "detect_clip_bpm", args1 ("clipId", clickId));
+        check (ok (det), "detect: 120bpm click detected ok");
+        const double dbpm = (double) det["data"].getProperty ("bpm", 0.0);
+        check (std::abs (dbpm - 120.0) < 3.0, "detect: reported BPM ~120");
+        check ((double) det["data"].getProperty ("confidence", 0.0) > 0.2, "detect: strong pulse -> good confidence");
+
+        // Enabling warp with detect:true on the click locks sourceBpm to the detected
+        // tempo (~120); the DEFAULT path (no detect) stays a 1:1 no-op (proven above).
+        auto wd = cmd (ops, "set_clip_warp", objN ({{ "clipId", clickId }, { "autoTempo", true }, { "detect", true }}));
+        check (ok (wd), "detect: set_clip_warp detect:true ok");
+        {
+            auto tv = trackById (st);
+            auto cv = tv.getProperty ("clips", var());
+            double srcBpm = 0.0;
+            if (auto* arr = cv.getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == clickId)
+                        srcBpm = (double) c.getProperty ("sourceBpm", 0.0);
+            check (std::abs (srcBpm - 120.0) < 3.0, "detect: warp detect locked sourceBpm to ~120");
+        }
+        check (! ok (cmd (ops, "detect_clip_bpm", args1 ("clipId", "no-such"))), "detect: bad clipId rejected");
+
+        cmd (ops, "remove_track", args1 ("trackId", st));   // tidy
+    }
+
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
         // Deterministic provider resolution — set known env, no network calls.

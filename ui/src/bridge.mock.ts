@@ -1049,10 +1049,47 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       const on = Boolean(args.autoTempo);
       f.clip.autoTempo = on;
-      if (on) f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
-      else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
+      if (on) {
+        f.clip.stretchMode = str(args.mode, f.clip.stretchMode ?? "SoundTouch (Better)");
+        // sourceBpm: explicit → detected (stub) → prior → map tempo. Mirrors the native
+        // serialiser carrying sourceBpm while warp is on (detect is a no-op offline stub).
+        const detected = args.detect && !("sourceBpm" in args) ? 120 : undefined;
+        f.clip.sourceBpm = "sourceBpm" in args ? num(args.sourceBpm) : (detected ?? f.clip.sourceBpm ?? snapshot.session.tempo);
+      } else { delete f.clip.stretchMode; delete f.clip.sourceBpm; }
       invalidate();
       return ok(command, { clipId: f.clip.id, autoTempo: on, stretchMode: f.clip.stretchMode });
+    }
+    // Stretch a wave clip to a target warped length (seconds) or bar count by deriving
+    // sourceBpm + enabling auto-tempo. Powers drag-to-stretch + Fit/×2 helpers. Undoable.
+    case "stretch_clip": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "not an audio clip");
+      if (!("length" in args) && !("bars" in args)) return err(command, "missing 'length' or 'bars'");
+      const sourceLen = num(f.clip.sourceLength, f.clip.length) || f.clip.length || 1;
+      const projectBpm = snapshot.session.tempo || 120;
+      pushUndo();
+      let target: number;
+      if ("bars" in args) {
+        const bars = num(args.bars, 0);
+        if (bars <= 0) return err(command, "'bars' must be > 0");
+        target = (bars * (snapshot.session.timeSigNumerator ?? 4) * 60) / projectBpm;
+      } else {
+        target = num(args.length, f.clip.length);
+        if (target <= 0) return err(command, "'length' must be > 0");
+      }
+      const sourceBpm = Math.max(20, Math.min(999, (projectBpm * target) / sourceLen));
+      f.clip.autoTempo = true;
+      f.clip.stretchMode = f.clip.stretchMode ?? "SoundTouch (Better)";
+      f.clip.sourceBpm = sourceBpm;
+      f.clip.length = (sourceLen * sourceBpm) / projectBpm; // == target (unless clamped)
+      invalidate();
+      return ok(command, { clipId: f.clip.id, sourceBpm, length: f.clip.length });
+    }
+    // Read-only BPM estimate. No real audio in the dev mock → deterministic stub.
+    case "detect_clip_bpm": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "no wave clip: " + str(args.clipId));
+      if (f.clip.type !== "wave") return err(command, "no wave clip: " + str(args.clipId));
+      return ok(command, { clipId: f.clip.id, bpm: num(f.clip.sourceBpm, 120) || 120, confidence: 0.8 });
     }
 
     // ── recording transport + take lanes (comp tree) ─────────────────────────

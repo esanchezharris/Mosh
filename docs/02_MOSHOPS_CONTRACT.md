@@ -42,6 +42,11 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `save` / `reload` | `{}` | ✗ | — | `reload`→`snapshot_invalidated` |
 | `add_render_layer` | `{clipId, adapter?}` | ✓ | `{layerId}` | `snapshot_invalidated` |
 | `add_drum_pattern` | `{pattern, trackId?, clipId?, stepsPerBar?, bars?, velocity?, start?, name?}` | ✓ | `{clipId, trackId, noteCount, steps, bars}` | `snapshot_invalidated` |
+| `set_clip_warp` | `{clipId, autoTempo, mode?, sourceBpm?, detect?}` | ✓ | `{clipId, autoTempo, stretchMode}` | `snapshot_invalidated` |
+| `stretch_clip` | `{clipId, length? \| bars?}` | ✓ | `{clipId, sourceBpm, length}` | `snapshot_invalidated` |
+| `detect_clip_bpm` | `{clipId}` | ✗ (read-only) | `{clipId, bpm, confidence}` | — |
+
+*Audio warp — "easy" Ableton-style (post-Stage-6): `set_clip_warp` toggles auto-tempo on a wave clip (Tracktion `TimeStretcher`/SoundTouch); with `detect:true` (and no explicit `sourceBpm`) it estimates the loop's own BPM offline and locks it to the grid. `stretch_clip` time-stretches a wave clip to a target warped `length` (seconds) OR a `bars` count by deriving `sourceBpm` (`warpedLen = sourceLen × sourceBpm / projectBpm`) and enabling auto-tempo — it powers the ⌘-drag-edge stretch gesture and the Inspector "Fit N bars / ½× / 2×" helpers. `detect_clip_bpm` is a read-only offline estimate (onset-envelope autocorrelation, pure C++ so it runs in `--selftest`) → `{bpm, confidence}`. Per-transient warp MARKERS remain a deferred subsystem.*
 
 *`add_drum_pattern` (DRM-002, post-Stage-6): lays a whole drum grid in ONE undoable command from per-lane step strings (`x` hit, `X` accent, `.`/`-` rest, `|` cosmetic; short lanes tile when they divide the total steps evenly). `pattern` is an object `{lane: steps}` or a flat `"lane: steps; lane: steps"` string (the flat form is what the agent catalog declares). `clipId` targets an existing MIDI clip and replaces ONLY the lanes named; otherwise a new clip lands on `trackId` (omitted → a new "Drums" drum track). Track policy: instrument-less target → `trackType:"drum"` + kit in the same transaction; instrument present → untouched; wave-audio target → error. Design: [superpowers/specs/2026-07-10-add-drum-pattern-design.md](superpowers/specs/2026-07-10-add-drum-pattern-design.md).*
 
