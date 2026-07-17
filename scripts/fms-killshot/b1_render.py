@@ -101,7 +101,7 @@ def assemble(arm, sr_out, total_s):
     for ch in chunks():
         mono, sr = v3.read_mono(arm_render(arm, ch["name"]))
         if sr != sr_out:
-            mono = sp.resample_linear(mono, sr, sr_out)
+            mono = sp.resample_hq(mono, sr, sr_out)
         for i, v in enumerate(mono):
             if i < len(out):
                 out[i] += v
@@ -182,7 +182,7 @@ def cmd_page() -> int:
     for arm, path in finals.items():
         mono, asr = v3.read_mono(path)
         if asr != sr:
-            mono = sp.resample_linear(mono, asr, sr)
+            mono = sp.resample_hq(mono, asr, sr)
         arms[arm] = mono
 
     labels, groups_html = {}, ""

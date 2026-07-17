@@ -141,5 +141,36 @@ check("resample_linear doubles length 4->8 rate", len(perform.resample_linear([0
 check("resample_linear is a no-op at equal rate", perform.resample_linear([1.0, 2.0], 8, 8) == [1.0, 2.0])
 check("resample_linear empty -> empty", perform.resample_linear([], 24000, 44100) == [])
 
+# ── 7b. resample_hq: band-limited, no HF imaging (the "squeak" fix) ────────────────────
+check("resample_hq no-op at equal rate", perform.resample_hq([1.0, 2.0, 3.0], 8, 8) == [1.0, 2.0, 3.0])
+check("resample_hq empty -> empty", perform.resample_hq([], 24000, 44100) == [])
+_hq = perform.resample_hq([0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0], 24000, 44100)
+check("resample_hq ~doubles length near the rate ratio",
+      abs(len(_hq) - round(8 * 44100 / 24000)) <= 2, f"len {len(_hq)}")
+check("resample_hq deterministic",
+      perform.resample_hq([0.1, -0.2, 0.3, -0.4, 0.5], 24000, 44100)
+      == perform.resample_hq([0.1, -0.2, 0.3, -0.4, 0.5], 24000, 44100))
+try:
+    import math as _m
+
+    import numpy as _np
+    from scipy.signal import resample_poly as _rp  # noqa: F401
+    # a 24k signal whose energy sits near its 12k Nyquist; upsample to 44.1k two ways and
+    # compare spurious energy in the 12-20k band (real content there is ~0).
+    _t = _np.arange(24000) / 24000.0
+    _sig = (0.6 * _np.sin(2 * _np.pi * 10500 * _t) + 0.4 * _np.sin(2 * _np.pi * 11500 * _t)).tolist()
+
+    def _hf(y, sr, lo=12000, hi=20000):
+        Y = _np.abs(_np.fft.rfft(_np.asarray(y))) ** 2
+        f = _np.fft.rfftfreq(len(y), 1.0 / sr)
+        return float(Y[(f >= lo) & (f < hi)].sum() / max(Y.sum(), 1e-12))
+
+    _lin_hf = _hf(perform.resample_linear(_sig, 24000, 44100), 44100)
+    _hq_hf = _hf(perform.resample_hq(_sig, 24000, 44100), 44100)
+    check("resample_hq leaves far less 12-20k imaging than linear (>=5x)",
+          _hq_hf * 5 < _lin_hf, f"hq {_hq_hf:.5f} vs linear {_lin_hf:.5f}")
+except ImportError:
+    print("[skip] numpy/scipy absent — resample_hq falls back to linear (quality check skipped)")
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

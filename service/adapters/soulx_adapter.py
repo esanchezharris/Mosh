@@ -211,7 +211,7 @@ def _snap_output_to_take(output_wav: str, take_path: str, clip: dict):
         return False, None
     take, sr_t = rt
     rend, sr_r = ro
-    rend = perform.resample_linear(rend, sr_r, sr_t)
+    rend = perform.resample_hq(rend, sr_r, sr_t)   # band-limited: no HF imaging "squeak"
     snapped = perform.snap_render_to_take(take, rend, sr_t, clip)
     events = soulx_score.word_event_spans(clip)
     lags = perform.event_lags(take, snapped, sr_t, events) if events else []

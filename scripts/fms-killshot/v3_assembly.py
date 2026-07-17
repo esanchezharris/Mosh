@@ -78,7 +78,7 @@ def plain_sum(sr_out, total_s):
     for ch in manifest["chunks"]:
         mono, sr = read_mono(RENDER_PAT.format(name=ch["name"]))
         if sr != sr_out:
-            mono = sp.resample_linear(mono, sr, sr_out)
+            mono = sp.resample_hq(mono, sr, sr_out)
         for i, v in enumerate(mono):
             if i < len(out):
                 out[i] += v

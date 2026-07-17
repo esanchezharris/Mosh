@@ -133,8 +133,11 @@ PHRASE_MAX_SHIFT_S = 0.25   # a phrase START can drift more than a syllable with
 
 
 def resample_linear(mono: List[float], sr_from: int, sr_to: int) -> List[float]:
-    """Linear-interp resampler so the take and render envelopes meet at one rate (SoulX
-    may emit 24k/48k; the take is its own). Stdlib; no-op at equal rate / empty input."""
+    """Linear-interp resampler. Stdlib; no-op at equal rate / empty input. NOTE: linear
+    interpolation is a POOR reconstruction filter for AUDIO — upsampling (e.g. SoulX's 24k
+    render -> a 44.1k take) leaves spectral IMAGES above the source Nyquist (measured ~21x
+    more 12-20k energy than a polyphase resampler), heard as HF harshness/"squeak". Use it
+    only for non-audio ramps/envelopes; audio-render paths use resample_hq()."""
     if sr_from == sr_to or not mono:
         return list(mono)
     n_out = max(1, int(round(len(mono) * sr_to / float(sr_from))))
@@ -147,6 +150,26 @@ def resample_linear(mono: List[float], sr_from: int, sr_to: int) -> List[float]:
         b = mono[j + 1] if j + 1 < len(mono) else a
         out.append(a + (b - a) * frac)
     return out
+
+
+def resample_hq(mono: List[float], sr_from: int, sr_to: int) -> List[float]:
+    """Band-limited polyphase resampler for AUDIO (scipy.signal.resample_poly) — proper
+    anti-imaging so a 24k->44.1k upsample leaves the 12-22k band empty instead of smearing
+    images into it. Falls back to resample_linear when numpy/scipy are unavailable (keeps
+    stdlib-only runtimes working, just lower quality). Deterministic; no-op at equal rate."""
+    if sr_from == sr_to or not mono:
+        return list(mono)
+    try:
+        import math as _math
+
+        import numpy as _np
+        from scipy.signal import resample_poly as _rp
+        g = _math.gcd(int(sr_from), int(sr_to))
+        up, down = int(sr_to) // g, int(sr_from) // g
+        y = _rp(_np.asarray(mono, dtype=_np.float64), up, down)
+        return [float(v) for v in y]
+    except Exception:  # noqa: BLE001 — no scipy/numpy: degrade to linear, never fail
+        return resample_linear(mono, sr_from, sr_to)
 
 
 def phrase_shifts(env_take: List[float], env_render: List[float], windows: List[tuple],
