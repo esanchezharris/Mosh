@@ -90,6 +90,19 @@
         "drum_aggression"
       ],
       "source": "loc2_grid_tightness"
+    },
+    "sustain": {
+      "vec_path": "vecs/sustain.npy",
+      "peak_layer": 17,
+      "astd_max": 0.4,
+      "more_sign": 1.0,
+      "verdict": "REAL",
+      "no_stack_with": [],
+      "envelope": {
+        "kind": "hold",
+        "knee_s": 1.5
+      },
+      "source": "onset_hold_diffmeans_L17_avg6"
     }
   }
 }
