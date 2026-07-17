@@ -134,6 +134,15 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // P4 self-heal (PR-1) — every uploadBlob/downloadBlob result above is ignored at
+    // its call site, so a single transient HTTP failure otherwise strands a clip's
+    // audio `sourceMissing` forever (the only prior recovery was the host re-committing
+    // that track). This re-derives the missing hash/ext from a wave clip's own by-hash
+    // source ref and retries the download for every clip currently missing its audio.
+    // Backend-only (Unguarded), non-undoable (writes bytes to disk only, no ValueTree
+    // mutation). `wait:true` runs synchronously (harness/agents/the bootstrap auto-
+    // trigger's callers don't need this); otherwise async (mirrors cmdTranscribeClip).
+    juce::var cmdMpFetchMissingStems (const juce::var& args);
     // Structural channel — scalar session-global ops (tempo/timesig/master/key)
     // broadcast to the peer; mp_apply_structural re-executes a peer's op locally,
     // guard-bypassed + without re-broadcasting (echo-free). Buses/groups deferred.
