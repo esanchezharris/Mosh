@@ -438,3 +438,11 @@ test("song navigator: shows bar numbers and click jumps the playhead", async ({ 
   await page.mouse.click(box.x + box.width * 0.5, box.y + box.height / 2);
   await expect.poll(() => page.getByTestId("v2-time").textContent()).not.toBe("1.1.1");
 });
+
+test("the timeline zoom segmented control is grouped with an accessible name (a11y)", async ({ page }) => {
+  await bootV2(page);
+  // the 8b/16b/Full buttons are mutually-exclusive aria-pressed toggles — group them so a
+  // screen reader announces them as one control, not three unrelated buttons (matches the
+  // role=group pattern the lyric proposals panel already uses).
+  await expect(page.getByRole("group", { name: "Timeline zoom" })).toBeVisible();
+});
