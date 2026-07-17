@@ -189,6 +189,32 @@ def _phonology_available() -> bool:
     return importlib.util.find_spec("cmudict") is not None
 
 
+def _guest_capability_summary() -> dict:
+    """Honest, live-checked "is the per-feature AI setup installed on THIS Mac" summary —
+    the same booleans /health already reports (transcribe/skeleton/whisper/phonology),
+    plus the transform tier's real-vs-fake backend and the training tier's backend name.
+    A guest Mac (no ~/Library/Mosh/venvs, no RAVE models, no MOSH_TRAINING_REMOTE_URL) sees
+    every venv-backed flag False and both backends "fake"/"fake-transform" — the frontend
+    disables/labels the affected UI (clip-menu transcription actions, the transform target
+    picker, the training popover) rather than letting them fail cryptically.
+
+    Piggybacked onto GET /transform_targets (see that handler) because it is the one
+    existing generic capability-discovery command (`list_transform_targets`) the native
+    side already forwards to the frontend verbatim with zero C++ involved — there is no
+    dedicated /capabilities passthrough command, and adding one would require a native
+    change, which this pass avoids. `/capabilities` itself also carries the venv flags
+    (for parity with /health) but nothing proxies it to the UI today."""
+    from adapters import transform_adapter as _tx
+    return {
+        "transcribe": _transcribe_available(),
+        "skeleton": _skeleton_available(),
+        "whisper": _whisper_available(),
+        "phonology": _phonology_available(),
+        "transformReal": _tx.available(),
+        "trainingBackend": lora_trainer_adapter.backend_name(),
+    }
+
+
 def _pronounce_words(words: list) -> dict:
     """ARPAbet phones for `words` via the phonology venv (real g2p for slang) when present,
     else in-process (cmudict/heuristic). Used by the vocabulary palette write path so palette
@@ -745,6 +771,11 @@ class Handler(BaseHTTPRequestHandler):
                              "sketch": {"available": _sketch_available(), "vocab": ["kick", "snare", "hat"],
                                         "grid": "16th", "bars": [1, 2]},
                              "whisper": {"available": _whisper_available()},
+                             # Parity with /health, which already reports these two (guest-
+                             # degradation pass): a guest Mac without the skeleton/phonology
+                             # venvs still gets a full, honest /capabilities response.
+                             "skeleton": {"available": _skeleton_available()},
+                             "phonology": {"available": _phonology_available()},
                              "service_build": SERVICE_BUILD})
         elif path == "/colors":
             try:
@@ -767,14 +798,25 @@ class Handler(BaseHTTPRequestHandler):
             # Route C discovery: when the REAL RAVE backend is installed, list the
             # installed .ts model stems (concrete targets, no free-text). Otherwise the
             # Route B curated fake list + free-text.
+            #
+            # `capabilities` (guest-degradation pass, 2026-07-16): the native
+            # `list_transform_targets` command forwards this whole object to the frontend
+            # verbatim, so it doubles as the one generic "what's actually installed on this
+            # Mac" carrier the UI loads lazily (ui/src/store.ts loadCapabilities, triggered
+            # on first clip-menu/Gen-drawer open — never at startup) — see
+            # _guest_capability_summary()'s docstring for why this endpoint specifically.
+            # (The transform tier's own real-vs-fake bit lives at capabilities.transformReal;
+            # no separate top-level field — the frontend only ever reads the nested one.)
             from adapters import transform_adapter as _tx
+            caps = _guest_capability_summary()
             if _tx.available():
-                self._send(200, {"ok": True, "targets": _tx.installed_targets(), "freeText": False})
+                self._send(200, {"ok": True, "targets": _tx.installed_targets(), "freeText": False,
+                                 "capabilities": caps})
             else:
                 self._send(200, {"ok": True,
                                  "targets": ["violin", "flute", "choir", "strings",
                                              "orchestra", "synth pad", "music box", "brass"],
-                                 "freeText": True})
+                                 "freeText": True, "capabilities": caps})
         elif path == "/training/health":
             self._send(200, {
                 "ok": True,
@@ -994,7 +1036,15 @@ class Handler(BaseHTTPRequestHandler):
             # skeleton.core, golden-covered); only the signal extraction is subprocessed.
             # GRACEFUL DEGRADATION: the FCPE venv (notes + F0, finer nuclei) is an UPGRADE — when
             # absent we reuse the Basic-Pitch /transcribe venv (notes only, f0=None) -> #178-quality
-            # rhythm with ZERO new install; both absent -> a clean no_melody_detected.
+            # rhythm with ZERO new install; genuinely zero notes detected -> a clean
+            # no_melody_detected. Guest-degradation pass: those two "no notes" causes used to
+            # collapse into the SAME no_melody_detected string even when Basic Pitch was simply
+            # NOT INSTALLED (a guest Mac with no ~/Library/Mosh/venvs/transcribe) — telling a
+            # tester "no melody detected in the take" about a take that plainly has melody is
+            # actively misleading. The native side (MoshOps.cpp cmdBuildSkeletonFromClip's
+            # `land`) only special-cases the EXACT string "no_melody_detected"; any other
+            # non-empty `error` is shown to the user verbatim, so the message below IS the
+            # user-facing text.
             input_wav = data.get("inputWav", "")
             if not input_wav or not os.path.exists(input_wav):
                 self._send(400, {"ok": False, "error": "inputWav missing or not found"})
@@ -1021,7 +1071,14 @@ class Handler(BaseHTTPRequestHandler):
                 except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
                     pass
             if not notes:
-                self._send(200, {"ok": False, "error": "no_melody_detected", "lines": []})
+                if not os.path.isfile(bp_py):
+                    self._send(200, {"ok": False,
+                                     "error": "audio-to-MIDI transcription isn't installed on this "
+                                              "Mac (run setup-guest.sh, or setup-transcribe.sh, to "
+                                              "enable Build flow / Build lyrics / Convert to MIDI)",
+                                     "lines": []})
+                else:
+                    self._send(200, {"ok": False, "error": "no_melody_detected", "lines": []})
                 return
             f0 = None
             sk_py = _skeleton_py()
