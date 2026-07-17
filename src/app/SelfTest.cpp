@@ -6,6 +6,7 @@
 #include "brain/BrainProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
+#include <juce_cryptography/juce_cryptography.h>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -1470,6 +1471,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hasArtifact = (bool) c.getProperty ("renderLayer", var()).getProperty ("hasArtifact", false); }
         check (hasArtifact, "render produced a cached artifact (output.wav)");
 
+        // Content fingerprint of the applied audio (the clip's in-place source). The MISS/HIT
+        // checks alone can't see stale job-dir reuse: the layer's job dir keeps the SAME
+        // output.wav path across renders, and the pollers treat an existing output+manifest
+        // pair as the durable completion signal — so a re-render that never clears the pair
+        // "completes" instantly with the PREVIOUS render's audio while still reporting MISS.
+        auto clipSource = [&] (const String& cid) -> File {
+            auto trk = trackById (gt);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == cid)
+                        return File (c.getProperty ("sourceFile", var()).toString());
+            return {};
+        };
+        const auto srcA = clipSource (gcid);
+        check (srcA.existsAsFile(), "first render's applied source exists on disk");
+        const auto bytesA = juce::MD5 (srcA).toHexString();
+
         // Re-render with identical fingerprint -> cache HIT.
         auto r2 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r2["data"].getProperty ("cache", var()).toString() == "hit", "identical re-render is a cache HIT (full fingerprint)");
@@ -1478,6 +1496,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 2 }}));
         auto r3 = cmd (ops, "render_layer", objN ({{ "clipId", gcid }, { "wait", true }}));
         check (r3["data"].getProperty ("cache", var()).toString() == "miss", "param change -> dirty -> re-render (cache MISS)");
+        // The fake adapter's output depends on the seed, so the re-render's AUDIO must actually
+        // change — this is the assertion that catches stale job-dir reuse (a stale pair lands
+        // the old bytes under a fresh fingerprint name and MISS/HIT still looks correct).
+        const auto srcB = clipSource (gcid);
+        check (srcB.existsAsFile(), "param-change re-render's applied source exists on disk");
+        check (juce::MD5 (srcB).toHexString() != bytesA,
+               "param-change re-render produced DIFFERENT audio bytes (no stale job-dir reuse)");
 
         // --- NRL-004: render-layer management (in-place apply / reset / bypass / freeze / remove) ---
         section ("NRL-004: render-layer management");
