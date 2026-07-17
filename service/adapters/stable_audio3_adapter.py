@@ -79,13 +79,28 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
 
     # LoRA rack: apply the selection to the DiT weights at RUNTIME (in-memory, no
     # disk bake, no reload) — idempotent on the selection key; empty == stock.
+    # The key folds in each file's sha12 so a retrained same-name adapter never
+    # reuses a stale in-memory application mid-session.
     import time as _time
     from loras import registry as LR
     lora_sel = LR.resolve(params.get("loras") or [], lab=lab)
-    loras_key = "|".join(f"{n}@{s}" for n, _f, s in lora_sel)     # "" == stock
+    lora_recs = {r["name"]: r for r in LR.list_loras()}
+    loras_key = "|".join(f"{n}@{s}@{lora_recs.get(n, {}).get('sha12', '')}"
+                         for n, _f, s in lora_sel)                # "" == stock
     _t0 = _time.perf_counter()
     eng.apply_loras(lora_sel, loras_key)
     apply_ms = round((_time.perf_counter() - _t0) * 1000.0, 1)
+
+    # Trigger auto-inject (owner's progressive-disclosure call): each active
+    # adapter's trigger token joins the prompt server-side, in rack order,
+    # deduplicated — surfaced only in the UI tooltip, never typed by the user.
+    triggers = []
+    for n, _f, _s in lora_sel:
+        t = (lora_recs.get(n, {}).get("trigger") or "").strip()
+        if t and t not in triggers and t.lower() not in prompt.lower():
+            triggers.append(t)
+    if triggers:
+        prompt = ", ".join(triggers + ([prompt] if prompt else []))
 
     has_src = bool(input_wav) and os.path.exists(input_wav)
 
@@ -115,7 +130,11 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "init_cache": init_status,
             "steers": [{"layer": t[0], "alpha": round(t[1], 4),
                         "scheduled": len(t) > 3 and t[3] is not None} for t in steers],
-            "loras": [{"name": n, "strength": s} for (n, _f, s) in lora_sel],
+            "loras": [{"name": n, "strength": s,
+                       "sha12": lora_recs.get(n, {}).get("sha12", "")}
+                      for (n, _f, s) in lora_sel],
+            "loras_applied": bool(lora_sel),
+            "triggers_injected": triggers,
             "lora_apply": "runtime",
             "apply_ms": apply_ms,
             "pq": None, "pq_base": None, "flags": [],

@@ -26,7 +26,7 @@ SECONDS = float(os.environ.get("SA3_SECONDS", "8.0"))   # pins the latent grid (
 
 # Bump when the runtime LoRA-apply math changes — folded into the service build so
 # the native render-cache invalidates (mirrors the old MERGE_VERSION role).
-LORA_APPLY_VERSION = "1"
+LORA_APPLY_VERSION = "2"   # 2: sha-keyed apply + server-side trigger injection (hybrid)
 
 _engine = None
 _engine_lock = threading.Lock()

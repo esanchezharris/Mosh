@@ -6177,7 +6177,8 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
 }
 
 juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                         const juce::String& upstreamOverride)
+                                         const juce::String& upstreamOverride,
+                                         const juce::String& lorasKey)
 {
     // Wave clips hash the staged audio. MIDI/drum clips are auto-bounced, but the bounce
     // isn't bit-deterministic (a synth's free-running phase), so they pass a stable source
@@ -6202,7 +6203,64 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
         juce::String (bpm, 4) + "bpm/" + tonic + " " + keyMode;
 
     return RenderLayer::fingerprint (node, upstreamHash, tempoKeyContext, 44100, 2,
-                                     jobManager.serviceBuild());
+                                     jobManager.serviceBuild(), lorasKey);
+}
+
+bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey, juce::String& err)
+{
+    // "name=value@sha12:trigger;" per ACTIVE (value != 0) row, rack order — resolved at
+    // RENDER time via GET /loras so the key carries content identity: a retrained
+    // same-name file (new sha) or a sidecar trigger edit is a cache MISS, and an
+    // unknown name errors BEFORE any job submit. Non-SA3 adapters key name=value only
+    // (the fake never applies adapters) — hermetic, no service round-trip.
+    lorasKey = {};
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto loras = params.getChildWithName (ids::LORAS);
+    if (! loras.isValid() || loras.getNumChildren() == 0)
+        return true;
+
+    juce::Array<juce::ValueTree> active;
+    for (int i = 0; i < loras.getNumChildren(); ++i)
+        if (auto row = loras.getChild (i); (double) row[ids::value] != 0.0)
+            active.add (row);
+    if (active.isEmpty())
+        return true;
+
+    const auto adapter = node[ids::modelAdapter].toString();
+    const bool isSa3 = adapter == "stable_audio3" || adapter == "sa3";
+    if (! isSa3)
+    {
+        for (auto& row : active)
+            lorasKey << row[ids::name].toString() << "=" << row[ids::value].toString() << ";";
+        return true;
+    }
+
+    auto reg = jobManager.listLoras();
+    if (! (bool) reg.getProperty ("ok", false))
+    {
+        err = "LoRA registry unavailable (generative service)";
+        return false;
+    }
+    std::map<juce::String, juce::var> byName;
+    if (auto* arr = reg.getProperty ("loras", var()).getArray())
+        for (auto& r : *arr)
+            byName[r.getProperty ("name", "").toString()] = r;
+
+    for (auto& row : active)
+    {
+        const auto name = row[ids::name].toString();
+        auto it = byName.find (name);
+        if (it == byName.end() || ! (bool) it->second.getProperty ("valid", false))
+        {
+            const auto dir = reg.getProperty ("dir", "~/Library/Mosh/loras/sa3").toString();
+            err = "LoRA '" + name + "' not found — drop the .safetensors in " + dir;
+            return false;
+        }
+        lorasKey << name << "=" << row[ids::value].toString()
+                 << "@" << it->second.getProperty ("sha12", "").toString()
+                 << ":" << it->second.getProperty ("trigger", "").toString() << ";";
+    }
+    return true;
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
@@ -6341,13 +6399,14 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
             }
     }
 
-    if (args.hasProperty ("loras"))   // LoRA rack: ≤2, ordered (stacks merge sequentially)
+    if (args.hasProperty ("loras"))   // LoRA rack: unbounded, ordered (stacks merge sequentially)
     {
         // getOrCreate: layers created before the rack shipped have no LORAS child.
+        // No count cap / strength clamp (owner call): value > 100 = deliberate overdrive.
         auto loras = params.getOrCreateChildWithName (ids::LORAS, &undoManager());
         loras.removeAllChildren (&undoManager());
         if (auto* arr = args.getProperty ("loras", var()).getArray())
-            for (int i = 0; i < juce::jmin (2, arr->size()); ++i)
+            for (int i = 0; i < arr->size(); ++i)
             {
                 auto& l = arr->getReference (i);
                 juce::ValueTree lo (ids::LORA);
@@ -6796,7 +6855,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_layer", "generative service unavailable");
 
-    const auto fp = computeFingerprint (node, input, upstreamOverride);
+    // Resolve the LoRA rack to its content identity (sha12 + trigger via /loras) —
+    // an unknown adapter name fails HERE, before any submit or cache probe.
+    juce::String lorasKey, lorasErr;
+    if (! resolveLorasKey (node, lorasKey, lorasErr))
+        return errResult ("render_layer", lorasErr);
+
+    const auto fp = computeFingerprint (node, input, upstreamOverride, lorasKey);
 
     // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
     // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
@@ -7037,6 +7102,35 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
 
     node.setProperty (ids::renderError, "", nullptr);   // clear on success
 
+    // P5 — boundary-quantized swap (ORDINARY renders only; the Live lane lands its own
+    // windows with a crossfade at the knob, the owner's default): a render that finishes
+    // while the producer is LISTENING to the target clip must not swap mid-phrase — hold
+    // it until the next musical boundary (the loop wrap when looping, else the next bar),
+    // then land. Stopped transport / headless / sing (never auto-applies) / a Live-armed
+    // layer land immediately as before.
+    double boundarySec = 0.0, armedPosSec = 0.0;
+    if (node[ids::mode].toString() != "sing"
+        && ! (bool) node[ids::liveArmed]
+        && shouldDeferSwap (clipId, boundarySec, armedPosSec))
+    {
+        pendingSwaps[clipId] = { outputWav, manifestFile, cacheKey, expectedEpoch,
+                                 boundarySec, armedPosSec };
+        if (swapTimer == nullptr)
+            swapTimer = std::make_unique<SwapTimer> (*this);
+        if (! swapTimer->isTimerRunning())
+            swapTimer->startTimerHz (30);   // the same decimation rate as the transport rail
+        return;   // status stays "rendering"; pollPendingSwaps() lands it at the boundary
+    }
+
+    applyFinalizedRender (clipId, outputWav, manifestFile, cacheKey);
+}
+
+void MoshOps::applyFinalizedRender (const juce::String& clipId, const juce::File& outputWav,
+                                    const juce::File& manifestFile, const juce::String& cacheKey)
+{
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+
     // Auto-apply the render (the new default): WAVE clips swap their own source in place; MIDI/drum
     // clips land a HIDDEN looping audio clip beneath the now-muted MIDI (Phase 2). Either way it's an
     // instant preview with no accept step. A sub-region render (or a clip with no track) falls through
@@ -7059,6 +7153,88 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+bool MoshOps::shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec)
+{
+    // Only meaningful when audio is actually audible: headless (selftest/run-script)
+    // never defers, so the harness stays deterministic by construction.
+    if (! eng.hasAudio())
+        return false;
+    if (juce::SystemStats::getEnvironmentVariable ("MOSH_SWAP_QUANTIZE", "1") == "0")
+        return false;   // escape hatch: land renders the instant they finish
+
+    auto& transport = eng.edit().getTransport();
+    if (! transport.isPlaying())
+        return false;
+
+    auto* clip = findClip (clipId);
+    if (clip == nullptr)
+        return false;
+    const auto cpos = clip->getPosition();
+    const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    posSec = transport.getPosition().inSeconds();
+    if (posSec < cs - 1.0e-3 || posSec >= ce - 1.0e-3)
+        return false;   // the playhead isn't in this clip — nothing audible interrupts
+
+    // Loop wrap when the transport loop is on and surrounds the playhead — "the change
+    // arrives when the loop comes around".
+    if (transport.looping.get())
+    {
+        const auto lr = transport.getLoopRange();
+        const double ls = lr.getStart().inSeconds(), le = lr.getEnd().inSeconds();
+        if (le > ls && posSec >= ls && posSec < le)
+        {
+            boundarySec = le;
+            return true;
+        }
+    }
+
+    // Otherwise the next BAR boundary from the tempo sequence.
+    const auto bb = eng.edit().tempoSequence.toBarsAndBeats (
+        tracktion::TimePosition::fromSeconds (posSec));
+    tracktion::tempo::BarsAndBeats next;
+    next.bars = bb.bars + 1;
+    boundarySec = eng.edit().tempoSequence.toTime (next).inSeconds();
+    return boundarySec > posSec + 1.0e-3;
+}
+
+void MoshOps::pollPendingSwaps()
+{
+    if (pendingSwaps.empty())
+    {
+        if (swapTimer != nullptr)
+            swapTimer->stopTimer();
+        return;
+    }
+    auto& transport = eng.edit().getTransport();
+    const bool playing = transport.isPlaying();
+    const double pos = transport.getPosition().inSeconds();
+
+    for (auto it = pendingSwaps.begin(); it != pendingSwaps.end();)
+    {
+        auto& ps = it->second;
+        const bool wrapped = pos < ps.armedPosSec - 0.05;         // loop wrap or seek-back
+        const bool reached = pos >= ps.boundarySec - 1.0e-3;
+        if (! playing || wrapped || reached)
+        {
+            // Same staleness rule as finalizeRender: a reactive render superseded while
+            // waiting at the boundary must not land.
+            auto node = findRenderLayer (it->first);
+            const bool fresh = node.isValid()
+                && ! (ps.expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != ps.expectedEpoch);
+            if (fresh)
+                applyFinalizedRender (it->first, ps.outputWav, ps.manifestFile, ps.cacheKey);
+            it = pendingSwaps.erase (it);
+        }
+        else
+        {
+            ps.armedPosSec = pos;   // track motion so a wrap reads as pos going backwards
+            ++it;
+        }
+    }
+    if (pendingSwaps.empty() && swapTimer != nullptr)
+        swapTimer->stopTimer();
 }
 
 bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
@@ -7506,7 +7682,19 @@ void MoshOps::renderAheadStartWindow (int k)
                 renderAheadDisarm();
                 return;
             }
-            renderAheadWindowDone (k, capturedEpoch, outFile);
+            // A window that rendered but failed to STITCH/repoint must surface, not
+            // silently no-op (a /stitch_windows failure once made the whole Live lane
+            // report success while never changing the audio). A false return with a
+            // matching epoch == the stitch/repoint failed; superseded/disarmed is fine.
+            if (! renderAheadWindowDone (k, capturedEpoch, outFile)
+                && r.active && capturedEpoch == r.epoch)
+            {
+                emit ("layer_status", [&] { auto* o = new DynamicObject();
+                    o->setProperty ("clipId", r.clipId); o->setProperty ("status", "error");
+                    o->setProperty ("error", "render-ahead stitch failed"); return var (o); }());
+                renderAheadDisarm();
+                return;
+            }
             if (r.active) renderAheadTick (r.lastPlayheadSec);   // chain the next window
         });
     }).detach();
@@ -7621,7 +7809,10 @@ juce::var MoshOps::cmdRenderAheadTick (const juce::var& args)
         }
         if (! outFile.existsAsFile())
         { renderAheadDisarm(); return errResult ("render_ahead_tick", "window render failed"); }
-        renderAheadWindowDone (k, ra.epoch, outFile);
+        // Fail CLOSED on a stitch/repoint failure (found live: a /stitch_windows 404
+        // silently no-op'd the whole lane while `placed` still reported success).
+        if (! renderAheadWindowDone (k, ra.epoch, outFile))
+        { renderAheadDisarm(); return errResult ("render_ahead_tick", "window stitch failed"); }
         ++placed;
     }
     auto* d = new DynamicObject();
