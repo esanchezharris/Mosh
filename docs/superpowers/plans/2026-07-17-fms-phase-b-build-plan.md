@@ -41,9 +41,15 @@ bigger lyric surgery. V4b PASS makes melisma (note_type=3) the flex mechanism.
   quality claim. Product adapter keeps `sylSnapMedianMs` as residual observability but the
   HARNESS pages (fresh-render/finish.py class) report vowel-onset medians.
 
-## Lane (b) — B1-lite: stage-3 duration derivation (~3–5 days) — THIRD
+## Lane (b) — B1-lite: stage-3 duration derivation — THIRD ✅ BUILT 2026-07-17 (ear round pending)
 
 V2: gold durations beat verbatim slots blind (vowel error 40→10ms) — real, partial win.
+**Status:** built + instrumented same-day (orchestrated: 2 parallel build agents + inline
+wiring + adversarial-review workflow). Core `service/soulx/duration.py`, params
+`duration_params.json` (fitted, clamped), mode `author_score(durations=…)` default-off,
+lab arms rendered. Instrument: verbatim +45ms vowel-onset delta → derived 0.0ms
+(pre-NSF snapped, n=30). Exit gate = the owner blind A/B at `mechanism/b1/b1-listen.html`
+— build record in `../specs/2026-07-16-fms-mechanism-verify-verdict.md` §B1-lite.
 
 - The take stays the spec at PHRASE level: phrase start/end + note pitches per slot.
 - Inside a phrase, durations are DERIVED, not transferred: anchor stressed/downbeat vowel

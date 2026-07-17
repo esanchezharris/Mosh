@@ -181,3 +181,43 @@ until after first-stranger per the runway rule.
    re-attack (vs M0)?
 3. **Line-1 re-record** (the export was silent) → a corroborating V2 round on the
    heavy-cluster line.
+
+## B1-lite BUILD record (2026-07-17 — post-Phase-V; ear round pending)
+
+All three green-lit lanes are now landed on this branch; lane (b) B1-lite completed the set.
+Build per `../plans/2026-07-17-fms-phase-b-build-plan.md` §Lane (b):
+
+- **Core:** `service/soulx/duration.py` — anchored piecewise zero-sum derivation
+  (stressed-content vowel onsets pinned to their take nuclei, onset consonants budgeted
+  BEFORE the anchor, function-word compression / stressed-rime + phrase-final lengthening
+  between anchors, articulability floors × cluster, phrase-initial rest-steal ≤120ms).
+  62-check golden ×3-det; `strength=0` is an exact identity.
+- **Params** (`service/soulx/duration_params.json`, fitted by `fit_duration_params.py`):
+  consonant_ms 47.4 (n=71 V0 raw-chunk clean rows; snapped lanes excluded — that stage is
+  deleted), floor 80.2ms (the owner's shortest gold word), stress 1.8 / function-compress
+  0.5 / final-lengthen 1.6 — all three gold ratios CLAMPED at their registered bounds
+  (n=6 monosyllabic gold words; the clamps are the honesty mechanism, provenance in the
+  JSON).
+- **Mode:** `author_score(durations="verbatim"|"derived")`, default byte-identical
+  (RED-proven pin); adapter passes `params["durations"]` through and reports it in the
+  manifest. Lab arms share the same `derive_clip` code path.
+- **Arms:** both re-rendered LOCALLY (V2 backend-parity lesson), 5 chunks each,
+  self-placement verified; plain-sum assembly; phrase-only snap with VERBATIM-clip
+  windows for BOTH arms; NSF `perform` at the take's F0.
+
+**Instrument readout (registered as informative, ear is the gate):** on the identical
+pre-NSF snapped arms, the vowelGate clean subset (n=30 measured of 34 clean / 101 words)
+reads **verbatim +45.0ms median vowel-onset delta → derived 0.0ms** — the V0/V2 lateness
+figure reproduced on the verbatim arm and eliminated on the derived arm (the V2 oracle
+had reached ~10ms). squeeze_frac 0.467 → 0.40; median vowel dur_ratio 0.833 → **0.905**
+(the derived arm holds vowels closer to full length — the anti-squeeze direction).
+Counterweight recorded: raw env_corr vs the take drops 0.425 → 0.332 (derivation
+deliberately re-times inside phrases; V3 proved env_corr and ear can move oppositely —
+neither direction is a verdict). Numbers are post-review-fix (the infeasible-revert,
+strength=0, and rest-steal fixes; derived arm re-rendered).
+
+**Owner checkpoint (the lane's exit gate):** blind A/B at
+`mechanism/b1/b1-listen.html` (:8199) — the u2 back half two ways (full passage + the two
+proven line windows, independently shuffled, level-matched). Unblinding in
+`b1-labels.json` (not linked). Verdict decides whether `durations:"derived"` becomes the
+sing default.
