@@ -28,15 +28,25 @@
 # Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 1;
 #            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`),
 #            MOSH_NOTARY_PROFILE (notarytool keychain profile, default "mosh-notary"),
-#            MOSH_RELEASE_DIR (release output dir, default ~/Desktop/Mosh-share).
+#            MOSH_RELEASE_DIR (release output dir, default ~/Desktop/Mosh-share),
+#            MOSH_SIGN_IDENTITY (pin an exact codesign identity instead of
+#            auto-discovering the first "Developer ID Application" cert),
+#            MOSH_NOTARY_APPLE_ID/MOSH_NOTARY_TEAM_ID/MOSH_NOTARY_PASSWORD (notarize
+#            with an explicit Apple-ID/team/app-specific-password instead of a
+#            keychain profile — no keychain profile setup needed; this is the mode
+#            .github/workflows/release.yml uses in CI).
 #
-# One-time setup for `release` (secrets stay in your keychain, never in the repo):
+# One-time setup for `release` (secrets stay in your keychain, never in the repo) —
+# full runbook incl. the CI path: docs/release/SIGNING_RUNBOOK.md. Short version:
 #   1. Create the cert: Xcode ▸ Settings ▸ Accounts ▸ <Apple ID> ▸ Manage Certificates…
 #      ▸ + ▸ "Developer ID Application".  (An "Apple Development" cert can NOT notarize
 #      for direct distribution — this is a separate certificate you must create.)
 #   2. Store notary creds once (make an app-specific password at appleid.apple.com):
 #        xcrun notarytool store-credentials "mosh-notary" \
 #          --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-pw>
+#   3. Sanity-check both without spending a build: `scripts/release/sign-and-notarize.sh
+#      --preflight-only` (fails closed with exact instructions if either is missing) or
+#      `--dry-run` (also previews the exact codesign/notarytool commands, no creds needed).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -308,81 +318,25 @@ refresh_icon_cache() { touch "$1"; killall Finder 2>/dev/null || true; killall D
 # The everyday `deploy` stays ad-hoc + local + fast. `release` produces a NOTARIZED,
 # stapled DMG (+ zip) that any friend opens by double-clicking — no Gatekeeper wall, no
 # right-click-Open, no `xattr`. Secrets never touch the repo or this script: the signing
-# identity lives in the keychain and notary creds live in a keychain profile.
-ENTITLEMENTS="$ROOT/cmake/Mosh.entitlements"
-NOTARY_PROFILE="${MOSH_NOTARY_PROFILE:-mosh-notary}"
+# identity lives in the keychain (or MOSH_SIGN_IDENTITY) and notary creds live in a
+# keychain profile (or MOSH_NOTARY_APPLE_ID/TEAM_ID/PASSWORD).
+#
+# The actual sign/notarize/staple/verify mechanics (incl. entitlements, the fail-closed
+# credential preflight, and the Info.plist regression guard) live in ONE place —
+# scripts/release/sign-and-notarize.sh — shared with .github/workflows/release.yml so
+# the local and CI release paths can never drift apart. See that script's own header
+# comment for the full env-var contract, and docs/release/SIGNING_RUNBOOK.md for the
+# one-time owner setup. This `release` verb is unchanged in shape from before
+# (build → stage → bundle → sign → notarize → dmg → sign/notarize the dmg → zip); only
+# the signing/notarizing STEPS themselves were extracted out to be independently
+# testable and CI-reusable.
+RELEASE_SIGN="$ROOT/scripts/release/sign-and-notarize.sh"
 
-# Echo the SHA-1 of an installed "Developer ID Application" identity, or empty if none.
-# (An "Apple Development"/"Apple Distribution" cert is NOT accepted by notarization for
-# direct distribution — it must be a Developer ID Application cert.)
-dev_id_identity() {
-  security find-identity -v -p codesigning 2>/dev/null \
-    | awk '/Developer ID Application/ { print $2; exit }'
-}
-
-# Sign a bundle for distribution: Hardened Runtime (--options runtime) + secure timestamp,
-# signed INSIDE-OUT (nested Mach-O first, the app bundle last with entitlements). Apple
-# discourages --deep for distribution, so nested code is signed explicitly. In the default
-# build there is no nested Mach-O (JUCE links statically); the anira build bundles LibTorch
-# + libanira dylibs, which the find loop covers.
-sign_app_developer_id() {                       # $1 = app, $2 = identity sha
-  local DEST="$1" ID="$2" f
-  xattr -cr "$DEST" 2>/dev/null || true
-  while IFS= read -r f; do
-    codesign --force --options runtime --timestamp --sign "$ID" "$f"
-  done < <(find "$DEST/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null)
-  while IFS= read -r f; do
-    codesign --force --options runtime --timestamp --sign "$ID" "$f"
-  done < <(find "$DEST/Contents" -type d -name '*.framework' 2>/dev/null)
-  # nested Mach-O *executables* (helper tools / scanners), if any. The default build has
-  # none (only Contents/MacOS/Mosh, sealed with the bundle below); this future-proofs the
-  # function against any helper a later build drops in — an unsigned nested Mach-O would
-  # fail notarization since we (correctly) avoid --deep for distribution.
-  while IFS= read -r f; do
-    [ "$f" = "$DEST/Contents/MacOS/Mosh" ] && continue
-    file "$f" 2>/dev/null | grep -q 'Mach-O' && \
-      codesign --force --options runtime --timestamp --sign "$ID" "$f"
-  done < <(find "$DEST/Contents/MacOS" "$DEST/Contents/Helpers" -type f 2>/dev/null)
-  codesign --force --options runtime --timestamp \
-           --entitlements "$ENTITLEMENTS" --sign "$ID" "$DEST"
-  sleep 1; xattr -cr "$DEST" 2>/dev/null || true
-  codesign --verify --deep --strict "$DEST"
-  echo "  signature: valid (Developer ID, Hardened Runtime + entitlements)"
-}
-
-# Upload to Apple's notary service, wait for the verdict, then staple the ticket so the
-# app validates OFFLINE on the friend's Mac. `--wait` blocks 1–5 min and exits nonzero
-# on rejection (→ set -e aborts); inspect a failure with
-#   xcrun notarytool log <submission-id> --keychain-profile "$NOTARY_PROFILE"
-notarize_bundle() {                             # $1 = .app or .dmg
-  local TARGET="$1" TMP="" SUBMIT="$1" rc=0
-  if [[ "$TARGET" == *.app ]]; then
-    TMP="$(mktemp -d)"                              # the .app must be zipped to submit
-    SUBMIT="$TMP/$(basename "$TARGET" .app).zip"
-    ditto -c -k --keepParent "$TARGET" "$SUBMIT"
-  fi
-  echo "  submitting to Apple notary (profile: $NOTARY_PROFILE) — 1–5 min…"
-  # Don't let set -e abort before cleanup: the zip embeds brain.env (the key), so it must
-  # never be left in /tmp on a rejection. Clean up on BOTH paths, then propagate failure.
-  xcrun notarytool submit "$SUBMIT" --keychain-profile "$NOTARY_PROFILE" --wait || rc=$?
-  [ -n "$TMP" ] && rm -rf "$TMP"
-  [ "$rc" -eq 0 ] || return "$rc"
-  echo "  stapling ticket…"
-  xcrun stapler staple "$TARGET"
-  xcrun stapler validate "$TARGET"
-}
-
-# Build a drag-to-Applications DMG from an app bundle.
+# Build a drag-to-Applications DMG from an app bundle. Delegates to
+# scripts/release/make-dmg.sh (shared with .github/workflows/release.yml) — one
+# implementation, not two copies that can drift.
 make_dmg() {                                     # $1 = app, $2 = output .dmg
-  local APP="$1" DMG="$2" STAGE rc=0
-  STAGE="$(mktemp -d)"
-  cp -R "$APP" "$STAGE/"
-  ln -s /Applications "$STAGE/Applications"       # the classic drag target
-  rm -f "$DMG"
-  # Stage holds a full .app copy (incl. brain.env); clean it even if hdiutil fails.
-  hdiutil create -volname "Mosh" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null || rc=$?
-  rm -rf "$STAGE"
-  return "$rc"
+  "$ROOT/scripts/release/make-dmg.sh" "$1" "$2" "Mosh"
 }
 
 case "$MODE" in
@@ -429,23 +383,10 @@ case "$MODE" in
     ;;
 
   release)
-    # --- preflight: the two one-time prerequisites (fail with exact instructions) ---
-    ID="$(dev_id_identity)"
-    if [ -z "$ID" ]; then
-      echo "✗ No 'Developer ID Application' certificate in your keychain." >&2
-      echo "  Create it once: Xcode ▸ Settings ▸ Accounts ▸ <Apple ID> ▸ Manage Certificates…" >&2
-      echo "                  ▸ + ▸ 'Developer ID Application'." >&2
-      echo "  (An 'Apple Development' cert can't notarize for direct distribution.)" >&2
-      exit 1
-    fi
-    echo "signing identity: $(security find-identity -v -p codesigning | awk -v id="$ID" '$0 ~ id {sub(/^[ ]*[0-9]+\) [0-9A-F]+ /,""); print; exit}')"
-    if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-      echo "✗ Notary credentials profile '$NOTARY_PROFILE' not found (or invalid)." >&2
-      echo "  Set it up once (make an app-specific password at appleid.apple.com first):" >&2
-      echo "    xcrun notarytool store-credentials \"$NOTARY_PROFILE\" \\" >&2
-      echo "      --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-pw>" >&2
-      exit 1
-    fi
+    # --- preflight: fail fast, before spending 10+ min on a Release build, if signing
+    # identity / notary credentials aren't ready. Exact instructions on failure — see
+    # scripts/release/sign-and-notarize.sh's own preflight/resolve_* functions.
+    "$RELEASE_SIGN" --preflight-only
 
     # --- build Release, stage, bundle service + brain key, sign, notarize, DMG ---
     build_app macos-arm64-release macos-arm64-release-app
@@ -457,16 +398,13 @@ case "$MODE" in
     install_app "$APP" "$STAGED"
     bundle_service "$STAGED"
     bundle_brain_key "$STAGED"            # the key is sealed INTO the notarized bundle (see note below)
-    echo "signing for distribution…"
-    sign_app_developer_id "$STAGED" "$ID"
-    echo "notarizing app…"
-    notarize_bundle "$STAGED"
+    echo "signing + notarizing + stapling the app…"
+    "$RELEASE_SIGN" "$STAGED"
     DMG="$OUTDIR/Mosh.dmg"
     echo "building DMG…"
     make_dmg "$STAGED" "$DMG"
-    codesign --force --timestamp --sign "$ID" "$DMG"
-    echo "notarizing DMG…"
-    notarize_bundle "$DMG"
+    echo "signing + notarizing + stapling the DMG…"
+    "$RELEASE_SIGN" "$DMG"
     ZIP="$OUTDIR/Mosh.zip"; rm -f "$ZIP"; ditto -c -k --keepParent "$STAGED" "$ZIP"
     echo
     echo "✅ Notarized + stapled — friends can DOUBLE-CLICK to open (no right-click / xattr):"

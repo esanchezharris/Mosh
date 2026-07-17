@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened Runtime entitlements for the NOTARIZED, Developer-ID-distributed Mosh.
+         Mosh is NOT sandboxed (it's a direct-download DAW, not a Mac App Store app), so
+         everything below is a Hardened Runtime *exception*, not an App Sandbox grant —
+         do NOT add App Sandbox keys (com.apple.security.app-sandbox and its
+         com.apple.security.network.*/files.* friends) here; they'd be silently inert
+         without app-sandbox=true and would misdescribe the app's actual posture to
+         anyone auditing this file.
+
+         Applied ONLY to the notarized distribution build, by
+         scripts/release/sign-and-notarize.sh (invoked by `./run-mosh.sh release`
+         locally and by .github/workflows/release.yml on a tag push). The everyday
+         ad-hoc `./run-mosh.sh deploy` / `deploy-anira` paths sign with `codesign
+         --sign -` (ad-hoc, no entitlements file, no Hardened Runtime) and never read
+         this file — they're for the owner's own Mac, not third-party distribution.
+
+         Every key below is load-bearing (dropping it breaks a shipping feature); every
+         *omission* is a deliberate, verified choice, documented at the bottom. Re-audit
+         this file whenever plugin hosting, the WebView, or IPC/companion transport
+         changes shape — the check in `scripts/release/check-plist-keys.sh` guards the
+         Info.plist TCC keys, but nothing automated guards *this* file's completeness;
+         it's a human judgment call tied to what the codebase actually does. -->
+
+    <!-- THE essential one for a plugin host. Hardened Runtime's library validation
+         otherwise refuses to load any code not signed by our Team ID or Apple — which
+         is every third-party VST3/AU the user owns, plus the bundled LibTorch/anira
+         dylibs in the real-time-RAVE build (deploy-anira; not built by release.yml
+         today, but the entitlement is harmless to carry either way). Without this, no
+         user plugin loads — this is the whole point of a plugin-hosting DAW being
+         notarized instead of staying ad-hoc-only. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- JIT: the JavaScript engine behind the WebView UI (JUCE's WKWebView-backed
+         WebBrowserComponent → WebKit's JavaScriptCore), and any plugin/DSP code that
+         emits machine code at runtime (some synths JIT their DSP graphs). -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Distinct from allow-jit (which permits MAP_JIT pages): this permits the older
+         mprotect(PROT_WRITE|PROT_EXEC) pattern that some legacy VST3 synths still use.
+         Kept because Mosh hosts arbitrary third-party plugins picked by the user, not a
+         fixed allow-list; dropping it would crash whichever of those plugins relies on
+         it, on a user's machine, with no recourse. Do NOT remove thinking allow-jit
+         covers it — they gate different code paths in the kernel's page-protection
+         checks. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Microphone: native voice control + audio recording (src/voice/NativeSpeech.mm,
+         src/audio/*). Pairs with NSMicrophoneUsageDescription (the TCC prompt string;
+         already present in the base Info.plist, not injected by
+         cmake/InjectInfoPlistKeys.cmake — only the three keys that history has proven
+         get silently dropped are handled there; see that file's own header). -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Camera: the WebView multiplayer-presence camera feature. Pairs with
+         NSCameraUsageDescription, which IS one of the cmake/InjectInfoPlistKeys.cmake
+         keys — scripts/release/check-plist-keys.sh asserts it survives signing. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- ─────────────────────────────────────────────────────────────────────────
+         Considered and deliberately EXCLUDED (each re-verified 2026-07-17 against
+         the current source tree — see the grep commands in the sign-and-notarize PR
+         description / commit for the exact checks run):
+
+         • com.apple.security.cs.allow-dyld-environment-variables — would let
+           DYLD_INSERT_LIBRARIES etc. survive into the hardened process. Grepped
+           src/ + service/ + run-mosh.sh for DYLD_*: zero hits. The Python service is
+           spawned as an independent process (juce::ChildProcess), not via dyld
+           injection into Mosh itself, so this is genuinely unused, not just unused
+           *yet*. Re-grep before ever adding it back; it's one of the more dangerous
+           Hardened Runtime exceptions (arbitrary code injection into the signed
+           binary) and notarization visibly frowns on it.
+
+         • com.apple.security.get-task-allow — the "this process is debuggable" flag.
+           MUST stay absent (defaults to false when omitted): Apple's notary service
+           rejects submissions where it's true. Xcode strips it automatically for
+           Release archives; because we hand-build the codesign invocation ourselves
+           in sign-and-notarize.sh, there's no Xcode step to rely on — the guarantee
+           here is simply that no key by this name appears in this file. Grepped for
+           it repo-wide: zero hits outside this comment.
+
+         • com.apple.security.cs.disable-executable-page-protection — a strictly
+           more permissive superset of allow-jit / allow-unsigned-executable-memory
+           (removes ALL executable-page protection, not just the two known-needed
+           patterns). Apple explicitly discourages it. Nothing in the plugin-hosting
+           or WebView path needs it beyond what the two narrower entitlements above
+           already grant; adding it would be a pure security downgrade for zero
+           functional gain.
+
+         • com.apple.security.automation.apple-events — grepped src/ for
+           AppleEvent / osascript / NSAppleScript: zero hits. Mosh never sends Apple
+           Events to other apps (the iPhone companion is HTTP+mDNS over
+           RemoteCompanionServer, not AppleScript/Automator).
+
+         • Any com.apple.security.network.* / com.apple.security.files.* /
+           com.apple.security.temporary-exception.* key — these are App Sandbox
+           entitlements. They do nothing for a non-sandboxed app (no
+           com.apple.security.app-sandbox=true above) and would misrepresent Mosh's
+           actual security model to a reader of this file. If Mosh is ever sandboxed
+           for Mac App Store distribution, this whole file gets re-derived from
+           scratch against the Sandbox's stricter defaults — it is not a smaller
+           version of that future file.
+
+         • No XPC services / helper tools / LaunchAgents exist in the bundle (grepped
+           cmake/ + CMakeLists.txt + src/ for XPCService / Contents/Helpers /
+           LaunchAgent / LaunchDaemon: zero hits), so there is nothing beyond the one
+           main executable for sign-and-notarize.sh's inside-out signing loop to sign
+           with entitlements. If a helper process is ever added, it needs its OWN
+           entitlements (typically a narrower subset — e.g. rarely allow-jit) applied
+           at its own signing step, not by inheriting this file wholesale.
+         ───────────────────────────────────────────────────────────────────────── -->
+</dict>
+</plist>
