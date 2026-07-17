@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "consonant_ms": 47.4,
+  "stress_ratio": 1.8,
+  "function_compress": 0.5,
+  "final_lengthen": 1.6,
+  "floor_ms": 80.22,
+  "floor_per_consonant_ms": 25.0,
+  "rest_steal_max_ms": 120.0,
+  "strength": 1.0,
+  "provenance": {
+    "consonant_ms": {
+      "source": "median(est_cluster_dur_ms/cluster_len) over n=71 v0 rows (V0 raw '*-chunks' lane, clean subset)",
+      "raw": 47.4,
+      "clamped": false
+    },
+    "stress_ratio": {
+      "source": "median(content per-syl dur)/median(function per-syl dur), gold line, n_content=4 n_function=2",
+      "raw": 4.5,
+      "clamped": true
+    },
+    "function_compress": {
+      "source": "median(function per-syl dur)/median(content per-syl dur), gold line, n_content=4 n_function=2",
+      "raw": 0.2222,
+      "clamped": true
+    },
+    "final_lengthen": {
+      "source": "final-word per-syl dur / median(other words' per-syl dur), gold line (n_others=5)",
+      "raw": 2.7647,
+      "clamped": true
+    },
+    "floor_ms": {
+      "source": "min(gold word slot duration ms) over n=6 words",
+      "raw": 80.22,
+      "clamped": false
+    },
+    "floor_per_consonant_ms": {
+      "source": "default (no measurement defined for this coefficient)",
+      "raw": null,
+      "clamped": false
+    }
+  }
+}
