@@ -2,8 +2,10 @@
 // gating RULES (not just the fetch/store plumbing) are directly unit-testable, and so
 // every UI surface that needs to know "is the AI setup installed on this Mac" reads the
 // same logic instead of re-deriving it ad hoc. Backed by service/server.py's
-// _guest_capability_summary(), piggybacked onto GET /transform_targets and loaded once
-// at app init via store.ts's loadCapabilities() (see that file for why THAT endpoint).
+// _guest_capability_summary(), piggybacked onto GET /transform_targets and loaded
+// LAZILY (first clip-menu/Gen-drawer open — never at app init, which must stay free of
+// any command that can spawn the generative service) via store.ts's loadCapabilities()
+// (see that file for why THAT endpoint, and why the fetch must never be eager).
 import type { ServiceCapabilities } from "./types";
 
 // The clip-menu's audio-source actions (Convert to MIDI / Build lyrics from this take /

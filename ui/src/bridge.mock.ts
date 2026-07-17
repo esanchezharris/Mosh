@@ -1363,7 +1363,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // via the dev-only window.__moshStore handle rather than branching the mock here.
       return ok(command, {
         targets: ["violin", "flute", "choir", "strings", "orchestra", "synth pad", "music box", "brass"],
-        freeText: true, real: false,
+        freeText: true,
         capabilities: { transcribe: true, skeleton: true, whisper: true, phonology: true, transformReal: false, trainingBackend: "fake" },
       });
     case "create_render_layer": {

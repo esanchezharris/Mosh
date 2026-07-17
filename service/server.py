@@ -799,21 +799,24 @@ class Handler(BaseHTTPRequestHandler):
             # installed .ts model stems (concrete targets, no free-text). Otherwise the
             # Route B curated fake list + free-text.
             #
-            # `real` + `capabilities` (guest-degradation pass, 2026-07-16): the native
+            # `capabilities` (guest-degradation pass, 2026-07-16): the native
             # `list_transform_targets` command forwards this whole object to the frontend
             # verbatim, so it doubles as the one generic "what's actually installed on this
-            # Mac" carrier the UI loads once at startup (ui/src/store.ts loadCapabilities) —
-            # see _guest_capability_summary()'s docstring for why this endpoint specifically.
+            # Mac" carrier the UI loads lazily (ui/src/store.ts loadCapabilities, triggered
+            # on first clip-menu/Gen-drawer open — never at startup) — see
+            # _guest_capability_summary()'s docstring for why this endpoint specifically.
+            # (The transform tier's own real-vs-fake bit lives at capabilities.transformReal;
+            # no separate top-level field — the frontend only ever reads the nested one.)
             from adapters import transform_adapter as _tx
             caps = _guest_capability_summary()
             if _tx.available():
                 self._send(200, {"ok": True, "targets": _tx.installed_targets(), "freeText": False,
-                                 "real": True, "capabilities": caps})
+                                 "capabilities": caps})
             else:
                 self._send(200, {"ok": True,
                                  "targets": ["violin", "flute", "choir", "strings",
                                              "orchestra", "synth pad", "music box", "brass"],
-                                 "freeText": True, "real": False, "capabilities": caps})
+                                 "freeText": True, "capabilities": caps})
         elif path == "/training/health":
             self._send(200, {
                 "ok": True,

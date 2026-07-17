@@ -12,9 +12,11 @@ Proves the specific guest-degradation fixes:
   1. /skeleton_spec tells a "transcription isn't installed" truth apart from a
      genuine "no melody in this take" verdict (both used to collapse into the
      same no_melody_detected string — see server.py's /skeleton_spec handler).
-  2. /transform_targets carries the honest real/capabilities summary the
-     frontend now loads once at startup (ui/src/store.ts loadCapabilities) to
-     gate/label the clip-menu + transform + training UI.
+  2. /transform_targets carries the honest capabilities summary the frontend
+     loads LAZILY (ui/src/store.ts loadCapabilities, triggered on first
+     clip-menu/Gen-drawer open — never at app init, which must stay free of any
+     command that can spawn the generative service) to gate/label the clip-menu
+     + transform + training UI.
   3. /capabilities reports skeleton + phonology (parity with /health).
 
 Run:  python3 service/scripts/guest_degradation_test.py     (exit 0 = all pass)
@@ -105,11 +107,11 @@ def main():
               str(caps.get("skeleton")))
         check("/capabilities reports phonology", "phonology" in caps, str(caps.get("phonology")))
 
-        # ── /transform_targets: the honest real + capabilities carrier ──────────────
+        # ── /transform_targets: the honest capabilities carrier ─────────────────────
         xf = get_json(base, "/transform_targets")
         check("/transform_targets ok", xf.get("ok") is True)
-        check("/transform_targets real:false (no RAVE models)", xf.get("real") is False, str(xf.get("real")))
         check("/transform_targets freeText:true under fake transform", xf.get("freeText") is True)
+        check("/transform_targets has no dead top-level 'real' field", "real" not in xf, str(xf.keys()))
         guest_caps = xf.get("capabilities", {})
         check("capabilities.transcribe false", guest_caps.get("transcribe") is False, str(guest_caps))
         check("capabilities.skeleton false", guest_caps.get("skeleton") is False, str(guest_caps))
