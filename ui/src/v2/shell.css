@@ -1140,6 +1140,13 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+/* FIT-003 — live rescan progress line (indeterminate: a running count + elapsed
+   time, not a determinate "X of N" bar — see ScanProgress.h for why). */
+.v2-pdock-scan-status {
+  font-size: 11px;
+  color: var(--v2-faint);
+  padding: 2px 2px 2px;
+}
 
 /* the windowed, vendor-grouped list */
 .v2-pb-list { flex: 1 1 auto; min-width: 0; overflow-y: auto; position: relative; }

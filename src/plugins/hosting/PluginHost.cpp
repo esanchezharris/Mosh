@@ -97,6 +97,41 @@ File PluginHost::deadMansPedal() const
                .getChildFile ("Mosh").getChildFile ("plugin-scan-inflight.txt");
 }
 
+// FIT-003 — a separate small sidecar (NOT the JUCE-owned catalog XML) recording WHY
+// each blocklist entry was added. One "reason\trawId" line per entry.
+File PluginHost::blockReasonsFile() const
+{
+    return File::getSpecialLocation (File::userApplicationDataDirectory)
+               .getChildFile ("Mosh").getChildFile ("plugin-block-reasons.txt");
+}
+
+void PluginHost::loadBlockReasons()
+{
+    blockReasons.clear();
+    auto f = blockReasonsFile();
+    if (! f.existsAsFile()) return;
+    StringArray lines;
+    f.readLines (lines);
+    for (auto& line : lines)
+    {
+        const int tab = line.indexOfChar ('\t');
+        if (tab <= 0) continue;
+        blockReasons.set (line.substring (tab + 1), line.substring (0, tab));
+    }
+}
+
+void PluginHost::saveBlockReasons()
+{
+    auto f = blockReasonsFile();
+    f.getParentDirectory().createDirectory();
+    String out;
+    const auto keys = blockReasons.getAllKeys();
+    const auto vals = blockReasons.getAllValues();
+    for (int i = 0; i < keys.size(); ++i)
+        out << vals[i] << '\t' << keys[i] << '\n';
+    f.replaceWithText (out);
+}
+
 void PluginHost::loadCatalog()
 {
     auto f = catalogFile();
@@ -141,11 +176,14 @@ void PluginHost::recoverFromDeadMansPedal()
     if (! f.existsAsFile()) return;
     const auto crasherId = f.loadFileAsString().trim();
     if (crasherId.isNotEmpty())
-    {
-        engine.getPluginManager().knownPluginList.addToBlacklist (crasherId);
-        saveCatalog();
-    }
+        blockPluginWithReason (crasherId, "crash_or_hang");   // FIT-003: tag the reason
     f.deleteFile();
+}
+
+void PluginHost::debugSimulateCrashRecovery (const juce::String& pluginId)
+{
+    deadMansPedal().replaceWithText (pluginId);
+    recoverFromDeadMansPedal();
 }
 
 void PluginHost::initialise()
@@ -171,6 +209,11 @@ void PluginHost::initialise()
     // Route C.2 — the real-time RAVE insert (only registered in the anira build).
     engine.getPluginManager().createBuiltInType<RaveInsertPlugin>();
    #endif
+
+    // FIT-003 — load persisted block reasons BEFORE recovery runs, so a fresh
+    // "crash_or_hang" tag from THIS launch's recovery below is layered on top of
+    // (not clobbered by) whatever was already persisted from prior launches.
+    loadBlockReasons();
 
     // A pedal left from the previous run means a component crashed mid-scan ->
     // quarantine it before we scan anything (INS-005 crash recovery).
@@ -492,13 +535,31 @@ StringArray PluginHost::blocklist() const
 
 void PluginHost::blockPlugin (const String& pluginId)
 {
+    blockPluginWithReason (pluginId, "manual");
+}
+
+// FIT-003 — the one place that actually blacklists + tags a reason. Both the manual
+// block_plugin command (above) and the crash/hang dead-mans-pedal recovery
+// (recoverFromDeadMansPedal()) route through here so blockReasonFor() is always
+// accurate and the reason is persisted in lock-step with the blacklist itself.
+void PluginHost::blockPluginWithReason (const String& pluginId, const String& reason)
+{
     engine.getPluginManager().knownPluginList.addToBlacklist (pluginId);
+    blockReasons.set (pluginId, reason);
+    saveBlockReasons();
     saveCatalog();
+}
+
+String PluginHost::blockReasonFor (const String& pluginId) const
+{
+    return blockReasons[pluginId];   // "" if never recorded (StringPairArray default)
 }
 
 void PluginHost::clearBlocklist()
 {
     engine.getPluginManager().knownPluginList.clearBlacklistedFiles();
+    blockReasons.clear();
+    saveBlockReasons();
     saveCatalog();
 }
 

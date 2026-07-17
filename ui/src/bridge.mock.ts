@@ -204,7 +204,6 @@ const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor",
 // gracefully (these mirror the non-mutating entries of bridge.mock.test.ts's ALLOWLIST;
 // give any of them a real case when dev-mode fidelity matters).
 const DEFAULT_OK = new Set([
-  "rescan_plugins",    // live plugin scan — no dev-mock catalog to mutate
   "import_clip_data",  // bytes-over-bridge is native-only; dev imports via import_clip
   "recover_session",   // A3 crash recovery — native-only (no dev-mock crash journal)
   "discard_recovery",  // "
@@ -319,6 +318,14 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
   if (!set) { set = new Set(); listeners.set(eventId, set); }
   set.add(fn);
   return () => set?.delete(fn);
+}
+
+/** TEST-ONLY: publish a synthetic event on the mock's event bus. For events the dev
+ * mock never emits itself by design (e.g. FIT-003's live plugin-scan running-count
+ * sample — there is no dev-mock AU sweep to sample), this is how a vitest exercises
+ * store.ts's real onEvent("mosh_event", ...) reducer instead of duplicating its logic. */
+export function __mockEmitForTests(type: string, payload?: unknown): void {
+  emit(type, payload);
 }
 const invalidate = () => emit("snapshot_invalidated");
 
@@ -1178,6 +1185,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
+    // FIT-003 — an explicit case (was a bare DEFAULT_OK passthrough returning no
+    // `status`, which store.rescanPlugins() then read as `undefined !== "scanning"`
+    // and treated as already-done — harmless for the real always-instant dev catalog,
+    // but it meant vitest/e2e never exercised the real "scanning" branch of the store
+    // action). Real: no dev-mock AU sweep, so this always completes synchronously.
+    case "rescan_plugins": return ok(command, { status: "done", count: VST3S.length });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });

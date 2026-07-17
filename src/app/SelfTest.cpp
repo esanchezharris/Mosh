@@ -872,9 +872,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // rescan_plugins (VST3-only, inline) dispatches + returns ok with a count.
         // Idempotent: the catalog must not shrink across a rescan.
+        //
+        // FIT-003 regression-lock: the sync (VST3-only) path must emit ZERO
+        // 'plugin_scan_progress' events. That event (now enriched with a live
+        // running count + elapsedMs from timerCallback()'s sampler) is reserved for
+        // the async AU/deep sweep -- proves enriching it didn't leak sampler state
+        // into the inline, message-thread-safe VST3 path.
+        auto countScanEvents = [&] {
+            int n = 0; for (auto& e : eventTypes) if (e == "plugin_scan_progress") ++n; return n; };
+        const int scanEventsBefore = countScanEvents();
         auto rs = cmd (ops, "rescan_plugins", objN ({{ "format", "vst3" }, { "wait", true }}));
         check (ok (rs), "rescan_plugins (vst3) ok");
         check ((int) rs["data"].getProperty ("count", -1) >= total, "rescan_plugins reports a count (>= prior total)");
+        check (countScanEvents() == scanEventsBefore,
+               "sync VST3 rescan emits no plugin_scan_progress events (FIT-003)");
 
         // get_plugin_blocklist returns a well-formed (possibly empty) array.
         auto gb = cmd (ops, "get_plugin_blocklist");
@@ -922,13 +933,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // The blocked entry must appear in get_plugin_blocklist.
             // For a real catalog entry the 'id' field is the UI-facing id (idFor form).
             // For the raw AU fallback the 'id' field equals the raw string (no catalog match).
+            // FIT-003: block_plugin is a MANUAL block, so its reason must read "manual"
+            // (not "crash_or_hang" -- that tag is reserved for dead-mans-pedal recovery).
             bool inBlock = false;
+            juce::String blockedReason;
             { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
               if (auto* arr = bl.getArray())
                 for (auto& e : *arr)
                     if (e.getProperty ("id",    var()).toString() == blockTarget ||
-                        e.getProperty ("rawId", var()).toString() == blockTarget) inBlock = true; }
+                        e.getProperty ("rawId", var()).toString() == blockTarget)
+                        { inBlock = true; blockedReason = e.getProperty ("reason", var()).toString(); } }
             check (inBlock, "blocked id appears in get_plugin_blocklist");
+            check (blockedReason == "manual", "manual block_plugin is tagged reason:\"manual\"");
 
             // If we blocked a real catalog entry it must have disappeared from list_plugins.
             if (useRealEntry)
@@ -952,6 +968,35 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // nothing here, but the contract is read-only).
         auto plog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
         check (! plog.contains ("get_plugin_blocklist"), "get_plugin_blocklist is READ-ONLY (not logged)");
+
+        // FIT-003 — dead-mans-pedal crash/hang recovery tags the RIGHT reason.
+        // A real in-session AU hang can't be simulated headlessly (JUCE marshals AU
+        // instantiation to the message thread with no per-component timeout -- see
+        // PluginHost.cpp's HONEST CAVEAT), but the recovery-and-tag bookkeeping IS
+        // exactly what a real hang's *next launch* runs, and that part is fully
+        // exercisable: debugSimulateCrashRecovery writes the pedal file and replays
+        // the identical PluginHost::recoverFromDeadMansPedal() path initialise() runs
+        // at real startup.
+        {
+            auto& ph = ops.pluginHostForScan();
+            const String crasherId = "AudioUnit:Effect/aufx,fitkillsim,MOSH";
+            ph.debugSimulateCrashRecovery (crasherId);
+
+            auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            bool found = false; String reason;
+            if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("rawId", var()).toString() == crasherId)
+                        { found = true; reason = e.getProperty ("reason", var()).toString(); }
+            check (found, "dead-mans-pedal recovery quarantines the crasher id");
+            check (reason == "crash_or_hang",
+                   "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
+
+            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
+            auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
+        }
     }
 
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───

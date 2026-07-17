@@ -138,7 +138,9 @@ export function PluginBrowser() {
         </div>
         {scanProgress && (
           <div className="scan-status" role="status" aria-live="polite">
-            Scanning {scanProgress.format}… out-of-process — hung plugins (e.g. WaveShell) are quarantined, not loaded.
+            Scanning {scanProgress.format}…
+            {typeof scanProgress.count === "number" ? ` ${scanProgress.count} found ·` : ""} out-of-process — hung
+            plugins (e.g. WaveShell) are quarantined, not loaded.
           </div>
         )}
         <PluginBrowserContent onLoaded={close} />
