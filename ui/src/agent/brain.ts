@@ -32,7 +32,9 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
     async send(text: string): Promise<BrainReply> {
       const snap = getSnapshot();
       history.push({ role: "user", content: text });
-      const messages = [{ role: "system", content: systemPrompt(snap) }, ...history.slice(-8)];
+      // Pass the turn text so systemPrompt injects the few relevant producer-knowledge
+      // cards next to the command catalog (WHY/WHEN for the controls this request touches).
+      const messages = [{ role: "system", content: systemPrompt(snap, text) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
         const reply = parseReply(content);

@@ -4,6 +4,7 @@
 // createBrain() on top of this; the benchmark scores the EXACT prompt + parser here.
 
 import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
+import { retrieveCards, knowledgePromptSection } from "./knowledge";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
 
@@ -51,21 +52,25 @@ export const DEFAULT_RULES = [
 ].join("\n");
 
 /** Assemble the full system prompt from an (optimizable) rules block + a snapshot.
- *  PREAMBLE + catalog + rules + session — the order systemPrompt has always used.
+ *  PREAMBLE + catalog + [knowledge] + rules + session — the order systemPrompt has
+ *  always used, with the producer-knowledge block inserted next to the catalog.
  *  `catalog` swaps the command catalog (the small-model-mode eval arm); omitted =
- *  the full catalog, so every existing caller is byte-unchanged. */
-export function buildSystemPrompt(rules: string, snap: Snapshot | null, catalog?: string): string {
-  return [
-    PREAMBLE,
-    catalog ?? commandCatalogPrompt(),
-    rules,
-    "Current session:",
-    snap ? compactSnapshot(snap) : "(empty session)",
-  ].join("\n");
+ *  the full catalog. `knowledge` is a pre-rendered producer-knowledge block; omitted
+ *  or empty ⇒ not inserted, so every existing caller (GEPA / SFT / harvest) is
+ *  byte-unchanged. */
+export function buildSystemPrompt(rules: string, snap: Snapshot | null, catalog?: string, knowledge?: string): string {
+  const parts = [PREAMBLE, catalog ?? commandCatalogPrompt()];
+  if (knowledge) parts.push(knowledge);
+  parts.push(rules, "Current session:", snap ? compactSnapshot(snap) : "(empty session)");
+  return parts.join("\n");
 }
 
-export function systemPrompt(snap: Snapshot | null): string {
-  return buildSystemPrompt(DEFAULT_RULES, snap);
+/** The production system prompt. Pass the user's request as `query` to inject the few
+ *  most-relevant producer-knowledge cards; omit it (e.g. offline harvest that has no
+ *  turn text yet) for the byte-identical no-knowledge prompt. */
+export function systemPrompt(snap: Snapshot | null, query?: string): string {
+  const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
+  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge);
 }
 
 // Coerce a string token ("17", 132, true) to the type an arg expects.
