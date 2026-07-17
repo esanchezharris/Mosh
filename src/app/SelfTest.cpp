@@ -99,6 +99,25 @@ namespace
         return juce::var (o);
     }
 
+    // A fixed filename in the shared, machine-wide system temp dir collides when two
+    // `Mosh --selftest` processes run at once on the same host (a self-hosted CI runner
+    // racing a dev's local run, or two concurrent worktree gates): one process's
+    // deleteFile()/write races the other's read and false-fails a check that has nothing
+    // to do with the code under test. The per-run session dir (isolated via
+    // MOSH_SELFTEST_SESSION) is the existing hermeticity boundary, but File::tempDirectory
+    // paths escape it. Scope every temp artifact to THIS process — same root-cause class as
+    // PR #342's hermetic service ports, for a temp-file path instead of a network port.
+    juce::File selftestTempPath (const MoshEngine& eng, const juce::String& leafName)
+    {
+        // Computed once per process: the isolated session leaf (already unique under the
+        // documented MOSH_SELFTEST_SESSION isolation) + a Uuid fragment (unique even when
+        // that env override is absent — e.g. a plain `--selftest` racing on both sides).
+        static const juce::String tag = eng.sessionDir().getFileName()
+                                            + "-" + juce::Uuid().toString().substring (0, 8);
+        return juce::File::getSpecialLocation (juce::File::tempDirectory)
+                   .getChildFile ("mosh-selftest-" + tag + "-" + leafName);
+    }
+
     class LiveAudioProbe final : public juce::AudioIODeviceCallback
     {
     public:
@@ -1245,7 +1264,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "X-FDBK readout sensitivity set");
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 4 }, { "value", 1.0 }}))),
                "X-FDBK readout auto-suppress enabled");
-        auto xfOut = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-xfeedback-readout.wav");
+        auto xfOut = selftestTempPath (eng, "xfeedback-readout.wav");
         xfOut.deleteFile();
         check (ok (cmd (ops, "export_audio", objN ({{ "file", xfOut.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
                "X-FDBK readout export ok");
@@ -1264,6 +1283,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             } }
         check (activeCutHasScore, "X-FDBK active cut readout carries its own score");
         check (activeCutHasDepth, "X-FDBK active cut readout carries depth");
+        xfOut.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
         const int autoIdx = builtinIndex (trackById (bt), "moshAutoTune");
         if (autoIdx >= 0)
@@ -3419,7 +3439,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
 
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-src");
+        auto destDir  = selftestTempPath (eng, "portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("portable.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3438,7 +3458,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
         // so resolution can ONLY succeed via the co-located copy, then open the copy.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-moved");
+        auto moved = selftestTempPath (eng, "portable-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the project dir to a new location");
         auto poolBak = poolSrc.getSiblingFile (poolSrc.getFileName() + ".gap3bak");
@@ -3521,7 +3541,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) renderLayerOf (rt, rcid).getProperty ("hasArtifact", false), "render produced a cached artifact");
 
         // Save As to a standalone dir OUTSIDE the pool → render artifacts consolidate local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-portable");
+        auto destDir  = selftestTempPath (eng, "renders-portable");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("renders.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3540,7 +3560,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // PROVE portability: copy the whole project elsewhere, DELETE the original pool
         // render so resolution can ONLY succeed via the co-located copy, then open the copy
         // and prove freeze/accept (the artifact-gated ops) still work — the AL-009 payoff.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-moved");
+        auto moved = selftestTempPath (eng, "renders-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the render project to a new location");
         poolDir.getChildFile ("renders").deleteRecursively();   // hide the original pool artifact
@@ -5506,8 +5526,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             MultiplayerClient peer;
             check (peer.joinSession (sessCode, "Peer", "#00ffff"), "peer joined the audio session");
-            auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                           .getChildFile ("mosh-mp-stem-" + h0 + "." + e0);
+            auto tmp = selftestTempPath (eng, "mp-stem-" + h0 + "." + e0);
             tmp.deleteFile();
             check (peer.downloadBlob (h0, e0, tmp), "peer fetched the stem from cloud storage [" + peer.lastError() + "]");
             check (tmp.existsAsFile() && tmp.getSize() > 0, "fetched stem is non-empty (" + juce::String (tmp.getSize()) + " bytes)");
@@ -6425,7 +6444,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 
     if (! micMode)
     {
-        auto aiff = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-voice-smoke.aiff");
+        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
         aiff.deleteFile();
         ChildProcess say;
         say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });
