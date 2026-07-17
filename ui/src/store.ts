@@ -72,7 +72,10 @@ type State = {
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
   pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
-  scanProgress: { format: string; done: boolean } | null; // transient rescan state
+  // FIT-003: count/elapsedMs are optional so the older {format,done} shape (still sent
+  // by the sync VST3 rescan path and the mock) stays valid — a live async sweep adds a
+  // periodic running count + elapsed time, sampled from the backend's real plugin catalog.
+  scanProgress: { format: string; done: boolean; count?: number; elapsedMs?: number } | null; // transient rescan state
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
@@ -366,12 +369,16 @@ export const useStore = create<State>((set, get) => ({
         set({ spectrum: { bands: p.bands ?? [], level: p.level ?? 0, flux: p.flux ?? 0 } });
       } else if (ev.type === "plugin_scan_progress") {
         // INS-005 — async (AU) rescan lifecycle. On done, refresh the catalog list.
-        const p = ev.payload as { format: string; done: boolean };
+        // FIT-003 — the backend now emits periodic samples with a live running `count`
+        // + `elapsedMs` (decimated ~2/s) for the whole sweep, not just start/done; both
+        // fields are optional so this stays compatible with any older {format,done}-only
+        // sender (e.g. a stale mock).
+        const p = ev.payload as { format: string; done: boolean; count?: number; elapsedMs?: number };
         if (p.done) {
           set({ scanProgress: null });
           void get().refreshPluginList();
         } else {
-          set({ scanProgress: { format: p.format, done: false } });
+          set({ scanProgress: { format: p.format, done: false, count: p.count, elapsedMs: p.elapsedMs } });
         }
       } else if (ev.type === "transcribe_status") {
         // Audio→MIDI status for a SOURCE clip: working | done | error. On done the
@@ -710,7 +717,7 @@ export const useStore = create<State>((set, get) => ({
   // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend
   // runs it off the message thread); we refresh the list when the scan reports done.
   rescanPlugins: async (format = "all") => {
-    set({ scanProgress: { format, done: false } });
+    set({ scanProgress: { format, done: false, count: 0, elapsedMs: 0 } });
     const res = await get().exec("rescan_plugins", { format });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).

@@ -595,6 +595,17 @@ private:
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
     double      lastPresenceBroadcastMs = 0.0;
 
+    // FIT-003 — live running-count progress for an in-flight async plugin rescan
+    // (cmdRescanPlugins' AU/deep branch). Touched ONLY on the message thread (set
+    // right before the detached scan thread is spawned / cleared in its callAsync
+    // completion; sampled + emitted from timerCallback()), so no atomics needed —
+    // the scan thread itself never reads or writes these. See ScanProgress.h.
+    bool        scanSampling_    = false;
+    juce::String scanFormat_;
+    double      scanStartMs_    = 0.0;
+    int         lastScanCount_  = -1;
+    double      lastScanEmitMs_ = 0.0;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MoshOps)
 };
 

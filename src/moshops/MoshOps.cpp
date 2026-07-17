@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "ScanProgress.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -774,6 +775,33 @@ void MoshOps::timerCallback()
     const bool spectrumLive = playing && transport.getCurrentPlaybackContext() != nullptr;
     if (spectrumLive)            { emitSpectrum (true);  spectrumActive = true; }
     else if (spectrumActive)     { emitSpectrum (false); spectrumActive = false; }
+
+    // FIT-003 — live running-count progress for an in-flight async plugin rescan.
+    // cmdRescanPlugins' AU/deep branch sets scanSampling_ before spawning its detached
+    // scan thread and clears it in that thread's callAsync completion; both of those
+    // run on the message thread, same as this timer, so scanSampling_/scanFormat_/
+    // scanStartMs_/lastScanCount_/lastScanEmitMs_ (all MoshOps-private) need no
+    // synchronization. getNumTypes() itself IS a genuine cross-thread read: the
+    // background scan thread concurrently mutates the SAME KnownPluginList via
+    // addType()/scanAndAddFile() inside PluginHost::rescan(). That's safe because
+    // KnownPluginList internally guards its type array with its own CriticalSection
+    // (typesArrayLock in juce_KnownPluginList.h) — getNumTypes()/addType() both take
+    // it, so this is an ordinary locked read, not a race. Decimated: emit only when
+    // the catalog grew, or ~500 ms have passed, so a fast VST3 tail doesn't spam 30 Hz
+    // and a stalled AU still ticks `elapsedMs` forward for the UI.
+    if (scanSampling_)
+    {
+        const auto now = Time::getMillisecondCounterHiRes();
+        const int count = eng.engine().getPluginManager().knownPluginList.getNumTypes();
+        if (count != lastScanCount_ || (now - lastScanEmitMs_) >= 500.0)
+        {
+            lastScanCount_ = count;
+            lastScanEmitMs_ = now;
+            emit ("plugin_scan_progress",
+                  makeScanProgressPayload (scanFormat_, count, /*done=*/false,
+                                            (int) (now - scanStartMs_)));
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4917,8 +4945,15 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
 
     // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
     // std::thread, marshal the result back to the message thread.
-    emit ("plugin_scan_progress", [&] { auto* o = new DynamicObject();
-        o->setProperty ("format", format); o->setProperty ("done", false); return var (o); }());
+    //
+    // FIT-003 — arm the live progress sampler BEFORE spawning the scan thread (message
+    // thread only; see timerCallback()) so the UI gets periodic running-count events
+    // for the whole sweep, not just this start/done pair.
+    scanSampling_  = true;
+    scanFormat_    = format;
+    scanStartMs_   = Time::getMillisecondCounterHiRes();
+    lastScanCount_ = -1;
+    emit ("plugin_scan_progress", makeScanProgressPayload (format, /*count=*/0, /*done=*/false, 0));
     // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
     // will run together below (async path).  Pass clearFirst=false and includeVST3 in
     // the async lambda only if we didn't already do them above.
@@ -4934,9 +4969,9 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true, /*slowVST3=*/true);
         juce::MessageManager::callAsync ([this, total, format]
         {
-            emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();
-                o->setProperty ("format", format); o->setProperty ("count", total);
-                o->setProperty ("done", true); return juce::var (o); }());
+            const int elapsed = (int) (Time::getMillisecondCounterHiRes() - scanStartMs_);
+            scanSampling_ = false;   // stop the timerCallback() sampler before the terminal emit
+            emit ("plugin_scan_progress", makeScanProgressPayload (format, total, /*done=*/true, elapsed));
             emitSnapshotInvalidated();
         });
     }).detach();
@@ -4976,7 +5011,13 @@ juce::var MoshOps::cmdGetPluginBlocklist (const juce::var&)
         auto* o = new DynamicObject();
         o->setProperty ("id",    uiId);
         o->setProperty ("rawId", rawId);   // the actual blacklist key, for debugging
-        o->setProperty ("reason", "blocked");   // crashed-scan vs manual not tracked separately
+        // FIT-003 — PluginHost now records WHY each entry was blocked: "crash_or_hang"
+        // for a dead-mans-pedal auto-quarantine (the scan crashed or hung loading it),
+        // "manual" for an explicit block_plugin call. Entries blocked before this
+        // tracking existed (or a fresh manual block missing the tag) default to
+        // "manual" — the safe assumption absent contrary evidence.
+        const auto reason = pluginHost.blockReasonFor (rawId);
+        o->setProperty ("reason", reason.isNotEmpty() ? reason : juce::String ("manual"));
         entries.add (var (o));
     }
     auto* data = new DynamicObject();
