@@ -92,6 +92,8 @@ try:
         json.dump({"displayName": "Ken Carson", "trigger": "kxc",
                    "hint": "rage trap instrumental", "notes": "rage synths"}, f)
     make_adapter(os.path.join(d, "micz.safetensors"), rank=8, adapter_type="dora")
+    with open(os.path.join(d, "micz.json"), "w") as fbad:
+        fbad.write("{broken json")   # a broken card must degrade to defaults, never hide the LoRA
     make_adapter(os.path.join(d, "plain.safetensors"), adapter_type="lora")
     make_adapter(os.path.join(d, "xs.safetensors"), adapter_type="lora-xs")
     with open(os.path.join(d, "garbage.safetensors"), "wb") as f:

@@ -6,7 +6,7 @@ Proves the whole rack loop against the REAL MLX engine with a REAL trained adapt
   2. an identical re-render is a native cache HIT
   3. emptying the rack renders ≈ the base again (restore-to-base proof; SA3 is
      seed-deterministic so the empty-rack render matches the base render closely)
-  4. the rack render's manifest carries loras / triggers_injected / lora_merge_ms
+  4. the rack render's manifest carries loras / triggers_injected / apply_ms
      (the layer's job dir reuses ONE manifest file, so the script renders the rack
      LAST — the manifest on disk at the end is the rack render's)
 
@@ -45,10 +45,11 @@ def check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands):
     # Isolated library: the adapter under its lab name + a sidecar with the trigger.
     lib = ART / "lora-lib"
     shutil.rmtree(lib, ignore_errors=True)
-    lib.mkdir(parents=True)
+    fam = lib / "sa3"                       # the registry scans $MOSH_LORA_DIR/sa3/
+    fam.mkdir(parents=True)
     name = Path(ADAPTER).stem
-    shutil.copyfile(ADAPTER, lib / f"{name}.safetensors")
-    (lib / f"{name}.json").write_text(json.dumps(
+    shutil.copyfile(ADAPTER, fam / f"{name}.safetensors")
+    (fam / f"{name}.json").write_text(json.dumps(
         {"displayName": "Verify Adapter", "trigger": TRIGGER, "notes": "lora_check"}))
 
     shutil.rmtree(_mosh_base() / SESSION, ignore_errors=True)
@@ -105,7 +106,7 @@ def check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands):
         except json.JSONDecodeError:
             pass
     triggers = (rack_man or {}).get("triggers_injected") or []
-    merge_ms = (rack_man or {}).get("lora_merge_ms")
+    merge_ms = (rack_man or {}).get("apply_ms")
 
     base_s = stats(str(out_base)) if out_base.exists() else None
     rack_s = stats(str(out_rack)) if out_rack.exists() else None
@@ -124,7 +125,7 @@ def check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands):
         "base_stats": base_s, "rack_stats": rack_s,
         "diff_rms_base_vs_rack": d_change,
         "diff_rms_base_vs_restored": d_restore,
-        "triggers_injected": triggers, "lora_merge_ms": merge_ms,
+        "triggers_injected": triggers, "apply_ms": merge_ms,
         "loras_applied": (rack_man or {}).get("loras_applied"),
     })
     return {"check": "LoRA rack (real merge)", "pass": bool(ok), "detail": detail}

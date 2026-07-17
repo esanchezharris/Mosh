@@ -9,7 +9,7 @@ inside Mosh's generative tier. v1 is runtime-only; in-app training is v2 (the ex
 ## Product decisions (owner)
 
 - **"LoRA" is the product name everywhere.** The files are DoRA-rows format internally;
-  that precision lives only here and in `service/sa3/lora_runtime.py`.
+  that precision lives only here and in `service/sa3/lora_merge.py`.
 - **NO budget rule.** No Σ clamp, no per-adapter cap, no adapter-count limit, no Lab
   gating. The UI shows a subtle informational `Σ` readout; nothing ever blocks. (The
   parked mud-threshold experiment informs docs/defaults only.)
@@ -34,7 +34,9 @@ and lists unsupported/corrupt files as `valid:false` rows. `GET /loras` mirrors
 `/colors`; `MOSH_ENABLE_LORAS=0` is the kill switch (pinned in `--selftest`, with
 `MOSH_LORA_DIR` double-locked to a temp empty dir).
 
-**Merge runtime** (`service/sa3/lora_runtime.py`) = **merge-at-rack-change**: adapters
+**Merge runtime** (`service/sa3/lora_runtime.py`, SUPERSEDED — see the hybrid
+addendum below; the shipping engine is `engine.apply_loras` via `lora_merge.py`)
+= **merge-at-rack-change**: adapters
 merge into the MLX DiT weights once per rack change; renders then run at full native
 speed (no per-step LoRA matmuls, zero edits to the carved MLX model code). The math is
 the exact upstream `LoRAParametrization.dora_forward` with **chained** composition in
@@ -137,3 +139,54 @@ GOTCHA (cost a debug cycle): `ensureServiceRunning` reuses ANY healthy service o
 port — a long-lived service from earlier in the session runs STALE service-side Python
 after edits. Kill the port-8770 service after editing service/ code, or run with a fresh
 MOSH_SERVICE_PORT.
+
+## Hybrid reconciliation (same day, PM) — SUPERSEDES the engine + streaming sections
+
+Main landed a PARALLEL implementation (PR #319 + FIT-013) while this branch was built.
+An A/B on real SA3 (same 4 adapters, same Mac) settled the merge (owner-approved):
+**main's skeleton + this branch's correctness layer.**
+
+**Apply engine — main's wins, ours retired.** `service/sa3/lora_runtime.py` (CPU
+merge-at-rack-change, 2.5–6.9s linear in adapter count) is DELETED in favor of main's
+GPU in-place `engine.apply_loras` via the shared `sa3/lora_merge.py` math (1.1–1.7s
+flat; fader scrub 1.3s vs 6.9s; restore 3ms). Measured audio-equivalent: identical
+rack/seed through both engines → diff-RMS 0.0016 while the LoRA effect is 0.10; their
+fp16-between-stages carry is ≤4e-4 relative of upstream. The upstream torch golden
+fixture now pins THEIR math (`lora_merge_math_test.py`, 19 checks: f32-exact,
+order-sensitivity witness, the s==0 registry-filter contract from both sides, conv 2D
+domain, full pipeline f16 carry < 2e-3 rel).
+
+**Kept from this branch (grafted onto main's structure):**
+- NO cap / clamp / Lab gate (owner call) — main's ≤2 + 1.0-ceiling removed everywhere
+  (registry, native set_render_param, UI, mock); Σ readout informational only.
+- **sha256 content identity**: registry caches sha by (path,size,mtime_ns); the render
+  fingerprint keys `name=value@sha12:trigger;` **resolved at RENDER time** via /loras
+  (`MoshOps::resolveLorasKey`; unknown name errors pre-submit; fake path keys
+  name=value, hermetic) — retrain-in-place or a sidecar trigger edit ⇒ MISS. The
+  engine's apply key also folds sha12 (a mid-session retrain never reuses a stale
+  in-memory application). LORA_APPLY_VERSION bumped 1→2.
+- **Trigger auto-inject** server-side (rack order, dedup'd, tooltip-only); main's
+  add-trigger-chip removed.
+- Registry hardening: safetensors header inspection (rank/alpha/adapter_type),
+  valid:false rows for corrupt/unsupported files, MOSH_ENABLE_LORAS kill switch +
+  selftest double lock. Library layout is MAIN's (`$MOSH_LORA_DIR/sa3/` family subdir).
+- **P5 boundary-quantized swap** for ORDINARY renders (loop wrap / next bar; 30 Hz,
+  epoch-guarded, `MOSH_SWAP_QUANTIZE=0` escape hatch). **Live-armed layers are
+  excluded**: the Live lane's 1ms crossfade at the knob is the shipping default
+  (owner call — "crossfade at the knob is the more intuitive option"); a quantize
+  option for Live is a named follow-up only if the owner asks.
+
+**Streaming — ONE mechanism.** This branch's progressive-chunks lane (S1–S3:
+`coverage.window_order`, progressive artifacts, native progressive polling) is RETIRED;
+main's Live render-ahead scheduler is THE streaming feature. A/B timeline (real SA3,
+24s clip, knob change with the listener at 9s): Live re-lays playhead-forward, fresh
+audio at the playhead ~2.3s, complete ~4.3s (windows behind the playhead deliberately
+keep the old sound until the next pass). Fix grafted from the A/B: renderAheadWindowDone's
+return is now CHECKED (a /stitch_windows failure disarms + surfaces instead of silently
+no-op'ing while `placed` reports success — found live when a cross-branch service
+without the route made the whole lane a silent no-op).
+
+**Fail-open**: the stale output+manifest submit-pair fix landed on main as PR #341
+(GenerativeJobManager::submitJob choke point — better than this branch's
+cmdRenderLayer-local delete, which is dropped; #341 also covers render-ahead's
+cross-restart stale-pair case).
