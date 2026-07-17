@@ -1,6 +1,6 @@
 {
-  "pass": 15,
-  "total": 15,
+  "pass": 35,
+  "total": 35,
   "rows": [
     {
       "key": "midi_octave_double",
@@ -679,6 +679,477 @@
       "detail": {
         "clean_apply": true,
         "tempo": 90.0
+      }
+    },
+    {
+      "key": "bus_reverb_vocal",
+      "cluster": "Bus",
+      "ask": "send the vocal to a new reverb bus at -6 dB",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Reverb"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${VOX_T}",
+            "bus": 0,
+            "db": -6
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_delay_melody",
+      "cluster": "Bus",
+      "ask": "set up a delay bus and route the melody into it",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Delay"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${MEL_T}",
+            "bus": 0
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_raise_drum_send",
+      "cluster": "Bus",
+      "ask": "bring the drums' reverb send up to -2 dB",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Reverb"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${DRUM_T}",
+            "bus": 0,
+            "db": -6
+          }
+        },
+        {
+          "command": "set_send_level",
+          "args": {
+            "trackId": "${DRUM_T}",
+            "bus": 0,
+            "db": -2
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_remove_bass_send",
+      "cluster": "Bus",
+      "ask": "take the bass off the reverb bus",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Reverb"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${BASS_T}",
+            "bus": 0,
+            "db": -6
+          }
+        },
+        {
+          "command": "remove_send",
+          "args": {
+            "trackId": "${BASS_T}",
+            "bus": 0
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_melody_unity_delay",
+      "cluster": "Bus",
+      "ask": "give the melody its own delay bus at unity gain",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Delay"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${MEL_T}",
+            "bus": 0,
+            "db": 0
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_room_drums_vocal",
+      "cluster": "Bus",
+      "ask": "add a room reverb bus and route the drums and vocal into it",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Room"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${DRUM_T}",
+            "bus": 0
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${VOX_T}",
+            "bus": 0
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_kill_bass_delay_send",
+      "cluster": "Bus",
+      "ask": "kill the bass's delay send",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Delay"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${BASS_T}",
+            "bus": 0,
+            "db": -6
+          }
+        },
+        {
+          "command": "set_send_level",
+          "args": {
+            "trackId": "${BASS_T}",
+            "bus": 0,
+            "db": -60
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "bus_two_vocal_sends",
+      "cluster": "Bus",
+      "ask": "put the vocal on both a reverb bus and a delay bus",
+      "ok": true,
+      "commands": [
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Reverb"
+          }
+        },
+        {
+          "command": "create_bus",
+          "args": {
+            "name": "Delay"
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${VOX_T}",
+            "bus": 0
+          }
+        },
+        {
+          "command": "add_send",
+          "args": {
+            "trackId": "${VOX_T}",
+            "bus": 1
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_arm_vocal",
+      "cluster": "Recording",
+      "ask": "arm the vocal track for recording",
+      "ok": true,
+      "commands": [
+        {
+          "command": "arm_track",
+          "args": {
+            "trackId": "${VOX_T}",
+            "armed": true
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_arm_and_record",
+      "cluster": "Recording",
+      "ask": "arm the vocal and start recording",
+      "ok": true,
+      "commands": [
+        {
+          "command": "arm_track",
+          "args": {
+            "trackId": "${VOX_T}",
+            "armed": true
+          }
+        },
+        {
+          "command": "set_transport",
+          "args": {
+            "action": "record"
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_stop_keep_take",
+      "cluster": "Recording",
+      "ask": "stop recording and keep this take",
+      "ok": true,
+      "commands": [
+        {
+          "command": "stop_recording",
+          "args": {
+            "discardRecordings": false
+          }
+        },
+        {
+          "command": "keep_take",
+          "args": {
+            "clipId": "${VOX_C}"
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_scrap_take",
+      "cluster": "Recording",
+      "ask": "scrap that last take",
+      "ok": true,
+      "commands": [
+        {
+          "command": "stop_recording",
+          "args": {
+            "discardRecordings": true
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_monitor_on",
+      "cluster": "Recording",
+      "ask": "turn on input monitoring for the vocal",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_input_monitor",
+          "args": {
+            "trackId": "${VOX_T}",
+            "mode": "on"
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_list_takes",
+      "cluster": "Recording",
+      "ask": "show me the takes on the vocal clip",
+      "ok": true,
+      "commands": [
+        {
+          "command": "list_takes",
+          "args": {
+            "clipId": "${VOX_C}"
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "recording_switch_take",
+      "cluster": "Recording",
+      "ask": "switch to the second take on the vocal",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_current_take",
+          "args": {
+            "clipId": "${VOX_C}",
+            "takeIndex": 1
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "transport_timesig_waltz",
+      "cluster": "Transport",
+      "ask": "switch to 3/4 time",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_time_signature",
+          "args": {
+            "numerator": 3,
+            "denominator": 4
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "transport_timesig_six_eight",
+      "cluster": "Transport",
+      "ask": "put the song in 6/8",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_time_signature",
+          "args": {
+            "numerator": 6,
+            "denominator": 8
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "transport_timesig_seven_eight",
+      "cluster": "Transport",
+      "ask": "change the time signature to 7/8",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_time_signature",
+          "args": {
+            "numerator": 7,
+            "denominator": 8
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "transport_timesig_back_to_four_four",
+      "cluster": "Transport",
+      "ask": "go back to plain 4/4",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_time_signature",
+          "args": {
+            "numerator": 4,
+            "denominator": 4
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
+      }
+    },
+    {
+      "key": "transport_timesig_waltz_slower",
+      "cluster": "Transport",
+      "ask": "switch to 3/4 and slow it down to 80 bpm",
+      "ok": true,
+      "commands": [
+        {
+          "command": "set_time_signature",
+          "args": {
+            "numerator": 3,
+            "denominator": 4
+          }
+        },
+        {
+          "command": "set_tempo",
+          "args": {
+            "bpm": 80
+          }
+        }
+      ],
+      "detail": {
+        "note": "schema-validated only (validateCommand + parseReply round-trip); not run against a live engine in this pass"
       }
     }
   ]
