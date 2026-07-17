@@ -116,4 +116,25 @@ describe("v2 Inspector Warp tab", () => {
     expect(call).toBeTruthy();
     expect(call!.args).toMatchObject({ clipId: "c1", autoTempo: true, mode: "SoundTouch (Normal)" });
   });
+
+  // Consistency polish — the Warp stretch-mode select and the Mix-tab Output select carry
+  // the same `btn ghost` inspector-pill idiom their MidiInputField sibling already uses, so
+  // they render as dark v2 pills (via .v2-shell .v2-insp-body .btn) instead of bare native OS
+  // dropdowns. RED before those className additions, GREEN after.
+  it("styles the Warp stretch-mode select as a btn-ghost inspector pill", () => {
+    render(makeSnapshot(waveClip({ autoTempo: true })));
+    const select = host.querySelector<HTMLSelectElement>('[data-testid="v2-warp-mode"]');
+    expect(select).not.toBeNull();
+    expect(select!.classList.contains("btn")).toBe(true);
+    expect(select!.classList.contains("ghost")).toBe(true);
+  });
+
+  it("styles the Mix-tab Output select as a btn-ghost inspector pill", () => {
+    act(() => useShell.setState({ inspectorTab: "mix" }));
+    render(makeSnapshot(waveClip()));
+    const select = host.querySelector<HTMLSelectElement>('[aria-label="Output for Keys"]');
+    expect(select).not.toBeNull();
+    expect(select!.classList.contains("btn")).toBe(true);
+    expect(select!.classList.contains("ghost")).toBe(true);
+  });
 });
