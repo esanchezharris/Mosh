@@ -18,7 +18,7 @@ import { settingsByCategory, type SettingDef } from "./schema";
 import { TEMPLATES } from "./templates";
 import { eventToCombo } from "../interaction/keymap";
 import { isV2Active } from "../v2/shellFlag";
-import { runAction, type ActionId } from "../menuActions";
+import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import {
   outputDeviceOptions,
   inputDeviceOptions,
@@ -250,8 +250,15 @@ function AudioRouting({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-// ── existing Project file-management actions — unchanged ────────────────────
-function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
+// ── existing Project file-management actions ────────────────────────────────
+// Buttons are driven off the SAME FILE_MENU array the topbar File menu and the "+"
+// file-options menu render from (menuActions.ts is the one source of truth for a
+// project action's id/label; runAction is the one dispatcher) — this panel used to
+// hand-roll its own New/Save/Save As/Open labels, which drifted from FILE_MENU in
+// spirit even though the commands stayed correct (AL-018).
+const PROJECT_ACTIONS = FILE_MENU.filter((m) => m.id !== "export_audio");
+
+export function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const run = (id: ActionId, opts?: { index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
@@ -259,10 +266,9 @@ function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
     <div className="pop-group">
       <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>
       <div className="pop-actions">
-        <button className="btn" onClick={() => run("new_project")}>New</button>
-        <button className="btn" onClick={() => run("save")}>Save</button>
-        <button className="btn" onClick={() => run("save_as")}>Save As…</button>
-        <button className="btn" onClick={() => run("open_project")}>Open…</button>
+        {PROJECT_ACTIONS.map((m) => (
+          <button key={m.id} className="btn" data-action={m.id} onClick={() => run(m.id)}>{m.label}</button>
+        ))}
       </div>
       {(s.recentProjects?.length ?? 0) > 0 && (
         <>

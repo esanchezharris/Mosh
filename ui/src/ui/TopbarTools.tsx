@@ -151,7 +151,7 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
 // layer and the native menu use, so there is one definition of each command. The
 // scattered New/Save/Save As/Open buttons that used to live in Settings are folded
 // in here (with Open Recent from session.recentProjects).
-function FileMenu({ snapshot }: { snapshot: Snapshot }) {
+export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const recents = (s.recentProjects ?? []).slice(0, 8);
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
