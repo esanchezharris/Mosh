@@ -13,10 +13,23 @@ const FORMATS: { value: ExportFormat; depths: number[] }[] = [
   { value: "wav", depths: [16, 24, 32] }, { value: "aiff", depths: [16, 24, 32] }, { value: "flac", depths: [16, 24] },
 ];
 
+type RangeChoice = "full" | "loop" | "custom";
+type TailChoice = "cut" | "include";
+
 export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const exec = useStore((s) => s.exec);
+  const loopStart = useStore((s) => s.transport.loopStart);
+  const loopEnd = useStore((s) => s.transport.loopEnd);
+  const hasLoop = loopEnd - loopStart > 0;
   const [format, setFormat] = useState<ExportFormat>("wav");
   const [bitDepth, setBitDepth] = useState(24);
+  // G1: export range (invariant 78) + delay-tail policy (invariant 81). Defaults
+  // ("full"/"cut") reproduce today's call — {format,bitDepth} only, byte-for-byte.
+  const [range, setRange] = useState<RangeChoice>("full");
+  const [start, setStart] = useState(0);
+  const [end, setEnd] = useState(4);
+  const [tail, setTail] = useState<TailChoice>("cut");
+  const [tailSeconds, setTailSeconds] = useState(2);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
   // "Copied" flash — there's no native "Reveal in Finder" bridge command (JUCE's
@@ -26,7 +39,11 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const depths = FORMATS.find((f) => f.value === format)!.depths;
   const onExport = async () => {
     setBusy(true); setDone(""); setCopied(null);
-    const r = await exec("export_audio", { format, bitDepth });
+    const args: Record<string, unknown> = { format, bitDepth };
+    if (range !== "full") args.range = range;
+    if (range === "custom") { args.start = start; args.end = end; }
+    if (tail === "include") { args.tail = "include"; args.tailSeconds = tailSeconds; }
+    const r = await exec("export_audio", args);
     setBusy(false);
     if (r.ok) setDone((r.data as { file?: string } | undefined)?.file ?? "exported");
   };
@@ -46,6 +63,32 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
         <label className="pop-row"><span>Bit depth</span>
           <select value={String(bitDepth)} onChange={(e) => setBitDepth(Number(e.target.value))}>{depths.map((d) => <option key={d} value={d}>{d}-bit</option>)}</select>
         </label>
+        <label className="pop-row"><span>Range</span>
+          <select data-testid="export-range" value={range} onChange={(e) => setRange(e.target.value as RangeChoice)}>
+            <option value="full">Full mix</option>
+            <option value="loop" disabled={!hasLoop}>Loop region{hasLoop ? "" : " (none set)"}</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        {range === "custom" && (
+          <label className="pop-row"><span>Start / End (s)</span>
+            <span className="pop-inline">
+              <input data-testid="export-start" type="number" min={0} step={0.1} value={start} onChange={(e) => setStart(Number(e.target.value))} />
+              <input data-testid="export-end" type="number" min={0} step={0.1} value={end} onChange={(e) => setEnd(Number(e.target.value))} />
+            </span>
+          </label>
+        )}
+        <label className="pop-row"><span>Tail</span>
+          <select data-testid="export-tail" value={tail} onChange={(e) => setTail(e.target.value as TailChoice)}>
+            <option value="cut">Cut tails</option>
+            <option value="include">Include tails</option>
+          </select>
+        </label>
+        {tail === "include" && (
+          <label className="pop-row"><span>Tail length (s)</span>
+            <input data-testid="export-tail-seconds" type="number" min={0.05} max={30} step={0.5} value={tailSeconds} onChange={(e) => setTailSeconds(Number(e.target.value))} />
+          </label>
+        )}
       </div>
       <div className="pop-actions">
         <button className="btn" data-testid="export-run" disabled={busy || !audioEnabled} onClick={onExport}>{busy ? "Exporting…" : "Export"}</button>

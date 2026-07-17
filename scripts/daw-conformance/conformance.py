@@ -475,10 +475,60 @@ def fam_export_mixdown(ctx):
 
 
 def fam_export_range_tail(ctx):
-    # G1: export_audio has no range (loop/section) arg and no delay-tail policy — always
-    # renders {0, getLength()} over all tracks. Capability absent.
-    return verdict(GAP, "audio", [78, 81],
-                   {"gap": "G1", "note": "export has no range/section selection and no tail-inclusion policy."})
+    # G1: export_audio range (full/loop/custom) + delay-tail (cut/include) policy.
+    # Drives a REAL headless render for each span and asserts the ACTUAL rendered
+    # duration matches the requested span (invariant 78) and that an included tail
+    # captures MORE audio than a cut one on the same short custom range, with a
+    # reverb actually ringing (invariant 81). Relational (duration_s/frames), not
+    # golden-PCM, so it stays robust to any reverb-tail float noise across runs.
+    rtype = _find_builtin_type(ctx, "reverb")
+    if not rt_ok(rtype):
+        return verdict(FAIL, "audio", [78, 81], {"error": "no built-in reverb found in list_builtins"})
+
+    full_out = ARTDIR / "export_range_full.wav"
+    loop_out = ARTDIR / "export_range_loop.wav"
+    custom_out = ARTDIR / "export_range_custom.wav"
+    tail_cut_out = ARTDIR / "export_range_tail_cut.wav"
+    tail_include_out = ARTDIR / "export_range_tail_include.wav"
+
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rng"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 4.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(full_out)}},
+        {"command": "set_transport", "args": {"loopStart": 0.5, "loopEnd": 2.5}},
+        {"command": "export_audio", "args": {"file": str(loop_out), "range": "loop"}},
+        {"command": "export_audio", "args": {"file": str(custom_out), "range": "custom", "start": 1.0, "end": 3.0}},
+        # Push a built-in reverb hot (big room, fully wet) so tail:'include' actually
+        # captures decaying tail audio past the range end — a silence-trim edge case
+        # (no decaying source) would make include==cut, which would NOT prove the policy.
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": rtype}, "capture": {"I": "index"}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 0, "value": 0.95}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 2, "value": 1.0}},
+        {"command": "export_audio", "args": {"file": str(tail_cut_out), "range": "custom", "start": 0.0, "end": 1.0, "tail": "cut"}},
+        {"command": "export_audio", "args": {"file": str(tail_include_out), "range": "custom", "start": 0.0, "end": 1.0,
+                                              "tail": "include", "tailSeconds": 1.5}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-export-range-tail")
+    if cmd_fails(results):
+        return verdict(FAIL, "audio", [78, 81], _err(proc, {"failed": cmd_fails(results)}))
+    for p in (full_out, loop_out, custom_out, tail_cut_out, tail_include_out):
+        if not p.exists():
+            return verdict(FAIL, "audio", [78, 81], {"error": f"{p.name} was not produced"})
+
+    full_s, loop_s, custom_s = verify.stats(full_out), verify.stats(loop_out), verify.stats(custom_out)
+    cut_s, inc_s = verify.stats(tail_cut_out), verify.stats(tail_include_out)
+
+    span_ok = (
+        1.5 < full_s["duration_s"] < 6.0
+        and abs(loop_s["duration_s"] - 2.0) < 0.2 and loop_s["duration_s"] < full_s["duration_s"]
+        and abs(custom_s["duration_s"] - 2.0) < 0.2 and custom_s["duration_s"] < full_s["duration_s"]
+    )
+    tail_ok = inc_s["duration_s"] > cut_s["duration_s"] or inc_s["frames"] > cut_s["frames"]
+    ok = span_ok and tail_ok
+    return verdict(PASS if ok else FAIL, "audio", [78, 81],
+                   {"full_duration_s": full_s["duration_s"], "loop_duration_s": loop_s["duration_s"],
+                    "custom_duration_s": custom_s["duration_s"], "tail_cut_duration_s": cut_s["duration_s"],
+                    "tail_include_duration_s": inc_s["duration_s"], "span_ok": span_ok, "tail_ok": tail_ok})
 
 
 def rt_ok(t):

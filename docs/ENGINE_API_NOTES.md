@@ -152,9 +152,30 @@ Verified against the pinned clone for the composite grid command:
   `cmdAddMidiClip`; clip-note beats are clip-local (no clip-start offset).
 - clipId→track resolution: `clip->getTrack()` (proven via `lockKeyFor`'s Clip branch).
 
+## Export range/section + delay-tail policy (G1 `export_audio`) — RESOLVED
+
+Verified against the pinned clone (`model/export/tracktion_Renderer.h`):
+- `Renderer::Parameters::time` (`TimeRange`) is the render span — set from two
+  `TimePosition::fromSeconds(...)` values exactly like `params.time` was already built
+  from `TimePosition()`/`edit.getLength()`; no new idiom needed.
+- `Renderer::Parameters::endAllowance` (`TimeDuration`) is the delay-tail policy,
+  already built into the engine ("optional tail time for notes to end, delays/reverbs
+  to decay… stopped early once the level drops to silence within the allowance" —
+  `tracktion_NodeRenderContext.cpp:147,302-312`). `tail:"cut"` leaves it at the default
+  `0s`; `tail:"include"` sets it to the clamped `tailSeconds`.
+- `TransportControl::getLoopRange()` (`playback/tracktion_TransportControl.h:196`) reads
+  `CachedValue<TimePosition> loopPoint1/loopPoint2` — context-independent (no playback
+  context needed), so it's safe to read before the render-exclusivity teardown; a fresh
+  Edit's loop defaults to `{0,0}` (empty — the "no loop set" error case).
+- `endAllowance>0` disables the WAV ACID-loop metadata (`tracktion_Renderer.cpp:83`
+  only stamps it when `endAllowance==0s`) — harmless; a tail-included render isn't a
+  clean one-shot loop by definition.
+- Range/tail resolution + validation is pure and engine-free
+  (`mosh::resolveExportRange`, `src/moshops/ExportRange.h`), unit-tested directly by
+  `tests/test_export_range.cpp` without a live `MoshEngine`.
+
 ## Still to verify at their stages
 
-- **Renderer::Parameters** field names + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`) — Stage 5. Grep `modules/tracktion_engine/.../tracktion_Renderer.h`.
 - **Takes / CompManager / WaveCompManager** external-take injection — Stage 5. If opaque → new-clip-on-neural-lane fallback (already a user-selectable mode, 05 §3.1).
 - **LatencyPlugin .h/.cpp** exact latency-reporting pattern — Stage 4. `modules/tracktion_engine/plugins/effects/`.
 - **anira `InferenceHandler::process/prepare`** signatures — Stage 4, against the pinned anira.

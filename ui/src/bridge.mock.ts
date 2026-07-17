@@ -1329,7 +1329,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       snapshot.session.timeSigDenominator = num(args.denominator, snapshot.session.timeSigDenominator);
       invalidate(); return ok(command);
     }
-    case "export_audio": return ok(command, { file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR), bytes: 794000, renderMode: "offline" });
+    case "export_audio": {
+      // G1: range (78) + delay-tail (81) — echo a faithful envelope so the requested
+      // span is reflected in seconds/bytes (a UI test can assert a shorter render).
+      const MOCK_EDIT_LEN = 4;   // seconds — the mock's nominal "edit length"
+      const rng = str(args.range, args.start !== undefined && args.end !== undefined ? "custom" : "full");
+      const rs = rng === "custom" ? num(args.start, 0) : rng === "loop" ? num(snapshot.transport.loopStart, 0) : 0;
+      const re = rng === "custom" ? num(args.end, MOCK_EDIT_LEN) : rng === "loop" ? num(snapshot.transport.loopEnd, MOCK_EDIT_LEN) : MOCK_EDIT_LEN;
+      const tail = str(args.tail, "cut");
+      const endAllowance = tail === "include" ? num(args.tailSeconds, 2) : 0;
+      const seconds = Math.max(0, re - rs);
+      return ok(command, {
+        file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"),
+        bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR),
+        bytes: Math.round(794000 * (seconds / MOCK_EDIT_LEN)), seconds, renderMode: "offline",
+        range: rng, rangeStart: rs, rangeEnd: re, tail, endAllowance,
+      });
+    }
     case "get_command_log": {
       const limit = Math.max(1, num(args.limit, 50));
       return ok(command, { entries: cmdLog.slice(-limit).reverse(), total: cmdLog.length });

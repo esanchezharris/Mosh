@@ -2103,6 +2103,113 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         aiffFile.deleteFile();
     }
 
+    // --- G1: export range/section + delay-tail policy --------------------------
+    // export_audio {range,start,end,tail,tailSeconds} — invariants 78 (render the
+    // intended span: full/loop/custom) and 81 (delay/reverb tails include-or-cut on
+    // an explicit policy). new_project isolates a clean edit (mirrors the mp-export
+    // and relink-export isolation sections above) so edit.getLength() is exactly the
+    // one 4s test-tone clip we add here, not the cumulative length of every clip the
+    // earlier sections in this run have staged.
+    section ("Export range + tail policy (G1)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "g1-export-selftest"))), "new_project (G1 export isolation) ok");
+
+        auto gt = cmd (ops, "create_track", args1 ("name", "G1 Tone"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt }, { "seconds", 4.0 }, { "freq", 220.0 }}))),
+               "G1: add_test_tone_clip (4s) ok");
+
+        auto g1Dir = eng.sessionDir().getChildFile ("exports");
+
+        // range:'loop' with NO loop set yet (a fresh edit's loop is {0,0}) -> error,
+        // BEFORE any loop has been configured below.
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-noloop.wav").getFullPathName() },
+                                                       { "range", "loop" }}))),
+               "G1: range:'loop' errors when no loop region is set");
+
+        // Invalid enums / a degenerate custom range all error BEFORE any render
+        // (no partial file is ever produced by these).
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bogus-range.wav").getFullPathName() },
+                                                       { "range", "bogus" }}))),
+               "G1: rejects an invalid range enum");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bogus-tail.wav").getFullPathName() },
+                                                       { "tail", "bogus" }}))),
+               "G1: rejects an invalid tail enum");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bad-custom.wav").getFullPathName() },
+                                                       { "range", "custom" }, { "start", 3.0 }, { "end", 1.0 }}))),
+               "G1: rejects a custom range where end <= start");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-missing-custom.wav").getFullPathName() },
+                                                       { "range", "custom" }}))),
+               "G1: range:'custom' without start/end errors");
+
+        // Full export (no new args) — behaviorally identical to pre-G1: whole edit, no tail.
+        auto expFull = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-full.wav").getFullPathName() }}));
+        check (ok (expFull), "G1: full export (no new args) ok");
+        check (expFull["data"].getProperty ("range", var()).toString() == "full", "G1: full export reports range=='full'");
+        check (std::abs ((double) expFull["data"].getProperty ("rangeStart", -1.0)) < 1.0e-6, "G1: full export rangeStart==0");
+        check (std::abs ((double) expFull["data"].getProperty ("rangeEnd", -1.0) - 4.0) < 0.05, "G1: full export rangeEnd~=4");
+        check (std::abs ((double) expFull["data"].getProperty ("seconds", -1.0) - 4.0) < 0.05, "G1: full export seconds~=4");
+        const juce::int64 bytesFull = (juce::int64) expFull["data"].getProperty ("bytes", 0);
+        check (bytesFull > 1000, "G1: full export produced a non-trivial file");
+
+        // Custom range renders ONLY [start,end] — the direct proof of invariant 78:
+        // a shorter requested span must produce a proportionally smaller file.
+        auto expCustom = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-custom.wav").getFullPathName() },
+                                                          { "range", "custom" }, { "start", 1.0 }, { "end", 3.0 }}));
+        check (ok (expCustom), "G1: custom range export ok");
+        check (expCustom["data"].getProperty ("range", var()).toString() == "custom", "G1: custom export reports range=='custom'");
+        check (std::abs ((double) expCustom["data"].getProperty ("rangeStart", -1.0) - 1.0) < 0.05, "G1: custom rangeStart~=1");
+        check (std::abs ((double) expCustom["data"].getProperty ("rangeEnd", -1.0) - 3.0) < 0.05, "G1: custom rangeEnd~=3");
+        check (std::abs ((double) expCustom["data"].getProperty ("seconds", -1.0) - 2.0) < 0.05, "G1: custom seconds~=2");
+        const juce::int64 bytesCustom = (juce::int64) expCustom["data"].getProperty ("bytes", 0);
+        check (bytesCustom > 0 && bytesCustom < bytesFull,
+               "G1: custom (2s) render is SMALLER than full (4s) render — proves only the range rendered");
+
+        // range:'loop' renders the transport loop region.
+        check (ok (cmd (ops, "set_transport", objN ({{ "loopStart", 0.5 }, { "loopEnd", 2.5 }}))),
+               "G1: set_transport loop 0.5-2.5 ok");
+        auto expLoop = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-loop.wav").getFullPathName() },
+                                                        { "range", "loop" }}));
+        check (ok (expLoop), "G1: loop export ok");
+        check (expLoop["data"].getProperty ("range", var()).toString() == "loop", "G1: loop export reports range=='loop'");
+        check (std::abs ((double) expLoop["data"].getProperty ("rangeStart", -1.0) - 0.5) < 0.05, "G1: loop rangeStart~=0.5");
+        check (std::abs ((double) expLoop["data"].getProperty ("rangeEnd", -1.0) - 2.5) < 0.05, "G1: loop rangeEnd~=2.5");
+
+        // Delay-tail policy (invariant 81) — needs something actually decaying: load a
+        // built-in reverb, pushed hot (big room, fully wet) so the tail rings well past
+        // the render's end, then compare tail:'cut' vs tail:'include' on the SAME short
+        // custom range. A silence-trim edge case (no decaying source) would make
+        // include==cut — see the spec's §6 note; the reverb is what makes this definitive.
+        auto rvLoad = cmd (ops, "load_builtin", objN ({{ "trackId", gt }, { "type", "reverb" }}));
+        check (ok (rvLoad), "G1: load reverb on the tone track ok");
+        const int rvIndex = (int) rvLoad["data"].getProperty ("index", -1);
+        // Param order (tracktion_Reverb.cpp): 0 roomSize, 1 damping, 2 wetLevel, 3 dryLevel, 4 width, 5 mode.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", rvIndex }, { "paramIndex", 0 }, { "value", 0.95 }}))),
+               "G1: reverb roomSize set high");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", rvIndex }, { "paramIndex", 2 }, { "value", 1.0 }}))),
+               "G1: reverb wetLevel set high");
+
+        auto expCut = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-tail-cut.wav").getFullPathName() },
+                                                       { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }, { "tail", "cut" }}));
+        check (ok (expCut), "G1: tail=cut export ok");
+        check (expCut["data"].getProperty ("tail", var()).toString() == "cut", "G1: tail=cut echoed in result");
+        check (std::abs ((double) expCut["data"].getProperty ("endAllowance", -1.0)) < 1.0e-6, "G1: tail=cut endAllowance==0");
+        const juce::int64 bytesCut = (juce::int64) expCut["data"].getProperty ("bytes", 0);
+
+        auto expInclude = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-tail-include.wav").getFullPathName() },
+                                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 },
+                                                           { "tail", "include" }, { "tailSeconds", 2.0 }}));
+        check (ok (expInclude), "G1: tail=include export ok");
+        check (expInclude["data"].getProperty ("tail", var()).toString() == "include", "G1: tail=include echoed in result");
+        check (std::abs ((double) expInclude["data"].getProperty ("endAllowance", -1.0) - 2.0) < 0.05, "G1: tail=include endAllowance~=2");
+        const juce::int64 bytesInclude = (juce::int64) expInclude["data"].getProperty ("bytes", 0);
+        check (bytesInclude > bytesCut,
+               "G1: tail=include (reverb ringing) produces MORE audio than tail=cut — the tail is actually captured");
+
+        // Clean up the temp export files.
+        for (auto* nm : { "g1-full.wav", "g1-custom.wav", "g1-loop.wav", "g1-tail-cut.wav", "g1-tail-include.wav" })
+            g1Dir.getChildFile (nm).deleteFile();
+    }
+
     section ("Serum render compatibility (optional local plugin gate)");
     if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
     {

@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "ExportRange.h"
 #include "ScanProgress.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
@@ -8576,6 +8577,28 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
         renderModeReason = "requested fast render";
     }
 
+    // ── Export range (invariant 78) + delay-tail policy (invariant 81) ──────────
+    // Resolved + validated BEFORE the device teardown below so a bad range/tail arg
+    // returns an error without a needless freePlaybackContext(). getLoopRange() reads
+    // transport CachedValue state and is context-independent either way. The actual
+    // resolution/validation math is pure + engine-free (mosh::resolveExportRange,
+    // src/moshops/ExportRange.h) so it's unit-testable without a live MoshEngine —
+    // see tests/test_export_range.cpp.
+    const auto loopRange = edit.getTransport().getLoopRange();
+    const auto rangeRes = resolveExportRange (
+        edit.getLength().inSeconds(),
+        loopRange.getStart().inSeconds(), loopRange.getEnd().inSeconds(),
+        args.hasProperty ("range"), args.getProperty ("range", var()).toString(),
+        args.hasProperty ("start"), (double) args.getProperty ("start", 0.0),
+        args.hasProperty ("end"),   (double) args.getProperty ("end", 0.0),
+        args.hasProperty ("tail"),  args.getProperty ("tail", var()).toString(),
+        args.hasProperty ("tailSeconds"), (double) args.getProperty ("tailSeconds", 2.0));
+    if (! rangeRes.ok)
+        return errResult ("export_audio", rangeRes.error);
+    const double rStart = rangeRes.rangeStart, rEnd = rangeRes.rangeEnd;
+    const juce::String rangeKind = rangeRes.rangeKind, tailKind = rangeRes.tailKind;
+    const double tailSeconds = rangeRes.tailSeconds;
+
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
     // is attached. Tear down our level-meter taps first (the master tap lives on
@@ -8587,7 +8610,7 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     edit.getTransport().freePlaybackContext();
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the next ctx
 
-    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+    const double len = juce::jmax (0.1, rEnd - rStart);
 
     // Sample rate: honor a valid explicit request (>= 7000), else the stored
     // per-project setting (PRJ-008), else the device rate with the 44100 fallback.
@@ -8615,7 +8638,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
     if (params.blockSizeForAudio <= 0)
         params.blockSizeForAudio = 512;
-    params.time = { tracktion::TimePosition(), edit.getLength() };
+    params.time = { tracktion::TimePosition::fromSeconds (rStart),
+                     tracktion::TimePosition::fromSeconds (rEnd) };
+    params.endAllowance = tracktion::TimeDuration::fromSeconds (tailSeconds);
     params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
     params.usePlugins = true;
     params.useMasterPlugins = true;
@@ -8640,9 +8665,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             // forever. A no-progress watchdog + an absolute deadline (scaled to the edit
             // length to allow legitimate realtime renders) turn any such stall into a clean
             // error instead of an app hang.
-            const double editSeconds  = edit.getLength().inSeconds();
+            const double renderSpan   = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
             const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, editSeconds * 8000.0 + 60000.0);
+            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, renderSpan * 8000.0 + 60000.0);
             const juce::uint32 stallMs    = 20000;   // abort if progress doesn't advance for 20s
             float  lastProgress   = -1.0f;
             juce::uint32 lastProgressMs = startMs;
@@ -8690,6 +8715,11 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     }
     data->setProperty ("bytes", (juce::int64) file.getSize());
     data->setProperty ("seconds", len);
+    data->setProperty ("range", rangeKind);
+    data->setProperty ("rangeStart", rStart);
+    data->setProperty ("rangeEnd", rEnd);
+    data->setProperty ("tail", tailKind);
+    data->setProperty ("endAllowance", tailSeconds);
     data->setProperty ("renderModeRequested", requestedMode);
     data->setProperty ("renderMode", renderMode);
     data->setProperty ("renderModeReason", renderModeReason);
