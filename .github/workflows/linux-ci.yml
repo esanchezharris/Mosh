@@ -65,13 +65,32 @@ jobs:
           cmake --version && ninja --version && node --version
 
       # Best-effort cache of the tracktion/JUCE FetchContent tree (shared by both stages).
+      # github.repository is folded into BOTH the key AND the restore-keys prefix so a
+      # repo RENAME (which changes /home/runner/work/<repo>/<repo>) can't prefix-match a
+      # pre-rename cache whose sub-build CMakeCache.txt has the old absolute path baked in
+      # — cmake then refuses the mismatched dir at configure (the 2026-07-16
+      # zeke431/ClaudeMosh -> zeke431/Mosh rename broke this stage; see ci.yml + CLAUDE.md).
       - name: Cache CPM/FetchContent
         uses: actions/cache@v4
         with:
           path: .cpm-cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
+          key: cpm-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake', 'CMakeLists.txt') }}
           restore-keys: |
-            cpm-${{ runner.os }}-
+            cpm-${{ runner.os }}-${{ github.repository }}-
+
+      - name: Purge a path-stale dep cache (self-heal)
+        # Defense-in-depth: restore-keys can prefix-match an older cache, so if the
+        # restored .cpm-cache has a FetchContent sub-build CMakeCache.txt baked with a
+        # checkout path other than this run's ($GITHUB_WORKSPACE), drop it and refetch.
+        run: |
+          f=.cpm-cache/_fc/tracktion_engine-subbuild/CMakeCache.txt
+          if [ -f "$f" ]; then
+            baked="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$f" | head -1)"
+            case "$baked" in
+              "$GITHUB_WORKSPACE"/*|"") : ;;  # belongs to this checkout (or unknown fmt) — keep
+              *) echo "stale .cpm-cache baked at '$baked' (!= $GITHUB_WORKSPACE) — purging"; rm -rf .cpm-cache ;;
+            esac
+          fi
 
       # ── Stage 1 (REQUIRED): headless MoshTests ────────────────────────────────
       # App/UI OFF so this configures with only build-essential/cmake/ninja present.
