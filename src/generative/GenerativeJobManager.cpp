@@ -262,6 +262,17 @@ juce::String GenerativeJobManager::submitJob (const juce::String& adapter,
                                               const juce::File& inputWav, const juce::File& outputWav,
                                               const juce::File& manifest, const juce::var& params)
 {
+    // Callers REUSE output paths across renders (a layer's job dir keeps the same
+    // output.wav; render-ahead window stems repeat across app restarts), and every
+    // poller treats an existing output+manifest pair as the durable completion signal
+    // (real SA3 can finish while /status is unreachable during teardown). Clear the
+    // previous render's pair before submitting or a re-render "completes" on the first
+    // poll with the stale audio. Safe: both files are per-job transients — the applied/
+    // accepted audio lives in durable copies (audio/<layerId>-<fp>.wav, accept_render's
+    // audio/<layerId>.wav) made at finalize.
+    outputWav.deleteFile();
+    manifest.deleteFile();
+
     auto* body = new DynamicObject();
     body->setProperty ("adapter", adapter.isNotEmpty() ? adapter : juce::String ("fake"));
     body->setProperty ("inputWav", inputWav.getFullPathName());
