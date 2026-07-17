@@ -205,6 +205,22 @@ export const SETTINGS: SettingDef[] = [
       ],
     },
   },
+  {
+    // Opt-in crash reporting + anonymous usage telemetry (src/telemetry/, see
+    // docs/telemetry/PRIVACY.md). Default OFF. The one side effect of toggling
+    // this is a native call (bridge.ts's setTelemetryOptIn, wired from
+    // effects.ts) that creates/removes a small flag file
+    // (~/Library/Mosh/telemetry.optin) the native crash handler + counters read
+    // directly — deliberately NOT a MoshOps command. No network of any kind
+    // happens unless this is on.
+    id: "telemetryOptIn",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Privacy",
+    label: "Share crash reports & usage",
+    help: "Off by default. When on, Mosh may send anonymous crash reports and command-usage counts (command NAMES only — never audio, lyrics, file paths, or project content) to help find and fix bugs. No network activity happens while this is off.",
+  },
   ...interactionSettings(),
   {
     // AUD-SCAN — opt-in AudioUnit cataloging. Off by default because an AU sweep is the

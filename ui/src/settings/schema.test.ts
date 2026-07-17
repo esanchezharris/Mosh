@@ -53,7 +53,7 @@ describe("settingsByCategory", () => {
     // AUD-SCAN — "Plugins" is last by design: it is maintenance (opt-in AU scanning),
     // not a preference, so it sits at the bottom of the settings panel.
     expect(groups.map((g) => g.category)).toEqual([
-      "Appearance", "Moshi", "Layout", "Interaction", "Feel", "Keys", "Plugins",
+      "Appearance", "Moshi", "Layout", "Privacy", "Interaction", "Feel", "Keys", "Plugins",
     ]);
   });
 
