@@ -106,6 +106,15 @@ def main():
         caps = get_json(base, "/capabilities")
         check("/capabilities lists fake adapter", any(a.get("id") == "fake" for a in caps.get("adapters", [])))
 
+        # Guest-clarity badge (2026-07-16): /colors reports the honest `sa3` ground truth
+        # separately from the colour rack itself — with MOSH_ENABLE_SA3=0 forced above, a
+        # guest Mac's service must say sa3:false even though it still returns colours (the
+        # FakeAdapter renders get a colour rack too; this field is what tells the UI which
+        # engine is actually behind it).
+        colors = get_json(base, "/colors")
+        check("/colors reports sa3:false under FakeAdapter-only", colors.get("sa3") is False, str(colors.get("sa3")))
+        check("/colors still returns a non-empty colour rack", len(colors.get("colors", [])) > 0, str(len(colors.get("colors", []))))
+
         with tempfile.TemporaryDirectory() as d:
             src = os.path.join(d, "input.wav")
             out = os.path.join(d, "output.wav")

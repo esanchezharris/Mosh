@@ -100,6 +100,25 @@ namespace
         return juce::var (o);
     }
 
+    // A fixed filename in the shared, machine-wide system temp dir collides when two
+    // `Mosh --selftest` processes run at once on the same host (a self-hosted CI runner
+    // racing a dev's local run, or two concurrent worktree gates): one process's
+    // deleteFile()/write races the other's read and false-fails a check that has nothing
+    // to do with the code under test. The per-run session dir (isolated via
+    // MOSH_SELFTEST_SESSION) is the existing hermeticity boundary, but File::tempDirectory
+    // paths escape it. Scope every temp artifact to THIS process — same root-cause class as
+    // PR #342's hermetic service ports, for a temp-file path instead of a network port.
+    juce::File selftestTempPath (const MoshEngine& eng, const juce::String& leafName)
+    {
+        // Computed once per process: the isolated session leaf (already unique under the
+        // documented MOSH_SELFTEST_SESSION isolation) + a Uuid fragment (unique even when
+        // that env override is absent — e.g. a plain `--selftest` racing on both sides).
+        static const juce::String tag = eng.sessionDir().getFileName()
+                                            + "-" + juce::Uuid().toString().substring (0, 8);
+        return juce::File::getSpecialLocation (juce::File::tempDirectory)
+                   .getChildFile ("mosh-selftest-" + tag + "-" + leafName);
+    }
+
     class LiveAudioProbe final : public juce::AudioIODeviceCallback
     {
     public:
@@ -873,9 +892,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // rescan_plugins (VST3-only, inline) dispatches + returns ok with a count.
         // Idempotent: the catalog must not shrink across a rescan.
+        //
+        // FIT-003 regression-lock: the sync (VST3-only) path must emit ZERO
+        // 'plugin_scan_progress' events. That event (now enriched with a live
+        // running count + elapsedMs from timerCallback()'s sampler) is reserved for
+        // the async AU/deep sweep -- proves enriching it didn't leak sampler state
+        // into the inline, message-thread-safe VST3 path.
+        auto countScanEvents = [&] {
+            int n = 0; for (auto& e : eventTypes) if (e == "plugin_scan_progress") ++n; return n; };
+        const int scanEventsBefore = countScanEvents();
         auto rs = cmd (ops, "rescan_plugins", objN ({{ "format", "vst3" }, { "wait", true }}));
         check (ok (rs), "rescan_plugins (vst3) ok");
         check ((int) rs["data"].getProperty ("count", -1) >= total, "rescan_plugins reports a count (>= prior total)");
+        check (countScanEvents() == scanEventsBefore,
+               "sync VST3 rescan emits no plugin_scan_progress events (FIT-003)");
 
         // get_plugin_blocklist returns a well-formed (possibly empty) array.
         auto gb = cmd (ops, "get_plugin_blocklist");
@@ -923,13 +953,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // The blocked entry must appear in get_plugin_blocklist.
             // For a real catalog entry the 'id' field is the UI-facing id (idFor form).
             // For the raw AU fallback the 'id' field equals the raw string (no catalog match).
+            // FIT-003: block_plugin is a MANUAL block, so its reason must read "manual"
+            // (not "crash_or_hang" -- that tag is reserved for dead-mans-pedal recovery).
             bool inBlock = false;
+            juce::String blockedReason;
             { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
               if (auto* arr = bl.getArray())
                 for (auto& e : *arr)
                     if (e.getProperty ("id",    var()).toString() == blockTarget ||
-                        e.getProperty ("rawId", var()).toString() == blockTarget) inBlock = true; }
+                        e.getProperty ("rawId", var()).toString() == blockTarget)
+                        { inBlock = true; blockedReason = e.getProperty ("reason", var()).toString(); } }
             check (inBlock, "blocked id appears in get_plugin_blocklist");
+            check (blockedReason == "manual", "manual block_plugin is tagged reason:\"manual\"");
 
             // If we blocked a real catalog entry it must have disappeared from list_plugins.
             if (useRealEntry)
@@ -953,6 +988,35 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // nothing here, but the contract is read-only).
         auto plog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
         check (! plog.contains ("get_plugin_blocklist"), "get_plugin_blocklist is READ-ONLY (not logged)");
+
+        // FIT-003 — dead-mans-pedal crash/hang recovery tags the RIGHT reason.
+        // A real in-session AU hang can't be simulated headlessly (JUCE marshals AU
+        // instantiation to the message thread with no per-component timeout -- see
+        // PluginHost.cpp's HONEST CAVEAT), but the recovery-and-tag bookkeeping IS
+        // exactly what a real hang's *next launch* runs, and that part is fully
+        // exercisable: debugSimulateCrashRecovery writes the pedal file and replays
+        // the identical PluginHost::recoverFromDeadMansPedal() path initialise() runs
+        // at real startup.
+        {
+            auto& ph = ops.pluginHostForScan();
+            const String crasherId = "AudioUnit:Effect/aufx,fitkillsim,MOSH";
+            ph.debugSimulateCrashRecovery (crasherId);
+
+            auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            bool found = false; String reason;
+            if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("rawId", var()).toString() == crasherId)
+                        { found = true; reason = e.getProperty ("reason", var()).toString(); }
+            check (found, "dead-mans-pedal recovery quarantines the crasher id");
+            check (reason == "crash_or_hang",
+                   "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
+
+            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
+            auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
+        }
     }
 
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
@@ -1246,7 +1310,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "X-FDBK readout sensitivity set");
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 4 }, { "value", 1.0 }}))),
                "X-FDBK readout auto-suppress enabled");
-        auto xfOut = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-xfeedback-readout.wav");
+        auto xfOut = selftestTempPath (eng, "xfeedback-readout.wav");
         xfOut.deleteFile();
         check (ok (cmd (ops, "export_audio", objN ({{ "file", xfOut.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
                "X-FDBK readout export ok");
@@ -1265,6 +1329,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             } }
         check (activeCutHasScore, "X-FDBK active cut readout carries its own score");
         check (activeCutHasDepth, "X-FDBK active cut readout carries depth");
+        xfOut.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
         const int autoIdx = builtinIndex (trackById (bt), "moshAutoTune");
         if (autoIdx >= 0)
@@ -3420,7 +3485,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
 
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-src");
+        auto destDir  = selftestTempPath (eng, "portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("portable.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3439,7 +3504,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
         // so resolution can ONLY succeed via the co-located copy, then open the copy.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-moved");
+        auto moved = selftestTempPath (eng, "portable-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the project dir to a new location");
         auto poolBak = poolSrc.getSiblingFile (poolSrc.getFileName() + ".gap3bak");
@@ -3522,7 +3587,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) renderLayerOf (rt, rcid).getProperty ("hasArtifact", false), "render produced a cached artifact");
 
         // Save As to a standalone dir OUTSIDE the pool → render artifacts consolidate local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-portable");
+        auto destDir  = selftestTempPath (eng, "renders-portable");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("renders.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3541,7 +3606,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // PROVE portability: copy the whole project elsewhere, DELETE the original pool
         // render so resolution can ONLY succeed via the co-located copy, then open the copy
         // and prove freeze/accept (the artifact-gated ops) still work — the AL-009 payoff.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-moved");
+        auto moved = selftestTempPath (eng, "renders-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the render project to a new location");
         poolDir.getChildFile ("renders").deleteRecursively();   // hide the original pool artifact
@@ -5535,8 +5600,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         {
             MultiplayerClient peer;
             check (peer.joinSession (sessCode, "Peer", "#00ffff"), "peer joined the audio session");
-            auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                           .getChildFile ("mosh-mp-stem-" + h0 + "." + e0);
+            auto tmp = selftestTempPath (eng, "mp-stem-" + h0 + "." + e0);
             tmp.deleteFile();
             check (peer.downloadBlob (h0, e0, tmp), "peer fetched the stem from the relay's blob store [" + peer.lastError() + "]");
             check (tmp.existsAsFile() && tmp.getSize() > 0, "fetched stem is non-empty (" + juce::String (tmp.getSize()) + " bytes)");
@@ -7043,7 +7107,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 
     if (! micMode)
     {
-        auto aiff = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-voice-smoke.aiff");
+        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
         aiff.deleteFile();
         ChildProcess say;
         say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });

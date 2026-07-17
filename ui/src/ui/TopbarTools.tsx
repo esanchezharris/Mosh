@@ -13,6 +13,7 @@ import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
+import { trainingPreviewLabel } from "../capabilities";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
@@ -37,6 +38,7 @@ function Pop({
   ariaLabel,
   testId,
   children,
+  onOpen,
 }: {
   label: React.ReactNode;
   title: string;
@@ -46,6 +48,11 @@ function Pop({
   ariaLabel?: string;
   testId?: string;
   children: (close: () => void) => React.ReactNode;
+  // Fires on the open transition only (not on close, not on mount) — the hook for a
+  // lazy per-popover data fetch (e.g. TrainingTool's guest-degradation capability
+  // load) that must wait for the user to actually open the popover rather than firing
+  // as soon as the always-mounted topbar tool renders.
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -56,6 +63,11 @@ function Pop({
     document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open]);
+  const toggle = () => setOpen((v) => {
+    const next = !v;
+    if (next) onOpen?.();
+    return next;
+  });
   return (
     <div className={`pop-wrap${className ? " " + className : ""}`} ref={ref}>
       <button
@@ -66,7 +78,7 @@ function Pop({
         aria-expanded={open}
         aria-haspopup="dialog"
         data-testid={testId}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         {label}
       </button>
@@ -188,6 +200,12 @@ export function TrainingTool({
 }: { training: TrainingState | null } & ToolChromeProps) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
+  // Guest degradation: the trainer is a deterministic-stub scaffold everywhere until the
+  // owner points MOSH_TRAINING_REMOTE_URL at a rented GPU box — label it so a tester
+  // doesn't mistake a completed "training run" for a real fine-tune. loadCapabilities is
+  // triggered lazily via Pop's onOpen below (see that prop's comment for why not here).
+  const previewLabel = useStore((s) => trainingPreviewLabel(s.capabilities));
+  const loadCapabilities = useStore((s) => s.loadCapabilities);
   const [title, setTitle] = useState("");
   const [creator, setCreator] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -284,10 +302,18 @@ export function TrainingTool({
       className={`training-pop${className ? ` ${className}` : ""}`}
       ariaLabel={ariaLabel ?? "Type-beat training"}
       testId={testId}
+      // Guest degradation: TrainingTool itself is always mounted (part of the topbar/
+      // overflow tools), so a plain useEffect here would fire at app load — the same
+      // eager-spawn bug this pass fixed elsewhere. onOpen only fires on the actual
+      // open transition (a user click), the correct lazy trigger point.
+      onOpen={loadCapabilities}
     >
       {() => (
         <>
-          <div className="pop-head">Type-Beat Training</div>
+          <div className="pop-head">Type-Beat Training{previewLabel && (
+            <span className="pop-head-badge" data-testid="training-preview-badge"
+              title="This trains a deterministic placeholder LoRA stub on this Mac — no GPU, no real fine-tune">{previewLabel}</span>
+          )}</div>
           <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
           <div className="pop-group">
             <div className="pop-label">Add source</div>

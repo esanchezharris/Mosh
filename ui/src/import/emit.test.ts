@@ -9,6 +9,17 @@ const ir = (session: Partial<ImportIR["session"]>): ImportIR => ({
   session: { tracks: [], ...session },
 });
 
+// resolveAudioPath deliberately uses platform-native node:path (emit.ts is
+// node-lane only — the engine opens platform-native paths), so the project
+// fixtures must be platform-shaped: win32 resolve() prepends the drive to a
+// "/Users/..." fixture. Same behavior asserted on both platforms — relative
+// resolution against the project dir, backslash normalization, and foreign
+// drive-letter / UNC passthrough.
+const WIN = process.platform === "win32";
+const PROJECT = WIN ? "C:\\Users\\me\\beats\\song.rpp" : "/Users/me/beats/song.rpp";
+const inProjectDir = (rel: string) =>
+  WIN ? `C:\\Users\\me\\beats\\${rel.replace(/\//g, "\\")}` : `/Users/me/beats/${rel}`;
+
 describe("emitCommands", () => {
   it("emits session-level commands, then per-track create + mixer with $refs", () => {
     const cmds = emitCommands(
@@ -69,22 +80,22 @@ describe("emitCommands", () => {
   it("resolves a project-relative audio path against the project file's directory", () => {
     const program = emitCommands({
       format: "rpp",
-      source: "/Users/me/beats/song.rpp",
+      source: PROJECT,
       unmappable: [],
       session: { tracks: [{ type: "audio", clips: [{ kind: "wave", start: 0, length: 2, sourceFile: "Media/kick.wav" }] }] },
     });
-    expect(program.commands.find((c) => c.command === "import_clip")!.args.file).toBe("/Users/me/beats/Media/kick.wav");
+    expect(program.commands.find((c) => c.command === "import_clip")!.args.file).toBe(inProjectDir("Media/kick.wav"));
   });
 
   it("normalizes Windows separators in a relative path and passes a foreign drive-letter path through", () => {
     const prog = (sourceFile: string) =>
       emitCommands({
         format: "rpp",
-        source: "/Users/me/beats/song.rpp",
+        source: PROJECT,
         unmappable: [],
         session: { tracks: [{ type: "audio", clips: [{ kind: "wave", start: 0, length: 1, sourceFile }] }] },
       }).commands.find((c) => c.command === "import_clip")!.args.file;
-    expect(prog("media\\kick.wav")).toBe("/Users/me/beats/media/kick.wav"); // relative Windows path
+    expect(prog("media\\kick.wav")).toBe(inProjectDir("media/kick.wav")); // relative Windows path resolves against the project dir
     expect(prog("D:\\Samples\\snare.wav")).toBe("D:\\Samples\\snare.wav"); // foreign drive-letter absolute — passed through
     expect(prog("\\\\nas\\share\\hat.wav")).toBe("\\\\nas\\share\\hat.wav"); // foreign UNC path — passed through intact
   });

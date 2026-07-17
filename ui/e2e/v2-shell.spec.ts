@@ -57,6 +57,27 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
 });
 
+// FIT-003 — v2 previously had NO rescan control and no progress UI at all (the classic
+// modal already did). This proves the dock's new Rescan control round-trips cleanly.
+test("plugins dock: rescan control exists and completes without error", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("v2-browser-tab-plugins").click();
+  const dock = page.getByTestId("v2-plugin-dock");
+  const rescanBtn = dock.getByTestId("v2-pb-rescan");
+  await expect(rescanBtn).toBeVisible();
+  await expect(rescanBtn).toHaveText("Rescan");
+
+  await rescanBtn.click();
+
+  // The dev mock's rescan_plugins always completes synchronously (there is no dev-mock
+  // AU sweep to sample), so the button settles back to "Rescan" and the live status line
+  // (rendered only while scanProgress is set) is gone; the catalog is still populated.
+  await expect(rescanBtn).toHaveText("Rescan");
+  await expect(dock.getByTestId("v2-pb-scan-status")).toHaveCount(0);
+  await expect(dock.getByTestId("v2-pb-row").first()).toBeVisible();
+});
+
 test("right agent dock: collapses to a Moshi pull-tab and re-expands", async ({ page }) => {
   await bootV2(page);
   // open by default → the agent rail (the live WebGL Moshi) is mounted

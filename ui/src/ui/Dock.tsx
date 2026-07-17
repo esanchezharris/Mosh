@@ -9,6 +9,8 @@ import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA }
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
+import { isTransformPreview } from "../capabilities";
+import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -176,6 +178,7 @@ function XFeedbackReadout({ plugin }: { plugin: Plugin }) {
 export function GenDrawer({ track, selectedClipId }: { track: Track; selectedClipId?: string }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
+  const sa3Available = useStore((s) => s.sa3Available);
   const loadColors = useStore((s) => s.loadColors);
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
   const loadLoras = useStore((s) => s.loadLoras);
@@ -188,11 +191,20 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const clip = pickGenClip(track, selectedClipId);
   if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add a clip on this track to re-imagine or transform it.</span></div>;
   const rl = clip.renderLayer;
-  const sa3 = colorsAvail.length > 0;
+  // sa3 was inferred from "does the colour rack have entries" — but the FakeAdapter returns a
+  // populated rack too, so a guest Mac without the real model looked identical to one with it.
+  // /colors now reports the ground truth directly; resolveSa3Available only falls back to the
+  // old proxy when talking to a service that predates the field (sa3Available === undefined).
+  const sa3 = resolveSa3Available(sa3Available, colorsAvail.length);
+  const badge = engineBadgeView(sa3);
 
   return (
     <div className="gen" data-testid="generative">
-      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
+      <div className="gen-head">
+        <span className="gen-title">⃝ GENERATIVE</span>
+        <span className={`engine-badge eb-${sa3 ? "sa3" : "preview"}`} title={badge.title} data-testid="engine-badge">{badge.label}</span>
+        <span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span>
+      </div>
       {!rl ? (
         <>
           <CompileBox clipId={clip.id} trackId={track.id} />
@@ -271,6 +283,11 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
 
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
+  // Per-render truth: the drawer header badge says what THIS Mac's service would render
+  // next; this says what actually produced the render sitting in the clip right now (its own
+  // manifest's `adapter`) — the two can disagree (e.g. SA3 went down mid-session). Silent when
+  // the render came from the real model — that's the unsurprising default.
+  const renderedBy = renderedByLabel(qa?.adapter);
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
@@ -329,6 +346,10 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         </select>
         )}
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
+        {renderedBy && (
+          <span className="gen-rendered-by tc" data-testid="rendered-by"
+            title="This render was produced by the preview engine, not the real model">{renderedBy}</span>
+        )}
       </div>
       {rendering && (
         <div className="gen-prog" role="progressbar" aria-label="Render progress"
@@ -486,6 +507,7 @@ function TransformControls({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const targets = useStore((s) => s.availableTransformTargets);
   const freeText = useStore((s) => s.transformFreeText);
+  const preview = useStore((s) => isTransformPreview(s.capabilities));
   const rl = clip.renderLayer!;
   const target = rl.target ?? "";
   const strength = rl.strength ?? 65;
@@ -493,6 +515,10 @@ function TransformControls({ clip }: { clip: Clip }) {
   const setTarget = (t: string) => void exec("set_render_param", { clipId: clip.id, target: t });
   return (
     <div className="xform-controls">
+      {preview && (
+        <span className="xform-preview tc" data-testid="xform-preview"
+          title="No RAVE model installed on this Mac — this renders a deterministic placeholder tilt/saturation, not a real instrument transform">preview</span>
+      )}
       <label className="nparam">
         <span className="nlabel">target</span>
         <select className="btn ghost" data-testid="xform-target" value={known ? target : ""}

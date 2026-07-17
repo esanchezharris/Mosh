@@ -33,8 +33,12 @@ The map of Mosh's documentation. **New here? Read [`../ARCHITECTURE.md`](../ARCH
 - [`MULTIPLAYER.md`](MULTIPLAYER.md) — the 2-player collaboration model: what syncs vs. stays
   local (independent playheads), track locks + commit-on-move, audio-clip/SA3 stem sync, the
   connect/join UX, and known limits. Read before a live session.
-- [`PLAYTEST_SETUP.md`](PLAYTEST_SETUP.md) — guest-facing setup for a live playtest (install an
-  unsigned build past Gatekeeper, join a session).
+- [`TESTER_QUICKSTART.md`](TESTER_QUICKSTART.md) — the full guest-facing, non-developer
+  walkthrough: install past Gatekeeper, first-launch permissions, sound check, join a
+  session, what to try first (incl. the SA3/preview engine badge), the optional real-AI
+  local setup, known quirks, and how to send diagnostics if something breaks.
+- [`PLAYTEST_SETUP.md`](PLAYTEST_SETUP.md) — short host-side pointer to
+  `TESTER_QUICKSTART.md` (this used to be the guest doc itself; it's now a redirect).
 - [`resumption/`](resumption/) — dated restart/resumption maps (historical once superseded by
   a newer status snapshot).
 

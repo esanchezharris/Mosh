@@ -62,6 +62,23 @@ public:
     void blockPlugin   (const juce::String& pluginId);   // manual quarantine
     void clearBlocklist();                                // un-quarantine all
 
+    /** FIT-003 — why `pluginId` (a raw fileOrIdentifier, as returned by blocklist())
+        is blocked: "crash_or_hang" if the dead-mans-pedal auto-quarantined it after a
+        scan crash/hang, "manual" if blockPlugin() was called directly, or an empty
+        string if it isn't blocked / predates this tracking. Persisted alongside the
+        catalog so the reason survives a relaunch. */
+    juce::String blockReasonFor (const juce::String& pluginId) const;
+
+    /** TEST-ONLY: simulate a dead-mans-pedal crash/hang recovery without an actual
+        relaunch, by writing `pluginId` to the pedal file and then running the exact
+        same recovery path initialise() runs at real startup. Production code never
+        calls this — recovery normally happens exactly once, automatically, at the
+        top of initialise(). Used by --selftest to prove the "crash_or_hang" reason
+        is recorded correctly (a genuine hang cannot be simulated headlessly — see
+        PROGRESS/PR notes — but the recovery-and-tag bookkeeping this exercises is the
+        same code path a real hang's next launch runs). */
+    void debugSimulateCrashRecovery (const juce::String& pluginId);
+
     /** Find a description by Tracktion identifier string; scans the file lazily
         if the id looks like a path we haven't seen. Slow VST3 scanning is
         opt-in via MOSH_SCAN_SLOW_VST3=1. Returns false if unknown. */
@@ -84,6 +101,16 @@ private:
     juce::File catalogFile()   const;
     juce::File deadMansPedal() const;
     void closeEditorByKey (const juce::String& key);
+
+    // FIT-003 — WHY each blocklist entry was added, keyed by the raw fileOrIdentifier
+    // (the same key blocklist()/blockPlugin() use). "crash_or_hang" | "manual".
+    // Persisted in its own small file (NOT inside the JUCE-owned catalog XML, which
+    // createXml()/recreateFromXml() fully own the shape of) so a relaunch remembers it.
+    void blockPluginWithReason (const juce::String& pluginId, const juce::String& reason);
+    void loadBlockReasons();
+    void saveBlockReasons();
+    juce::File blockReasonsFile() const;
+    juce::StringPairArray blockReasons;
 
     te::Engine& engine;
     juce::OwnedArray<juce::DocumentWindow> editorWindows;
