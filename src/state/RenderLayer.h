@@ -71,8 +71,13 @@ struct RenderLayer
                                      const juce::String& upstreamHash,
                                      const juce::String& tempoKeyContext,
                                      int sampleRate, int channels,
-                                     const juce::String& serviceBuild)
+                                     const juce::String& serviceBuild,
+                                     const juce::String& lorasKey = {})
     {
+        // lorasKey ("name=value@sha12:trigger;" per active row, rack order) is resolved
+        // at RENDER time via /loras (MoshOps::resolveLorasKey) — content identity, so a
+        // retrained same-name file or a sidecar trigger edit is a cache MISS. The one
+        // fingerprint caller (cmdRenderLayer) always passes it; default {} == no rack.
         auto params = v.getChildWithName (ids::PARAMS);
         juce::String colorsKey;
         if (auto colors = params.getChildWithName (ids::COLORS); colors.isValid())
@@ -80,13 +85,6 @@ struct RenderLayer
             {
                 auto c = colors.getChild (i);
                 colorsKey << c[ids::name].toString() << "=" << c[ids::value].toString() << ";";
-            }
-        juce::String lorasKey;   // LoRA rack — order matters (stacks merge sequentially)
-        if (auto loras = params.getChildWithName (ids::LORAS); loras.isValid())
-            for (int i = 0; i < loras.getNumChildren(); ++i)
-            {
-                auto l = loras.getChild (i);
-                lorasKey << l[ids::name].toString() << "=" << l[ids::value].toString() << ";";
             }
 
         juce::StringArray parts {
@@ -104,7 +102,8 @@ struct RenderLayer
             params[ids::target].toString(),        // Route B transform target — part of key
             params[ids::strength].toString(),      // Route B transform strength — part of key
             colorsKey,
-            lorasKey,                              // LoRA rack selection — part of key
+            lorasKey,                              // LoRA rack: name=value@sha12:trigger; — resolved at
+                                                   // RENDER time (retrain / trigger edit ⇒ MISS)
             v[ids::seed].toString(),
             params[ids::cfg].toString() + "/" + params[ids::steps].toString() + "/" + params[ids::nl].toString(),
             v[ids::safetyMappingVersion].toString(),

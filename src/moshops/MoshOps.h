@@ -392,10 +392,40 @@ private:
     // Wave clips hash their staged audio; MIDI/drum clips pass a stable source signature
     // (notes + instrument/FX state) since their bounced audio isn't bit-deterministic.
     juce::String    computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                        const juce::String& upstreamOverride = {});
+                                        const juce::String& upstreamOverride = {},
+                                        const juce::String& lorasKey = {});
+    // LoRA rack → fingerprint key ("name=value@sha12:trigger;"), resolved at render
+    // time via /loras for the sa3 adapter (name=value only otherwise). false + err on
+    // an unknown LoRA name.
+    bool            resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey,
+                                     juce::String& err);
     void            finalizeRender (const juce::String& clipId, const juce::File& outputWav,
                                     const juce::File& manifestFile, const juce::String& cacheKey,
                                     const juce::String& serviceError = {}, int expectedEpoch = -1);
+    // P5 — boundary-quantized swap: a render finishing while the playhead is INSIDE the
+    // target clip defers its swap to the next musical boundary (loop wrap when looping,
+    // else next bar) so the change lands "when the loop comes around", never mid-phrase.
+    // Headless / stopped transport / sing land instantly (hermetic in selftest).
+    struct PendingSwap
+    {
+        juce::File outputWav, manifestFile;
+        juce::String cacheKey;
+        int expectedEpoch = -1;
+        double boundarySec = 0.0;   // land when the playhead reaches/wraps past this
+        double armedPosSec = 0.0;   // last observed position (wrap detection)
+    };
+    struct SwapTimer : juce::Timer
+    {
+        explicit SwapTimer (MoshOps& o) : ops (o) {}
+        void timerCallback() override { ops.pollPendingSwaps(); }
+        MoshOps& ops;
+    };
+    std::map<juce::String, PendingSwap> pendingSwaps;   // clipId → latest finished render
+    std::unique_ptr<SwapTimer> swapTimer;
+    void            applyFinalizedRender (const juce::String& clipId, const juce::File& outputWav,
+                                          const juce::File& manifestFile, const juce::String& cacheKey);
+    bool            shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec);
+    void            pollPendingSwaps();
 
     // Phase 3 — reactive auto-re-render. reactiveTouch(clipId) bumps the layer's reactiveEpoch and
     // (debounced) fires a background re-render when an applied render is live (wave in-place or MIDI

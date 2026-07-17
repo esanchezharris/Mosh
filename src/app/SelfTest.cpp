@@ -501,6 +501,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Same pin for the FMS sing adapter: a machine with MOSH_SOULX_SSH_HOST + an enrolled
     // voice configured must still run the deterministic fake legato-beep backend here.
     mosh::setEnvVar ("MOSH_ENABLE_SOULX", "0");
+    // LoRA rack double lock: the fake path never consults the registry (names key the
+    // fingerprint directly), but pin the kill switch AND an empty library dir anyway so
+    // the user's real ~/Library/Mosh/loras can never leak into a hermetic run.
+    mosh::setEnvVar ("MOSH_ENABLE_LORAS", "0");
+    {
+        auto emptyLoraDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("mosh-selftest-loras-empty");
+        emptyLoraDir.createDirectory();
+        mosh::setEnvVar ("MOSH_LORA_DIR", emptyLoraDir.getFullPathName().toRawUTF8());
+    }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
@@ -1758,14 +1768,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lr4 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
         check (lr4["data"].getProperty ("cache", var()).toString() == "miss", "clearing the LoRA rack -> cache MISS");
 
-        // The command clamps to <=2 entries (compose limit).
+        // The rack is UNBOUNDED and UNCLAMPED (owner call — no budget rule): all
+        // entries stick in order, and value > 100 (deliberate overdrive) survives.
         Array<var> sel3;
+        int v3 = 50;
         for (auto* nm : { "a", "b", "c" })
-        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", 50); sel3.add (var (lo)); }
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", v3); sel3.add (var (lo)); v3 += 40; }
         cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel3) }}));
         { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
           auto* larr = lv.getArray();
-          check (larr != nullptr && larr->size() == 2, "LoRA rack clamps to two entries"); }
+          check (larr != nullptr && larr->size() == 3
+                 && larr->getReference (0).getProperty ("name", var()).toString() == "a"
+                 && larr->getReference (2).getProperty ("name", var()).toString() == "c",
+                 "LoRA rack is unbounded (3 entries, order preserved)");
+          check (larr != nullptr && larr->size() == 3
+                 && (double) larr->getReference (2).getProperty ("value", 0) == 130.0,
+                 "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
