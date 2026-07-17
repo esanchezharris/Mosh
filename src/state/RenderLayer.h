@@ -51,7 +51,7 @@ struct RenderLayer
         // never per-render controls, so they are deliberately absent here and out of the
         // fingerprint (they had no audible effect on the canonical MLX path). Removed
         // 2026-07-17 — see the fingerprint note below.
-        params.setProperty (ids::nl, 0.4, nullptr);
+        params.setProperty (ids::nl, 0.4, nullptr);   // init_noise_level; ≤0.5 keeps whole-clip stitch pulse-free (service clamp_nl is the guard). UI surfaces it as a 0–100 "keep ↔ re-imagine" dial.
         params.setProperty (ids::target, "", nullptr);       // Route B transform target
         params.setProperty (ids::strength, 65.0, nullptr);   // Route B transform strength (0–100)
         params.appendChild (juce::ValueTree (ids::COLORS), nullptr);
