@@ -2115,7 +2115,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "new_project", args1 ("name", "g1-export-selftest"))), "new_project (G1 export isolation) ok");
 
         auto gt = cmd (ops, "create_track", args1 ("name", "G1 Tone"))["data"].getProperty ("trackId", var()).toString();
-        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt }, { "seconds", 4.0 }, { "freq", 220.0 }}))),
+        // freq 337 is unique to this section: add_test_tone_clip caches the generated
+        // WAV by int(freq) and reuses it (duration is NOT in the key — see the LoRA
+        // rack section's note above), so sharing a frequency with another section that
+        // expects a different duration (e.g. the 220Hz/2s tone elsewhere in this file)
+        // would silently give G1's clip the WRONG length and fail the rangeEnd/seconds
+        // assertions below.
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt }, { "seconds", 4.0 }, { "freq", 337.0 }}))),
                "G1: add_test_tone_clip (4s) ok");
 
         auto g1Dir = eng.sessionDir().getChildFile ("exports");

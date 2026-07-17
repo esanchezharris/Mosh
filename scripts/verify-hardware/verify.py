@@ -479,6 +479,72 @@ def check_relative_ref_export(ctx):
     return row("Relative-ref export (MP-hang guard)", ok, {"wav": str(out), **st})
 
 
+def check_export_range_tail(ctx):
+    """G1: export_audio range (invariant 78) + delay-tail policy (invariant 81), proven on
+    the ACTUAL rendered WAV — `--selftest` only checks the command's reported
+    seconds/rangeStart/rangeEnd fields, never the bytes that hit disk. A 4s tone: the full
+    export's real duration is ~4s; a custom [1,3] range's real duration is ~2s and its
+    frame count is smaller than the full render's — direct hardware proof that only the
+    requested span was rendered (not the whole edit, trimmed after the fact). Then the tail
+    policy: load a reverb pushed hot (big room, fully wet) so its decay rings well past a
+    short render's end, and compare tail:'cut' vs tail:'include' on the IDENTICAL [0,1]
+    custom range — tail:'include' must produce a measurably LONGER actual WAV (it captured
+    the ringing decay), while tail:'cut' stays at ~the requested span. Engine-only (no
+    service / no models), offline."""
+    SESSION = "verify-export-range-tail"
+    full_out = ART / "10_export_full.wav"
+    custom_out = ART / "10_export_custom.wav"
+    cut_out = ART / "10_export_tail_cut.wav"
+    include_out = ART / "10_export_tail_include.wav"
+
+    cmds = [
+        {"command": "create_track", "args": {"name": "RangeTail"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 4.0, "freq": 220.0}},
+        # Full export (no range args) — the un-ranged baseline.
+        {"command": "export_audio", "args": {"file": str(full_out)}},
+        # Custom [1,3] range — invariant 78: a shorter requested span -> a shorter actual render.
+        {"command": "export_audio", "args": {"file": str(custom_out),
+                                             "range": "custom", "start": 1.0, "end": 3.0}},
+        # A hot reverb so tail:'include' has something audible to capture past the range end.
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": "reverb"}, "capture": {"RV": "index"}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${RV}", "paramIndex": 0, "value": 0.95}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${RV}", "paramIndex": 2, "value": 1.0}},
+        # tail:'cut' vs tail:'include' on the SAME [0,1] custom range — invariant 81.
+        {"command": "export_audio", "args": {"file": str(cut_out),
+                                             "range": "custom", "start": 0.0, "end": 1.0, "tail": "cut"}},
+        {"command": "export_audio", "args": {"file": str(include_out),
+                                             "range": "custom", "start": 0.0, "end": 1.0,
+                                             "tail": "include", "tailSeconds": 2.0}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION)
+    fails = failed_commands(results)
+    outs = (full_out, custom_out, cut_out, include_out)
+    if fails or not all(p.exists() for p in outs):
+        return row("Export range + tail (G1)", False,
+                   {"failed_commands": fails,
+                    "exists": {p.name: p.exists() for p in outs},
+                    "stderr": proc.stderr[-500:]})
+
+    full_st, custom_st, cut_st, include_st = (stats(p) for p in outs)
+
+    # invariant 78: the requested SPAN, not the whole edit, is what was actually rendered.
+    range_ok = (3.5 < full_st["duration_s"] < 4.5
+                and 1.5 < custom_st["duration_s"] < 2.5
+                and custom_st["frames"] < full_st["frames"])
+
+    # invariant 81: tail:'include' must make the ACTUAL rendered WAV measurably longer
+    # than tail:'cut' on the identical range (it captured the reverb decay past the
+    # requested end), while tail:'cut' stays close to the requested 1s span.
+    tail_ok = (0.7 < cut_st["duration_s"] < 1.5
+               and include_st["duration_s"] > cut_st["duration_s"] + 0.5
+               and include_st["frames"] > cut_st["frames"])
+
+    ok = range_ok and tail_ok
+    return row("Export range + tail (G1)", ok,
+               {"full": full_st, "custom": custom_st, "tail_cut": cut_st, "tail_include": include_st,
+                "range_ok": range_ok, "tail_ok": tail_ok})
+
+
 def check_bypass_layer(ctx):
     """AL-008: bypass_layer must RE-ROUTE real audio, not just flip a ValueTree flag.
 
@@ -823,7 +889,7 @@ def check_crash_recovery(ctx):
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
                   check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
-                  check_relative_ref_export, check_bypass_layer, check_render_artifact_portability,
+                  check_relative_ref_export, check_export_range_tail, check_bypass_layer, check_render_artifact_portability,
                   check_crash_recovery]
 
 
