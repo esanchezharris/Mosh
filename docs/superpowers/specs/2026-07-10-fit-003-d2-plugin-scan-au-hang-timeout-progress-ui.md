@@ -2,6 +2,39 @@
 
 _Execution-ready spec authored by the sprint bug-hunt/spec workflow (2026-07-10). feasible=True._
 
+## Addendum (PR #348, post-implementation) — the seam-exclusion scope was widened, on purpose
+
+This spec's §2/§6 "zero edits under `src/plugins/hosting/**`" principle held for the
+**progress-UI** half but turned out to be too narrow for the **blocklist** half. The
+shipped PR **does** edit `src/plugins/hosting/PluginHost.{h,cpp}` — intentionally, with
+owner sign-off (this is an owner-merge PR, not an auto-loop one, so the seam exclusion's
+"needs-human" gate is satisfied by construction) and adversarially reviewed clean.
+
+**Why the seam had to be touched:** the ticket also asked for "on next launch
+auto-blacklist the recorded culprit" to be *legible* — i.e. the UI should be able to say
+*why* a plugin is blocked ("it crashed/hung a previous scan" vs. "you blocked it").
+`recoverFromDeadMansPedal()` and `blockPlugin()` — the only two places that ever add to
+the blocklist — both live in `PluginHost`, and the blocklist itself is `PluginHost`'s
+private `KnownPluginList`. There's no way to tag *why* an entry is there without either
+(a) adding that bookkeeping inside `PluginHost` (what shipped), or (b) inferring it from
+outside via some fragile side-channel. (a) is the honest fix. So the actually-shipped
+scope is: `src/moshops/**` + `ui/src/**` + `tests/` (per the original plan, unchanged)
+**plus** a small, additive `PluginHost` extension — `blockReasons` (a `StringPairArray`),
+`blockPluginWithReason()`, `loadBlockReasons()`/`saveBlockReasons()`,
+`blockReasonsFile()`, and a test-only `debugSimulateCrashRecovery()` hook. It does not
+touch the watchdog/scan machinery this doc describes as already-shipped (§1) — those
+lines are unchanged.
+
+This does **not** reopen the residual gap in §7.2 below: fixing an AU hang *in the
+current session* still needs out-of-process plugin **hosting** (FIT-008), which this PR
+does not attempt. Tagging *why* a plugin got blocked is a bookkeeping change to data that
+already lives in `PluginHost`, not a hosting-architecture change.
+
+The stale "zero edits / reviewer check: `git diff --stat` must show no
+`src/plugins/hosting/` paths" lines below (§2, §6, §7.6) predate this addendum — read
+them as historical intent for the progress-UI half, superseded here for the blocklist
+half.
+
 # FIT-003 — Plugin-scan AU-hang timeout + progress UI (execution-ready spec)
 
 ## ⚠️ Scope correction up front (read before executing)
@@ -16,7 +49,7 @@ The backlog entry (`docs/auto-loop/backlog.jsonl:46`) names the scan path as `sr
 
 2. **The residual true gap — an AU that hangs *in the current session* — cannot be fixed without editing the excluded seam.** Per the HONEST CAVEAT at `PluginHost.cpp:274-289`: `AudioUnitPluginFormat` instantiation is marshalled back to the **message thread**, so `killScanWorkers()` (which only kills the OOP child) does nothing for an in‑process AU hang; it freezes the UI until a forced restart. Fixing that means OOP AU hosting inside `scanAUComponents()` — squarely inside `src/plugins/hosting/**` and overlapping **FIT‑008** (plugin‑teardown OOP hosting). **Out of scope here.**
 
-**What this lane CAN ship seam‑free, and where the real value is:** the **progress‑UI half**. Today progress is a coarse two‑event lifecycle (`plugin_scan_progress {done:false}` → `{done:true, count}`), consumed only by the **classic** `PluginBrowser`; the **v2 default shell has no rescan control and no progress UI at all**. The achievable deliverable is: (a) a live *running‑count* progress feed emitted from **MoshOps** (not the seam), (b) that feed surfaced in the v2 dock and enriched in the classic modal, and (c) a Catch2 + `--selftest` + vitest guard so the already‑present timeout is documented/regression‑locked. `feasible=true` for this reduced, honest scope.
+**What this lane CAN ship seam‑free, and where the real value is:** the **progress‑UI half**. Today progress is a coarse two‑event lifecycle (`plugin_scan_progress {done:false}` → `{done:true, count}`), consumed only by the **classic** `PluginBrowser`; the **v2 default shell has no rescan control and no progress UI at all**. The achievable deliverable is: (a) a live *running‑count* progress feed emitted from **MoshOps** (not the seam), (b) that feed surfaced in the v2 dock and enriched in the classic modal, and (c) a Catch2 + `--selftest` + vitest guard so the already‑present timeout is documented/regression‑locked. `feasible=true` for this reduced, honest scope. (As shipped — see the Addendum at the top of this doc — the progress-UI half stayed exactly this seam-free; a *second*, separate half of PR #348 — making the blocklist say *why* a plugin was blocked — turned out to need a small, deliberate, owner-reviewed extension into `PluginHost` itself. That's a distinct piece of scope from the progress-UI design below, not a violation of it.)
 
 ---
 
@@ -47,7 +80,7 @@ The backlog entry (`docs/auto-loop/backlog.jsonl:46`) names the scan path as `sr
 
 ## 2. Proposed design
 
-**Principle:** all new code is in `src/moshops/**` (event enrichment), `ui/src/**` (UI), and `tests/` — **zero edits under `src/plugins/hosting/**`, `src/engine/**`, `src/state/**`.** The seam is read via public JUCE APIs only.
+**Principle (as originally scoped for the progress-UI half — see the Addendum at the top of this doc for what actually shipped):** all new code is in `src/moshops/**` (event enrichment), `ui/src/**` (UI), and `tests/` — **zero edits under `src/plugins/hosting/**`, `src/engine/**`, `src/state/**`.** The seam is read via public JUCE APIs only. **As shipped:** the progress-UI half (§2a-2d below) matches this exactly; the blocklist-reason half additionally made a small, owner-signed-off extension to `src/plugins/hosting/PluginHost.{h,cpp}` (blocklist reason bookkeeping only — not the scan/watchdog machinery). `src/engine/**` and `src/state/**` remain untouched.
 
 ### 2a. Live running‑count progress from MoshOps (message‑thread sampler)
 
@@ -161,7 +194,7 @@ Append the running count to the existing status line (`PluginBrowser.tsx:141`).
 
 ## 6. Risks & seam concerns
 
-- **HARD‑EXCLUDED `src/plugins/hosting/**`:** the design touches it **zero times**. Progress is derived from the public `knownPluginList.getNumTypes()` and MoshOps‑owned timing state. Reviewer check: `git diff --stat` must show no `src/plugins/hosting/` paths.
+- **`src/plugins/hosting/**` (owner-review-gated, not truly "hard-excluded" for an owner-merge PR):** the **progress-UI** design (§2a-2d) touches it **zero times** — progress is derived from the public `knownPluginList.getNumTypes()` and MoshOps‑owned timing state. **As shipped (see Addendum), the blocklist-reason half deliberately extends `PluginHost.{h,cpp}`** with reason bookkeeping (`blockReasons`/`blockPluginWithReason`/`loadBlockReasons`/`saveBlockReasons`/`blockReasonsFile`/`debugSimulateCrashRecovery`) — additive, does not touch `rescan()`/`scanFile()`/`scanAUComponents()`/the watchdog. Reviewer check: `git diff --stat` **will** show `src/plugins/hosting/PluginHost.{h,cpp}` — confirm the diff there is limited to blocklist-reason bookkeeping, not scan/watchdog/hosting-architecture changes, and that the PR is owner-merge (not auto-loop) so the seam's sign-off requirement is met.
 - **`src/engine/**` (MoshEngine), `src/state/**`:** untouched. `eng.engine().getPluginManager()` is an existing public accessor already used throughout `MoshOps.cpp` — no MoshEngine edit.
 - **deploy / CI:** untouched.
 - **Threading:** the sampler runs on the **message thread** (`timerCallback`), reads the list on the message thread, and emits on the message thread — same thread the OOP master mutates the list on. No new thread, no lock, no race. The existing detached scan thread + `callAsync` completion pattern is reused verbatim (its `this`‑capture lifetime exposure is pre‑existing; MoshOps lives for process lifetime, so it's the established safe assumption — do **not** widen it).
@@ -178,7 +211,7 @@ Append the running count to the existing status line (`PluginBrowser.tsx:141`).
 3. Classic `PluginBrowser` status line shows the count.
 4. **Catch2 green** including the new `test_plugin_scan_progress.cpp`; **`--selftest` deterministic across 3 runs** with the pre‑existing rescan checks passing and **no baseline count regression** (count unchanged, or +K exactly for K intentionally‑added optional assertions, recorded in the PR).
 5. `tsc` clean; existing vitest + e2e suites still green (additive only).
-6. **Zero edits under `src/plugins/hosting/**`, `src/engine/**`, `src/state/**`, deploy, CI.** No snapshot/format schema bump.
+6. **Zero edits under `src/engine/**`, `src/state/**`, deploy, CI.** No snapshot/format schema bump. (As shipped: `src/plugins/hosting/PluginHost.{h,cpp}` IS touched, deliberately, for blocklist-reason bookkeeping only — see the Addendum at the top of this doc. That is an owner-reviewed exception to the progress-UI half's original zero-edits principle, not a violation of it.)
 7. PR description documents: (a) the already‑present VST3/OOP 25 s watchdog with file:line, (b) that the in‑session AU‑hang timeout is out of scope under the seam exclusion and routed to FIT‑008.
 
 ---

@@ -17,7 +17,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // for a track and must always run (otherwise we'd block reading a peer's work).
     static const std::set<juce::String> unguarded {
         "list_plugins", "list_builtins", "list_audio_devices", "list_midi_inputs",
-        "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors",
+        "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors", "list_loras",
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
@@ -34,6 +34,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "mp_create_session", "mp_join_session", "mp_leave_session",
         "mp_claim_track", "mp_commit_track", "mp_broadcast_selection",
         "mp_serialize_project", "mp_apply_bootstrap", "mp_apply_structural",
+        "mp_fetch_missing_stems",
         "import_training_source", "approve_training_source", "build_training_corpus",
         "submit_training_job", "training_job_status", "cancel_training_job",
         "import_lora_adapter", "activate_lora_adapter",

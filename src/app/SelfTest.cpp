@@ -99,6 +99,25 @@ namespace
         return juce::var (o);
     }
 
+    // A fixed filename in the shared, machine-wide system temp dir collides when two
+    // `Mosh --selftest` processes run at once on the same host (a self-hosted CI runner
+    // racing a dev's local run, or two concurrent worktree gates): one process's
+    // deleteFile()/write races the other's read and false-fails a check that has nothing
+    // to do with the code under test. The per-run session dir (isolated via
+    // MOSH_SELFTEST_SESSION) is the existing hermeticity boundary, but File::tempDirectory
+    // paths escape it. Scope every temp artifact to THIS process — same root-cause class as
+    // PR #342's hermetic service ports, for a temp-file path instead of a network port.
+    juce::File selftestTempPath (const MoshEngine& eng, const juce::String& leafName)
+    {
+        // Computed once per process: the isolated session leaf (already unique under the
+        // documented MOSH_SELFTEST_SESSION isolation) + a Uuid fragment (unique even when
+        // that env override is absent — e.g. a plain `--selftest` racing on both sides).
+        static const juce::String tag = eng.sessionDir().getFileName()
+                                            + "-" + juce::Uuid().toString().substring (0, 8);
+        return juce::File::getSpecialLocation (juce::File::tempDirectory)
+                   .getChildFile ("mosh-selftest-" + tag + "-" + leafName);
+    }
+
     class LiveAudioProbe final : public juce::AudioIODeviceCallback
     {
     public:
@@ -481,6 +500,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // Same pin for the FMS sing adapter: a machine with MOSH_SOULX_SSH_HOST + an enrolled
     // voice configured must still run the deterministic fake legato-beep backend here.
     mosh::setEnvVar ("MOSH_ENABLE_SOULX", "0");
+    // LoRA rack double lock: the fake path never consults the registry (names key the
+    // fingerprint directly), but pin the kill switch AND an empty library dir anyway so
+    // the user's real ~/Library/Mosh/loras can never leak into a hermetic run.
+    mosh::setEnvVar ("MOSH_ENABLE_LORAS", "0");
+    {
+        auto emptyLoraDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("mosh-selftest-loras-empty");
+        emptyLoraDir.createDirectory();
+        mosh::setEnvVar ("MOSH_LORA_DIR", emptyLoraDir.getFullPathName().toRawUTF8());
+    }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
@@ -872,9 +901,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // rescan_plugins (VST3-only, inline) dispatches + returns ok with a count.
         // Idempotent: the catalog must not shrink across a rescan.
+        //
+        // FIT-003 regression-lock: the sync (VST3-only) path must emit ZERO
+        // 'plugin_scan_progress' events. That event (now enriched with a live
+        // running count + elapsedMs from timerCallback()'s sampler) is reserved for
+        // the async AU/deep sweep -- proves enriching it didn't leak sampler state
+        // into the inline, message-thread-safe VST3 path.
+        auto countScanEvents = [&] {
+            int n = 0; for (auto& e : eventTypes) if (e == "plugin_scan_progress") ++n; return n; };
+        const int scanEventsBefore = countScanEvents();
         auto rs = cmd (ops, "rescan_plugins", objN ({{ "format", "vst3" }, { "wait", true }}));
         check (ok (rs), "rescan_plugins (vst3) ok");
         check ((int) rs["data"].getProperty ("count", -1) >= total, "rescan_plugins reports a count (>= prior total)");
+        check (countScanEvents() == scanEventsBefore,
+               "sync VST3 rescan emits no plugin_scan_progress events (FIT-003)");
 
         // get_plugin_blocklist returns a well-formed (possibly empty) array.
         auto gb = cmd (ops, "get_plugin_blocklist");
@@ -922,13 +962,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // The blocked entry must appear in get_plugin_blocklist.
             // For a real catalog entry the 'id' field is the UI-facing id (idFor form).
             // For the raw AU fallback the 'id' field equals the raw string (no catalog match).
+            // FIT-003: block_plugin is a MANUAL block, so its reason must read "manual"
+            // (not "crash_or_hang" -- that tag is reserved for dead-mans-pedal recovery).
             bool inBlock = false;
+            juce::String blockedReason;
             { auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
               if (auto* arr = bl.getArray())
                 for (auto& e : *arr)
                     if (e.getProperty ("id",    var()).toString() == blockTarget ||
-                        e.getProperty ("rawId", var()).toString() == blockTarget) inBlock = true; }
+                        e.getProperty ("rawId", var()).toString() == blockTarget)
+                        { inBlock = true; blockedReason = e.getProperty ("reason", var()).toString(); } }
             check (inBlock, "blocked id appears in get_plugin_blocklist");
+            check (blockedReason == "manual", "manual block_plugin is tagged reason:\"manual\"");
 
             // If we blocked a real catalog entry it must have disappeared from list_plugins.
             if (useRealEntry)
@@ -952,6 +997,35 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // nothing here, but the contract is read-only).
         auto plog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
         check (! plog.contains ("get_plugin_blocklist"), "get_plugin_blocklist is READ-ONLY (not logged)");
+
+        // FIT-003 — dead-mans-pedal crash/hang recovery tags the RIGHT reason.
+        // A real in-session AU hang can't be simulated headlessly (JUCE marshals AU
+        // instantiation to the message thread with no per-component timeout -- see
+        // PluginHost.cpp's HONEST CAVEAT), but the recovery-and-tag bookkeeping IS
+        // exactly what a real hang's *next launch* runs, and that part is fully
+        // exercisable: debugSimulateCrashRecovery writes the pedal file and replays
+        // the identical PluginHost::recoverFromDeadMansPedal() path initialise() runs
+        // at real startup.
+        {
+            auto& ph = ops.pluginHostForScan();
+            const String crasherId = "AudioUnit:Effect/aufx,fitkillsim,MOSH";
+            ph.debugSimulateCrashRecovery (crasherId);
+
+            auto bl = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            bool found = false; String reason;
+            if (auto* arr = bl.getArray())
+                for (auto& e : *arr)
+                    if (e.getProperty ("rawId", var()).toString() == crasherId)
+                        { found = true; reason = e.getProperty ("reason", var()).toString(); }
+            check (found, "dead-mans-pedal recovery quarantines the crasher id");
+            check (reason == "crash_or_hang",
+                   "dead-mans-pedal recovery is tagged reason:\"crash_or_hang\" (not \"manual\")");
+
+            // Clean up: never leave a synthetic id in the shared, machine-wide catalog.
+            check (ok (cmd (ops, "clear_plugin_blocklist")), "clear_plugin_blocklist ok (crash-recovery cleanup)");
+            auto bl2 = cmd (ops, "get_plugin_blocklist")["data"].getProperty ("blocklist", var());
+            check (bl2.isArray() && bl2.size() == 0, "blocklist empty after crash-recovery cleanup");
+        }
     }
 
     // ─── Wave 2: tempo / time-signature / metronome / record / navigation ───
@@ -1245,7 +1319,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "X-FDBK readout sensitivity set");
         check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", xfTrack }, { "index", xfIdx }, { "paramIndex", 4 }, { "value", 1.0 }}))),
                "X-FDBK readout auto-suppress enabled");
-        auto xfOut = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-xfeedback-readout.wav");
+        auto xfOut = selftestTempPath (eng, "xfeedback-readout.wav");
         xfOut.deleteFile();
         check (ok (cmd (ops, "export_audio", objN ({{ "file", xfOut.getFullPathName() }, { "format", "wav" }, { "bitDepth", 24 }}))),
                "X-FDBK readout export ok");
@@ -1264,6 +1338,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             } }
         check (activeCutHasScore, "X-FDBK active cut readout carries its own score");
         check (activeCutHasDepth, "X-FDBK active cut readout carries depth");
+        xfOut.deleteFile();   // per-process unique name → clean up so it can't accumulate in the temp dir
 
         const int autoIdx = builtinIndex (trackById (bt), "moshAutoTune");
         if (autoIdx >= 0)
@@ -1692,14 +1767,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto lr4 = cmd (ops, "render_layer", objN ({{ "clipId", lcid }, { "wait", true }}));
         check (lr4["data"].getProperty ("cache", var()).toString() == "miss", "clearing the LoRA rack -> cache MISS");
 
-        // The command clamps to <=2 entries (compose limit).
+        // The rack is UNBOUNDED and UNCLAMPED (owner call — no budget rule): all
+        // entries stick in order, and value > 100 (deliberate overdrive) survives.
         Array<var> sel3;
+        int v3 = 50;
         for (auto* nm : { "a", "b", "c" })
-        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", 50); sel3.add (var (lo)); }
+        { auto* lo = new DynamicObject(); lo->setProperty ("name", juce::String (nm)); lo->setProperty ("value", v3); sel3.add (var (lo)); v3 += 40; }
         cmd (ops, "set_render_param", objN ({{ "clipId", lcid }, { "loras", var (sel3) }}));
         { auto lv = lLayer().getProperty ("loras", var());   // keep the var alive past getArray()
           auto* larr = lv.getArray();
-          check (larr != nullptr && larr->size() == 2, "LoRA rack clamps to two entries"); }
+          check (larr != nullptr && larr->size() == 3
+                 && larr->getReference (0).getProperty ("name", var()).toString() == "a"
+                 && larr->getReference (2).getProperty ("name", var()).toString() == "c",
+                 "LoRA rack is unbounded (3 entries, order preserved)");
+          check (larr != nullptr && larr->size() == 3
+                 && (double) larr->getReference (2).getProperty ("value", 0) == 130.0,
+                 "LoRA overdrive (value > 100) survives unclamped"); }
     }
 
     // ─── NRL-MIDI: generative on a MIDI clip (auto-bounce → audio → model) ───
@@ -3419,7 +3502,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "create_track", objN ({ { "name", "Kit" }, { "type", "drum" } }))), "drum track for portability ok");
 
         // Save As to a standalone dir OUTSIDE the pool → consolidation copies audio local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-src");
+        auto destDir  = selftestTempPath (eng, "portable-src");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("portable.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3438,7 +3521,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // PROVE portability: copy the whole project elsewhere, hide the ORIGINAL pool source
         // so resolution can ONLY succeed via the co-located copy, then open the copy.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-portable-moved");
+        auto moved = selftestTempPath (eng, "portable-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the project dir to a new location");
         auto poolBak = poolSrc.getSiblingFile (poolSrc.getFileName() + ".gap3bak");
@@ -3521,7 +3604,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((bool) renderLayerOf (rt, rcid).getProperty ("hasArtifact", false), "render produced a cached artifact");
 
         // Save As to a standalone dir OUTSIDE the pool → render artifacts consolidate local.
-        auto destDir  = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-portable");
+        auto destDir  = selftestTempPath (eng, "renders-portable");
         destDir.deleteRecursively(); destDir.createDirectory();
         auto destEdit = destDir.getChildFile ("renders.tracktionedit");
         check (ok (cmd (ops, "save_as", args1 ("file", destEdit.getFullPathName()))), "save_as ok");
@@ -3540,7 +3623,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // PROVE portability: copy the whole project elsewhere, DELETE the original pool
         // render so resolution can ONLY succeed via the co-located copy, then open the copy
         // and prove freeze/accept (the artifact-gated ops) still work — the AL-009 payoff.
-        auto moved = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-renders-moved");
+        auto moved = selftestTempPath (eng, "renders-moved");
         moved.deleteRecursively();
         check (destDir.copyDirectoryTo (moved), "copied the render project to a new location");
         poolDir.getChildFile ("renders").deleteRecursively();   // hide the original pool artifact
@@ -5604,11 +5687,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "mp_leave_session")), "mp_leave_session ok (poll thread joined)");
 
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
-        // relay; the upload/peer-download round-trip only on the cloud relay (the
-        // local self-host relay has no /mp/blob/* storage).
-        const juce::String relayUrl (std::getenv ("MOSH_RELAY_URL") ? std::getenv ("MOSH_RELAY_URL") : "");
-        const bool cloudRelay = relayUrl.contains ("supabase");
-
+        // relay; the upload/peer-download round-trip now runs against WHATEVER
+        // relay MOSH_RELAY_URL points at — cloud or local. (Previously gated to
+        // the cloud relay only, because the local dev relay had no /mp/blob/*
+        // storage; relay/server.py now mirrors that contract for local/CI use —
+        // see the mp_fetch_missing_stems self-heal section below.)
         auto sess = cmd (ops, "mp_create_session", objN ({ { "name", "Hz" }, { "color", "#ffff00" } }));
         check (ok (sess), "mp_create_session (audio)");
         const auto sessCode = sess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
@@ -5631,14 +5714,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto e0 = (refs.isArray() && refs.size() > 0) ? refs[0].getProperty ("ext", juce::var()).toString() : juce::String();
         check (h0.length() == 64, "stem hash is a sha256");
 
-        if (cloudRelay)
         {
             MultiplayerClient peer;
             check (peer.joinSession (sessCode, "Peer", "#00ffff"), "peer joined the audio session");
-            auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                           .getChildFile ("mosh-mp-stem-" + h0 + "." + e0);
+            auto tmp = selftestTempPath (eng, "mp-stem-" + h0 + "." + e0);
             tmp.deleteFile();
-            check (peer.downloadBlob (h0, e0, tmp), "peer fetched the stem from cloud storage [" + peer.lastError() + "]");
+            check (peer.downloadBlob (h0, e0, tmp), "peer fetched the stem from the relay's blob store [" + peer.lastError() + "]");
             check (tmp.existsAsFile() && tmp.getSize() > 0, "fetched stem is non-empty (" + juce::String (tmp.getSize()) + " bytes)");
             tmp.deleteFile();
             peer.leave();
@@ -5687,6 +5768,298 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
             cmd (ops, "mp_leave_session");
             watcher.leave();
+        }
+
+        // Shared by both sub-sections below: a wave clip's sourceMissing flag / id,
+        // read from a track located by logicalId (mirrors trackSnapshotByLogicalId's
+        // own scoping, used across both the self-heal regression and the bootstrap
+        // end-to-end test).
+        auto clipSourceMissing = [] (MoshOps& o, const juce::String& lid) -> bool
+        {
+            auto t = trackSnapshotByLogicalId (o, lid);
+            if (auto* cs = t.getProperty ("clips", juce::var()).getArray())
+                for (auto& c : *cs)
+                    if (c.getProperty ("type", juce::var()).toString() == "wave")
+                        return (bool) c.getProperty ("sourceMissing", false);
+            return false;
+        };
+        auto waveClipIdOf = [] (MoshOps& o, const juce::String& lid) -> juce::String
+        {
+            auto t = trackSnapshotByLogicalId (o, lid);
+            if (auto* cs = t.getProperty ("clips", juce::var()).getArray())
+                for (auto& c : *cs)
+                    if (c.getProperty ("type", juce::var()).toString() == "wave")
+                        return c.getProperty ("id", juce::var()).toString();
+            return {};
+        };
+
+        // ── mp_fetch_missing_stems — self-healing stem resolution ───────────
+        // Fresh, isolated host + guest engines (distinct session dirs, like the
+        // AL-010 / "Layer 3" two-engine patterns above) so a stem download is a
+        // REAL cross-directory HTTP fetch through relay/server.py's blob store,
+        // not a same-directory coincidence.
+        section ("Multiplayer P4: self-healing stem fetch (mp_fetch_missing_stems)");
+        {
+            MoshEngine hostEng (false, true, "mp-selfheal-host");
+            MoshOps    hostOps (hostEng);
+            MoshEngine guestEng (false, true, "mp-selfheal-guest");
+            MoshOps    guestOps (guestEng);
+
+            auto hostSess = cmd (hostOps, "mp_create_session", objN ({ { "name", "SHHost" }, { "color", "#111111" } }));
+            check (ok (hostSess), "self-heal: host created a session");
+            const auto shCode = hostSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+            check (shCode.isNotEmpty(), "self-heal: host got a room code");
+
+            check (ok (cmd (guestOps, "mp_join_session",
+                            objN ({ { "code", shCode }, { "name", "SHGuest" }, { "color", "#222222" } }))),
+                   "self-heal: guest joined the host's room");
+
+            auto mk = cmd (hostOps, "create_track", args1 ("name", "SH Src"));
+            const auto shTrackId = mk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (hostOps, "add_test_tone_clip", objN ({ { "trackId", shTrackId }, { "seconds", 1.0 } }))),
+                   "self-heal: host added a wave clip");
+
+            // mp_serialize_project content-addresses + uploads the stem (the same path
+            // a late-joiner's bootstrap uses) and returns the blob directly.
+            auto ser = cmd (hostOps, "mp_serialize_project");
+            check (ok (ser), "self-heal: host mp_serialize_project ok");
+            juce::var shTrackEntry;
+            if (auto* tarr = ser.getProperty ("data", juce::var()).getProperty ("tracks", juce::var()).getArray())
+                for (auto& tv : *tarr)
+                    if (auto rr = tv.getProperty ("audioRefs", juce::var()); rr.isArray() && rr.size() > 0)
+                        shTrackEntry = tv;
+            check (shTrackEntry.isObject(), "self-heal: host's bundle carries a track with audioRefs");
+            const auto shBlob = shTrackEntry.getProperty ("blob", juce::var()).toString();
+            check (shBlob.isNotEmpty(), "self-heal: host track blob non-empty");
+
+            // THE REGRESSION: apply the peer's track structure directly (bypassing the
+            // download-before-apply step that applyMultiplayerCommitMessage/
+            // cmdMpApplyBootstrap normally run) — reproduces a transient upload/download
+            // failure, where the ignored uploadBlob/downloadBlob bool result left the
+            // guest's clip permanently sourceMissing with no recovery but a host re-commit.
+            auto applied = cmd (guestOps, "apply_remote_track", args1 ("blob", shBlob));
+            check (ok (applied), "self-heal: guest applied the track structure (no stem download)");
+            const auto shLid = applied.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+            check (shLid.isNotEmpty(), "self-heal: applied track logicalId resolved");
+
+            check (clipSourceMissing (guestOps, shLid),
+                   "self-heal: guest's clip is sourceMissing before fetch (regression reproduced)");
+            const auto shClipId = waveClipIdOf (guestOps, shLid);
+            check (shClipId.isNotEmpty(), "self-heal: guest's wave clip id resolved");
+            check (! ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", shClipId))),
+                   "self-heal: get_clip_peaks fails before the stem is fetched");
+
+            // THE FIX: the guest self-heals by re-deriving the missing hash/ext from its
+            // own clip's by-hash source ref and retrying the download.
+            auto fetch = cmd (guestOps, "mp_fetch_missing_stems", args1 ("wait", true));
+            check (ok (fetch), "self-heal: mp_fetch_missing_stems ok");
+            check ((int) fetch.getProperty ("data", juce::var()).getProperty ("fetched", 0) == 1,
+                   "self-heal: fetched exactly 1 missing stem");
+            check ((int) fetch.getProperty ("data", juce::var()).getProperty ("failed", 0) == 0,
+                   "self-heal: 0 failures");
+            check (! clipSourceMissing (guestOps, shLid),
+                   "self-heal: guest's clip is no longer sourceMissing after fetch");
+            check (ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", shClipId))),
+                   "self-heal: get_clip_peaks succeeds after the fetch");
+
+            // A second fetch with nothing missing is a cheap synchronous no-op.
+            auto refetch = cmd (guestOps, "mp_fetch_missing_stems", args1 ("wait", true));
+            check (ok (refetch), "self-heal: re-running mp_fetch_missing_stems is a harmless no-op");
+            check ((int) refetch.getProperty ("data", juce::var()).getProperty ("fetched", 0) == 0,
+                   "self-heal: nothing left to fetch");
+
+            // Adversarial-review finding #2: every check above uses wait:true (the
+            // SYNCHRONOUS branch) — the std::thread + callAsync ASYNC branch had ZERO
+            // coverage. Force it directly with a second missing-stem clip on the SAME
+            // host+guest room (the relay already holds the correct bytes, so this is a
+            // deterministic proof the background-thread path lands correctly, not a
+            // race against a deliberately-broken transfer).
+            auto mk2 = cmd (hostOps, "create_track", args1 ("name", "SH Src 2"));
+            const auto shTrackId2 = mk2.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (hostOps, "add_test_tone_clip",
+                            objN ({ { "trackId", shTrackId2 }, { "seconds", 1.0 }, { "freq", 440.0 } }))),
+                   "self-heal (async): host added a second wave clip");
+
+            auto ser2 = cmd (hostOps, "mp_serialize_project");
+            check (ok (ser2), "self-heal (async): host mp_serialize_project ok");
+            juce::String shLid2;
+            {
+                auto snap = hostOps.snapshot();
+                if (auto* arr = snap["tracks"].getArray())
+                    for (auto& tv : *arr)
+                        if (tv.getProperty ("name", juce::var()).toString() == "SH Src 2")
+                            shLid2 = tv.getProperty ("logicalId", juce::var()).toString();
+            }
+            check (shLid2.isNotEmpty(), "self-heal (async): host's second track logicalId resolved");
+
+            juce::var shTrackEntry2;
+            if (auto* tarr = ser2.getProperty ("data", juce::var()).getProperty ("tracks", juce::var()).getArray())
+                for (auto& tv : *tarr)
+                    if (tv.getProperty ("logicalId", juce::var()).toString() == shLid2)
+                        shTrackEntry2 = tv;
+            check (shTrackEntry2.isObject(), "self-heal (async): host's bundle carries the second track");
+            const auto shBlob2 = shTrackEntry2.getProperty ("blob", juce::var()).toString();
+            check (shBlob2.isNotEmpty(), "self-heal (async): second track blob non-empty");
+
+            auto applied2 = cmd (guestOps, "apply_remote_track", args1 ("blob", shBlob2));
+            check (ok (applied2), "self-heal (async): guest applied the second track structure (no stem download)");
+            const auto shLid2Applied = applied2.getProperty ("data", juce::var()).getProperty ("logicalId", juce::var()).toString();
+            check (shLid2Applied == shLid2, "self-heal (async): applied logicalId matches the host's second track");
+            check (clipSourceMissing (guestOps, shLid2Applied),
+                   "self-heal (async): guest's second clip is sourceMissing before fetch");
+
+            // THE ASYNC PATH: no `wait` arg -> cmdMpFetchMissingStems takes the
+            // std::thread + callAsync branch (mirrors cmdMpApplyBootstrap's own
+            // auto-trigger call, which also omits `wait`).
+            auto fetch2 = cmd (guestOps, "mp_fetch_missing_stems");
+            check (ok (fetch2), "self-heal (async): mp_fetch_missing_stems (no wait) returns ok immediately");
+            check (fetch2.getProperty ("data", juce::var()).getProperty ("status", juce::var()).toString() == "started",
+                   "self-heal (async): took the async branch (status:\"started\")");
+
+            // Bounded drain for the background thread's downloadBlob + its callAsync
+            // completion (sourceMediaChanged + emitSnapshotInvalidated) to land.
+            auto* mm2 = juce::MessageManager::getInstanceWithoutCreating();
+            bool resolved2 = false;
+            const auto deadline2 = juce::Time::getMillisecondCounter() + (juce::uint32) 6000;
+            while (! resolved2 && juce::Time::getMillisecondCounter() < deadline2)
+            {
+                if (mm2 != nullptr) mm2->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+                resolved2 = ! clipSourceMissing (guestOps, shLid2Applied);
+            }
+            check (resolved2, "self-heal (async): guest's clip resolved via the background thread + callAsync (previously untested code path)");
+            check (ok (cmd (guestOps, "get_clip_peaks", args1 ("clipId", waveClipIdOf (guestOps, shLid2Applied)))),
+                   "self-heal (async): get_clip_peaks succeeds after the async fetch");
+
+            cmd (guestOps, "mp_leave_session");
+            cmd (hostOps, "mp_leave_session");
+        }
+
+        // ── PR-1 should-fix: downloadBlob rejects a corrupted transfer ───────
+        // Nothing previously proved the SHA-256 integrity check in
+        // MultiplayerClient::downloadBlob (see its .h doc comment) actually fires —
+        // it was "correct by inspection" only. relay/server.py's MOSH_RELAY_BLOB_CORRUPT
+        // hook (armed for this whole gate run by run-mp-selftest.sh, ext-scoped so it
+        // can be left on without corrupting every OTHER test's real ".wav" stem) flips
+        // the bytes of any raw GET whose key ends in ".corrupttest" — a reserved ext
+        // used nowhere else in this file. A direct MultiplayerClient-level check (not
+        // routed through MoshOps/a clip) isolates the exact mechanism cmdMpFetchMissingStems
+        // depends on: its `land` lambda (MoshOps.cpp) only calls sourceMediaChanged() /
+        // clears sourceMissing when downloadBlob returns true, and downloadBlob itself
+        // never leaves a corrupt/truncated file on disk on a hash mismatch — so proving
+        // downloadBlob's rejection here is precisely the guarantee the clip-level
+        // self-heal flow (proven working above) relies on to keep a corrupted clip
+        // sourceMissing (retryable) rather than falsely landing bad bytes as resolved.
+        section ("Multiplayer PR-1 should-fix: downloadBlob rejects a corrupted transfer (MOSH_RELAY_BLOB_CORRUPT)");
+        {
+            MultiplayerClient corruptHost;
+            const auto corruptCode = corruptHost.createSession ("CorruptHost", "#abcabc");
+            check (corruptCode.isNotEmpty(), "corrupt: host created a session [" + corruptHost.lastError() + "]");
+
+            MultiplayerClient corruptPeer;
+            check (corruptPeer.joinSession (corruptCode, "CorruptPeer", "#cbacba"),
+                   "corrupt: peer joined the room [" + corruptPeer.lastError() + "]");
+
+            // Upload a KNOWN payload under the reserved "corrupttest" ext -- the relay's
+            // hook targets exactly (and only) this ext for the whole run.
+            const juce::String payload ("known-stem-bytes-for-the-corruption-rejection-check");
+            juce::File srcTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                    .getChildFile ("mosh-selftest-corrupt-src.corrupttest");
+            srcTmp.replaceWithText (payload);
+            juce::FileInputStream fis (srcTmp);
+            const auto hash = juce::SHA256 (fis).toHexString();
+            check (corruptHost.uploadBlob (hash, "corrupttest", srcTmp),
+                   "corrupt: host uploaded the known payload [" + corruptHost.lastError() + "]");
+            srcTmp.deleteFile();
+
+            juce::File dest = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                  .getChildFile ("mosh-selftest-corrupt-dest-" + hash + ".corrupttest");
+            dest.deleteFile();
+            const bool got = corruptPeer.downloadBlob (hash, "corrupttest", dest);
+            check (! got, "corrupt: downloadBlob correctly REJECTS the corrupted transfer (returns false)");
+            check (! dest.existsAsFile(), "corrupt: the corrupted/truncated download was deleted, not left on disk");
+            check (corruptPeer.lastError().contains ("hash mismatch"),
+                   "corrupt: the error reports a hash mismatch [" + corruptPeer.lastError() + "]");
+
+            // Retryable: a clean download (a normal ".wav"-scoped ext, untouched by the
+            // hook) must still succeed right after -- the rejection above doesn't wedge
+            // the client or the relay into a permanently-broken state.
+            const juce::String payload2 ("clean-retry-bytes-prove-the-client-recovers");
+            juce::File srcTmp2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                     .getChildFile ("mosh-selftest-corrupt-retry-src.wav");
+            srcTmp2.replaceWithText (payload2);
+            juce::FileInputStream fis2 (srcTmp2);
+            const auto hash2 = juce::SHA256 (fis2).toHexString();
+            check (corruptHost.uploadBlob (hash2, "wav", srcTmp2),
+                   "corrupt: host uploaded a second (clean-path) payload [" + corruptHost.lastError() + "]");
+            srcTmp2.deleteFile();
+            juce::File dest2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                   .getChildFile ("mosh-selftest-corrupt-retry-dest-" + hash2 + ".wav");
+            dest2.deleteFile();
+            // NOTE: lastError() is sticky (only ever set, never cleared on success) --
+            // don't print it here, it would misleadingly show the PRIOR rejection's
+            // message even though this call succeeds.
+            check (corruptPeer.downloadBlob (hash2, "wav", dest2),
+                   "corrupt: a clean (non-corrupted-ext) retry still succeeds -- rejection is retryable, not wedged");
+            check (dest2.existsAsFile(), "corrupt: the clean retry landed a real file");
+            dest2.deleteFile();
+
+            corruptPeer.leave();
+            corruptHost.leave();
+        }
+
+        // ── Bootstrap end-to-end on the local/dev relay ──────────────────────
+        // The NORMAL (non-regression) path: a fresh late-joiner adopts the host's
+        // whole project via mp_apply_bootstrap, and the stem arrives automatically
+        // (cmdMpApplyBootstrap's existing download-before-apply loop) — proving the
+        // real cross-machine fetch that was previously only exercised against the
+        // cloud relay now also works against relay/server.py.
+        section ("Multiplayer P4: bootstrap end-to-end on the local relay");
+        {
+            MoshEngine bootHostEng (false, true, "mp-bootstrap-host");
+            MoshOps    bootHostOps (bootHostEng);
+            MoshEngine bootGuestEng (false, true, "mp-bootstrap-guest");
+            MoshOps    bootGuestOps (bootGuestEng);
+
+            auto bhSess = cmd (bootHostOps, "mp_create_session", objN ({ { "name", "BHost" }, { "color", "#333333" } }));
+            check (ok (bhSess), "bootstrap: host created a session");
+            const auto bhCode = bhSess.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString();
+
+            check (ok (cmd (bootGuestOps, "mp_join_session",
+                            objN ({ { "code", bhCode }, { "name", "BGuest" }, { "color", "#444444" } }))),
+                   "bootstrap: guest joined the host's room");
+
+            auto bmk = cmd (bootHostOps, "create_track", args1 ("name", "Boot Src"));
+            const auto bhTrackId = bmk.getProperty ("data", juce::var()).getProperty ("trackId", juce::var()).toString();
+            check (ok (cmd (bootHostOps, "add_test_tone_clip", objN ({ { "trackId", bhTrackId }, { "seconds", 1.0 } }))),
+                   "bootstrap: host added a wave clip");
+
+            auto bser = cmd (bootHostOps, "mp_serialize_project");
+            check (ok (bser), "bootstrap: host mp_serialize_project ok");
+            auto bBundle = bser.getProperty ("data", juce::var());
+            check ((int) bBundle.getProperty ("count", 0) == 1, "bootstrap: serialized a 1-track bundle");
+
+            auto bApp = cmd (bootGuestOps, "mp_apply_bootstrap",
+                             objN ({ { "tracks", bBundle.getProperty ("tracks", juce::var()) },
+                                     { "annotations", bBundle.getProperty ("annotations", juce::var()) } }));
+            check (ok (bApp), "bootstrap: guest mp_apply_bootstrap ok");
+            check ((int) bApp.getProperty ("data", juce::var()).getProperty ("applied", 0) == 1,
+                   "bootstrap: guest applied 1 track");
+
+            juce::String bLid;
+            {
+                auto snap = bootGuestOps.snapshot();
+                if (auto* arr = snap["tracks"].getArray())
+                    for (auto& tv : *arr)
+                        if (tv.getProperty ("name", juce::var()).toString() == "Boot Src")
+                            bLid = tv.getProperty ("logicalId", juce::var()).toString();
+            }
+            check (bLid.isNotEmpty(), "bootstrap: guest's track resolved by name");
+            check (! clipSourceMissing (bootGuestOps, bLid),
+                   "bootstrap: guest's clip is NOT sourceMissing (stem arrived via real cross-directory HTTP fetch)");
+
+            cmd (bootGuestOps, "mp_leave_session");
+            cmd (bootHostOps, "mp_leave_session");
         }
 
         a.leave();
@@ -6554,7 +6927,7 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
 
     if (! micMode)
     {
-        auto aiff = File::getSpecialLocation (File::tempDirectory).getChildFile ("mosh-voice-smoke.aiff");
+        auto aiff = selftestTempPath (eng, "voice-smoke.aiff");
         aiff.deleteFile();
         ChildProcess say;
         say.start (StringArray { "say", "-o", aiff.getFullPathName(), phrase });

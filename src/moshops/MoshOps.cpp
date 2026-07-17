@@ -1,5 +1,6 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "ScanProgress.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
@@ -774,6 +775,33 @@ void MoshOps::timerCallback()
     const bool spectrumLive = playing && transport.getCurrentPlaybackContext() != nullptr;
     if (spectrumLive)            { emitSpectrum (true);  spectrumActive = true; }
     else if (spectrumActive)     { emitSpectrum (false); spectrumActive = false; }
+
+    // FIT-003 — live running-count progress for an in-flight async plugin rescan.
+    // cmdRescanPlugins' AU/deep branch sets scanSampling_ before spawning its detached
+    // scan thread and clears it in that thread's callAsync completion; both of those
+    // run on the message thread, same as this timer, so scanSampling_/scanFormat_/
+    // scanStartMs_/lastScanCount_/lastScanEmitMs_ (all MoshOps-private) need no
+    // synchronization. getNumTypes() itself IS a genuine cross-thread read: the
+    // background scan thread concurrently mutates the SAME KnownPluginList via
+    // addType()/scanAndAddFile() inside PluginHost::rescan(). That's safe because
+    // KnownPluginList internally guards its type array with its own CriticalSection
+    // (typesArrayLock in juce_KnownPluginList.h) — getNumTypes()/addType() both take
+    // it, so this is an ordinary locked read, not a race. Decimated: emit only when
+    // the catalog grew, or ~500 ms have passed, so a fast VST3 tail doesn't spam 30 Hz
+    // and a stalled AU still ticks `elapsedMs` forward for the UI.
+    if (scanSampling_)
+    {
+        const auto now = Time::getMillisecondCounterHiRes();
+        const int count = eng.engine().getPluginManager().knownPluginList.getNumTypes();
+        if (count != lastScanCount_ || (now - lastScanEmitMs_) >= 500.0)
+        {
+            lastScanCount_ = count;
+            lastScanEmitMs_ = now;
+            emit ("plugin_scan_progress",
+                  makeScanProgressPayload (scanFormat_, count, /*done=*/false,
+                                            (int) (now - scanStartMs_)));
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -984,6 +1012,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "mp_send_signal")    return cmdMpSendSignal (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
+    if (name == "mp_fetch_missing_stems") return cmdMpFetchMissingStems (args);
     if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
@@ -3084,7 +3113,9 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
         {
             // Fetch any by-hash stems this track references (into audio/by-hash/) BEFORE
             // applying, so its pre-existing wave clips resolve without a host re-commit —
-            // the late-join analogue of the commit-apply download. No-op on the local relay.
+            // the late-join analogue of the commit-apply download. The result is ignored
+            // here (a transient failure just leaves the clip sourceMissing) — the
+            // self-heal pass below retries anything still missing once the tracks land.
             if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
                 for (auto& a : *refs)
                 {
@@ -3111,9 +3142,154 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
 
     eng.markDirty();
     emitSnapshotInvalidated();
+
+    // P4 self-heal (PR-1): the download loop above ignores its result, so a transient
+    // upload/download failure during THIS bootstrap (or a peer's blob that hadn't
+    // finished landing) can leave a just-applied clip sourceMissing. Kick off a retry
+    // pass so the guest doesn't need the host to notice and re-commit that track — a
+    // no-op (synchronous, effectively free) when nothing is missing.
+    cmdMpFetchMissingStems (var (new DynamicObject()));
+
     auto* d = new DynamicObject();
     d->setProperty ("applied", applied);
     return okResult ("mp_apply_bootstrap", var (d));
+}
+
+juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
+{
+    // Self-heal (P4/PR-1): every uploadBlob/downloadBlob result in mp_commit_track,
+    // mp_serialize_project, mp_apply_bootstrap, and applyMultiplayerCommitMessage is
+    // ignored at its call site — a single transient HTTP failure otherwise leaves a
+    // clip's audio sourceMissing forever, with the host manually re-committing that
+    // track as the only prior recovery ("nudging"). This command self-heals: it
+    // enumerates every wave clip whose source is currently missing, recognizes the
+    // ones referencing a content-addressed by-hash stem (repointWaveClipSource's own
+    // form: ".../audio/by-hash/<64-hex-sha256>.<ext>" — the hash IS the fetch key, no
+    // separate bookkeeping needed), and retries the download for exactly those. A
+    // clip missing its source for any OTHER reason (a plain moved/deleted local file)
+    // is untouched — that is relink_clip's job, not a peer blob store's.
+    struct Missing
+    {
+        juce::String clipId, hash, ext;
+        juce::File dest;
+    };
+    juce::Array<Missing> missing;
+
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+            {
+                const auto resolved = w->getCurrentSourceFile();
+                if (resolved.existsAsFile()) continue;
+
+                if (resolved.getParentDirectory().getFileName() != "by-hash") continue;
+                const auto stem = resolved.getFileNameWithoutExtension();
+                if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
+
+                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
+                // a manual retry, or two overlapping bootstraps) is already fetching this
+                // exact hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state the
+                // other pass's existsAsFile()/size check could otherwise observe.
+                if (inFlightStems_.count (stem) > 0) continue;
+
+                missing.add ({ c->itemID.toString(), stem,
+                              resolved.getFileExtension().removeCharacters ("."), resolved });
+            }
+    }
+
+    for (auto& m : missing)
+        inFlightStems_.insert (m.hash);
+
+    // Runs on the message thread: re-resolve each clip by id (it may have been
+    // removed/undone since the scan above — findClip returns nullptr, skipped), write
+    // the fetched bytes' arrival into the clip's cached source (sourceMediaChanged,
+    // mirroring repointWaveClipSource's own post-repoint call), and emit exactly one
+    // snapshot_invalidated if anything actually landed. downloadBlob (adversarial-review
+    // finding #1) now verifies the downloaded bytes' SHA-256 against `hash` itself before
+    // reporting success, so a truncated/corrupt transfer is never blessed as resolved here.
+    auto land = [this] (const juce::Array<Missing>& items) -> juce::var
+    {
+        int fetched = 0, failed = 0;
+        juce::Array<var> stillMissing;
+        for (auto& m : items)
+        {
+            const bool got = mpSession_ != nullptr
+                             && mpSession_->downloadBlob (m.hash, m.ext, m.dest)
+                             && m.dest.existsAsFile();
+            if (got)
+            {
+                if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (m.clipId)))
+                    w->sourceMediaChanged();
+                ++fetched;
+            }
+            else
+            {
+                ++failed;
+                stillMissing.add (m.hash);
+            }
+            inFlightStems_.erase (m.hash);
+        }
+        if (fetched > 0)
+            emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("fetched", fetched);
+        d->setProperty ("failed", failed);
+        d->setProperty ("stillMissing", var (stillMissing));
+        return okResult ("mp_fetch_missing_stems", var (d));
+    };
+
+    const bool wait = (bool) args.getProperty ("wait", false);
+    if (missing.isEmpty() || wait)
+        return land (missing);
+
+    // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
+    // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
+    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
+    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
+    // round-trip runs on the background thread; results land back via callAsync.
+    std::thread ([this, missing]
+    {
+        if (mpSession_ == nullptr || ! mpSession_->active())
+        {
+            // Bailed before attempting anything -- still release the in-flight marks
+            // (on the message thread) so a later pass isn't permanently skipped.
+            juce::MessageManager::callAsync ([this, missing]
+            {
+                for (auto& m : missing) inFlightStems_.erase (m.hash);
+            });
+            return;
+        }
+
+        struct Result { juce::String clipId, hash; bool ok; };
+        juce::Array<Result> results;
+        for (auto& m : missing)
+            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+
+        juce::MessageManager::callAsync ([this, results]
+        {
+            int fetched = 0;
+            for (auto& r : results)
+            {
+                if (r.ok)
+                {
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (r.clipId)))
+                        w->sourceMediaChanged();
+                    ++fetched;
+                }
+                inFlightStems_.erase (r.hash);
+            }
+            if (fetched > 0)
+                emitSnapshotInvalidated();
+        });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("mp_fetch_missing_stems", var (data));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
@@ -5089,8 +5265,15 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
 
     // Async AU rescan — mirror cmdRenderLayer: do the slow work on a background
     // std::thread, marshal the result back to the message thread.
-    emit ("plugin_scan_progress", [&] { auto* o = new DynamicObject();
-        o->setProperty ("format", format); o->setProperty ("done", false); return var (o); }());
+    //
+    // FIT-003 — arm the live progress sampler BEFORE spawning the scan thread (message
+    // thread only; see timerCallback()) so the UI gets periodic running-count events
+    // for the whole sweep, not just this start/done pair.
+    scanSampling_  = true;
+    scanFormat_    = format;
+    scanStartMs_   = Time::getMillisecondCounterHiRes();
+    lastScanCount_ = -1;
+    emit ("plugin_scan_progress", makeScanProgressPayload (format, /*count=*/0, /*done=*/false, 0));
     // NOTE: clearFirst and the VST3 sweep have already run inline (if wait:true) or
     // will run together below (async path).  Pass clearFirst=false and includeVST3 in
     // the async lambda only if we didn't already do them above.
@@ -5106,9 +5289,9 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
         const int total = pluginHost.rescan (asyncClearFirst, asyncIncludeVST3, true, /*slowVST3=*/true);
         juce::MessageManager::callAsync ([this, total, format]
         {
-            emit ("plugin_scan_progress", [&] { auto* o = new juce::DynamicObject();
-                o->setProperty ("format", format); o->setProperty ("count", total);
-                o->setProperty ("done", true); return juce::var (o); }());
+            const int elapsed = (int) (Time::getMillisecondCounterHiRes() - scanStartMs_);
+            scanSampling_ = false;   // stop the timerCallback() sampler before the terminal emit
+            emit ("plugin_scan_progress", makeScanProgressPayload (format, total, /*done=*/true, elapsed));
             emitSnapshotInvalidated();
         });
     }).detach();
@@ -5148,7 +5331,13 @@ juce::var MoshOps::cmdGetPluginBlocklist (const juce::var&)
         auto* o = new DynamicObject();
         o->setProperty ("id",    uiId);
         o->setProperty ("rawId", rawId);   // the actual blacklist key, for debugging
-        o->setProperty ("reason", "blocked");   // crashed-scan vs manual not tracked separately
+        // FIT-003 — PluginHost now records WHY each entry was blocked: "crash_or_hang"
+        // for a dead-mans-pedal auto-quarantine (the scan crashed or hung loading it),
+        // "manual" for an explicit block_plugin call. Entries blocked before this
+        // tracking existed (or a fresh manual block missing the tag) default to
+        // "manual" — the safe assumption absent contrary evidence.
+        const auto reason = pluginHost.blockReasonFor (rawId);
+        o->setProperty ("reason", reason.isNotEmpty() ? reason : juce::String ("manual"));
         entries.add (var (o));
     }
     auto* data = new DynamicObject();
@@ -6160,7 +6349,8 @@ juce::ValueTree MoshOps::findRenderLayer (const juce::String& clipId)
 }
 
 juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juce::File& inputWav,
-                                         const juce::String& upstreamOverride)
+                                         const juce::String& upstreamOverride,
+                                         const juce::String& lorasKey)
 {
     // Wave clips hash the staged audio. MIDI/drum clips are auto-bounced, but the bounce
     // isn't bit-deterministic (a synth's free-running phase), so they pass a stable source
@@ -6185,7 +6375,64 @@ juce::String MoshOps::computeFingerprint (const juce::ValueTree& node, const juc
         juce::String (bpm, 4) + "bpm/" + tonic + " " + keyMode;
 
     return RenderLayer::fingerprint (node, upstreamHash, tempoKeyContext, 44100, 2,
-                                     jobManager.serviceBuild());
+                                     jobManager.serviceBuild(), lorasKey);
+}
+
+bool MoshOps::resolveLorasKey (const juce::ValueTree& node, juce::String& lorasKey, juce::String& err)
+{
+    // "name=value@sha12:trigger;" per ACTIVE (value != 0) row, rack order — resolved at
+    // RENDER time via GET /loras so the key carries content identity: a retrained
+    // same-name file (new sha) or a sidecar trigger edit is a cache MISS, and an
+    // unknown name errors BEFORE any job submit. Non-SA3 adapters key name=value only
+    // (the fake never applies adapters) — hermetic, no service round-trip.
+    lorasKey = {};
+    auto params = node.getChildWithName (ids::PARAMS);
+    auto loras = params.getChildWithName (ids::LORAS);
+    if (! loras.isValid() || loras.getNumChildren() == 0)
+        return true;
+
+    juce::Array<juce::ValueTree> active;
+    for (int i = 0; i < loras.getNumChildren(); ++i)
+        if (auto row = loras.getChild (i); (double) row[ids::value] != 0.0)
+            active.add (row);
+    if (active.isEmpty())
+        return true;
+
+    const auto adapter = node[ids::modelAdapter].toString();
+    const bool isSa3 = adapter == "stable_audio3" || adapter == "sa3";
+    if (! isSa3)
+    {
+        for (auto& row : active)
+            lorasKey << row[ids::name].toString() << "=" << row[ids::value].toString() << ";";
+        return true;
+    }
+
+    auto reg = jobManager.listLoras();
+    if (! (bool) reg.getProperty ("ok", false))
+    {
+        err = "LoRA registry unavailable (generative service)";
+        return false;
+    }
+    std::map<juce::String, juce::var> byName;
+    if (auto* arr = reg.getProperty ("loras", var()).getArray())
+        for (auto& r : *arr)
+            byName[r.getProperty ("name", "").toString()] = r;
+
+    for (auto& row : active)
+    {
+        const auto name = row[ids::name].toString();
+        auto it = byName.find (name);
+        if (it == byName.end() || ! (bool) it->second.getProperty ("valid", false))
+        {
+            const auto dir = reg.getProperty ("dir", "~/Library/Mosh/loras/sa3").toString();
+            err = "LoRA '" + name + "' not found — drop the .safetensors in " + dir;
+            return false;
+        }
+        lorasKey << name << "=" << row[ids::value].toString()
+                 << "@" << it->second.getProperty ("sha12", "").toString()
+                 << ":" << it->second.getProperty ("trigger", "").toString() << ";";
+    }
+    return true;
 }
 
 // Slice [srcStartSec, srcEndSec] of an audio file into destWav (raw, no FX) — the
@@ -6324,13 +6571,14 @@ juce::var MoshOps::cmdSetRenderParam (const juce::var& args)
             }
     }
 
-    if (args.hasProperty ("loras"))   // LoRA rack: ≤2, ordered (stacks merge sequentially)
+    if (args.hasProperty ("loras"))   // LoRA rack: unbounded, ordered (stacks merge sequentially)
     {
         // getOrCreate: layers created before the rack shipped have no LORAS child.
+        // No count cap / strength clamp (owner call): value > 100 = deliberate overdrive.
         auto loras = params.getOrCreateChildWithName (ids::LORAS, &undoManager());
         loras.removeAllChildren (&undoManager());
         if (auto* arr = args.getProperty ("loras", var()).getArray())
-            for (int i = 0; i < juce::jmin (2, arr->size()); ++i)
+            for (int i = 0; i < arr->size(); ++i)
             {
                 auto& l = arr->getReference (i);
                 juce::ValueTree lo (ids::LORA);
@@ -6779,7 +7027,13 @@ juce::var MoshOps::cmdRenderLayer (const juce::var& args)
     if (! jobManager.ensureServiceRunning())
         return errResult ("render_layer", "generative service unavailable");
 
-    const auto fp = computeFingerprint (node, input, upstreamOverride);
+    // Resolve the LoRA rack to its content identity (sha12 + trigger via /loras) —
+    // an unknown adapter name fails HERE, before any submit or cache probe.
+    juce::String lorasKey, lorasErr;
+    if (! resolveLorasKey (node, lorasKey, lorasErr))
+        return errResult ("render_layer", lorasErr);
+
+    const auto fp = computeFingerprint (node, input, upstreamOverride, lorasKey);
 
     // Cache by FULL fingerprint (05 §5) — reuse only on an exact match. Resolve the
     // artifact move-aware (AL-009): a Save-As'd project stores cacheArtifact relative.
@@ -7020,6 +7274,35 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
 
     node.setProperty (ids::renderError, "", nullptr);   // clear on success
 
+    // P5 — boundary-quantized swap (ORDINARY renders only; the Live lane lands its own
+    // windows with a crossfade at the knob, the owner's default): a render that finishes
+    // while the producer is LISTENING to the target clip must not swap mid-phrase — hold
+    // it until the next musical boundary (the loop wrap when looping, else the next bar),
+    // then land. Stopped transport / headless / sing (never auto-applies) / a Live-armed
+    // layer land immediately as before.
+    double boundarySec = 0.0, armedPosSec = 0.0;
+    if (node[ids::mode].toString() != "sing"
+        && ! (bool) node[ids::liveArmed]
+        && shouldDeferSwap (clipId, boundarySec, armedPosSec))
+    {
+        pendingSwaps[clipId] = { outputWav, manifestFile, cacheKey, expectedEpoch,
+                                 boundarySec, armedPosSec };
+        if (swapTimer == nullptr)
+            swapTimer = std::make_unique<SwapTimer> (*this);
+        if (! swapTimer->isTimerRunning())
+            swapTimer->startTimerHz (30);   // the same decimation rate as the transport rail
+        return;   // status stays "rendering"; pollPendingSwaps() lands it at the boundary
+    }
+
+    applyFinalizedRender (clipId, outputWav, manifestFile, cacheKey);
+}
+
+void MoshOps::applyFinalizedRender (const juce::String& clipId, const juce::File& outputWav,
+                                    const juce::File& manifestFile, const juce::String& cacheKey)
+{
+    auto node = findRenderLayer (clipId);
+    if (! node.isValid()) return;
+
     // Auto-apply the render (the new default): WAVE clips swap their own source in place; MIDI/drum
     // clips land a HIDDEN looping audio clip beneath the now-muted MIDI (Phase 2). Either way it's an
     // instant preview with no accept step. A sub-region render (or a clip with no track) falls through
@@ -7042,6 +7325,88 @@ void MoshOps::finalizeRender (const juce::String& clipId, const juce::File& outp
         o->setProperty ("status", "ready"); o->setProperty ("cache", "miss");
         o->setProperty ("qa", qa); return var (o); }());
     emitSnapshotInvalidated();
+}
+
+bool MoshOps::shouldDeferSwap (const juce::String& clipId, double& boundarySec, double& posSec)
+{
+    // Only meaningful when audio is actually audible: headless (selftest/run-script)
+    // never defers, so the harness stays deterministic by construction.
+    if (! eng.hasAudio())
+        return false;
+    if (juce::SystemStats::getEnvironmentVariable ("MOSH_SWAP_QUANTIZE", "1") == "0")
+        return false;   // escape hatch: land renders the instant they finish
+
+    auto& transport = eng.edit().getTransport();
+    if (! transport.isPlaying())
+        return false;
+
+    auto* clip = findClip (clipId);
+    if (clip == nullptr)
+        return false;
+    const auto cpos = clip->getPosition();
+    const double cs = cpos.getStart().inSeconds(), ce = cpos.getEnd().inSeconds();
+    posSec = transport.getPosition().inSeconds();
+    if (posSec < cs - 1.0e-3 || posSec >= ce - 1.0e-3)
+        return false;   // the playhead isn't in this clip — nothing audible interrupts
+
+    // Loop wrap when the transport loop is on and surrounds the playhead — "the change
+    // arrives when the loop comes around".
+    if (transport.looping.get())
+    {
+        const auto lr = transport.getLoopRange();
+        const double ls = lr.getStart().inSeconds(), le = lr.getEnd().inSeconds();
+        if (le > ls && posSec >= ls && posSec < le)
+        {
+            boundarySec = le;
+            return true;
+        }
+    }
+
+    // Otherwise the next BAR boundary from the tempo sequence.
+    const auto bb = eng.edit().tempoSequence.toBarsAndBeats (
+        tracktion::TimePosition::fromSeconds (posSec));
+    tracktion::tempo::BarsAndBeats next;
+    next.bars = bb.bars + 1;
+    boundarySec = eng.edit().tempoSequence.toTime (next).inSeconds();
+    return boundarySec > posSec + 1.0e-3;
+}
+
+void MoshOps::pollPendingSwaps()
+{
+    if (pendingSwaps.empty())
+    {
+        if (swapTimer != nullptr)
+            swapTimer->stopTimer();
+        return;
+    }
+    auto& transport = eng.edit().getTransport();
+    const bool playing = transport.isPlaying();
+    const double pos = transport.getPosition().inSeconds();
+
+    for (auto it = pendingSwaps.begin(); it != pendingSwaps.end();)
+    {
+        auto& ps = it->second;
+        const bool wrapped = pos < ps.armedPosSec - 0.05;         // loop wrap or seek-back
+        const bool reached = pos >= ps.boundarySec - 1.0e-3;
+        if (! playing || wrapped || reached)
+        {
+            // Same staleness rule as finalizeRender: a reactive render superseded while
+            // waiting at the boundary must not land.
+            auto node = findRenderLayer (it->first);
+            const bool fresh = node.isValid()
+                && ! (ps.expectedEpoch >= 0 && (int) node[ids::reactiveEpoch] != ps.expectedEpoch);
+            if (fresh)
+                applyFinalizedRender (it->first, ps.outputWav, ps.manifestFile, ps.cacheKey);
+            it = pendingSwaps.erase (it);
+        }
+        else
+        {
+            ps.armedPosSec = pos;   // track motion so a wrap reads as pos going backwards
+            ++it;
+        }
+    }
+    if (pendingSwaps.empty() && swapTimer != nullptr)
+        swapTimer->stopTimer();
 }
 
 bool MoshOps::applyRenderInPlace (const juce::String& clipId, juce::ValueTree node,
@@ -7489,7 +7854,19 @@ void MoshOps::renderAheadStartWindow (int k)
                 renderAheadDisarm();
                 return;
             }
-            renderAheadWindowDone (k, capturedEpoch, outFile);
+            // A window that rendered but failed to STITCH/repoint must surface, not
+            // silently no-op (a /stitch_windows failure once made the whole Live lane
+            // report success while never changing the audio). A false return with a
+            // matching epoch == the stitch/repoint failed; superseded/disarmed is fine.
+            if (! renderAheadWindowDone (k, capturedEpoch, outFile)
+                && r.active && capturedEpoch == r.epoch)
+            {
+                emit ("layer_status", [&] { auto* o = new DynamicObject();
+                    o->setProperty ("clipId", r.clipId); o->setProperty ("status", "error");
+                    o->setProperty ("error", "render-ahead stitch failed"); return var (o); }());
+                renderAheadDisarm();
+                return;
+            }
             if (r.active) renderAheadTick (r.lastPlayheadSec);   // chain the next window
         });
     }).detach();
@@ -7604,7 +7981,10 @@ juce::var MoshOps::cmdRenderAheadTick (const juce::var& args)
         }
         if (! outFile.existsAsFile())
         { renderAheadDisarm(); return errResult ("render_ahead_tick", "window render failed"); }
-        renderAheadWindowDone (k, ra.epoch, outFile);
+        // Fail CLOSED on a stitch/repoint failure (found live: a /stitch_windows 404
+        // silently no-op'd the whole lane while `placed` still reported success).
+        if (! renderAheadWindowDone (k, ra.epoch, outFile))
+        { renderAheadDisarm(); return errResult ("render_ahead_tick", "window stitch failed"); }
         ++placed;
     }
     auto* d = new DynamicObject();

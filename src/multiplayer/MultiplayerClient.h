@@ -65,12 +65,20 @@ public:
     /** Leave the room (best-effort). */
     void leave();
 
-    // ── P4 audio blobs (cloud relay only; the local self-host relay has no
-    //    /mp/blob/* endpoints, so these return false gracefully there) ──
+    // ── P4 audio blobs (both the cloud relay and the local self-host dev relay
+    //    implement /mp/blob/*, per PR-1 — see relay/server.py's BlobStore) ──
     /** Upload `file` as the content-addressed stem <hash>.<ext>, skipping if the
         relay reports it already exists (dedup). Returns true on success/already-there. */
     bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
-    /** Download the stem <hash>.<ext> to `dest` via a signed URL. */
+    /** Download the stem <hash>.<ext> to `dest` via a signed URL, then verify it:
+        the downloaded bytes are SHA-256'd and compared against `hash`. On a
+        mismatch (corrupted/truncated/tampered transfer) this DELETES `dest`,
+        records an error via lastError() ("blob GET hash mismatch..."), and
+        returns false — the caller (e.g. mp_fetch_missing_stems) sees the fetch
+        as failed and the clip stays sourceMissing/retryable; it never lands a
+        corrupt file as if it were a resolved stem. See the RED-first coverage in
+        SelfTest.cpp's "downloadBlob rejects a corrupted transfer" section,
+        exercised via relay/server.py's MOSH_RELAY_BLOB_CORRUPT test hook. */
     bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);
 
 private:

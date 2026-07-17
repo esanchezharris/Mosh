@@ -72,13 +72,22 @@ type State = {
   availablePlugins: AvailablePlugin[];
   availableBuiltins: BuiltinPlugin[];
   pluginCounts: PluginCounts | null;          // per-format catalog counts (INS-005)
-  scanProgress: { format: string; done: boolean } | null; // transient rescan state
+  // FIT-003: count/elapsedMs are optional so the older {format,done} shape (still sent
+  // by the sync VST3 rescan path and the mock) stays valid — a live async sweep adds a
+  // periodic running count + elapsed time, sampled from the backend's real plugin catalog.
+  scanProgress: { format: string; done: boolean; count?: number; elapsedMs?: number } | null; // transient rescan state
   browserOpen: boolean;
   renderProgress: Record<string, number>; // clipId → 0..1 (Tier-B render)
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   buildingSkeleton: Record<string, boolean>; // source clipId → "Build flow from this take" in flight
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
+  // Whether THIS Mac's generative service is actually running the real Stable Audio 3
+  // model, straight from /colors' `sa3` field (server.py's SA3_ENABLED). undefined means
+  // the service didn't report it — an older service, or /colors errored internally — and
+  // callers fall back to the colour-rack-nonempty proxy (see ui/src/ui/engineBadge.ts)
+  // rather than silently claiming SA3.
+  sa3Available: boolean | undefined;
   availableTransformTargets: AvailableTransformTarget[]; // Route B targets (from list_transform_targets)
   availableLoras: AvailableLora[];         // LoRA rack library (from list_loras)
   availableRaveModels: AvailableRaveModel[]; // Lane B — RAVE model library (from list_rave_models)
@@ -259,6 +268,7 @@ export const useStore = create<State>((set, get) => ({
   buildingLyrics: {},
   buildingSkeleton: {},
   availableColors: [],
+  sa3Available: undefined,
   availableTransformTargets: [],
   availableLoras: [],
   availableRaveModels: [],
@@ -366,12 +376,16 @@ export const useStore = create<State>((set, get) => ({
         set({ spectrum: { bands: p.bands ?? [], level: p.level ?? 0, flux: p.flux ?? 0 } });
       } else if (ev.type === "plugin_scan_progress") {
         // INS-005 — async (AU) rescan lifecycle. On done, refresh the catalog list.
-        const p = ev.payload as { format: string; done: boolean };
+        // FIT-003 — the backend now emits periodic samples with a live running `count`
+        // + `elapsedMs` (decimated ~2/s) for the whole sweep, not just start/done; both
+        // fields are optional so this stays compatible with any older {format,done}-only
+        // sender (e.g. a stale mock).
+        const p = ev.payload as { format: string; done: boolean; count?: number; elapsedMs?: number };
         if (p.done) {
           set({ scanProgress: null });
           void get().refreshPluginList();
         } else {
-          set({ scanProgress: { format: p.format, done: false } });
+          set({ scanProgress: { format: p.format, done: false, count: p.count, elapsedMs: p.elapsedMs } });
         }
       } else if (ev.type === "transcribe_status") {
         // Audio→MIDI status for a SOURCE clip: working | done | error. On done the
@@ -710,7 +724,7 @@ export const useStore = create<State>((set, get) => ({
   // INS-005 — re-enumerate the catalog. AU is the slow/risky path (the backend
   // runs it off the message thread); we refresh the list when the scan reports done.
   rescanPlugins: async (format = "all") => {
-    set({ scanProgress: { format, done: false } });
+    set({ scanProgress: { format, done: false, count: 0, elapsedMs: 0 } });
     const res = await get().exec("rescan_plugins", { format });
     // Inline/VST3 rescans return done immediately; AU rescans complete via the
     // 'plugin_scan_progress' event (see init()).
@@ -723,11 +737,11 @@ export const useStore = create<State>((set, get) => ({
 
   loadColors: () => {
     if (get().availableColors.length > 0) return;
-    void executeCommand<CommandResult<{ colors: AvailableColor[] }>>({
+    void executeCommand<CommandResult<{ colors: AvailableColor[]; sa3?: boolean }>>({
       command: "list_colors",
       args: {},
     }).then((res) => {
-      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors });
+      if (res.ok && res.data?.colors) set({ availableColors: res.data.colors, sa3Available: res.data.sa3 });
     });
   },
 

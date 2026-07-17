@@ -204,7 +204,6 @@ const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor",
 // gracefully (these mirror the non-mutating entries of bridge.mock.test.ts's ALLOWLIST;
 // give any of them a real case when dev-mode fidelity matters).
 const DEFAULT_OK = new Set([
-  "rescan_plugins",    // live plugin scan — no dev-mock catalog to mutate
   "import_clip_data",  // bytes-over-bridge is native-only; dev imports via import_clip
   "recover_session",   // A3 crash recovery — native-only (no dev-mock crash journal)
   "discard_recovery",  // "
@@ -319,6 +318,14 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
   if (!set) { set = new Set(); listeners.set(eventId, set); }
   set.add(fn);
   return () => set?.delete(fn);
+}
+
+/** TEST-ONLY: publish a synthetic event on the mock's event bus. For events the dev
+ * mock never emits itself by design (e.g. FIT-003's live plugin-scan running-count
+ * sample — there is no dev-mock AU sweep to sample), this is how a vitest exercises
+ * store.ts's real onEvent("mosh_event", ...) reducer instead of duplicating its logic. */
+export function __mockEmitForTests(type: string, payload?: unknown): void {
+  emit(type, payload);
 }
 const invalidate = () => emit("snapshot_invalidated");
 
@@ -512,8 +519,10 @@ const COLORS = [
   { name: "air", astd_max: 0.08, peak_layer: 1, more_sign: 1, verdict: "WEAK", no_stack_with: ["brightness"] },
 ];
 const LORAS = [
-  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental" },
-  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental" },
+  { name: "ken-sa3", displayName: "Ken (xperiment)", trigger: "kxc", hint: "rage trap instrumental", valid: true, sha12: "aaaaaaaaaaaa" },
+  { name: "bro-sa3", displayName: "Brother (BWPOM era)", trigger: "brozr", hint: "melodic pop instrumental", valid: true, sha12: "bbbbbbbbbbbb" },
+  { name: "mic-sa3", displayName: "Microphones", trigger: "micz", hint: "lo-fi indie texture", valid: true, sha12: "cccccccccccc" },
+  { name: "broken", displayName: "broken", trigger: "", hint: "", valid: false, reason: "unreadable safetensors", sha12: "" },
 ];
 
 const reindex = (t: Track) => t.plugins!.forEach((p, i) => (p.index = i));
@@ -1215,6 +1224,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
     case "list_builtins": return ok(command, { plugins: BUILTINS });
+    // FIT-003 — an explicit case (was a bare DEFAULT_OK passthrough returning no
+    // `status`, which store.rescanPlugins() then read as `undefined !== "scanning"`
+    // and treated as already-done — harmless for the real always-instant dev catalog,
+    // but it meant vitest/e2e never exercised the real "scanning" branch of the store
+    // action). Real: no dev-mock AU sweep, so this always completes synchronously.
+    case "rescan_plugins": return ok(command, { status: "done", count: VST3S.length });
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });
@@ -1386,8 +1401,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
 
     // ── generative (Tier-B) render layers ────────────────────────────────────
-    case "list_colors": return ok(command, { colors: COLORS });
-    case "list_loras": return ok(command, { loras: LORAS, maxActive: 2 });
+    // sa3: true matches the mock's existing posture (a populated colour rack always implied
+    // SA3 before this field existed) — dev/e2e keep seeing the "SA3" badge, not a spurious
+    // "preview" one now that the badge reads /colors' honest field instead of the old proxy.
+    case "list_colors": return ok(command, { colors: COLORS, sa3: true });
+    // list_loras keeps #343's no-cap shape (maxActive removed per the owner "no cap" directive;
+    // the LorasResponse type no longer carries maxActive, so re-adding it would not typecheck).
+    case "list_loras": return ok(command, { loras: LORAS });
     case "list_rave_models":   // Lane B — RAVE model browser fixture
       return ok(command, { models: [
         { name: "guitar", sizeMB: 156 }, { name: "piano", sizeMB: 143 },
@@ -1416,7 +1436,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
       const rl = f.clip.renderLayer;
       if ("colors" in args) rl.colors = args.colors as RenderLayer["colors"];
-      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []).slice(0, 2);
+      if ("loras" in args) rl.loras = (args.loras as RenderLayer["loras"] ?? []);
       if ("prompt" in args) rl.prompt = str(args.prompt, rl.prompt ?? "");
       if ("nl" in args) rl.nl = num(args.nl, rl.nl);
       if ("seed" in args) rl.seed = num(args.seed, rl.seed);

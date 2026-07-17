@@ -10,6 +10,7 @@ import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
 import { pickGenClip } from "./genClip";
 import { isTransformPreview } from "../capabilities";
+import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 
 export function Dock({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -177,6 +178,7 @@ function XFeedbackReadout({ plugin }: { plugin: Plugin }) {
 export function GenDrawer({ track, selectedClipId }: { track: Track; selectedClipId?: string }) {
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
+  const sa3Available = useStore((s) => s.sa3Available);
   const loadColors = useStore((s) => s.loadColors);
   const loadTransformTargets = useStore((s) => s.loadTransformTargets);
   const loadLoras = useStore((s) => s.loadLoras);
@@ -189,11 +191,20 @@ export function GenDrawer({ track, selectedClipId }: { track: Track; selectedCli
   const clip = pickGenClip(track, selectedClipId);
   if (!clip) return <div className="gen" data-testid="generative"><div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span></div><span className="rack-empty">Add a clip on this track to re-imagine or transform it.</span></div>;
   const rl = clip.renderLayer;
-  const sa3 = colorsAvail.length > 0;
+  // sa3 was inferred from "does the colour rack have entries" — but the FakeAdapter returns a
+  // populated rack too, so a guest Mac without the real model looked identical to one with it.
+  // /colors now reports the ground truth directly; resolveSa3Available only falls back to the
+  // old proxy when talking to a service that predates the field (sa3Available === undefined).
+  const sa3 = resolveSa3Available(sa3Available, colorsAvail.length);
+  const badge = engineBadgeView(sa3);
 
   return (
     <div className="gen" data-testid="generative">
-      <div className="gen-head"><span className="gen-title">⃝ GENERATIVE</span><span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span></div>
+      <div className="gen-head">
+        <span className="gen-title">⃝ GENERATIVE</span>
+        <span className={`engine-badge eb-${sa3 ? "sa3" : "preview"}`} title={badge.title} data-testid="engine-badge">{badge.label}</span>
+        <span className="gen-clip">{rl?.mode === "sing" ? "sing" : rl?.mode === "transform" ? "transform" : sa3 ? "stable audio 3" : "fake"} · {clip.name}</span>
+      </div>
       {!rl ? (
         <>
           <CompileBox clipId={clip.id} trackId={track.id} />
@@ -272,6 +283,11 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
 
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
+  // Per-render truth: the drawer header badge says what THIS Mac's service would render
+  // next; this says what actually produced the render sitting in the clip right now (its own
+  // manifest's `adapter`) — the two can disagree (e.g. SA3 went down mid-session). Silent when
+  // the render came from the real model — that's the unsurprising default.
+  const renderedBy = renderedByLabel(qa?.adapter);
   const exec = useStore((s) => s.exec);
   const colorsAvail = useStore((s) => s.availableColors);
   const labMode = useStore((s) => s.labMode);
@@ -330,6 +346,10 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
         </select>
         )}
         <button className={`btn${labMode ? " on" : ""}`} title="Lab — unlock the ASTD clamp" aria-pressed={labMode} onClick={() => setLab(!labMode)}>{labMode ? "⚠ LAB" : "Lab"}</button>
+        {renderedBy && (
+          <span className="gen-rendered-by tc" data-testid="rendered-by"
+            title="This render was produced by the preview engine, not the real model">{renderedBy}</span>
+        )}
       </div>
       {rendering && (
         <div className="gen-prog" role="progressbar" aria-label="Render progress"
@@ -390,49 +410,49 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
 }
 
 // LoRA rack — trained style adapters applied to the SA3 re-imagine at 0–100 strength,
-// composing with colours/prompt/seed (≤2, ordered: stacks merge sequentially). The
-// library is a drop-in dir (~/Library/Mosh/loras/sa3); hidden when it's empty. A LoRA
-// whose trigger token is missing from the prompt offers a one-tap "add trigger" chip —
-// the trigger is what meaningfully activates the trained style.
+// composing with colours/prompt/seed (unbounded + unclamped, ordered: stacks merge
+// sequentially; >100 = deliberate overdrive). The library is a drop-in dir
+// (~/Library/Mosh/loras/sa3); hidden when it's empty. Trigger tokens auto-inject into
+// the prompt server-side (progressive disclosure — surfaced only in the row tooltip).
+// The muted Σ readout is informational, never blocking (no budget rule — owner call).
 function LoraRack({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const lorasAvail = useStore((s) => s.availableLoras);
   const rl = clip.renderLayer!;
   const active: RenderLora[] = rl.loras ?? [];
   if (lorasAvail.length === 0 && active.length === 0) return null;
-  const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next.slice(0, 2) });
-  const addable = lorasAvail.filter((m) => !active.some((a) => a.name === m.name));
-  const prompt = rl.prompt ?? "";
-  const missingTriggers = active
-    .map((a) => lorasAvail.find((m) => m.name === a.name)?.trigger ?? "")
-    .filter((t) => t && !prompt.toLowerCase().includes(t.toLowerCase()));
+  const setLoras = (next: RenderLora[]) => exec("set_render_param", { clipId: clip.id, loras: next });
+  const addable = lorasAvail.filter((m) => (m.valid ?? true) && !active.some((a) => a.name === m.name));
+  const sum = active.reduce((s, a) => s + a.value / 100, 0);
   return (
     <>
       {active.map((l) => {
         const meta = lorasAvail.find((m) => m.name === l.name);
+        const tip = [
+          meta?.trigger ? `trigger “${meta.trigger}” is added to the prompt automatically` : "",
+          meta?.hint ?? "", meta?.notes ?? "",
+        ].filter(Boolean).join(" — ");
         return (
           <label key={l.name} className="nparam" data-testid={`lora-row-${l.name}`}>
-            <span className="nlabel" title={meta?.hint || undefined}>🧬 {meta?.displayName ?? l.name}</span>
-            <input type="range" min={0} max={100} step={1} value={Math.round(l.value)}
+            <span className="nlabel" title={tip || undefined}>🧬 {meta?.displayName ?? l.name}</span>
+            <input type="range" min={0} max={100} step={1} value={Math.min(100, Math.round(l.value))}
               aria-label={`${meta?.displayName ?? l.name} LoRA strength`}
               onChange={(e) => setLoras(active.map((a) => (a.name === l.name ? { ...a, value: Number(e.target.value) } : a)))} />
             <button className="btn x" onClick={() => setLoras(active.filter((a) => a.name !== l.name))}>✕</button>
           </label>
         );
       })}
-      {active.length < 2 && addable.length > 0 && (
+      {addable.length > 0 && (
         <select className="btn ghost color-add" data-testid="lora-add" value=""
           onChange={(e) => e.target.value && setLoras([...active, { name: e.target.value, value: 70 }])}>
           <option value="">+ LoRA…</option>
           {addable.map((m) => <option key={m.name} value={m.name}>{m.displayName}</option>)}
         </select>
       )}
-      {missingTriggers.length > 0 && (
-        <button className="btn ghost" data-testid="lora-trigger-chip"
-          title="This LoRA's trigger word isn't in the prompt — add it so the style engages"
-          onClick={() => void exec("set_render_param", { clipId: clip.id, prompt: [prompt, ...missingTriggers].filter(Boolean).join(", ") })}>
-          + add trigger “{missingTriggers.join("”, “")}”
-        </button>
+      {active.length > 1 && (
+        <span className="rack-empty" data-testid="lora-sum" title="combined adapter strength — informational only">
+          Σ {sum.toFixed(2)}
+        </span>
       )}
     </>
   );

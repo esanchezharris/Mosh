@@ -199,12 +199,19 @@ def ensure_service(results: dict) -> None:
         results["service"] = {"ok": True, "detail": f"existing service healthy at {SERVICE_URL}"}
         return
 
-    log = (EVID / "service.log").open("w", encoding="utf-8")
+    log_path = EVID / "service.log"
+    log = log_path.open("w", encoding="utf-8")
     env = os.environ.copy()
     env["MOSH_ENABLE_SA3"] = "0"
     env.setdefault("MOSH_SERVICE_HOST", SERVICE_HOST)
     env.setdefault("MOSH_SERVICE_PORT", str(SERVICE_PORT))
     env["PYTHONUNBUFFERED"] = "1"
+    # run.sh now ALWAYS redirects its own stdout/stderr internally to MOSH_SERVICE_LOG
+    # (default ~/Library/Mosh/logs/service.log) rather than inheriting whatever fd it
+    # was spawned with, so without this, `stdout=log` below would capture nothing —
+    # point it at the SAME evidence file we already opened. This actually improves
+    # capture vs. before: run.sh's own startup lines land here too, not just server.py's.
+    env["MOSH_SERVICE_LOG"] = str(log_path)
     SERVICE_PROC = subprocess.Popen(
         ["bash", str(REPO / "service/run.sh")],
         cwd=str(REPO),
