@@ -780,8 +780,16 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/colors":
             try:
                 from colors import runtime as CR
+                # `sa3` is the honest ground truth for "is this Mac's service actually running
+                # the real Stable Audio 3 model" (module flag SA3_ENABLED, resolved once at
+                # import from MOSH_ENABLE_SA3 + weight availability). The colour rack itself is
+                # populated regardless of adapter (FakeAdapter renders still get colours), so a
+                # guest Mac without SA3 was previously indistinguishable from one with it —
+                # the UI inferred SA3 from `colors.length > 0`, which is true either way. Additive
+                # field: old UI builds that don't read it are unaffected.
                 self._send(200, {"ok": True, "colors": CR.descriptor(),
-                                 "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4)})
+                                 "lab_alpha_max": CR._meta().get("lab_alpha_max", 0.4),
+                                 "sa3": SA3_ENABLED})
             except Exception as e:  # noqa: BLE001
                 self._send(503, {"ok": False, "error": f"colors unavailable: {e}", "colors": []})
         elif path == "/loras":
