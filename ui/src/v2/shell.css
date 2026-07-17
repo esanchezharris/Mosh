@@ -590,6 +590,10 @@
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: 10px; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
 /* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
 .v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+/* Warp indicator (≈) — this wave clip time-stretches to the project tempo. Mirrors the
+   .reimagine glyph treatment, parked in the one free corner (bottom-right: label owns
+   top-left, reimagine top-right, working bottom-left) so it never collides with a sibling. */
+.v2-clip-badge.warp { position: absolute; right: 5px; bottom: 3px; font-size: 11px; line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 /* An audio→MIDI/lyrics/flow build is in flight for this source clip (guest-degradation
    pass — v2 previously gave zero feedback for any of these three async actions). */
 .v2-clip-badge.working {
