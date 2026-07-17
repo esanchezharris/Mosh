@@ -730,6 +730,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-create-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .xform-controls { display: flex; flex-direction: column; gap: 4px; }
 .xform-text { flex: 1 1 auto; min-width: 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 11px; }
+/* Guest degradation — no RAVE model installed, this renders the fake tilt/saturation
+   stand-in. Self-contained pill (mirrors .cap-tag's register), not gated to any other
+   guest-clarity work touching the GenDrawer header. */
+.xform-preview { align-self: flex-start; font-size: 8px; text-transform: uppercase; color: var(--on-accent); background: var(--warn); border-radius: 3px; padding: 1px 4px; }
 
 /* ── mixer ──────────────────────────────────────────────────────────────────*/
 .mixer { flex: 1 1 auto; display: flex; gap: 10px; padding: 14px; overflow: auto; background: var(--ink); }
@@ -786,6 +790,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
   padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 8px;
 }
 .pop-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.04em; }
+/* Guest degradation — e.g. the Type-beat Training popover's "preview" tag (fake backend,
+   no GPU on this Mac). Generic so any pop-head can carry one. */
+.pop-head-badge { font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--on-accent); background: var(--warn); border-radius: 3px; padding: 1px 4px; }
 .pop-group { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px solid var(--ink-line-soft); }
 .pop-group:first-of-type { border-top: none; padding-top: 0; }
 .pop-label { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-dim); }
@@ -793,6 +800,11 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-row select { background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .pop-note { font-size: 10px; color: var(--bone-dim); word-break: break-all; }
+/* Post-export "where did my file go" block — no native Reveal-in-Finder command exists,
+   so the full path stays prominent + copyable (file and folder) instead. */
+.export-done { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--bone-dim); }
+.export-done .export-path { color: var(--bone); word-break: break-all; }
+.export-done .pop-actions { gap: 6px; }
 
 /* File menu (WebView mirror of the native macOS File menu). Anchored LEFT — it sits
    at the left of the topbar tools, unlike the right-anchored utility popovers. */

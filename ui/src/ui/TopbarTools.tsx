@@ -13,6 +13,7 @@ import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
+import { trainingPreviewLabel } from "../capabilities";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
@@ -188,6 +189,10 @@ export function TrainingTool({
 }: { training: TrainingState | null } & ToolChromeProps) {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
+  // Guest degradation: the trainer is a deterministic-stub scaffold everywhere until the
+  // owner points MOSH_TRAINING_REMOTE_URL at a rented GPU box — label it so a tester
+  // doesn't mistake a completed "training run" for a real fine-tune.
+  const previewLabel = useStore((s) => trainingPreviewLabel(s.capabilities));
   const [title, setTitle] = useState("");
   const [creator, setCreator] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -287,7 +292,10 @@ export function TrainingTool({
     >
       {() => (
         <>
-          <div className="pop-head">Type-Beat Training</div>
+          <div className="pop-head">Type-Beat Training{previewLabel && (
+            <span className="pop-head-badge" data-testid="training-preview-badge"
+              title="This trains a deterministic placeholder LoRA stub on this Mac — no GPU, no real fine-tune">{previewLabel}</span>
+          )}</div>
           <div className="pop-note">Use only music you can legally train on. YouTube is discovery/reference. Import local files for training.</div>
           <div className="pop-group">
             <div className="pop-label">Add source</div>

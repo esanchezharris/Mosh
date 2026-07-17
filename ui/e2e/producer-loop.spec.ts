@@ -78,7 +78,12 @@ test("full producer loop: new → program → drums → plugin → mix → expor
   // 7 — Export the mix through the export popover (the file-picker-free path).
   await page.locator('button[title="Export the mix"]').click();
   await page.getByTestId("export-run").click();
-  await expect(page.locator(".pop-note", { hasText: "Exported:" })).toBeVisible();
+  // Guest degradation: the confirmation now shows the full path prominently + a "Copy
+  // path"/"Copy folder" affordance (there is no native Reveal-in-Finder command).
+  await expect(page.getByTestId("export-done")).toBeVisible();
+  await expect(page.getByTestId("export-done")).toContainText("Exported to:");
+  await page.getByTestId("export-copy-path").click();
+  await expect(page.getByTestId("export-copy-path")).toHaveText("Copied ✓");
 });
 
 test("File menu exposes the project actions with accelerators", async ({ page }) => {
