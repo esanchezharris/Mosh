@@ -2,6 +2,16 @@
 #include "UiResourcePathGuard.h"
 #include "../brain/BrainProxy.h"
 #include "../voice/NativeSpeech.h"
+// Crash/telemetry module (src/telemetry/) — opt-in, privacy-respecting. This is
+// the ONE chokepoint every UI- and agent-issued command passes through, so it is
+// where the redacted command-NAME-ONLY breadcrumb trail + the anonymous usage
+// histogram are recorded (see docs/telemetry/PRIVACY.md). Headless harnesses
+// (--selftest/--run-script) call MoshOps::execute() directly and never reach
+// here — by design, those aren't real user sessions.
+#include "../telemetry/Breadcrumbs.h"
+#include "../telemetry/CrashReportFormatter.h"
+#include "../telemetry/Telemetry.h"
+#include "../telemetry/TelemetryConfig.h"
 
 namespace mosh
 {
@@ -154,7 +164,19 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 if (commandHandler && args.size() > 0)
+                {
+                    // Redact ONCE, here, to a bare command-name token — Breadcrumbs
+                    // (crash context) and Telemetry (opt-in usage histogram) both
+                    // receive ONLY this sanitized name, never the raw command object
+                    // (which carries args — trackIds, file paths, lyric text, …).
+                    // Both sinks independently re-sanitize on top of this (defense in
+                    // depth), but neither is ever handed anything BUT this token.
+                    const auto safeName = mosh::telemetry::sanitizeCommandName (
+                        args[0].getProperty ("command", juce::var()).toString());
+                    mosh::telemetry::Breadcrumbs::record (safeName);
+                    mosh::telemetry::Telemetry::onCommand (safeName);
                     completion (commandHandler (args[0]));
+                }
                 else
                 {
                     auto* err = new juce::DynamicObject();
@@ -169,6 +191,26 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 completion (snapshotProvider ? snapshotProvider() : juce::var());
+            })
+        // Telemetry opt-in (default OFF; see docs/telemetry/PRIVACY.md). Deliberately
+        // NOT a MoshOps command — it's a UI-local setting (mirrors uiShell/theme,
+        // ui/src/settings/schema.ts) whose one side effect is this native call, which
+        // just creates/removes a small flag file (TelemetryConfig::optInFile(),
+        // ~/Library/Mosh/telemetry.optin by default) that the crash handler and
+        // Telemetry counters read directly. Synchronous — a stat()+touch/delete, no
+        // async dialog or service call needed, unlike pick_files/escalate_candidates.
+        .withNativeFunction (
+            juce::Identifier ("set_telemetry_optin"),
+            [] (const juce::Array<juce::var>& args,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto optInVar = args.size() > 0 ? args[0].getProperty ("optIn", false) : juce::var (false);
+                const bool optIn = (bool) optInVar;
+                mosh::telemetry::TelemetryConfig::setOptedIn (optIn);
+                auto* ok = new juce::DynamicObject();
+                ok->setProperty ("ok", true);
+                ok->setProperty ("optIn", optIn);
+                completion (juce::var (ok));
             })
         // Moshi's brain, server side (the native equivalent of the Vite /api/brain
         // proxy). Keys live in the environment, never in the WebView. The HTTP call
