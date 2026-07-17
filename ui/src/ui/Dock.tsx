@@ -301,6 +301,16 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
   const setColors = (next: RenderColor[]) => exec("set_render_param", { clipId: clip.id, colors: next.slice(0, 3), lab: labMode });
   const blockedBy = (name: string) => (colorsAvail.find((c) => c.name === name)?.no_stack_with ?? []).some((n) => active.some((a) => a.name === n));
   const addable = colorsAvail.filter((c) => !active.some((a) => a.name === c.name) && !blockedBy(c.name));
+  const displayGroup = (g: string) => g.charAt(0).toUpperCase() + g.slice(1);
+  // Colours sharing a `group` are ONE control with a mode toggle (Sustain · Gentle ⇄ Swell).
+  // Collapse the add-dropdown to one entry per group (keep its first = the default mode).
+  const seenGroups = new Set<string>();
+  const addOptions = addable.filter((c) => {
+    if (!c.group) return true;
+    if (seenGroups.has(c.group)) return false;
+    seenGroups.add(c.group);
+    return true;
+  });
   const isTransform = rl.mode === "transform";
   const isSing = rl.mode === "sing";
   const singable = isSing ? (track.lyricSheet?.lines ?? []).filter((l) => l.singable).length : 0;
@@ -321,19 +331,33 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
       </label>
       {active.map((c) => {
         const meta = colorsAvail.find((m) => m.name === c.name);
+        // A grouped colour (e.g. sustain) is shown as its group name + a mode toggle that
+        // swaps the active colour between the group's modes (Gentle L17 ⇄ Swell L8), keeping
+        // the value. Keyed by group so the slider doesn't remount when the mode flips.
+        const modes = meta?.group ? colorsAvail.filter((m) => m.group === meta.group) : [];
         return (
-          <label key={c.name} className="nparam">
-            <span className="nlabel">{c.name}{meta && meta.astd_max <= 0.1 && <span className="cap-tag">CAPPED</span>}</span>
+          <label key={meta?.group ?? c.name} className="nparam">
+            <span className="nlabel">{meta?.group ? displayGroup(meta.group) : c.name}{meta && meta.astd_max <= 0.1 && <span className="cap-tag">CAPPED</span>}</span>
+            {modes.length > 1 && (
+              <span className="mode-toggle" role="group" aria-label={`${displayGroup(meta!.group!)} mode`}>
+                {modes.map((m) => (
+                  <button key={m.name} type="button" className={"mode-btn" + (m.name === c.name ? " on" : "")}
+                    data-testid={`color-mode-${(m.mode ?? m.name).toLowerCase()}`}
+                    aria-pressed={m.name === c.name} title={`peak layer ${m.peak_layer}`}
+                    onClick={() => setColors(active.map((a) => (a.name === c.name ? { ...a, name: m.name } : a)))}>{m.mode}</button>
+                ))}
+              </span>
+            )}
             <input type="range" min={0} max={100} step={1} value={Math.round(c.value)}
               onChange={(e) => setColors(active.map((a) => (a.name === c.name ? { ...a, value: Number(e.target.value) } : a)))} />
             <button className="btn x" onClick={() => setColors(active.filter((a) => a.name !== c.name))}>✕</button>
           </label>
         );
       })}
-      {active.length < 3 && addable.length > 0 && (
-        <select className="btn ghost color-add" value="" onChange={(e) => e.target.value && setColors([...active, { name: e.target.value, value: 65 }])}>
+      {active.length < 3 && addOptions.length > 0 && (
+        <select className="btn ghost color-add" data-testid="color-add" value="" onChange={(e) => e.target.value && setColors([...active, { name: e.target.value, value: 65 }])}>
           <option value="">+ colour…</option>
-          {addable.map((c) => <option key={c.name} value={c.name}>{c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
+          {addOptions.map((c) => <option key={c.name} value={c.name}>{c.group ? displayGroup(c.group) : c.name}{c.verdict === "WEAK" ? " (weak)" : ""}</option>)}
         </select>
       )}
       <LoraRack clip={clip} />

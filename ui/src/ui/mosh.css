@@ -702,6 +702,11 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pcard-actions { display: flex; gap: 5px; }
 .btn.x, .msx.x { color: var(--danger); }
 .cap-tag { font-size: 8px; color: var(--on-accent); background: var(--warn); border-radius: 3px; padding: 0 3px; margin-left: 4px; }
+/* Grouped-colour mode toggle (Sustain · Gentle ⇄ Swell) — a compact segmented switch. */
+.mode-toggle { display: inline-flex; flex: 0 0 auto; border: 1px solid var(--ink-line); border-radius: 5px; overflow: hidden; }
+.mode-btn { font-size: 9px; line-height: 1.5; padding: 0 6px; background: transparent; border: none; color: var(--bone-dim); cursor: pointer; }
+.mode-btn + .mode-btn { border-left: 1px solid var(--ink-line); }
+.mode-btn.on { background: var(--lime); color: var(--on-accent); }
 
 /* generative drawer */
 .gen { flex: 0 0 312px; width: 312px; border-left: 1px solid var(--ink-line); padding: 10px 12px; overflow: auto; }

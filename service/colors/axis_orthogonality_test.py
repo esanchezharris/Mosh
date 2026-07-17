@@ -56,6 +56,8 @@ check("L4 shares 3 colours (brightness, futuristic, tension)",
       sorted(n for n in REG if layer_of(n) == 4) == ["brightness", "futuristic", "tension"])
 check("L17 shares 5 colours (air, distortion, epic, grid_tightness, sustain)",
       sorted(n for n in REG if layer_of(n) == 17) == ["air", "distortion", "epic", "grid_tightness", "sustain"])
+check("L8 shares 2 colours (drum_aggression, sustain_swell)",
+      sorted(n for n in REG if layer_of(n) == 8) == ["drum_aggression", "sustain_swell"])
 
 a_ft = angle_deg(vec("futuristic"), vec("tension"))
 a_de = angle_deg(vec("distortion"), vec("epic"))
@@ -86,6 +88,7 @@ def assert_group_orthogonal(label, names):
 
 assert_group_orthogonal("L4 group", ["brightness", "futuristic", "tension"])
 assert_group_orthogonal("L17 group", ["air", "distortion", "epic", "grid_tightness", "sustain"])
+assert_group_orthogonal("L8 group", ["drum_aggression", "sustain_swell"])
 
 # ── (c) guards: singleton + near-parallel pass through unchanged ───────────────
 solo = [vec("grit")]

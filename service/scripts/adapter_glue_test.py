@@ -31,7 +31,8 @@ else:
 
 desc = colorrack.descriptor() if colorrack.available() else []
 names = {c["name"] for c in desc}
-check("colors() descriptor has 10 calibrated colors (incl. sustain)", len(desc) == 10 and "sustain" in names, sorted(names))
+check("colors() descriptor has 11 calibrated colors (incl. sustain Gentle+Swell)",
+      len(desc) == 11 and {"sustain", "sustain_swell"} <= names, sorted(names))
 air = next((c for c in desc if c["name"] == "air"), None)
 check("air carries astd_max ceiling 0.08", air and abs(air["astd_max"] - 0.08) < 1e-6, str(air))
 

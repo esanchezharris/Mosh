@@ -108,6 +108,10 @@ export type AvailableColor = {
   more_sign: number;
   verdict: string;
   no_stack_with: string[];
+  // Colors sharing a `group` are one control with a `mode` toggle in the UI
+  // (e.g. Sustain · Gentle ⇄ Swell). Absent on ungrouped colors.
+  group?: string;
+  mode?: string;
 };
 
 // Route B transform target from GET /transform_targets (via list_transform_targets).
