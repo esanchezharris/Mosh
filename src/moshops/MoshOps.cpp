@@ -1010,6 +1010,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "mp_send_signal")    return cmdMpSendSignal (args);
     if (name == "mp_serialize_project") return cmdMpSerializeProject (args);
     if (name == "mp_apply_bootstrap")   return cmdMpApplyBootstrap (args);
+    if (name == "mp_fetch_missing_stems") return cmdMpFetchMissingStems (args);
     if (name == "mp_apply_structural")  return cmdMpApplyStructural (args);
     if (name == "ungroup_track")      return cmdUngroupTrack (args);
     if (name == "list_wave_inputs")   return cmdListWaveInputs (args);
@@ -3110,7 +3111,9 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
         {
             // Fetch any by-hash stems this track references (into audio/by-hash/) BEFORE
             // applying, so its pre-existing wave clips resolve without a host re-commit —
-            // the late-join analogue of the commit-apply download. No-op on the local relay.
+            // the late-join analogue of the commit-apply download. The result is ignored
+            // here (a transient failure just leaves the clip sourceMissing) — the
+            // self-heal pass below retries anything still missing once the tracks land.
             if (auto* refs = tv.getProperty ("audioRefs", var()).getArray())
                 for (auto& a : *refs)
                 {
@@ -3137,9 +3140,154 @@ juce::var MoshOps::cmdMpApplyBootstrap (const juce::var& args)
 
     eng.markDirty();
     emitSnapshotInvalidated();
+
+    // P4 self-heal (PR-1): the download loop above ignores its result, so a transient
+    // upload/download failure during THIS bootstrap (or a peer's blob that hadn't
+    // finished landing) can leave a just-applied clip sourceMissing. Kick off a retry
+    // pass so the guest doesn't need the host to notice and re-commit that track — a
+    // no-op (synchronous, effectively free) when nothing is missing.
+    cmdMpFetchMissingStems (var (new DynamicObject()));
+
     auto* d = new DynamicObject();
     d->setProperty ("applied", applied);
     return okResult ("mp_apply_bootstrap", var (d));
+}
+
+juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
+{
+    // Self-heal (P4/PR-1): every uploadBlob/downloadBlob result in mp_commit_track,
+    // mp_serialize_project, mp_apply_bootstrap, and applyMultiplayerCommitMessage is
+    // ignored at its call site — a single transient HTTP failure otherwise leaves a
+    // clip's audio sourceMissing forever, with the host manually re-committing that
+    // track as the only prior recovery ("nudging"). This command self-heals: it
+    // enumerates every wave clip whose source is currently missing, recognizes the
+    // ones referencing a content-addressed by-hash stem (repointWaveClipSource's own
+    // form: ".../audio/by-hash/<64-hex-sha256>.<ext>" — the hash IS the fetch key, no
+    // separate bookkeeping needed), and retries the download for exactly those. A
+    // clip missing its source for any OTHER reason (a plain moved/deleted local file)
+    // is untouched — that is relink_clip's job, not a peer blob store's.
+    struct Missing
+    {
+        juce::String clipId, hash, ext;
+        juce::File dest;
+    };
+    juce::Array<Missing> missing;
+
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        for (auto* c : t->getClips())
+            if (auto* w = dynamic_cast<te::WaveAudioClip*> (c))
+            {
+                const auto resolved = w->getCurrentSourceFile();
+                if (resolved.existsAsFile()) continue;
+
+                if (resolved.getParentDirectory().getFileName() != "by-hash") continue;
+                const auto stem = resolved.getFileNameWithoutExtension();
+                if (stem.length() != 64 || ! stem.containsOnly ("0123456789abcdef")) continue;
+
+                // Adversarial-review finding #3 — a concurrent pass (a resync tick racing
+                // a manual retry, or two overlapping bootstraps) is already fetching this
+                // exact hash; skip it here rather than spawn a second downloadBlob into the
+                // SAME dest file (delete-then-create-then-stream), whose partial state the
+                // other pass's existsAsFile()/size check could otherwise observe.
+                if (inFlightStems_.count (stem) > 0) continue;
+
+                missing.add ({ c->itemID.toString(), stem,
+                              resolved.getFileExtension().removeCharacters ("."), resolved });
+            }
+    }
+
+    for (auto& m : missing)
+        inFlightStems_.insert (m.hash);
+
+    // Runs on the message thread: re-resolve each clip by id (it may have been
+    // removed/undone since the scan above — findClip returns nullptr, skipped), write
+    // the fetched bytes' arrival into the clip's cached source (sourceMediaChanged,
+    // mirroring repointWaveClipSource's own post-repoint call), and emit exactly one
+    // snapshot_invalidated if anything actually landed. downloadBlob (adversarial-review
+    // finding #1) now verifies the downloaded bytes' SHA-256 against `hash` itself before
+    // reporting success, so a truncated/corrupt transfer is never blessed as resolved here.
+    auto land = [this] (const juce::Array<Missing>& items) -> juce::var
+    {
+        int fetched = 0, failed = 0;
+        juce::Array<var> stillMissing;
+        for (auto& m : items)
+        {
+            const bool got = mpSession_ != nullptr
+                             && mpSession_->downloadBlob (m.hash, m.ext, m.dest)
+                             && m.dest.existsAsFile();
+            if (got)
+            {
+                if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (m.clipId)))
+                    w->sourceMediaChanged();
+                ++fetched;
+            }
+            else
+            {
+                ++failed;
+                stillMissing.add (m.hash);
+            }
+            inFlightStems_.erase (m.hash);
+        }
+        if (fetched > 0)
+            emitSnapshotInvalidated();
+
+        auto* d = new DynamicObject();
+        d->setProperty ("fetched", fetched);
+        d->setProperty ("failed", failed);
+        d->setProperty ("stillMissing", var (stillMissing));
+        return okResult ("mp_fetch_missing_stems", var (d));
+    };
+
+    const bool wait = (bool) args.getProperty ("wait", false);
+    if (missing.isEmpty() || wait)
+        return land (missing);
+
+    // Async (GUI / the bootstrap auto-trigger): downloadBlob does blocking HTTP, so it
+    // must not run on the message thread (mirrors cmdTranscribeClip's dual-mode shape).
+    // The clip/session-active check + sourceMediaChanged()/emitSnapshotInvalidated()
+    // (and the inFlightStems_ erase, #3) are message-thread-only, so only the network
+    // round-trip runs on the background thread; results land back via callAsync.
+    std::thread ([this, missing]
+    {
+        if (mpSession_ == nullptr || ! mpSession_->active())
+        {
+            // Bailed before attempting anything -- still release the in-flight marks
+            // (on the message thread) so a later pass isn't permanently skipped.
+            juce::MessageManager::callAsync ([this, missing]
+            {
+                for (auto& m : missing) inFlightStems_.erase (m.hash);
+            });
+            return;
+        }
+
+        struct Result { juce::String clipId, hash; bool ok; };
+        juce::Array<Result> results;
+        for (auto& m : missing)
+            results.add ({ m.clipId, m.hash, mpSession_->downloadBlob (m.hash, m.ext, m.dest) && m.dest.existsAsFile() });
+
+        juce::MessageManager::callAsync ([this, results]
+        {
+            int fetched = 0;
+            for (auto& r : results)
+            {
+                if (r.ok)
+                {
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (r.clipId)))
+                        w->sourceMediaChanged();
+                    ++fetched;
+                }
+                inFlightStems_.erase (r.hash);
+            }
+            if (fetched > 0)
+                emitSnapshotInvalidated();
+        });
+    }).detach();
+
+    auto* data = new DynamicObject();
+    data->setProperty ("status", "started");
+    return okResult ("mp_fetch_missing_stems", var (data));
 }
 
 juce::var MoshOps::cmdUngroupTrack (const juce::var& args)

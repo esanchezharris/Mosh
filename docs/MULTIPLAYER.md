@@ -70,10 +70,18 @@ Audio 3 render** is an actual audio *file*. To appear on your peer's machine it 
 ([MultiplayerClient.cpp:231](src/multiplayer/MultiplayerClient.cpp:231) — `/mp/blob/head`,
 `/mp/blob/put-url`, `/mp/blob/get-url` signed URLs).
 
-**These blob endpoints exist only on the cloud relay.** The local self-host relay
-(`relay/server.py`) has none — so on the local relay, MIDI/structure sync but audio clips
-do **not** transfer. The cloud relay is the **built-in default**, so audio sync works out of
-the box; just know that sharing audio (incl. SA3 renders) rides the cloud path.
+**The blob store is content-addressed and self-healing.** Every `uploadBlob`/`downloadBlob`
+call is best-effort (a transient network hiccup no longer strands a clip forever): the
+**`mp_fetch_missing_stems`** command re-derives the missing hash/ext straight from a wave
+clip's own by-hash source path and retries the fetch — it runs **automatically** right after
+a guest adopts a bootstrap (`mp_apply_bootstrap`), and is available as a manual retry
+otherwise. **The local self-host relay (`relay/server.py`) now mirrors the cloud's blob
+contract too** (head/put-url/get-url + raw PUT/GET), so the whole stem round-trip — including
+the self-heal path — is exercisable **hermetically** by `Mosh --selftest`
+(`MOSH_SELFTEST_MP=1`) without any network. That local blob store is an **in-memory, dev/test
+posture only** (no persistence, no real signed-URL security, loopback-bound): the cloud relay
+remains the one that matters for an actual two-machine session — a `127.0.0.1` relay can't
+reach a peer's machine anyway.
 
 ## Connecting (the UX)
 
@@ -93,19 +101,43 @@ The session control lives in the topbar's **2-player (B-5) pop**
   ([MultiplayerClient.cpp:12](src/multiplayer/MultiplayerClient.cpp:12)). A double-clicked
   app reaches multiplayer with no config — this is what you want for the playtest.
 - **Self-host (dev/offline):** `MOSH_RELAY_URL=http://127.0.0.1:8771` + run
-  `PORT=8771 python3 relay/server.py`. Note: **no blob endpoints** → no audio-clip sync.
+  `PORT=8771 python3 relay/server.py`. It now HAS blob endpoints (an in-memory dev/test store,
+  mirroring the cloud contract — see [Audio clips](#audio-clips-the-one-real-file-transfer)
+  above), so audio syncs on it too — but it only binds `127.0.0.1`, so it's for same-machine
+  dev/CI use, not an actual two-machine session (use the cloud relay for that).
 - `MOSH_RELAY_APIKEY` overrides the cloud relay's anon key (rarely needed).
 
-## Known limits (true as of 2026-06-23)
+## Known limits (updated 2026-07-17 — self-healing stems)
 
-- **Bootstrap audio rides the cloud relay:** a guest who joins an in-progress session now
-  receives pre-existing **audio clips** automatically — on serialize the host content-addresses
-  + uploads each stem, and the joiner downloads them as it adopts the bundle (the same by-hash
-  path as a commit). Two caveats remain: the transfer runs on the message thread, so a session
-  with several audio clips briefly **freezes both windows** while stems move (keep imported clips
-  modest); and the **local self-host relay has no blob store**, so on it audio still won't
-  transfer — do a MIDI-first jam, or nudge each audio track after the guest joins. MIDI/instrument
-  parts always appear immediately.
+- **Bootstrap audio is now self-healing.** A guest who joins an in-progress session receives
+  pre-existing **audio clips** automatically — on serialize the host content-addresses +
+  uploads each stem, and the joiner downloads them as it adopts the bundle (the same by-hash
+  path as a commit). Previously, every upload/download call ignored its success/failure —
+  **one transient HTTP hiccup left a clip `sourceMissing` forever**, and the only recovery was
+  the host manually re-committing that track (a "nudge"). That gap is closed:
+  - `mp_fetch_missing_stems` (backend-only, non-undoable) scans every wave clip whose source
+    is missing, recognizes the ones referencing a content-addressed by-hash stem (a 64-hex-char
+    filename under `audio/by-hash/`), and retries the download for exactly those — it can't
+    "fix" an unrelated missing local file (that's `relink_clip`'s job).
+  - It fires **automatically** right after `mp_apply_bootstrap` lands the guest's tracks (fire-
+    and-forget, off the `wait` arg — it runs synchronously only when nothing is actually
+    missing, which is a cheap no-op; a genuine miss takes the background-thread path below), so
+    a late-joiner's audio catches up on its own within moments — no manual nudge needed.
+  - It is also a manual command: `{wait:true}` for a synchronous retry (e.g. from a script or
+    the future UI); otherwise (the default, and what the bootstrap auto-trigger uses) it runs
+    the download on a background thread and reports completion by re-invalidating the
+    snapshot — never blocking the caller on the network round-trip.
+  - Every downloaded stem's bytes are verified against its own content-address (SHA-256) before
+    being accepted — a dropped/truncated transfer is rejected and left genuinely missing (for a
+    future retry) rather than silently blessed as resolved.
+  - The **local self-host relay now has a blob store** too (mirroring the cloud contract), so
+    this whole path — including the self-heal — is covered by the hermetic `--selftest` gate
+    (`MOSH_SELFTEST_MP=1`), not just the cloud-gated smoke check.
+  - One caveat remains: the ORIGINAL upload/download attempt (inside `mp_commit_track` /
+    `mp_apply_bootstrap`'s own inline loop, and the host's bootstrap-answer upload) still runs
+    synchronously on the message thread, so a session with several audio clips can still
+    **briefly freeze** while stems move (keep imported clips modest) — a proper async/
+    background transfer for THAT path is a follow-up (PR-2, stacked on this fix).
 - **Stem transfer briefly blocks the UI:** upload/download runs on the message thread, so a
   large audio file can freeze the window for a few seconds. Keep imported clips modest.
 - **Stale lock badge (~250 ms):** after a peer disconnects, their lock chip can linger
@@ -116,8 +148,27 @@ The session control lives in the topbar's **2-player (B-5) pop**
 
 ## Verification status
 
-- `Mosh --selftest` with `MOSH_SELFTEST_MP=1` (two simulated peers, one process) passes
-  against both the local relay (`relay/run-mp-selftest.sh`) and the cloud relay — **911/911**.
+- `Mosh --selftest` with `MOSH_SELFTEST_MP=1` (`relay/run-mp-selftest.sh`, two/four
+  simulated peers across several in-process engines) passes against the **local**
+  relay — **1349/1349 ×3 deterministic** (2026-07-17, self-healing stems PR +
+  consolidated fix batch: corruption-rejection coverage below). The default
+  `--selftest` (no MP env) is unaffected — **1274/1274**. This is the FIRST time
+  the whole stem round-trip (upload/download/self-heal/bootstrap) runs
+  hermetically, since the local relay previously had no blob store at all.
+- **Corrupted-transfer rejection is now executable, not just "correct by
+  inspection":** `relay/server.py`'s `MOSH_RELAY_BLOB_CORRUPT` hook (ext-scoped —
+  it only flips bytes for a reserved `.corrupttest` extension, so it's armed for
+  the WHOLE gate run by `run-mp-selftest.sh` without corrupting any real `.wav`
+  stem) backs a dedicated selftest section proving `MultiplayerClient::downloadBlob`
+  rejects a corrupted transfer (returns `false`, deletes the partial/corrupt
+  `dest` file, reports a hash-mismatch error) and that the rejection is retryable
+  (a clean download right after still succeeds) — see `SelfTest.cpp`'s
+  "downloadBlob rejects a corrupted transfer" section.
+- `scripts/playtest/mp-live-smoke.sh` (two SEPARATE OS processes, real HTTP) run
+  against the **real cloud relay** — **PASS**: process B received A's MIDI + audio
+  tracks, downloaded the stem, and `mp_fetch_missing_stems` confirmed nothing was
+  left `sourceMissing` (fetched:0 failed:0 — the original download had already
+  succeeded, so the self-heal ran as the harmless no-op it's designed to be).
 - **Not yet proven:** two *separate* app instances, two humans, live, hearing the results.
   **Tonight's playtest is the first real two-machine test.** Do a two-window dry run on one
   Mac first (see `docs/PLAYTEST_SETUP.md`).

@@ -19,6 +19,9 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     REQUIRE (LockManager::classify ("apply_remote_track")== Scope::Unguarded);
     REQUIRE (LockManager::classify ("mp_serialize_track")== Scope::Unguarded);
     REQUIRE (LockManager::classify ("mp_sync_locks")     == Scope::Unguarded);
+    // P4 self-heal (PR-1): backend-only, no clip/track target in its args, never
+    // contends for a track -- same posture as the other mp_* internals above.
+    REQUIRE (LockManager::classify ("mp_fetch_missing_stems") == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")

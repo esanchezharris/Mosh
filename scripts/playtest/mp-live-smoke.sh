@@ -75,9 +75,17 @@ echo "room code: $ROOM"
 # NB: we deliberately do NOT export from the guest — export_audio inside a freshly
 # joined session hangs in this headless run-script harness (see followups.md). We
 # verify sync via on-disk artifacts instead: the downloaded stem + the saved edit.
+# P4 self-heal (PR-1): mp_fetch_missing_stems{wait:true} + __snapshot right after the
+# sync wait — normally a no-op (the commit/apply download already landed the stem, or
+# mp_apply_bootstrap's own auto-trigger already healed it), but it's the real recovery
+# path if this live cross-machine transfer hits a transient hiccup the __wait alone
+# didn't ride out, and the snapshot is how the verdict below confirms no clip is left
+# sourceMissing (not just that SOME stem file exists on disk).
 cat > "$ART/b.jsonl" <<EOF
 {"command":"mp_join_session","args":{"code":"$ROOM","name":"GuestB","color":"#ff7755"}}
 {"command":"__wait","args":{"ms":16000}}
+{"command":"mp_fetch_missing_stems","args":{"wait":true}}
+{"command":"__snapshot"}
 {"command":"save"}
 EOF
 
@@ -121,6 +129,48 @@ else
   echo "(no saved edit found)"
 fi
 
+echo "=== B mp_fetch_missing_stems (P4 self-heal) ==="
+FETCH_LINE="$(python3 - "$ART/b.out" <<'PY'
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except Exception: continue
+    if o.get("command") == "mp_fetch_missing_stems":
+        print(json.dumps(o.get("data", {}))); break
+PY
+)"
+echo "${FETCH_LINE:-(no mp_fetch_missing_stems result found)}"
+
+echo "=== B snapshot: any clip still sourceMissing? ==="
+# The real verdict for the self-heal path: not "does a by-hash file exist somewhere",
+# but "does B's OWN applied project resolve every clip's audio" (the __snapshot
+# emitted right after mp_fetch_missing_stems above is the same snapshot() the WebView
+# would render). A track landing with its structure but a dangling sourceMissing clip
+# is exactly the P4 regression this PR fixes — catch it here on a REAL cross-machine
+# transfer, not just in the hermetic --selftest gate.
+ANY_MISSING="$(python3 - "$ART/b.out" <<'PY'
+import json, sys
+snap = None
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line: continue
+    try: o = json.loads(line)
+    except Exception: continue
+    if o.get("command") == "__snapshot":
+        snap = o.get("data", {})
+missing = []
+if snap:
+    for t in snap.get("tracks", []):
+        for c in t.get("clips", []):
+            if c.get("type") == "wave" and c.get("sourceMissing"):
+                missing.append(c.get("id", "?"))
+print("yes" if missing else "no")
+PY
+)"
+echo "sourceMissing present: $ANY_MISSING"
+
 # ── verdict ─────────────────────────────────────────────────────────────────────
 STEM_OK=0
 if [ -n "$A_HASH" ] && [ -n "$(find "$BDIR" -name "$A_HASH.*" -type f -print -quit 2>/dev/null)" ]; then
@@ -128,8 +178,11 @@ if [ -n "$A_HASH" ] && [ -n "$(find "$BDIR" -name "$A_HASH.*" -type f -print -qu
 fi
 echo
 echo "RESULT:"
-if [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
-  echo "  PASS — B (separate process) received A's MIDI track + audio track AND downloaded the audio stem over the cloud relay."
+if [ "$ANY_MISSING" = "yes" ]; then
+  echo "  FAIL — B's snapshot still shows a sourceMissing wave clip after mp_fetch_missing_stems{wait:true} — the P4 self-heal did not resolve it on this real cross-machine transfer."
+  exit 1
+elif [ "$STEM_OK" = 1 ] && [ "$DRUMS" = 1 ] && [ "$TONE" = 1 ]; then
+  echo "  PASS — B (separate process) received A's MIDI track + audio track AND downloaded the audio stem over the cloud relay (no clip left sourceMissing)."
   exit 0
 elif [ "$STEM_OK" = 1 ]; then
   echo "  PARTIAL — B downloaded A's audio stem (blob round-trip OK), but the saved edit did not show both track names (DRUMS=$DRUMS TONE=$TONE)."
