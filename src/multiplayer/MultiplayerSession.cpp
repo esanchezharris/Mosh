@@ -1,29 +1,54 @@
 #include "MultiplayerSession.h"
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 
 namespace mosh
 {
 using namespace juce;
+
+namespace
+{
+    // PR-2 kill switch: MOSH_MP_SYNC_TRANSFER=1 reverts every transfer path (commit,
+    // received commit/bootstrap_state/structural, the host's bootstrap answer) to the
+    // original fully synchronous/inline behaviour — cheap playtest insurance if the
+    // async path ever misbehaves live. See docs/MULTIPLAYER.md.
+    bool readSyncTransferEnv()
+    {
+        if (auto* env = std::getenv ("MOSH_MP_SYNC_TRANSFER"); env != nullptr && std::strlen (env) > 0)
+            return String (env) != "0";
+        return false;
+    }
+}
 
 MultiplayerSession::MultiplayerSession (ApplyCommitFn applyCommit, EmitFn emit, SyncLocksFn syncLocks,
                                         ProvideBootstrapFn provideBootstrap, ApplyBootstrapFn applyBootstrap,
                                         ApplyStructuralFn applyStructural)
     : applyCommit_ (std::move (applyCommit)), emit_ (std::move (emit)), syncLocks_ (std::move (syncLocks)),
       provideBootstrap_ (std::move (provideBootstrap)), applyBootstrap_ (std::move (applyBootstrap)),
-      applyStructural_ (std::move (applyStructural))
+      applyStructural_ (std::move (applyStructural)),
+      syncMode_ (readSyncTransferEnv())
 {
 }
 
 MultiplayerSession::~MultiplayerSession()
 {
     stopPoll();
+    // transferQueue_'s own destructor aborts + joins its worker if one is still
+    // alive (idempotent with the explicit reset() in leaveSession()).
 }
 
 juce::String MultiplayerSession::createSession (const String& name, const String& color)
 {
     const auto code = client_.createSession (name, color);
     if (code.isNotEmpty())
+    {
+        // PR-2: a fresh worker for this session (a TransferQueue is not restartable
+        // after a prior leaveSession()'s abort() — see TransferQueue.h).
+        transferQueue_ = std::make_unique<TransferQueue> (
+            [] (std::function<void()> f) { MessageManager::callAsync (std::move (f)); });
         startPoll();
+    }
     return code;
 }
 
@@ -31,6 +56,8 @@ bool MultiplayerSession::joinSession (const String& code, const String& name, co
 {
     if (! client_.joinSession (code, name, color))
         return false;
+    transferQueue_ = std::make_unique<TransferQueue> (
+        [] (std::function<void()> f) { MessageManager::callAsync (std::move (f)); });
     startPoll();
     // P6 — ask the host for the full project so a late-joiner starts from their
     // state (the host answers in its poll loop with a bootstrap_state).
@@ -43,6 +70,7 @@ bool MultiplayerSession::joinSession (const String& code, const String& name, co
 void MultiplayerSession::leaveSession()
 {
     stopPoll();             // no more poll callAsyncs after this (they no-op on !running_)
+    transferQueue_.reset(); // PR-2: abort() + join the worker before it's gone for good
     client_.leave();
     syncLocks_ (false, {}, {});
     auto* o = new DynamicObject();
@@ -62,18 +90,144 @@ int MultiplayerSession::claim (const String& logicalId)
     return -1;
 }
 
-void MultiplayerSession::commit (const String& logicalId, const String& blob, const var& audioRefs)
+void MultiplayerSession::setStemBaseDir (const String& absoluteDir)
 {
+    const std::lock_guard<std::mutex> lk (stemBaseDirMutex_);
+    stemBaseDir_ = absoluteDir;
+}
+
+juce::String MultiplayerSession::stemBaseDir() const
+{
+    const std::lock_guard<std::mutex> lk (stemBaseDirMutex_);
+    return stemBaseDir_;
+}
+
+juce::File MultiplayerSession::byHashDirFor (const String& base) const
+{
+    return File (base).getChildFile ("audio").getChildFile ("by-hash");
+}
+
+bool MultiplayerSession::transferAborting() const
+{
+    return transferQueue_ == nullptr || transferQueue_->isAborting();
+}
+
+void MultiplayerSession::emitCommitDone (const String& logicalId, bool ok, const String& error)
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("logicalId", logicalId);
+    o->setProperty ("ok", ok);
+    if (! ok && error.isNotEmpty())
+        o->setProperty ("error", error);
+    if (emit_)
+        emit_ ("mp_commit_done", var (o));
+}
+
+void MultiplayerSession::prefetchAudioRefs (const juce::var& audioRefsArr)
+{
+    const auto base = stemBaseDir();
+    if (base.isEmpty())
+        return;   // no session-stamped directory yet (shouldn't happen once a session is live)
+    auto byHashDir = byHashDirFor (base);
+    if (auto* arr = audioRefsArr.getArray())
+        for (auto& a : *arr)
+        {
+            if (transferAborting())
+                return;
+            const auto h = a.getProperty ("hash", var()).toString();
+            const auto e = a.getProperty ("ext", var()).toString();
+            if (h.isEmpty())
+                continue;
+            auto dest = byHashDir.getChildFile (h + "." + e);
+            if (! dest.existsAsFile())
+                client_.downloadBlob (h, e, dest, [this] { return transferAborting(); });
+        }
+}
+
+void MultiplayerSession::routeStateMutatingJob (TransferQueue::Job job)
+{
+    if (syncMode_ || transferQueue_ == nullptr)
+    {
+        // Kill-switch / defensive fallback (no live queue, e.g. called outside an
+        // active session): run inline, right here, exactly like the pre-PR-2 code.
+        if (job.prefetch) job.prefetch();
+        if (job.apply)    job.apply();
+        return;
+    }
+    transferQueue_->enqueue (std::move (job));
+}
+
+void MultiplayerSession::commit (const String& logicalId, const String& blob, const var& audioRefs,
+                                 const juce::Array<juce::File>& stemFiles)
+{
+    const int epoch = [&]
+    {
+        const auto it = heldEpochs_.find (logicalId);
+        return it != heldEpochs_.end() ? it->second : 0;
+    }();
+    heldEpochs_.erase (logicalId);   // captured NOW, on the message thread -- heldEpochs_ is not otherwise synchronized
+
     auto* msg = new DynamicObject();
     msg->setProperty ("type", "commit");
     msg->setProperty ("logicalId", logicalId);
-    const auto it = heldEpochs_.find (logicalId);
-    msg->setProperty ("epoch", it != heldEpochs_.end() ? it->second : 0);
+    msg->setProperty ("epoch", epoch);
     msg->setProperty ("blob", blob);
     msg->setProperty ("audioRefs", audioRefs);
-    client_.publish (var (msg));
-    client_.releaseLock (logicalId);
-    heldEpochs_.erase (logicalId);
+    const var msgVar (msg);
+
+    Array<var> refs;
+    if (auto* a = audioRefs.getArray())
+        refs = *a;
+
+    if (syncMode_ || transferQueue_ == nullptr)
+    {
+        // Original pre-PR-2 behaviour: upload + publish + release, all inline.
+        bool allOk = true;
+        for (int i = 0; i < refs.size() && i < stemFiles.size(); ++i)
+        {
+            const auto h = refs[i].getProperty ("hash", var()).toString();
+            const auto e = refs[i].getProperty ("ext", var()).toString();
+            if (! client_.uploadBlob (h, e, stemFiles[i]))
+                allOk = false;
+        }
+        const int seq = allOk ? client_.publish (msgVar) : -1;
+        client_.releaseLock (logicalId);   // released either way -- a failed upload must not leave the track stuck locked
+        emitCommitDone (logicalId, allOk && seq >= 1, allOk ? String() : String ("upload failed"));
+        return;
+    }
+
+    // Async: the caller (MoshOps::cmdMpCommitTrack) has ALREADY done every bit of
+    // synchronous engine work (hash/copy-to-by-hash/repoint/serialize -- an
+    // immutable content-addressed snapshot, so further edits during the upload are
+    // safe by construction) and returns immediately; only the network round-trip
+    // (upload each stem, then publish, then release the lock) runs on the worker.
+    auto ok  = std::make_shared<bool> (true);
+    auto err = std::make_shared<String>();
+
+    TransferQueue::Job job;
+    job.prefetch = [this, logicalId, msgVar, refs, stemFiles, ok, err]
+    {
+        for (int i = 0; i < refs.size() && i < stemFiles.size(); ++i)
+        {
+            if (transferAborting())
+                { *ok = false; if (err->isEmpty()) *err = "aborted"; break; }
+            const auto h = refs[i].getProperty ("hash", var()).toString();
+            const auto e = refs[i].getProperty ("ext", var()).toString();
+            if (! client_.uploadBlob (h, e, stemFiles[i], [this] { return transferAborting(); }))
+                { *ok = false; if (err->isEmpty()) *err = "upload failed"; }
+        }
+        int seq = -1;
+        if (*ok)
+            seq = client_.publish (msgVar);
+        if (seq < 1)
+            { *ok = false; if (err->isEmpty()) *err = "publish failed"; }
+        client_.releaseLock (logicalId);   // ALWAYS -- success or failure (design point 3)
+    };
+    job.apply = [this, logicalId, ok, err]
+    {
+        emitCommitDone (logicalId, *ok, *err);
+    };
+    transferQueue_->enqueue (std::move (job));
 }
 
 bool MultiplayerSession::uploadBlob (const String& hash, const String& ext, const File& file)
@@ -183,7 +337,16 @@ void MultiplayerSession::pollLoop()
                 const auto type = msg.getProperty ("type", var()).toString();
                 if (type == "commit")
                 {
-                    applyCommit_ (msg);   // full msg: {logicalId, epoch, blob, audioRefs}
+                    // PR-2: prefetch (download any missing stems) on the transfer
+                    // worker, THEN apply (the existing applyCommit_ callback) —
+                    // routed through the SAME ordered pipeline as bootstrap_state/
+                    // structural below, so this commit's apply can never be jumped
+                    // by a later-arriving frame's own (possibly prefetch-free, fast)
+                    // job.
+                    TransferQueue::Job job;
+                    job.prefetch = [this, msg] { prefetchAudioRefs (msg.getProperty ("audioRefs", var())); };
+                    job.apply    = [this, msg] { applyCommit_ (msg); };
+                    routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "selection")
                 {
@@ -208,24 +371,80 @@ void MultiplayerSession::pollLoop()
                 }
                 else if (type == "bootstrap_request")
                 {
-                    // A late-joiner wants our project: serialize it + reply. (One-time,
-                    // small JSON; the brief publish on the message thread is fine.)
-                    auto bundle = provideBootstrap_ ? provideBootstrap_() : var();
+                    // A late-joiner wants our project. PR-2: the message-thread part
+                    // (provideBootstrap_ -> MoshOps::serializeProjectForBootstrapAnswer)
+                    // does the engine-touching content-addressing/serialize and
+                    // returns {tracks, annotations, stemFiles[]} WITHOUT uploading;
+                    // one worker job then uploads every stem THEN publishes
+                    // bootstrap_state (in-job ordering guarantees the guest's
+                    // prefetch finds the blobs already on the relay).
+                    auto answer = provideBootstrap_ ? provideBootstrap_() : var();
                     auto* msgOut = new DynamicObject();
                     msgOut->setProperty ("type", "bootstrap_state");
-                    msgOut->setProperty ("tracks", bundle.getProperty ("tracks", var()));
-                    msgOut->setProperty ("annotations", bundle.getProperty ("annotations", var()));
-                    client_.publish (var (msgOut));
+                    msgOut->setProperty ("tracks", answer.getProperty ("tracks", var()));
+                    msgOut->setProperty ("annotations", answer.getProperty ("annotations", var()));
+                    const var msgOutVar (msgOut);
+                    const auto stemFiles = answer.getProperty ("stemFiles", var());
+
+                    TransferQueue::Job job;
+                    job.prefetch = [this, msgOutVar, stemFiles]
+                    {
+                        if (auto* sf = stemFiles.getArray())
+                            for (auto& s : *sf)
+                            {
+                                if (transferAborting())
+                                    return;
+                                const auto h = s.getProperty ("hash", var()).toString();
+                                const auto e = s.getProperty ("ext", var()).toString();
+                                const auto p = s.getProperty ("path", var()).toString();
+                                if (h.isEmpty() || p.isEmpty())
+                                    continue;
+                                client_.uploadBlob (h, e, File (p), [this] { return transferAborting(); });
+                            }
+                        client_.publish (msgOutVar);
+                    };
+                    // No apply stage -- nothing to apply locally on the host side.
+                    routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "bootstrap_state")
                 {
-                    if (applyBootstrap_)
-                        applyBootstrap_ (msg);   // adopt the host's project
+                    TransferQueue::Job job;
+                    job.prefetch = [this, msg]
+                    {
+                        if (auto* tarr = msg.getProperty ("tracks", var()).getArray())
+                            for (auto& tv : *tarr)
+                            {
+                                if (transferAborting())
+                                    return;
+                                prefetchAudioRefs (tv.getProperty ("audioRefs", var()));
+                            }
+                    };
+                    job.apply = [this, msg]
+                    {
+                        if (! applyBootstrap_)
+                            return;
+                        // Tell cmdMpApplyBootstrap the worker already prefetched every
+                        // stem it could (PR-2) so its own inline per-track download
+                        // loop (PR-1) can skip re-attempting them. The direct-command
+                        // contract (a raw mp_apply_bootstrap call outside a live
+                        // session — the harness/agents) is UNCHANGED: this flag is
+                        // only ever set here, on bundles arriving through the session.
+                        auto* withFlag = new DynamicObject();
+                        withFlag->setProperty ("tracks", msg.getProperty ("tracks", var()));
+                        withFlag->setProperty ("annotations", msg.getProperty ("annotations", var()));
+                        withFlag->setProperty ("stemsPrefetched", true);
+                        applyBootstrap_ (var (withFlag));
+                    };
+                    routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "structural")
                 {
-                    if (applyStructural_)
-                        applyStructural_ (msg);  // mirror a peer's tempo/master/key op
+                    // No prefetch (nothing to download) -- routed through the SAME
+                    // FIFO purely for ordering: a fast tempo change enqueued right
+                    // after a slow commit upload must still apply strictly after it.
+                    TransferQueue::Job job;
+                    job.apply = [this, msg] { if (applyStructural_) applyStructural_ (msg); };
+                    routeStateMutatingJob (std::move (job));
                 }
                 else if (type == "webrtc")
                 {
