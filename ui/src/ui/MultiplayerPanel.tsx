@@ -1,27 +1,93 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { loadMpIdentity, saveMpIdentity } from "../multiplayer/identity";
+import { ConfirmDialog } from "./ConfirmDialog";
 
-// MP-001 — session entry + roster. Lives in a topbar Pop (the reserved B-5 slot).
-// Create a session (share the code) or join one; once connected, shows the peer
-// roster + a leave control. All state is fed by the mp_state event (off-snapshot).
+// MP-001 — session entry + roster. Lives in a topbar Pop (the reserved B-5 slot) in
+// the classic shell, and in a modal from the v2 shell's prominent Invite affordances
+// (MultiplayerLauncher). Create a session (share the code) or join one; once
+// connected, shows the peer roster + the room code (always re-visible/copyable, so
+// the host can re-share it) + a leave control. All state is fed by the mp_state
+// event (off-snapshot).
 export function MultiplayerPanel() {
   const mp = useStore((s) => s.mp);
   const peers = useStore((s) => s.peers);
   const create = useStore((s) => s.mpCreateSession);
   const join = useStore((s) => s.mpJoinSession);
   const leave = useStore((s) => s.mpLeaveSession);
+  // Joining adopts the HOST's project onto this Mac — cmdMpApplyBootstrap drops every
+  // local track (non-undoably) before rebuilding from the host's bundle. If this Mac
+  // already has real work, gate the join behind a confirm so nobody loses a session by
+  // clicking the wrong button. Creating never touches local tracks (only the joiner's
+  // side runs the adopt), so it needs no such gate.
+  const localTrackCount = useStore((s) => s.snapshot?.tracks.length ?? 0);
 
-  const [name, setName] = useState("");
-  const [color, setColor] = useState("#3aa0ff");
+  const initialIdentity = loadMpIdentity();
+  const [name, setName] = useState(initialIdentity.name);
+  const [color, setColor] = useState(initialIdentity.color);
   const [code, setCode] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+
+  const persistIdentity = (nextName: string, nextColor: string) => {
+    saveMpIdentity({ name: nextName.trim() || "Producer", color: nextColor });
+  };
+
+  const doCreate = () => {
+    const effectiveName = name.trim() || "Producer";
+    persistIdentity(effectiveName, color);
+    void create(effectiveName, color);
+  };
+
+  const doJoin = (roomCode: string) => {
+    const effectiveName = name.trim() || "Producer";
+    persistIdentity(effectiveName, color);
+    void join(roomCode, effectiveName, color);
+  };
+
+  const requestJoin = () => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    if (localTrackCount > 0) { setPendingJoinCode(trimmed); return; }
+    doJoin(trimmed);
+  };
+
+  const copyCode = async () => {
+    const value = mp.roomCode ?? "";
+    if (!value) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // Fallback for embeds without the async Clipboard API — a hidden textarea + execCommand.
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — the code is still visible + selectable in the field */
+    }
+  };
 
   if (mp.active) {
     return (
       <div className="mp-panel" aria-label="Multiplayer session">
         <div className="mp-head"><strong>Session</strong><span className="mp-dot on" title="connected" /></div>
         <label className="mp-field">Room code
-          <input className="mp-code" readOnly value={mp.roomCode ?? ""}
-                 onFocus={(e) => e.currentTarget.select()} aria-label="Room code (share to invite)" />
+          <div className="mp-code-row">
+            <input className="mp-code" readOnly value={mp.roomCode ?? ""}
+                   onFocus={(e) => e.currentTarget.select()} aria-label="Room code (share to invite)" />
+            <button type="button" className="btn" onClick={() => void copyCode()} disabled={!mp.roomCode}>
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
         </label>
         <div className="mp-roster">
           {Object.entries(peers).map(([id, p]) => (
@@ -46,13 +112,36 @@ export function MultiplayerPanel() {
       <label className="mp-field mp-color">Colour
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Your colour" />
       </label>
-      <button className="btn primary" onClick={() => void create(name, color)}>Create session</button>
+      <button className="btn primary" onClick={doCreate}>Create session</button>
       <div className="mp-sep">or join with a code</div>
       <div className="mp-join">
         <input value={code} placeholder="paste room code" onChange={(e) => setCode(e.target.value)}
                aria-label="Room code to join" />
-        <button className="btn" disabled={!code.trim()} onClick={() => void join(code.trim(), name, color)}>Join</button>
+        <button className="btn" disabled={!code.trim()} onClick={requestJoin}>Join</button>
       </div>
+      {localTrackCount > 0 && (
+        <div className="pop-note">
+          You have {localTrackCount} track{localTrackCount === 1 ? "" : "s"} in this project — joining a
+          session replaces it with the host's, so we'll confirm before that happens.
+        </div>
+      )}
+      {pendingJoinCode !== null && (
+        <ConfirmDialog
+          title="Join session — replace this project?"
+          body={
+            <>
+              Joining adopts the host's project on this Mac. Your current {localTrackCount} track
+              {localTrackCount === 1 ? "" : "s"} will be replaced and this can't be undone.
+            </>
+          }
+          confirmLabel="Join anyway"
+          cancelLabel="Cancel"
+          danger
+          testId="mp-join-confirm"
+          onConfirm={() => { const c = pendingJoinCode; setPendingJoinCode(null); doJoin(c); }}
+          onCancel={() => setPendingJoinCode(null)}
+        />
+      )}
     </div>
   );
 }

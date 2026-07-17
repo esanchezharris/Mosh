@@ -252,6 +252,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .btn.on, .btn[aria-pressed="true"] { background: var(--lime); border-color: var(--lime); color: var(--on-accent); }
 .btn.rec[data-state="recording"] { background: var(--rec); border-color: var(--rec); color: #fff; }
 .btn.ghost { background: transparent; }
+.btn.primary { background: var(--lime); border-color: var(--lime); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover { background: var(--lime-glow); border-color: var(--lime-glow); color: var(--on-accent); }
+.btn.danger { background: var(--rec); border-color: var(--rec); color: #fff; }
+.btn.danger:hover { border-color: var(--rec); color: #fff; filter: brightness(1.08); }
 .seg { display: inline-flex; border: 1px solid var(--ink-line); border-radius: 8px; overflow: hidden; }
 .seg .btn { border: none; border-radius: 0; }
 .seg .btn + .btn { border-left: 1px solid var(--ink-line); }
@@ -755,6 +759,9 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--ink-line); }
 .modal-head .pr-meta { margin-left: auto; color: var(--bone-dim); font-size: 11px; }
+.confirm-modal { width: min(92vw, 380px); }
+.confirm-body { padding: 4px 14px 0; font-size: 12px; line-height: 1.5; }
+.confirm-actions { padding: 12px 14px 14px; justify-content: flex-end; }
 .modal-filters { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line-soft); }
 .modal-filters input { flex: 1 1 auto; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 7px; padding: 6px 9px; }
 .modal-list { overflow: auto; padding: 8px 10px; flex: 1 1 auto; min-height: 0; }
@@ -1199,6 +1206,9 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-field input { font: inherit; padding: 4px 6px; }
 .mp-field.mp-color { flex-direction: row; align-items: center; gap: 8px; }
 .mp-code { font-family: var(--font-mono); font-size: 11px; }
+.mp-code-row { display: flex; gap: 6px; }
+.mp-code-row .mp-code { flex: 1; min-width: 0; }
+.mp-code-row .btn { flex: none; }
 .mp-roster { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .mp-peer { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .mp-peer-name { flex: 1; }
@@ -1208,6 +1218,10 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
 .mp-join { display: flex; gap: 6px; }
 .mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+/* v2 shell's modal-based launcher (MultiplayerLauncher) — same panel, more room than
+   the classic shell's small anchored popover. */
+.mp-launcher-modal { width: min(92vw, 420px); }
+.mp-launcher-body { padding: 12px 14px 14px; }
 
 /* A peer-held track: dim + a coloured lock chip; not editable here (the backend
    guard is the real enforcement, this is the visual affordance). */

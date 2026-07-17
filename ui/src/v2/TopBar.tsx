@@ -10,6 +10,7 @@ import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
+import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import type { Snapshot } from "../types";
 import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStop, IconUsers } from "../ui/icons";
 
@@ -22,7 +23,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const t = useStore((s) => s.transport);
   const agentBusy = useStore((s) => s.agentBusy);
-  const mpCreate = useStore((s) => s.mpCreateSession);
   const mpActive = useStore((s) => s.mp.active);
 
   const map = tempoMapFrom(snapshot.session);
@@ -102,10 +102,12 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
 
         <AvatarCluster />
 
-        <button className="v2-btn v2-invite-btn" data-testid="v2-share" onClick={() => { if (!mpActive) void mpCreate(); }}>
-          <IconUsers size={15} />
-          <span>{mpActive ? "Shared" : "Invite"}</span>
-        </button>
+        <MultiplayerLauncher
+          className="v2-btn v2-invite-btn"
+          testId="v2-share"
+          ariaLabel={mpActive ? "Multiplayer session — view room code" : "Create or join a multiplayer session"}
+          label={<><IconUsers size={15} /><span>{mpActive ? "Shared" : "Invite"}</span></>}
+        />
 
         <OverflowMenu />
       </div>
