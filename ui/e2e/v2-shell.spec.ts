@@ -234,6 +234,40 @@ test("the track header is keyboard-focusable and Enter selects it (a11y)", async
   await expect(page.getByTestId("v2-inspector")).toContainText(`Inspector · ${name}`);
 });
 
+test("the selected track-header tint tracks the --v2-accent token across themes", async ({ page }) => {
+  // Light (shipped default): select a header, read its tint.
+  await page.goto("/?shell=v2");
+  await expect(page.getByTestId("v2-shell")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  const header = page.getByTestId("v2-track-header").first();
+  await header.click();
+  const lightBg = await header.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+  // Dark: persist the dark theme + reload, re-select, read its tint.
+  await page.evaluate(() => window.localStorage.setItem(
+    "mosh.settings",
+    JSON.stringify({ version: 2, template: null, values: { theme: "dark" }, keyOverrides: {} }),
+  ));
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await header.click();
+  const darkBg = await header.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+  // The tint now differs by theme — before this polish both hardcoded the dark lime
+  // rgba(204,255,54,0.045); now each mixes its own --v2-accent (dark #ccff36 / light #c2f53f).
+  expect(lightBg).not.toBe(darkBg);
+  // Dark control is byte-identical to the token-derived dark-lime tint (unchanged from today).
+  const canonicalDarkTint = await page.evaluate(() => {
+    const d = document.createElement("div");
+    d.style.backgroundColor = "color-mix(in srgb, #ccff36 4.5%, transparent)";
+    document.body.appendChild(d);
+    const v = getComputedStyle(d).backgroundColor;
+    d.remove();
+    return v;
+  });
+  expect(darkBg).toBe(canonicalDarkTint);
+});
+
 test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();

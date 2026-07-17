@@ -501,9 +501,9 @@
 }
 .v2-lhead:hover { background: rgba(255, 255, 255, 0.028); }
 .v2-lhead.sel {
-  background: rgba(204, 255, 54, 0.045);
+  background: color-mix(in srgb, var(--v2-accent) 4.5%, transparent);
   border-right-color: var(--v2-line-strong);
-  box-shadow: inset 3px 0 0 var(--v2-accent), inset 0 0 0 1px rgba(204, 255, 54, 0.08);
+  box-shadow: inset 3px 0 0 var(--v2-accent), inset 0 0 0 1px color-mix(in srgb, var(--v2-accent) 8%, transparent);
 }
 .v2-licon {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
@@ -535,7 +535,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.v2-lhead.sel .v2-ltype { color: var(--v2-accent); border-color: rgba(204, 255, 54, 0.26); }
+.v2-lhead.sel .v2-ltype { color: var(--v2-accent); border-color: color-mix(in srgb, var(--v2-accent) 26%, transparent); }
 .v2-lpreset { display: block; font-size: 11px; color: var(--v2-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v2-ms { display: flex; flex-direction: column; gap: 4px; }
 .v2-ms button {
