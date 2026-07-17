@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Golden: the LoRA adapter registry (service/loras/registry.py).
 
-The registry scans the watched folder (MOSH_LORA_DIR, default
-~/Library/Mosh/loras) for `*.safetensors` adapters, reads ONLY the
+The registry scans the watched folder's sa3/ family subdir
+(MOSH_LORA_DIR/sa3, default ~/Library/Mosh/loras/sa3) for `*.safetensors`
+adapters, reads ONLY the
 safetensors header (stdlib — no torch/numpy), merges optional `<stem>.json`
-sidecars ({displayName, trigger, notes}), caches sha256 by
+sidecars ({displayName, trigger, hint, notes}), caches sha256 by
 (path, size, mtime_ns), and degrades gracefully: absent dir / empty dir /
 corrupt file / unsupported adapter_type are all non-fatal.
 
@@ -81,15 +82,15 @@ try:
     # --- absent dir: graceful empty -------------------------------------------------
     check("absent dir → descriptor []", registry.descriptor() == [])
     check("absent dir → available False", registry.available() is False)
-    check("absent dir → resolve None", registry.resolve("kxc") is None)
+    check("absent dir → resolve([]) []", registry.resolve([]) == [])
 
-    # --- populated dir ---------------------------------------------------------------
-    d = os.path.join(tmp, "loras")
+    # --- populated dir (the sa3/ family subdir) ---------------------------------------
+    d = os.path.join(tmp, "loras", "sa3")
     os.makedirs(d)
     make_adapter(os.path.join(d, "kxc.safetensors"))
     with open(os.path.join(d, "kxc.json"), "w") as f:
         json.dump({"displayName": "Ken Carson", "trigger": "kxc",
-                   "notes": "rage synths"}, f)
+                   "hint": "rage trap instrumental", "notes": "rage synths"}, f)
     make_adapter(os.path.join(d, "micz.safetensors"), rank=8, adapter_type="dora")
     make_adapter(os.path.join(d, "plain.safetensors"), adapter_type="lora")
     make_adapter(os.path.join(d, "xs.safetensors"), adapter_type="lora-xs")
@@ -108,12 +109,14 @@ try:
     check("kxc valid", kxc.get("valid") is True, str(kxc))
     check("kxc sidecar displayName", kxc.get("displayName") == "Ken Carson")
     check("kxc sidecar trigger", kxc.get("trigger") == "kxc")
+    check("kxc sidecar hint", kxc.get("hint") == "rage trap instrumental")
     check("kxc sidecar notes", kxc.get("notes") == "rage synths")
     check("kxc rank from header", kxc.get("rank") == 16)
     check("kxc adapterType", kxc.get("adapterType") == "dora-rows")
     check("kxc sha12 is 12 hex", len(kxc.get("sha12", "")) == 12)
     check("kxc sizeBytes > 0", kxc.get("sizeBytes", 0) > 0)
-    check("descriptor has no abs paths", "path" not in kxc, str(kxc.keys()))
+    check("descriptor has no abs paths", "file" not in kxc and "path" not in kxc, str(kxc.keys()))
+    check("descriptor has no full digest", "sha256" not in kxc)
 
     micz = by.get("micz", {})
     check("legacy 'dora' resolves valid", micz.get("valid") is True)
@@ -132,12 +135,28 @@ try:
     check("corrupt file listed invalid, no crash", g.get("valid") is False)
     check("corrupt reason non-empty", bool(g.get("reason")))
 
-    # --- resolve() gives server-side path + trigger ----------------------------------
-    r = registry.resolve("kxc")
-    check("resolve returns path", r is not None and os.path.isfile(r["path"]))
-    check("resolve carries trigger", r["trigger"] == "kxc")
-    check("resolve unknown → None", registry.resolve("nope") is None)
-    check("resolve invalid → None", registry.resolve("xs") is None)
+    # --- resolve(selection): unbounded, unclamped, fail-closed ------------------------
+    sel = registry.resolve([{"name": "kxc", "value": 70},
+                            {"name": "micz", "value": 125},   # overdrive allowed
+                            {"name": "plain", "value": 0}])   # 0 == removed
+    check("resolve keeps order", [t[0] for t in sel] == ["kxc", "micz"], str(sel))
+    check("resolve file exists", os.path.isfile(sel[0][1]))
+    check("resolve strength = value/100", sel[0][2] == 0.7)
+    check("resolve overdrive unclamped", sel[1][2] == 1.25, str(sel[1]))
+    def raises(selection):
+        try:
+            registry.resolve(selection)
+            return False
+        except ValueError:
+            return True
+    check("resolve unknown → ValueError", raises([{"name": "nope", "value": 50}]))
+    check("resolve invalid file → ValueError", raises([{"name": "xs", "value": 50}]))
+    check("resolve negative → ValueError", raises([{"name": "kxc", "value": -5}]))
+    check("resolve duplicate → ValueError",
+          raises([{"name": "kxc", "value": 50}, {"name": "kxc", "value": 60}]))
+    check("resolve 4-stack unbounded",
+          len(registry.resolve([{"name": n, "value": 50}
+                                for n in ("kxc", "micz", "plain")])) == 3)
 
     # --- determinism: 3× scan, byte-identical JSON, sorted order ---------------------
     j1 = json.dumps(registry.descriptor(), sort_keys=True)
@@ -161,7 +180,11 @@ try:
     os.environ["MOSH_ENABLE_LORAS"] = "0"
     check("MOSH_ENABLE_LORAS=0 → descriptor []", registry.descriptor() == [])
     check("MOSH_ENABLE_LORAS=0 → available False", registry.available() is False)
-    check("MOSH_ENABLE_LORAS=0 → resolve None", registry.resolve("kxc") is None)
+    try:
+        registry.resolve([{"name": "kxc", "value": 50}])
+        check("MOSH_ENABLE_LORAS=0 → resolve fails closed", False)
+    except ValueError:
+        check("MOSH_ENABLE_LORAS=0 → resolve fails closed", True)
     os.environ.pop("MOSH_ENABLE_LORAS", None)
 
     # --- registry stays importable under a bare stdlib venv ---------------------------
