@@ -42,13 +42,42 @@ GENERATORS = {"oracle": gen_oracle, "passthrough": gen_passthrough, "pipeline": 
 
 
 # ── per-item run (impure; deps injectable) ──────────────────────────────────────────────
+def _subproc_mumble(clean, words, ratio, out, *, seed=0):
+    """Run bench_mumble in a fresh subprocess so librosa/numba never load in THIS process
+    (the flaky-import-order isolation — keeps the long-lived run loop clean)."""
+    import subprocess
+    import tempfile
+    fd, wf = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    try:
+        with open(wf, "w") as f:
+            json.dump(words, f)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "bench_mumble.py"),
+                            "--clean", clean, "--words", wf, "--ratio", str(ratio),
+                            "--seed", str(seed), "--out", out],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"bench_mumble failed: {r.stderr[-400:]}")
+        return json.loads(r.stdout)
+    finally:
+        os.remove(wf)
+
+
 def _real_deps():
-    import bench_mumble
     import bench_score
-    return {"mumble": bench_mumble.mumble_wav, "score": bench_score.score_vocal}
+    return {"mumble": _subproc_mumble, "score": bench_score.score_vocal}
 
 
-def run_item(item, ratio, generator, out_dir, *, seed=0, deps=None):
+def whisper_true_words(clean_wav):
+    """Ground-truth words for word_match = Whisper on the CLEAN vocal (real intelligible
+    words), NOT the reverse-CMUdict reconstruction (whose phone-labels/homophones Whisper
+    would never reproduce). NUS spans still drive the mumble; this only feeds word_match."""
+    import bench_score
+    aw = bench_score._real_deps()["asr"](clean_wav)
+    return [w for w in (aw or []) if w and w.strip().isalpha()]
+
+
+def run_item(item, ratio, generator, out_dir, *, seed=0, true_words=None, deps=None):
     d = deps or _real_deps()
     os.makedirs(out_dir, exist_ok=True)
     base = f"{item['id']}_r{int(round(ratio * 100)):02d}"
@@ -56,8 +85,9 @@ def run_item(item, ratio, generator, out_dir, *, seed=0, deps=None):
     d["mumble"](item["clean_vocal"], item["words"], ratio, mumbled, seed=seed)
     gen_wav = os.path.join(out_dir, f"{base}_{generator}.wav")
     GENERATORS[generator](mumbled, item["clean_vocal"], gen_wav)
-    true_words = [w["word"] for w in item["words"] if w["word"].isalpha()]
-    stats = d["score"](item["clean_vocal"], gen_wav, true_words=true_words)
+    # true_words defaults to the NUS reconstruction (fallback); the CLI passes Whisper-on-clean.
+    tw = true_words if true_words is not None else [w["word"] for w in item["words"] if w["word"].isalpha()]
+    stats = d["score"](item["clean_vocal"], gen_wav, true_words=tw)
     return {"item": item["id"], "ratio": ratio, "generator": generator,
             "stats": stats, "mumbled": mumbled, "generated": gen_wav}
 
@@ -106,10 +136,12 @@ def main():
 
     runs = []
     for it in items:
+        tw = whisper_true_words(it["clean_vocal"])          # once per item (Whisper on clean)
+        print(f"  {it['id']}: {len(tw)} true words from clean vocal", flush=True)
         for r in ratios:
             for g in gens:
                 print(f"  run {it['id']} ρ={r} {g} …", flush=True)
-                runs.append(run_item(it, r, g, a.out, seed=a.seed))
+                runs.append(run_item(it, r, g, a.out, seed=a.seed, true_words=tw))
     board = build_scoreboard(runs)
     json.dump({"runs": [{k: v for k, v in r.items() if k != "stats"} | {"stats": r["stats"]}
                         for r in runs], "scoreboard": board},

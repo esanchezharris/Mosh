@@ -165,3 +165,24 @@ def mumble_wav(clean_wav, words, ratio, out_wav, *, seed=0):
             "mumbled": [{"word": words[i].get("word", ""), "start": float(words[i]["start"]),
                          "end": float(words[i]["end"])} for i in idx],
             "spans": [list(s) for s in spans]}
+
+
+def main():
+    """CLI so the librosa-using degrade runs in an ISOLATED subprocess (the nsf_cli pattern):
+    librosa pulls in numba, whose in-process import order is flaky in the teardown venv, so
+    callers (bench_run) shell out here and keep librosa out of the main process."""
+    import argparse
+    import json
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--clean", required=True)
+    ap.add_argument("--words", required=True, help="JSON file: [{word,start,end}, ...]")
+    ap.add_argument("--ratio", type=float, required=True)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    info = mumble_wav(a.clean, json.load(open(a.words)), a.ratio, a.out, seed=a.seed)
+    print(json.dumps(info))
+
+
+if __name__ == "__main__":
+    main()
