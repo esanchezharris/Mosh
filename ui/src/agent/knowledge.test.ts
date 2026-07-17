@@ -24,7 +24,10 @@ describe("PRODUCER_KNOWLEDGE store", () => {
   it("parses the committed JSONL store into well-formed cards", () => {
     // AG-KB1: expanded past the original 2-card seed to cover warp, drums,
     // lyrics, generative, mixer/sends, VST3, and recording/takes.
-    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(28);
+    // AG-KB-R2: deepened the same categories (mixer routing, plugin params/chain/
+    // editor, recording arm/takes, multiplayer, undo/save, transport/loop, drum
+    // kit/assign_sample ordering, warp confidence) plus common producer mistakes.
+    expect(PRODUCER_KNOWLEDGE.length).toBeGreaterThanOrEqual(46);
     for (const c of PRODUCER_KNOWLEDGE) {
       expect(typeof c.id).toBe("string");
       expect(c.id.length).toBeGreaterThan(0);
@@ -216,5 +219,116 @@ describe("AG-KB1 expanded categories (warp/drums/lyrics/generative/mixer/vst3/re
       expect(AGENT_COMMAND_MAP.has(name)).toBe(true);
     }
     expect(bare.length).toBeGreaterThan(0);
+  });
+});
+
+describe("AG-KB-R2 expanded categories (mixer/plugins/recording/multiplayer/history/transport/drums/warp/mistakes)", () => {
+  // Round 2: deepens coverage of MAIN-EXISTING commands only (no export-range args,
+  // no export_stems, no set_clip_gain/set_clip_mute cards — those live in
+  // unmerged owner-review PRs, not this store). Same pin-the-retrieval pattern as
+  // the AG-KB1 block above: each query is how a producer would actually ask, and
+  // should surface the matching new card as the top result.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("mixer: hearing one track alone -> solo vs mute", () => {
+    expect(top("how do I hear just this one track without changing the mix")).toBe("mixer-solo-mute");
+  });
+
+  it("mixer: send landed on the wrong return -> bus is a number, not a name", () => {
+    expect(top("my send keeps landing on the wrong bus, I typed the name not a number")).toBe(
+      "mixer-bus-send-numbering",
+    );
+  });
+
+  it("plugins: raw Hz/dB value did nothing -> set_plugin_param is normalized 0-1", () => {
+    expect(top("I tried setting a plugin's cutoff to 500 and nothing sensible happened")).toBe(
+      "plugin-param-normalized-range",
+    );
+  });
+
+  it("plugins: quick A/B without deleting -> bypass_plugin vs remove_plugin", () => {
+    expect(top("I want to quickly compare a plugin on and off without deleting it")).toBe(
+      "plugin-bypass-vs-remove",
+    );
+  });
+
+  it("plugins: Mosh's own effect vs a specific owned plugin -> load_builtin vs load_plugin", () => {
+    expect(top("should I use one of Mosh's own built-in effects or a specific plugin I already own")).toBe(
+      "plugin-builtin-vs-hosted",
+    );
+  });
+
+  it("recording: armed but can't hear input -> arm_track vs set_input_monitor", () => {
+    expect(top("the track is armed but I can't hear myself while recording")).toBe(
+      "recording-arm-vs-monitor",
+    );
+  });
+
+  it("recording: throw out a bad take immediately -> stop_recording discard vs keep_take", () => {
+    expect(top("that last take was bad the second I stopped, just throw it away")).toBe(
+      "recording-discard-vs-keep",
+    );
+  });
+
+  it("multiplayer: a friend joining live -> session basics", () => {
+    expect(top("can my friend join and work on this project with me live")).toBe(
+      "multiplayer-session-basics",
+    );
+  });
+
+  it("history: does undo catch a plugin load, not just notes -> undo/redo scope", () => {
+    expect(top("will undo actually catch a plugin I just loaded, not just note edits")).toBe(
+      "history-undo-scope",
+    );
+  });
+
+  it("session: save before a risky plugin load -> save habit", () => {
+    expect(top("should I save before loading this risky plugin")).toBe("session-save-habit");
+  });
+
+  it("transport: repeat a spot instead of reseeking -> loop region", () => {
+    expect(top("I keep manually seeking back to the same spot, can playback just repeat it")).toBe(
+      "transport-loop-region",
+    );
+  });
+
+  it("transport: jump to the very end -> to_start/to_end vs position", () => {
+    expect(top("how do I jump straight to the very end of the session")).toBe("transport-seek-actions");
+  });
+
+  it("drums: a drum track lost its kit -> load_drum_kit vs set_track_type", () => {
+    expect(top("my drum track has no kit loaded, how do I get sounds back on the pads")).toBe(
+      "drum-kit-track-type-overlap",
+    );
+  });
+
+  it("drums: worried a pattern will overwrite a melodic sampler -> assign_sample ordering", () => {
+    expect(top("will laying a drum pattern replace the 808 sampler I already assigned")).toBe(
+      "assign-sample-melodic-order",
+    );
+  });
+
+  it("warp: bar count or a seconds length for stretch_clip's target", () => {
+    expect(top("should I give stretch_clip a bar count or an exact seconds length")).toBe(
+      "warp-length-vs-bars-arg",
+    );
+  });
+
+  it("warp: checking a tempo guess before committing to a stretch", () => {
+    expect(top("I don't know this loop's original tempo, can I check before stretching it")).toBe(
+      "warp-detect-before-stretch",
+    );
+  });
+
+  it("mistake: audio clip went silent after an instrument was added to its track", () => {
+    expect(top("my audio clip went completely silent right after I added a synth to its track")).toBe(
+      "mistake-instrument-silences-track-audio",
+    );
+  });
+
+  it("mistake: a follow-up plugin tweak hit the wrong plugin after a reorder", () => {
+    expect(top("what happens to my next plugin edit's index if I reorder a plugin first")).toBe(
+      "mistake-reorder-changes-indices",
+    );
   });
 });
