@@ -135,6 +135,17 @@ private:
     // and adopt a received bundle (clear local tracks, rebuild from the bundle).
     juce::var cmdMpSerializeProject (const juce::var& args);
     juce::var cmdMpApplyBootstrap   (const juce::var& args);
+    // PR-2 — shared content-addressing/serialize body (no upload) for the whole
+    // project; cmdMpSerializeProject uploads synchronously right after (kept
+    // behavior-compatible with direct-call tests), serializeProjectForBootstrapAnswer
+    // does not (the live-session bootstrap-answer path's transfer worker uploads
+    // instead — see MultiplayerSession::pollLoop's "bootstrap_request" handling).
+    juce::var contentAddressWholeProjectNoUpload();
+    juce::var serializeProjectForBootstrapAnswer();
+    // Snapshot the directory stem transfers resolve `audio/by-hash/` under into
+    // mpSession_ (PR-2) — call whenever eng.editFile() can change (construction,
+    // new_project/open_project/save_as) or a session starts/joins.
+    void refreshMpStemDir();
     // P4 self-heal (PR-1) — every uploadBlob/downloadBlob result above is ignored at
     // its call site, so a single transient HTTP failure otherwise strands a clip's
     // audio `sourceMissing` forever (the only prior recovery was the host re-committing
