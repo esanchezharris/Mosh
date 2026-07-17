@@ -11,6 +11,10 @@
 #             the reserved "corrupttest" ext, which no real stem ever uses (all real
 #             stems are ext="wav") -- so it's safe to leave armed for the WHOLE run,
 #             unlike MOSH_RELAY_BLOB_DELAY_MS. Set to "" to disable entirely.
+#   MOSH_RELAY_BLOB_FAIL     ext-scoped upload-rejection hook for the "uploadBlob
+#             checks the PUT status" selftest section (PR-2 BLOCKER). Defaults to
+#             the reserved "failtest" ext -- same safety property as above. Set to
+#             "" to disable entirely.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # repo root
@@ -18,6 +22,7 @@ PORT="${PORT:-8799}"
 APP="${MOSH_BIN:-$(find "$HERE/build-macos-arm64" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
 SESSION="${MOSH_SELFTEST_SESSION:-session-mp-selftest-$(date +%Y%m%d%H%M%S)-$$}"
 export MOSH_RELAY_BLOB_CORRUPT="${MOSH_RELAY_BLOB_CORRUPT-corrupttest}"
+export MOSH_RELAY_BLOB_FAIL="${MOSH_RELAY_BLOB_FAIL-failtest}"
 
 if [ -z "${APP:-}" ] || [ ! -x "$APP" ]; then
   echo "Mosh binary not found. Build the app or set MOSH_BIN=/path/to/Mosh" >&2

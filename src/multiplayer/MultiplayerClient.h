@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include <functional>
 #include <mutex>
 
 namespace mosh
@@ -68,22 +69,40 @@ public:
     // ── P4 audio blobs (both the cloud relay and the local self-host dev relay
     //    implement /mp/blob/*, per PR-1 — see relay/server.py's BlobStore) ──
     /** Upload `file` as the content-addressed stem <hash>.<ext>, skipping if the
-        relay reports it already exists (dedup). Returns true on success/already-there. */
-    bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file);
-    /** Download the stem <hash>.<ext> to `dest` via a signed URL, then verify it:
-        the downloaded bytes are SHA-256'd and compared against `hash`. On a
-        mismatch (corrupted/truncated/tampered transfer) this DELETES `dest`,
-        records an error via lastError() ("blob GET hash mismatch..."), and
-        returns false — the caller (e.g. mp_fetch_missing_stems) sees the fetch
-        as failed and the clip stays sourceMissing/retryable; it never lands a
-        corrupt file as if it were a resolved stem. See the RED-first coverage in
-        SelfTest.cpp's "downloadBlob rejects a corrupted transfer" section,
-        exercised via relay/server.py's MOSH_RELAY_BLOB_CORRUPT test hook. */
-    bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest);
+        relay reports it already exists (dedup). Returns true on success/already-there.
+        `shouldAbort` (PR-2), when supplied, is polled between each network step AND
+        during the PUT itself (via URL::withProgressCallback) — returning true from it
+        cancels the upload in flight and this returns false. Default: never aborts,
+        so every pre-PR-2 call site is unaffected. */
+    bool uploadBlob (const juce::String& hash, const juce::String& ext, const juce::File& file,
+                     std::function<bool()> shouldAbort = {});
+    /** Download the stem <hash>.<ext> to `dest` via a signed URL, then verify it: the
+        downloaded bytes are SHA-256'd and compared against `hash`. On a mismatch
+        (corrupted/truncated/tampered transfer) this DELETES `dest`, records an error
+        via lastError() ("blob GET hash mismatch..."), and returns false — the caller
+        (e.g. mp_fetch_missing_stems) sees the fetch as failed and the clip stays
+        sourceMissing/retryable; it never lands a corrupt file as if it were a
+        resolved stem. See the RED-first coverage in SelfTest.cpp's "downloadBlob
+        rejects a corrupted transfer" section, exercised via relay/server.py's
+        MOSH_RELAY_BLOB_CORRUPT test hook.
+        `shouldAbort` (PR-2), when supplied, is polled between each network step AND
+        between each chunk of the response body — an abort mid-download ALSO deletes
+        the partial file (never leaves a truncated stem behind) and this returns
+        false. Default: never aborts. */
+    bool downloadBlob (const juce::String& hash, const juce::String& ext, const juce::File& dest,
+                       std::function<bool()> shouldAbort = {});
 
 private:
     juce::var httpGet  (const juce::String& path);
-    juce::var httpPost (const juce::String& path, const juce::var& body);
+    // `outStatus` (optional): when non-null, receives the HTTP status code JUCE saw —
+    // 0 if the request never reached the network at all (createInputStream returned
+    // nullptr). Adversarial-review BLOCKER (PR-2 review): createInputStream() returns
+    // a NON-null stream for 4xx/5xx on macOS (only a total connection failure is
+    // null — the same caveat poll() already documents), so callers that need to
+    // distinguish "got an error response" from "got a real success" MUST check this,
+    // not just "did I get a stream back". Every pre-existing call site passes nullptr
+    // and is unaffected.
+    juce::var httpPost (const juce::String& path, const juce::var& body, int* outStatus = nullptr);
     // Extra request headers. Adds the Supabase `apikey` (from MOSH_RELAY_APIKEY)
     // when set — required by the cloud Edge Function relay, harmlessly ignored by
     // the local self-host relay, so one binary targets either backend via env.

@@ -42,6 +42,23 @@ describe("commitClipDrag — optimistic preview rollback", () => {
     expect(setPreview).not.toHaveBeenCalled();
   });
 
+  it("commits a stretch via stretch_clip (length only)", async () => {
+    const exec = vi.fn().mockResolvedValue({ ok: true });
+    const setPreview = vi.fn();
+    commitClipDrag("stretch", { start: 1.0, length: 3.0, offset: 0 }, origStart, "c1", exec, setPreview);
+    expect(exec).toHaveBeenCalledWith("stretch_clip", { clipId: "c1", length: 3.0 });
+    await flush();
+    expect(setPreview).not.toHaveBeenCalled();
+  });
+
+  it("reverts the preview when stretch_clip is rejected", async () => {
+    const exec = vi.fn().mockResolvedValue({ ok: false });
+    const setPreview = vi.fn();
+    commitClipDrag("stretch", { start: 1.0, length: 3.0, offset: 0 }, origStart, "c1", exec, setPreview);
+    await flush();
+    expect(setPreview).toHaveBeenCalledWith(null);
+  });
+
   it("clears the preview with no command on a negligible move", () => {
     const exec = vi.fn();
     const setPreview = vi.fn();

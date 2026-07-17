@@ -20,6 +20,7 @@ target_sources(MoshTests PRIVATE
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
+    test_multiplayer_transfer_queue.cpp
     test_training.cpp
     test_webbridge_resource_guard.cpp
     test_rt_guard.cpp
@@ -29,6 +30,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
+    ${CMAKE_SOURCE_DIR}/src/multiplayer/TransferQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionProtocol.cpp
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp

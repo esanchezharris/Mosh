@@ -70,6 +70,9 @@ if (audioFile.isValid())
 ```
 > Pitfall (01 §2.2): garbled/silent clips ⇒ wrong ClipPosition/offset or the source AudioFile went out of scope. Use strong time types.
 
+### Audio warp / time-stretch (easy-warp) — **RESOLVED**
+`te::AudioClipBase`: `setTimeStretchMode(mode)` + `getLoopInfo().setBpm(sourceBpm, audioFile.getInfo())` + `setAutoTempo(true)` make a wave clip re-anchor in beats and time-stretch to follow the tempo map (vendored SoundTouch; `te::TimeStretcher::checkModeIsAvailable(defaultMode)`). `ac->getAudioFile().getLength()` = source seconds. With auto-tempo on, the warped seconds-length is `sourceLen × sourceBpm / projectBpm`, so `stretch_clip` derives `sourceBpm = projectBpm × targetLen / sourceLen` (and, for a bar target, `sourceBpm = bars × beatsPerBar × 60 / sourceLen`, project tempo cancelling) then `setPosition` to fill the target span explicitly. `detect_clip_bpm` reads the source via `juce::AudioFormatReader` (same path as `get_clip_peaks`) and autocorrelates a per-hop onset envelope — pure C++, no service, deterministic in `--selftest`. Warp MARKERS (per-transient anchors, `WarpTimeManager`) remain deferred.
+
 ## Transport & device (01 §5) — **RESOLVED**
 
 `auto& transport = edit.getTransport();` (`TransportControl`):
