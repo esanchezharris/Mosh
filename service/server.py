@@ -305,7 +305,8 @@ if SA3_ENABLED:
                      f"+colors{_colorrack_hash()}+sec{os.environ.get('SA3_SECONDS', '8.0')}"
                      f"+steps{os.environ.get('SA3_STEPS', '8')}-{os.environ.get('MOSH_SA3_STEPS', '30')}"
                      f"+cfg{os.environ.get('MOSH_SA3_CFG', '7.0')}"
-                     f"+lora{_sa3_engine.LORA_APPLY_VERSION}")
+                     f"+lora{_sa3_engine.LORA_APPLY_VERSION}"
+                     f"+contig{_sa3_engine.CONTIGUOUS_VERSION}")   # contiguous-first: retarget length per-clip
 else:
     SERVICE_BUILD = "fake-0.1.0"
 

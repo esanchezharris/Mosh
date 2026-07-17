@@ -155,6 +155,17 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             "pq": None, "pq_base": None, "flags": [],
         }
 
+    # Contiguous-first: retarget the engine to the clip's OWN length (capped at MAX_CONTIGUOUS)
+    # so it renders in ONE smooth pass with no windowing seams. coverage.render then takes the
+    # single-pass path whenever the clip fits, and only stitches for clips past the ceiling. The
+    # retarget is a cheap in-place reconfigure (no weight reload) — see engine.set_seconds.
+    target_len = float(params.get("duration_s") or 0.0)
+    if target_len <= 0.0 and has_src:
+        import stitch
+        target_len = stitch.wav_duration(input_wav)
+    if target_len > 0.0:
+        eng.set_seconds(target_len)
+
     manifest = coverage.render(_render_window, input_wav, output_wav, params, float(eng.SECONDS))
     # Best-effort QA on the FINAL (tiled/stitched) output (judges venv); never fails the render.
     qa.augment_manifest(manifest, output_wav, source_wav=input_wav if has_src else None)
