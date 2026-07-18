@@ -44,6 +44,19 @@ def aggregate(stats_list):
     return {"n": n, **means}
 
 
+def human_band(values):
+    """Summarize a metric across the real (mumble -> finished) pairs -> the HUMAN BAND.
+
+    Two genuine human takes of the same song do not score 1.0 against each other; they land
+    in a band. That band is the absolute scale the benchmark previously lacked. `spread` says
+    whether it is one calibration constant (tight) or a per-song accident (wide)."""
+    v = [float(x) for x in values if x is not None]
+    if not v:
+        return {"lo": None, "hi": None, "mean": None, "spread": None, "n": 0}
+    return {"lo": round(min(v), 4), "hi": round(max(v), 4),
+            "mean": round(sum(v) / len(v), 4), "spread": round(max(v) - min(v), 4), "n": len(v)}
+
+
 def _better(key, a, b):
     """Is `a` strictly better than `b` for `key`? 'good'/'bad'/'tie', or None if incomparable."""
     pol = POLARITY.get(key)

@@ -45,5 +45,17 @@ check("ranks is symmetric-false", bm.ranks(BAD, GOOD)["correctness_ok"] is False
 det = {hashlib.sha256(json.dumps(bm.ranks(GOOD, BAD), sort_keys=True).encode()).hexdigest() for _ in range(3)}
 check("ranks deterministic (3x)", len(det) == 1)
 
+# ── human_band: the absolute scale from the real (mumble → finished) pairs ──────────────
+b = bm.human_band([0.55, 0.69, 0.61])
+check("human_band lo/hi", b["lo"] == 0.55 and b["hi"] == 0.69)
+check("human_band mean", abs(b["mean"] - 0.6167) < 1e-3, str(b["mean"]))
+check("human_band spread drives the tight-vs-per-song verdict", abs(b["spread"] - 0.14) < 1e-9)
+check("human_band counts contributors", b["n"] == 3)
+check("human_band skips None (a metric can be unavailable)",
+      bm.human_band([0.5, None, 0.7]) == {"lo": 0.5, "hi": 0.7, "mean": 0.6, "spread": 0.2, "n": 2})
+check("human_band on nothing is honest, not zero",
+      bm.human_band([None]) == {"lo": None, "hi": None, "mean": None, "spread": None, "n": 0})
+check("human_band single value has zero spread", bm.human_band([0.42])["spread"] == 0.0)
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)

@@ -68,6 +68,67 @@ outside git.
 
 ---
 
-## VERDICT
+## VERDICT (measured 2026-07-18)
 
-*(appended after measurement)*
+`bench_human_baseline.py` over all 3 pairs. Each arm scored against the **finished** take.
+
+| song | arm | energyCorr | onsetF1 | wordAlign | hit | pq | f0 Δ (st) |
+|---|---|---|---|---|---|---|---|
+| LookinBack | mumble | 0.518 | 0.557 | 0.261 | 0.42 | 7.09 | 0.1 |
+| LookinBack | finished | 1.000 | 1.000 | 0.407 | 0.68 | 7.25 | 0.0 |
+| stage10 | mumble | 0.476 | 0.345 | 0.140 | 0.09 | 6.88 | 0.0 |
+| stage10 | finished | 1.000 | 1.000 | 0.312 | 0.46 | 6.89 | 0.0 |
+| stage9orsum | mumble | 0.347 | 0.286 | 0.071 | 0.03 | 6.72 | 0.0 |
+| stage9orsum | finished | 1.000 | 1.000 | 0.356 | 0.63 | 7.04 | 0.0 |
+
+**The human band (mumble → finished):** energyCorr 0.347–0.518 · onsetF1 0.286–0.557 ·
+wordAlign 0.071–0.261 · pq 6.72–7.09.
+
+### Prediction results
+
+**P1 — direction sanity: TRUE.** The mumble is worse on every axis in all 3 songs. The
+identity arm reads exactly 1.000 for energyCorr and onsetF1, so the harness is wired right.
+
+**P2 — the ruler holds in-voice: PARTIAL (load-bearing claim TRUE, thresholds wrong).**
+The separation holds in all 3 songs, gap **0.146 / 0.172 / 0.285**, comfortably over the
+predicted ≥0.10. But my exact bounds were miscalibrated: finished ≥0.35 misses on stage10
+(0.312) and mumble ≤0.25 misses on LookinBack (0.261). `hit_frac` turns out to be the far
+sharper discriminator than `mean_score` — finished 0.46–0.68 vs mumble 0.03–0.42.
+
+**P3 — the naturalness axis is valid: TRUE, but weakly, and the comparison is not clean.**
+pq(finished) = 6.89 / 7.04 / 7.25, all above 6.83. However: the *mumble* also averages 6.90,
+i.e. **the SoulX render scores below even a degraded human draft**; the human-vs-machine gap
+(0.23) is barely wider than the polished-vs-mumbled-human gap (0.16); the total dynamic range
+across everything measured is 0.53; and 6.83 came from NUS content (different singers, songs)
+so that leg is cross-corpus, not apples-to-apples. **Read: pq orders correctly but has almost
+no discriminative power for this task. Do not lean on it alone — bring SingMOS-Pro online.**
+
+**P4 — the human band is one stable constant: MOSTLY FALSE.** Spreads: energyCorr 0.171 ✓,
+wordAlign 0.190 ✓, onsetF1 **0.271** ✗, pq **0.370** ✗. There is no single universal "human
+number": timing agreement between two takes is strongly song-dependent (LookinBack 0.557 vs
+stage9orsum 0.286). Calibration must be reported **per song, or as a range** — never as one
+scalar.
+
+### The two findings that outrank the predictions
+
+**1. The word-align ruler saturates near 0.36 on real human singing — not 1.0.** A finished,
+fully intelligible human vocal scores only **0.312–0.407** against its own ground-truth words,
+because the metric is MMS forced-alignment acoustic confidence, not similarity to a reference.
+This retroactively reinterprets the third-curve run: its "oracle 0.348" was not a weak ceiling,
+it *was* the human ceiling, so the pipeline's **0.238 is ~66% of achievable**, not 24% of 1.0.
+Every future word-recovery number must be read against ≈0.36.
+
+**2. Pitch is already solved by the input.** The mumble and finished takes differ by
+**0.0–0.1 semitones** of median F0 on all three songs. The draft already carries the melody in
+the correct register; what it lacks is words (bag coverage 0.28–0.44, seq ratio 0.15–0.31) and
+some timing. The pipeline's job is **articulation and intelligibility, not pitch** — which
+supports the existing "perform at the take's own F0" design and argues against spending
+further effort on pitch correction.
+
+### Process note (a bug this found in the harness, not the pipeline)
+
+The first run reported `energy_corr` as null: `overlap.analyze`'s `energy` block is silence
+**leakage** (percentages), and has no envelope-correlation key to read. Fixed by computing it
+through the canonical `soulx.perform.env_corr` (Pearson over reference-active frames) — the
+same convention every prior FMS audit used. Recorded because a metric silently reading `None`
+is exactly how an unanchored loop stays unanchored.
