@@ -4,15 +4,16 @@
 // project data (mock-backed for now); later they become agent scope handles. All
 // mutation is via the command seam (create/rename/remove_section); zoom is UI-local.
 import { useStore } from "../store";
+import { meterFrom, beatSeconds } from "../time";
 import type { Snapshot, Section } from "../types";
 
 export function SectionNavigator({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
   const sections = snapshot.sections ?? [];
-  const tempo = snapshot.session.tempo || 120;
-  const beatSec = 60 / tempo;
-  const sigNum = snapshot.session.timeSigNumerator ?? 4;
+  const meter = meterFrom(snapshot.session);
+  const beatSec = beatSeconds(meter);
+  const sigNum = meter.num;
   const spanBeats = Math.max(16, ...sections.map((s) => s.endBeat));
 
   const jump = (sec: Section) => void exec("set_transport", { action: "seek", position: sec.startBeat * beatSec });
