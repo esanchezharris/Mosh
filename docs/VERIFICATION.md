@@ -93,6 +93,29 @@ The offline checks (1–5) are deterministic — re-run `python3 scripts/verify-
 (add `--sa3`) any time a change could affect the signal chain, as a render-level regression guard
 on top of `--selftest`.
 
+## Parity hands-on checklist (owner, ≤30 min)
+
+*The L4 lane of the DAW-parity program: the short list of things silicon can't hear. Run a
+pass at milestones (or when a row's trigger paths change — the native gate prints an
+advisory naming affected rows). Record each pass inline: `last-passed: YYYY-MM-DD @ <short-hash>`.
+Everything else about parity is automated — if a row here feels worth automating, it
+probably belongs in `verify.py`, not this list.*
+
+**Triggers:** recording/input paths → REC rows · fades/crossfades → EAR-fades ·
+warp/stretch → EAR-warp · stems/export → EAR-stems · MIDI input → MIDI-in ·
+relay/multiplayer → MP-two-mac.
+
+| id | Steps | Expect | ~min | last-passed |
+| --- | --- | --- | --- | --- |
+| REC-mic | Arm the vocal track (voice/agent `arm_track` until the arm button ships), `set_count_in` 1 bar, record 4 bars against the click, stop. | Take lands where it was played; the count-in bar is audible but excluded from the clip. | 5 | — |
+| REC-latency | Record the metronome via a loopback (BlackHole/cable); zoom to a click transient in the recorded take. | Recorded transient within ~5 ms of the grid line (input-latency compensation applied). | 5 | — |
+| REC-monitor | Toggle `set_input_monitor` on the armed track while singing. | Live input audibly gates on/off with the toggle. | 1 | — |
+| EAR-fades | 1 s fade-in + fade-out on a clip; split a sustained clip and crossfade the splice. | No clicks/pops at any boundary; crossfade is smooth. | 3 | — |
+| EAR-warp | Warp a 2-bar 170 BPM loop to a 120 BPM project (`set_clip_warp detect` or Fit-bars). | Downbeats land on the grid; artifacts acceptable at this ratio. | 3 | — |
+| EAR-stems | `export_stems` + `export_audio` the same song; import the stems to fresh tracks and A/B against the mixdown. | Indistinguishable by ear (the sample-level `sum≈mix` null lives in `verify.py`, automated). | 4 | — |
+| MIDI-in | Connect a MIDI keyboard (picker from G11); play live, then record 2 bars. | Live notes sound with low latency; recorded notes land where played. If a MIDI *take* can't be recorded, that's a capability-matrix MISSING row — file it, don't shrug. | 4 | — |
+| MP-two-mac | Two Macs, one session: claim a track from Mac B, move a clip on Mac A. | Lock icon + live clip motion on both within ~1 s. | 5 | — |
+
 ## Collaborator video — two machines (hardware-gated)
 
 The WebRTC + signaling layer is built and unit-tested (`ui/src/webrtc/*.test.ts`,

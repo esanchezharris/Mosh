@@ -187,9 +187,28 @@ gate_cheap() {
   emit_step "swappability" true '{"proof":"by-classification: no compiled paths touched"}'
 }
 
+# Advisory (never gates): when a change touches paths only the OWNER's hands-on lane can
+# verify, name the affected rows of the parity runbook (docs/VERIFICATION.md §"Parity
+# hands-on checklist") so the by-ear re-pass isn't forgotten. Pure notice — always ok:true.
+runbook_advisory() {
+  local changed rows=""
+  changed="$(cd "$WT" && git diff --name-only "$BASE"...HEAD 2>/dev/null)" || return 0
+  echo "$changed" | grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" && rows="$rows REC-mic,REC-latency,REC-monitor"
+  echo "$changed" | grep -qE "fade|crossfade|Crossfade|Fade" && rows="$rows EAR-fades"
+  echo "$changed" | grep -qiE "warp|stretch|autoTempo" && rows="$rows EAR-warp"
+  echo "$changed" | grep -qE "export_stems|Stem|Renderer|export_audio" && rows="$rows EAR-stems"
+  echo "$changed" | grep -qE "midi_input|MidiInput" && rows="$rows MIDI-in"
+  echo "$changed" | grep -qE "^relay/|multiplayer|LockManager" && rows="$rows MP-two-mac"
+  if [ -n "$rows" ]; then
+    emit_step "runbook_advisory" true "{\"note\":\"owner hands-on rows affected:$rows — docs/VERIFICATION.md parity checklist\"}"
+  fi
+  return 0
+}
+
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
   run_parity_checks
+  runbook_advisory
   local cfgflags=()
   [ -n "${AL_CPM_CACHE:-}" ]   && cfgflags+=("-DCPM_SOURCE_CACHE=$AL_CPM_CACHE")
   [ -n "${AL_TRACTION_SRC:-}" ] && cfgflags+=("-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$AL_TRACTION_SRC")
