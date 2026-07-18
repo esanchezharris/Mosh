@@ -73,8 +73,30 @@ if [ "$HAVE_CERT" = 1 ] && [ "$HAVE_PROFILE" = 1 ]; then
     exit 3
   fi
 
+  # ── staging dir must NOT be inside iCloud ──────────────────────────────────
+  # run-mosh.sh stages a COPY of the app and then signs it. If that staging dir
+  # lives in an iCloud file provider (Desktop & Documents syncing), iCloud
+  # re-applies com.apple.FinderInfo to the bundle in the window between the
+  # script's own `xattr -cr` and codesign, and signing dies with:
+  #   "resource fork, Finder information, or similar detritus not allowed"
+  # This is unwinnable by stripping harder (observed live on ~/Desktop/Mosh-share),
+  # so default the output OUTSIDE iCloud and refuse an iCloud-backed override.
+  RELEASE_DIR="${MOSH_RELEASE_DIR:-$HOME/Library/Mosh/release}"
+  for probe in "$RELEASE_DIR" "$(dirname "$RELEASE_DIR")"; do
+    [ -e "$probe" ] || continue
+    if xattr "$probe" 2>/dev/null | grep -qi 'fileprovider\|file-provider'; then
+      no "release dir '$RELEASE_DIR' is inside an iCloud-synced folder ($probe)."
+      echo "    codesign WILL fail there. Set MOSH_RELEASE_DIR to a non-iCloud path,"
+      echo "    e.g. MOSH_RELEASE_DIR=\$HOME/Library/Mosh/release"
+      exit 4
+    fi
+  done
+  mkdir -p "$RELEASE_DIR"
+  ok "release output: $RELEASE_DIR (outside iCloud)"
+
   cd "$REPO"
-  MOSH_BRAIN_ENV="$BRAIN_ENV" MOSH_NOTARY_PROFILE="$PROFILE" ./run-mosh.sh release
+  MOSH_BRAIN_ENV="$BRAIN_ENV" MOSH_NOTARY_PROFILE="$PROFILE" \
+  MOSH_RELEASE_DIR="$RELEASE_DIR" ./run-mosh.sh release
   echo
   echo "Done. Verify Gatekeeper will accept it on a guest's Mac:"
   echo "  spctl -a -vvv -t install <the .app or .dmg>   # expect: accepted, source=Notarized Developer ID"
