@@ -78,3 +78,43 @@ Blind catch-trial A/B at `~/mosh-fms-ksb/bench/ear-oracle/` (:8199): the previou
 owner heard (SoulX-convention, mumble melody) vs the round-3 oracle, per song, one pair
 byte-identical as the catch. The oracle should sound like *his finished melody* for the
 first time. The ear still disposes; the numbers only nominated.
+
+## Ear verdict (2026-07-18, unblinded)
+
+Owner: "lookinback B, stage10 A and B sound identical, stage9orsum B — however, we are
+still pretty far off and I'm kind of doubtful that you're even showing me the right pieces
+of audio."
+
+Against the key: **catch PASSED** (stage10 was the byte-identical pair and was called
+identical — the round is valid) and **the ORACLE won both real songs** (B = oracle on
+LookinBack and stage9orsum). The oracle direction is confirmed by ear, not just by number.
+
+**Provenance audit** (the "right pieces of audio" doubt, answered with evidence): every
+served clip verified sample-exact (max |Δ| = 0.000000) against its claimed source —
+LookinBack/stage9orsum A = `own-run-soulx` pipeline+snap (mumble melody), B =
+`iterate/round-3` pipeline+snap (oracle), stage10 A = B = round-3 (the catch). The only
+difference vs the sources is a trailing 0.25 s render pad the crop trims so lengths match
+the reference. The windows of the two runs are identical, so the crop was span-neutral.
+"Still pretty far off" is therefore a true judgment of the oracle render itself.
+
+## Post-verdict decomposition: where "pretty far off" lives (lineup instrument)
+
+`bench_lineup.py` (golden ×3) measures the owner's own criterion — "there shouldn't be
+silence where there's a sustained, vice versa" — as classified spans. Round-3 oracle read:
+
+- **Global lag is DEAD as a lever**: envelope lag 0/0/+10 ms — the phrase snap already
+  aligned the mass; a global shift changes nothing (`after_global_shift` == raw). The
+  +52/+88 ms word-onset lags are late ATTACK SHAPES, not a uniform offset.
+- **stage10 = commanded-silence bugs**: 1.13 s `missing@rest` (the flat 0.30 s
+  `close_legato_gaps` cap refused to bridge 0.71 s/0.42 s gaps the take sustains straight
+  through) + 0.30 s `spurious@note` (the last word's aligned end overruns the take's
+  voicing, so the score commands a note where the singer already stopped).
+- **LookinBack/stage9orsum = model TAIL DECAY, not true silence**: 26 of 27 missing spans
+  are QUIET-SING (the render phonates below its own voicing threshold), overwhelmingly
+  @TAIL of long commanded notes. SoulX decays tails where the singer holds level.
+
+Levers queued (one per round, seeded, mean-across-3-songs guard): round 5 = take-driven
+commanded-silence fix (`trim_word_ends` + sustained-gap bridging with a voiced-frac guard
+replacing the flat cap); round 6 = `chain_long_segments` sustain-chains (long notes as
+same-pitch note_type-3 continuation chains — V4b proved continuation chains hold voicing
+continuously, an in-distribution "keep singing the tail" command).
