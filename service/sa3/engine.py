@@ -10,8 +10,10 @@ two carve paths from `mlx_inproc.py` are preserved verbatim: the load sequence a
 init-mix `init_lat*(1-σ) + noise*σ`, decode + `save_wav`). The two hardcoded paths
 become env vars `SA3_MLX_DIR` (model) and — for colours — `COLORRACK_DATA`.
 
-DURATION IS PINNED at load: the DiT bakes `T_lat` (from `SA3_SECONDS`, default 8s) into
-its latent grid, so one loaded engine serves one duration. Variable-length is a later rung.
+DURATION: `SA3_SECONDS` (default 8s) sets the INITIAL latent grid, but the length is
+retargeted per-clip via `set_seconds()` — the DiT is length-agnostic (RoPE), so a clip
+renders in ONE contiguous pass at its own length (up to `MAX_CONTIGUOUS`). This is the
+contiguous-first path; the coverage stitch fallback only covers clips past the ceiling.
 """
 from __future__ import annotations
 
@@ -27,6 +29,20 @@ SECONDS = float(os.environ.get("SA3_SECONDS", "8.0"))   # pins the latent grid (
 # Bump when the runtime LoRA-apply math changes — folded into the service build so
 # the native render-cache invalidates (mirrors the old MERGE_VERSION role).
 LORA_APPLY_VERSION = "2"   # 2: sha-keyed apply + server-side trigger injection (hybrid)
+
+# Contiguous-render policy: render a clip at its OWN length (one smooth pass — no windowing
+# seams) up to a ceiling; beyond it the coverage stitch fallback takes over. Length is
+# retargeted per-clip via Engine.set_seconds — the DiT is length-agnostic (RoPE positions;
+# weights independent of T_lat), so retargeting is ~free (no weight reload) and byte-identical
+# to a fresh engine at that length. Bump to invalidate the render cache if this policy changes.
+CONTIGUOUS_VERSION = "1"
+MAX_CONTIGUOUS = float(os.environ.get("MOSH_SA3_MAX_CONTIGUOUS", "240.0"))  # ceiling (memory-bound; ≥4min verified)
+MIN_SECONDS = float(os.environ.get("MOSH_SA3_MIN_SECONDS", "2.0"))          # floor (avoid a degenerate tiny grid)
+
+
+def clamp_render_seconds(clip_len) -> float:
+    """The length to render a clip at: its own length, clamped to [MIN_SECONDS, MAX_CONTIGUOUS]."""
+    return float(max(MIN_SECONDS, min(float(clip_len), MAX_CONTIGUOUS)))
 
 _engine = None
 _engine_lock = threading.Lock()
@@ -282,3 +298,24 @@ class _Engine:
     def reimagine(self, prompt, seed, init_lat, init_noise_level, steers=None, out_wav=None):
         self._gen(prompt, seed, steers, out_wav, init_lat=init_lat,
                   init_noise_level=init_noise_level)
+
+    def set_seconds(self, seconds) -> float:
+        """Retarget the render length so a clip renders in ONE contiguous pass at its OWN length
+        (clamped to [MIN_SECONDS, MAX_CONTIGUOUS]) — the contiguous-first path. The DiT is
+        length-agnostic (RoPE positions; weights independent of T_lat), so this is a cheap
+        in-place reconfigure: NO weight reload, byte-identical to a fresh engine at that length
+        (verified). Only the DiT's T_lat + its default local_add_cond zeros buffer are resized;
+        the encoder/decoder read `self.T_LAT` / handle any length. Idempotent. Returns the
+        actual (clamped) seconds. Must be called on the message thread like every other engine op."""
+        S, mx = self.S, self.mx
+        secs = clamp_render_seconds(seconds)
+        self.SECONDS = secs
+        t_lat = max(1, math.ceil(secs * S.SAMPLE_RATE / S.SAMPLES_PER_LATENT))
+        if t_lat != self.T_LAT:
+            self.T_LAT = t_lat
+            d = self.dit_model
+            d.T_lat = t_lat
+            z = d._local_zeros_1
+            d._local_zeros_1 = mx.zeros((1, t_lat, z.shape[-1]), dtype=z.dtype)
+            mx.eval(d._local_zeros_1)
+        return secs
