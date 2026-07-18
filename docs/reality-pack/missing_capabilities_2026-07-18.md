@@ -36,7 +36,7 @@ touch/latch).
 |---|---|---|
 | Sidechain routing (key an FX from another track) | no `sidechain` surface anywhere in `MoshOps.cpp` dispatch | T1 |
 | Punch in/out recording | no `punch` surface | T1 |
-| Mid-song time-signature changes | `cmdSetTimeSignature` takes only `numerator`/`denominator` — global, no position | T1 |
+| ~~Mid-song time-signature changes~~ **CORRECTED: SHIPPED** | `insert_time_sig_change`/`remove_time_sig_change` exist (`cmdInsertTimeSigChange`, positional via `tempoSequence.insertTimeSig`) — this doc's first draft grepped for "signature" and missed the "sig" spelling; caught by the P2 matrix extraction | — |
 | MIDI CC / pitch-bend editing | no cc/bend commands; note surface is `add_note`/`set_note`/`remove_note` only | T1 |
 | Swing / groove on quantize | `cmdQuantizeNotes` has `division` + `strength` only | T1 |
 | Plugin presets (.fxp / named save-load) | no `preset` command surface | T1 |
