@@ -24,6 +24,7 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const t = useStore((s) => s.transport);
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
@@ -32,6 +33,21 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const loopBars = Math.max(1, Math.round((t.loopEnd - t.loopStart) / barLen));
   const totalBars = Math.max(1, Math.round((snapshot.session.length ?? 0) / barLen));
   const key = snapshot.session.key ?? DEFAULT_KEY;
+
+  // CONF-RECORD-ARM — the Record button used to toggle set_transport{action:"record"}
+  // with nothing armed, so a mouse-only user (no keyboard/agent arm step) recorded
+  // silence. Mirrors store.enterRecord's fallback (selected → first audio → first
+  // track): arm it via arm_track ONLY when starting a fresh recording and no track
+  // is armed yet — an already-armed track (or an in-progress recording, where the
+  // click just stops it) is left untouched.
+  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
+  async function handleRecord() {
+    if (!t.recording && !anyArmed) {
+      const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
+      if (trackId) await exec("arm_track", { trackId, armed: true });
+    }
+    await exec("set_transport", { action: "record" });
+  }
 
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
@@ -88,8 +104,8 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
             onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconStop size={15} /></button>
-          <button className="v2-tbtn rec" data-on={t.recording} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
-            onClick={() => void exec("set_transport", { action: "record" })}><span className="dot" /></button>
+          <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
+            onClick={() => void handleRecord()}><span className="dot" /></button>
         </div>
 
         <div className="v2-readout">
