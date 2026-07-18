@@ -10,5 +10,6 @@ export type ActionId =
   | "undo" | "redo" | "cut" | "copy" | "paste" | "delete"
   | "play_pause" | "record" | "to_start" | "to_end"
   | "duplicate" | "group" | "split"
+  | "nudge_left" | "nudge_right"
   | "tool_move" | "tool_split" | "tool_range"
   | "seek" | "loop_region";

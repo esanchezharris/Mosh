@@ -103,6 +103,11 @@ const MOSH: Keymap = {
   [A.PASTE]: "Mod+V",
   [A.DUPLICATE]: "Mod+D",
   [A.GROUP]: "Mod+G",
+  // FU-CLIP-NUDGE — plain arrow keys are unbound everywhere else in the app (no
+  // gesture/keymap collision across any DAW preset below), so they're free for a
+  // fine, fixed-increment clip move that's independent of drag/snap.
+  [A.NUDGE_LEFT]: "ArrowLeft",
+  [A.NUDGE_RIGHT]: "ArrowRight",
   [A.TO_START]: "Home",
   [A.TO_END]: "End",
   [A.TOOL_MOVE]: "1",

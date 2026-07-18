@@ -106,6 +106,15 @@ describe("per-DAW keymaps", () => {
     for (const name of ["mosh", "ableton", "fl", "protools", "logic"])
       expect(resolveKey(getKeymap(name), ev({ key: "z", metaKey: true }))).toBe(A.UNDO);
   });
+
+  // FU-CLIP-NUDGE — plain arrow keys are unbound everywhere else, so every preset
+  // (inherited from the shared MOSH core, none override it) binds them to nudge.
+  it("every preset binds plain ArrowLeft/ArrowRight to clip nudge (shared core)", () => {
+    for (const name of ["mosh", "ableton", "fl", "protools", "logic"]) {
+      expect(resolveKey(getKeymap(name), ev({ key: "ArrowLeft" }))).toBe(A.NUDGE_LEFT);
+      expect(resolveKey(getKeymap(name), ev({ key: "ArrowRight" }))).toBe(A.NUDGE_RIGHT);
+    }
+  });
 });
 
 describe("resolveKey — custom keymap overrides", () => {

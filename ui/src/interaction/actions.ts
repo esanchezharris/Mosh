@@ -38,6 +38,10 @@ export const EditorAction = {
   REDO: "redo",
   SAVE: "save",
   GROUP: "group",
+  // FU-CLIP-NUDGE — fine-move the selected clip(s) by a fixed increment,
+  // independent of drag/snap (see interaction/keymap.ts for the binding).
+  NUDGE_LEFT: "nudge_left",
+  NUDGE_RIGHT: "nudge_right",
 
   // keyboard — transport
   PLAY_PAUSE: "play_pause",

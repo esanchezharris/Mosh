@@ -14,6 +14,7 @@ import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
+import { meterAt, snapStep, tempoMapFrom } from "../../time";
 import type { Clip, Track } from "../../types";
 
 export function Inspector() {
@@ -203,12 +204,22 @@ const fadeCurveName = (type: number | undefined): (typeof FADE_CURVES)[number] =
 // clip's own length so the slider can never request more fade than the clip has room for.
 function ClipTab({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
+  const session = useStore((s) => s.snapshot?.session);
+  const snapDivision = useStore((s) => s.snapDivision);
   const isWave = clip.type === "wave";
   const clampToLength = (v: number) => Math.max(0, Math.min(v, clip.length));
   // clip-ops wave — normalize's optional target dB. Local-only (not a command arg
   // until the button fires); defaults to 0 dB, the same default the backend uses
   // when targetDb is omitted.
   const [normalizeTargetDb, setNormalizeTargetDb] = useState(0);
+  // FU-CLIP-NUDGE — fine-move THIS clip by one grid-division step (session/tempo-
+  // aware), independent of the drag-time snap toggle. Applies to every clip type
+  // (move_clip isn't wave-only), so it sits outside the isWave-gated fields below.
+  // Clamped so the clip can never nudge to a negative start.
+  const nudge = (dir: 1 | -1) => {
+    const step = snapStep(meterAt(tempoMapFrom(session), clip.start), snapDivision);
+    void exec("move_clip", { clipId: clip.id, start: Math.max(0, clip.start + dir * step) });
+  };
   return (
     <div className="v2-mix" data-testid="v2-clip-tab">
       <label className="v2-field">
@@ -223,6 +234,12 @@ function ClipTab({ clip }: { clip: Clip }) {
           }}
         />
       </label>
+      <div className="v2-mix-btns" data-testid="v2-clip-nudge">
+        <button className="btn" data-testid="v2-clip-nudge-left" title="Nudge left one grid division"
+          onClick={() => nudge(-1)}>◂ Nudge</button>
+        <button className="btn" data-testid="v2-clip-nudge-right" title="Nudge right one grid division"
+          onClick={() => nudge(1)}>Nudge ▸</button>
+      </div>
       {isWave && (
         <label className="v2-field">
           <span>Gain</span>
