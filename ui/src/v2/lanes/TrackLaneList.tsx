@@ -36,7 +36,11 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
     }
   }, [exec]);
 
-  const tracks = snapshot.tracks.filter((t) => !t.isGroup);
+  // Aux/return (bus) tracks are instrument-free carriers for sends — they hold no
+  // clips and belong on the mixer, not as an empty lane in the arrangement (matches
+  // classic Mixer.tsx's `!t.isReturn` filter; the classic Arrange.tsx timeline predates
+  // create_bus and doesn't yet exclude them — a separate, pre-existing gap).
+  const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
   const contentW = contentSeconds(snapshot) * pxPerSec;
   const beatPx = beatSeconds(meterOf(snapshot)) * pxPerSec;
   const barLen = barSeconds(meterOf(snapshot));
