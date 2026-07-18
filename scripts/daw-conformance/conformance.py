@@ -588,11 +588,67 @@ FAMILIES = {
     ("Export", "Render a loop range with delay tail enabled"): fam_export_range_tail,
 }
 
+# Families for capabilities shipped AFTER the reality pack was gathered (2026-06-26),
+# keyed by a stable family name instead of a CSV (area, user_action) pair — the padded
+# legacy CSV rows are frozen, so post-pack features register here. Same verdict contract,
+# same fail-closed wrapper, folded into the report with "ids": []. model_lint.py parses
+# this dict (by regex, dependency-free) so every entry must stay a simple
+#   "name": fam_function,
+# line. The DAW-parity P3 expansion waves fill this in.
+EXTRA_FAMILIES = {}
+
+# ── committed-verdict freshness contract ──────────────────────────────────────────
+# verdicts.json is the COMMITTED, normalized outcome of a conformance run: one entry per
+# family — {area, action, status, invariants, backlog_ref, note} — sorted, no measured
+# values, no timestamps, no paths, so it is byte-deterministic for a given behavior.
+# A normal run COMPARES fresh results against it and FAILS the gate on any difference:
+# the PR that changes behavior must carry the verdict flip (and the regenerated
+# FEATURE_AUDIT) as a reviewable diff. `--write-verdicts` updates it intentionally.
+# scoreboard.py renders docs/FEATURE_AUDIT.md from THIS file (+ the eval CSV + the
+# backlog), so the scoreboard is regenerable without a binary — which is what lets
+# `scoreboard.py --check` run in the cheap gate lane.
+VERDICTS = SELF / "verdicts.json"
+
+
+def normalize_verdicts(fam_results):
+    out = []
+    for (area, action), v in sorted(fam_results.items()):
+        det = v.get("detail", {}) or {}
+        note = det.get("note") or det.get("reason") or det.get("error") or ""
+        entry = {"area": area, "action": action, "status": v["status"],
+                 "invariants": list(v.get("invariants", []))}
+        if det.get("gap"):
+            entry["backlog_ref"] = det["gap"]
+        if note:
+            entry["note"] = note
+        out.append(entry)
+    return out
+
+
+def load_backlog():
+    """id -> item for docs/auto-loop/backlog.jsonl (tolerant: absent file -> {})."""
+    path = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+    items = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+                items[d.get("id")] = d
+            except json.JSONDecodeError:
+                pass  # model_lint.py owns backlog validity; don't double-report here
+    return items
+
 
 def main():
     ap = argparse.ArgumentParser(description="Mosh DAW-conformance harness (reality-pack eval suite → gate)")
     ap.add_argument("--bin", help="path to the Mosh binary (default: newest local build)")
     ap.add_argument("--json", help="write the machine report here (default: scripts/daw-conformance/report.json)")
+    ap.add_argument("--write-verdicts", action="store_true",
+                    help="update the committed verdicts.json from this run (the intentional-change path); "
+                         "without it, any difference vs the committed verdicts FAILS the gate")
     args = ap.parse_args()
 
     ARTDIR.mkdir(parents=True, exist_ok=True)
@@ -609,9 +665,12 @@ def main():
     for r in rows:
         scenarios.setdefault((r["area"], r["user_action"]), []).append(r["id"])
 
+    backlog = load_backlog()
+
     fam_results = {}
     for key in sorted(scenarios):
         area, action = key
+        row0 = next(r for r in rows if (r["area"], r["user_action"]) == key)
         if key in FAMILIES:
             try:
                 v = FAMILIES[key](ctx)
@@ -620,11 +679,38 @@ def main():
         elif area in OUT_OF_SCOPE_AREAS:
             v = verdict(OOS, "n/a", [], {"reason": f"{area} is outside the conventional-parity pass"})
         else:
-            v = verdict(FAIL, "unmapped", [], {"error": "no family for this in-scope scenario"})
+            # Unmapped in-scope scenario. A row that carries a LIVE backlog_ref is a
+            # tracked, attributed gap (an eval row authored ahead of implementation —
+            # the P3 expansion-wave path); anything else stays a hard FAIL so new rows
+            # can never land silently untested. A backlog_ref pointing at a DONE item
+            # also FAILS: the capability shipped, so the row must gain a family.
+            ref = (row0.get("backlog_ref") or "").strip()
+            item = backlog.get(ref)
+            if item is not None and item.get("status") != "done":
+                v = verdict(GAP, "unimplemented", [],
+                            {"gap": ref, "note": f"awaiting backlog item {ref} ({item.get('title', '')})"})
+            elif item is not None:
+                v = verdict(FAIL, "unmapped", [],
+                            {"error": f"backlog item {ref} is done — this row must gain a conformance family"})
+            else:
+                v = verdict(FAIL, "unmapped", [], {"error": "no family for this in-scope scenario"})
         v.update({"area": area, "action": action, "ids": scenarios[key]})
         fam_results[key] = v
         mark = v["status"].upper()
         print(f"  [{mark:12}] {area} / {action}")
+        print(f"               {json.dumps(v['detail'])}")
+
+    # Post-pack families: capabilities shipped after the reality pack was gathered.
+    # Keyed ("Post-pack", <family name>); no CSV ids to fan out to.
+    for name in sorted(EXTRA_FAMILIES):
+        key = ("Post-pack", name)
+        try:
+            v = EXTRA_FAMILIES[name](ctx)
+        except Exception as e:  # fail-closed, same as CSV families
+            v = verdict(FAIL, "harness", [], {"exception": repr(e)})
+        v.update({"area": key[0], "action": name, "ids": []})
+        fam_results[key] = v
+        print(f"  [{v['status'].upper():12}] {key[0]} / {name}")
         print(f"               {json.dumps(v['detail'])}")
 
     # Fan out to per-id results.
@@ -664,7 +750,33 @@ def main():
     out = Path(args.json) if args.json else (SELF / "report.json")
     out.write_text(json.dumps(report, indent=2) + "\n")
 
-    n_fail = by_status.get(FAIL, 0)
+    # ── committed-verdict freshness gate ──────────────────────────────────────────
+    fresh = normalize_verdicts(fam_results)
+    verdicts_stale = False
+    if args.write_verdicts:
+        VERDICTS.write_text(json.dumps(fresh, indent=1) + "\n")
+        print(f"  verdicts: wrote {VERDICTS.name} ({len(fresh)} families)")
+    else:
+        committed = json.loads(VERDICTS.read_text()) if VERDICTS.exists() else None
+        if committed != fresh:
+            verdicts_stale = True
+            def _k(vs):
+                return {(v["area"], v["action"]): v for v in vs or []}
+            cf, ff = _k(committed), _k(fresh)
+            for key in sorted(set(cf) | set(ff)):
+                a, b = cf.get(key), ff.get(key)
+                if a != b:
+                    print(f"  verdict drift: {key[0]} / {key[1]}: "
+                          f"{(a or {}).get('status', '<absent>')} -> {(b or {}).get('status', '<absent>')}")
+            print(f"  VERDICTS STALE: this run disagrees with the committed {VERDICTS.name}. If the change "
+                  f"is intentional, run conformance.py --write-verdicts && scoreboard.py IN THIS PR so the "
+                  f"flip lands as a reviewable diff.")
+
+    # Post-pack families fan out to zero CSV rows, so their failures are invisible to
+    # the per-id tally — count them directly or an EXTRA_FAMILIES regression would
+    # never fail the gate.
+    extra_fails = [v["action"] for v in fam_results.values() if not v["ids"] and v["status"] == FAIL]
+    n_fail = by_status.get(FAIL, 0) + len(extra_fails)
     n_pass = by_status.get(PASS, 0)
     n_gap = by_status.get(GAP, 0)
     n_hw = by_status.get(HARDWARE, 0)
@@ -674,6 +786,9 @@ def main():
     print(f"  report: {out}")
     if n_fail:
         print("  GATE: FAIL — an in-scope capability regressed.")
+        return 1
+    if verdicts_stale:
+        print("  GATE: FAIL — committed verdicts.json is stale (see above).")
         return 1
     print("  GATE: PASS — no in-scope regressions (gaps are tracked backlog items).")
     return 0

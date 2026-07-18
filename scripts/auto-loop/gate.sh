@@ -161,9 +161,21 @@ run_py_tests() {
   rm -f "$log"
 }
 
+# ── DAW-parity honesty checks (P1) ───────────────────────────────────────────────
+# Pure static text analysis — no binary, no build, <5s total — so they run in BOTH
+# lanes. Each fails on its own: an untested dispatch command (coverage ledger), an
+# unmapped eval scenario / a gap pointing at a done backlog item (model lint), or a
+# stale docs/FEATURE_AUDIT.md (scoreboard --check).
+run_parity_checks() {
+  run_step "parity_model_lint" bash -c 'python3 scripts/daw-conformance/model_lint.py'
+  run_step "parity_coverage"   bash -c 'python3 scripts/daw-conformance/coverage_check.py'
+  run_step "parity_scoreboard" bash -c 'python3 scripts/daw-conformance/scoreboard.py --check'
+}
+
 # ── cheap lane ───────────────────────────────────────────────────────────────────
 gate_cheap() {
   ensure_node_modules
+  run_parity_checks
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
   run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
@@ -177,6 +189,7 @@ gate_cheap() {
 
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
+  run_parity_checks
   local cfgflags=()
   [ -n "${AL_CPM_CACHE:-}" ]   && cfgflags+=("-DCPM_SOURCE_CACHE=$AL_CPM_CACHE")
   [ -n "${AL_TRACTION_SRC:-}" ] && cfgflags+=("-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$AL_TRACTION_SRC")
@@ -220,9 +233,11 @@ gate_native() {
   run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --gate --bin '$bin'"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
-  # through the real command surface. Fails ONLY on an in-scope regression (known gaps are
-  # tracked in the report, not failed). Reuses the run-script + WAV harness, so it needs the
-  # same freshly-built binary + numpy. A parity fix that closes a gap flips its row to pass.
+  # through the real command surface. Fails on an in-scope regression (known gaps are
+  # tracked, not failed) AND on any drift from the committed verdicts.json — a behavior
+  # change must land its verdict flip (conformance.py --write-verdicts + scoreboard.py)
+  # in the same PR. Reuses the run-script + WAV harness, so it needs the same
+  # freshly-built binary + numpy.
   run_step "daw_conformance" bash -c "python3 scripts/daw-conformance/conformance.py --bin '$bin'"
 
   # …and assert the committed SCOREBOARD still matches that run. conformance.py only
