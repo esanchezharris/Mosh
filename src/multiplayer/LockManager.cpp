@@ -55,6 +55,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",
         "set_send_level", "remove_send", "add_automation_point", "remove_automation_point",
         "set_automation_point", "clear_automation",
+        // G10 — automation recording: arming write mode and bulk-authoring a curve both
+        // target one track's parameter surface, same lock group as the Wave-7 quartet above.
+        "set_track_automation_mode", "write_automation_curve",
         // LYR-001 — lyric sheet mutations target a track (args carry trackId).
         "create_lyric_sheet", "remove_lyric_sheet", "set_lyric_constraint",
         "set_lyric_line", "remove_lyric_line",

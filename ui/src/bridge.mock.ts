@@ -1440,6 +1440,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "set_plugin_param": {
       const f = findPlugin(str(args.trackId), num(args.index)); if (!f) return err(command, "plugin not found");
       const p = f.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      // G10 — mirrors the native cmdSetPluginParam: when the owning track is armed
+      // "write", capture a point at the current transport position in the SAME mutation
+      // (touch/latch are accepted by set_track_automation_mode but inert here too, v0).
+      if (p && f.track.automationMode === "write") {
+        p.points = p.points ?? [];
+        p.points.push({ t: Math.max(0, num(snapshot.transport.position)), v: Math.min(1, Math.max(0, num(args.value))) });
+        p.automated = p.points.length > 0;
+      }
       invalidate(); return ok(command);
     }
     case "open_plugin_editor": return ok(command);
@@ -1481,6 +1489,59 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       else p.points = [];
       p.automated = p.points.length > 0;
       invalidate(); return ok(command);
+    }
+
+    // G10 — automation record-arm mode. All 4 values are stored+round-trip; only "write"
+    // is behavioral (see the set_plugin_param case above) — touch/latch are Phase 2.
+    case "set_track_automation_mode": {
+      const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
+      const mode = str(args.mode) as Track["automationMode"];
+      if (mode !== "read" && mode !== "touch" && mode !== "latch" && mode !== "write")
+        return err(command, `mode must be one of read|touch|latch|write (got "${str(args.mode)}")`);
+      pushUndo();
+      t.automationMode = mode;
+      invalidate(); return ok(command);
+    }
+
+    // G10 — bulk-author a curve in one step. `points` is a native array (UI/tests) OR a
+    // JSON-encoded string (the agent-catalog form, since ArgType has no array type — same
+    // duality add_drum_pattern's `pattern` arg already uses). Validated before mutating.
+    case "write_automation_curve": {
+      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
+      const p = f?.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex));
+      if (!p) return err(command, "param not found");
+      const applyMode = str(args.apply, "replace");
+      if (applyMode !== "replace" && applyMode !== "merge") return err(command, 'apply must be "replace" or "merge"');
+
+      let raw: unknown = args.points;
+      if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { return err(command, "points string is not valid JSON"); } }
+      if (!Array.isArray(raw) || raw.length === 0) return err(command, "points must be a non-empty array");
+
+      const parsed: { t: number; v: number }[] = [];
+      let lastT = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const pt: unknown = raw[i];
+        const rec = (typeof pt === "object" && pt !== null) ? (pt as Record<string, unknown>) : null;
+        const t = rec && typeof rec.t === "number" ? rec.t : NaN;
+        const v = rec && typeof rec.v === "number" ? rec.v : NaN;
+        if (rec === null || Number.isNaN(t) || Number.isNaN(v)) return err(command, "each point must be an object {t, v}");
+        if (t < 0) return err(command, `point t must be >= 0 (got ${t})`);
+        if (i > 0 && !(t > lastT)) return err(command, `points must be strictly ascending in t (got ${t} after ${lastT})`);
+        if (v < 0 || v > 1) return err(command, `point v must be 0..1 (got ${v})`);
+        parsed.push({ t, v });
+        lastT = t;
+      }
+
+      pushUndo();
+      p.points = p.points ?? [];
+      if (applyMode === "replace") {
+        const rangeStart = parsed[0].t, rangeEnd = parsed[parsed.length - 1].t;
+        p.points = p.points.filter((pt) => pt.t < rangeStart || pt.t > rangeEnd);
+      }
+      p.points.push(...parsed);
+      p.points.sort((a, b) => a.t - b.t);
+      p.automated = p.points.length > 0;
+      invalidate(); return ok(command, { pointCount: parsed.length, numPoints: p.points.length });
     }
 
     // ── generative (Tier-B) render layers ────────────────────────────────────

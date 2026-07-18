@@ -1,5 +1,7 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "AutomationMode.h"
+#include "AutomationCurveWrite.h"
 #include "ExportRange.h"
 #include "ScanProgress.h"
 #include "StemExport.h"
@@ -999,6 +1001,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "remove_automation_point") return cmdRemoveAutomationPoint (args);
     if (name == "set_automation_point")    return cmdSetAutomationPoint (args);
     if (name == "clear_automation")        return cmdClearAutomation (args);
+    if (name == "set_track_automation_mode") return cmdSetTrackAutomationMode (args);
+    if (name == "write_automation_curve")    return cmdWriteAutomationCurve (args);
     if (name == "open_plugin_editor")return cmdOpenPluginEditor (args);
     if (name == "add_midi_clip")     return cmdAddMidiClip (args);
     if (name == "add_drum_pattern")  return cmdAddDrumPattern (args);
@@ -5410,18 +5414,32 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     auto param = plugin->getAutomatableParameter (pi);
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
     const float raw  = param->valueRange.convertFrom0to1 (norm);
+    auto* track = findTrack (trackId);   // resolved once — also gates G10 write-mode capture below
+
     beginTxn ("set_plugin_param");
     // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
     // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
     // after undo; replaying through a custom UndoableAction keeps it correct both ways.
     undoManager().perform (new SetPluginParamValueAction (*param, raw));
+    // G10 — parameter automation RECORDING (v0): when the owning track is armed `write`,
+    // capture a point at the current transport position in the SAME transaction, so one
+    // undo reverts the value AND the point together. Deliberately gated on automationMode
+    // alone, NOT transport.isPlaying() — see docs/superpowers/specs/2026-07-17-
+    // g10-automation-record.md §1 for why (headless --selftest never opens an audio device,
+    // so a playing-transport gate would be untestable there). touch/latch are accepted by
+    // set_track_automation_mode but inert here in v0 (Phase 2).
+    if (track != nullptr && track->automationMode.get() == te::AutomationMode::write)
+    {
+        const auto posSec = eng.edit().getTransport().getPosition().inSeconds();
+        param->getCurve().addPoint (tracktion::TimePosition::fromSeconds (posSec), raw, 0.0f, &undoManager());
+    }
     logLine ("set_plugin_param", args, true, {}, true);
     // Scoped — param tweaks are the other rapid-fire case. A param that changes plugin
     // LATENCY leaves the session PDC readout briefly stale (self-corrects on the next
     // structural edit); the arrangement is unaffected. Group-track plugins → full.
-    if (auto* track = findTrack (trackId)) emitTrackPatch (*track);
+    if (track != nullptr) emitTrackPatch (*track);
     else emitSnapshotInvalidated();
-    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — param change → re-bounce
+    reactiveTouchTrack (trackId);   // Phase 3 — param change → re-bounce
     return okResult ("set_plugin_param");
 }
 
@@ -5623,19 +5641,19 @@ juce::var MoshOps::cmdBlockPlugin (const juce::var& args)
 // (trackId, pluginIndex, paramIndex); values cross the seam normalised 0–1 and
 // are mapped to the parameter's real range here. Times are in seconds.
 // ─────────────────────────────────────────────────────────────────────────────
-te::AutomatableParameter* MoshOps::findParam (const juce::var& args)
+te::AutomatableParameter* MoshOps::findParam (const juce::String& trackId, int pluginIndex, int paramIndex)
 {
-    auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
-                               (int) args.getProperty ("pluginIndex", -1));
+    auto* plugin = findPlugin (trackId, pluginIndex);
     if (plugin == nullptr) return nullptr;
-    const int pi = (int) args.getProperty ("paramIndex", -1);
-    if (pi < 0 || pi >= plugin->getNumAutomatableParameters()) return nullptr;
-    return plugin->getAutomatableParameter (pi).get();
+    if (paramIndex < 0 || paramIndex >= plugin->getNumAutomatableParameters()) return nullptr;
+    return plugin->getAutomatableParameter (paramIndex).get();
 }
 
 juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("add_automation_point", "no such parameter");
     const double t = juce::jmax (0.0, (double) args.getProperty ("time", 0.0));
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
@@ -5650,7 +5668,9 @@ juce::var MoshOps::cmdAddAutomationPoint (const juce::var& args)
 
 juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("remove_automation_point", "no such parameter");
     auto& curve = param->getCurve();
     const int idx = (int) args.getProperty ("pointIndex", -1);
@@ -5665,7 +5685,9 @@ juce::var MoshOps::cmdRemoveAutomationPoint (const juce::var& args)
 juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
 {
     // Move a point: remove + re-add at the new (time, value).
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("set_automation_point", "no such parameter");
     auto& curve = param->getCurve();
     const int idx = (int) args.getProperty ("pointIndex", -1);
@@ -5686,13 +5708,90 @@ juce::var MoshOps::cmdSetAutomationPoint (const juce::var& args)
 
 juce::var MoshOps::cmdClearAutomation (const juce::var& args)
 {
-    auto* param = findParam (args);
+    auto* param = findParam (args.getProperty ("trackId", var()).toString(),
+                             (int) args.getProperty ("pluginIndex", -1),
+                             (int) args.getProperty ("paramIndex", -1));
     if (param == nullptr) return errResult ("clear_automation", "no such parameter");
     beginTxn ("clear_automation");
     param->getCurve().clear (&undoManager());
     logLine ("clear_automation", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("clear_automation");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G10 — parameter automation RECORDING (v0). set_track_automation_mode arms/disarms
+// the record mode on a TRACK (not a single parameter — every automatable param on the
+// track is captured while write-armed); write_automation_curve bulk-authors a curve in
+// one undoable step. See docs/superpowers/specs/2026-07-17-g10-automation-record.md.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdSetTrackAutomationMode (const juce::var& args)
+{
+    const auto trackId = args.getProperty ("trackId", var()).toString();
+    auto* track = findTrack (trackId);
+    if (track == nullptr) return errResult ("set_track_automation_mode", "no track");
+
+    const auto parsed = parseAutomationRecordMode (args.getProperty ("mode", var()).toString());
+    if (! parsed.ok) return errResult ("set_track_automation_mode", parsed.error);
+
+    te::AutomationMode engineMode = te::AutomationMode::read;
+    switch (parsed.mode)
+    {
+        case AutomationRecordMode::read:  engineMode = te::AutomationMode::read;  break;
+        case AutomationRecordMode::touch: engineMode = te::AutomationMode::touch; break;
+        case AutomationRecordMode::latch: engineMode = te::AutomationMode::latch; break;
+        case AutomationRecordMode::write: engineMode = te::AutomationMode::write; break;
+    }
+
+    beginTxn ("set_track_automation_mode");
+    // Track::automationMode is a CachedValue<AutomationMode> already referTo()'d against
+    // the real Edit UndoManager (tracktion_Track.cpp) — a plain assignment is undo-correct
+    // on its own; no custom UndoableAction needed (unlike the value-write bug fixed above).
+    track->automationMode = engineMode;
+    logLine ("set_track_automation_mode", args, true, {}, true);
+    emitTrackPatch (*track);
+    return okResult ("set_track_automation_mode");
+}
+
+juce::var MoshOps::cmdWriteAutomationCurve (const juce::var& args)
+{
+    const auto trackId     = args.getProperty ("trackId", var()).toString();
+    const int  pluginIndex = (int) args.getProperty ("pluginIndex", -1);
+    const int  paramIndex  = (int) args.getProperty ("paramIndex", -1);
+    auto* param = findParam (trackId, pluginIndex, paramIndex);
+    if (param == nullptr) return errResult ("write_automation_curve", "no such parameter");
+
+    const auto apply = args.getProperty ("apply", "replace").toString();
+    if (apply != "replace" && apply != "merge")
+        return errResult ("write_automation_curve", "apply must be \"replace\" or \"merge\"");
+
+    // Validate the WHOLE point array BEFORE any mutation (DRM-002 discipline — a rejected
+    // call leaves no empty/partial undo step).
+    const auto parsed = parseAutomationCurvePoints (args.getProperty ("points", var()));
+    if (! parsed.ok) return errResult ("write_automation_curve", parsed.error);
+
+    beginTxn ("write_automation_curve");
+    auto& curve = param->getCurve();
+    if (apply == "replace")
+    {
+        // [minT, maxT] the new points span, padded past the last point by a sub-millisecond
+        // epsilon: removePointsInRegion is HALF-OPEN [start,end), so without the pad a
+        // pre-existing point sitting exactly at the new curve's last timestamp would survive
+        // the clear and end up duplicated alongside the freshly-added point at that time.
+        const auto rangeStart = tracktion::TimePosition::fromSeconds (parsed.points.front().t);
+        const auto rangeEnd   = tracktion::TimePosition::fromSeconds (parsed.points.back().t + 0.0005);
+        curve.removePointsInRegion (tracktion::TimeRange (rangeStart, rangeEnd), &undoManager());
+    }
+    for (const auto& p : parsed.points)
+        curve.addPoint (tracktion::TimePosition::fromSeconds (p.t),
+                        param->valueRange.convertFrom0to1 (p.v), p.curve, &undoManager());
+
+    logLine ("write_automation_curve", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("pointCount", (int) parsed.points.size());
+    data->setProperty ("numPoints", curve.getNumPoints());
+    return okResult ("write_automation_curve", var (data));
 }
 
 juce::var MoshOps::cmdOpenPluginEditor (const juce::var& args)
@@ -10166,6 +10265,19 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     }
     o->setProperty ("mute", t.isMuted (false));
     o->setProperty ("solo", t.isSolo (false));
+    // G10 — automation record-arm mode ("read"|"touch"|"latch"|"write"); defaults to
+    // "read" for a track that never called set_track_automation_mode.
+    {
+        AutomationRecordMode recMode = AutomationRecordMode::read;
+        switch (t.automationMode.get())
+        {
+            case te::AutomationMode::read:  recMode = AutomationRecordMode::read;  break;
+            case te::AutomationMode::touch: recMode = AutomationRecordMode::touch; break;
+            case te::AutomationMode::latch: recMode = AutomationRecordMode::latch; break;
+            case te::AutomationMode::write: recMode = AutomationRecordMode::write; break;
+        }
+        o->setProperty ("automationMode", automationRecordModeToString (recMode));
+    }
 
     // Recording state (Wave: recording). Requires a live input-device instance;
     // getAllInputDevices() is empty headless / without a playback context, so all

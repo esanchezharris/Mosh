@@ -97,6 +97,19 @@ export function AutomationPanel() {
             {(plugin?.params ?? []).map((pr) => <option key={pr.index} value={pr.index}>{pr.name}{pr.automated ? " ●" : ""}</option>)}
           </select>
           <span className="spacer" />
+          {/* G10 — record-arm mode is per-TRACK (every param on the track captures while
+              write-armed), not per-param — hence no dependency on the plugin/param pickers. */}
+          <select
+            className="btn ghost"
+            title="Automation record mode (arms the whole track, not just this parameter)"
+            value={track.automationMode ?? "read"}
+            onChange={(e) => void exec("set_track_automation_mode", { trackId: track.id, mode: e.target.value })}
+          >
+            <option value="read">Read</option>
+            <option value="touch">Touch</option>
+            <option value="latch">Latch</option>
+            <option value="write">Write</option>
+          </select>
           <button className="btn" onClick={() => exec("clear_automation", target)} disabled={points.length === 0}>Clear</button>
           <button className="btn x" onClick={close}>✕</button>
         </div>

@@ -1296,6 +1296,125 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) paramVar (at, pidx, 0).getProperty ("automated", true), "clear_automation removes all points");
     }
 
+    // ─── G10: parameter automation RECORDING (v0) ───
+    // docs/superpowers/specs/2026-07-17-g10-automation-record.md — synchronous capture
+    // (gated on automationMode==write, NOT transport.isPlaying()) inside cmdSetPluginParam;
+    // set_track_automation_mode arms/disarms all 4 values but only write is behavioral;
+    // write_automation_curve bulk-authors a curve in one undoable step.
+    section ("G10: parameter automation recording");
+    {
+        auto paramVarG10 = [&] (const String& trkId, int plugIdx, int paramIdx) -> var {
+            auto trk = trackById (trkId);
+            if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                        if (auto* params = p.getProperty ("params", var()).getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == paramIdx) return pr;
+            return {};
+        };
+
+        auto gt = cmd (ops, "create_track", args1 ("name", "AutoRec"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "load_builtin", objN ({{ "trackId", gt }, { "type", "compressor" }}));
+        int gpidx = -1;
+        { auto trk = trackById (gt);
+          if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "compressor") gpidx = (int) p.getProperty ("index", -1); }
+        check (gpidx >= 0, "G10: compressor loaded for recording test");
+
+        // ── set_track_automation_mode: default, round-trip, validation, undo/redo ──
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "read", "G10: fresh track defaults automationMode=read");
+        check (ok (cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "write" }}))), "G10: set_track_automation_mode write ok");
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "write", "G10: automationMode reflects write");
+        check (! ok (cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "bogus" }}))), "G10: rejects an unknown mode");
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "write", "G10: a rejected mode leaves the track unchanged");
+        check (ok (cmd (ops, "undo")), "G10: undo set_track_automation_mode ok");
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "read", "G10: undo reverts automationMode to read (CachedValue undo, no custom action needed)");
+        check (ok (cmd (ops, "redo")), "G10: redo set_track_automation_mode ok");
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "write", "G10: redo restores automationMode to write");
+
+        // ── write mode captures a point at the transport position; ONE undo reverts value+point together ──
+        cmd (ops, "set_transport", args1 ("position", 3.0));
+        const double v0 = (double) paramVarG10 (gt, gpidx, 0).getProperty ("value", -1.0);
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", gpidx }, { "paramIndex", 0 }, { "value", 0.75 }}))),
+               "G10: set_plugin_param under write mode ok");
+        check (std::abs ((double) paramVarG10 (gt, gpidx, 0).getProperty ("value", -1.0) - 0.75) < 0.02, "G10: value reflects the set_plugin_param call");
+        check ((bool) paramVarG10 (gt, gpidx, 0).getProperty ("automated", false), "G10: write mode captured a point (param flagged automated)");
+        { auto pts = paramVarG10 (gt, gpidx, 0).getProperty ("points", var());
+          check (pts.size() == 1, "G10: exactly one point captured");
+          check (pts.size() == 1 && std::abs ((double) pts[0].getProperty ("t", -1.0) - 3.0) < 0.05, "G10: captured point lands at the transport position");
+          check (pts.size() == 1 && std::abs ((double) pts[0].getProperty ("v", -1.0) - 0.75) < 0.02, "G10: captured point value matches the set value"); }
+        check (ok (cmd (ops, "undo")), "G10: undo set_plugin_param (write mode) ok");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 0, "G10: one undo removes the captured point");
+        check (std::abs ((double) paramVarG10 (gt, gpidx, 0).getProperty ("value", -1.0) - v0) < 0.02,
+               "G10: the SAME undo reverts the value too (bug-fix regression: not stale at the pre-undo value)");
+        check (ok (cmd (ops, "redo")), "G10: redo set_plugin_param (write mode) ok");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 1, "G10: redo restores the captured point");
+        check (std::abs ((double) paramVarG10 (gt, gpidx, 0).getProperty ("value", -1.0) - 0.75) < 0.02, "G10: redo restores the value");
+
+        cmd (ops, "clear_automation", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 }}));
+
+        // ── read mode does NOT capture ──
+        cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "read" }}));
+        cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", gpidx }, { "paramIndex", 0 }, { "value", 0.4 }}));
+        check (! (bool) paramVarG10 (gt, gpidx, 0).getProperty ("automated", true), "G10: read mode does not capture a point");
+
+        // ── touch/latch are ACCEPTED (round-trip losslessly) but INERT in v0 — Phase 2 ──
+        cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "touch" }}));
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "touch", "G10: touch mode stored");
+        cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", gpidx }, { "paramIndex", 0 }, { "value", 0.6 }}));
+        check (! (bool) paramVarG10 (gt, gpidx, 0).getProperty ("automated", true), "G10 AUTO-MODE-INERT: touch mode does not capture in v0");
+
+        cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "latch" }}));
+        check (trackById (gt).getProperty ("automationMode", "?").toString() == "latch", "G10: latch mode stored");
+        cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", gpidx }, { "paramIndex", 0 }, { "value", 0.3 }}));
+        check (! (bool) paramVarG10 (gt, gpidx, 0).getProperty ("automated", true), "G10 AUTO-MODE-INERT: latch mode does not capture in v0");
+
+        // ── write_automation_curve: validate-before-mutate, replace, reject, merge, undo, JSON-string form ──
+        cmd (ops, "set_track_automation_mode", objN ({{ "trackId", gt }, { "mode", "read" }}));   // don't let write-mode capture interfere below
+        cmd (ops, "clear_automation", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 }}));
+
+        var replacePoints; { Array<var> a; a.add (objN ({{ "t", 0.0 }, { "v", 0.1 }}));
+                              a.add (objN ({{ "t", 1.0 }, { "v", 0.5 }}));
+                              a.add (objN ({{ "t", 2.0 }, { "v", 0.9 }})); replacePoints = a; }
+        auto wr = cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                              { "points", replacePoints }, { "apply", "replace" }}));
+        check (ok (wr), "G10: write_automation_curve replace ok");
+        check ((int) wr["data"].getProperty ("pointCount", -1) == 3, "G10: replace reports 3 points written");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 3, "G10: curve now has exactly the 3 replaced points");
+
+        // reject: non-ascending t -> the WHOLE call is rejected, curve UNCHANGED (validate-before-mutate)
+        var badPoints; { Array<var> a; a.add (objN ({{ "t", 1.0 }, { "v", 0.2 }}));
+                          a.add (objN ({{ "t", 0.5 }, { "v", 0.4 }})); badPoints = a; }
+        check (! ok (cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                                { "points", badPoints }, { "apply", "replace" }}))),
+               "G10: rejects non-ascending t");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 3, "G10: a rejected call leaves the curve untouched");
+
+        // reject: v out of range
+        var badV; { Array<var> a; a.add (objN ({{ "t", 5.0 }, { "v", 1.5 }})); badV = a; }
+        check (! ok (cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                                { "points", badV }, { "apply", "replace" }}))),
+               "G10: rejects v outside 0..1");
+
+        // merge: adds without clearing the existing 3
+        var mergePoints; { Array<var> a; a.add (objN ({{ "t", 5.0 }, { "v", 0.3 }})); mergePoints = a; }
+        auto wm = cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                                                              { "points", mergePoints }, { "apply", "merge" }}));
+        check (ok (wm), "G10: write_automation_curve merge ok");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 4, "G10: merge adds without clearing the existing 3 points");
+
+        // one undo reverts the WHOLE bulk write (all points added in one beginTxn)
+        check (ok (cmd (ops, "undo")), "G10: undo write_automation_curve (merge) ok");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 3, "G10: undo drops the whole merged batch in one step");
+
+        // the agent-catalog form: points as a JSON-encoded string (ArgType has no array type)
+        check (ok (cmd (ops, "write_automation_curve", objN ({{ "trackId", gt }, { "pluginIndex", gpidx }, { "paramIndex", 0 },
+                        { "points", String ("[{\"t\":9.0,\"v\":0.2}]") }, { "apply", "merge" }}))),
+               "G10: write_automation_curve accepts a JSON-string points array");
+        check (paramVarG10 (gt, gpidx, 0).getProperty ("points", var()).size() == 4, "G10: JSON-string points landed");
+    }
+
     // ─── G10 bug fix: cmdSetPluginParam undo correctness (G14-class regression) ───
     section ("G10: set_plugin_param undo regression (G14-class)");
     {

@@ -334,6 +334,11 @@ export type Track = {
   pan?: number;
   mute?: boolean;
   solo?: boolean;
+  // G10 — automation record-arm mode. Absent (legacy/never-set track) means "read".
+  // Track-wide, not per-parameter: while "write", every automatable param change on
+  // this track captures a point. Only "write" is behavioral in v0 — "touch"/"latch"
+  // round-trip losslessly but are inert (Phase 2).
+  automationMode?: "read" | "touch" | "latch" | "write";
   armed?: boolean;
   monitor?: "off" | "automatic" | "on";
   hasInput?: boolean;
