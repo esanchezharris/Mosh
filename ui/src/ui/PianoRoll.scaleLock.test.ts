@@ -70,18 +70,19 @@ describe("piano-roll scale lock", () => {
     return call ? (call[1] as { pitch: number }).pitch : undefined;
   };
 
-  /** Drag the fixture note down by `semitones` and commit it. */
-  const dragNote = (semitones: number) => {
+  /** Drag the fixture note by `semitones` down and `beats` sideways, and commit it. */
+  const dragNote = (semitones: number, beats = 0) => {
     const note = host.querySelector(".pr-note");
     if (!note) throw new Error("piano-roll note did not render");
+    const x0 = 10, x1 = x0 + beats * BEAT_PX;
     const y0 = 200, y1 = y0 + semitones * ROW_H; // +y is downward = lower pitch
     act(() => {
-      note.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, clientX: 10, clientY: y0 }));
-      note.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 2, clientX: 10, clientY: y1, buttons: 1 }));
-      note.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 2, clientX: 10, clientY: y1 }));
+      note.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, clientX: x0, clientY: y0 }));
+      note.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 2, clientX: x1, clientY: y1, buttons: 1 }));
+      note.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 2, clientX: x1, clientY: y1 }));
     });
     const call = exec.mock.calls.find((c) => c[0] === "set_note");
-    return call ? (call[1] as { pitch?: number }).pitch : undefined;
+    return call ? (call[1] as { pitch?: number }) : undefined;
   };
 
   beforeEach(() => {
@@ -141,12 +142,27 @@ describe("piano-roll scale lock", () => {
     mount();
     // The fixture note is D#4 (63); dragging down 2 semitones targets C#4 (61),
     // which is out of A minor and must land on C4 (60).
-    expect(dragNote(2)).toBe(60);
+    expect(dragNote(2)?.pitch).toBe(60);
   });
 
   it("does not snap a dragged note when OFF", () => {
     mount();
-    expect(dragNote(2)).toBe(61);
+    expect(dragNote(2)?.pitch).toBe(61);
+  });
+
+  it("a purely HORIZONTAL nudge never re-pitches an off-key note — invariant 88", () => {
+    useSettings.getState().set("scaleLock", true);
+    mount();
+    // The fixture note is an off-key D#4 (63). Sliding it sideways in time is
+    // not a request to re-pitch it, so its pitch must survive the move even
+    // though it does not belong to the locked key.
+    expect(dragNote(0, 2)?.pitch).toBe(63);
+  });
+
+  it("a horizontal nudge on an IN-key note is likewise left alone", () => {
+    useSettings.getState().set("scaleLock", true);
+    mount({ tonic: "D#", mode: "major" }); // 63 is the tonic here — in key
+    expect(dragNote(0, 2)?.pitch).toBe(63);
   });
 
   it("NEVER rewrites existing notes — invariant 88", () => {

@@ -145,7 +145,10 @@ export function PianoRoll() {
       if (d.kind === "move") {
         const start = Math.max(0, snapBeat(d.orig.start + db));
         const dp = -Math.round((e.clientY - d.startY) / ROW_H);
-        const pitch = lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
+        // Only a gesture that actually moves the PITCH axis may re-pitch the note.
+        // Sliding a note sideways is a request to change its time, not its pitch —
+        // so an existing off-key note survives a time-nudge untouched (invariant 88).
+        const pitch = dp === 0 ? d.orig.pitch : lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
         setPreviewNote({ ...d.orig, start, pitch });
       } else {
         const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
@@ -223,8 +226,8 @@ export function PianoRoll() {
             <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
               onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}
               title={scaleLock
-                ? `Scale lock ON — notes you draw or drag snap to ${keyLabel(snapshot?.session.key ?? {})}. Existing notes are untouched.`
-                : `Scale lock OFF — click to snap new notes to ${keyLabel(snapshot?.session.key ?? {})} (set the key in the topbar).`}>
+                ? `Scale lock ON — a note you draw, or drag to a new pitch, snaps to ${keyLabel(snapshot?.session.key ?? {})}. Notes you don't move keep their pitch, and so does a note you only slide in time.`
+                : `Scale lock OFF — click to snap notes you draw or re-pitch to ${keyLabel(snapshot?.session.key ?? {})} (set the key in the topbar).`}>
               Scale {keyLabel(snapshot?.session.key ?? {})}
             </button>
           )}

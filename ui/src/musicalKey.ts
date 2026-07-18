@@ -92,7 +92,9 @@ export const inScale = (pitch: number, mask: boolean[]) => mask[pitchClass(pitch
  * mask is all-true) or a degenerate all-false mask.
  */
 export function snapToScale(pitch: number, mask: boolean[]): number {
-  const p = Math.max(0, Math.min(127, Math.round(pitch)));
+  // `|| 0` keeps the "always in range" promise total: NaN would otherwise pass
+  // straight through both the clamp and the search loop and be returned as-is.
+  const p = Math.max(0, Math.min(127, Math.round(pitch) || 0));
   if (mask[pitchClass(p)]) return p;
   for (let d = 1; d <= 6; d++) {
     const down = p - d;

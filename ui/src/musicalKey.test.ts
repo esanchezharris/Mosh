@@ -193,6 +193,15 @@ describe("snapToScale", () => {
     expect(snapToScale(61.6, cMajor)).toBe(62); // rounds to 62 (D), already in scale
   });
 
+  it("keeps the in-range promise total for non-finite input", () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      const s = snapToScale(bad, cMajor);
+      expect(Number.isFinite(s)).toBe(true);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(127);
+    }
+  });
+
   it("degenerate all-false mask behaves chromatically instead of inventing a pitch", () => {
     const dead = new Array<boolean>(12).fill(false);
     expect(snapToScale(64, dead)).toBe(64);
