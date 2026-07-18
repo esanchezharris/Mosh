@@ -14,9 +14,6 @@ export type WorkflowCapabilitySurface =
   | "product"
   | "project";
 
-export const WORKFLOW_BROWSER_TABS: readonly WorkflowBrowserTab[] = ["sounds", "plugins"];
-export const WORKFLOW_SECTION_ZOOMS: readonly WorkflowSectionZoom[] = ["8b", "16b", "full"];
-
 export function isWorkflowBrowserTab(value: unknown): value is WorkflowBrowserTab {
   return value === "sounds" || value === "plugins";
 }
