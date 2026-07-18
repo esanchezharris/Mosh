@@ -47,11 +47,16 @@ TARGET_ROWS = 40
 
 
 # ── catalog: parsed live from ui/src/agent/commands.ts ───────────────────────
-# Every AGENT_COMMANDS entry is a single line of the form
+# Every AGENT_COMMANDS entry has the form
 #   { command: "name", desc: "...", args: [S("x"), N("y", false), ...] },
-# (verified 2026-07-17: 88/88 entries match this shape). Parsing it — instead of
-# hand-copying the catalog text — is the anti-invention guarantee: a command name
-# used below can only ever be one this parser actually found in the real file.
+# but an entry with many args WRAPS over several lines (e.g. set_clip_fade,
+# set_clip_loop). So an entry is accumulated from its opening "{ command:" until
+# its braces balance, then matched as one whitespace-normalised string — matching
+# line-by-line silently depends on formatting and breaks the moment someone wraps
+# a long entry (it did: 114/116 single-line, 2 wrapped, as of 2026-07-18).
+# Parsing this file — instead of hand-copying the catalog text — is the
+# anti-invention guarantee: a command name used below can only ever be one this
+# parser actually found in the real file.
 
 _ENTRY_RE = re.compile(
     r'^\{\s*command:\s*"(?P<name>[a-zA-Z0-9_]+)"\s*,\s*desc:\s*"(?P<desc>(?:[^"\\]|\\.)*)"\s*,'
@@ -71,19 +76,62 @@ class Command(NamedTuple):
     args: tuple[Arg, ...]
 
 
+def _split_entries(body: str) -> list[str]:
+    """Yield each AGENT_COMMANDS entry as one whitespace-normalised string.
+
+    Scans for a top-level "{ command:" and consumes until its braces balance, so a
+    single entry may span any number of source lines. Brace counting is
+    string-aware: a "{" or "}" inside a desc/arg string literal (and any
+    backslash-escaped char) is not treated as structure.
+    """
+    entries: list[str] = []
+    i, n = 0, len(body)
+    while True:
+        start = body.find("{ command:", i)
+        if start < 0:
+            break
+        depth, j = 0, start
+        in_str = False
+        while j < n:
+            c = body[j]
+            if in_str:
+                if c == "\\":
+                    j += 2      # skip the escaped char, incl. \" and \\
+                    continue
+                if c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    break
+            j += 1
+        else:
+            raise RuntimeError(
+                f"unterminated AGENT_COMMANDS entry starting at offset {start} "
+                "(parser drifted from commands.ts)"
+            )
+        # Collapse the wrap: newlines + run-on indentation become single spaces so
+        # a wrapped entry is byte-comparable to a single-line one.
+        entries.append(" ".join(body[start:j].split()))
+        i = j
+    return entries
+
+
 def parse_agent_commands(ts_path: Path = COMMANDS_TS) -> list[Command]:
     text = ts_path.read_text(encoding="utf-8")
     m = re.search(r"export const AGENT_COMMANDS: AgentCommand\[\] = \[(.*?)\n\];", text, re.S)
     if not m:
         raise RuntimeError(f"could not locate AGENT_COMMANDS array in {ts_path}")
     commands: list[Command] = []
-    for raw in m.group(1).splitlines():
-        line = raw.strip()
-        if not line.startswith("{ command:"):
-            continue
-        em = _ENTRY_RE.match(line)
+    for entry in _split_entries(m.group(1)):
+        em = _ENTRY_RE.match(entry)
         if not em:
-            raise RuntimeError(f"unparseable AGENT_COMMANDS entry (parser drifted from commands.ts): {line!r}")
+            raise RuntimeError(f"unparseable AGENT_COMMANDS entry (parser drifted from commands.ts): {entry!r}")
         args = tuple(
             Arg(am.group("name"), True if am.group("required") is None else am.group("required") == "true")
             for am in _ARG_RE.finditer(em.group("args"))
