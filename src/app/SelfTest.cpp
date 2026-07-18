@@ -2821,6 +2821,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     } }
         check (scopedLanding, "accepted render landed bounded to the section (start ~0.5 s, length ~0.5 s)");
 
+        // METER-001 — the auto-created "Neural Renders" lane is metered too (no explicit
+        // enable_track_meter call), same as any other track-creation path.
+        bool neuralLaneMetered = false;
+        { auto snap = ops.snapshot();
+          if (auto* arr = snap["tracks"].getArray())
+            for (auto& t : *arr) if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                neuralLaneMetered = (bool) t.getProperty ("meterEnabled", false); }
+        check (neuralLaneMetered, "METER-001: the auto-created Neural Renders lane is metered");
+
         // A whole-clip render (no region) still works — guards the default path.
         auto st2 = cmd (ops, "create_track", args1 ("name", "Whole"))["data"].getProperty ("trackId", var()).toString();
         auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", st2 }, { "seconds", 1.0 }, { "freq", 180.0 }}));
@@ -4131,6 +4140,63 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! meterOn (mt), "undo removes the meter tap");
         cmd (ops, "redo");
         check (meterOn (mt), "redo restores the meter tap");
+    }
+
+    // ─── METER-001: every track-creation path auto-meters (coverage gap fix) ───
+    // Previously only enable_all_meters (called once at UI init) covered a track — a
+    // track created MID-SESSION via any of these paths never appeared in the "levels"
+    // telemetry, silent-forever, until the app was relaunched. Each of these now
+    // self-meters with NO explicit enable_track_meter call.
+    section ("METER-001: auto-meter every track-creation path");
+    {
+        auto meterOn = [&] (const String& tid) { return (bool) trackById (tid).getProperty ("meterEnabled", false); };
+
+        // create_track — the main UI/agent "+ track" path (both audio and drum; drum
+        // loads a sampler+kit in the SAME transaction, ahead of the meter, so this
+        // also proves the tap lands after that same-command instrument load).
+        auto ctA = cmd (ops, "create_track", args1 ("name", "AutoMeterAudio"));
+        check (ok (ctA), "create_track (audio) ok");
+        const auto ctAId = ctA["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (ctAId), "METER-001: a freshly created audio track is metered with no explicit enable call");
+
+        auto ctD = cmd (ops, "create_track", objN ({{ "name", "AutoMeterDrum" }, { "type", "drum" }}));
+        check (ok (ctD), "create_track (drum) ok");
+        const auto ctDId = ctD["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (ctDId), "METER-001: a freshly created drum track is metered too");
+
+        // add_midi_clip — auto-creates its own track when trackId is omitted.
+        auto amc = cmd (ops, "add_midi_clip", objN ({{ "name", "AutoMIDI" }}));
+        check (ok (amc), "add_midi_clip (auto-create track) ok");
+        const auto amcTrackId = amc["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (amcTrackId), "METER-001: add_midi_clip's auto-created track is metered");
+
+        // add_drum_pattern (DRM-002) — auto-creates a "Drums" track when neither
+        // trackId nor clipId is given.
+        auto adp = cmd (ops, "add_drum_pattern", args1 ("pattern", "kick: x...x...x...x..."));
+        check (ok (adp), "add_drum_pattern (auto-create track) ok");
+        const auto adpTrackId = adp["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (adpTrackId), "METER-001: add_drum_pattern's auto-created track is metered");
+
+        // create_bus — a return/bus AudioTrack; not surfaced by a v2 meter widget
+        // (buses are excluded from TrackLaneHeader, matching classic Mixer.tsx), but
+        // enable_all_meters has always covered every AudioTrack including these, so
+        // native-side coverage stays consistent.
+        auto cb = cmd (ops, "create_bus", args1 ("name", "AutoMeterBus"));
+        check (ok (cb), "create_bus ok");
+        const auto cbTrackId = cb["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (cbTrackId), "METER-001: a freshly created bus/return track is metered");
+
+        // Self-healing proof: a track whose meter was explicitly DISABLED gets re-metered
+        // the next time a mutating command (add_midi_clip on an EXISTING track, not the
+        // auto-create branch above) touches it — proving the call really lives in the
+        // command handler, not just riding create_track's own auto-meter.
+        auto healTrack = cmd (ops, "create_track", args1 ("name", "ReHeal"))["data"].getProperty ("trackId", var()).toString();
+        check (meterOn (healTrack), "ReHeal track starts metered (create_track)");
+        check (ok (cmd (ops, "disable_track_meter", args1 ("trackId", healTrack))), "disable_track_meter on ReHeal ok");
+        check (! meterOn (healTrack), "ReHeal track is un-metered after disable");
+        check (ok (cmd (ops, "add_midi_clip", objN ({{ "trackId", healTrack }, { "name", "Heal" }}))),
+               "add_midi_clip on the existing ReHeal track ok");
+        check (meterOn (healTrack), "METER-001: add_midi_clip self-heals a track whose meter was disabled");
     }
 
     // ─── Wave: recording (arm / input monitor / snapshot plumbing) ───

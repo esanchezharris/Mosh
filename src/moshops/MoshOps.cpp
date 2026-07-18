@@ -1320,6 +1320,17 @@ juce::var MoshOps::cmdCreateTrack (const juce::var& args)
         ensureDefaultInstrument (*track, true);   // sampler + kit
     }
 
+    // METER-001 — auto-meter every freshly created track (must run AFTER any
+    // same-command instrument/plugin setup above, since ensureTrackMeter appends
+    // at the CURRENT end of the chain — calling it any earlier would leave the
+    // tap ahead of the instrument, silently mismeasuring the track's real output).
+    // Previously only enable_all_meters (called once at UI init) covered this, so
+    // any track created mid-session — here, or via import/paste/add_midi_clip/
+    // add_drum_pattern/create_bus/accept_render's Neural Renders lane, all fixed
+    // alongside this one — never appeared in the "levels" telemetry. Best-effort:
+    // a meter-creation failure must not fail track creation itself.
+    ensureTrackMeter (*track);
+
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("type", type);
@@ -2468,6 +2479,7 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
     if (track == nullptr)
         track = createAudioTrack ({});
     if (track == nullptr) return errResult (command, "no track");
+    ensureTrackMeter (*track);   // METER-001 — self-healing: covers both the auto-created and the resolved-existing case
 
     const double len = audioFile.getLength();
     auto name = clipName;
@@ -4851,6 +4863,8 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
         if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
             mm->runDispatchLoopUntil (1);
 
+    ensureTrackMeter (*track);   // METER-001 — self-healing: covers both the auto-created and the resolved-existing case
+
     auto* data = new DynamicObject();
     data->setProperty ("clipId", pasted->itemID.toString());
     data->setProperty ("trackId", track->itemID.toString());
@@ -5310,6 +5324,11 @@ juce::var MoshOps::cmdCreateBus (const juce::var& args)
         r->busNumber = bus;
     track->pluginList.insertPlugin (plugin, 0, nullptr);
     ensureVolumePlugin (*track);
+    // METER-001 — after the return/volume plugins so the tap stays truly last (post-fader).
+    // Not surfaced in v2's arrangement (bus/return tracks are excluded from TrackLaneHeader,
+    // matching classic Mixer.tsx's `!t.isReturn` filter) but kept consistent with what
+    // enable_all_meters already covers for every AudioTrack, buses included.
+    ensureTrackMeter (*track);
     edit.setAuxBusName (bus, name);
 
     auto* data = new DynamicObject();
@@ -6408,6 +6427,8 @@ juce::var MoshOps::cmdAddMidiClip (const juce::var& args)
     // no notes — the user programs it in the piano roll. (No default arpeggio: that
     // surprised users with phantom notes. Callers wanting seed content pass `notes`.)
 
+    ensureTrackMeter (*track);   // METER-001 — after the instrument load above so the tap stays post-fader
+
     auto* data = new DynamicObject();
     data->setProperty ("clipId", clip->itemID.toString());
     data->setProperty ("trackId", track->itemID.toString());
@@ -6527,6 +6548,13 @@ juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
         outClipId = clip->itemID.toString();
         outTrackId = track->itemID.toString();
     }
+
+    // METER-001 — self-healing for both branches (targetClip's own track may pre-date
+    // this fix; the new-track branch's instrument load is already behind us here).
+    // Resolved via outTrackId (not the `track` local, which stays null in the
+    // per-lane-replace/targetClip branch) so one call covers both paths.
+    if (auto* mt = findTrack (outTrackId))
+        ensureTrackMeter (*mt);
 
     auto* data = new DynamicObject();
     data->setProperty ("clipId", outClipId);
@@ -8402,6 +8430,9 @@ te::AudioTrack* MoshOps::findOrCreateHiddenRenderTrack()
     // The single shared, instrument-free, snapshot-excluded track that holds every drum/MIDI
     // beneath-render clip (Phase 2). Found by its moshHidden flag (the name is cosmetic); created
     // once and reused. NOT undo-created on purpose mismatch — it's created inside the caller's txn.
+    // METER-001 — deliberately NOT auto-metered: it's excluded from snapshot() entirely (the
+    // producer never sees this track), so a meter tap here would only cost cycles + bytes over
+    // the "levels" bridge event with no UI ever able to read it.
     for (auto* t : te::getAudioTracks (eng.edit()))
         if (t != nullptr && (bool) t->state.getProperty (ids::moshHidden, false))
             return t;
@@ -9102,6 +9133,7 @@ juce::var MoshOps::cmdAcceptRender (const juce::var& args)
         lane = createAudioTrack ("Neural Renders");
     }
     if (lane == nullptr) return errResult ("accept_render", "no lane");
+    ensureTrackMeter (*lane);   // METER-001 — a normal, snapshot-visible track like any other
 
     // Land the render. Anchor to the clip's LIVE position; only when the layer carries a
     // genuine sub-region (tighter than the current clip span) do we land that sub-range.

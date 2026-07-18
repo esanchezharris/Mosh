@@ -14,6 +14,7 @@ import { IconCamera, IconCameraOff, IconChevronLeft, IconSpark, IconUsers } from
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
+import { MasterMeter } from "../ui/Meter";
 import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
@@ -104,6 +105,10 @@ export function MasterCard() {
             onChange={(e) => void exec("set_master_pan", { pan: Number(e.target.value) })} />
           <span className="v2-val">{Math.round((master?.pan ?? 0) * 100)}</span>
         </label>
+        <div className="v2-field" data-testid="v2-master-meter-field">
+          <span>Level</span>
+          <MasterMeter />
+        </div>
         <MasterPluginRack plugins={plugins} />
       </div>
     </section>

@@ -546,6 +546,13 @@
 .v2-ms button.on.m { background: var(--mute, #ffb454); color: #1a1206; border-color: transparent; }
 .v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
 
+/* Per-track peak meter (Wave 9 telemetry, METER-001 v2 surface) — sizing-only, sits
+   beside Mute/Solo. The bars/gradient/clip-glow themselves are the shared .meter rules
+   in ui/mosh.css (loaded globally); this just narrows the footprint for the compact
+   64px-tall v2 header row. */
+.v2-meter { flex: 0 0 auto; width: 30px; }
+.v2-meter .meter { gap: 3px; }
+
 /* lane content */
 .v2-lane {
   position: relative; height: var(--v2-lane-h);
