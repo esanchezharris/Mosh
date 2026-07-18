@@ -45,7 +45,10 @@ export function buildKeymap(get: Getter): ScopedKeymap {
     const v = get(`key.${action}`);
     if (typeof v === "string" && v.trim()) km = rebindAction(km, action, v.trim());
   }
-  return shell !== "classic" && profile.id === "fl" ? removeCombo(km, "Mod+E") : km;
+  if (shell !== "classic") {
+    for (const combo of profile.reservedKeyCombos) km = removeCombo(km, combo);
+  }
+  return km;
 }
 
 // ── live readers (event-time): the handlers call these so the latest settings apply

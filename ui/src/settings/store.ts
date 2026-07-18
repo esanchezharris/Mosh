@@ -23,6 +23,8 @@ import { applySettingEffects } from "./effects";
 import {
   DEFAULT_WORKFLOW_PROFILE_ID,
   getWorkflowProfile,
+  isWorkflowBrowserTab,
+  isWorkflowSectionZoom,
   type WorkflowProfileId,
   type WorkflowWorkspace,
   type WorkflowWorkspaceOverride,
@@ -94,9 +96,9 @@ function sanitizeWorkspaceOverride(raw: unknown): WorkflowWorkspaceOverride {
   const input = raw as Record<string, unknown>;
   const out: WorkflowWorkspaceOverride = {};
   if (typeof input.browserOpen === "boolean") out.browserOpen = input.browserOpen;
-  if (typeof input.browserTab === "string" && input.browserTab.length > 0) out.browserTab = input.browserTab;
+  if (isWorkflowBrowserTab(input.browserTab)) out.browserTab = input.browserTab;
   if (typeof input.rightOpen === "boolean") out.rightOpen = input.rightOpen;
-  if (typeof input.sectionZoom === "string" && input.sectionZoom.length > 0) out.sectionZoom = input.sectionZoom;
+  if (isWorkflowSectionZoom(input.sectionZoom)) out.sectionZoom = input.sectionZoom;
   if (typeof input.drumWindowOpen === "boolean") out.drumWindowOpen = input.drumWindowOpen;
   return out;
 }

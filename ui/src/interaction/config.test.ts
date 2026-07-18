@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { defaultSettings, type SettingValue } from "../settings/schema";
 import { buildFeel, buildKeymap, gestureTableName } from "./config";
@@ -32,6 +34,11 @@ describe("gestureTableName", () => {
 });
 
 describe("buildKeymap", () => {
+  it("consumes reserved combos from profile metadata without duplicating Mod+E", () => {
+    const source = readFileSync(resolve("src/interaction/config.ts"), "utf8");
+    expect(source).not.toContain('"Mod+E"');
+  });
+
   it("keeps Classic on the selected legacy keymap axis", () => {
     const km = buildKeymap(getterFrom({ uiShell: "classic", keymap: "ableton", workflowProfile: "fl" }));
     expect(resolveKey(km, { key: "e", metaKey: true })).toBe(A.SPLIT); // Ableton-only
