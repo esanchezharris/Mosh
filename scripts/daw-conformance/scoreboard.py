@@ -27,6 +27,7 @@ import coverage_check
 REPO = Path(__file__).resolve().parents[2]
 SELF = Path(__file__).resolve().parent
 EVAL_CSV = REPO / "docs" / "reality-pack" / "mosh_daw_eval_suite.csv"
+MATRIX_CSV = REPO / "docs" / "reality-pack" / "daw_capability_matrix.csv"
 VERDICTS = SELF / "verdicts.json"
 BACKLOG = REPO / "docs" / "auto-loop" / "backlog.jsonl"
 OUT = REPO / "docs" / "FEATURE_AUDIT.md"
@@ -108,6 +109,34 @@ def render():
              f"see `scripts/daw-conformance/coverage_waivers.json`); "
              f"{len(cov['uncovered'])} uncovered.")
     L.append("")
+
+    if MATRIX_CSV.exists():
+        mrows = list(csv.DictReader(MATRIX_CSV.open()))
+        L.append("## Capability parity by tier (the honest headline)")
+        L.append("")
+        L.append("_From `docs/reality-pack/daw_capability_matrix.csv` — the sourced enumeration of "
+                 "what Ableton Live 12 / FL Studio / Pro Tools / Reaper 7 can do (2-of-4 inclusion "
+                 "rule), each row code-dispositioned on TWO axes: does the engine surface exist, and "
+                 "can a mouse/keyboard user reach it. The conformance suite above proves what EXISTS "
+                 "works; this table shows how much of the full DAW surface exists. Tier assignments "
+                 "are a DRAFT pending owner review._")
+        L.append("")
+        L.append("| Tier | capabilities | engine shipped | UI reachable | SHIPPED | PARTIAL | MISSING |")
+        L.append("|---|---|---|---|---|---|---|")
+        tier_label = {"T0": "T0 — daily-driver core", "T1": "T1 — pro",
+                      "T2": "T2 — niche", "X": "X — rejected (owner-signed)"}
+        for tier in ("T0", "T1", "T2", "X"):
+            rows_t = [r for r in mrows if r.get("tier") == tier]
+            if not rows_t:
+                continue
+            n = len(rows_t)
+            eng = sum(1 for r in rows_t if r.get("mosh_engine") in ("shipped", "n/a"))
+            ui = sum(1 for r in rows_t if r.get("mosh_ui") in ("shipped", "n/a"))
+            d = {k: sum(1 for r in rows_t if r.get("disposition") == k)
+                 for k in ("SHIPPED", "PARTIAL", "MISSING")}
+            L.append(f"| {tier_label[tier]} | {n} | {eng} ({round(100 * eng / n)}%) | "
+                     f"{ui} ({round(100 * ui / n)}%) | {d['SHIPPED']} | {d['PARTIAL']} | {d['MISSING']} |")
+        L.append("")
 
     L.append("## Parity by area (eval suite)")
     L.append("")
