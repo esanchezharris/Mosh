@@ -1,0 +1,42 @@
+# v2 Shell UI/UX Edge-Case Sweep — 2026-07-18
+
+Systematic edge-case pass over the v2 shell (live browser vs the mock backend on this
+worktree, cream + dark themes). Continues the ID numbering of
+[SWEEP_2026-07-17.md](SWEEP_2026-07-17.md) (#40–#42 carried in from there).
+Lenses: L1 overlays/Escape · L2 MP dialogs · L3 drag · L4 empty/degenerate · L5 hostile
+text · L6 zoom · L7 viewport · L8 rapid-fire · L9 error surfaces · L10 inspector tabs ·
+L11 scale · L12 themes.
+
+Severity: BLOCKER / MAJOR / MINOR / NOTE. Disposition: fix-now · log-only ·
+mock-limited · out-of-scope(polish-loop | auto-loop | native).
+
+| ID | Sev | Lens | Finding | Where | Repro | Disposition |
+|----|-----|------|---------|-------|-------|-------------|
+| 40 | MINOR | L2 | Lock-denied error surfaces a raw peer UUID ("blocked: locked by <uuid>") | native msg `src/multiplayer/LockManager.cpp:120`; renders at `ui/src/v2/AppV2.tsx` errbar | needs native MP session; mock never enforces locks | fix-now (display-layer UUID→peer-name mapping); native msg text = log-only `native` |
+| 41 | MINOR | L1 | v2 overflow menu ignores Escape — never joins the escape stack | `ui/src/v2/TopBar.tsx` OverflowMenu (local state + backdrop only) | open ⋯ menu → Esc → still open (`aria-expanded` stays true) | fix-now |
+| 42 | MINOR | L2 | Join failure shows only the global error bar, no inline feedback in the join panel | `ui/src/ui/MultiplayerPanel.tsx` (`void join(...)` discards result) | mock `mp_join_session` always succeeds — not reproducible live | fix-now (+ deterministic mock failure path as enabler) |
+| 43 | MAJOR | L1 | Escape falls **through** the open overflow menu and closes the overlay *underneath* it (menu isn't in the stack, so the topmost stack entry — e.g. the MP modal — takes the key) | `ui/src/v2/TopBar.tsx` + `ui/src/hooks/escapeStack` | open MP modal → open ⋯ menu → Esc → MP modal closes, menu stays | fix-now (same fix as #41; pin ordering in spec) |
+| 44 | MAJOR | L2/L12 | Classic `.modal` surfaces inside the v2 shell render near-invisible text in the cream theme: headings/labels/roster inherit the v2 dark-panel text token `rgb(240,239,233)` on the modal's white bg (contrast ≈ 1.09:1). Hits the MP launcher modal, the destructive Join ConfirmDialog title, "2-player session" label, all roster peer names | `ui/src/v2/shell.css` (v2 text color cascades into `.modal`) / classic `mosh.css` modal tokens | open Invite modal in cream theme; computed color of `.modal-head .display` = #f0efe9 on #fff | fix-now |
+| 45 | MINOR | L2/L5 | MP roster rows don't truncate long peer names: a 220-char name blows the row to scrollWidth 1400px and the **modal itself** to 1414px (client 418) — horizontal overflow, presence dot pushed out of view | `.mp-peer` rows in `ui/src/ui/MultiplayerPanel.tsx` / its CSS | inject peer with 220-char name → open Session modal | fix-now (min-width:0 + ellipsis) |
+| 46 | NOTE | L2 | Empty peer name renders a blank roster row (colour chip + dot only) | `ui/src/ui/MultiplayerPanel.tsx` | inject peer `{name:""}` | log-only (fallback label nice-to-have; fold into #45 if trivial) |
+| 47 | MINOR | L4 | Zero-track project is an affordance dead-end: the "Add track" row lives inside the track list and vanishes with the last track — the empty state ("No tracks yet…") carries no control at all; only Ask Moshi or the File menu can create a track | `ui/src/v2/lanes/TrackLaneList.tsx` empty branch | remove all tracks → no add/track button in DOM | fix-now (render the Add-track affordance in the empty state) |
+| 48 | MINOR | L4 | A fully-overlapped clip is unreachable by pointer: `elementFromPoint` over a 0.05s clip hits the covering clip's trim handle; selection does not raise z-order (`z-index: auto` on `.v2-clip`, no `.sel` elevation), so there is no rescue path except moving the top clip | `ui/src/v2/lanes/ClipView.tsx` / `shell.css` `.v2-clip` | two clips at same start; click the smaller | fix-now (cheap: `.v2-clip.sel { z-index: 1 }` so marquee/inspector selection rescues); full z-cycling = log-only product gap |
+| 49 | MINOR | L5 | Inspector card title doesn't truncate the track name: `Inspector · {track.name}` renders a 240-emoji name across ~7 wrapped lines, pushing Mix controls (Out/MIDI-in rows) off the panel bottom | `ui/src/v2/inspector/Inspector.tsx:50` `.v2-card-head span` | rename selected track to 240 emoji | fix-now (one-line ellipsis on the head span) |
+| 50 | NOTE | L5 | Clip name label hard-clips at the clip edge (no ellipsis): `.v2-clip-label` grows to content width (2177px in a 130px clip) inside `overflow:hidden` — paint is clipped mid-character | `ui/src/v2/lanes/ClipView.tsx` label / `shell.css` | 250-char clip name | out-of-scope(polish-loop) — cosmetic truncation nit; layout does NOT break (earlier width-growth suspicion was refuted: clip width is explicit `style={{left,width}}`) |
+| 51 | MINOR | L6 | "Full" zoom silently fails to fit long projects: `fit()` computes pxPerSec = width/(totalBars×barLen) but the store clamps at 20, so a ~100-bar project shows ~20% of the song with "Full" active (scrollW 4350 vs clientW 866) and no indication | `ui/src/v2/lanes/TrackLaneList.tsx` `fit()` + `store.setPxPerSec` clamp | clip at start:200s → click Full | triage: fix-now if cheap (fit-path bypass of the lower clamp), else log-only (SongNav mitigates) |
+| 52 | MAJOR | L7 | No minimum shell width + absolutely-centred transport → progressive topbar self-destruction: count-in grazes the transport at ~1100px, title×transport overlap 45×45 at 1024px, transport covers the time-sig controls at 768px, and ≤~560px the whole shell piles up (rail renders through lanes, Moshi through the timeline, topbar unreadable) | `ui/src/v2/shell.css` topbar/stage grid | resize to 1024/768/375 wide | fix-now (shell min-width + `overflow-x:auto` at the app root = honest scroll floor; full responsive topbar collapse = log-only follow-up) |
+| 53 | MAJOR | L9 | An unbroken token in `lastError` (long path, UUID chain, arg dump) breaks the whole shell: the errbar has no `overflow-wrap`, grows to content width (~4000px), and inflates its grid column — the stage displaces right (measured stageX 652 vs ~76), the right rail leaves the viewport, and the message tail is unreadable | `ui/src/v2/AppV2.tsx` errbar / `shell.css` `.v2-errbar` | `setState({lastError: "x".repeat(400)})` | fix-now (`overflow-wrap:anywhere` + `min-width:0` on the bar's grid track) |
+| 54 | MINOR | L9/L12 | v2 errbar text is near-unreadable in the cream theme: pale pink `rgb(255,179,193)` on a 14%-alpha rose wash over the cream ground (the classic `error-bar` right beside it uses correct light-theme colours). Dark theme is fine — theme-duality class | `shell.css` `.v2-errbar` colour token | force an error in cream theme | fix-now (light-theme override via `[data-theme="light"]`) |
+| 55 | MINOR | L10 | Inspector header lies about editing context: it renders the *track-selection* track (`Inspector · Drums`) while the Clip/Warp tabs operate on the selected clip living on a different track (Keys) — selecting a clip doesn't focus its track | `ui/src/v2/inspector/Inspector.tsx` (track vs selectedClip derivation) | select Drums track, then click a clip on Keys → open Clip tab | fix-now (derive the header/track context from the selected clip's track when a clip is selected) |
+| 56 | NOTE | L11 | At 53 tracks / 76 clips the browser-pane tooling repeatedly timed out (30s) on scroll/JS probes, but a `longtask` observer recorded ZERO main-thread long tasks — evidence points at the measurement tooling (WebGL Moshi canvas slowing pane captures), not app jank; visual rendering stayed correct. Needs the deterministic Playwright scale smoke for a verdict | `ui/src/v2/lanes/TrackLaneList.tsx` (no virtualization — known design state) | 50× create_track + clips via `__moshStore` | log-only + e2e scale smoke; virtualization = tracked product gap |
+
+## Verified-sane (no finding)
+
+- Escape stack ordering is correct for participating overlays: ConfirmDialog atop MP
+  modal closes one at a time; piano roll closes cleanly; clip context menu's private
+  Escape works standalone.
+- Destructive join is gated by a ConfirmDialog (#350 behavior confirmed).
+- Topbar avatar cluster caps at 4 avatars + "+N" chip with 6 peers; emoji/RTL initials
+  render.
+- Baselines before any change: typecheck clean · vitest 1363 passed (146 files) ·
+  e2e isolated 152 passed (1.9m).
