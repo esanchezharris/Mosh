@@ -232,6 +232,11 @@ function interactionSettings(): SettingDef[] {
       help: "Which DAW's keyboard shortcut set.",
       constraints: { options: DAW_OPTIONS },
     },
+    {
+      id: "scaleLock", type: "bool", default: false, scope: "app",
+      category: "Interaction", label: "Scale lock",
+      help: "In the piano roll, snap notes you draw or drag to the song key, and dim the out-of-key rows. Existing notes are never rewritten. Off by default — set the key in the topbar.",
+    },
   ];
   const feel: SettingDef[] = FEEL_META.map((m) => ({
     id: `feel.${m.id}`, type: "number", default: FEEL_DEFAULTS[m.id], scope: "app",

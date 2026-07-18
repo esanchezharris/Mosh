@@ -6,17 +6,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import type { MidiNote } from "../types";
 import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
+import { noteName, pitchClass, resolveKey, scaleMask, snapToScale, keyLabel } from "../musicalKey";
 import { DrumSequencer } from "./DrumSequencer";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
 
 const ROW_H = 15;
 const BEAT_PX = 42;
 const LOW = 36, HIGH = 96;
-const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
-const noteName = (p: number) => `${NAMES[((p % 12) + 12) % 12]}${Math.floor(p / 12) - 1}`;
 
 type DragKind = "move" | "resize";
 type Drag = { kind: DragKind; i: number; startX: number; startY: number; orig: MidiNote };
@@ -29,6 +29,7 @@ export function PianoRoll() {
   const exec = useStore((s) => s.exec);
   const snap = useStore((s) => s.snap);
   const snapDivision = useStore((s) => s.snapDivision);
+  const scaleLock = useSettings((s) => Boolean(s.get("scaleLock")));
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
@@ -111,6 +112,13 @@ export function PianoRoll() {
   const gridW = gridBeats * BEAT_PX;
   const yOf = (pitch: number) => (HIGH - pitch) * ROW_H;
   const pitchAt = (y: number) => HIGH - Math.floor(y / ROW_H);
+  // Scale lock (invariant 88) — an INPUT AID, exactly like snap-to-grid above:
+  // it constrains the pitch of notes you draw or drag BEFORE the command is sent,
+  // so notes you never touched are never rewritten. Off ⇒ this whole block is
+  // inert and the roll renders exactly as it did before.
+  const songKey = resolveKey(snapshot?.session.key);
+  const keyMask = scaleMask(songKey);
+  const lockPitch = (pitch: number) => (scaleLock ? snapToScale(pitch, keyMask) : pitch);
   const noteBox = (n: MidiNote) => ({ x: n.start * BEAT_PX, y: yOf(n.pitch) + 1, w: Math.max(6, n.length * BEAT_PX - 1), h: ROW_H - 2 });
   const setPreviewNote = (n: MidiNote | null) => { previewRef.current = n; setPreview(n); };
 
@@ -137,7 +145,10 @@ export function PianoRoll() {
       if (d.kind === "move") {
         const start = Math.max(0, snapBeat(d.orig.start + db));
         const dp = -Math.round((e.clientY - d.startY) / ROW_H);
-        const pitch = Math.min(127, Math.max(0, d.orig.pitch + dp));
+        // Only a gesture that actually moves the PITCH axis may re-pitch the note.
+        // Sliding a note sideways is a request to change its time, not its pitch —
+        // so an existing off-key note survives a time-nudge untouched (invariant 88).
+        const pitch = dp === 0 ? d.orig.pitch : lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
         setPreviewNote({ ...d.orig, start, pitch });
       } else {
         const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
@@ -169,7 +180,7 @@ export function PianoRoll() {
     const wasMoved = gd.moved || Math.hypot(x - gd.x0, y - gd.y0) > 4;
     setLasso(null);
     if (!wasMoved) {
-      const start = Math.max(0, snapBeat(x / BEAT_PX)), pitch = pitchAt(y), length = stepBeats > 0 ? stepBeats : 1;
+      const start = Math.max(0, snapBeat(x / BEAT_PX)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
       return;
     }
@@ -212,6 +223,15 @@ export function PianoRoll() {
             </label>
           )}
           {mode === "piano" && (
+            <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
+              onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}
+              title={scaleLock
+                ? `Scale lock ON — a note you draw, or drag to a new pitch, snaps to ${keyLabel(snapshot?.session.key ?? {})}. Notes you don't move keep their pitch, and so does a note you only slide in time.`
+                : `Scale lock OFF — click to snap notes you draw or re-pitch to ${keyLabel(snapshot?.session.key ?? {})} (set the key in the topbar).`}>
+              Scale {keyLabel(snapshot?.session.key ?? {})}
+            </button>
+          )}
+          {mode === "piano" && (
             <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
           )}
           <button className="btn x" onClick={close}>✕</button>
@@ -226,7 +246,13 @@ export function PianoRoll() {
           <div className="pr-scroll" ref={scrollRef} onScroll={(e) => { if (keysRef.current) keysRef.current.scrollTop = e.currentTarget.scrollTop; }}>
             <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: pitches.length * ROW_H }}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
-              {pitches.map((p) => <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}`} style={{ top: yOf(p), height: ROW_H }} />)}
+              {pitches.map((p) => {
+                // Only shade for the key while the lock is on, so the roll is
+                // pixel-identical to before when the feature is off.
+                const off = scaleLock && !keyMask[pitchClass(p)];
+                const root = scaleLock && pitchClass(p) === songKey.tonic;
+                return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
+              })}
               {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * BEAT_PX }} />)}
               {notes.map((n) => {
                 const b = noteBox(n);
