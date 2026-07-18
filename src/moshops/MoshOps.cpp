@@ -463,6 +463,33 @@ namespace
         return peaks;
     }
 
+    // Overall absolute-value peak sample across a reader's whole span (linear, 0..~1+).
+    // Shared with normalize_clip — reuses the same block-read shape as bucketedPeaks
+    // (Stage-2's get_clip_peaks path) instead of a dedicated render job (tracktion's
+    // ClipEffects/NormaliseEffect are an unused, heavier subsystem for this).
+    float findSourcePeak (juce::AudioFormatReader& reader)
+    {
+        const auto total = (juce::int64) reader.lengthInSamples;
+        const int chans = (int) reader.numChannels;
+        if (total <= 0 || chans <= 0) return 0.0f;
+
+        constexpr juce::int64 blockSize = 65536;
+        juce::AudioBuffer<float> buf (chans, (int) juce::jmin (blockSize, total));
+        float peak = 0.0f;
+        for (juce::int64 start = 0; start < total; start += blockSize)
+        {
+            const int n = (int) juce::jmin (blockSize, total - start);
+            buf.clear();
+            reader.read (&buf, 0, n, start, true, chans > 1);
+            for (int c = 0; c < buf.getNumChannels(); ++c)
+            {
+                auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
+                peak = juce::jmax (peak, std::abs (r.getStart()), std::abs (r.getEnd()));
+            }
+        }
+        return peak;
+    }
+
     String findSerumRealtimeRenderReason (te::Edit& edit)
     {
         for (auto* track : te::getAudioTracks (edit))
@@ -993,6 +1020,9 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
     if (name == "set_clip_fade")     return cmdSetClipFade (args);
+    if (name == "set_clip_reverse")  return cmdSetClipReverse (args);
+    if (name == "set_clip_crossfade") return cmdSetClipCrossfade (args);
+    if (name == "normalize_clip")    return cmdNormalizeClip (args);
     if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
     if (name == "stretch_clip")      return cmdStretchClip (args);
@@ -4024,6 +4054,69 @@ juce::var MoshOps::cmdSetClipFade (const juce::var& args)
     data->setProperty ("fadeInSec",  ac->getFadeIn().inSeconds());
     data->setProperty ("fadeOutSec", ac->getFadeOut().inSeconds());
     return okResult ("set_clip_fade", var (data));
+}
+
+// clip-ops wave — reverse / auto-crossfade / normalize. Mirrors cmdSetClipGain's
+// shape exactly: audio-clip-only (AudioClipBase), one CachedValue flip, undoable
+// via the clip's own ValueTree (no src/state schema change, free persistence).
+juce::var MoshOps::cmdSetClipReverse (const juce::var& args)
+{
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_reverse", "not an audio clip");
+    beginTxn ("set_clip_reverse");
+    ac->setIsReversed ((bool) args.getProperty ("reversed", false));
+    logLine ("set_clip_reverse", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_reverse");
+}
+
+// Auto-crossfade only has an audible effect when this clip OVERLAPS a neighbor on
+// the same track (Tracktion auto-computes a triangular fade via getOverlappingClip);
+// Mosh otherwise leaves it off, so overlapping clips sum at full volume (see the
+// comment on cmdSetClipFade above). This just exposes the toggle.
+juce::var MoshOps::cmdSetClipCrossfade (const juce::var& args)
+{
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_crossfade", "not an audio clip");
+    beginTxn ("set_clip_crossfade");
+    ac->setAutoCrossfade ((bool) args.getProperty ("enabled", false));
+    logLine ("set_clip_crossfade", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_clip_crossfade");
+}
+
+juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
+{
+    // Non-destructive: reads the source's true peak sample via the SAME reader path
+    // get_clip_peaks uses (no re-render, no source-file mutation), then sets the
+    // clip's own gain — the identical AudioClipBase::setGainDB set_clip_gain uses —
+    // so the peak lands at targetDb. Undo restores the prior gain exactly like
+    // set_clip_gain. (newGainDb = targetDb - peakDb algebraically absorbs any gain
+    // already on the clip, so "set" vs "add a delta" converge to the same result.)
+    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (wave == nullptr) return errResult ("normalize_clip", "no wave clip");
+
+    auto file = wave->getCurrentSourceFile();
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr) return errResult ("normalize_clip", "cannot read source");
+
+    const float peakLinear = findSourcePeak (*reader);
+    if (peakLinear <= 0.0f) return errResult ("normalize_clip", "clip is silent (peak 0) — nothing to normalize");
+
+    const double targetDb = args.hasProperty ("targetDb") ? (double) args.getProperty ("targetDb", 0.0) : 0.0;
+    const float peakDb = juce::Decibels::gainToDecibels (peakLinear);
+    const float newGainDb = juce::jlimit (-48.0f, 24.0f, (float) targetDb - peakDb);
+
+    beginTxn ("normalize_clip");
+    wave->setGainDB (newGainDb);
+    logLine ("normalize_clip", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", wave->itemID.toString());
+    data->setProperty ("gainDb", (double) wave->getGainDB());
+    data->setProperty ("peakDb", (double) peakDb);
+    return okResult ("normalize_clip", var (data));
 }
 
 juce::var MoshOps::cmdRelinkClip (const juce::var& args)
@@ -10475,6 +10568,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("fadeOutSec",  w->getFadeOut().inSeconds());
         o->setProperty ("fadeInType",  (int) w->getFadeInType());   // 1..4 — UI only needs durations for v1
         o->setProperty ("fadeOutType", (int) w->getFadeOutType());
+        // clip-ops wave — reverse / auto-crossfade: additive, unconditional (mirrors
+        // gainDb/autoTempo) so the snapshot always reflects current state, default off.
+        o->setProperty ("reversed",      w->getIsReversed());
+        o->setProperty ("autoCrossfade", w->getAutoCrossfade());
         // Audio warp (auto-tempo): the clip follows the tempo map when on.
         o->setProperty ("autoTempo", w->getAutoTempo());
         if (w->getAutoTempo())

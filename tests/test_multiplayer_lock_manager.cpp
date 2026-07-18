@@ -54,6 +54,10 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("set_clip_mute")  == Scope::Clip);
     // G4b — clip fades carry a clipId like gain/mute; same clip-scoped key resolution.
     REQUIRE (LockManager::classify ("set_clip_fade")  == Scope::Clip);
+    // clip-ops wave — reverse / auto-crossfade / normalize also carry a clipId.
+    REQUIRE (LockManager::classify ("set_clip_reverse")   == Scope::Clip);
+    REQUIRE (LockManager::classify ("set_clip_crossfade") == Scope::Clip);
+    REQUIRE (LockManager::classify ("normalize_clip")     == Scope::Clip);
 }
 
 TEST_CASE ("classify: render-layer mutations are clip-scoped", "[multiplayer][lock]")

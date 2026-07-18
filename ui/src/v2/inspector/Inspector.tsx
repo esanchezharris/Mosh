@@ -205,6 +205,10 @@ function ClipTab({ clip }: { clip: Clip }) {
   const exec = useStore((s) => s.exec);
   const isWave = clip.type === "wave";
   const clampToLength = (v: number) => Math.max(0, Math.min(v, clip.length));
+  // clip-ops wave — normalize's optional target dB. Local-only (not a command arg
+  // until the button fires); defaults to 0 dB, the same default the backend uses
+  // when targetDb is omitted.
+  const [normalizeTargetDb, setNormalizeTargetDb] = useState(0);
   return (
     <div className="v2-mix" data-testid="v2-clip-tab">
       <label className="v2-field">
@@ -280,6 +284,51 @@ function ClipTab({ clip }: { clip: Clip }) {
           >
             {FADE_CURVES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+        </label>
+      )}
+      {isWave && (
+        // clip-ops wave — reverse / auto-crossfade toggles + normalize. Wave-clip-only
+        // (set_clip_reverse/set_clip_crossfade/normalize_clip all reject non-audio
+        // clips backend-side, same as gain/fades above). Auto-crossfade is only
+        // audible where this clip overlaps a neighbor on the same track.
+        <div className="v2-mix-btns">
+          <button
+            className={clip.reversed ? "on" : ""}
+            aria-pressed={!!clip.reversed}
+            data-testid="v2-clip-reverse"
+            onClick={() => void exec("set_clip_reverse", { clipId: clip.id, reversed: !clip.reversed })}
+          >
+            Reverse
+          </button>
+          <button
+            className={clip.autoCrossfade ? "on" : ""}
+            aria-pressed={!!clip.autoCrossfade}
+            data-testid="v2-clip-crossfade"
+            title="Only audible where this clip overlaps a neighbor on the same track"
+            onClick={() => void exec("set_clip_crossfade", { clipId: clip.id, enabled: !clip.autoCrossfade })}
+          >
+            Auto-crossfade
+          </button>
+        </div>
+      )}
+      {isWave && (
+        <label className="v2-field">
+          <span>Normalize to</span>
+          <input
+            type="number"
+            step={0.5}
+            value={normalizeTargetDb}
+            data-testid="v2-clip-normalize-target"
+            onChange={(e) => setNormalizeTargetDb(Number(e.target.value))}
+          />
+          <span className="v2-val">dB</span>
+          <button
+            className="btn"
+            data-testid="v2-clip-normalize"
+            onClick={() => void exec("normalize_clip", { clipId: clip.id, targetDb: normalizeTargetDb })}
+          >
+            Normalize
+          </button>
         </label>
       )}
       <div className="v2-mix-btns">

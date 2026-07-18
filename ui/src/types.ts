@@ -201,6 +201,10 @@ export type Clip = {
   fadeOutSec?: number;
   fadeInType?: number;
   fadeOutType?: number;
+  // clip-ops wave — reverse / auto-crossfade (wave clips only). autoCrossfade only
+  // has an audible effect when this clip overlaps a neighbor on the same track.
+  reversed?: boolean;
+  autoCrossfade?: boolean;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;

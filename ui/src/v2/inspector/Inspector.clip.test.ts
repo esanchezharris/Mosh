@@ -240,4 +240,78 @@ describe("v2 Inspector Clip tab", () => {
     // when displayed (the engine clamps identically server-side on the next set).
     expect(Number(slider!.value)).toBeLessThanOrEqual(2);
   });
+
+  // clip-ops wave — reverse / auto-crossfade / normalize.
+  it("shows reverse/crossfade/normalize for a wave clip but not for a MIDI clip", () => {
+    render(makeSnapshot(waveClip()));
+    expect(host.querySelector('[data-testid="v2-clip-reverse"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-crossfade"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-normalize"]')).not.toBeNull();
+
+    act(() => useShell.setState({ selectedClipId: "m1", inspectorTab: "clip" }));
+    render(makeSnapshot(midiClip()));
+    expect(host.querySelector('[data-testid="v2-clip-reverse"]')).toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-crossfade"]')).toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-normalize"]')).toBeNull();
+  });
+
+  it("clicking Reverse execs set_clip_reverse with the flipped value", () => {
+    render(makeSnapshot(waveClip({ reversed: false })));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-reverse"]');
+    expect(btn!.getAttribute("aria-pressed")).toBe("false");
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "set_clip_reverse");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", reversed: true });
+  });
+
+  it("reflects an already-reversed clip (aria-pressed) and un-reverses on click", () => {
+    render(makeSnapshot(waveClip({ reversed: true })));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-reverse"]');
+    expect(btn!.getAttribute("aria-pressed")).toBe("true");
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "set_clip_reverse");
+    expect(call!.args).toMatchObject({ clipId: "c1", reversed: false });
+  });
+
+  it("clicking Auto-crossfade execs set_clip_crossfade with the flipped value", () => {
+    render(makeSnapshot(waveClip({ autoCrossfade: false })));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-crossfade"]');
+    expect(btn!.getAttribute("aria-pressed")).toBe("false");
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "set_clip_crossfade");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", enabled: true });
+  });
+
+  it("reflects an already-crossfaded clip (aria-pressed) and disables on click", () => {
+    render(makeSnapshot(waveClip({ autoCrossfade: true })));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-crossfade"]');
+    expect(btn!.getAttribute("aria-pressed")).toBe("true");
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "set_clip_crossfade");
+    expect(call!.args).toMatchObject({ clipId: "c1", enabled: false });
+  });
+
+  it("clicking Normalize execs normalize_clip with the default target (0 dB)", () => {
+    render(makeSnapshot(waveClip()));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-normalize"]');
+    expect(btn).not.toBeNull();
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "normalize_clip");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", targetDb: 0 });
+  });
+
+  it("changing the target dB field then clicking Normalize execs normalize_clip with that target", () => {
+    render(makeSnapshot(waveClip()));
+    const input = host.querySelector<HTMLInputElement>('[data-testid="v2-clip-normalize-target"]');
+    expect(input).not.toBeNull();
+    act(() => setInputValue(input!, "-6"));
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-normalize"]');
+    act(() => btn!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const call = execCalls.find((c) => c.command === "normalize_clip");
+    expect(call).toBeTruthy();
+    expect(call!.args).toMatchObject({ clipId: "c1", targetDb: -6 });
+  });
 });

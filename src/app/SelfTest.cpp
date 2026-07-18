@@ -1242,6 +1242,106 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check ((int) clipById (cid).getProperty ("fadeInType", 0) == 2, "clip fadeInType reflects curveIn=convex");
         check ((int) clipById (cid).getProperty ("fadeOutType", 0) == 4, "clip fadeOutType reflects curveOut=sCurve");
 
+        // clip-ops wave — reverse / auto-crossfade. Mirrors the fade tests above exactly:
+        // audio-clip-only, undoable via the same CachedValue.referTo path, free
+        // persistence (no src/state schema change).
+        check (! (bool) clipById (cid).getProperty ("reversed", true), "clip reversed defaults to false");
+        check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", cid }, { "reversed", true }}))), "set_clip_reverse ok");
+        check ((bool) clipById (cid).getProperty ("reversed", false), "clip reversed reflects in snapshot");
+        check (ok (cmd (ops, "undo")), "undo set_clip_reverse ok");
+        check (! (bool) clipById (cid).getProperty ("reversed", true), "undo restores clip un-reversed");
+        check (ok (cmd (ops, "redo")), "redo set_clip_reverse ok");
+        check ((bool) clipById (cid).getProperty ("reversed", false), "redo re-applies clip reverse");
+
+        check (! (bool) clipById (cid).getProperty ("autoCrossfade", true), "clip autoCrossfade defaults to false");
+        check (ok (cmd (ops, "set_clip_crossfade", objN ({{ "clipId", cid }, { "enabled", true }}))), "set_clip_crossfade ok");
+        check ((bool) clipById (cid).getProperty ("autoCrossfade", false), "clip autoCrossfade reflects in snapshot (round-trips)");
+        check (ok (cmd (ops, "undo")), "undo set_clip_crossfade ok");
+        check (! (bool) clipById (cid).getProperty ("autoCrossfade", true), "undo restores clip autoCrossfade off");
+        check (ok (cmd (ops, "redo")), "redo set_clip_crossfade ok");
+        check ((bool) clipById (cid).getProperty ("autoCrossfade", false), "redo re-applies clip autoCrossfade");
+
+        // Save/reload persistence — both ride Tracktion's own ValueTree (isReversed /
+        // autoCrossfade CachedValues), no src/state code at all, mirrors the fade proof.
+        cmd (ops, "save"); cmd (ops, "reload");
+        check ((bool) clipById (cid).getProperty ("reversed", false), "clip reversed persists across save/reload");
+        check ((bool) clipById (cid).getProperty ("autoCrossfade", false), "clip autoCrossfade persists across save/reload");
+
+        // Type rejection: both are audio-clip-only (mirrors set_clip_gain/set_clip_fade).
+        {
+            auto midiRev = cmd (ops, "add_midi_clip", objN ({{ "trackId", et }, { "length", 1.0 }}));
+            const auto midiRevCid = midiRev["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", midiRevCid }, { "reversed", true }}))),
+                   "set_clip_reverse on a MIDI clip rejected");
+            check (! ok (cmd (ops, "set_clip_crossfade", objN ({{ "clipId", midiRevCid }, { "enabled", true }}))),
+                   "set_clip_crossfade on a MIDI clip rejected");
+            cmd (ops, "remove_clip", args1 ("clipId", midiRevCid));   // tidy
+        }
+
+        // JSONL: both logged undoable:true (mirrors the fade assert).
+        {
+            auto rlog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool revU = false, xfU = false;
+            for (auto& ln : StringArray::fromLines (rlog))
+            {
+                if (ln.contains ("\"command\": \"set_clip_reverse\"")   && ln.contains ("\"undoable\": true")) revU = true;
+                if (ln.contains ("\"command\": \"set_clip_crossfade\"") && ln.contains ("\"undoable\": true")) xfU = true;
+            }
+            check (revU, "set_clip_reverse logged undoable:true");
+            check (xfU, "set_clip_crossfade logged undoable:true");
+        }
+
+        // Leave both off for downstream (the undo/redo pairs above left them ON).
+        cmd (ops, "set_clip_reverse",   objN ({{ "clipId", cid }, { "reversed", false }}));
+        cmd (ops, "set_clip_crossfade", objN ({{ "clipId", cid }, { "enabled",  false }}));
+
+        // clip-ops wave — normalize_clip: non-destructive gain-to-peak. A fresh tone
+        // clip (generateTestTone writes 0.25 peak amplitude) has a known source peak of
+        // ~-12.04 dBFS (20*log10(0.25)); normalizing to the default target (0 dB) should
+        // move the clip's gain to ~+12.04 dB — proving the gain moves toward the target
+        // from a known peak, exactly as the task asks.
+        {
+            auto nCid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", et }, { "seconds", 0.3 }, { "freq", 440.0 }}))["data"].getProperty ("clipId", var()).toString();
+            check (nCid.isNotEmpty(), "tone clip created for normalize_clip");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 999.0) - 0.0) < 0.5, "fresh tone clip starts at ~0 dB gain");
+
+            auto nres = cmd (ops, "normalize_clip", args1 ("clipId", nCid));
+            check (ok (nres), "normalize_clip ok");
+            check (std::abs ((double) nres["data"].getProperty ("peakDb", 0.0) - (-12.04)) < 0.5,
+                   "normalize_clip measures the tone's known ~-12 dB peak");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 0.0) - 12.04) < 0.5,
+                   "normalize_clip (default target 0 dB) moves gain toward +12 dB");
+
+            // Undo restores the prior gain; redo re-applies (same CachedValue path as set_clip_gain).
+            check (ok (cmd (ops, "undo")), "undo normalize_clip ok");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 999.0) - 0.0) < 0.5, "undo restores prior clip gain (~0 dB)");
+            check (ok (cmd (ops, "redo")), "redo normalize_clip ok");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 0.0) - 12.04) < 0.5, "redo re-applies normalize_clip gain");
+
+            // Explicit targetDb: normalizing to -6 dB should land gain around -6-(-12.04) = +6.04 dB.
+            auto nres2 = cmd (ops, "normalize_clip", objN ({{ "clipId", nCid }, { "targetDb", -6.0 }}));
+            check (ok (nres2), "normalize_clip (targetDb -6) ok");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 0.0) - 6.04) < 0.5,
+                   "normalize_clip moves gain toward the requested target, not just 0 dB");
+
+            // Clamp: an extreme target clamps to the same +24 dB ceiling as set_clip_gain.
+            auto nres3 = cmd (ops, "normalize_clip", objN ({{ "clipId", nCid }, { "targetDb", 200.0 }}));
+            check (ok (nres3), "normalize_clip (extreme target) ok");
+            check (std::abs ((double) clipById (nCid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "normalize_clip clamps gain to +24 dB");
+
+            // Silent clip (freq 0 -> an all-zero tone): a clear error, not a silent no-op or crash.
+            auto silentCid = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", et }, { "seconds", 0.2 }, { "freq", 0.0 }}))["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "normalize_clip", args1 ("clipId", silentCid))), "normalize_clip on a silent clip errors gracefully");
+
+            // Type rejection: MIDI clips have no source audio to scan.
+            auto midiNormCid = cmd (ops, "add_midi_clip", objN ({{ "trackId", et }, { "length", 1.0 }}))["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "normalize_clip", args1 ("clipId", midiNormCid))), "normalize_clip on a MIDI clip rejected");
+
+            cmd (ops, "remove_clip", args1 ("clipId", nCid));
+            cmd (ops, "remove_clip", args1 ("clipId", silentCid));
+            cmd (ops, "remove_clip", args1 ("clipId", midiNormCid));
+        }
+
         const int before = trackById (et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
         check (ok (dup), "duplicate_clip ok");
