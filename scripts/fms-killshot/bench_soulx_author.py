@@ -6,7 +6,11 @@ Runs under the phonology venv (cmudict/g2p) so (a) NUS words carry REAL text (re
 correct ARPAbet phonemes and spreads them over note_type 2/3 notes — hand-rolling NUS phones
 sings the wrong words (ruler-proven 0.042 vs clean 0.377); author_score lands them (0.167).
 
-argv:  in.json {"singer","t0","t1","f0":[[t,hz,voiced],...]}   out_score.json
+argv:  in.json {"singer","t0","t1","f0":[[t,hz,voiced],...], "words"?}   out_score.json
+
+`words` is optional: own-pairs items carry their own ground-truth words (Whisper on the
+finished take — real text with apostrophes), so they are passed inline. Absent, the NUS
+lookup-by-singer path runs exactly as before.
 Builds ONE line = one slot per word (segments = the word's syllables, so author_score spreads
 the phones over notes), pitch from the clean F0. Prints the true words (real text) as JSON on
 stdout's last line so the caller can score word-recovery against them.
@@ -48,9 +52,18 @@ def main():
     data = json.load(open(sys.argv[1]))
     f0 = [tuple(x) for x in data["f0"]]
     t0, t1 = float(data["t0"]), float(data["t1"])
-    it = bd.nus_items(singers=[data["singer"]], limit=1)[0]
-    words = [w for w in it["words"]
-             if w["end"] > t0 and w["start"] < t1 and w["word"].isalpha()]
+    if data.get("words") is not None:
+        # own-pairs: real ground-truth words travel with the item (may carry apostrophes,
+        # which .isalpha() would wrongly reject — normalize curly quotes, keep any word
+        # containing a letter). See the apostrophe GOTCHA in the used2 notes.
+        src = [dict(w, word=str(w.get("word", "")).replace("’", "'").strip())
+               for w in data["words"]]
+        words = [w for w in src if w["end"] > t0 and w["start"] < t1
+                 and any(c.isalpha() for c in w["word"])]
+    else:
+        it = bd.nus_items(singers=[data["singer"]], limit=1)[0]
+        words = [w for w in it["words"]
+                 if w["end"] > t0 and w["start"] < t1 and w["word"].isalpha()]
 
     slots, texts = [], []
     for w in words:

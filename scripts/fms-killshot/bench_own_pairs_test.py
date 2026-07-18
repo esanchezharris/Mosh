@@ -71,5 +71,27 @@ check("registry: own-pairs IS train_ok", bd.REGISTRY["own-pairs"]["train_ok"] is
 check("license_tier helper agrees", bd.license_tier("own-pairs") == "train-ok")
 check("registry: nus-48e still eval-only (unchanged)", bd.license_tier("nus-48e") == "eval-only")
 
+# ── the anti-leak invariant + NUS-path equality (pure payload builder) ──────────────────
+import bench_pipeline_render as pr  # noqa: E402
+
+NUS = {"singer": "ADIZ", "clean_vocal": "/d/adiz.wav", "words": [{"word": "hi", "start": 0, "end": 1}]}
+OWN = op.pair_item("S", "/d/S.mumble.wav", "/d/S.finished.wav", WORDS)
+F0 = [[0.0, 220.0, 1]]
+
+check("NUS payload is UNCHANGED (no words key → author's lookup-by-singer path)",
+      pr.author_payload(NUS, 0, 12, F0) == {"singer": "ADIZ", "t0": 0, "t1": 12, "f0": F0})
+check("own-pairs payload carries its own real-text words inline",
+      pr.author_payload(OWN, 0, 12, F0)["words"] == WORDS)
+check("own-pairs payload keeps the rest of the NUS shape",
+      {k: v for k, v in pr.author_payload(OWN, 0, 12, F0).items() if k != "words"}
+      == {"singer": "owner", "t0": 0, "t1": 12, "f0": F0})
+# The finished take is the ANSWER; f0_from must name the mumble for own-pairs. Pin the
+# default so the NUS lane cannot change, and prove the own-pairs key exists to point at.
+import inspect  # noqa: E402
+check("pipeline_generate defaults f0_from to clean_vocal (NUS lane unchanged)",
+      inspect.signature(pr.pipeline_generate).parameters["f0_from"].default == "clean_vocal")
+check("an own-pairs item exposes mumble_vocal for f0_from to point at (no answer leak)",
+      OWN["mumble_vocal"] == "/d/S.mumble.wav" and OWN["clean_vocal"] != OWN["mumble_vocal"])
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)

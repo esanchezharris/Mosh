@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Stage 4 — run the REAL pipeline on the owner's REAL mumbles, in his own voice, and score
+it against the finished takes and the human band.
+
+This is the measurement the whole benchmark exists for, with every confound the NUS lane
+carried finally removed:
+  * the input is a REAL mumble (real rough-draft prosody), not a synthetic degradation;
+  * the reference is a REAL finished vocal of the same song on the same session clock;
+  * the render uses the owner's OWN enrolled voice, so it is in-voice — f0 and register are
+    finally comparable rather than cross-voice.
+
+Arms per window: `mumble` (the floor — hand the draft back unchanged) and `pipeline`
+(author_score on the true words + the MUMBLE's F0 → local SoulX). Scored with the
+singing-capable forced-align word ruler (read against the ~0.36 human ceiling), onset F1,
+and pq.
+
+ANTI-ECHO: every arm is scored against BOTH the reference and its own INPUT. A system that
+merely hands back its input scores well on distance-to-reference while correlating ~1.0 with
+the mumble — the trap that killed the ACE cover lane. Either number alone is fakeable; the
+pair is not.
+
+Run:  bench_own_run.py [--t0 0 --t1 12] [--songs LookinBack]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import struct
+import sys
+import wave
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+
+def slice_wav(src_mono, sr, a, b, dst):
+    seg = src_mono[int(a * sr):int(b * sr)]
+    w = wave.open(dst, "wb")
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(sr)
+    w.writeframes(b"".join(struct.pack("<h", int(max(-32767, min(32767, x * 32767)))) for x in seg))
+    w.close()
+    return dst
+
+
+def _snap_arm(pipe_wav, ref_wav, out_dir, base):
+    """The PRODUCT's phrase-level timing snap (`soulx.perform.snap_render_to_take`), which
+    the shipping sing adapter applies after rendering. Without this arm the run measures a
+    raw render rather than the product chain — a control worth having, since timing is where
+    the pipeline is weakest. Per-word snap is deliberately absent (removed in V3: it raised
+    the alignment metric while damaging the sound). Returns None if anything is missing."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "service"))
+    try:
+        import numpy as np
+        import soundfile as sf
+        from skeleton.core import read_pcm_mono
+        from soulx.perform import resample_hq, snap_render_to_take
+        score_json = os.path.join(out_dir, os.path.splitext(os.path.basename(pipe_wav))[0] + "_score.json")
+        if not os.path.isfile(score_json):
+            return None
+        clip = json.load(open(score_json))
+        clip = clip[0] if isinstance(clip, list) else clip
+        take, sr = read_pcm_mono(ref_wav)
+        ren, sr_r = read_pcm_mono(pipe_wav)
+        ren = resample_hq(list(ren), sr_r, sr) if sr_r != sr else list(ren)
+        out = os.path.join(out_dir, base + "_pipeline_snap.wav")
+        sf.write(out, np.asarray(snap_render_to_take(list(take), ren, sr, clip), dtype=np.float32),
+                 sr, subtype="PCM_16")
+        return out
+    except Exception:
+        return None
+
+
+def run_item(item, t0, t1, out_dir):
+    import bench_align
+    import bench_human_baseline as hb
+    import bench_naturalness
+    import bench_pipeline_render as pr
+    import mumble_probe as mp
+    import overlap
+
+    os.makedirs(out_dir, exist_ok=True)
+    base = f"{item['song']}_{int(t0)}-{int(t1)}"
+
+    fin, sr = mp._read_mono(item["clean_vocal"])
+    mum, sr_m = mp._read_mono(item["mumble_vocal"])
+    ref_slice = slice_wav(fin, sr, t0, t1, os.path.join(out_dir, base + "_reference.wav"))
+    mum_slice = slice_wav(mum, sr_m, t0, t1, os.path.join(out_dir, base + "_mumble.wav"))
+
+    # THE REAL PIPELINE — F0 from the MUMBLE (never the finished take), owner's own voice.
+    pipe = os.path.join(out_dir, base + "_pipeline.wav")
+    pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from="mumble_vocal")
+    snapped = _snap_arm(pipe, ref_slice, out_dir, base)
+
+    ref_mono = fin[int(t0 * sr):int(t1 * sr)]
+    out = {"item": item["id"], "window": [t0, t1], "n_true_words": len(true_words), "arms": {}}
+    arms = [("reference", ref_slice), ("mumble", mum_slice), ("pipeline", pipe)]
+    if snapped:
+        arms.append(("pipeline+snap", snapped))
+    for name, wav in arms:
+        g, g_sr = mp._read_mono(wav)
+        rep = overlap.analyze(ref_mono, sr, g, g_sr)
+        out["arms"][name] = {
+            "word_align": bench_align.word_align_score(wav, true_words),
+            "onset_f1": (rep.get("onsets") or {}).get("f1"),
+            "pq": bench_naturalness.pq_score(wav),
+            "corr_to_reference": hb.energy_corr(ref_slice, wav),
+            "corr_to_input": hb.energy_corr(mum_slice, wav),   # anti-echo
+            "wav": wav,
+        }
+    return out
+
+
+def _fmt(v, w=7, p=3):
+    return f"{v:{w}.{p}f}" if isinstance(v, (int, float)) else f"{'·':>{w}}"
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--t0", type=float, default=0.0)
+    ap.add_argument("--t1", type=float, default=12.0)
+    ap.add_argument("--songs")
+    ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
+    a = ap.parse_args()
+
+    import bench_own_pairs as op
+    items = op.own_pairs_items(songs=a.songs.split(",") if a.songs else None)
+    os.makedirs(a.out, exist_ok=True)
+
+    rows = []
+    for it in items:
+        print(f"  {it['id']} [{a.t0:.0f}-{a.t1:.0f}s] …", flush=True)
+        try:
+            rows.append(run_item(it, a.t0, a.t1, a.out))
+        except Exception as e:
+            print(f"    FAILED: {str(e)[:220]}", flush=True)
+    json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
+
+    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s) ===")
+    print(f"  {'song':16} {'arm':14} {'wordAlign':>10} {'hit':>6} {'onsetF1':>8} "
+          f"{'→reference':>11} {'→input':>8} {'pq':>7}")
+    for r in rows:
+        for arm in ("reference", "mumble", "pipeline", "pipeline+snap"):
+            d = r["arms"].get(arm)
+            if not d:
+                continue
+            wa = d.get("word_align") or {}
+            print(f"  {r['item']:16} {arm:14} {_fmt(wa.get('mean_score'),10)} {_fmt(wa.get('hit_frac'),6,2)} "
+                  f"{_fmt(d.get('onset_f1'),8)} {_fmt(d.get('corr_to_reference'),11)} "
+                  f"{_fmt(d.get('corr_to_input'),8)} {_fmt(d.get('pq'),7,2)}")
+
+    import bench_metrics as bm
+    print("\n=== means (word recovery is read against the ~0.36 human ceiling) ===")
+    for arm in ("reference", "mumble", "pipeline", "pipeline+snap"):
+        got = [r["arms"][arm] for r in rows if arm in r["arms"]]
+        if not got:
+            continue
+        wa = bm.human_band([(g.get("word_align") or {}).get("mean_score") for g in got])
+        ci = bm.human_band([g.get("corr_to_input") for g in got])
+        cr = bm.human_band([g.get("corr_to_reference") for g in got])
+        print(f"  {arm:14} wordAlign={_fmt(wa['mean'])}  →reference={_fmt(cr['mean'])}  →input={_fmt(ci['mean'])}")
+    print(f"\nwrote {os.path.join(a.out, 'own_run.json')}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

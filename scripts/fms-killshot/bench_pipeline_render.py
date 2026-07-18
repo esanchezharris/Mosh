@@ -105,21 +105,40 @@ REF_WAV = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing
 REF_JSON = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing-handoff/refs/own-30s.json")
 
 
-def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None):
-    """THE real `pipeline` generator: NUS true words + clean F0 → product author_score
-    (phonology venv) → local SoulX render → out_wav. Returns (out_wav, true_words).
-    Oracle-lyrics (true words), single ≤12s window. Cross-voice (owner's ref) for now."""
+def author_payload(item, t0, t1, f0):
+    """The author-script input (pure, so the NUS/own-pairs split is testable).
+
+    Own-pairs items carry their own real-text ground-truth words and a `singer` that is not
+    a NUS singer, so their words travel inline. NUS items get exactly the previous payload —
+    no `words` key — and fall through to the author's lookup-by-singer path unchanged."""
+    payload = {"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}
+    if "mumble_vocal" in item:
+        payload["words"] = item["words"]
+    return payload
+
+
+def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None,
+                      f0_from="clean_vocal"):
+    """THE real `pipeline` generator: true words + F0 → product author_score (phonology venv)
+    → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics, one ≤12 s
+    window.
+
+    `f0_from` names the item key the melody is read from, and is LOAD-BEARING. For NUS the
+    default `clean_vocal` is correct: there the clean vocal IS the source being degraded, so
+    reading its F0 leaks nothing. For **own-pairs it must be `mumble_vocal`** — the finished
+    take is the answer, and reading its F0 would hand the pipeline the very thing it is being
+    asked to produce. Explicit rather than inferred, so a leak cannot happen silently."""
     import mumble_probe as mp
     ref_wav, ref_json = ref_wav or REF_WAV, ref_json or REF_JSON
     work = os.path.dirname(out_wav) or "."
     os.makedirs(work, exist_ok=True)
     base = os.path.splitext(os.path.basename(out_wav))[0]
 
-    # 1. F0 of the clean vocal (in-process pyin)
-    clean, sr = mp._read_mono(item["clean_vocal"])
-    f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(clean, sr)]
+    # 1. F0 of the SOURCE the pipeline is allowed to see (in-process pyin)
+    src, sr = mp._read_mono(item[f0_from])
+    f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(src, sr)]
     inj = os.path.join(work, base + "_in.json")
-    json.dump({"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}, open(inj, "w"))
+    json.dump(author_payload(item, t0, t1, f0), open(inj, "w"))
 
     # 2. author the SoulX score under the phonology venv (real words + author_score)
     scorej = os.path.join(work, base + "_score.json")

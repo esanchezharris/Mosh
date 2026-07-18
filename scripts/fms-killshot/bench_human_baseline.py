@@ -41,11 +41,13 @@ def energy_corr(ref_wav, other_wav):
     correlation; there is no envelope-correlation key to read off it."""
     sys.path.insert(0, os.path.join(REPO, "service"))
     from skeleton.core import read_pcm_mono
-    from soulx.perform import env_corr
+    from soulx.perform import env_corr, resample_hq
     a, sr_a = read_pcm_mono(ref_wav)
     b, sr_b = read_pcm_mono(other_wav)
     if sr_a != sr_b:
-        return None
+        # SoulX renders at 24 kHz against 44.1 kHz takes. Band-limited polyphase (NOT linear
+        # — linear interpolation leaves HF images; that was the "squeak" root cause).
+        b = resample_hq(list(b), sr_b, sr_a)
     return round(float(env_corr(list(a), list(b), sr_a)), 4)
 
 
