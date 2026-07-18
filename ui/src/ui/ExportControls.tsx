@@ -8,12 +8,13 @@ import { useStore } from "../store";
 import type { ExportFormat } from "../types";
 import { copyText } from "../clipboard";
 import { parentDir } from "../exportPath";
+import { resolveSectionExportRange } from "../exportSection";
 
 const FORMATS: { value: ExportFormat; depths: number[] }[] = [
   { value: "wav", depths: [16, 24, 32] }, { value: "aiff", depths: [16, 24, 32] }, { value: "flac", depths: [16, 24] },
 ];
 
-type RangeChoice = "full" | "loop" | "custom";
+type RangeChoice = "full" | "loop" | "custom" | "section";
 type TailChoice = "cut" | "include";
 
 export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
@@ -21,6 +22,14 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const loopStart = useStore((s) => s.transport.loopStart);
   const loopEnd = useStore((s) => s.transport.loopEnd);
   const hasLoop = loopEnd - loopStart > 0;
+  // CONF-EXPORT-SECTION — named song sections (MOSH_SECTIONS; beat-based) live at
+  // snapshot.sections; export_audio itself only knows seconds, so a chosen section is
+  // resolved to [start,end) seconds via exportSection.ts and dispatched as range:"custom".
+  const sections = useStore((s) => s.snapshot?.sections ?? []);
+  const tempo = useStore((s) => s.snapshot?.session.tempo);
+  const timeSigNumerator = useStore((s) => s.snapshot?.session.timeSigNumerator);
+  const timeSigDenominator = useStore((s) => s.snapshot?.session.timeSigDenominator);
+  const hasSections = sections.length > 0;
   const [format, setFormat] = useState<ExportFormat>("wav");
   const [bitDepth, setBitDepth] = useState(24);
   // G1: export range (invariant 78) + delay-tail policy (invariant 81). Defaults
@@ -28,6 +37,11 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const [range, setRange] = useState<RangeChoice>("full");
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(4);
+  const [sectionId, setSectionId] = useState("");
+  // No explicit pick yet (or the picked id fell off the list) -> default to the first
+  // section, mirroring how Range=Loop reads live transport state rather than requiring
+  // an extra "select one" step.
+  const effectiveSectionId = sections.some((s) => s.id === sectionId) ? sectionId : (sections[0]?.id ?? "");
   const [tail, setTail] = useState<TailChoice>("cut");
   const [tailSeconds, setTailSeconds] = useState(2);
   const [busy, setBusy] = useState(false);
@@ -40,8 +54,15 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const onExport = async () => {
     setBusy(true); setDone(""); setCopied(null);
     const args: Record<string, unknown> = { format, bitDepth };
-    if (range !== "full") args.range = range;
-    if (range === "custom") { args.start = start; args.end = end; }
+    if (range === "custom") {
+      args.range = "custom"; args.start = start; args.end = end;
+    } else if (range === "section") {
+      const sec = sections.find((s) => s.id === effectiveSectionId);
+      const resolved = resolveSectionExportRange(sec, { tempo, timeSigNumerator, timeSigDenominator });
+      if (resolved) { args.range = "custom"; args.start = resolved.start; args.end = resolved.end; }
+    } else if (range === "loop") {
+      args.range = "loop";
+    }
     if (tail === "include") { args.tail = "include"; args.tailSeconds = tailSeconds; }
     const r = await exec("export_audio", args);
     setBusy(false);
@@ -67,9 +88,17 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
           <select data-testid="export-range" value={range} onChange={(e) => setRange(e.target.value as RangeChoice)}>
             <option value="full">Full mix</option>
             <option value="loop" disabled={!hasLoop}>Loop region{hasLoop ? "" : " (none set)"}</option>
+            <option value="section" disabled={!hasSections}>Section{hasSections ? "" : " (none defined)"}</option>
             <option value="custom">Custom</option>
           </select>
         </label>
+        {range === "section" && hasSections && (
+          <label className="pop-row"><span>Section</span>
+            <select data-testid="export-section" value={effectiveSectionId} onChange={(e) => setSectionId(e.target.value)}>
+              {sections.map((sec) => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
+            </select>
+          </label>
+        )}
         {range === "custom" && (
           <label className="pop-row"><span>Start / End (s)</span>
             <span className="pop-inline">
