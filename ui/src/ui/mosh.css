@@ -20,6 +20,9 @@
   --ink-line-soft: #1a1a1a;
   --lime-dim: rgba(204, 255, 35, 0.42);
   --lime-faint: rgba(204, 255, 35, 0.12);
+  /* Piano-roll out-of-key veil. Dark theme darkens; light theme needs a
+     different alpha to read against a cream grid — see the light block. */
+  --pr-offkey: rgba(255, 255, 255, 0.07);
   --bone-dim: rgba(246, 242, 235, 0.55);
 
   /* semantic accents — tokenized so the light theme can remap them in one place */
@@ -57,6 +60,7 @@
   --bone-dim: rgba(20, 20, 15, 0.58);
   --lime-dim: rgba(110, 140, 8, 0.62);
   --lime-faint: rgba(150, 190, 20, 0.2);
+  --pr-offkey: rgba(0, 0, 0, 0.42);
   --danger-deep: #ffe1e6;
   --danger-line: #f1b6bf;
 }
@@ -889,8 +893,11 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pr-row.black { background: rgba(0,0,0,0.28); }
 /* Scale lock — dim the rows outside the song key and mark the root. Applied only
    while the lock is on, so the default roll keeps its original two-tone look. */
-.pr-row.off-key { background: rgba(0,0,0,0.52); }
-.pr-row.root { box-shadow: inset 0 0 0 1px var(--lime-dim); }
+.pr-row.off-key { background: var(--pr-offkey); }
+/* The root sits LAST so a black-key tonic (C#, F#…) reads as the root rather
+   than as just another black row. A tint, not a hairline: the row spans the
+   whole scrollable grid, so an edge marker would scroll out of sight. */
+.pr-row.root { background: var(--lime-faint); }
 .pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-line-soft); }
 .pr-gl.bar { background: var(--ink-line); }
 .pr-note { position: absolute; background: var(--lime); border: 1px solid #97c01a; border-radius: 3px; cursor: grab; box-sizing: border-box; }
