@@ -19,3 +19,4 @@ dist
 companion-dist
 # playwright visual gate — commit the baselines under visual/, ignore run output
 /visual-results
+e2e/.replay-artifacts/
