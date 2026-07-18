@@ -84,6 +84,22 @@ segs = bsa.word_segments(f0, 2.0, 2.5, 2.0)
 check("t0 offset makes the segment clip-relative (starts at 0)",
       segs[0]["start"] == 0.0 and abs(segs[0]["end"] - 0.5) < 0.02, str(segs))
 
+# ── fill_unvoiced_pitches: an unvoiced word inherits a NEIGHBOUR, never a constant ──────
+SL = [{"pitch": 48, "segments": [{"pitch": 48}]},
+      {"pitch": None, "segments": [{"pitch": None}]},
+      {"pitch": 50, "segments": [{"pitch": 50}]}]
+fu = bsa.fill_unvoiced_pitches(SL)
+check("unvoiced word takes the PREVIOUS word's pitch", fu[1]["pitch"] == 48, str(fu[1]))
+check("its segments are filled too", fu[1]["segments"][0]["pitch"] == 48)
+check("voiced words untouched", fu[0]["pitch"] == 48 and fu[2]["pitch"] == 50)
+check("leading unvoiced word looks AHEAD",
+      bsa.fill_unvoiced_pitches([{"pitch": None, "segments": []}, {"pitch": 44, "segments": []}])[0]["pitch"] == 44)
+check("all-unvoiced falls back to the default, not a crash",
+      bsa.fill_unvoiced_pitches([{"pitch": None, "segments": []}])[0]["pitch"] == 57)
+check("fill does not mutate the caller's slots", SL[1]["pitch"] is None)
+check("word_segments(default_pitch=None) marks unvoiced as None for the filler",
+      bsa.word_segments([], 0.0, 0.4, 0.0, default_pitch=None)[0]["pitch"] is None)
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402

@@ -102,7 +102,7 @@ def _dynamics_arm(src_wav, ref_wav, out_dir, base, mode):
 
 
 def run_item(item, t0, t1, out_dir, *, durations="verbatim", convention="syllable",
-             note_floor_s=0.0):
+             note_floor_s=0.0, melody="mumble", skip_dyn=False, author_extra=None):
     import bench_align
     import bench_human_baseline as hb
     import bench_naturalness
@@ -120,24 +120,26 @@ def run_item(item, t0, t1, out_dir, *, durations="verbatim", convention="syllabl
 
     # THE REAL PIPELINE — F0 from the MUMBLE (never the finished take), owner's own voice.
     pipe = os.path.join(out_dir, base + "_pipeline.wav")
-    pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from="mumble_vocal",
+    f0_from = "clean_vocal" if melody == "finished" else "mumble_vocal"
+    pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from=f0_from,
                                             durations=durations, convention=convention,
-                                            note_floor_s=note_floor_s)
+                                            note_floor_s=note_floor_s, author_extra=author_extra)
     snapped = _snap_arm(pipe, ref_slice, out_dir, base)
 
     ref_mono = fin[int(t0 * sr):int(t1 * sr)]
     out = {"item": item["id"], "window": [t0, t1], "n_true_words": len(true_words),
-           "durations": durations, "arms": {}}
+           "durations": durations, "melody": melody, "arms": {}}
     arms = [("reference", ref_slice), ("mumble", mum_slice), ("pipeline", pipe)]
     if snapped:
         arms.append(("pipeline+snap", snapped))
         # L3/L4 — dynamics probes, applied on TOP of the snapped arm (timing first, then
         # loudness). Lab-only: `frame` is the ear-rejected implementation, kept purely as a
-        # measuring stick; `note` is the Phase-2 hypothesis.
-        for mode in ("frame", "note"):
-            d = _dynamics_arm(snapped, ref_slice, out_dir, base, mode)
-            if d:
-                arms.append((f"snap+dyn:{mode}", d))
+        # measuring stick; `note` is the Phase-2 hypothesis. Skippable for iterate rounds.
+        if not skip_dyn:
+            for mode in ("frame", "note"):
+                d = _dynamics_arm(snapped, ref_slice, out_dir, base, mode)
+                if d:
+                    arms.append((f"snap+dyn:{mode}", d))
     for name, wav in arms:
         g, g_sr = mp._read_mono(wav)
         rep = overlap.analyze(ref_mono, sr, g, g_sr)
@@ -189,6 +191,12 @@ def main():
                     help="minimum sung-note duration (SoulX p5 ~0.15); 0 = off")
     ap.add_argument("--soulx", action="store_true",
                     help="shortcut: --convention soulx --durations derived --note-floor-s 0.15")
+    ap.add_argument("--melody", default="mumble", choices=["mumble", "finished"],
+                    help="melody/F0 source. 'finished' = the ORACLE arm: sing the finished "
+                         "take's own melody (development ceiling — deliberate, labeled use "
+                         "of the ground truth; the product benchmark arm stays 'mumble')")
+    ap.add_argument("--skip-dyn", action="store_true",
+                    help="skip the (refuted) dynamics probe arms — faster iterate rounds")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
 
@@ -213,12 +221,13 @@ def main():
         print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
             rows.append(run_item(it, t0, t1, a.out, durations=dur_mode,
-                                 convention=conv, note_floor_s=floor))
+                                 convention=conv, note_floor_s=floor,
+                                 melody=a.melody, skip_dyn=a.skip_dyn))
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
 
-    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s, conv={conv} dur={dur_mode} floor={floor}) ===")
+    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s, conv={conv} dur={dur_mode} floor={floor} melody={a.melody}) ===")
     print(f"  {'song':16} {'arm':14} {'wordAlign':>10} {'hit':>6} {'onsetF1':>8} "
           f"{'→reference':>11} {'→input':>8} {'pq':>7}")
     for r in rows:

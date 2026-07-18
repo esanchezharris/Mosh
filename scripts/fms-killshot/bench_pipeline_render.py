@@ -106,7 +106,7 @@ REF_JSON = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sin
 
 
 def author_payload(item, t0, t1, f0, durations="verbatim", convention="syllable",
-                   note_floor_s=0.0):
+                   note_floor_s=0.0, author_extra=None):
     """The author-script input (pure, so the NUS/own-pairs split is testable).
 
     Own-pairs items carry their own real-text ground-truth words and a `singer` that is not
@@ -114,7 +114,9 @@ def author_payload(item, t0, t1, f0, durations="verbatim", convention="syllable"
     no `words` key — and fall through to the author's lookup-by-singer path unchanged.
 
     `convention`/`note_floor_s` are the SoulX in-distribution re-authoring knobs; both are
-    omitted at their defaults so the existing payload is byte-unchanged."""
+    omitted at their defaults so the existing payload is byte-unchanged. `author_extra`
+    merges additional author knobs (e.g. melisma thresholds for the iterate loop) — None/{}
+    adds nothing."""
     payload = {"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}
     if "mumble_vocal" in item:
         payload["words"] = item["words"]
@@ -124,12 +126,14 @@ def author_payload(item, t0, t1, f0, durations="verbatim", convention="syllable"
         payload["convention"] = convention
     if note_floor_s > 0.0:
         payload["noteFloorS"] = note_floor_s
+    if author_extra:
+        payload.update(author_extra)
     return payload
 
 
 def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None,
                       f0_from="clean_vocal", durations="verbatim", convention="syllable",
-                      note_floor_s=0.0):
+                      note_floor_s=0.0, author_extra=None):
     """THE real `pipeline` generator: true words + F0 → product author_score (phonology venv)
     → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics, one ≤12 s
     window.
@@ -149,8 +153,8 @@ def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=
     src, sr = mp._read_mono(item[f0_from])
     f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(src, sr)]
     inj = os.path.join(work, base + "_in.json")
-    json.dump(author_payload(item, t0, t1, f0, durations, convention, note_floor_s),
-              open(inj, "w"))
+    json.dump(author_payload(item, t0, t1, f0, durations, convention, note_floor_s,
+                             author_extra), open(inj, "w"))
 
     # 2. author the SoulX score under the phonology venv (real words + author_score)
     scorej = os.path.join(work, base + "_score.json")
@@ -175,14 +179,22 @@ def render_chunk(score_json_path, out_dir, ref_wav, ref_json):
     """Render one SoulX target score to out_dir/generated.wav via the local MLX bridge."""
     os.makedirs(out_dir, exist_ok=True)
     py = os.path.join(MAC, "venv", "bin", "python")
+    # SOULX_SEED pins the flow-matching init noise (bridge env knob added 2026-07-18):
+    # without it, identical scores render differently run to run and round-to-round
+    # comparisons are mostly noise (measured: byte-identical score, conformance swung
+    # silent-notes 4->0 and rhythm 103->40ms). Callers may override; "" disables.
     env = dict(os.environ, PYTHONPATH=BRIDGE, PYTORCH_ENABLE_MPS_FALLBACK="1")
+    env.setdefault("SOULX_SEED", "4242")
     r = subprocess.run(
         [py, "scripts/inference_mlx_bridge.py",
          "--model", "models/SoulX-Singer-bf16", "--component", "svs", "--control", "score",
          "--device", "mps", "--prompt_wav_path", ref_wav, "--prompt_metadata_path", ref_json,
          "--target_metadata_path", score_json_path,
          "--phoneset_path", "soulxsinger/utils/phoneme/phone_set.json",
-         "--n_steps", "32", "--cfg", "3.0", "--pitch_shift", "0", "--save_dir", out_dir],
+         # sampler knobs are env-overridable for the iterate loop (defaults = the originals)
+         "--n_steps", os.environ.get("SOULX_NSTEPS", "32"),
+         "--cfg", os.environ.get("SOULX_CFG", "3.0"),
+         "--pitch_shift", "0", "--save_dir", out_dir],
         cwd=BRIDGE, env=env, capture_output=True, text=True)
     gen = os.path.join(out_dir, "generated.wav")
     if r.returncode != 0 or not os.path.isfile(gen):

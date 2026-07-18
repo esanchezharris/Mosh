@@ -53,6 +53,36 @@ def _med(xs):
     return s[len(s) // 2] if s else 0.0
 
 
+def fill_unvoiced_pitches(slots, fallback=57):
+    """Replace None pitches (words where pyin found no voiced frames) with the NEAREST
+    measured neighbour's pitch — previous word first, else the next one, else `fallback`.
+
+    Round-0 oracle finding: the old hardcoded default (57 = A3) commanded notes up to
+    ~9 st above the singer's actual line in his low register ("tough": take C3, commanded
+    A3 — and the model OBEYED the wrong command). A singer's unvoiced word sits in the
+    phrase's register, not on a constant. Pure; mutates copies."""
+    out = [dict(s2) for s2 in slots]
+    n = len(out)
+    for i, sl in enumerate(out):
+        if sl.get("pitch") is not None:
+            continue
+        pick = None
+        for j in range(i - 1, -1, -1):
+            if out[j].get("pitch") is not None:
+                pick = out[j]["pitch"]
+                break
+        if pick is None:
+            for j in range(i + 1, n):
+                if slots[j].get("pitch") is not None:
+                    pick = slots[j]["pitch"]
+                    break
+        sl["pitch"] = pick if pick is not None else fallback
+        for g in sl.get("segments") or []:
+            if g.get("pitch") is None:
+                g["pitch"] = sl["pitch"]
+    return out
+
+
 def word_segments(f0, s, e, t0, *, min_step_st=1.5, min_hold_s=0.12, max_segs=None,
                   default_pitch=57):
     """SoulX-convention segmentation of ONE word's span into notes.
@@ -70,6 +100,7 @@ def word_segments(f0, s, e, t0, *, min_step_st=1.5, min_hold_s=0.12, max_segs=No
     pts = [(t, 69.0 + 12.0 * math.log2(h / 440.0))
            for (t, h, v) in f0 if s <= t < e and v and h > 0]
     if not pts:
+        # default_pitch=None => the caller back-fills from neighbours (fill_unvoiced_pitches)
         return [{"start": round(s - t0, 4), "end": round(e - t0, 4), "pitch": default_pitch}]
 
     times = [p[0] for p in pts]
@@ -129,8 +160,12 @@ def main():
             continue
         if convention == "soulx":
             # whole word on one note unless the take's F0 genuinely steps (a real melisma),
-            # capped at the word's syllable count
-            segs = word_segments(f0, s, e, t0, max_segs=nsyl(w["word"]))
+            # capped at the word's syllable count. Step/hold thresholds are iterate-loop
+            # knobs (defaults preserved when the payload omits them).
+            segs = word_segments(f0, s, e, t0, max_segs=nsyl(w["word"]),
+                                 min_step_st=float(data.get("melismaStepSt") or 1.5),
+                                 min_hold_s=float(data.get("melismaHoldS") or 0.12),
+                                 default_pitch=None)
         else:
             n = nsyl(w["word"])
             segs = []
@@ -141,6 +176,11 @@ def main():
         slots.append({"start": round(s - t0, 4), "end": round(e - t0, 4),
                       "pitch": segs[0]["pitch"], "segments": segs})
         texts.append(w["word"])
+    if convention == "soulx":
+        # unvoiced words inherit a NEIGHBOUR's pitch, never a hardcoded register
+        slots = fill_unvoiced_pitches(slots)
+        for sl in slots:
+            sl["pitch"] = sl["segments"][0]["pitch"] if sl.get("segments") else sl["pitch"]
 
     if not slots:
         print(json.dumps({"ok": False, "error": "no words in window"}))
