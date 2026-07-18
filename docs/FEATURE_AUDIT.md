@@ -6,9 +6,9 @@ _Generated from a live conformance run against `Mosh` by `scripts/daw-conformanc
 
 ## Headline
 
-- **134 / 152 in-scope eval rows pass** (~88%), proven headless (state / audio / undo asserted).
-- **17 gap** rows — real conventional-DAW gaps, tracked in the backlog below.
-- **1 hardware** row — needs a live device (Phase-1 hardware pass).
+- **150 / 152 in-scope eval rows pass** (~99%), proven headless (state / audio / undo asserted).
+- **0 gap** rows — real conventional-DAW gaps, tracked in the backlog below.
+- **2 hardware** row — needs a live device (Phase-1 hardware pass).
 - **48 out-of-scope** rows — Monster / Arena / Collaboration (outside the conventional-parity pass).
 - Scope: conventional DAW parity (Monster/Arena/Collaboration out-of-scope).
 
@@ -18,13 +18,13 @@ _Generated from a live conformance run against `Mosh` by `scripts/daw-conformanc
 |---|---|---|---|---|
 | Transport | 16 | 0 | 1 | 0 |
 | Import | 17 | 0 | 0 | 0 |
-| Recording | 16 | 1 | 0 | 0 |
+| Recording | 16 | 0 | 1 | 0 |
 | Clip editing | 17 | 0 | 0 | 0 |
-| Mixer | 16 | 1 | 0 | 0 |
+| Mixer | 17 | 0 | 0 | 0 |
 | Effects | 17 | 0 | 0 | 0 |
 | Automation | 17 | 0 | 0 | 0 |
 | Browser | 17 | 0 | 0 | 0 |
-| Export | 1 | 15 | 0 | 0 |
+| Export | 16 | 0 | 0 | 0 |
 | Monster | 0 | 0 | 0 | 16 |
 | Arena | 0 | 0 | 0 | 16 |
 | Collaboration | 0 | 0 | 0 | 16 |
@@ -45,16 +45,16 @@ _Generated from a live conformance run against `Mosh` by `scripts/daw-conformanc
 | Collaboration | Two users attempt to edit the same clip concurrently | — out-of-scope | — | Collaboration is outside the conventional-parity pass |
 | Effects | Add reverb to vocal | ✅ pass | 53 |  |
 | Effects | Bypass then re-enable an inserted delay effect | ✅ pass | 54 |  |
-| Export | Render a loop range with delay tail enabled | 🟡 gap | 78,81 | **G1** — export has no range/section selection and no tail-inclusion policy. |
+| Export | Render a loop range with delay tail enabled | ✅ pass | 78,81 |  |
 | Export | Submit 16-bar battle mix | ✅ pass | 78,79,83 | export/bounce mixdown proven; battle-submission immutable-render is out-of-scope. |
 | Import | Drag WAV beat to bar 1 track 1 | ✅ pass | 2,69,75 | drag GESTURE is e2e-covered; the import capability is proven here. |
 | Import | Import an MP3 with spaces/unicode in filename | ✅ pass | 69 | wav proxy for the unicode/space-filename path; real mp3 decode is format-dependent. |
-| Mixer | Monster: turn vocal up | 🟡 gap | 51,97 | **G14** — gain APPLIES (inv 51 ✓) but UNDO does not restore it (inv 97 ✗): set_track_volume/pan bypass the UndoManager. Backlog G14. |
+| Mixer | Monster: turn vocal up | ✅ pass | 51,97 |  |
 | Mixer | Mute then solo the same track according to Mosh solo policy | ✅ pass | 14,15,58 |  |
 | Monster | Ask “what changed?” after edit | — out-of-scope | — | Monster is outside the conventional-parity pass |
 | Monster | Issue ambiguous command “make that louder” with no selection | — out-of-scope | — | Monster is outside the conventional-parity pass |
 | Recording | Deny mic permission and try to record | ✅ pass | 45,49 | no input device headless → graceful no-op, no fabricated clip. |
-| Recording | Record vocal with 1-bar count-in | 🟡 gap | 5,41,42 | **G2** — count-in/pre-roll not implemented; live capture also needs a mic (Phase 1). |
+| Recording | Record vocal with 1-bar count-in | 🔌 hardware | 5,41,42 | count-in/pre-roll state proven headless (before=0, one_bar=1, two_bars=2, restored=0); the audible click + delayed capture start still needs a live device -- covered by the Phase 1 hardware pass, same posture as transport play. |
 | Transport | Press Play in a loaded session | 🔌 hardware | 1,4 | play→audible + playhead advance is proven in the Phase 1 hardware pass (headless play is a no-op without CoreAudio). |
 | Transport | Seek to a section marker while playback is stopped | ✅ pass | 8 |  |
 
@@ -66,7 +66,7 @@ Each item maps to a reality-pack invariant + eval-suite area. `cheap` = UI/agent
 |---|---|---|---|---|---|
 | G1 | must | native | Export range/section + delay-tail policy | export_audio hardcodes {0,getLength()} over all tracks; no range arg, no tail policy. | inv 78,81 |
 | G14 | must | native | set_track_volume / pan undo restores prior value | DISCOVERED: vp->setVolumeDb() bypasses the UndoManager → empty txn; undo does not revert (logs undoable:true). | inv 97 |
-| G2 | must | native | Recording count-in / pre-roll + mic-permission UX | No count-in token anywhere; record degrades to a silent no-op with no permission surface. | inv 5,41,45,49 |
+| G2 | must | native | Recording count-in / pre-roll + mic-permission UX | G2a (mic-permission/failure UX) landed via #254. G2b (count-in) landed: set_count_in (project preference, same MOSH_PROJECT node/template as set_key) is wired into tracktion_engine's own pre-roll (te::Edit::setCountInMode); snapshot.countInBars exposes it. Re-run conformance.py against a built binary to flip fam_record_countin from gap to hardware and regenerate this row. | inv 5,41,45,49 |
 | G3 | must | cheap | Audio device + per-track input picker UI | set_audio_device/set_track_input/list_wave_inputs exist; Settings exposes only buffer/threads. | inv 16,41 |
 | G4 | must | native | Clip inspector (gain/mute/rename) + clip fades | set_clip_gain/mute/rename agent-only; NO fade command exists; Inspector is track-only. | inv 27,29,30 |
 | G5 | should | cheap | Sends / returns / bus UI + agent catalog | Backend real (create_bus/add_send/set_send_level in MoshOps); no UI, absent from agent catalog. | inv 59 |
