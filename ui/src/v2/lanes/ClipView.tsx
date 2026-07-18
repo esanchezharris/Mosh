@@ -23,6 +23,7 @@ import { getGestureTable } from "../../interaction/gestureTables";
 import { liveFeel } from "../../interaction/config";
 import { passedDragThreshold, isDoubleClick } from "../../interaction/feel";
 import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
+import { pushEscapeHandler } from "../../hooks/escapeStack";
 // Reuse the proven legacy canvas renderers so drum clips show a true fixed-lane step
 // grid + MIDI shows note blocks (identical to the classic shell), not sparse dots.
 import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/Arrange";
@@ -79,6 +80,20 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const [menu, setMenu] = useState<{ x: number; y: number; time: number } | null>(null);
   useEffect(() => { setPreview(null); }, [clip.start, clip.length, clip.offset]);
 
+  // L3 (EDGECASE_SWEEP_V2_2026-07-18) — abandon an interrupted drag. Without this, a
+  // pointercancel (system gesture, alt-tab, palm rejection) or an Escape mid-drag
+  // left drag.current armed and the optimistic preview frozen at a position that was
+  // never committed. While a drag is armed it also holds the TOP of the shared
+  // Escape stack, so Esc cancels the gesture instead of closing an overlay beneath.
+  const escDispose = useRef<(() => void) | null>(null);
+  const cancelDrag = () => {
+    drag.current = null;
+    setPreview(null);
+    escDispose.current?.();
+    escDispose.current = null;
+  };
+  useEffect(() => () => { escDispose.current?.(); escDispose.current = null; }, []);
+
   const pos: DragPos = preview ?? { start: clip.start, length: clip.length, offset: clip.offset };
   const left = pos.start * pxPerSec;
   const width = Math.max(4, pos.length * pxPerSec);
@@ -118,6 +133,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     if (!dk) return;
     capturePointer(e.target as HTMLElement, e.pointerId);
     drag.current = { kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
+    escDispose.current?.();
+    escDispose.current = pushEscapeHandler(cancelDrag);
   };
 
   const onMove = (e: React.PointerEvent) => {
@@ -149,6 +166,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   const onUp = (e: React.PointerEvent) => {
     const d = drag.current; drag.current = null;
+    escDispose.current?.();
+    escDispose.current = null;
     releasePointer(e.target as HTMLElement, e.pointerId);
     if (d && d.engaged) {
       lastUp.current = null;
@@ -176,6 +195,11 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     }
   };
 
+  const onCancel = (e: React.PointerEvent) => {
+    releasePointer(e.target as HTMLElement, e.pointerId);
+    cancelDrag();
+  };
+
   const onContext = (e: React.MouseEvent) => {
     const { region, localX } = regionOf(e);
     const action = resolveGesture(TABLE(), { region, gesture: "contextmenu", mods: modsOf(e), tool });
@@ -189,7 +213,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     <div
       className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
       style={{ left, width }}
-      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onContextMenu={onContext}
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
       data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
     >
       {clip.type === "wave" && <ClipWave peaks={peaks} width={width} />}
