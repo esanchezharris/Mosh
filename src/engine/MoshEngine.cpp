@@ -33,6 +33,26 @@ namespace
             const int cores = juce::jmax (1, juce::SystemStats::getNumCpus());
             return n > 0 ? juce::jlimit (1, cores, n) : cores;
         }
+
+        // The internal master-bus spectral tap (xmlTypeName moshMasterSpectralTap,
+        // see MoshOps::ensureMasterSpectralTap/isInternalMasterPlugin) occupies ONE
+        // master-plugin slot invisibly — masterVisibleBoundary() hides it from
+        // master.plugins entirely, but Tracktion's PluginList::insertPlugin still
+        // counts it against te::EditLimits::maxNumMasterPlugins (default 4). Without
+        // this override, once the tap exists (created lazily the first time
+        // transport plays, via emitSpectrum), the user's effective VISIBLE budget
+        // silently drops from 4 to 3: the 4th load_master_plugin/load_master_builtin
+        // hits PluginList::insertPlugin's `numPlugins >= limits.maxNumMasterPlugins`
+        // guard and returns an empty Ptr — a SILENT no-op Tracktion gives no error
+        // for, which cmdLoadMasterPlugin/cmdLoadMasterBuiltin didn't check either
+        // (see the belt-and-suspenders fix there). +1 keeps the full 4-plugin
+        // visible budget regardless of whether the tap has been created yet.
+        te::EditLimits getEditLimits() override
+        {
+            auto limits = te::EngineBehaviour::getEditLimits();
+            limits.maxNumMasterPlugins += 1;
+            return limits;
+        }
     };
 }
 
