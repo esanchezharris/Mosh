@@ -555,10 +555,20 @@ function ClipBlock({
   const onClipMove = (e: React.PointerEvent) => {
     const d = drag.current; if (!d) return;
     const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+    const threshold = liveFeel().dragThreshold;
     if (!d.engaged) {
-      if (!passedDragThreshold(dx, dy, liveFeel().dragThreshold)) return; // still a click
+      if (!passedDragThreshold(dx, dy, threshold)) return; // still a click
       d.engaged = true;
     }
+    // Every clip-drag kind below writes only the TIME axis (a clip cannot be dragged
+    // to another lane — the commit never sends trackId), so once the gesture has
+    // engaged, vertical travel must not move the clip in time. Clearing the preview
+    // rather than leaving it unwritten also makes "drag it out and put it back"
+    // commit nothing, instead of releasing with the abandoned position still set.
+    // Without this an off-grid clip — a pushed hit, a hand-placed sample — was
+    // silently straightened to the grid by a drag that never really travelled.
+    // The "time" kind is exempt: it paints a range rather than moving a clip.
+    if (d.kind !== "time" && Math.abs(dx) <= threshold) { setPreview(null); return; }
     const delta = pxToSec(dx), o = d.orig;
     if (d.kind === "move") {
       setPreview({ ...o, start: Math.max(0, snapTime(o.start + delta)) });
