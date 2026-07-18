@@ -177,6 +177,8 @@ def main():
     ap.add_argument("--t0", type=float, default=0.0)
     ap.add_argument("--t1", type=float, default=12.0)
     ap.add_argument("--songs")
+    ap.add_argument("--fixed-window", action="store_true",
+                    help="ignore per-song phrase windows and use --t0/--t1")
     ap.add_argument("--durations", default="verbatim",
                     help="verbatim (shipped default) | derived (B1-lite)")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
@@ -188,9 +190,17 @@ def main():
 
     rows = []
     for it in items:
-        print(f"  {it['id']} [{a.t0:.0f}-{a.t1:.0f}s] …", flush=True)
+        # Per-song PHRASE-ALIGNED window when bench_lyrics installed one. A fixed stopwatch
+        # cut truncates mid-phrase ("Helena Bonham-", "got a good one and I-"), corrupting
+        # both the render and the scoring at the boundary; ending on a real breath does not.
+        t0, t1 = a.t0, a.t1
+        wj = os.path.join(os.path.dirname(it["clean_vocal"]), f"{it['song']}.window.json")
+        if not a.fixed_window and os.path.isfile(wj):
+            w = json.load(open(wj))
+            t0, t1 = float(w["t0"]), float(w["t1"])
+        print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
-            rows.append(run_item(it, a.t0, a.t1, a.out, durations=a.durations))
+            rows.append(run_item(it, t0, t1, a.out, durations=a.durations))
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
