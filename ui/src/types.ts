@@ -628,6 +628,12 @@ export type ExportResult = {
   sampleRate: number;
   bytes: number;
   renderMode: string;
+  // G1: export range (78) + delay-tail policy (81) — all optional/additive.
+  range?: "full" | "loop" | "custom";
+  rangeStart?: number;
+  rangeEnd?: number;
+  tail?: "cut" | "include";
+  endAllowance?: number;
 };
 
 // get_command_log result (AGT-001): a read-only window over the canonical command
