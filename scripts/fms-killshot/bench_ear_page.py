@@ -84,14 +84,24 @@ def build(run_json, out_dir):
     html = f"""<!doctype html><meta charset=utf-8>
 <title>FMS — performance transfer, blind ear gate</title>
 <style>
+ /* Theme-aware: the panel this is viewed in may be light or dark, and a blind ranking
+    task is useless if the A/B/C labels aren't legible. */
+ :root{{--bg:#fff;--fg:#1a1a1a;--dim:#555;--rule:#e5e5e5;--card:#f7f7f5;--accent:#0b5cad}}
+ @media (prefers-color-scheme:dark){{
+   :root{{--bg:#151515;--fg:#ededed;--dim:#b0b0b0;--rule:#333;--card:#222;--accent:#6fb4ff}}
+ }}
+ html,body{{background:var(--bg);color:var(--fg)}}
  body{{font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:760px;margin:40px auto;
-       padding:0 20px;color:#1a1a1a}}
- h1{{font-size:22px;margin-bottom:4px}} h2{{font-size:17px;margin:28px 0 10px}}
- section{{border-top:1px solid #e5e5e5;padding-top:8px;margin-top:28px}}
- .arm{{display:flex;align-items:center;gap:14px;margin:8px 0}}
- .lab{{font-weight:600;min-width:190px}} .anchor .lab{{font-weight:400;color:#666}}
- audio{{flex:1;height:34px}} .ctx{{color:#555;margin:14px 0 6px}}
- .note{{background:#f7f7f5;padding:14px 16px;border-radius:8px;color:#333}}
+       padding:0 20px}}
+ h1{{font-size:22px;margin-bottom:4px;color:var(--fg)}}
+ h2{{font-size:17px;margin:28px 0 10px;color:var(--accent)}}
+ section{{border-top:1px solid var(--rule);padding-top:8px;margin-top:28px}}
+ .arm{{display:flex;align-items:center;gap:14px;margin:10px 0}}
+ .lab{{font-weight:700;min-width:190px;font-size:17px;color:var(--fg)}}
+ .anchor .lab{{font-weight:400;font-size:15px;color:var(--dim)}}
+ audio{{flex:1;height:34px}} .ctx{{color:var(--dim);margin:14px 0 6px}}
+ .note{{background:var(--card);padding:14px 16px;border-radius:8px;color:var(--fg)}}
+ @media (max-width:600px){{.arm{{flex-wrap:wrap}}.lab{{min-width:0}}audio{{width:100%}}}}
 </style>
 <h1>Performance transfer — blind ear gate</h1>
 <p class="note">The pipeline was measured as <strong>solving the words and breaking the
