@@ -70,9 +70,17 @@ BLURB_RANK = ("The pipeline was measured as <strong>solving the words and breaki
 ARMS = {"today": "pipeline+snap", "fix": "snap+dyn:note", "control": "snap+dyn:frame"}
 
 
-def blind_order(song, keys):
-    """Deterministic per-song permutation — stable across rebuilds, unguessable from position."""
+def blind_order(song, keys, index=None):
+    """Deterministic per-song permutation — stable across rebuilds, position carries nothing.
+
+    COUNTERBALANCED for 2-arm tests. A pure per-song hash can land the same way for every
+    song by chance (~25% with 3 songs), and when it does, "I picked B every time" is
+    indistinguishable from a position bias — which is exactly what happened on the words A/B
+    round and made its verdict unusable. With an `index`, two-arm assignments alternate by
+    song so each arm appears first about half the time."""
     ranked = sorted(keys, key=lambda k: hashlib.sha256(f"{song}:{k}".encode()).hexdigest())
+    if len(ranked) == 2 and index is not None and index % 2:
+        ranked.reverse()
     return dict(zip("ABCDE", ranked))
 
 
@@ -148,12 +156,12 @@ def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb):
     os.makedirs(clips, exist_ok=True)
     mapping, cards = {}, []
 
-    for item in sorted(set(rows) & set(rowsb)):
+    for idx, item in enumerate(sorted(set(rows) & set(rowsb))):
         song = item.replace("own-", "")
         ra, rb = rows[item].get("arms", {}), rowsb[item].get("arms", {})
         if arm not in ra or arm not in rb:
             continue
-        order = blind_order(song, [label_a, label_b])
+        order = blind_order(song, [label_a, label_b], index=idx)
         mapping[song] = order
         # The two runs used different windows (fixed 12 s vs phrase-snapped), so the clips
         # differ in LENGTH — a systematic tell that would un-blind the test, and a second
