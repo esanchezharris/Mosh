@@ -730,6 +730,9 @@
 .v2-insp-body .rack-empty { color: var(--v2-faint); font-size: 12px; padding: 8px 2px; }
 .v2-insp-body .pg-label, .v2-insp-body .gen-head, .v2-insp-body .rack-head { color: var(--v2-dim); }
 
+/* master bus card — same field/val layout as the Inspector Mix tab, own body padding */
+.v2-master-body { padding: 10px 12px 12px; }
+
 .v2-presence { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
 .v2-collab-card[data-active="false"] .v2-presence { gap: 12px; }
 .v2-cam { appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 8px; padding: 3px 8px; font-size: 13px; line-height: 1; cursor: pointer; color: var(--v2-dim); }

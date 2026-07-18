@@ -28,6 +28,7 @@ export function RightRail() {
         <aside className="v2-rail" data-testid="v2-rail">
           <MoshCard onCollapse={() => setOpen(false)} />
           <Inspector />
+          <MasterCard />
           <CollaboratorsCard />
         </aside>
       ) : (
@@ -70,6 +71,38 @@ function MoshStatusLine() {
       <span className="wave" aria-hidden><IconSpark size={13} /></span>
       <span>{text}</span>
     </div>
+  );
+}
+
+// CONF-MASTER-VOL — the master bus fader/pan. set_master_volume/set_master_pan have
+// existed natively (and agent-callable) since Wave 5 with no UI surface anywhere in
+// v2; this is that surface. Lives in the rail next to the per-track Inspector Mix tab
+// (the closest thing v2 has to a mixer strip) rather than the TopBar, which stays
+// dedicated to transport/project chrome. Reuses the Inspector's .v2-mix/.v2-field
+// layout verbatim so a master fader reads as the same control family as a track one.
+export function MasterCard() {
+  const exec = useStore((s) => s.exec);
+  const master = useStore((s) => s.snapshot?.master);
+  return (
+    <section className="v2-card v2-master-card" data-testid="v2-master-card">
+      <div className="v2-card-head"><span>Master</span></div>
+      <div className="v2-mix v2-master-body">
+        <label className="v2-field">
+          <span>Vol</span>
+          <input type="range" min={-48} max={6} step={0.5} value={master?.volumeDb ?? 0}
+            aria-label="Master volume" data-testid="v2-master-volume"
+            onChange={(e) => void exec("set_master_volume", { db: Number(e.target.value) })} />
+          <span className="v2-val">{(master?.volumeDb ?? 0).toFixed(1)}</span>
+        </label>
+        <label className="v2-field">
+          <span>Pan</span>
+          <input type="range" min={-1} max={1} step={0.02} value={master?.pan ?? 0}
+            aria-label="Master pan" data-testid="v2-master-pan"
+            onChange={(e) => void exec("set_master_pan", { pan: Number(e.target.value) })} />
+          <span className="v2-val">{Math.round((master?.pan ?? 0) * 100)}</span>
+        </label>
+      </div>
+    </section>
   );
 }
 
