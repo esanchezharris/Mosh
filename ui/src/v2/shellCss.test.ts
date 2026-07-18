@@ -51,3 +51,15 @@ describe("v2 shell.css transport-clock font-size token", () => {
     expect(css).not.toContain("font-size: 20px");
   });
 });
+
+describe("v2 shell.css uppercase caps-label tracking token", () => {
+  it("routes every caps label through --v2-tracking-caps (no hardcoded 0.14em)", () => {
+    // --v2-tracking-caps (0.14em) names "the recurring uppercase-label treatment"; the
+    // three uppercase caps labels (.pg-label / .v2-pb-listhead / .v2-pb-group) used to
+    // hardcode `letter-spacing: 0.14em`. Routing them through the token is a visual
+    // no-op that single-sources the caps tracking. (The token DEFINITION still carries
+    // the 0.14em value — only the `letter-spacing: 0.14em` literal is banned.)
+    expect(css).not.toContain("letter-spacing: 0.14em");
+    expect(css).toContain("letter-spacing: var(--v2-tracking-caps)");
+  });
+});
