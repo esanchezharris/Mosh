@@ -71,7 +71,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // logicalId, resolved by MoshOps.
     static const std::set<juce::String> clip {
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp", "stretch_clip",
+        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",

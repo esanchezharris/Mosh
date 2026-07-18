@@ -195,6 +195,12 @@ export type Clip = {
   // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
   hidden?: boolean;
   gainDb?: number;
+  // G4b — clip-edge fades (wave clips only). Seconds; type is 1=linear 2=convex
+  // 3=concave 4=sCurve (optional — the v1 UI only drives durations).
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  fadeInType?: number;
+  fadeOutType?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;

@@ -1145,6 +1145,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", cid }, { "name", "Renamed" }}))), "rename_clip ok");
         check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "clip name reflects rename");
+        // G4A — rename_clip is undoable (was uncovered): undo restores the prior name, redo re-applies.
+        check (ok (cmd (ops, "undo")), "undo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() != "Renamed", "undo restores clip's prior name");
+        check (ok (cmd (ops, "redo")), "redo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "redo re-applies clip rename");
 
         check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", cid }, { "mute", true }}))), "set_clip_mute ok");
         check ((bool) clipById (cid).getProperty ("mute", false), "clip mute reflects in snapshot");
@@ -1164,6 +1169,78 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "undo")), "undo set_clip_gain ok");
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "undo restores prior clip gain (+24)");
         cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}));   // sane default for downstream
+
+        // G4b — clip fades (fade-in / fade-out, + optional curve type). Audio-clip-only,
+        // undoable, JSONL-logged undoable:true, snapshot-invalidating. Fades render NATIVELY
+        // through Tracktion's AudioClipBase — no src/state schema change (free persistence
+        // + undo, proven below).
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", -1.0) - 0.0) < 0.02
+               && std::abs ((double) clipById (cid).getProperty ("fadeOutSec", -1.0) - 0.0) < 0.02,
+               "clip fades default to 0/0");
+        check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "fadeInSec", 0.5 }, { "fadeOutSec", 0.25 }}))),
+               "set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec reflects in snapshot");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec reflects in snapshot");
+
+        // Undo/redo — the plain CachedValue.referTo(state, id, um) path (same mechanism as
+        // clip gain), so this is undoable exactly like every other clip command.
+        check (ok (cmd (ops, "undo")), "undo set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", -1.0) - 0.0) < 0.02, "undo restores clip fadeInSec to 0");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", -1.0) - 0.0) < 0.02, "undo restores clip fadeOutSec to 0");
+        check (ok (cmd (ops, "redo")), "redo set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "redo re-applies clip fadeInSec");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "redo re-applies clip fadeOutSec");
+
+        // Clamp / no-boundary-move (reality-pack inv 30): an over-length fade-in clamps to
+        // the clip's own length and NEVER moves the clip's start/length — the fade shapes
+        // the edge, it never relocates it.
+        {
+            const double startBefore  = (double) clipById (cid).getProperty ("start", -1.0);
+            const double lengthBefore = (double) clipById (cid).getProperty ("length", -1.0);
+            check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "fadeInSec", 5.0 }}))),
+                   "set_clip_fade (over-length fadeIn) ok");
+            check ((double) clipById (cid).getProperty ("fadeInSec", 0.0) <= lengthBefore + 0.02,
+                   "clip fadeInSec clamps to <= clip length");
+            check (std::abs ((double) clipById (cid).getProperty ("start", -1.0) - startBefore) < 0.001
+                   && std::abs ((double) clipById (cid).getProperty ("length", -1.0) - lengthBefore) < 0.001,
+                   "fade does not move clip start/length (inv 30)");
+            check (ok (cmd (ops, "undo")), "undo over-length fadeIn ok");   // restore 0.5/0.25 for downstream
+        }
+
+        // Type rejection: fades are audio-clip-only (mirrors set_clip_gain).
+        {
+            auto midiFade = cmd (ops, "add_midi_clip", objN ({{ "trackId", et }, { "length", 1.0 }}));
+            const auto midiFadeCid = midiFade["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", midiFadeCid }, { "fadeInSec", 0.2 }}))),
+                   "set_clip_fade on a MIDI clip rejected");
+            cmd (ops, "remove_clip", args1 ("clipId", midiFadeCid));   // tidy
+        }
+
+        // Save/reload persistence — proves the free-persistence claim: fades ride
+        // Tracktion's own ValueTree, no src/state code at all.
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec persists across save/reload");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec persists across save/reload");
+
+        // JSONL: set_clip_fade logged undoable:true (mirror the warp assert).
+        {
+            auto flog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool fadeU = false;
+            for (auto& ln : StringArray::fromLines (flog))
+                if (ln.contains ("\"command\": \"set_clip_fade\"") && ln.contains ("\"undoable\": true")) fadeU = true;
+            check (fadeU, "set_clip_fade logged undoable:true");
+        }
+
+        // Curve types (optional args): curveIn/curveOut map to AudioFadeCurve::Type
+        // (1=linear 2=convex 3=concave 4=sCurve), surfaced on the snapshot as
+        // fadeInType/fadeOutType next to the durations.
+        check ((int) clipById (cid).getProperty ("fadeInType", 0) == 1
+               && (int) clipById (cid).getProperty ("fadeOutType", 0) == 1,
+               "clip fade curve types default to linear (1)");
+        check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "curveIn", "convex" }, { "curveOut", "sCurve" }}))),
+               "set_clip_fade (curve) ok");
+        check ((int) clipById (cid).getProperty ("fadeInType", 0) == 2, "clip fadeInType reflects curveIn=convex");
+        check ((int) clipById (cid).getProperty ("fadeOutType", 0) == 4, "clip fadeOutType reflects curveOut=sCurve");
 
         const int before = trackById (et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));

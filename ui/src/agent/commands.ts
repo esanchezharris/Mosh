@@ -41,6 +41,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
+  { command: "set_clip_fade", desc: "Set a clip's fade-in / fade-out (seconds)",
+    args: [S("clipId"), N("fadeInSec", false, "seconds"), N("fadeOutSec", false, "seconds"),
+           S("curveIn", false, "linear|convex|concave|sCurve"), S("curveOut", false, "linear|convex|concave|sCurve")] },
   { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
   { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
 
@@ -177,6 +180,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
+    case "set_clip_fade": return `Set clip fades (in ${a.fadeInSec ?? "–"}s, out ${a.fadeOutSec ?? "–"}s)`;
     case "stretch_clip": return a.bars ? `Stretched a clip to ${a.bars} bar${Number(a.bars) > 1 ? "s" : ""}` : `Stretched a clip to ${a.length}s`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
