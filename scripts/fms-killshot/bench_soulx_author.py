@@ -84,7 +84,7 @@ def main():
         print(json.dumps({"ok": False, "error": "no words in window"}))
         sys.exit(1)
     line = {"text": " ".join(texts), "asserted": True, "score": {"slots": slots}}
-    res = author_score([line])
+    res = author_score([line], durations=str(data.get("durations") or "verbatim"))
     if not res.get("ok"):
         print("author_score rejected:", json.dumps(res)[:300])
         sys.exit(1)

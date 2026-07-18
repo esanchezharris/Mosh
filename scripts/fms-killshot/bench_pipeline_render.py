@@ -105,7 +105,7 @@ REF_WAV = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing
 REF_JSON = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing-handoff/refs/own-30s.json")
 
 
-def author_payload(item, t0, t1, f0):
+def author_payload(item, t0, t1, f0, durations="verbatim"):
     """The author-script input (pure, so the NUS/own-pairs split is testable).
 
     Own-pairs items carry their own real-text ground-truth words and a `singer` that is not
@@ -114,11 +114,13 @@ def author_payload(item, t0, t1, f0):
     payload = {"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}
     if "mumble_vocal" in item:
         payload["words"] = item["words"]
+    if durations != "verbatim":          # absent key => the shipped default, byte-unchanged
+        payload["durations"] = durations
     return payload
 
 
 def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None,
-                      f0_from="clean_vocal"):
+                      f0_from="clean_vocal", durations="verbatim"):
     """THE real `pipeline` generator: true words + F0 → product author_score (phonology venv)
     → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics, one ≤12 s
     window.
@@ -138,7 +140,7 @@ def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=
     src, sr = mp._read_mono(item[f0_from])
     f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(src, sr)]
     inj = os.path.join(work, base + "_in.json")
-    json.dump(author_payload(item, t0, t1, f0), open(inj, "w"))
+    json.dump(author_payload(item, t0, t1, f0, durations), open(inj, "w"))
 
     # 2. author the SoulX score under the phonology venv (real words + author_score)
     scorej = os.path.join(work, base + "_score.json")

@@ -73,7 +73,35 @@ def _snap_arm(pipe_wav, ref_wav, out_dir, base):
         return None
 
 
-def run_item(item, t0, t1, out_dir):
+def _dynamics_arm(src_wav, ref_wav, out_dir, base, mode):
+    """Apply a dynamics probe to an already-timing-snapped render. LAB ONLY — see
+    bench_dynamics_probe. Returns None if anything is missing."""
+    try:
+        import numpy as np
+        import soundfile as sf
+        from skeleton.core import read_pcm_mono
+        import bench_dynamics_probe as dp
+        score_json = os.path.join(out_dir, base + "_pipeline_score.json")
+        clip = json.load(open(score_json)) if os.path.isfile(score_json) else None
+        clip = (clip[0] if isinstance(clip, list) else clip) if clip else None
+        take, sr = read_pcm_mono(ref_wav)
+        ren, sr_r = read_pcm_mono(src_wav)
+        if sr_r != sr:
+            return None
+        if mode == "frame":
+            outv = dp.transfer_envelope_frame(list(take), list(ren), sr)
+        else:
+            if not clip:
+                return None
+            outv = dp.transfer_envelope_note(list(take), list(ren), sr, clip)
+        out = os.path.join(out_dir, f"{base}_dyn_{mode}.wav")
+        sf.write(out, np.asarray(outv, dtype=np.float32), sr, subtype="PCM_16")
+        return out
+    except Exception:
+        return None
+
+
+def run_item(item, t0, t1, out_dir, *, durations="verbatim"):
     import bench_align
     import bench_human_baseline as hb
     import bench_naturalness
@@ -91,14 +119,23 @@ def run_item(item, t0, t1, out_dir):
 
     # THE REAL PIPELINE — F0 from the MUMBLE (never the finished take), owner's own voice.
     pipe = os.path.join(out_dir, base + "_pipeline.wav")
-    pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from="mumble_vocal")
+    pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from="mumble_vocal",
+                                            durations=durations)
     snapped = _snap_arm(pipe, ref_slice, out_dir, base)
 
     ref_mono = fin[int(t0 * sr):int(t1 * sr)]
-    out = {"item": item["id"], "window": [t0, t1], "n_true_words": len(true_words), "arms": {}}
+    out = {"item": item["id"], "window": [t0, t1], "n_true_words": len(true_words),
+           "durations": durations, "arms": {}}
     arms = [("reference", ref_slice), ("mumble", mum_slice), ("pipeline", pipe)]
     if snapped:
         arms.append(("pipeline+snap", snapped))
+        # L3/L4 — dynamics probes, applied on TOP of the snapped arm (timing first, then
+        # loudness). Lab-only: `frame` is the ear-rejected implementation, kept purely as a
+        # measuring stick; `note` is the Phase-2 hypothesis.
+        for mode in ("frame", "note"):
+            d = _dynamics_arm(snapped, ref_slice, out_dir, base, mode)
+            if d:
+                arms.append((f"snap+dyn:{mode}", d))
     for name, wav in arms:
         g, g_sr = mp._read_mono(wav)
         rep = overlap.analyze(ref_mono, sr, g, g_sr)
@@ -117,11 +154,31 @@ def _fmt(v, w=7, p=3):
     return f"{v:{w}.{p}f}" if isinstance(v, (int, float)) else f"{'·':>{w}}"
 
 
+# The human-to-human band, measured in the human-baseline verdict: two genuine takes of the
+# same song correlate 0.40–0.44. The target is TWO-SIDED. Landing inside is success; landing
+# ABOVE means the envelope was painted on rather than transferred, which is the "I can hear
+# the volume automation" failure — and treating it as failure is what stops this metric being
+# optimized into the V3 trap (a number improving while the sound degrades).
+BAND_LO, BAND_HI, OVERSHOOT = 0.40, 0.44, 0.90
+
+
+def _band_verdict(corr):
+    if not isinstance(corr, (int, float)):
+        return ""
+    if corr > OVERSHOOT:
+        return "OVERSHOOT — painted, not transferred (FAIL)"
+    if corr >= BAND_LO:
+        return "IN BAND ✓" if corr <= BAND_HI else "above band (near-copy?)"
+    return f"below band (gap {BAND_LO - corr:+.3f})"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--t0", type=float, default=0.0)
     ap.add_argument("--t1", type=float, default=12.0)
     ap.add_argument("--songs")
+    ap.add_argument("--durations", default="verbatim",
+                    help="verbatim (shipped default) | derived (B1-lite)")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
 
@@ -133,16 +190,16 @@ def main():
     for it in items:
         print(f"  {it['id']} [{a.t0:.0f}-{a.t1:.0f}s] …", flush=True)
         try:
-            rows.append(run_item(it, a.t0, a.t1, a.out))
+            rows.append(run_item(it, a.t0, a.t1, a.out, durations=a.durations))
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
 
-    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s) ===")
+    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s, durations={a.durations}) ===")
     print(f"  {'song':16} {'arm':14} {'wordAlign':>10} {'hit':>6} {'onsetF1':>8} "
           f"{'→reference':>11} {'→input':>8} {'pq':>7}")
     for r in rows:
-        for arm in ("reference", "mumble", "pipeline", "pipeline+snap"):
+        for arm in ("reference", "mumble", "pipeline", "pipeline+snap", "snap+dyn:frame", "snap+dyn:note"):
             d = r["arms"].get(arm)
             if not d:
                 continue
@@ -153,14 +210,18 @@ def main():
 
     import bench_metrics as bm
     print("\n=== means (word recovery is read against the ~0.36 human ceiling) ===")
-    for arm in ("reference", "mumble", "pipeline", "pipeline+snap"):
+    for arm in ("reference", "mumble", "pipeline", "pipeline+snap", "snap+dyn:frame", "snap+dyn:note"):
         got = [r["arms"][arm] for r in rows if arm in r["arms"]]
         if not got:
             continue
         wa = bm.human_band([(g.get("word_align") or {}).get("mean_score") for g in got])
         ci = bm.human_band([g.get("corr_to_input") for g in got])
         cr = bm.human_band([g.get("corr_to_reference") for g in got])
-        print(f"  {arm:14} wordAlign={_fmt(wa['mean'])}  →reference={_fmt(cr['mean'])}  →input={_fmt(ci['mean'])}")
+        print(f"  {arm:14} wordAlign={_fmt(wa['mean'])}  →reference={_fmt(cr['mean'])}"
+              f"  →input={_fmt(ci['mean'])}   "
+              f"{'(identity)' if arm == 'reference' else _band_verdict(cr['mean'])}")
+    print(f"\n  band = the human-to-human range {BAND_LO}-{BAND_HI}; OVERSHOOT (>{OVERSHOOT}) is a"
+          f" FAILURE\n  (envelope painted on rather than transferred — the 'volume automation' percept)")
     print(f"\nwrote {os.path.join(a.out, 'own_run.json')}")
     return 0
 
