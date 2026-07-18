@@ -12,6 +12,7 @@ ACE audit used).
 Run:  python3 service/soulx/perform_test.py     (exit 0 = all pass)
 """
 import hashlib
+import json
 import math
 import os
 import sys
@@ -171,6 +172,72 @@ try:
           _hq_hf * 5 < _lin_hf, f"hq {_hq_hf:.5f} vs linear {_lin_hf:.5f}")
 except ImportError:
     print("[skip] numpy/scipy absent — resample_hq falls back to linear (quality check skipped)")
+
+
+# ── per-note dynamics transfer (Phase 2: the performance-transfer fix) ──────────────────
+SR_D = 16000
+
+
+def _tone(dur_s, amp, f=220.0):
+    return [amp * math.sin(2 * math.pi * f * (i / SR_D)) for i in range(int(dur_s * SR_D))]
+
+
+def _rms(x):
+    return math.sqrt(sum(v * v for v in x) / len(x)) if x else 0.0
+
+
+# take: loud note then quiet note. render: both notes at the SAME level (the model invented
+# flat dynamics conditioned on nothing — exactly the failure this fixes).
+_TAKE = _tone(0.5, 0.8) + _tone(0.5, 0.15)
+_REND = _tone(0.5, 0.5) + _tone(0.5, 0.5)
+_CLIP = {"duration": "0.5 0.5", "note_type": "2 2"}
+
+check("dynamics: strength=0 is byte-identical (the shipped-default contract)",
+      perform.transfer_note_dynamics(_TAKE, _REND, SR_D, _CLIP, strength=0.0) == _REND)
+check("dynamics: empty clip is a safe no-op",
+      perform.transfer_note_dynamics(_TAKE, _REND, SR_D, {}) == _REND)
+check("dynamics: malformed clip is a safe no-op (never a crash)",
+      perform.transfer_note_dynamics(_TAKE, _REND, SR_D, {"duration": "x", "note_type": "2"}) == _REND)
+check("dynamics: preserves length exactly",
+      len(perform.transfer_note_dynamics(_TAKE, _REND, SR_D, _CLIP)) == len(_REND))
+
+_half = int(0.5 * SR_D)
+_out = perform.transfer_note_dynamics(_TAKE, _REND, SR_D, _CLIP)
+_ratio = _rms(_out[:_half]) / max(_rms(_out[_half:]), 1e-9)
+check("dynamics: restores the take's loud/quiet contrast the render lacked",
+      _ratio > 2.0 and _rms(_REND[:_half]) / max(_rms(_REND[_half:]), 1e-9) < 1.2,
+      f"ratio {_ratio:.2f}")
+
+# note_spans
+check("note_spans lays authored durations end to end",
+      perform.note_spans({"duration": "0.2 0.3", "note_type": "2 3"}, 10.0) == [(0.0, 0.2), (0.2, 0.5)])
+check("note_spans EXCLUDES rests (note_type 1)",
+      perform.note_spans({"duration": "0.2 0.3 0.4", "note_type": "1 2 1"}, 10.0) == [(0.2, 0.5)])
+check("note_spans clamps to the render length",
+      perform.note_spans({"duration": "0.2 5.0", "note_type": "2 2"}, 1.0) == [(0.0, 0.2), (0.2, 1.0)])
+
+# THE distinguishing property vs the deleted per-frame version: only the LEVEL is imported,
+# never the take's shape INSIDE a note. Importing that shape is the "volume automation"
+# percept, and it measures as band overshoot (0.726 vs the human 0.40-0.44).
+_TAKE_SW = [0.8 * (0.15 + 0.85 * (i / (0.6 * SR_D))) * math.sin(2 * math.pi * 220 * (i / SR_D))
+            for i in range(int(0.6 * SR_D))]
+_REND_FLAT = _tone(0.6, 0.5)
+_third = len(_REND_FLAT) // 3
+
+
+def _swell(x):
+    return _rms(x[-_third:]) / max(_rms(x[:_third]), 1e-9)
+
+
+_sw_out = _swell(perform.transfer_note_dynamics(_TAKE_SW, _REND_FLAT, SR_D,
+                                                {"duration": "0.6", "note_type": "2"}))
+check("dynamics: does NOT import the take's intra-note shape (per-note, not per-frame)",
+      _sw_out < _swell(_REND_FLAT) * 1.5, f"render swell {_swell(_REND_FLAT):.2f} -> {_sw_out:.2f}")
+
+_det = {hashlib.sha256(json.dumps([round(v, 9) for v in
+        perform.transfer_note_dynamics(_TAKE, _REND, SR_D, _CLIP)]).encode()).hexdigest()
+        for _ in range(3)}
+check("dynamics deterministic (3x)", len(_det) == 1)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

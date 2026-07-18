@@ -243,3 +243,108 @@ def env_corr(ref: List[float], other: List[float], sr: int,
     if va <= 0.0 or vb <= 0.0:
         return 0.0
     return cov / math.sqrt(va * vb)
+
+
+# ── dynamics: give the render the take's LOUDNESS, per note ─────────────────────────────
+# The SoulX target score has no dynamics channel (text/phoneme/pitch/note_type/duration and
+# nothing else), so the model invents loudness conditioned on nothing from the take. Measured
+# consequence on the own-pairs bench: energy-envelope correlation to the finished vocal 0.266,
+# BELOW the 0.400 the untouched mumble scores, against a human-to-human band of 0.40-0.44.
+#
+# An earlier per-FRAME `transfer_envelope` was deleted (3fbb61d2) on the rationale "NSF
+# supplies dynamics". That was wrong twice over: NSF ships OFF, and NSF's `perform` mode
+# resynthesizes from the RENDER's own mel, so it transfers F0, never the take's loudness.
+#
+# Per-frame vs per-note is the whole difference. Frame-rate gain tracks the take's envelope
+# hop by hop, so the render inherits an interior shape it never performed — that imported
+# shape IS the "I can hear the volume automation rather than the words ending naturally"
+# percept, and it MEASURES as overshoot: 0.726, far above the human band, with the worst pq
+# of any arm. Per-note transfer takes only each note's LEVEL and leaves the model's own
+# attack/decay inside the note alone: 0.414, in band, pq unchanged.
+# Evidence: docs/superpowers/specs/2026-07-18-fms-performance-transfer-phase1-verdict.md
+
+MAX_BOOST = 4.0        # never lift a note by more than this (no fabricating energy from hiss)
+RAMP_S = 0.030         # inter-note gain transition, so a level change never steps
+
+
+def _voicing_threshold(env: List[float]) -> float:
+    """Above this the signal is actually SINGING (the overlap-QA convention — stricter than
+    the rest gate, so breath under a note reads as non-voicing and is never boosted)."""
+    if not env:
+        return float("inf")
+    sv = sorted(env)
+    return max(1e-6, 4.0 * _pctl(sv, 5), 0.15 * _pctl(sv, 95))
+
+
+def note_spans(clip: dict, total_s: float) -> List[tuple]:
+    """[(start_s, end_s)] for each SOUNDED note of an authored clip (note_type 2/3; 1 is a
+    rest). Authored durations laid end to end — the same clock `phrase_windows` reads."""
+    if not clip:
+        return []
+    try:
+        durs = [float(x) for x in str(clip.get("duration", "")).split()]
+        types = [int(x) for x in str(clip.get("note_type", "")).split()]
+    except ValueError:
+        return []
+    spans, t = [], 0.0
+    for d, ty in zip(durs, types):
+        if ty != 1 and d > 0:
+            spans.append((t, min(t + d, total_s)))
+        t += d
+    return [(a, b) for a, b in spans if b > a and a < total_s]
+
+
+def transfer_note_dynamics(take: List[float], render: List[float], sr: int, clip: dict,
+                           *, strength: float = 1.0, hop_s: float = HOP_S,
+                           max_boost: float = MAX_BOOST, gate_frac: float = GATE_FRAC,
+                           ramp_s: float = RAMP_S) -> List[float]:
+    """Give each authored NOTE of `render` the loudness the take has over that span.
+
+    One gain per note, held flat across it and ramped (~30 ms) between notes, so the curve
+    moves at note rate rather than frame rate and the model's articulation inside each note
+    survives. A note the take rests through is silenced; a note where the render is not
+    voicing is never boosted (breath stays breath). `strength=0` returns the render
+    byte-identical, matching duration.py's contract. No-op safe on an empty/degenerate clip."""
+    if strength <= 0.0:
+        return list(render)
+    spans = note_spans(clip, len(render) / float(sr))
+    if not spans:
+        return list(render)
+    env_t = energy_envelope(take, sr, hop_ms=hop_s * 1000.0)
+    env_r = energy_envelope(render, sr, hop_ms=hop_s * 1000.0)
+    if not env_t or not env_r:
+        return list(render)
+
+    th, th_r = _gate_threshold(env_t, gate_frac), _voicing_threshold(env_r)
+    n = len(env_r)
+    gains = [1.0] * n
+
+    def _mean(env, a, b):
+        seg = [env[i] for i in range(max(0, a), min(len(env), b))]
+        return sum(seg) / len(seg) if seg else 0.0
+
+    for s, e in spans:
+        i0 = int(s / hop_s)
+        i1 = max(int(e / hop_s), i0 + 1)
+        et, er = _mean(env_t, i0, i1), _mean(env_r, i0, i1)
+        if et < th:
+            raw = 0.0                                   # the take rests across this note
+        else:
+            cap = max_boost if er >= th_r else 1.0
+            raw = min(et / max(er, 1e-9), cap)
+        g = (1.0 - strength) + strength * raw
+        for i in range(max(0, i0), min(n, i1)):
+            gains[i] = g
+
+    half = max(1, int(ramp_s / hop_s) // 2)
+    gains = [sum(gains[max(0, i - half):i + half + 1])
+             / (min(n, i + half + 1) - max(0, i - half)) for i in range(n)]
+
+    hop = max(1, int(sr * hop_s))
+    out = []
+    for j, v in enumerate(render):
+        f = j / hop
+        i = int(f)
+        g = gains[-1] if i >= len(gains) - 1 else gains[i] + (gains[i + 1] - gains[i]) * (f - i)
+        out.append(v * g)
+    return out

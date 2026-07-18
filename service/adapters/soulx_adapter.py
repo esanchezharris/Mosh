@@ -231,6 +231,24 @@ def _render_real(output_wav: str, score_json: str) -> None:
         raise RuntimeError(f"soulx pc render failed: {(proc.stderr or proc.stdout)[-400:]}")
 
 
+def _transfer_dynamics_to_take(output_wav: str, take_path: str, clip: dict,
+                               strength: float = 1.0) -> bool:
+    """Give the rendered output the take's loudness PER NOTE (soulx.perform). Best-effort:
+    any unreadable input returns False and leaves the output untouched. Expects to run after
+    the timing snap, so the notes are already on the take's clock before they are levelled."""
+    from skeleton.core import read_pcm_mono
+    from soulx import perform
+    rt, ro = read_pcm_mono(take_path), read_pcm_mono(output_wav)
+    if not rt or not ro or not rt[0] or not ro[0]:
+        return False
+    take, sr_t = rt
+    rend, sr_r = ro
+    rend = perform.resample_hq(rend, sr_r, sr_t)
+    out = perform.transfer_note_dynamics(take, rend, sr_t, clip, strength=strength)
+    write_wav(output_wav, out, 1, sr_t)
+    return True
+
+
 def _snap_output_to_take(output_wav: str, take_path: str, clip: dict):
     """Timing-snap the rendered output onto the take (the certified recipe's step 5, now
     in the product path): PHRASE-level alignment via soulx.perform, derived from the
@@ -304,6 +322,23 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
             timing_snapped = False
         snap_skipped = not timing_snapped
 
+    # Dynamics transfer — give each authored NOTE the loudness the take has over that span.
+    # OPT-IN (`dynamics: "note"`), so the default path is byte-identical. The SoulX score has
+    # no dynamics channel, so without this the model's invented loudness is final: measured
+    # at energy-envelope corr 0.266 to the finished vocal, BELOW the 0.400 the raw mumble
+    # scores, against a human-to-human band of 0.40-0.44. Per-note transfer reads 0.414 (in
+    # band); the older per-FRAME version overshoots to 0.726 — it imports the take's shape
+    # INSIDE each note, which is the "volume automation" percept the owner rejected by ear.
+    # Runs AFTER the timing snap (place the notes, then level them) and needs a readable take.
+    dynamics_mode = str(params.get("dynamics") or "off")
+    dynamics_applied = False
+    if dynamics_mode == "note" and timing_snapped and input_wav and os.path.isfile(input_wav):
+        try:
+            dynamics_applied = _transfer_dynamics_to_take(
+                output_wav, input_wav, clip, float(params.get("dynamicsStrength") or 1.0))
+        except Exception:  # noqa: BLE001 — best-effort; never corrupt/lose the render
+            dynamics_applied = False
+
     # NSF re-vocode (certified recipe step 6) — SHIPPED OFF (CC-BY-NC-SA weights). Runs on
     # the snapped output; best-effort (keeps the snapped render on any failure).
     nsf_resynth, nsf_failed = False, False
@@ -359,6 +394,7 @@ def render(input_wav: str, output_wav: str, params: dict) -> dict:
         "durations": authored.get("durations", "verbatim"),
         "voiceEnrolled": bool(voice_ref_path()),
         "timingSnapped": timing_snapped, "sylSnapMedianMs": syl_snap_ms,
+        "dynamics": dynamics_mode if dynamics_applied else "off",
         "nsfResynth": nsf_resynth,
         "singViz": os.path.basename(sing_viz) if sing_viz else False,
         "pq": pq, "pq_base": 0.85, "flags": flags,
