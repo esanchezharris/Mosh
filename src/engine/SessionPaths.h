@@ -108,6 +108,41 @@ namespace mosh::sessionpaths
     */
     inline constexpr int kPruneAfterHours = 24;
 
+    /** Marks a directory this scheme moved aside instead of deleting. Distinct from
+        kAutoMarker so the pruner (which only ever touches "-auto-" dirs) leaves these
+        alone — a preserved dir must outlive the run that rescued it.
+    */
+    inline constexpr const char* kLegacyMarker = "-legacy-";
+
+    /** Moves a pre-existing REAL directory at the pointer path out of the way.
+
+        NEVER deletes it. The tempting premise — "the legacy harness dir was wiped by
+        every run anyway, so it was never durable state" — is precisely what SLF-CONC-001
+        disproved: since #246 (2026-07-07) the interactive GUI's session ALSO resolved to
+        "session-selftest", so a real directory at a legacy harness path can hold the
+        owner's actual project. This function keys off a directory's NAME, which says
+        nothing about its CONTENTS, so deleting is never justified here. Renaming costs
+        nothing and turns the worst case from silent permanent data loss into "an oddly
+        named folder appeared".
+
+        @returns where it was moved, or an empty File if nothing needed moving.
+    */
+    inline juce::File preserveLegacyDir (const juce::File& pointer)
+    {
+        if (! pointer.isDirectory() || pointer.isSymbolicLink())
+            return {};
+
+        const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+        auto aside = pointer.getSiblingFile (pointer.getFileName() + kLegacyMarker + stamp);
+
+        // Two runs racing within the same second must not clobber each other's rescue.
+        if (aside.exists())
+            aside = pointer.getSiblingFile (pointer.getFileName() + kLegacyMarker + stamp
+                                            + "-" + juce::Uuid().toString().substring (0, 8));
+
+        return pointer.moveFileTo (aside) ? aside : juce::File();
+    }
+
     /** Points <moshDir>/<baseName> at the run's real dir and prunes stale auto dirs.
 
         Auto-isolation would otherwise break every "look in ~/Library/Mosh/session-selftest
@@ -125,11 +160,10 @@ namespace mosh::sessionpaths
 
         const auto pointer = moshDir.getChildFile (baseName);
 
-        // A pre-existing REAL directory here is the legacy shared harness dir — the one
-        // every run used to wipe anyway. Replacing it with the pointer is safe precisely
-        // because it was never durable state. (deleteRecursively does not follow symlinks.)
+        // A pre-existing REAL directory is PRESERVED, not deleted (see preserveLegacyDir).
+        // A symlink is our own pointer from an earlier run — that IS disposable, so unlink it.
         if (pointer.isDirectory() && ! pointer.isSymbolicLink())
-            pointer.deleteRecursively();
+            preserveLegacyDir (pointer);
         else if (pointer.exists() || pointer.isSymbolicLink())
             pointer.deleteFile();
 

@@ -92,8 +92,12 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     session = moshDir.getChildFile (sessionLeaf);
     // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project. Nothing
     // should route "session" here with freshSession set, but this is a data-loss class —
-    // guard it rather than trust every caller.
-    if (freshSession && sessionLeaf != "session")
+    // guard it rather than trust every caller. ONE boolean covers EVERY destructive step
+    // below (the dir wipe AND the edit-file delete): guarding only the first left
+    // `MOSH_SELFTEST_SESSION=session` + any headless mode still deleting the GUI's
+    // session.tracktionedit, which is exactly what this guard exists to prevent.
+    const bool mayWipe = freshSession && sessionLeaf != "session";
+    if (mayWipe)
         session.deleteRecursively();
     else if (freshSession)
         DBG ("MoshEngine: refusing to wipe the GUI \"session\" dir");
@@ -115,7 +119,8 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
 
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
-    if (freshSession)
+    // Shares mayWipe with the dir wipe above — never `freshSession` alone.
+    if (mayWipe)
         editPath.deleteFile();
 
     bool loadedFromFile = false;

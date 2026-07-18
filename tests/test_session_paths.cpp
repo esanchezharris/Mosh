@@ -113,3 +113,70 @@ TEST_CASE ("auto-isolated leaves are identifiable so stale ones can be pruned", 
     REQUIRE_FALSE (isAutoIsolatedLeaf ("session-run-script"));
     REQUIRE_FALSE (isAutoIsolatedLeaf ("gate-worktree-7"));
 }
+
+TEST_CASE ("a populated legacy dir at the pointer path is PRESERVED, never deleted", "[sessionpaths]")
+{
+    // The regression this guards: SLF-CONC-001 established that since #246 the
+    // interactive GUI ALSO resolved to "session-selftest". So a real directory at a
+    // legacy harness path can hold the owner's actual project, and publishLatestPointer
+    // keys off the directory's NAME -- which says nothing about its CONTENTS. Deleting
+    // it (the original behaviour) was silent, permanent data loss on the first ordinary
+    // --selftest after upgrading. RED-proof: swap preserveLegacyDir back for
+    // deleteRecursively() and the "survives" REQUIREs below fail.
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+    moshDir.createDirectory();
+
+    const auto pointer = moshDir.getChildFile ("session-selftest");
+    pointer.createDirectory();
+    const auto precious = pointer.getChildFile ("session.tracktionedit");
+    precious.replaceWithText ("<EDIT>the owner's real project</EDIT>");
+    const auto actual = moshDir.getChildFile ("session-selftest-auto-999-deadbeef");
+    actual.createDirectory();
+
+    publishLatestPointer (moshDir, "session-selftest", actual);
+
+    // The project survived, byte-for-byte, under a clearly-labelled name.
+    REQUIRE_FALSE (precious.existsAsFile());          // it MOVED (not still under the pointer)
+    juce::Array<juce::File> rescued;
+    moshDir.findChildFiles (rescued, juce::File::findDirectories, false, "session-selftest-legacy-*");
+    REQUIRE (rescued.size() == 1);
+    const auto survivor = rescued[0].getChildFile ("session.tracktionedit");
+    REQUIRE (survivor.existsAsFile());
+    REQUIRE (survivor.loadFileAsString() == "<EDIT>the owner's real project</EDIT>");
+
+    // ...and the pointer still does its job.
+    REQUIRE (pointer.isSymbolicLink());
+    REQUIRE (pointer.getLinkedTarget() == actual);
+
+    // A rescued dir must NOT look like prunable garbage, or the next run deletes it anyway.
+    REQUIRE_FALSE (isAutoIsolatedLeaf (rescued[0].getFileName()));
+
+    moshDir.deleteRecursively();
+}
+
+TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved", "[sessionpaths]")
+{
+    // The complement: our OWN pointer from a previous run IS disposable. If this
+    // took the preserve path it would litter a -legacy- dir on every single run.
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+    moshDir.createDirectory();
+
+    const auto oldRun = moshDir.getChildFile ("session-selftest-auto-1-aaaaaaaa");
+    const auto newRun = moshDir.getChildFile ("session-selftest-auto-2-bbbbbbbb");
+    oldRun.createDirectory();
+    newRun.createDirectory();
+
+    const auto pointer = moshDir.getChildFile ("session-selftest");
+    juce::File::createSymbolicLink (pointer, oldRun.getFullPathName(), true);
+
+    publishLatestPointer (moshDir, "session-selftest", newRun);
+
+    REQUIRE (pointer.getLinkedTarget() == newRun);
+    juce::Array<juce::File> littered;
+    moshDir.findChildFiles (littered, juce::File::findDirectories, false, "session-selftest-legacy-*");
+    REQUIRE (littered.isEmpty());
+
+    moshDir.deleteRecursively();
+}
