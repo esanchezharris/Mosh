@@ -357,3 +357,35 @@ describe("AG-KB3: set_clip_gain / set_clip_mute (real main-existing commands, wr
     );
   });
 });
+
+describe("AG-KB4: tempo / bus / track-routing / stem-export (CONF-CATALOG newly agent-callable commands)", () => {
+  // These commands became agent-callable via CONF-CATALOG: set_tempo/set_time_signature
+  // were already agent-callable but had no card; remove_bus/rename_bus, set_track_output/
+  // list_track_outputs, and export_stems/export_audio are newly in AGENT_COMMANDS. Same
+  // pin-the-retrieval pattern as the AG-KB1/AG-KB-R2/AG-KB3 blocks above.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("transport: changing the whole song's tempo/meter -> set_tempo / set_time_signature", () => {
+    expect(top("how do I change the whole song tempo and time signature, not just one loop's speed")).toBe(
+      "transport-tempo-time-signature-range",
+    );
+  });
+
+  it("mixer: an empty bus needs deleting or relabeling -> remove_bus / rename_bus", () => {
+    expect(top("a bus I created is empty, how do I get rid of it or rename it")).toBe(
+      "mixer-remove-rename-bus",
+    );
+  });
+
+  it("mixer: routing a track's output into another track or a device -> set_track_output / list_track_outputs", () => {
+    expect(top("I want a track to output into another track as a submix instead of the master")).toBe(
+      "mixer-track-output-routing",
+    );
+  });
+
+  it("export: stems for a mastering engineer vs the final mixdown -> export_stems / export_audio", () => {
+    expect(top("I need every track as its own file for the mastering engineer, not just the final mix")).toBe(
+      "export-stems-vs-mixdown",
+    );
+  });
+});

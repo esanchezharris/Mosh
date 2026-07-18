@@ -1,5 +1,5 @@
 // The curated tool catalog Moshi's brain is allowed to call. It deliberately
-// exposes a high-value, low-blast-radius subset (~64 of the ~148 MoshOps commands) — no
+// exposes a high-value, low-blast-radius subset (~99 of the ~190 MoshOps commands) — no
 // project IO, device settings, scans, or anything that could lose the user's work.
 // Each entry feeds two consumers: (1) the LLM system prompt (so the brain knows
 // what it can do), and (2) client-side validation, so a malformed or unknown
@@ -46,6 +46,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
            S("curveIn", false, "linear|convex|concave|sCurve"), S("curveOut", false, "linear|convex|concave|sCurve")] },
   { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
   { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
+  { command: "transcribe_clip", desc: "Transcribe a wave clip's audio into a new, time-aligned MIDI clip (pitch detection)", args: [S("clipId"), S("mode", false, '"mono" (default) | "poly"'), B("wait", false)] },
 
   // ── embodied capture (Sketch, Phase 0) ───────────────────────────────────
   { command: "sketch_beatbox", desc: "Transduce a recorded beatbox WAV into an editable drum clip at a known BPM (kick/snare/hat on a 16th grid)", args: [S("file", true, "path to the beatbox WAV"), N("bpm", true, "known tempo"), N("bars", false, "loop length, 1-2 bars")] },
@@ -56,6 +57,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
   { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", false, "beats: 1=1/4, 0.5=1/8, 0.25=1/16"), N("strength", false, "0-1")] },
   { command: "add_drum_pattern", desc: "Lay a whole drum grid in ONE undoable step from lane strings — 'x' hit, 'X' accent, '.'/'-' rest, '|' cosmetic; lanes kick/snare/clap/hat/openhat/lowtom/midtom/crash or a raw MIDI pitch; short lanes tile (\"x.\" = 8th hats)", args: [S("pattern", true, 'lane map: "kick: x...x...x...x...; snare: ....x.......x..."'), S("trackId", false, "target track — omit to create a new Drums track"), S("clipId", false, "existing MIDI clip: replaces ONLY the lanes named (trackId ignored)"), N("stepsPerBar", false, "1-64, default 16"), N("bars", false, "1-16, default fits the longest lane"), N("velocity", false, "1-127 for 'x' hits, default 100"), N("start", false, "seconds — new-clip position")] },
+  { command: "set_drum_lane", desc: "Mute/solo one drum pad lane on a drum track, by MIDI note", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 — the pad"), B("mute", false), B("solo", false)] },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
@@ -91,6 +93,12 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "add_send", desc: "Add a post-fader send from a track to a bus (bus number from the snapshot's buses[])", args: [S("trackId"), N("bus", true, "the bus number"), N("db", false, "send level in dB, -60…6")] },
   { command: "set_send_level", desc: "Set a track's send level to a bus in dB", args: [S("trackId"), N("bus"), N("db")] },
   { command: "remove_send", desc: "Remove a track's send to a bus", args: [S("trackId"), N("bus")] },
+  { command: "remove_bus", desc: "Remove an aux/return bus (sweeps any sends pointing at it)", args: [N("bus", true, "the bus number")] },
+  { command: "rename_bus", desc: "Rename an aux/return bus", args: [N("bus", true, "the bus number"), S("name")] },
+
+  // ── track output routing ─────────────────────────────────────────────────
+  { command: "list_track_outputs", desc: "List available track-output destinations — hardware outs + tracks (read-only)", args: [] },
+  { command: "set_track_output", desc: "Route a track's output — into another track (a submix), to a hardware device, or back to 'default'", args: [S("trackId"), S("destTrackId", false, "route into this track instead of the master"), S("deviceID", false, "route to a hardware output device (from list_track_outputs)"), S("output", false, "'default' resets to normal master routing")] },
 
   // ── plugins ─────────────────────────────────────────────────────────────
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
@@ -104,10 +112,15 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")] },
 
+  // ── export ──────────────────────────────────────────────────────────────
+  { command: "export_audio", desc: "Render the whole mix down to an audio file", args: [S("file", false, "destination path, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), S("range", false, '"full" (default) | "loop" | "custom"'), N("start", false, "seconds — with range:\"custom\""), N("end", false, "seconds — with range:\"custom\""), S("tail", false, '"cut" (default) | "include" — carry a reverb/delay tail past the end'), N("tailSeconds", false, "with tail:\"include\", default 2")] },
+  { command: "export_stems", desc: "Render every track to its own audio file (stems) into a directory", args: [S("dir", false, "destination directory, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), B("includeEmpty", false, "write silent stems for empty tracks too")] },
+
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to ANY clip — wave, MIDI or drum (MIDI/drum is auto-bounced to audio first), optionally scoped to a beat range, in seconds", args: [S("clipId"), S("adapter", false), N("regionStart", false, "scope start in seconds"), N("regionEnd", false, "scope end in seconds")] },
   { command: "set_render_param", desc: "Set a render-layer parameter (prompt/noise/seed, transform target/strength, or whole-clip coverage)", args: [S("clipId"), S("prompt", false), N("nl", false, "noise level 0-1"), N("seed", false), S("target", false, "transform target instrument or free-text"), N("strength", false, "transform strength 0-100"), S("coverage", false, '"auto"|"loop"|"stitch" — cover a long clip by tiling a cycle or stitching windows')] },
   { command: "render_layer", desc: "Run the generative render on a clip's layer", args: [S("clipId")] },
+  { command: "cancel_render", desc: "Cancel a clip's in-progress render job", args: [S("clipId"), S("jobId", false)] },
   { command: "compile_render", desc: "Compile a loose instruction (\"make it lo-fi\", \"as a violin\") into a validated generative render on a clip — auto-picks re-imagine vs transform and fills prompt/colours/noise or target/strength; corrective (fix/tune) or vocal requests are honestly declined", args: [S("clipId"), S("instruction"), N("intensity", false, "0-100, how strong"), B("autoRender", false, "render immediately after compiling")] },
   { command: "accept_render", desc: "Accept a finished render (MIDI/drum: lands it as a clip; wave clips auto-apply in place, so this is a no-op for them)", args: [S("clipId")] },
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
