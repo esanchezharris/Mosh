@@ -48,12 +48,33 @@ if [ "$HAVE_CERT" = 1 ] && [ "$HAVE_PROFILE" = 1 ]; then
   echo "  (build Release → Hardened-Runtime sign → notarytool submit --wait → staple → verify)"
   echo
   [ -x "$REPO/run-mosh.sh" ] || { echo "✗ $REPO/run-mosh.sh not found/executable" >&2; exit 2; }
+
+  # ── brain key ──────────────────────────────────────────────────────────────
+  # The release SEALS brain.env into the bundle BEFORE signing, so a missing key
+  # cannot be added afterwards without invalidating the signature and redoing
+  # notarization. A stale `export MOSH_BRAIN_ENV=<deleted path>` is a known
+  # landmine here, and `${MOSH_BRAIN_ENV:-default}` does NOT protect against it
+  # (the var is set, just wrong). So validate the target file, don't trust the var.
+  has_keys() { [ -f "$1" ] && [ "$(grep -cE '^(DEEPSEEK|OPENAI|XAI)_API_KEY=.+' "$1" 2>/dev/null)" -gt 0 ]; }
+  if [ -n "${MOSH_BRAIN_ENV:-}" ] && has_keys "${MOSH_BRAIN_ENV}"; then
+    BRAIN_ENV="$MOSH_BRAIN_ENV"
+  else
+    [ -n "${MOSH_BRAIN_ENV:-}" ] && no "ignoring stale MOSH_BRAIN_ENV='$MOSH_BRAIN_ENV' (missing or keyless)"
+    BRAIN_ENV="$REPO/ui/.env.local"
+  fi
+  if has_keys "$BRAIN_ENV"; then
+    ok "brain key source: $BRAIN_ENV ($(grep -cE '^(DEEPSEEK|OPENAI|XAI)_API_KEY=.+' "$BRAIN_ENV") provider key(s))"
+  elif [ "${MOSH_ALLOW_NO_BRAIN:-0}" = "1" ]; then
+    no "no provider key found — continuing anyway (MOSH_ALLOW_NO_BRAIN=1)"
+  else
+    no "No provider key in $BRAIN_ENV — the notarized bundle would ship brain-less,"
+    echo "    and the key is sealed BEFORE signing, so it can't be added afterwards."
+    echo "    Fix ui/.env.local, or re-run with MOSH_ALLOW_NO_BRAIN=1 to accept it."
+    exit 3
+  fi
+
   cd "$REPO"
-  # MOSH_BRAIN_ENV is set explicitly: a stale profile export pointing at a missing
-  # file silently ships a brain-less bundle (known landmine).
-  MOSH_BRAIN_ENV="${MOSH_BRAIN_ENV:-$REPO/ui/.env.local}" \
-  MOSH_NOTARY_PROFILE="$PROFILE" \
-    ./run-mosh.sh release
+  MOSH_BRAIN_ENV="$BRAIN_ENV" MOSH_NOTARY_PROFILE="$PROFILE" ./run-mosh.sh release
   echo
   echo "Done. Verify Gatekeeper will accept it on a guest's Mac:"
   echo "  spctl -a -vvv -t install <the .app or .dmg>   # expect: accepted, source=Notarized Developer ID"
