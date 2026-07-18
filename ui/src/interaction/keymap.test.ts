@@ -5,11 +5,11 @@ import {
   canonicalCombo,
   resolveKey,
   getKeymap,
-  shortcutRows,
   KEYMAPS,
   type ScopedKeymap,
   type KeyEventLike,
 } from "./keymap";
+import { shortcutRows } from "./shortcutPresentation";
 
 const ev = (over: Partial<KeyEventLike>): KeyEventLike => ({ key: "a", ...over });
 

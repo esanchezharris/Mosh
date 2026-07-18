@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { EditorAction } from "./actions";
+import { getKeymap, resolveKey, type KeyEventLike } from "./keymap";
 
 // The editor-action vocabulary is the shared alphabet both resolvers (keymap +
 // gesture table) speak. These tests pin the set's completeness, the uniqueness of
@@ -23,14 +24,18 @@ describe("EditorAction", () => {
     expect(new Set(vals).size).toBe(vals.length);
   });
 
-  it("includes file and profile window actions used by shortcut dispatch", () => {
-    expect(EditorAction.OPEN_PROJECT).toBe("open_project");
-    expect(EditorAction.SAVE_AS).toBe("save_as");
-    expect(EditorAction.EXPORT_AUDIO).toBe("export_audio");
-    expect(EditorAction.SHOW_ARRANGEMENT).toBe("show_arrangement");
-    expect(EditorAction.SHOW_DRUM).toBe("show_drum");
-    expect(EditorAction.SHOW_PIANO_ROLL).toBe("show_piano_roll");
-    expect(EditorAction.SHOW_MIXER).toBe("show_mixer");
-    expect(EditorAction.SHOW_BROWSER).toBe("show_browser");
+  it("uses the shared file and window vocabulary in FL shortcut resolution", () => {
+    const keymap = getKeymap("fl");
+    const cases: [KeyEventLike, string][] = [
+      [{ key: "o", metaKey: true }, EditorAction.OPEN_PROJECT],
+      [{ key: "s", metaKey: true, shiftKey: true }, EditorAction.SAVE_AS],
+      [{ key: "r", metaKey: true }, EditorAction.EXPORT_AUDIO],
+      [{ key: "F5" }, EditorAction.SHOW_ARRANGEMENT],
+      [{ key: "F6" }, EditorAction.SHOW_DRUM],
+      [{ key: "F7" }, EditorAction.SHOW_PIANO_ROLL],
+      [{ key: "F9" }, EditorAction.SHOW_MIXER],
+      [{ key: "F8", altKey: true }, EditorAction.SHOW_BROWSER],
+    ];
+    expect(cases.map(([event]) => resolveKey(keymap, event))).toEqual(cases.map(([, action]) => action));
   });
 });

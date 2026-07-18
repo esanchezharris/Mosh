@@ -6,9 +6,19 @@ import type { Snapshot } from "../types";
 import { FileOptions } from "./FileOptions";
 
 const snapshot = {
-  session: { recentProjects: [], editFile: "", dirty: false, audioEnabled: true },
+  schemaVersion: 1,
+  session: {
+    sampleRate: 48_000,
+    tempo: 120,
+    key: { tonic: "C", mode: "major" },
+    editFile: "",
+    dirty: false,
+    audioEnabled: true,
+    recentProjects: [],
+  },
   tracks: [],
-} as unknown as Snapshot;
+  transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+} satisfies Snapshot;
 
 describe("FileOptions effective shortcut presentation", () => {
   let host: HTMLDivElement;

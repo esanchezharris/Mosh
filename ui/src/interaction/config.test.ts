@@ -61,7 +61,10 @@ describe("buildKeymap", () => {
     expect(resolveKey(km, { key: "r", metaKey: true })).toBeNull();
   });
 
-  it.each(["key.split", "key.export_audio"])("keeps FL Mod+E reserved over the persisted %s override", (id) => {
+  it.each([
+    ["key.split", A.SPLIT],
+    ["key.export_audio", A.EXPORT_AUDIO],
+  ])("reserves FL Mod+E in v2 but keeps the persisted %s binding available in Classic", (id, classicAction) => {
     const stored: Record<string, SettingValue> = {
       uiShell: "v2",
       workflowProfile: "fl",
@@ -70,16 +73,9 @@ describe("buildKeymap", () => {
     const km = buildKeymap(getterFrom(stored));
     expect(resolveKey(km, { key: "e", metaKey: true }, "arrangement")).toBeNull();
     expect(resolveKey(km, { key: "e", metaKey: true }, "modal")).toBeNull();
-    expect(stored[id]).toBe("Mod+E");
-  });
-
-  it("does not apply the FL reservation to Classic persisted bindings", () => {
-    const km = buildKeymap(getterFrom({
-      uiShell: "classic",
-      keymap: "mosh",
-      workflowProfile: "fl",
-      "key.export_audio": "Mod+E",
-    }));
-    expect(resolveKey(km, { key: "e", metaKey: true }, "modal")).toBe(A.EXPORT_AUDIO);
+    stored.uiShell = "classic";
+    stored.keymap = "fl";
+    const classic = buildKeymap(getterFrom(stored));
+    expect(resolveKey(classic, { key: "e", metaKey: true }, "modal")).toBe(classicAction);
   });
 });

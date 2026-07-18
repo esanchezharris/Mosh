@@ -11,7 +11,7 @@ import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile } from "../bridge";
 import { runAction, fileMenuForKeymap, type ActionId } from "../menuActions";
 import { liveKeymap } from "../interaction/config";
-import { shortcutRows } from "../interaction/keymap";
+import { shortcutRows } from "../interaction/shortcutPresentation";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";

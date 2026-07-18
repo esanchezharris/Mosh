@@ -6,7 +6,8 @@
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
 import type { ActionId } from "./keymap";
-import { shortcutRows, type ScopedKeymap } from "./interaction/keymap";
+import type { ScopedKeymap } from "./interaction/keymap";
+import { shortcutRows } from "./interaction/shortcutPresentation";
 import type { Snapshot } from "./types";
 import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 
