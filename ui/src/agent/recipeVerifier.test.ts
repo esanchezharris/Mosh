@@ -123,6 +123,48 @@ describe("verifyRecipe — Goodhart hardening (red-team regression)", () => {
   });
 });
 
+// ── scoreKey grades against the DECLARED mode (SCL-002) ──────────────────────
+// v2 collapsed every mode onto natural minor, so a correctly-modal melody was
+// penalised for its own characteristic tone. These pin each mode's identity.
+describe("verifyRecipe — key is graded against the declared mode", () => {
+  const keyOnly = (tonic: string, mode: string, pitches: number[]): Recipe => ({
+    tempo: 140, key: { tonic, mode }, bars: 2,
+    tracks: [{ name: "Lead", role: "melody", notes: pitches.map((p, i) => nf(p, i * 0.5, 0.5, 88 + (i % 4) * 6)) }],
+  });
+  const keyDim = (tonic: string, mode: string, pitches: number[]) => verifyRecipe(keyOnly(tonic, mode, pitches)).dims.key;
+
+  // D dorian = D E F G A B C. Its identity vs D minor is the major 6th (B♮, not B♭).
+  it("dorian: the characteristic major 6th is IN key (not penalised as minor's ♭6)", () => {
+    expect(keyDim("D", "dorian", [62, 64, 65, 67, 69, 71, 72])).toBe(1);
+    expect(keyDim("D", "minor", [71])).toBe(0); // same B♮ is genuinely out of D minor
+  });
+
+  // G mixolydian = G A B C D E F. Identity vs G minor is the major 3rd (B♮) with a ♭7.
+  it("mixolydian: the major 3rd and ♭7 are both IN key", () => {
+    expect(keyDim("G", "mixolydian", [67, 69, 71, 72, 74, 76, 77])).toBe(1);
+  });
+
+  // A minor pentatonic = A C D E G — a STRICTER set than A minor (no 2nd, no ♭6).
+  it("pentatonic: the 2nd is OUT of key (pentatonic is stricter than minor)", () => {
+    expect(keyDim("A", "pentatonic", [69, 72, 74, 76, 79])).toBe(1);
+    expect(keyDim("A", "pentatonic", [71])).toBe(0); // B is in A minor but not A pentatonic
+  });
+
+  // chromatic declares NO pitch constraint, so there is nothing to verify. Returning
+  // 1.0 would pay the agent 0.12 of weight for removing its own constraint (it controls
+  // set_key), so it takes the file's established "unmeasurable → neutral" value.
+  it("chromatic: unverifiable → neutral, never a free 1.0", () => {
+    expect(keyDim("C", "chromatic", [60, 61, 62, 63, 64, 65, 66])).toBe(0.7);
+  });
+
+  it("major/minor are unchanged, and an out-of-domain mode still reads as before", () => {
+    expect(keyDim("C", "major", [60, 62, 64, 65, 67, 69, 71])).toBe(1);
+    expect(keyDim("A", "minor", [69, 71, 72, 74, 76, 77, 79])).toBe(1);
+    expect(keyDim("C", "Major", [60, 64, 67])).toBe(1);   // capitalised → still major
+    expect(keyDim("A", "aeolian", [69, 72, 76])).toBe(1); // unknown → minor, as in v2
+  });
+});
+
 describe("recipeFromSnapshot", () => {
   it("extracts roles/notes from a mock snapshot (drum-type, low=bass, mid=melody)", () => {
     const snap = {
