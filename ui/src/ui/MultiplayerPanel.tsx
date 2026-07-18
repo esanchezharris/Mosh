@@ -111,7 +111,7 @@ export function MultiplayerPanel() {
           {Object.entries(peers).map(([id, p]) => (
             <div className="mp-peer" key={id}>
               <span className="mp-swatch" style={{ background: p.color }} />
-              <span className="mp-peer-name">{p.name}{id === mp.selfPeer ? " (you)" : ""}</span>
+              <span className="mp-peer-name" title={p.name || undefined}>{p.name || "(unnamed)"}{id === mp.selfPeer ? " (you)" : ""}</span>
               <span className={`mp-dot${p.online ? " on" : ""}`} title={p.online ? "online" : "offline"} />
             </div>
           ))}
