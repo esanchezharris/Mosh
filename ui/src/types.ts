@@ -205,6 +205,11 @@ export type Clip = {
   // has an audible effect when this clip overlaps a neighbor on the same track.
   reversed?: boolean;
   autoCrossfade?: boolean;
+  // CLP-LOOP — clip loop region (wave clips). loopEnabled mirrors the engine's own
+  // "is this clip looping" state (loop length > 0); start/length are in seconds.
+  loopEnabled?: boolean;
+  loopStart?: number;
+  loopLength?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;

@@ -194,6 +194,10 @@ private:
     juce::var cmdSetClipReverse   (const juce::var& args);
     juce::var cmdSetClipCrossfade (const juce::var& args);
     juce::var cmdNormalizeClip    (const juce::var& args);
+    // CLP-LOOP — clip loop region (reality-pack invariant 28). Audio-clip-only, mirrors
+    // cmdSetClipGain's shape; drives te::AudioClipBase::setLoopRange (the same loop state
+    // isLooping()/getLoopStart()/getLoopLength() — and clipAudibleSourceSpan — already read).
+    juce::var cmdSetClipLoop      (const juce::var& args);
     juce::var cmdRelinkClip     (const juce::var& args);   // gap 3 — re-point a missing wave source
     // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
     // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).

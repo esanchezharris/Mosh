@@ -81,6 +81,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // clip-ops wave — reverse / auto-crossfade / normalize all carry a clipId like
         // gain/mute/fade; same clip-scoped key resolution.
         "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
+        // CLP-LOOP — clip loop region; carries a clipId like gain/mute/fade.
+        "set_clip_loop",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
