@@ -326,7 +326,44 @@ function ClipTab({ clip }: { clip: Clip }) {
           >
             Auto-crossfade
           </button>
+          <button
+            className={clip.loopEnabled ? "on" : ""}
+            aria-pressed={!!clip.loopEnabled}
+            data-testid="v2-clip-loop"
+            title="Loop a region of this clip's source"
+            onClick={() => void exec("set_clip_loop", { clipId: clip.id, enabled: !clip.loopEnabled })}
+          >
+            Loop
+          </button>
         </div>
+      )}
+      {isWave && clip.loopEnabled && (
+        // Progressive disclosure: the loop region only appears once looping is ON
+        // (mirrors the WarpTab's detect/fit helpers). Enabling with no bounds loops
+        // the clip's whole length from 0 — these two fields then narrow it.
+        <label className="v2-field">
+          <span>Loop region</span>
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            aria-label="Loop start (seconds)"
+            data-testid="v2-clip-loop-start"
+            value={Number((clip.loopStart ?? 0).toFixed(3))}
+            onChange={(e) => void exec("set_clip_loop", { clipId: clip.id, enabled: true, start: Number(e.target.value) })}
+          />
+          <span className="v2-val">→</span>
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            aria-label="Loop length (seconds)"
+            data-testid="v2-clip-loop-length"
+            value={Number((clip.loopLength ?? 0).toFixed(3))}
+            onChange={(e) => void exec("set_clip_loop", { clipId: clip.id, enabled: true, length: Number(e.target.value) })}
+          />
+          <span className="v2-val">s</span>
+        </label>
       )}
       {isWave && (
         <label className="v2-field">

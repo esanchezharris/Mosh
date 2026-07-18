@@ -1133,6 +1133,33 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo(); f.clip.autoCrossfade = Boolean(args.enabled); invalidate(); return ok(command);
     }
+    // CLP-LOOP — clip loop region. Mirrors the native semantics that matter to the UI:
+    // "looping" IS "loop length > 0" (there is no separate flag in the engine), disabling
+    // zeroes the region without touching the clip's position/length, and enabling with a
+    // non-positive length is an error. The native source-length clamp is not modelled —
+    // the mock has no real source file to clamp against.
+    case "set_clip_loop": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      const enabled = Boolean(args.enabled);
+      const length = "length" in args ? num(args.length) : (f.clip.loopLength || f.clip.length);
+      if (enabled && !(length > 0)) return err(command, "loop length must be greater than 0 when enabled");
+      pushUndo();
+      if (enabled) {
+        f.clip.loopStart = Math.max(0, "start" in args ? num(args.start) : (f.clip.loopStart ?? 0));
+        f.clip.loopLength = length;
+      } else {
+        f.clip.loopStart = 0;
+        f.clip.loopLength = 0;
+      }
+      f.clip.loopEnabled = (f.clip.loopLength ?? 0) > 0;
+      invalidate();
+      return ok(command, {
+        clipId: f.clip.id,
+        loopEnabled: f.clip.loopEnabled,
+        loopStart: f.clip.loopStart,
+        loopLength: f.clip.loopLength,
+      });
+    }
     // normalize_clip: the dev mock has no real audio samples to scan, so it assumes a
     // fixed nominal source peak of -6 dBFS (gain = targetDb - assumedPeakDb, mirroring
     // the native formula) — deterministic and testable without decoding a WAV in-browser.
