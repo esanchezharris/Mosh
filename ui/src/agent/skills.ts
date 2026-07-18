@@ -819,6 +819,110 @@ export const WARP_LOOP_TO_GRID_SKILL: SkillDefinition = {
   },
 };
 
+// Arm a track's automation for write, then set a plugin parameter — the change is
+// captured as an automation point at the playhead, the G10 "record by performing the
+// tweak" workflow (the write_automation_curve bulk-author path is a direct single-call
+// command and doesn't need a skill wrapper).
+export const AUTOMATE_PARAMETER_SKILL: SkillDefinition = {
+  name: "automate_parameter",
+  description:
+    "Arm a track's automation for write, then set a plugin parameter — captured as an automation point at the playhead.",
+  slots: [
+    {
+      name: "trackId",
+      type: "string",
+      required: true,
+      description: "Track whose plugin parameter should be captured while write-armed.",
+    },
+    {
+      name: "index",
+      type: "number",
+      required: true,
+      description: "Chain position of the plugin whose parameter is being automated.",
+      min: 0,
+    },
+    {
+      name: "paramIndex",
+      type: "number",
+      required: true,
+      description: "Index of the plugin parameter to automate.",
+      min: 0,
+    },
+    {
+      name: "value",
+      type: "number",
+      required: true,
+      description: "New parameter value, 0-1 — the move captured as the automation point.",
+      min: 0,
+      max: 1,
+    },
+  ],
+  template: [
+    {
+      kind: "command",
+      command: "set_track_automation_mode",
+      args: { trackId: { slot: "trackId" }, mode: "write" },
+    },
+    {
+      kind: "command",
+      command: "set_plugin_param",
+      args: {
+        trackId: { slot: "trackId" },
+        index: { slot: "index" },
+        paramIndex: { slot: "paramIndex" },
+        value: { slot: "value" },
+      },
+    },
+  ],
+  precondition: (snapshot, slots) => {
+    const trackId = slots.trackId;
+    if (typeof trackId !== "string")
+      return { ok: false, reason: "automate_parameter: validated trackId is unavailable." };
+    const track = trackFor(snapshot, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
+    const index = slots.index;
+    if (typeof index !== "number")
+      return { ok: false, reason: "automate_parameter: validated index slot is unavailable." };
+    const plugin = track.plugins?.find((p) => p.index === index);
+    if (!plugin) return { ok: false, reason: `Track "${trackId}" has no plugin at chain position ${index}.` };
+    const paramIndex = slots.paramIndex;
+    if (typeof paramIndex !== "number")
+      return { ok: false, reason: "automate_parameter: validated paramIndex slot is unavailable." };
+    const param = plugin.params.find((p) => p.index === paramIndex);
+    if (!param)
+      return { ok: false, reason: `Plugin at chain position ${index} has no parameter ${paramIndex}.` };
+    return { ok: true };
+  },
+  postcondition: (_before, after, slots) => {
+    const trackId = slots.trackId;
+    const index = slots.index;
+    const paramIndex = slots.paramIndex;
+    const value = slots.value;
+    if (
+      typeof trackId !== "string" ||
+      typeof index !== "number" ||
+      typeof paramIndex !== "number" ||
+      typeof value !== "number"
+    )
+      return { ok: false, reason: "automate_parameter: validated required slots are unavailable." };
+    const afterTrack = trackFor(after, trackId);
+    if (!afterTrack) return { ok: false, reason: `Track "${trackId}" was not preserved.` };
+    if (afterTrack.automationMode !== "write")
+      return { ok: false, reason: `Track "${trackId}" did not arm write automation mode.` };
+    const plugin = afterTrack.plugins?.find((p) => p.index === index);
+    if (!plugin) return { ok: false, reason: `Track "${trackId}" lost the plugin at chain position ${index}.` };
+    const param = plugin.params.find((p) => p.index === paramIndex);
+    if (!param || Math.abs(param.value - value) > 1e-6)
+      return { ok: false, reason: `Plugin parameter ${paramIndex} did not reach ${value}.` };
+    if (!param.points || param.points.length === 0)
+      return { ok: false, reason: `Plugin parameter ${paramIndex} did not capture an automation point.` };
+    const lastPoint = param.points[param.points.length - 1];
+    if (Math.abs(lastPoint.v - value) > 1e-6)
+      return { ok: false, reason: `The captured automation point did not reach value ${value}.` };
+    return { ok: true };
+  },
+};
+
 export const SKILL_CATALOG: readonly SkillDefinition[] = [
   SET_TRACK_LEVEL_SKILL,
   ARRANGE_BEAT_SKILL,
@@ -827,4 +931,5 @@ export const SKILL_CATALOG: readonly SkillDefinition[] = [
   REIMAGINE_CLIP_SKILL,
   HOST_PLUGIN_SKILL,
   WARP_LOOP_TO_GRID_SKILL,
+  AUTOMATE_PARAMETER_SKILL,
 ];
