@@ -12,4 +12,5 @@ export type ActionId =
   | "duplicate" | "group" | "split"
   | "nudge_left" | "nudge_right"
   | "tool_move" | "tool_split" | "tool_range"
+  | "show_arrangement" | "show_drum" | "show_piano_roll" | "show_mixer" | "show_browser"
   | "seek" | "loop_region";

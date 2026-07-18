@@ -5,7 +5,9 @@ import {
   canonicalCombo,
   resolveKey,
   getKeymap,
+  shortcutRows,
   KEYMAPS,
+  type ScopedKeymap,
   type KeyEventLike,
 } from "./keymap";
 
@@ -62,16 +64,39 @@ describe("resolveKey — mosh keymap", () => {
     expect(resolveKey(km, ev({ key: "k", metaKey: true }))).toBeNull();
     expect(resolveKey(km, ev({ key: "Shift", shiftKey: true }))).toBeNull();
   });
+
+  it("keeps Mosh export on Mod+E", () => {
+    expect(resolveKey(km, ev({ key: "e", metaKey: true }))).toBe(A.EXPORT_AUDIO);
+  });
+});
+
+describe("scoped shortcut resolution", () => {
+  it("checks the focused scope before falling back to global", () => {
+    const map: ScopedKeymap = {
+      global: { [A.EXPORT_AUDIO]: "Mod+B", [A.SAVE]: "Mod+S" },
+      arrangement: { [A.DUPLICATE]: "Mod+B" },
+    };
+    expect(resolveKey(map, ev({ key: "b", metaKey: true }), "arrangement")).toBe(A.DUPLICATE);
+    expect(resolveKey(map, ev({ key: "s", metaKey: true }), "arrangement")).toBe(A.SAVE);
+    expect(resolveKey(map, ev({ key: "b", metaKey: true }), "pianoRoll")).toBe(A.EXPORT_AUDIO);
+  });
+
+  it("produces visible rows from the same effective scoped bindings", () => {
+    const rows = shortcutRows(getKeymap("fl"), "arrangement");
+    expect(rows.find((row) => row.action === A.DUPLICATE)).toMatchObject({ combo: "Mod+B", label: "Duplicate" });
+    expect(rows.find((row) => row.action === A.EXPORT_AUDIO)).toMatchObject({ combo: "Mod+R", label: "Export audio" });
+    expect(rows.some((row) => row.combo === "Mod+E")).toBe(false);
+  });
 });
 
 describe("per-DAW keymaps", () => {
   it("getKeymap falls back to mosh for an unknown name", () => {
     expect(getKeymap("nope")).toBe(KEYMAPS.mosh);
   });
-  it("ableton binds split-at-playhead to Mod+E; mosh leaves Mod+E unbound (split is tool-only)", () => {
+  it("ableton binds split-at-playhead to Mod+E while FL reserves it and Mosh exports", () => {
     expect(resolveKey(getKeymap("ableton"), ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
-    expect(resolveKey(getKeymap("fl"), ev({ key: "e", metaKey: true }))).toBe(A.SPLIT);
-    expect(resolveKey(getKeymap("mosh"), ev({ key: "e", metaKey: true }))).toBeNull();
+    expect(resolveKey(getKeymap("fl"), ev({ key: "e", metaKey: true }))).toBeNull();
+    expect(resolveKey(getKeymap("mosh"), ev({ key: "e", metaKey: true }))).toBe(A.EXPORT_AUDIO);
   });
   it("ableton moves record to F9 (R no longer records there)", () => {
     expect(resolveKey(getKeymap("ableton"), ev({ key: "F9" }))).toBe(A.RECORD);
@@ -82,6 +107,30 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "b", metaKey: true }))).toBe(A.DUPLICATE);
     expect(resolveKey(getKeymap("fl"), ev({ key: "d", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "d", metaKey: true }))).toBe(A.DUPLICATE);
+  });
+  it("FL v1 exposes its supported global, arrangement, and window bindings", () => {
+    const fl = getKeymap("fl");
+    const cases: [Partial<KeyEventLike>, string][] = [
+      [{ key: " " }, A.PLAY_PAUSE],
+      [{ key: "r" }, A.RECORD],
+      [{ key: "o", metaKey: true }, A.OPEN_PROJECT],
+      [{ key: "s", metaKey: true }, A.SAVE],
+      [{ key: "s", metaKey: true, shiftKey: true }, A.SAVE_AS],
+      [{ key: "r", metaKey: true }, A.EXPORT_AUDIO],
+      [{ key: "z", metaKey: true }, A.UNDO],
+      [{ key: "z", metaKey: true, shiftKey: true }, A.REDO],
+      [{ key: "b", metaKey: true }, A.DUPLICATE],
+      [{ key: "c" }, A.TOOL_SPLIT],
+      [{ key: "e" }, A.TOOL_RANGE],
+      [{ key: "F5" }, A.SHOW_ARRANGEMENT],
+      [{ key: "F6" }, A.SHOW_DRUM],
+      [{ key: "F7" }, A.SHOW_PIANO_ROLL],
+      [{ key: "F9" }, A.SHOW_MIXER],
+      [{ key: "F8", altKey: true }, A.SHOW_BROWSER],
+    ];
+    for (const [event, action] of cases)
+      expect(resolveKey(fl, ev(event), "arrangement"), JSON.stringify(event)).toBe(action);
+    expect(resolveKey(fl, ev({ key: "e", metaKey: true }), "arrangement")).toBeNull();
   });
   it("pro tools: ⌘E separates, ⌘Space records, F7/F8 pick Selector/Grabber, Return → start", () => {
     const pt = getKeymap("protools");
@@ -119,7 +168,10 @@ describe("per-DAW keymaps", () => {
 
 describe("resolveKey — custom keymap overrides", () => {
   it("honours a rebind", () => {
-    const km = { ...getKeymap("mosh"), [A.PLAY_PAUSE]: "Mod+P" };
+    const km: ScopedKeymap = {
+      ...getKeymap("mosh"),
+      global: { ...getKeymap("mosh").global, [A.PLAY_PAUSE]: "Mod+P" },
+    };
     expect(resolveKey(km, ev({ key: "p", metaKey: true }))).toBe(A.PLAY_PAUSE);
     expect(resolveKey(km, ev({ key: " " }))).toBeNull(); // old binding gone
   });

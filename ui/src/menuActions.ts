@@ -6,6 +6,7 @@
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
 import type { ActionId } from "./keymap";
+import { shortcutRows, type ScopedKeymap } from "./interaction/keymap";
 import type { Snapshot } from "./types";
 import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 
@@ -195,6 +196,12 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     case "tool_range":
       store.setTool?.("range");
       return;
+    case "show_arrangement":
+    case "show_drum":
+    case "show_piano_roll":
+    case "show_mixer":
+    case "show_browser":
+      return;
     case "seek":
       if (typeof opts.position === "number")
         await store.exec("set_transport", { position: opts.position });
@@ -217,9 +224,14 @@ export interface MenuItemMeta {
 /** The File menu, in display order. The "Open Recent" submenu is inserted by the
  *  renderer between Open and Save. Shared by the native menu and the WebView menu. */
 export const FILE_MENU: MenuItemMeta[] = [
-  { id: "new_project", label: "New", accel: "⌘N" },
-  { id: "open_project", label: "Open…", accel: "⌘O" },
-  { id: "save", label: "Save", accel: "⌘S" },
-  { id: "save_as", label: "Save As…", accel: "⇧⌘S" },
-  { id: "export_audio", label: "Export Audio…", accel: "⌘E" },
+  { id: "new_project", label: "New", accel: "" },
+  { id: "open_project", label: "Open…", accel: "" },
+  { id: "save", label: "Save", accel: "" },
+  { id: "save_as", label: "Save As…", accel: "" },
+  { id: "export_audio", label: "Export Audio…", accel: "" },
 ];
+
+export function fileMenuForKeymap(keymap: ScopedKeymap): MenuItemMeta[] {
+  const accelerators = new Map<string, string>(shortcutRows(keymap).map((row) => [row.action, row.display]));
+  return FILE_MENU.map((item) => ({ ...item, accel: accelerators.get(item.id) ?? "" }));
+}

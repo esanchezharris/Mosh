@@ -37,6 +37,9 @@ export const EditorAction = {
   UNDO: "undo",
   REDO: "redo",
   SAVE: "save",
+  OPEN_PROJECT: "open_project",
+  SAVE_AS: "save_as",
+  EXPORT_AUDIO: "export_audio",
   GROUP: "group",
   // FU-CLIP-NUDGE — fine-move the selected clip(s) by a fixed increment,
   // independent of drag/snap (see interaction/keymap.ts for the binding).
@@ -53,6 +56,12 @@ export const EditorAction = {
   TOOL_MOVE: "tool_move",
   TOOL_SPLIT: "tool_split",
   TOOL_RANGE: "tool_range",
+
+  SHOW_ARRANGEMENT: "show_arrangement",
+  SHOW_DRUM: "show_drum",
+  SHOW_PIANO_ROLL: "show_piano_roll",
+  SHOW_MIXER: "show_mixer",
+  SHOW_BROWSER: "show_browser",
 } as const;
 
 export type EditorAction = (typeof EditorAction)[keyof typeof EditorAction];

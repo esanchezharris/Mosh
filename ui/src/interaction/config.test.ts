@@ -32,9 +32,15 @@ describe("gestureTableName", () => {
 });
 
 describe("buildKeymap", () => {
-  it("uses the selected preset", () => {
-    const km = buildKeymap(getterFrom({ keymap: "ableton" }));
+  it("keeps Classic on the selected legacy keymap axis", () => {
+    const km = buildKeymap(getterFrom({ uiShell: "classic", keymap: "ableton", workflowProfile: "fl" }));
     expect(resolveKey(km, { key: "e", metaKey: true })).toBe(A.SPLIT); // Ableton-only
+  });
+
+  it("uses the authoritative workflow profile keymap in v2", () => {
+    const fl = buildKeymap(getterFrom({ uiShell: "v2", workflowProfile: "fl", keymap: "ableton" }));
+    expect(resolveKey(fl, { key: "r", metaKey: true })).toBe(A.EXPORT_AUDIO);
+    expect(resolveKey(fl, { key: "e", metaKey: true })).toBeNull();
   });
 
   it("a non-empty key.* override rebinds; empty inherits the preset", () => {
@@ -47,5 +53,11 @@ describe("buildKeymap", () => {
   it("ignores a whitespace-only override", () => {
     const km = buildKeymap(getterFrom({ "key.play_pause": "   " }));
     expect(resolveKey(km, { key: " " })).toBe(A.PLAY_PAUSE); // still the preset Space
+  });
+
+  it("applies the active profile's persisted override over its scoped preset", () => {
+    const km = buildKeymap(getterFrom({ workflowProfile: "fl", "key.export_audio": "Mod+P" }));
+    expect(resolveKey(km, { key: "p", metaKey: true })).toBe(A.EXPORT_AUDIO);
+    expect(resolveKey(km, { key: "r", metaKey: true })).toBeNull();
   });
 });

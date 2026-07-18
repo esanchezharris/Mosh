@@ -1,16 +1,10 @@
-// The keymap layer — {action: keyCombo} dictionaries, one per DAW, plus the pure
-// resolver that looks up an action from a keyboard event. useKeyboardShortcuts mounts
-// the single app-level keydown handler and dispatches through this table-driven lookup.
-// Combos are platform-neutral ("Mod" = Cmd or Ctrl) and rebindable through the settings
-// schema's 'key' type.
-
 import { EditorAction, type EditorAction as Action } from "./actions";
 
-export type KeyCombo = string; // e.g. "Mod+Shift+Z", "Space", "Delete", "1"
+export type KeyCombo = string;
 export type Keymap = Partial<Record<Action, KeyCombo | KeyCombo[]>>;
+export type ShortcutScope = "global" | "arrangement" | "pianoRoll" | "drum" | "modal";
+export type ScopedKeymap = Partial<Record<ShortcutScope, Keymap>>;
 
-// A minimal keyboard-event shape so the resolver is testable without a real event
-// (a DOM KeyboardEvent satisfies it).
 export interface KeyEventLike {
   key: string;
   shiftKey?: boolean;
@@ -19,17 +13,22 @@ export interface KeyEventLike {
   ctrlKey?: boolean;
 }
 
+export interface ShortcutRow {
+  action: Action;
+  combo: string;
+  display: string;
+  label: string;
+  scope: ShortcutScope;
+}
+
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "AltGraph", "CapsLock", "OS"]);
 
-// Canonical key-name: Space normalised, letters uppercased, everything else verbatim.
 export function normalizeKeyName(key: string): string {
   if (key === " " || /^(space|spacebar)$/i.test(key)) return "Space";
   if (key.length === 1 && /[a-z]/i.test(key)) return key.toUpperCase();
   return key;
 }
 
-// A keyboard event → canonical combo string ("Mod+Shift+Z"). A lone modifier press
-// yields "" so the resolver ignores it (no action fires while just holding Cmd).
 export function eventToCombo(e: KeyEventLike): KeyCombo {
   if (MODIFIER_KEYS.has(e.key)) return "";
   const parts: string[] = [];
@@ -40,8 +39,6 @@ export function eventToCombo(e: KeyEventLike): KeyCombo {
   return parts.join("+");
 }
 
-// Normalise a written combo ("cmd+z", "Shift+Mod+Z") into the canonical form so
-// presets/overrides can be authored loosely and still match eventToCombo output.
 export function canonicalCombo(combo: KeyCombo): KeyCombo {
   let mod = false, shift = false, alt = false, key = "";
   for (const raw of combo.split("+")) {
@@ -60,98 +57,183 @@ export function canonicalCombo(combo: KeyCombo): KeyCombo {
   return parts.join("+");
 }
 
-const asArray = (c: KeyCombo | KeyCombo[]): KeyCombo[] => (Array.isArray(c) ? c : [c]);
+const asArray = (combo: KeyCombo | KeyCombo[]): KeyCombo[] => Array.isArray(combo) ? combo : [combo];
 
-// Look up the action bound to a keyboard event, or null if unbound.
-export function resolveKey(keymap: Keymap, e: KeyEventLike): Action | null {
-  const combo = eventToCombo(e);
-  if (!combo) return null;
+function resolveInScope(keymap: Keymap | undefined, combo: KeyCombo): Action | null {
+  if (!keymap) return null;
   for (const action of Object.keys(keymap) as Action[]) {
     const bound = keymap[action];
-    if (!bound) continue;
-    if (asArray(bound).some((c) => canonicalCombo(c) === combo)) return action;
+    if (bound && asArray(bound).some((candidate) => canonicalCombo(candidate) === combo)) return action;
   }
   return null;
 }
 
-// True when the event target should keep full keyboard control (typing into a field).
+export function resolveKey(keymap: ScopedKeymap, e: KeyEventLike, scope: ShortcutScope = "arrangement"): Action | null {
+  const combo = eventToCombo(e);
+  if (!combo) return null;
+  if (scope !== "global") {
+    const focused = resolveInScope(keymap[scope], combo);
+    if (focused) return focused;
+  }
+  return resolveInScope(keymap.global, combo);
+}
+
 export function isEditableTarget(el: EventTarget | null): boolean {
   const e = el as HTMLElement | null;
-  return (
-    !!e &&
-    (e.tagName === "INPUT" ||
-      e.tagName === "TEXTAREA" ||
-      e.tagName === "SELECT" ||
-      e.isContentEditable)
-  );
+  return !!e && (e.tagName === "INPUT" || e.tagName === "TEXTAREA" || e.tagName === "SELECT" || e.isContentEditable);
 }
 
 const A = EditorAction;
 
-// ── Mosh — the consolidated native keymap (the previously-live undo/redo/delete/space
-// PLUS the documented-but-unmounted set: save/record/copy/cut/paste/duplicate/group/
-// home-end/tool-switch). The live three are byte-for-byte the same combos.
-const MOSH: Keymap = {
+const MOSH_GLOBAL: Keymap = {
   [A.PLAY_PAUSE]: "Space",
   [A.RECORD]: "R",
   [A.UNDO]: "Mod+Z",
   [A.REDO]: "Mod+Shift+Z",
+  [A.OPEN_PROJECT]: "Mod+O",
   [A.SAVE]: "Mod+S",
+  [A.SAVE_AS]: "Mod+Shift+S",
+  [A.EXPORT_AUDIO]: "Mod+E",
+  [A.TO_START]: "Home",
+  [A.TO_END]: "End",
+};
+
+const MOSH_ARRANGEMENT: Keymap = {
   [A.DELETE]: ["Delete", "Backspace"],
   [A.COPY]: "Mod+C",
   [A.CUT]: "Mod+X",
   [A.PASTE]: "Mod+V",
   [A.DUPLICATE]: "Mod+D",
   [A.GROUP]: "Mod+G",
-  // FU-CLIP-NUDGE — plain arrow keys are unbound everywhere else in the app (no
-  // gesture/keymap collision across any DAW preset below), so they're free for a
-  // fine, fixed-increment clip move that's independent of drag/snap.
   [A.NUDGE_LEFT]: "ArrowLeft",
   [A.NUDGE_RIGHT]: "ArrowRight",
-  [A.TO_START]: "Home",
-  [A.TO_END]: "End",
   [A.TOOL_MOVE]: "1",
   [A.TOOL_SPLIT]: "2",
   [A.TOOL_RANGE]: "3",
 };
 
-// Per-DAW variants — the core is shared; only a few flavor bindings differ so a
-// template switch is observable. (DAW interaction identity lives mostly in gestures.)
-const ABLETON: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.RECORD]: "F9" };
-const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
-
-// Pro Tools — Separate Clip = ⌘E; Selector = F7, Grabber = F8; Record = ⌘Space
-// (PT also uses numpad 3); Return = back to start.
-const PROTOOLS: Keymap = {
-  ...MOSH,
-  [A.SPLIT]: "Mod+E",
-  [A.RECORD]: "Mod+Space",
-  [A.TOOL_RANGE]: "F7",
-  [A.TOOL_MOVE]: "F8",
-  [A.TO_START]: "Enter",
+const without = (keymap: Keymap, ...actions: Action[]): Keymap => {
+  const copy = { ...keymap };
+  for (const action of actions) delete copy[action];
+  return copy;
 };
 
-// Logic — Split at Playhead = ⌘T; Record stays R (mosh core); Return = back to start.
-const LOGIC: Keymap = {
-  ...MOSH,
-  [A.SPLIT]: "Mod+T",
-  [A.TO_START]: "Enter",
+const MOSH: ScopedKeymap = { global: MOSH_GLOBAL, arrangement: MOSH_ARRANGEMENT };
+const ABLETON: ScopedKeymap = {
+  global: { ...MOSH_GLOBAL, [A.RECORD]: "F9" },
+  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+E" },
+};
+const FL: ScopedKeymap = {
+  global: {
+    ...without(MOSH_GLOBAL, A.EXPORT_AUDIO),
+    [A.EXPORT_AUDIO]: "Mod+R",
+    [A.SHOW_ARRANGEMENT]: "F5",
+    [A.SHOW_DRUM]: "F6",
+    [A.SHOW_PIANO_ROLL]: "F7",
+    [A.SHOW_MIXER]: "F9",
+    [A.SHOW_BROWSER]: "Alt+F8",
+  },
+  arrangement: {
+    ...MOSH_ARRANGEMENT,
+    [A.DUPLICATE]: "Mod+B",
+    [A.TOOL_SPLIT]: "C",
+    [A.TOOL_RANGE]: "E",
+  },
+};
+const PROTOOLS: ScopedKeymap = {
+  global: { ...MOSH_GLOBAL, [A.RECORD]: "Mod+Space", [A.TO_START]: "Enter" },
+  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+E", [A.TOOL_RANGE]: "F7", [A.TOOL_MOVE]: "F8" },
+};
+const LOGIC: ScopedKeymap = {
+  global: { ...without(MOSH_GLOBAL, A.EXPORT_AUDIO), [A.TO_START]: "Enter" },
+  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+T" },
 };
 
-export const KEYMAPS: Record<string, Keymap> = { mosh: MOSH, ableton: ABLETON, fl: FL, protools: PROTOOLS, logic: LOGIC };
+export const KEYMAPS: Record<string, ScopedKeymap> = { mosh: MOSH, ableton: ABLETON, fl: FL, protools: PROTOOLS, logic: LOGIC };
 
-export function getKeymap(name: string): Keymap {
+export function getKeymap(name: string): ScopedKeymap {
   return KEYMAPS[name] ?? KEYMAPS.mosh;
 }
 
-// The actions a user can rebind — the union of every preset's bound actions. The
-// settings schema generates one 'key' descriptor per entry (empty = inherit preset).
-export const REBINDABLE_ACTIONS: Action[] = Array.from(
-  new Set<Action>([
-    ...(Object.keys(MOSH) as Action[]),
-    ...(Object.keys(ABLETON) as Action[]),
-    ...(Object.keys(FL) as Action[]),
-    ...(Object.keys(PROTOOLS) as Action[]),
-    ...(Object.keys(LOGIC) as Action[]),
-  ]),
-);
+export function rebindAction(keymap: ScopedKeymap, action: Action, combo: KeyCombo): ScopedKeymap {
+  const next: ScopedKeymap = {};
+  let rebound = false;
+  for (const scope of ["global", "arrangement", "pianoRoll", "drum", "modal"] as ShortcutScope[]) {
+    const bindings = keymap[scope];
+    if (!bindings) continue;
+    next[scope] = { ...bindings };
+    if (Object.prototype.hasOwnProperty.call(bindings, action)) {
+      next[scope]![action] = combo;
+      rebound = true;
+    }
+  }
+  if (!rebound) next.global = { ...(next.global ?? {}), [action]: combo };
+  return next;
+}
+
+export const SHORTCUT_LABELS: Partial<Record<Action, string>> = {
+  [A.OPEN_PROJECT]: "Open project",
+  [A.SAVE]: "Save",
+  [A.SAVE_AS]: "Save As",
+  [A.EXPORT_AUDIO]: "Export audio",
+  [A.UNDO]: "Undo",
+  [A.REDO]: "Redo",
+  [A.CUT]: "Cut",
+  [A.COPY]: "Copy",
+  [A.PASTE]: "Paste",
+  [A.DELETE]: "Delete",
+  [A.DUPLICATE]: "Duplicate",
+  [A.GROUP]: "Group",
+  [A.PLAY_PAUSE]: "Play / pause",
+  [A.RECORD]: "Record",
+  [A.TO_START]: "To start",
+  [A.TO_END]: "To end",
+  [A.NUDGE_LEFT]: "Nudge left",
+  [A.NUDGE_RIGHT]: "Nudge right",
+  [A.TOOL_MOVE]: "Move tool",
+  [A.TOOL_SPLIT]: "Split tool",
+  [A.TOOL_RANGE]: "Select / Range tool",
+  [A.SPLIT]: "Split at playhead",
+  [A.SHOW_ARRANGEMENT]: "Arrangement",
+  [A.SHOW_DRUM]: "Drum window",
+  [A.SHOW_PIANO_ROLL]: "Piano Roll",
+  [A.SHOW_MIXER]: "Mixer",
+  [A.SHOW_BROWSER]: "Browser",
+};
+
+export function displayCombo(combo: string): string {
+  return combo.split("+").map((part) => ({ Mod: "⌘", Shift: "⇧", Alt: "⌥" }[part] ?? part)).join("");
+}
+
+export function shortcutRows(keymap: ScopedKeymap, scope: ShortcutScope = "arrangement"): ShortcutRow[] {
+  const rows: ShortcutRow[] = [];
+  const claimed = new Set<string>();
+  const addScope = (owner: ShortcutScope) => {
+    const bindings = keymap[owner];
+    if (!bindings) return;
+    for (const action of Object.keys(bindings) as Action[]) {
+      const bound = bindings[action];
+      const combos = bound ? asArray(bound).map(canonicalCombo).filter(Boolean) : [];
+      const effective = combos.filter((combo) => !claimed.has(combo));
+      if (!effective.length) continue;
+      effective.forEach((combo) => claimed.add(combo));
+      const label = SHORTCUT_LABELS[action];
+      if (!label) continue;
+      rows.push({
+        action,
+        combo: effective.join(" · "),
+        display: effective.map(displayCombo).join(" · "),
+        label,
+        scope: owner,
+      });
+    }
+  };
+  if (scope !== "global") addScope(scope);
+  addScope("global");
+  return rows;
+}
+
+export const REBINDABLE_ACTIONS: Action[] = Array.from(new Set(
+  Object.values(KEYMAPS).flatMap((map) =>
+    Object.values(map).flatMap((bindings) => Object.keys(bindings ?? {}) as Action[])),
+));

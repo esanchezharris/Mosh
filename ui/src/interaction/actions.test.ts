@@ -22,4 +22,15 @@ describe("EditorAction", () => {
     const vals = Object.values(EditorAction);
     expect(new Set(vals).size).toBe(vals.length);
   });
+
+  it("includes file and profile window actions used by shortcut dispatch", () => {
+    expect(EditorAction.OPEN_PROJECT).toBe("open_project");
+    expect(EditorAction.SAVE_AS).toBe("save_as");
+    expect(EditorAction.EXPORT_AUDIO).toBe("export_audio");
+    expect(EditorAction.SHOW_ARRANGEMENT).toBe("show_arrangement");
+    expect(EditorAction.SHOW_DRUM).toBe("show_drum");
+    expect(EditorAction.SHOW_PIANO_ROLL).toBe("show_piano_roll");
+    expect(EditorAction.SHOW_MIXER).toBe("show_mixer");
+    expect(EditorAction.SHOW_BROWSER).toBe("show_browser");
+  });
 });

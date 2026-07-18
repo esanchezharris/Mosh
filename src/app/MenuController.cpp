@@ -147,7 +147,7 @@ void MenuController::getCommandInfo (juce::CommandID commandID, juce::Applicatio
         case fileOpen:    result.setInfo ("Open" + ell, "Open a project", "File", 0);          result.addDefaultKeypress ('o', cmd); break;
         case fileSave:    result.setInfo ("Save", "Save the project", "File", 0);              result.addDefaultKeypress ('s', cmd); break;
         case fileSaveAs:  result.setInfo ("Save As" + ell, "Save a portable copy", "File", 0); result.addDefaultKeypress ('s', cmdShift); break;
-        case fileExport:  result.setInfo ("Export Audio" + ell, "Export the mix", "File", 0);  result.addDefaultKeypress ('e', cmd); break;
+        case fileExport:  result.setInfo ("Export Audio" + ell, "Export the mix", "File", 0);  break;
         case fileClose:   result.setInfo ("Close", "Close the window", "File", 0);             result.addDefaultKeypress ('w', cmd); break;
 
         case editUndo:    result.setInfo ("Undo", "Undo the last change", "Edit", 0);          result.addDefaultKeypress ('z', cmd); break;

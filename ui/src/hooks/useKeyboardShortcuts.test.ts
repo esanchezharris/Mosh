@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useStore } from "../store";
 import { nativeMenuPresent } from "../bridge";
+import { useSettings } from "../settings/store";
+import { shortcutScopeForTarget } from "./useKeyboardShortcuts";
 import type { CommandResult } from "../types";
 
 const bridgeMock = vi.hoisted(() => ({
@@ -42,6 +44,10 @@ describe("useKeyboardShortcuts", () => {
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
+    useSettings.setState({
+      values: { uiShell: "v2", workflowProfile: "mosh" },
+      keyOverrides: {},
+    });
     useStore.setState({
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
@@ -139,6 +145,40 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
+  });
+
+  it.each([
+    ["mosh", "e"],
+    ["fl", "r"],
+  ])("dispatches the %s profile export exactly once when a native menu is present", async (profile, key) => {
+    vi.mocked(nativeMenuPresent).mockReturnValue(true);
+    useSettings.setState({ values: { uiShell: "v2", workflowProfile: profile } });
+    await act(async () => {
+      root.render(React.createElement(Harness));
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true }));
+    });
+
+    expect(execCalls.filter((call) => call.command === "export_audio")).toHaveLength(1);
+  });
+
+  it("derives scope from the nearest owner and treats a focused dialog as modal", () => {
+    const arrangement = document.createElement("div");
+    arrangement.dataset.shortcutScope = "arrangement";
+    const pianoRoll = document.createElement("button");
+    pianoRoll.dataset.shortcutScope = "pianoRoll";
+    arrangement.appendChild(pianoRoll);
+    expect(shortcutScopeForTarget(pianoRoll)).toBe("pianoRoll");
+
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const modalTarget = document.createElement("button");
+    modalTarget.dataset.shortcutScope = "drum";
+    dialog.appendChild(modalTarget);
+    expect(shortcutScopeForTarget(modalTarget)).toBe("modal");
+    expect(shortcutScopeForTarget(document.body)).toBe("arrangement");
   });
 
   it("dispatches Record through the app action dispatcher", () => {

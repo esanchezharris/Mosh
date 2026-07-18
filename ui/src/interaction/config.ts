@@ -5,8 +5,9 @@
 
 import type { SettingValue } from "../settings/schema";
 import { useSettings } from "../settings/store";
+import { getWorkflowProfile } from "../settings/workflowProfiles";
 import { FEEL_DEFAULTS, type Feel } from "./feel";
-import { getKeymap, REBINDABLE_ACTIONS, type Keymap } from "./keymap";
+import { getKeymap, rebindAction, REBINDABLE_ACTIONS, type ScopedKeymap } from "./keymap";
 import { type GestureTable } from "./gestures";
 import { getGestureTable } from "./gestureTables";
 
@@ -32,12 +33,16 @@ export function gestureTableName(get: Getter): string {
 }
 
 // Active keymap = the selected preset with any non-empty key.* override layered on.
-export function buildKeymap(get: Getter): Keymap {
-  const base = get("keymap");
-  const km: Keymap = { ...getKeymap(typeof base === "string" ? base : "mosh") };
+export function buildKeymap(get: Getter): ScopedKeymap {
+  const shell = get("uiShell");
+  const legacy = get("keymap");
+  const base = shell === "classic"
+    ? (typeof legacy === "string" ? legacy : "mosh")
+    : getWorkflowProfile(get("workflowProfile")).keymapId;
+  let km = getKeymap(base);
   for (const action of REBINDABLE_ACTIONS) {
     const v = get(`key.${action}`);
-    if (typeof v === "string" && v.trim()) km[action] = v.trim();
+    if (typeof v === "string" && v.trim()) km = rebindAction(km, action, v.trim());
   }
   return km;
 }
@@ -46,5 +51,5 @@ export function buildKeymap(get: Getter): Keymap {
 // without forcing React re-renders of the arrangement tree.
 const liveGet: Getter = (id) => useSettings.getState().get(id);
 export const liveFeel = (): Feel => buildFeel(liveGet);
-export const liveKeymap = (): Keymap => buildKeymap(liveGet);
+export const liveKeymap = (): ScopedKeymap => buildKeymap(liveGet);
 export const liveGestureTable = (): GestureTable => getGestureTable(gestureTableName(liveGet));

@@ -9,7 +9,9 @@ import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile } from "../bridge";
-import { runAction, FILE_MENU, type ActionId } from "../menuActions";
+import { runAction, fileMenuForKeymap, type ActionId } from "../menuActions";
+import { liveKeymap } from "../interaction/config";
+import { shortcutRows } from "../interaction/keymap";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
@@ -152,6 +154,9 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
 // scattered New/Save/Save As/Open buttons that used to live in Settings are folded
 // in here (with Open Recent from session.recentProjects).
 export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
+  useSettings((state) => state.values);
+  useSettings((state) => state.keyOverrides);
+  const fileMenu = fileMenuForKeymap(liveKeymap());
   const s = snapshot.session;
   const recents = (s.recentProjects ?? []).slice(0, 8);
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
@@ -160,7 +165,7 @@ export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
     <Pop label="File" title="File menu" ariaLabel="File" className="menu-pop">
       {(close) => (
         <div className="menu-list" role="menu" data-testid="file-menu">
-          {FILE_MENU.map((m) => (
+          {fileMenu.map((m) => (
             <Fragment key={m.id}>
               <button className="menu-item" role="menuitem" data-action={m.id}
                       onClick={() => { run(m.id); close(); }}>
@@ -418,17 +423,9 @@ export function TrainingTool({
 // + useKeyboardShortcuts); the ruler/clip pointer gestures live in Arrange. Surfaced
 // here so they're discoverable (and mirrored by the File/Edit menus).
 export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
-  const SHORTCUTS: [string, string][] = [
-    ["⌘N · ⌘O", "New · Open project"],
-    ["⌘S · ⇧⌘S", "Save · Save As"],
-    ["⌘E", "Export audio"],
-    ["⌘Z · ⇧⌘Z", "Undo · Redo"],
-    ["⌘X · ⌘C · ⌘V", "Cut · Copy · Paste clip"],
-    ["Space", "Play / pause"],
-    ["Delete  ⌫", "Remove selected clip"],
-    ["Drag clip", "Move · drag an edge to trim"],
-    ["Click ruler", "Seek · ⇧-drag sets the loop"],
-  ];
+  useSettings((state) => state.values);
+  useSettings((state) => state.keyOverrides);
+  const shortcuts = shortcutRows(liveKeymap());
   return (
     <Pop
       label={label ?? "?"}
@@ -441,8 +438,8 @@ export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChr
         <>
           <div className="pop-head">Shortcuts</div>
           <div className="pop-group">
-            {SHORTCUTS.map(([k, d]) => (
-              <div className="pop-row" key={k}><span className="tc">{k}</span><span className="pop-note">{d}</span></div>
+            {shortcuts.map((row) => (
+              <div className="pop-row" key={`${row.scope}:${row.action}`}><span className="tc">{row.display}</span><span className="pop-note">{row.label}</span></div>
             ))}
           </div>
           <div className="pop-note">Tools (Move / Split / Range) &amp; Snap live in the toolbar.</div>
