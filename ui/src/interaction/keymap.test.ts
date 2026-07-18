@@ -98,6 +98,19 @@ describe("per-DAW keymaps", () => {
     expect(resolveKey(getKeymap("fl"), ev({ key: "e", metaKey: true }))).toBeNull();
     expect(resolveKey(getKeymap("mosh"), ev({ key: "e", metaKey: true }))).toBe(A.EXPORT_AUDIO);
   });
+  it.each(["ableton", "protools"])("%s keeps legacy Mod+E Split in every focus scope", (name) => {
+    const keymap = getKeymap(name);
+    for (const scope of ["arrangement", "pianoRoll", "drum", "modal"] as const)
+      expect(resolveKey(keymap, ev({ key: "e", metaKey: true }), scope), scope).toBe(A.SPLIT);
+    expect(shortcutRows(keymap, "modal").find((row) => row.action === A.EXPORT_AUDIO)).toBeUndefined();
+  });
+  it("Logic keeps legacy Mod+T Split across focus scopes without inheriting Mosh Export", () => {
+    const keymap = getKeymap("logic");
+    for (const scope of ["arrangement", "pianoRoll", "drum", "modal"] as const) {
+      expect(resolveKey(keymap, ev({ key: "t", metaKey: true }), scope)).toBe(A.SPLIT);
+      expect(resolveKey(keymap, ev({ key: "e", metaKey: true }), scope)).toBeNull();
+    }
+  });
   it("ableton moves record to F9 (R no longer records there)", () => {
     expect(resolveKey(getKeymap("ableton"), ev({ key: "F9" }))).toBe(A.RECORD);
     expect(resolveKey(getKeymap("ableton"), ev({ key: "r" }))).toBeNull();

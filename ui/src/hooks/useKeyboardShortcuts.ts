@@ -4,7 +4,7 @@ import { pickFiles, pickSaveFile, onEvent, nativeMenuPresent } from "../bridge";
 import { runAction, type ActionCtx, type ActionId } from "../menuActions";
 import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
-import { isEditableTarget, resolveKey, type ShortcutScope } from "../interaction/keymap";
+import { isEditableTarget, isShortcutScope, resolveKey, type ShortcutScope } from "../interaction/keymap";
 
 const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile });
 
@@ -13,15 +13,13 @@ const NATIVE_MENU_ACTIONS = new Set<string>([
   EA.UNDO, EA.REDO, EA.CUT, EA.COPY, EA.PASTE, EA.PLAY_PAUSE,
 ]);
 
-const SHORTCUT_SCOPES = new Set<ShortcutScope>(["global", "arrangement", "pianoRoll", "drum", "modal"]);
-
 export function shortcutScopeForTarget(target: EventTarget | null): ShortcutScope {
   const element = target instanceof Element ? target : null;
   if (!element) return "arrangement";
   if (element.closest('dialog[open], [role="dialog"], [aria-modal="true"]')) return "modal";
   const owner = element.closest<HTMLElement>("[data-shortcut-scope]");
-  const scope = owner?.dataset.shortcutScope as ShortcutScope | undefined;
-  return scope && SHORTCUT_SCOPES.has(scope) ? scope : "arrangement";
+  const scope = owner?.dataset.shortcutScope;
+  return isShortcutScope(scope) ? scope : "arrangement";
 }
 
 const emptyAgentPromptSpace = (target: EventTarget | null, action: string): boolean =>

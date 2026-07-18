@@ -7,7 +7,7 @@ import type { SettingValue } from "../settings/schema";
 import { useSettings } from "../settings/store";
 import { getWorkflowProfile } from "../settings/workflowProfiles";
 import { FEEL_DEFAULTS, type Feel } from "./feel";
-import { getKeymap, rebindAction, REBINDABLE_ACTIONS, type ScopedKeymap } from "./keymap";
+import { getKeymap, rebindAction, removeCombo, REBINDABLE_ACTIONS, type ScopedKeymap } from "./keymap";
 import { type GestureTable } from "./gestures";
 import { getGestureTable } from "./gestureTables";
 
@@ -36,15 +36,16 @@ export function gestureTableName(get: Getter): string {
 export function buildKeymap(get: Getter): ScopedKeymap {
   const shell = get("uiShell");
   const legacy = get("keymap");
+  const profile = getWorkflowProfile(get("workflowProfile"));
   const base = shell === "classic"
     ? (typeof legacy === "string" ? legacy : "mosh")
-    : getWorkflowProfile(get("workflowProfile")).keymapId;
+    : profile.keymapId;
   let km = getKeymap(base);
   for (const action of REBINDABLE_ACTIONS) {
     const v = get(`key.${action}`);
     if (typeof v === "string" && v.trim()) km = rebindAction(km, action, v.trim());
   }
-  return km;
+  return shell !== "classic" && profile.id === "fl" ? removeCombo(km, "Mod+E") : km;
 }
 
 // ── live readers (event-time): the handlers call these so the latest settings apply

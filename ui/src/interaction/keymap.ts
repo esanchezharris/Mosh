@@ -4,6 +4,7 @@ export type KeyCombo = string;
 export type Keymap = Partial<Record<Action, KeyCombo | KeyCombo[]>>;
 export type ShortcutScope = "global" | "arrangement" | "pianoRoll" | "drum" | "modal";
 export type ScopedKeymap = Partial<Record<ShortcutScope, Keymap>>;
+export const SHORTCUT_SCOPES: readonly ShortcutScope[] = ["global", "arrangement", "pianoRoll", "drum", "modal"];
 
 export interface KeyEventLike {
   key: string;
@@ -22,6 +23,18 @@ export interface ShortcutRow {
 }
 
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "AltGraph", "CapsLock", "OS"]);
+const EDITOR_ACTION_NAMES: ReadonlySet<string> = new Set(Object.values(EditorAction));
+const SHORTCUT_SCOPE_NAMES: ReadonlySet<string> = new Set(SHORTCUT_SCOPES);
+
+function isEditorAction(value: string): value is Action {
+  return EDITOR_ACTION_NAMES.has(value);
+}
+
+export function isShortcutScope(value: string | undefined): value is ShortcutScope {
+  return value !== undefined && SHORTCUT_SCOPE_NAMES.has(value);
+}
+
+const boundActions = (keymap: Keymap): Action[] => Object.keys(keymap).filter(isEditorAction);
 
 export function normalizeKeyName(key: string): string {
   if (key === " " || /^(space|spacebar)$/i.test(key)) return "Space";
@@ -61,7 +74,7 @@ const asArray = (combo: KeyCombo | KeyCombo[]): KeyCombo[] => Array.isArray(comb
 
 function resolveInScope(keymap: Keymap | undefined, combo: KeyCombo): Action | null {
   if (!keymap) return null;
-  for (const action of Object.keys(keymap) as Action[]) {
+  for (const action of boundActions(keymap)) {
     const bound = keymap[action];
     if (bound && asArray(bound).some((candidate) => canonicalCombo(candidate) === combo)) return action;
   }
@@ -120,8 +133,8 @@ const without = (keymap: Keymap, ...actions: Action[]): Keymap => {
 
 const MOSH: ScopedKeymap = { global: MOSH_GLOBAL, arrangement: MOSH_ARRANGEMENT };
 const ABLETON: ScopedKeymap = {
-  global: { ...MOSH_GLOBAL, [A.RECORD]: "F9" },
-  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+E" },
+  global: { ...without(MOSH_GLOBAL, A.EXPORT_AUDIO), [A.RECORD]: "F9", [A.SPLIT]: "Mod+E" },
+  arrangement: MOSH_ARRANGEMENT,
 };
 const FL: ScopedKeymap = {
   global: {
@@ -141,12 +154,12 @@ const FL: ScopedKeymap = {
   },
 };
 const PROTOOLS: ScopedKeymap = {
-  global: { ...MOSH_GLOBAL, [A.RECORD]: "Mod+Space", [A.TO_START]: "Enter" },
-  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+E", [A.TOOL_RANGE]: "F7", [A.TOOL_MOVE]: "F8" },
+  global: { ...without(MOSH_GLOBAL, A.EXPORT_AUDIO), [A.RECORD]: "Mod+Space", [A.TO_START]: "Enter", [A.SPLIT]: "Mod+E" },
+  arrangement: { ...MOSH_ARRANGEMENT, [A.TOOL_RANGE]: "F7", [A.TOOL_MOVE]: "F8" },
 };
 const LOGIC: ScopedKeymap = {
-  global: { ...without(MOSH_GLOBAL, A.EXPORT_AUDIO), [A.TO_START]: "Enter" },
-  arrangement: { ...MOSH_ARRANGEMENT, [A.SPLIT]: "Mod+T" },
+  global: { ...without(MOSH_GLOBAL, A.EXPORT_AUDIO), [A.TO_START]: "Enter", [A.SPLIT]: "Mod+T" },
+  arrangement: MOSH_ARRANGEMENT,
 };
 
 export const KEYMAPS: Record<string, ScopedKeymap> = { mosh: MOSH, ableton: ABLETON, fl: FL, protools: PROTOOLS, logic: LOGIC };
@@ -158,16 +171,42 @@ export function getKeymap(name: string): ScopedKeymap {
 export function rebindAction(keymap: ScopedKeymap, action: Action, combo: KeyCombo): ScopedKeymap {
   const next: ScopedKeymap = {};
   let rebound = false;
-  for (const scope of ["global", "arrangement", "pianoRoll", "drum", "modal"] as ShortcutScope[]) {
+  for (const scope of SHORTCUT_SCOPES) {
     const bindings = keymap[scope];
     if (!bindings) continue;
-    next[scope] = { ...bindings };
+    const nextBindings = { ...bindings };
     if (Object.prototype.hasOwnProperty.call(bindings, action)) {
-      next[scope]![action] = combo;
+      nextBindings[action] = combo;
       rebound = true;
     }
+    next[scope] = nextBindings;
   }
   if (!rebound) next.global = { ...(next.global ?? {}), [action]: combo };
+  return next;
+}
+
+export function removeCombo(keymap: ScopedKeymap, combo: KeyCombo): ScopedKeymap {
+  const reserved = canonicalCombo(combo);
+  const next: ScopedKeymap = {};
+  for (const scope of SHORTCUT_SCOPES) {
+    const bindings = keymap[scope];
+    if (!bindings) continue;
+    const nextBindings = { ...bindings };
+    for (const action of boundActions(bindings)) {
+      const bound = bindings[action];
+      if (!bound) continue;
+      const remaining = asArray(bound).filter((candidate) => canonicalCombo(candidate) !== reserved);
+      if (remaining.length === 0) {
+        delete nextBindings[action];
+      } else if (Array.isArray(bound)) {
+        nextBindings[action] = remaining;
+      } else {
+        const first = remaining[0];
+        if (first !== undefined) nextBindings[action] = first;
+      }
+    }
+    next[scope] = nextBindings;
+  }
   return next;
 }
 
@@ -211,7 +250,7 @@ export function shortcutRows(keymap: ScopedKeymap, scope: ShortcutScope = "arran
   const addScope = (owner: ShortcutScope) => {
     const bindings = keymap[owner];
     if (!bindings) return;
-    for (const action of Object.keys(bindings) as Action[]) {
+    for (const action of boundActions(bindings)) {
       const bound = bindings[action];
       const combos = bound ? asArray(bound).map(canonicalCombo).filter(Boolean) : [];
       const effective = combos.filter((combo) => !claimed.has(combo));
@@ -235,5 +274,5 @@ export function shortcutRows(keymap: ScopedKeymap, scope: ShortcutScope = "arran
 
 export const REBINDABLE_ACTIONS: Action[] = Array.from(new Set(
   Object.values(KEYMAPS).flatMap((map) =>
-    Object.values(map).flatMap((bindings) => Object.keys(bindings ?? {}) as Action[])),
+    Object.values(map).flatMap((bindings) => bindings ? boundActions(bindings) : [])),
 ));

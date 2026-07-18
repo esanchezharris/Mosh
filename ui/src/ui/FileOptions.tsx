@@ -7,8 +7,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile } from "../bridge";
-import { runAction, FILE_MENU, type ActionId } from "../menuActions";
+import { runAction, fileMenuForKeymap, type ActionId } from "../menuActions";
+import { liveKeymap } from "../interaction/config";
 import type { Snapshot } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
@@ -30,6 +32,8 @@ function FoPanel({ title, onBack, children }: { title: string; onBack: () => voi
 }
 
 export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
+  useSettings((state) => state.values);
+  useSettings((state) => state.keyOverrides);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<null | "settings" | "samples">(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -49,7 +53,7 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
 
   const close = () => { setOpen(false); setPanel(null); };
   // Export has its own group (with format/depth) — drop the plain File-menu export item.
-  const fileActions = FILE_MENU.filter((m) => m.id !== "export_audio");
+  const fileActions = fileMenuForKeymap(liveKeymap()).filter((m) => m.id !== "export_audio");
 
   return (
     <div className="file-options" ref={ref}>
