@@ -181,7 +181,7 @@ function OutputField({ track }: { track: Track }) {
   return (
     <label className="v2-field">
       <span>Out</span>
-      <select aria-label={`Output for ${track.name}`} value={cur}
+      <select className="btn ghost" aria-label={`Output for ${track.name}`} value={cur}
         onChange={(e) => void exec("set_track_output", trackOutputPatch(e.target.value, track.id))}>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -440,7 +440,7 @@ function WarpTab({ clip }: { clip: Clip }) {
       </div>
       <label className="v2-field">
         <span>Stretch</span>
-        <select aria-label="Stretch mode" data-testid="v2-warp-mode" value={mode} disabled={!on}
+        <select className="btn ghost" aria-label="Stretch mode" data-testid="v2-warp-mode" value={mode} disabled={!on}
           onChange={(e) => void exec("set_clip_warp", { clipId: clip.id, autoTempo: true, mode: e.target.value })}>
           {STRETCH_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
