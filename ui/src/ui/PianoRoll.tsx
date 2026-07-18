@@ -10,6 +10,7 @@ import { useSettings } from "../settings/store";
 import type { MidiNote } from "../types";
 import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
 import { noteName, pitchClass, resolveKey, scaleMask, snapToScale, keyLabel } from "../musicalKey";
+import { liveFeel } from "../interaction/config";
 import { DrumSequencer } from "./DrumSequencer";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
 
@@ -141,18 +142,34 @@ export function PianoRoll() {
   const onGridMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d) {
-      const db = (e.clientX - d.startX) / BEAT_PX;
+      const dxPx = e.clientX - d.startX;
+      const db = dxPx / BEAT_PX;
+      // The two axes are guarded symmetrically: an axis you did not move is never
+      // rewritten. Pitch gets its deadzone for free from rounding to whole rows
+      // (dp === 0 below covers half a row either way); TIME is continuous, so it
+      // needs the explicit drag threshold — the same "this is a drag, not tremor"
+      // constant the arrangement uses. Without it a 1px hand-wobble during a
+      // vertical drag would re-snap the start, which is the whole bug: a
+      // deliberately off-grid note (pushed hit, swung 16th) must survive a
+      // pitch nudge with its timing intact.
+      const timeMoved = Math.abs(dxPx) > liveFeel().dragThreshold;
       if (d.kind === "move") {
-        const start = Math.max(0, snapBeat(d.orig.start + db));
+        const start = timeMoved ? Math.max(0, snapBeat(d.orig.start + db)) : d.orig.start;
         const dp = -Math.round((e.clientY - d.startY) / ROW_H);
         // Only a gesture that actually moves the PITCH axis may re-pitch the note.
         // Sliding a note sideways is a request to change its time, not its pitch —
         // so an existing off-key note survives a time-nudge untouched (invariant 88).
         const pitch = dp === 0 ? d.orig.pitch : lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
         setPreviewNote({ ...d.orig, start, pitch });
-      } else {
+      } else if (timeMoved) {
         const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
         setPreviewNote({ ...d.orig, length });
+      } else {
+        // Resize is a pure time-axis gesture, so inside the deadzone it commits
+        // nothing — and the preview must be CLEARED, not merely left unwritten:
+        // dragging the grip far out and back to the origin would otherwise release
+        // with the abandoned length still standing and commit the trip anyway.
+        setPreviewNote(null);
       }
       return;
     }
