@@ -733,6 +733,24 @@
 /* master bus card — same field/val layout as the Inspector Mix tab, own body padding */
 .v2-master-body { padding: 10px 12px 12px; }
 
+/* master-bus plugin rack (limiter, bus EQ, …) — mirrors the classic Rack/PluginCard's
+   bypass-dot/name/actions row shape, in the v2 card's own dark-field visual language
+   (not the classic .rack/.pcard ink+lime look, which is only re-themed for reuse inside
+   .v2-insp-body — see the CSS comment there). */
+.v2-master-rack { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--v2-line); }
+.v2-master-rack-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--v2-dim); }
+.v2-master-empty { font-size: 11px; color: var(--v2-faint); padding: 4px 0; }
+.v2-master-plugin-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.v2-master-plugin-row.bypassed { opacity: 0.55; }
+.v2-master-plugin-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--v2-line); background: transparent; cursor: pointer; flex: 0 0 auto; padding: 0; }
+.v2-master-plugin-dot.on { background: var(--v2-accent); border-color: var(--v2-accent); box-shadow: 0 0 5px var(--v2-accent-soft); }
+.v2-master-plugin-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); }
+.v2-master-plugin-row .v2-btn.icon { padding: 4px 6px; font-size: 11px; border-radius: 7px; }
+.v2-master-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.v2-master-picker-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--v2-line); border-radius: 10px; }
+.v2-master-picker-list .v2-pb-add { border-radius: 0; }
+.v2-master-picker-list .v2-pb-add + .v2-pb-add { border-top: 1px solid var(--v2-line); }
+
 .v2-presence { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
 .v2-collab-card[data-active="false"] .v2-presence { gap: 12px; }
 .v2-cam { appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 8px; padding: 3px 8px; font-size: 13px; line-height: 1; cursor: pointer; color: var(--v2-dim); }
@@ -1138,8 +1156,11 @@
 }
 
 /* ── plugin picker — the shared search box + windowed list. v2 has no plugin MODAL:
-     the FX rack's "+ Plugin" opens the left browser drawer's Plugins tab (.v2-pdock),
-     which is the only consumer of these rules now. ───────────────────────────────── */
+     the FX rack's "+ Plugin" opens the left browser drawer's Plugins tab (.v2-pdock).
+     The master-bus rack's compact picker (.v2-master-picker below) reuses the row/
+     search primitives (.v2-pb-search, .v2-pb-add, .v2-pb-kind, .v2-pb-copy, .v2-pb-name,
+     .v2-pb-meta) directly, in normal (non-windowed) flow instead of .v2-pb-row's absolute
+     positioning — the master rack never has enough entries to need virtualization. ── */
 .v2-pb-search { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0;
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 10px; padding: 0 10px; height: 40px; }
 .v2-pb-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }

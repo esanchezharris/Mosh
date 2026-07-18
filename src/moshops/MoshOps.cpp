@@ -433,6 +433,17 @@ namespace
                                             && plugin.getAudioPluginInstance()->isNonRealtime());
     }
 
+    // Master-bus plugins — the master plugin list also carries internal utility plugins
+    // Mosh itself inserts (currently only the spectral tap that feeds Moshi reactivity,
+    // MasterSpectralTapPlugin — see MoshOps::ensureMasterSpectralTap()); those must never
+    // be user-visible or user-addressable. This is the single filter both master-plugin
+    // index resolution (MoshOps::findMasterPlugin/masterVisibleBoundary) and snapshot
+    // serialization key off of.
+    bool isInternalMasterPlugin (te::Plugin* p)
+    {
+        return p != nullptr && p->getPluginType() == MasterSpectralTapPlugin::xmlTypeName;
+    }
+
     // Downsample a reader to `buckets` [min,max] pairs for a waveform overview.
     // Shared by get_clip_peaks (clip source) and file_peaks (un-imported file).
     juce::Array<juce::var> bucketedPeaks (juce::AudioFormatReader& reader, int buckets)
@@ -763,6 +774,24 @@ MasterSpectralTapPlugin* MoshOps::ensureMasterSpectralTap()
     return t;
 }
 
+// See the MoshOps.h comment on masterVisibleBoundary() for the invariant this relies on.
+int MoshOps::masterVisibleBoundary()
+{
+    int i = 0;
+    for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+    {
+        if (isInternalMasterPlugin (p)) return i;
+        ++i;
+    }
+    return i;
+}
+
+te::Plugin* MoshOps::findMasterPlugin (int index)
+{
+    auto plugins = eng.edit().getMasterPluginList().getPlugins();
+    return (index >= 0 && index < masterVisibleBoundary()) ? plugins[index].get() : nullptr;
+}
+
 // Drain the tap (message thread), window + Goertzel into 12 log-spaced bands +
 // overall level + spectral flux, and emit the `spectrum` event (mirrors `levels`).
 void MoshOps::emitSpectrum (bool playing)
@@ -1043,6 +1072,18 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "mark_take")         return cmdMarkTake (args);
     if (name == "set_master_volume") return broadcastStructuralIfActive (name, args, cmdSetMasterVolume (args));
     if (name == "set_master_pan")    return broadcastStructuralIfActive (name, args, cmdSetMasterPan (args));
+    // Master-bus plugins — mirror the per-track plugin commands one level up (see
+    // cmdLoadPlugin/cmdRemovePlugin/etc below); SessionGlobal like set_master_volume/pan
+    // above (the master bus is one shared resource, not a track), so mutations sync to
+    // peers via the same LWW broadcastStructural replay. open_master_plugin_editor is a
+    // viewer-local pop-out (no state to sync) — Unguarded, exactly like open_plugin_editor.
+    if (name == "load_master_plugin")      return broadcastStructuralIfActive (name, args, cmdLoadMasterPlugin (args));
+    if (name == "load_master_builtin")     return broadcastStructuralIfActive (name, args, cmdLoadMasterBuiltin (args));
+    if (name == "remove_master_plugin")    return broadcastStructuralIfActive (name, args, cmdRemoveMasterPlugin (args));
+    if (name == "reorder_master_plugin")   return broadcastStructuralIfActive (name, args, cmdReorderMasterPlugin (args));
+    if (name == "bypass_master_plugin")    return broadcastStructuralIfActive (name, args, cmdBypassMasterPlugin (args));
+    if (name == "set_master_plugin_param") return broadcastStructuralIfActive (name, args, cmdSetMasterPluginParam (args));
+    if (name == "open_master_plugin_editor") return cmdOpenMasterPluginEditor (args);
     if (name == "enable_track_meter")  return cmdEnableTrackMeter (args);
     if (name == "disable_track_meter") return cmdDisableTrackMeter (args);
     if (name == "enable_all_meters")   return cmdEnableAllMeters (args);
@@ -5593,6 +5634,163 @@ juce::var MoshOps::cmdBypassPlugin (const juce::var& args)
     emitSnapshotInvalidated();
     reactiveTouchTrack (args.getProperty ("trackId", var()).toString());   // Phase 3 — bypass changes the bounce
     return okResult ("bypass_plugin");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Master-bus plugins — hosts plugins (limiter, bus EQ, …) on the master output via
+// getMasterPluginList(), mirroring the per-track commands above one level up (no
+// trackId; findMasterPlugin()/masterVisibleBoundary() stand in for findPlugin() +
+// the track's pluginList). See docs/02_MOSHOPS_CONTRACT.md for the full contract.
+
+juce::var MoshOps::cmdLoadMasterPlugin (const juce::var& args)
+{
+    // A2 — persist any unsaved work BEFORE an op that can crash the process in-place
+    // (hosting a third-party VST3/AU is the #1 in-process-teardown crash), same as
+    // cmdLoadPlugin.
+    eng.saveIfDirty();
+    const auto pluginId = args.getProperty ("pluginId", var()).toString();
+    juce::PluginDescription desc;
+    if (! pluginHost.findDescription (pluginId, desc))
+        return errResult ("load_master_plugin", "unknown plugin: " + pluginId);
+
+    beginTxn ("load_master_plugin");
+    // Same PluginCache path as cmdLoadPlugin — the inserted plugin IS the one we hold.
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, desc);
+    if (plugin == nullptr) return errResult ("load_master_plugin", "create failed");
+
+    auto& list = eng.edit().getMasterPluginList();
+    const int boundary = masterVisibleBoundary();
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0 || index > boundary) index = boundary;   // append before any internal tap
+    list.insertPlugin (plugin, index, nullptr);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", list.indexOf (plugin.get()));
+    data->setProperty ("name", plugin->getName());
+    if (auto* ext = dynamic_cast<te::ExternalPlugin*> (plugin.get()))
+        addExternalPluginMetadata (*data, *ext);
+    logLine ("load_master_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("load_master_plugin", var (data));
+}
+
+juce::var MoshOps::cmdLoadMasterBuiltin (const juce::var& args)
+{
+    eng.saveIfDirty();   // A2 — pre-risky-op save (recovery point if instantiation crashes)
+    const auto type = args.getProperty ("type", var()).toString();
+    const auto* spec = findBuiltin (type);
+    if (spec == nullptr) return errResult ("load_master_builtin", "unknown builtin: " + type);
+
+    beginTxn ("load_master_builtin");
+    // Same cache path as cmdLoadMasterPlugin/cmdLoadBuiltin.
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (type, {});
+    if (plugin == nullptr) return errResult ("load_master_builtin", "create failed: " + type);
+
+    auto& list = eng.edit().getMasterPluginList();
+    const int boundary = masterVisibleBoundary();
+    int index = (int) args.getProperty ("index", -1);
+    if (index < 0 || index > boundary) index = boundary;   // append before any internal tap
+    list.insertPlugin (plugin, index, nullptr);
+
+    auto* data = new DynamicObject();
+    data->setProperty ("index", list.indexOf (plugin.get()));
+    data->setProperty ("name", plugin->getName());
+    data->setProperty ("type", type);
+    data->setProperty ("isInstrument", spec->isInstrument);
+    logLine ("load_master_builtin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("load_master_builtin", var (data));
+}
+
+juce::var MoshOps::cmdRemoveMasterPlugin (const juce::var& args)
+{
+    eng.saveIfDirty();   // A2 — pre-risky-op save (plugin teardown can crash in-process)
+    auto* plugin = findMasterPlugin ((int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("remove_master_plugin", "no plugin");
+    pluginHost.closeEditor (*plugin);
+    beginTxn ("remove_master_plugin");
+    plugin->deleteFromParent();
+    logLine ("remove_master_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("remove_master_plugin");
+}
+
+juce::var MoshOps::cmdReorderMasterPlugin (const juce::var& args)
+{
+    const int from = (int) args.getProperty ("index", -1);
+    const int to   = (int) args.getProperty ("toIndex", -1);
+    auto& list = eng.edit().getMasterPluginList();
+    auto plugins = list.getPlugins();
+    if (from < 0 || from >= masterVisibleBoundary()) return errResult ("reorder_master_plugin", "bad index");
+
+    te::Plugin::Ptr p = plugins[from];
+    beginTxn ("reorder_master_plugin");
+    p->removeFromParent();
+    // Recomputed post-removal (one fewer visible plugin) — clamp INSIDE the visible
+    // prefix so an out-of-range toIndex lands before any internal tap, never after it
+    // (unlike cmdReorderPlugin, we can't rely on insertPlugin's raw out-of-range clamp:
+    // that would append past the tap and break its "sees the final output" invariant).
+    // Negative clamps to the FRONT (0), too-large clamps to the END (boundary) — e.g. a
+    // "move earlier" UI action on the first plugin sends toIndex -1 and should land it
+    // back at 0, not wrap it to the end.
+    const int boundary = masterVisibleBoundary();
+    const int dest = to < 0 ? 0 : (to > boundary ? boundary : to);
+    list.insertPlugin (p, dest, nullptr);
+    logLine ("reorder_master_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("reorder_master_plugin");
+}
+
+juce::var MoshOps::cmdSetMasterPluginParam (const juce::var& args)
+{
+    auto* plugin = findMasterPlugin ((int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("set_master_plugin_param", "no plugin");
+    const int pi = (int) args.getProperty ("paramIndex", -1);
+    if (pi < 0 || pi >= plugin->getNumAutomatableParameters())
+        return errResult ("set_master_plugin_param", "bad paramIndex");
+
+    auto param = plugin->getAutomatableParameter (pi);
+    const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
+    const float raw  = param->valueRange.convertFrom0to1 (norm);
+
+    beginTxn ("set_master_plugin_param");
+    // Same undo-correct replay action cmdSetPluginParam uses — resolve() keys off the
+    // plugin's stable EditItemID via the Edit's PluginCache, not a track, so it works
+    // unchanged for a master-bus plugin (see the action's comment above for why).
+    undoManager().perform (new SetPluginParamValueAction (*param, pi, raw));
+    logLine ("set_master_plugin_param", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_master_plugin_param");
+}
+
+juce::var MoshOps::cmdBypassMasterPlugin (const juce::var& args)
+{
+    auto* plugin = findMasterPlugin ((int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("bypass_master_plugin", "no plugin");
+    const bool bypassed = (bool) args.getProperty ("bypassed", false);
+    beginTxn ("bypass_master_plugin");
+    plugin->setEnabled (! bypassed);          // enabled == not bypassed
+    logLine ("bypass_master_plugin", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("bypass_master_plugin");
+}
+
+juce::var MoshOps::cmdOpenMasterPluginEditor (const juce::var& args)
+{
+    auto* plugin = findMasterPlugin ((int) args.getProperty ("index", -1));
+    if (plugin == nullptr) return errResult ("open_master_plugin_editor", "no plugin");
+    const bool contextActiveBefore = eng.edit().getTransport().getCurrentPlaybackContext() != nullptr;
+    if (eng.hasAudio())
+        eng.ensurePlaybackContext();
+    const bool contextActiveAfter = eng.edit().getTransport().getCurrentPlaybackContext() != nullptr;
+    pluginHost.openEditor (*plugin);          // native pop-out (not undoable)
+    logLine ("open_master_plugin_editor", args, true, {}, false);
+    auto* data = new DynamicObject();
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    data->setProperty ("playbackContextActiveBefore", contextActiveBefore);
+    data->setProperty ("playbackContextActive", contextActiveAfter);
+    data->setProperty ("plugin", plugin->getName());
+    return okResult ("open_master_plugin_editor", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10296,6 +10494,19 @@ juce::var MoshOps::snapshot()
         auto* master = new DynamicObject();
         master->setProperty ("volumeDb", mvp->getVolumeDb());
         master->setProperty ("pan", mvp->getPan());
+        // Master-bus plugins (limiter, bus EQ, …) — mirrors tracks[].plugins, but hosted
+        // via getMasterPluginList() with no owning track (pluginToVar's owner arg is only
+        // used for a track-scoped MoshXFeedback preview readout, so nullptr here is fine).
+        // Internal utility plugins (the spectral tap) are filtered out — never user-visible.
+        Array<var> masterPlugins;
+        int mvi = 0;
+        for (auto* p : edit.getMasterPluginList().getPlugins())
+        {
+            if (p == nullptr || isInternalMasterPlugin (p)) continue;
+            masterPlugins.add (pluginToVar (*p, mvi, nullptr));
+            ++mvi;
+        }
+        master->setProperty ("plugins", masterPlugins);
         root->setProperty ("master", var (master));
     }
     return var (root);

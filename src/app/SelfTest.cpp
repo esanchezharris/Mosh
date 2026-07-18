@@ -1846,6 +1846,129 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "reorder_plugin with a bad from-index errors");
     }
 
+    // ─── Master-bus plugins: host plugins (limiter, bus EQ, …) on getMasterPluginList(),
+    // mirroring the per-track plugin commands one level up (no trackId). Built-ins only
+    // (compressor/reverb/4bandEq/delay) — deterministic, no VST3 dependency — plus one
+    // block gated on a real scanned VST3 (mirrors Stage 3's fxId-gated block above). ───
+    section ("Master bus plugins (load/remove/reorder/bypass/param, undo)");
+    {
+        auto masterPlugins = [&] () -> var {
+            return ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
+        };
+        auto masterOrder = [&] () -> StringArray {
+            StringArray order;
+            if (auto* arr = masterPlugins().getArray())
+                for (auto& p : *arr) order.add (p.getProperty ("type", var()).toString());
+            return order;
+        };
+        auto masterIdxOf = [&] (const String& type) -> int {
+            if (auto* arr = masterPlugins().getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return (int) p.getProperty ("index", -1);
+            return -1;
+        };
+
+        check (masterOrder().isEmpty(), "master bus starts with no plugins");
+
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "compressor" }}))), "load_master_builtin (compressor) ok");
+        check (masterOrder() == StringArray ({ "compressor" }), "compressor appears in master.plugins");
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "reverb" }}))), "load_master_builtin (reverb) ok");
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "delay" }}))),  "load_master_builtin (delay) ok");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "master effects load in chain order C,R,D");
+
+        // set_master_plugin_param — value reflected in the snapshot.
+        const int compIdx = masterIdxOf ("compressor");
+        check (compIdx >= 0, "compressor index resolved");
+        check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", compIdx }, { "paramIndex", 0 }, { "value", 0.65 }}))),
+               "set_master_plugin_param ok");
+        {
+            double v = -1.0;
+            if (auto* arr = masterPlugins().getArray())
+                for (auto& p : *arr)
+                    if ((int) p.getProperty ("index", -1) == compIdx)
+                        if (auto* ps = p.getProperty ("params", var()).getArray())
+                            for (auto& pp : *ps)
+                                if ((int) pp.getProperty ("index", -1) == 0)
+                                    v = (double) pp.getProperty ("value", -1.0);
+            check (std::abs (v - 0.65) < 0.02, "set_master_plugin_param value reflects in the snapshot");
+        }
+
+        // bypass_master_plugin + undo.
+        check (ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", compIdx }, { "bypassed", true }}))), "bypass_master_plugin ok");
+        {
+            bool bypassed = false;
+            if (auto* arr = masterPlugins().getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == compIdx) bypassed = ! (bool) p.getProperty ("enabled", true);
+            check (bypassed, "bypass_master_plugin disabled the plugin");
+        }
+        check (ok (cmd (ops, "undo")), "undo bypass_master_plugin ok");
+
+        // reorder_master_plugin — an out-of-bounds toIndex clamps INSIDE the visible
+        // prefix (unlike reorder_plugin, which relies on Tracktion's raw append-at-end
+        // clamp — master must never land a plugin after the (currently absent, headless)
+        // internal spectral tap; see masterVisibleBoundary()).
+        check (ok (cmd (ops, "reorder_master_plugin", objN ({{ "index", compIdx }, { "toIndex", 99 }}))),
+               "reorder_master_plugin with an out-of-bounds toIndex clamps (ok, no crash)");
+        check (masterOrder() == StringArray ({ "reverb", "delay", "compressor" }), "compressor moved to the end of the master chain");
+        check (ok (cmd (ops, "undo")), "undo reorder_master_plugin ok");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "undo restores the prior master plugin order");
+
+        check (! ok (cmd (ops, "reorder_master_plugin", objN ({{ "index", 99 }, { "toIndex", 0 }}))),
+               "reorder_master_plugin with a bad from-index errors");
+
+        // persists across save/reload.
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "master plugins persist across save/reload");
+
+        // remove_master_plugin + undo.
+        check (ok (cmd (ops, "remove_master_plugin", objN ({{ "index", masterIdxOf ("delay") }}))), "remove_master_plugin ok");
+        check (masterOrder() == StringArray ({ "compressor", "reverb" }), "master plugin removed from chain");
+        check (ok (cmd (ops, "undo")), "undo remove_master_plugin restores it");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "undo restores the removed master plugin");
+
+        // open_master_plugin_editor — dispatches without crashing (native pop-out itself
+        // is untestable headless, same posture as open_plugin_editor).
+        check (ok (cmd (ops, "open_master_plugin_editor", objN ({{ "index", compIdx }}))), "open_master_plugin_editor ok");
+
+        // bad index -> clean errors, not crashes.
+        check (! ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", 99 }, { "paramIndex", 0 }, { "value", 0.5 }}))),
+               "set_master_plugin_param on a bad index errors");
+        check (! ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", 99 }, { "bypassed", true }}))),
+               "bypass_master_plugin on a bad index errors");
+        check (! ok (cmd (ops, "remove_master_plugin", objN ({{ "index", 99 }}))),
+               "remove_master_plugin on a bad index errors");
+        check (! ok (cmd (ops, "load_master_builtin", objN ({{ "type", "not-a-real-builtin" }}))),
+               "load_master_builtin on an unknown type errors");
+
+        // Optional: a real scanned VST3 (Stage 3's fxId-gated posture) — proves
+        // load_master_plugin/pluginId end-to-end when the harness has a hostable plugin.
+        {
+            String masterFxId;
+            if (auto* arr = cmd (ops, "list_plugins")["data"].getProperty ("plugins", var()).getArray())
+                for (auto& p : *arr)
+                    if (isHarnessHostablePlugin (p) && ! (bool) p.getProperty ("isInstrument", false))
+                    { masterFxId = p.getProperty ("id", var()).toString(); break; }
+
+            if (masterFxId.isNotEmpty())
+            {
+                auto lr = cmd (ops, "load_master_plugin", objN ({{ "pluginId", masterFxId }}));
+                check (ok (lr), "load_master_plugin (real VST3) ok");
+                const int idx = (int) lr["data"].getProperty ("index", -1);
+                check (idx >= 0 && masterOrder().size() == 4, "real VST3 appears in master.plugins");
+                check (ok (cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}))), "remove_master_plugin (real VST3) ok");
+            }
+            else
+                std::cerr << "  (no hostable VST3 available — skipping load_master_plugin/pluginId check)\n";
+        }
+
+        // cleanup — leave the master bus clean for later sections/demos.
+        for (int guard = 0; guard < 8 && ! masterOrder().isEmpty(); ++guard)
+        {
+            const int idx = (int) masterPlugins()[0].getProperty ("index", -1);
+            cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}));
+        }
+        check (masterOrder().isEmpty(), "master bus cleaned up");
+    }
+
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───
     section ("MON-004: PDC / reported-latency readout");
     {

@@ -30,6 +30,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "enable_all_meters", "set_audio_device", "set_buffer_size", "set_audio_threads",
         "set_project_settings", "set_key", "rescan_plugins", "get_plugin_blocklist",
         "clear_plugin_blocklist", "block_plugin", "open_plugin_editor",
+        // Master-bus plugins — popping a native editor window is viewer-local (no state
+        // to sync), same posture as open_plugin_editor above.
+        "open_master_plugin_editor",
         "mp_serialize_track", "apply_remote_track", "mp_sync_locks",
         "mp_create_session", "mp_join_session", "mp_leave_session",
         "mp_claim_track", "mp_commit_track", "mp_broadcast_selection",
