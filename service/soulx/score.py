@@ -137,8 +137,47 @@ def _word_units(words: List[str], slots: List[dict]):
     return units
 
 
+def apply_note_floor(clip: dict, floor_s: float) -> dict:
+    """Raise every sub-`floor_s` SUNG note (note_type 2/3) to the floor, taking the deficit
+    from an adjacent REST if one exists, else from the longest sung neighbour. The total
+    timeline is preserved (sum of durations unchanged), so the take alignment holds. Pure;
+    floor_s <= 0 returns the clip unchanged (byte-identical)."""
+    if floor_s <= 0.0:
+        return clip
+    durs = [float(d) for d in clip["duration"].split()]
+    types = [int(t) for t in clip["note_type"].split()]
+    n = len(durs)
+    for i in range(n):
+        if types[i] == 1 or durs[i] >= floor_s:
+            continue
+        need = floor_s - durs[i]
+        # donors: adjacent rests first (silence is the cheapest place to borrow), then the
+        # longest sung neighbour that can spare it without itself dropping below the floor.
+        order = sorted((j for j in (i - 1, i + 1) if 0 <= j < n),
+                       key=lambda j: (0 if types[j] == 1 else 1, -durs[j]))
+        for j in order:
+            spare = durs[j] if types[j] == 1 else max(0.0, durs[j] - floor_s)
+            take = min(need, spare)
+            durs[j] -= take
+            need -= take
+            if need <= 1e-9:
+                break
+        durs[i] = floor_s - max(0.0, need)      # if nobody could spare it, take what we got
+    # re-quantize on the error-diffused chain so summed timeline is bit-stable (as author_score)
+    qdur, acc_true, acc_emit = [], 0.0, 0.0
+    for d in durs:
+        acc_true += d
+        q = max(0.0, round(acc_true - acc_emit, 4))
+        qdur.append(q)
+        acc_emit += q
+    out = dict(clip)
+    out["duration"] = " ".join(f"{q:.4f}" for q in qdur)
+    out["time"] = [clip["time"][0], clip["time"][0] + round(acc_emit * 1000)]
+    return out
+
+
 def author_score(lines: List[dict], language: str = "English", name: str = "mosh-sheet",
-                 durations: str = "verbatim") -> dict:
+                 durations: str = "verbatim", note_floor_s: float = 0.0) -> dict:
     """[{text, score: lyricScore-blob|None}, ...] -> {"ok", "score": [clip], stats}.
 
     Lines without a score blob are SKIPPED and counted (typed-later lines have no take
@@ -148,7 +187,12 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
 
     durations: "verbatim" (default — slot durations transferred as-is, the shipped
     behavior) or "derived" (B1-lite: phrase anchors kept, in-phrase durations re-derived
-    by soulx.duration's zero-sum rule layer; V2-blind-motivated, owner-ear-gated)."""
+    by soulx.duration's zero-sum rule layer; V2-blind-motivated, owner-ear-gated).
+
+    note_floor_s: minimum sung-note duration (default 0.0 = off, byte-identical). SoulX's
+    shipped English notes bottom out near 0.15 s; 15.8% of ours sat below that (mechanism V4a),
+    too short to fit a consonant + vowel. A positive floor raises sub-floor sung notes by
+    borrowing from an adjacent rest, then the longest neighbour — total timeline preserved."""
     if durations not in ("verbatim", "derived"):
         raise ValueError(f"unknown durations mode: {durations!r}")
     scored = [ln for ln in (lines or [])
@@ -238,6 +282,14 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
         result["score"] = [new_clip]
         result["deriveChanged"] = sum(1 for a, b in zip(old, new) if abs(a - b) > 0.0005)
         result["deriveChainOk"] = bool(dlog.get("chain_check", {}).get("ok"))
+    if note_floor_s > 0.0:
+        # applied LAST so it floors whatever durations the derive step produced
+        floored = apply_note_floor(result["score"][0], note_floor_s)
+        pre = [float(d) for d in result["score"][0]["duration"].split()]
+        post = [float(d) for d in floored["duration"].split()]
+        result["score"] = [floored]
+        result["noteFloorS"] = note_floor_s
+        result["noteFloorRaised"] = sum(1 for a, b in zip(pre, post) if b - a > 0.0005)
     return result
 
 

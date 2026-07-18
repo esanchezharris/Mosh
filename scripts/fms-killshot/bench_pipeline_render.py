@@ -105,22 +105,31 @@ REF_WAV = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing
 REF_JSON = os.path.expanduser("~/mosh-fms-ksb/used2/asserted-proof/back-half/sing-handoff/refs/own-30s.json")
 
 
-def author_payload(item, t0, t1, f0, durations="verbatim"):
+def author_payload(item, t0, t1, f0, durations="verbatim", convention="syllable",
+                   note_floor_s=0.0):
     """The author-script input (pure, so the NUS/own-pairs split is testable).
 
     Own-pairs items carry their own real-text ground-truth words and a `singer` that is not
     a NUS singer, so their words travel inline. NUS items get exactly the previous payload —
-    no `words` key — and fall through to the author's lookup-by-singer path unchanged."""
+    no `words` key — and fall through to the author's lookup-by-singer path unchanged.
+
+    `convention`/`note_floor_s` are the SoulX in-distribution re-authoring knobs; both are
+    omitted at their defaults so the existing payload is byte-unchanged."""
     payload = {"singer": item["singer"], "t0": t0, "t1": t1, "f0": f0}
     if "mumble_vocal" in item:
         payload["words"] = item["words"]
     if durations != "verbatim":          # absent key => the shipped default, byte-unchanged
         payload["durations"] = durations
+    if convention != "syllable":
+        payload["convention"] = convention
+    if note_floor_s > 0.0:
+        payload["noteFloorS"] = note_floor_s
     return payload
 
 
 def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None,
-                      f0_from="clean_vocal", durations="verbatim"):
+                      f0_from="clean_vocal", durations="verbatim", convention="syllable",
+                      note_floor_s=0.0):
     """THE real `pipeline` generator: true words + F0 → product author_score (phonology venv)
     → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics, one ≤12 s
     window.
@@ -140,7 +149,8 @@ def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=
     src, sr = mp._read_mono(item[f0_from])
     f0 = [[p["t"], p["hz"], 1 if p["v"] else 0] for p in mp._pyin(src, sr)]
     inj = os.path.join(work, base + "_in.json")
-    json.dump(author_payload(item, t0, t1, f0, durations), open(inj, "w"))
+    json.dump(author_payload(item, t0, t1, f0, durations, convention, note_floor_s),
+              open(inj, "w"))
 
     # 2. author the SoulX score under the phonology venv (real words + author_score)
     scorej = os.path.join(work, base + "_score.json")

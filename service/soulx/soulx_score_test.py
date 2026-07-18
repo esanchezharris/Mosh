@@ -256,6 +256,34 @@ try:
 except ValueError:
     check("unknown durations mode raises", True)
 
+# ── apply_note_floor: raise sub-floor sung notes, preserve the total timeline ───────────
+FLOOR_CLIP = {"index": "t_0_800", "language": "English", "time": [0, 800],
+              "duration": "0.30 0.06 0.20 0.04 0.20", "text": "a b c d e",
+              "phoneme": "en_AH1 en_B en_S en_D en_IY1", "note_pitch": "60 62 60 62 60",
+              "note_type": "2 2 1 2 2"}   # index 2 is a REST (0.20s)
+
+check("floor 0 is byte-identical (the shipped-default contract)",
+      sx.apply_note_floor(FLOOR_CLIP, 0.0) == FLOOR_CLIP)
+
+fl = sx.apply_note_floor(FLOOR_CLIP, 0.15)
+fd = [float(x) for x in fl["duration"].split()]
+check("floor raises the 0.06s sung note to >= 0.15s", fd[1] >= 0.1499, str(fd))
+check("floor raises the 0.04s sung note to >= 0.15s", fd[3] >= 0.1499, str(fd))
+check("floor preserves the TOTAL timeline (borrowed, not invented)",
+      abs(sum(fd) - 0.80) < 1e-3, f"sum={sum(fd):.4f}")
+check("floor borrows from the adjacent REST first (the rest at idx2 shrinks)",
+      fd[2] < 0.20, f"rest now {fd[2]:.3f}")
+check("floor never pushes a donor sung note below the floor",
+      all(fd[i] >= 0.1499 for i in (0, 1, 3, 4)), str(fd))
+check("apply_note_floor is pure (input clip untouched)", FLOOR_CLIP["duration"] == "0.30 0.06 0.20 0.04 0.20")
+
+# author_score(note_floor_s=) is off by default → byte-identical to the plain call
+_base = sx.author_score(LINES) if "LINES" in dir() else None
+if _base and _base.get("ok"):
+    _f0 = sx.author_score(LINES, note_floor_s=0.0)
+    check("author_score note_floor_s=0 leaves the score byte-identical",
+          _f0["score"] == _base["score"])
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

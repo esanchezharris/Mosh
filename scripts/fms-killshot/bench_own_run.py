@@ -101,7 +101,8 @@ def _dynamics_arm(src_wav, ref_wav, out_dir, base, mode):
         return None
 
 
-def run_item(item, t0, t1, out_dir, *, durations="verbatim"):
+def run_item(item, t0, t1, out_dir, *, durations="verbatim", convention="syllable",
+             note_floor_s=0.0):
     import bench_align
     import bench_human_baseline as hb
     import bench_naturalness
@@ -120,7 +121,8 @@ def run_item(item, t0, t1, out_dir, *, durations="verbatim"):
     # THE REAL PIPELINE — F0 from the MUMBLE (never the finished take), owner's own voice.
     pipe = os.path.join(out_dir, base + "_pipeline.wav")
     pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from="mumble_vocal",
-                                            durations=durations)
+                                            durations=durations, convention=convention,
+                                            note_floor_s=note_floor_s)
     snapped = _snap_arm(pipe, ref_slice, out_dir, base)
 
     ref_mono = fin[int(t0 * sr):int(t1 * sr)]
@@ -181,8 +183,18 @@ def main():
                     help="ignore per-song phrase windows and use --t0/--t1")
     ap.add_argument("--durations", default="verbatim",
                     help="verbatim (shipped default) | derived (B1-lite)")
+    ap.add_argument("--convention", default="syllable",
+                    help="syllable (shipped) | soulx (whole-word notes, melody-driven melisma)")
+    ap.add_argument("--note-floor-s", type=float, default=0.0,
+                    help="minimum sung-note duration (SoulX p5 ~0.15); 0 = off")
+    ap.add_argument("--soulx", action="store_true",
+                    help="shortcut: --convention soulx --durations derived --note-floor-s 0.15")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
+
+    conv = "soulx" if a.soulx else a.convention
+    dur_mode = "derived" if a.soulx else a.durations
+    floor = 0.15 if a.soulx else a.note_floor_s
 
     import bench_own_pairs as op
     items = op.own_pairs_items(songs=a.songs.split(",") if a.songs else None)
@@ -200,12 +212,13 @@ def main():
             t0, t1 = float(w["t0"]), float(w["t1"])
         print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
-            rows.append(run_item(it, t0, t1, a.out, durations=a.durations))
+            rows.append(run_item(it, t0, t1, a.out, durations=dur_mode,
+                                 convention=conv, note_floor_s=floor))
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
 
-    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s, durations={a.durations}) ===")
+    print(f"\n=== in-voice run on REAL mumbles ({a.t0:.0f}-{a.t1:.0f}s, conv={conv} dur={dur_mode} floor={floor}) ===")
     print(f"  {'song':16} {'arm':14} {'wordAlign':>10} {'hit':>6} {'onsetF1':>8} "
           f"{'→reference':>11} {'→input':>8} {'pq':>7}")
     for r in rows:
