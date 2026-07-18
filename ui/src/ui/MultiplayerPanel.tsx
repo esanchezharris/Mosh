@@ -38,6 +38,10 @@ export function MultiplayerPanel() {
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+  // #42 — inline join feedback. Failures used to land only in the global error bar
+  // while the panel the user was looking at stayed silent.
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const persistIdentity = (nextName: string, nextColor: string) => {
     saveMpIdentity({ name: nextName.trim() || "Producer", color: nextColor });
@@ -52,7 +56,11 @@ export function MultiplayerPanel() {
   const doJoin = (roomCode: string) => {
     const effectiveName = name.trim() || "Producer";
     persistIdentity(effectiveName, color);
-    void join(roomCode, effectiveName, color);
+    setJoining(true);
+    setJoinError(null);
+    void join(roomCode, effectiveName, color)
+      .then((r) => { if (!r.ok) setJoinError(r.error ?? "join session failed"); })
+      .finally(() => setJoining(false));
   };
 
   const requestJoin = () => {
@@ -142,10 +150,18 @@ export function MultiplayerPanel() {
       <button className="btn primary" onClick={doCreate}>Create session</button>
       <div className="mp-sep">or join with a code</div>
       <div className="mp-join">
-        <input value={code} placeholder="paste room code" onChange={(e) => setCode(e.target.value)}
+        <input value={code} placeholder="paste room code"
+               onChange={(e) => { setCode(e.target.value); setJoinError(null); }}
                aria-label="Room code to join" />
-        <button className="btn" disabled={!code.trim()} onClick={requestJoin}>Join</button>
+        <button className="btn" disabled={!code.trim() || joining} onClick={requestJoin}>
+          {joining ? "Joining…" : "Join"}
+        </button>
       </div>
+      {joinError !== null && (
+        <div className="mp-join-error" role="alert" data-testid="mp-join-error">
+          ⚠ {joinError}
+        </div>
+      )}
       {localTrackCount > 0 && (
         <div className="pop-note">
           You have {localTrackCount} track{localTrackCount === 1 ? "" : "s"} in this project — joining a

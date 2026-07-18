@@ -145,7 +145,9 @@ type State = {
   failedCommits: Record<string, string>;           // logicalId -> last error (persists until a retry succeeds)
   retryFailedCommit: (logicalId: string) => Promise<void>;
   mpCreateSession: (name?: string, color?: string) => Promise<void>;
-  mpJoinSession: (code: string, name?: string, color?: string) => Promise<void>;
+  // Returns the raw result so the join UI can render INLINE failure feedback (#42);
+  // the global lastError is still set for surfaces that only watch the error bar.
+  mpJoinSession: (code: string, name?: string, color?: string) => Promise<CommandResult>;
   mpLeaveSession: () => Promise<void>;
   syncActiveTrack: () => Promise<void>;            // recompute activeTrack; commit+claim on change
 
@@ -719,6 +721,7 @@ export const useStore = create<State>((set, get) => ({
   mpJoinSession: async (code, name = "", color = "") => {
     const r = await get().exec("mp_join_session", { code, name, color });
     if (!r.ok) set({ lastError: r.error ?? "join session failed" });
+    return r;
   },
   mpLeaveSession: async () => {
     await get().exec("mp_leave_session");

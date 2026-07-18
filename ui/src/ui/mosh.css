@@ -1289,6 +1289,9 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
 .mp-join { display: flex; gap: 6px; }
 .mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+/* #42 — inline join failure, right where the user is looking (the global error bar
+   alone was easy to miss behind the modal). */
+.mp-join-error { font-size: 12px; color: var(--err, #c02040); overflow-wrap: anywhere; }
 /* v2 shell's modal-based launcher (MultiplayerLauncher) — same panel, more room than
    the classic shell's small anchored popover. */
 .mp-launcher-modal { width: min(92vw, 420px); }

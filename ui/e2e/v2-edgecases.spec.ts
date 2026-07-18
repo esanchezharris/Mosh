@@ -59,6 +59,20 @@ test.describe("L1 · overlay/Escape stacking", () => {
     await expect(page.getByTestId("mp-launcher-modal")).not.toBeVisible();
   });
 
+  test("join with an unknown room code shows INLINE feedback in the panel (#42)", async ({ page }) => {
+    await bootV2(page);
+    await page.getByTestId("v2-share").click();
+    await page.getByLabel("Room code to join").fill("JUNK-CODE-999");
+    await page.getByTestId("mp-launcher-modal").getByRole("button", { name: "Join", exact: true }).click();
+    // 3 tracks in the mock project → the destructive-join confirm gates first
+    await page.getByTestId("mp-join-confirm").getByRole("button", { name: "Join anyway" }).click();
+    const inline = page.getByTestId("mp-join-error");
+    await expect(inline).toBeVisible();
+    await expect(inline).toContainText(/no such room/i);
+    await expect(page.getByTestId("mp-launcher-modal")).toBeVisible(); // still there to retry
+    expect(await store(page).lastError()).toMatch(/no such room/i);    // global surface too
+  });
+
   test("piano roll still closes on Escape (stack sanity)", async ({ page }) => {
     await bootV2(page);
     const midiClip = page.locator('[data-clip-id]').filter({ has: page.locator(":scope") }).nth(1);
