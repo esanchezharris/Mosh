@@ -232,6 +232,38 @@ test.describe("L4/L5/L10 · degenerate states", () => {
   });
 });
 
+test.describe("L11 · scale smoke", () => {
+  test("50 tracks / ~75 clips stay responsive: scroll + select inside a frame budget (#56)", async ({ page }) => {
+    test.slow();
+    await bootV2(page);
+    for (let i = 0; i < 50; i++) await store(page).exec("create_track", { name: "Stress " + i });
+    const snap = await store(page).snapshot();
+    const stress = snap.tracks.filter((t) => t.name.startsWith("Stress"));
+    for (let i = 0; i < stress.length; i++) {
+      await store(page).exec("add_midi_clip", { trackId: stress[i].id, start: (i % 10) * 4, length: 2 });
+      if (i % 2 === 0) await store(page).exec("add_midi_clip", { trackId: stress[i].id, start: (i % 10) * 4 + 8, length: 2 });
+    }
+    const timing = await page.evaluate(async () => {
+      const scroller = document.querySelector('[data-testid="v2-timeline"]')!;
+      const t0 = performance.now();
+      scroller.scrollTop = 2000;
+      await new Promise((r) => requestAnimationFrame(r));
+      const t1 = performance.now();
+      scroller.scrollTop = 0;
+      await new Promise((r) => requestAnimationFrame(r));
+      const t2 = performance.now();
+      return { down: t1 - t0, up: t2 - t1 };
+    });
+    // generous budget — this is a hang detector, not a benchmark. The live-browser
+    // 30s "stalls" during the sweep were tooling artifacts (zero longtasks recorded);
+    // this pins the app-side truth deterministically.
+    expect(timing.down).toBeLessThan(2000);
+    expect(timing.up).toBeLessThan(2000);
+    await page.locator('[data-clip-id]').last().click();
+    await expect(page.locator(".v2-inspector .v2-card-head")).toContainText("Stress");
+  });
+});
+
 test.describe("L7 · viewport floor", () => {
   test("below the shell's min width the layout scrolls instead of self-destructing (#52)", async ({ page }) => {
     await bootV2(page);
