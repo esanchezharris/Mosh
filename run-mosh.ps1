@@ -88,7 +88,7 @@ function Copy-ServiceBundle {
     param([string]$SvcDest)   # <dist>\service
     Write-Host "bundling service -> $SvcDest"
     if (Test-Path $SvcDest) { Remove-Item -Recurse -Force $SvcDest }
-    foreach ($sub in @($SvcDest, "$SvcDest\transcribe", "$SvcDest\sketch", "$SvcDest\transform")) {
+    foreach ($sub in @($SvcDest, "$SvcDest\transcribe", "$SvcDest\sketch", "$SvcDest\transform", "$SvcDest\teardown\render")) {
         New-Item -ItemType Directory -Force -Path $sub | Out-Null
     }
 
@@ -115,10 +115,17 @@ function Copy-ServiceBundle {
     }
 
     # Extra per-feature CLIs + setup scripts (the venvs themselves are NEVER bundled).
+    # teardown\recipe.py + teardown\render\compile.py back /generate_recipe
+    # (GenerativeJobManager::generateBeatRecipe / cmdGenerateBeatRecipe) — MUST match
+    # run-mosh.sh bundle_service's individual `cp .../teardown/...` lines, or the
+    # packaged Windows app 500s on generate_beat_recipe with ModuleNotFoundError:
+    # 'teardown' (bundle_completeness_test.py's sh/ps1 parity check does not catch
+    # this class of drift — it only compares $topFiles/$dirs, not these extras).
     $extras = @(
         "transcribe\transcribe_cli.py", "transcribe\setup-transcribe.sh",
         "sketch\beatbox_cli.py", "sketch\make_fixtures.py", "sketch\setup-sketch.sh", "sketch\README.md",
-        "transform\transform_cli.py", "transform\setup-transform.sh"
+        "transform\transform_cli.py", "transform\setup-transform.sh",
+        "teardown\recipe.py", "teardown\render\compile.py"
     )
     foreach ($e in $extras) {
         $src = Join-Path $Root "service\$e"
@@ -129,7 +136,7 @@ function Copy-ServiceBundle {
 
     # Machine-local venv pointers (gitignored). Absent ones fall back to the conventional
     # %LOCALAPPDATA%\Mosh\venvs default that server.py's _venv_py resolves on Windows.
-    foreach ($ptr in @(".sa3.env", "transcribe\.transcribe.env", "sketch\.sketch.env", "transform\.transform.env")) {
+    foreach ($ptr in @(".sa3.env", ".recipe.env", "transcribe\.transcribe.env", "sketch\.sketch.env", "transform\.transform.env")) {
         $src = Join-Path $Root "service\$ptr"
         if (Test-Path $src) { Copy-Item $src -Destination (Join-Path $SvcDest $ptr) }
     }
