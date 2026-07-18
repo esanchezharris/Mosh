@@ -5,7 +5,7 @@
 // The status line narrates the agent's last move (agentUtter.say) with a transport/render
 // fallback ladder. Video tiles land in the collaborators slice.
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { Moshi } from "../ui/Moshi";
@@ -16,6 +16,8 @@ import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
 import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
+import type { Plugin } from "../types";
 
 export function RightRail() {
   const open = useShell((s) => s.rightOpen);
@@ -83,6 +85,7 @@ function MoshStatusLine() {
 export function MasterCard() {
   const exec = useStore((s) => s.exec);
   const master = useStore((s) => s.snapshot?.master);
+  const plugins = master?.plugins ?? [];
   return (
     <section className="v2-card v2-master-card" data-testid="v2-master-card">
       <div className="v2-card-head"><span>Master</span></div>
@@ -101,8 +104,100 @@ export function MasterCard() {
             onChange={(e) => void exec("set_master_pan", { pan: Number(e.target.value) })} />
           <span className="v2-val">{Math.round((master?.pan ?? 0) * 100)}</span>
         </label>
+        <MasterPluginRack plugins={plugins} />
       </div>
     </section>
+  );
+}
+
+// Master-bus plugins (limiter, bus EQ, …) — hosted via getMasterPluginList(), the SAME
+// load/remove/reorder/bypass/param/edit command seam the per-track FX rack uses
+// (TrackFxDrawer / Dock's Rack+PluginCard), one level up (no trackId). Kept as its own
+// small, self-contained rack here — rather than generalizing the shared per-track Rack
+// component to a "master" mode — so the dark v2-card visual language and the widely-used
+// classic Rack stay decoupled; the row shape (bypass dot · name · move · edit · remove)
+// and the picker's underlying plugin-catalog utilities (pluginBrowserUtil) are the real
+// reuse. exec() is the same execute_command seam either way.
+function MasterPluginRack({ plugins }: { plugins: Plugin[] }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  return (
+    <div className="v2-master-rack" data-testid="v2-master-rack">
+      <div className="v2-master-rack-head">
+        <span>Plugins</span>
+        <button className="v2-btn icon" data-testid="v2-master-add-plugin" aria-expanded={pickerOpen}
+          title="Add a plugin to the master bus" onClick={() => setPickerOpen((v) => !v)}>+ Plugin</button>
+      </div>
+      {plugins.length === 0 && <div className="v2-master-empty">No master-bus plugins yet.</div>}
+      {plugins.map((p) => <MasterPluginRow key={p.index} plugin={p} />)}
+      {pickerOpen && <MasterPluginPicker onClose={() => setPickerOpen(false)} />}
+    </div>
+  );
+}
+
+function MasterPluginRow({ plugin }: { plugin: Plugin }) {
+  const exec = useStore((s) => s.exec);
+  return (
+    <div className={`v2-master-plugin-row${plugin.enabled ? "" : " bypassed"}`} data-testid="v2-master-plugin-row" data-plugin-index={plugin.index}>
+      <button className={`v2-master-plugin-dot${plugin.enabled ? " on" : ""}`} title={plugin.enabled ? "Bypass" : "Enable"}
+        aria-pressed={!plugin.enabled}
+        onClick={() => void exec("bypass_master_plugin", { index: plugin.index, bypassed: plugin.enabled })} />
+      <span className="v2-master-plugin-name" title={plugin.name}>{plugin.name}</span>
+      <button className="v2-btn icon" title="Move earlier in the chain" aria-label={`Move ${plugin.name} earlier`}
+        onClick={() => void exec("reorder_master_plugin", { index: plugin.index, toIndex: plugin.index - 1 })}>‹</button>
+      <button className="v2-btn icon" title="Move later in the chain" aria-label={`Move ${plugin.name} later`}
+        onClick={() => void exec("reorder_master_plugin", { index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
+      <button className="v2-btn icon" title="Open plugin window" aria-label={`Open ${plugin.name}`}
+        onClick={() => void exec("open_master_plugin_editor", { index: plugin.index })}>⤢</button>
+      <button className="v2-btn icon" title="Remove" aria-label={`Remove ${plugin.name}`}
+        onClick={() => void exec("remove_master_plugin", { index: plugin.index })}>✕</button>
+    </div>
+  );
+}
+
+// Compact inline picker (search + load) — reuses the plugin-catalog utilities the real
+// plugin browser (PluginBrowser.tsx) is built from, so master-bus plugin availability
+// (installed VST3/AU + built-ins) is always identical to the per-track picker's.
+function MasterPluginPicker({ onClose }: { onClose: () => void }) {
+  const availablePlugins = useStore((s) => s.availablePlugins);
+  const availableBuiltins = useStore((s) => s.availableBuiltins);
+  const ensureCatalog = useStore((s) => s.ensurePluginCatalog);
+  const exec = useStore((s) => s.exec);
+  const [q, setQ] = useState("");
+  useEffect(() => { ensureCatalog(); }, [ensureCatalog]);
+
+  const entries = useMemo(() => {
+    const all: PluginEntry[] = [...availableBuiltins.map(builtinEntry), ...availablePlugins.map(installedEntry)];
+    return all.filter((e) => matchEntry(e, q, "all")).sort((a, b) => a.name.localeCompare(b.name));
+  }, [availableBuiltins, availablePlugins, q]);
+
+  const load = (e: PluginEntry) => {
+    if (e.loadKind === "builtin") void exec("load_master_builtin", { type: e.loadKey });
+    else void exec("load_master_plugin", { pluginId: e.loadKey });
+    onClose();
+  };
+
+  return (
+    <div className="v2-master-picker" data-testid="v2-master-plugin-picker">
+      <label className="v2-pb-search">
+        <span className="v2-pb-search-label">Search</span>
+        <input aria-label="Search master-bus plugins" placeholder="Search by name or vendor..."
+          value={q} onChange={(e) => setQ(e.target.value)} />
+      </label>
+      <div className="v2-master-picker-list">
+        {entries.length === 0 && (
+          <div className="v2-master-empty">{q ? `Nothing matches "${q}".` : "No plugins here yet."}</div>
+        )}
+        {entries.map((e) => (
+          <button key={e.uid} className="v2-pb-add" data-testid="v2-master-picker-row" onClick={() => load(e)} title={`Add ${e.name}`}>
+            <span className={`v2-pb-kind ${e.isInstrument ? "inst" : "fx"}`}>{e.isInstrument ? "INST" : "FX"}</span>
+            <span className="v2-pb-copy">
+              <span className="v2-pb-name">{e.name}</span>
+              <span className="v2-pb-meta">{e.meta}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

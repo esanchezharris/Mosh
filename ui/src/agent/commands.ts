@@ -115,6 +115,15 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "open_plugin_editor", desc: "Pop out a plugin's native editor window", args: [S("trackId"), N("index")] },
   { command: "remove_plugin", desc: "Remove a plugin from a track's chain", args: [S("trackId"), N("index")] },
 
+  // ── master-bus plugins (limiter, bus EQ, …) — same commands as above, one level up ──
+  { command: "load_master_plugin", desc: "Add a scanned VST3/AU plugin to the master bus (pluginId from list_plugins)", args: [S("pluginId"), N("index", false, "chain position")] },
+  { command: "load_master_builtin", desc: "Add a built-in effect to the master bus (type from list_builtins)", args: [S("type"), N("index", false, "chain position")] },
+  { command: "set_master_plugin_param", desc: "Set a master-bus plugin parameter (0-1) by chain index + param index", args: [N("index"), N("paramIndex"), N("value", true, "0-1")] },
+  { command: "bypass_master_plugin", desc: "Bypass/enable a plugin on the master bus", args: [N("index"), B("bypassed")] },
+  { command: "reorder_master_plugin", desc: "Move a master-bus plugin to a new chain position", args: [N("index"), N("toIndex")] },
+  { command: "open_master_plugin_editor", desc: "Pop out a master-bus plugin's native editor window", args: [N("index")] },
+  { command: "remove_master_plugin", desc: "Remove a plugin from the master bus", args: [N("index")] },
+
   // ── export ──────────────────────────────────────────────────────────────
   { command: "export_audio", desc: "Render the whole mix down to an audio file", args: [S("file", false, "destination path, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), S("range", false, '"full" (default) | "loop" | "custom"'), N("start", false, "seconds — with range:\"custom\""), N("end", false, "seconds — with range:\"custom\""), S("tail", false, '"cut" (default) | "include" — carry a reverb/delay tail past the end'), N("tailSeconds", false, "with tail:\"include\", default 2")] },
   { command: "export_stems", desc: "Render every track to its own audio file (stems) into a directory", args: [S("dir", false, "destination directory, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), B("includeEmpty", false, "write silent stems for empty tracks too")] },
@@ -250,6 +259,13 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "reorder_plugin": return `Reordered a plugin`;
     case "open_plugin_editor": return `Opened a plugin editor`;
     case "remove_plugin": return `Removed a plugin`;
+    case "load_master_plugin": return `Added a plugin to the master bus`;
+    case "load_master_builtin": return `Added ${a.type} to the master bus`;
+    case "set_master_plugin_param": return `Tweaked a master-bus plugin parameter`;
+    case "bypass_master_plugin": return a.bypassed ? `Bypassed a master-bus plugin` : `Enabled a master-bus plugin`;
+    case "reorder_master_plugin": return `Reordered a master-bus plugin`;
+    case "open_master_plugin_editor": return `Opened a master-bus plugin editor`;
+    case "remove_master_plugin": return `Removed a master-bus plugin`;
     case "add_automation_point": return `Added an automation point`;
     case "remove_automation_point": return `Removed an automation point`;
     case "set_automation_point": return `Moved an automation point`;

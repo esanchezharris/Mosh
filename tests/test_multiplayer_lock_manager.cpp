@@ -26,6 +26,9 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     // iterates ALL of them, one render at a time), so it is unguarded, not
     // session-global.
     REQUIRE (LockManager::classify ("export_stems") == Scope::Unguarded);
+    // Master-bus plugins: popping a native editor window is viewer-local, same
+    // posture as open_plugin_editor.
+    REQUIRE (LockManager::classify ("open_master_plugin_editor") == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")
@@ -83,6 +86,13 @@ TEST_CASE ("classify: structural ops + unknown commands fail closed to session-g
     REQUIRE (LockManager::classify ("create_bus")         == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("set_tempo")          == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("set_master_volume")  == Scope::SessionGlobal);
+    // Master-bus plugins: same posture as set_master_volume/pan above.
+    REQUIRE (LockManager::classify ("load_master_plugin")      == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("load_master_builtin")     == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("remove_master_plugin")    == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("reorder_master_plugin")   == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("bypass_master_plugin")    == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("set_master_plugin_param") == Scope::SessionGlobal);
     // fail-closed: a command nobody classified is guarded, not waved through.
     REQUIRE (LockManager::classify ("some_future_command")== Scope::SessionGlobal);
 }
@@ -209,6 +219,13 @@ namespace
             "set_count_in",
             // The master bus is not "a track" -- it is the session's one mix bus.
             "set_master_volume", "set_master_pan",
+            // Master-bus plugins (limiter, bus EQ, ...) -- same posture as the master
+            // volume/pan above: one shared resource, not a track, so mutations sync to
+            // peers via the LWW broadcastStructural replay rather than a track lock.
+            // open_master_plugin_editor is separately classified Unguarded in
+            // LockManager.cpp (a viewer-local pop-out), so it is NOT listed here.
+            "load_master_plugin", "load_master_builtin", "remove_master_plugin",
+            "reorder_master_plugin", "bypass_master_plugin", "set_master_plugin_param",
             // Project/session lifecycle.
             "open_recent", "recover_session", "discard_recovery",
             // Authors a multi-command recipe (tempo/key/tracks) -- see

@@ -226,6 +226,17 @@ private:
     juce::var cmdMarkTake       (const juce::var& args);
     juce::var cmdSetMasterVolume (const juce::var& args);
     juce::var cmdSetMasterPan    (const juce::var& args);
+    // Master-bus plugins — hosts plugins (limiter, bus EQ, …) on the master output via
+    // getMasterPluginList(), mirroring the per-track plugin commands below one level up
+    // (no trackId — the master bus is the session's one mix bus, same posture as
+    // set_master_volume/set_master_pan above).
+    juce::var cmdLoadMasterPlugin      (const juce::var& args);
+    juce::var cmdLoadMasterBuiltin     (const juce::var& args);
+    juce::var cmdRemoveMasterPlugin    (const juce::var& args);
+    juce::var cmdReorderMasterPlugin   (const juce::var& args);
+    juce::var cmdSetMasterPluginParam  (const juce::var& args);
+    juce::var cmdBypassMasterPlugin    (const juce::var& args);
+    juce::var cmdOpenMasterPluginEditor (const juce::var& args);
     // Wave 9 — channel metering
     juce::var cmdEnableTrackMeter  (const juce::var& args);
     juce::var cmdDisableTrackMeter (const juce::var& args);
@@ -609,6 +620,18 @@ private:
     // emit the `spectrum` event (mirrors `levels`). All on the message thread.
     MasterSpectralTapPlugin* ensureMasterSpectralTap();   // find on the master list or append
     MasterSpectralTapPlugin* findMasterSpectralTap();
+
+    // ── master-bus plugin hosting ── user-facing master-plugin indices address only the
+    // VISIBLE prefix of getMasterPluginList(); internal utility plugins (the spectral tap
+    // above) are invisible and — since ensureMasterSpectralTap() only ever appends once, at
+    // whatever the list's end was when first created — always sit AFTER every visible
+    // plugin. masterVisibleBoundary() is that boundary: the physical index of the first
+    // internal plugin, or the list's true size if none is present yet. findMasterPlugin()
+    // resolves a user-facing index; load/reorder commands clamp inserts inside
+    // [0, masterVisibleBoundary()] so a tap created later still taps the FULLY-PROCESSED
+    // master signal.
+    int              masterVisibleBoundary();
+    te::Plugin*      findMasterPlugin (int index);
     void  emitSpectrum (bool playing);                    // drain tap → Goertzel bands → emit
     std::array<float, 1024> spectralRing {};              // rolling mono history
     int   spectralRingPos = 0;

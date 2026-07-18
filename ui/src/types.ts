@@ -610,7 +610,7 @@ export type Snapshot = {
   tracks: Track[];
   transport: Transport;
   controller?: ControllerState;
-  master?: { volumeDb: number; pan: number };
+  master?: { volumeDb: number; pan: number; plugins?: Plugin[] };
   buses?: Bus[];
   sections?: Section[];
   annotations?: Annotation[];

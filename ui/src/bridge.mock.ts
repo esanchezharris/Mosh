@@ -14,7 +14,7 @@
 // behaviour the UI relies on is exercised, while audio/Tracktion concepts never
 // appear (the swappable seam holds on the web side too).
 
-import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
+import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern } from "./ui/drumPatternUtil";
 import { stepBeats } from "./ui/drumGrid";
@@ -134,7 +134,7 @@ function seedSnapshot(): Snapshot {
     },
     tracks,
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
-    master: { volumeDb: 0, pan: 0 },
+    master: { volumeDb: 0, pan: 0, plugins: [] },
     buses: [],
     sections: [
       { id: "sec-1", name: "Intro", startBeat: 0, endBeat: 8, color: "#9fe1cb" },
@@ -544,6 +544,19 @@ function findPlugin(trackId: string, index: number): { track: Track; idx: number
   const t = findTrack(trackId);
   if (!t || !t.plugins || index < 0 || index >= t.plugins.length) return null;
   return { track: t, idx: index };
+}
+// Master-bus plugins — mirrors findPlugin/reindex one level up, on snapshot.master.plugins
+// (no owning track). Kept in lockstep with the native findMasterPlugin/pluginToVar shape.
+function masterPlugins(): Plugin[] {
+  snapshot.master = snapshot.master ?? { volumeDb: 0, pan: 0 };
+  snapshot.master.plugins = snapshot.master.plugins ?? [];
+  return snapshot.master.plugins;
+}
+const reindexMaster = () => masterPlugins().forEach((p, i) => (p.index = i));
+function findMasterPlugin(index: number): { idx: number } | null {
+  const p = masterPlugins();
+  if (index < 0 || index >= p.length) return null;
+  return { idx: index };
 }
 function mkParams(n: number) {
   return Array.from({ length: n }, (_, i) => ({ index: i, name: ["Drive", "Tone", "Mix", "Decay", "Size", "Rate", "Depth", "Gain"][i] ?? `P${i}`, value: 0.5 }));
@@ -1479,6 +1492,42 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate(); return ok(command);
     }
     case "open_plugin_editor": return ok(command);
+
+    // Master-bus plugins — mirrors load_builtin/load_plugin/bypass_plugin/remove_plugin/
+    // reorder_plugin/set_plugin_param/open_plugin_editor above one level up, on
+    // snapshot.master.plugins (no owning track).
+    case "load_master_builtin": {
+      const b = BUILTINS.find((x) => x.type === str(args.type)); if (!b) return err(command, "unknown builtin");
+      pushUndo(); const list = masterPlugins();
+      list.push({ index: list.length, name: b.name, type: b.type, enabled: true, external: false, builtin: true, category: b.category, isInstrument: b.isInstrument, params: mkBuiltinParams(b.type, b.isInstrument), moshFx: mkMoshFx(b.type) });
+      invalidate(); return ok(command, { index: list.length - 1 });
+    }
+    case "load_master_plugin": {
+      const v = VST3S.find((x) => x.id === str(args.pluginId)); if (!v) return err(command, "unknown plugin");
+      pushUndo(); const list = masterPlugins();
+      list.push({ index: list.length, name: v.name, type: v.format, enabled: true, external: true, isInstrument: v.isInstrument, params: mkParams(6) });
+      invalidate(); return ok(command, { index: list.length - 1 });
+    }
+    case "bypass_master_plugin": {
+      const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
+      pushUndo(); masterPlugins()[f.idx].enabled = !Boolean(args.bypassed); invalidate(); return ok(command);
+    }
+    case "remove_master_plugin": {
+      const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
+      pushUndo(); masterPlugins().splice(f.idx, 1); reindexMaster(); invalidate(); return ok(command);
+    }
+    case "reorder_master_plugin": {
+      const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
+      const list = masterPlugins();
+      const to = num(args.toIndex); if (to < 0 || to >= list.length) return ok(command);
+      pushUndo(); const [p] = list.splice(f.idx, 1); list.splice(to, 0, p); reindexMaster(); invalidate(); return ok(command);
+    }
+    case "set_master_plugin_param": {
+      const f = findMasterPlugin(num(args.index)); if (!f) return err(command, "plugin not found");
+      const p = masterPlugins()[f.idx].params?.find((x) => x.index === num(args.paramIndex)); if (p) p.value = num(args.value);
+      invalidate(); return ok(command);
+    }
+    case "open_master_plugin_editor": return ok(command);
 
     // Route C.2 — real-time RAVE insert (dev-mock; the real one is anira+LibTorch).
     case "add_rave_insert": {
