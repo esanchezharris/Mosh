@@ -15,6 +15,9 @@ import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
+// Renamed on import: this file already has a `meterOf` (time-signature meter, from
+// ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
+import { Meter as AudioLevelMeter } from "../../ui/Meter";
 
 const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group: "Group" };
 
@@ -208,6 +211,7 @@ function TrackLaneHeader({ track }: { track: Track }) {
         </span>
         <span className="v2-lpreset">{preset}</span>
       </span>
+      <TrackMeterBar trackId={track.id} />
       <span className="v2-ms">
         <button
           className={`m${track.mute ? " on" : ""}`}
@@ -223,6 +227,24 @@ function TrackLaneHeader({ track }: { track: Track }) {
         >S</button>
       </span>
     </div>
+  );
+}
+
+// Compact per-track peak meter for the v2 header, beside Mute/Solo. Reuses the classic
+// shell's <Meter> verbatim (../../ui/Meter) — same ballistics/clip-latch/geometry, same
+// "read imperatively inside a rAF loop, never re-render React" discipline — so this
+// widget itself never causes TrackLaneHeader (or the track tree) to re-render on the 30Hz
+// `levels` feed. Sizing-only CSS (.v2-meter, shell.css) narrows it to fit the compact
+// header; the underlying .meter/.mbar/.mmask classes (mosh.css, loaded globally) are
+// untouched. Silent/no-data tracks simply read the Bars component's undefined→{-100,-100}
+// fallback (an empty bar); a peak at/above 0 dBFS lights the shared .meter-clip glow.
+// Exported for its own focused test (TrackMeterBar.test.ts) alongside the
+// aux/return-exclusion coverage in TrackLaneList.test.ts.
+export function TrackMeterBar({ trackId }: { trackId: string }) {
+  return (
+    <span className="v2-meter" data-testid="v2-track-meter">
+      <AudioLevelMeter trackId={trackId} />
+    </span>
   );
 }
 
