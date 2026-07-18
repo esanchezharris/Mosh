@@ -2173,6 +2173,207 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
     }
 
+    // --- G7: per-track stem export (common zero point) ---------------------------
+    // Reality-pack invariant 84: "Stem export names and aligns each stem from the
+    // same zero point." export_stems mirrors export_audio's render but loops
+    // tracks (bounceClipToWav's single-track primitive); every stem shares the
+    // SAME {0, editLength} window, so re-imported stems land aligned by construction.
+    section ("G7: per-track stem export (common zero point)");
+    {
+        // Frame-count reader (mirrors DRM-001's wavMagnitude helper below) — proves
+        // the structural half of "common zero point": every stem is the SAME length.
+        auto wavFrames = [] (const File& f) -> int64
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+                return reader->lengthInSamples;
+            return -1;
+        };
+
+        // Content-isolation readers — prove the OTHER half of "per-track stem": each
+        // stem contains ONLY its own track's audio, not the full mix. Frame-count/
+        // existence/naming checks (above) can't tell an isolated stem from an
+        // accidental full-mix render (a real regression: te::toBitSet() in the
+        // pinned tracktion_engine doesn't actually restrict tracksToDo to the given
+        // track — see the comment above MoshOps::cmdExportStems — so a "stem" built
+        // from tracksToDo alone silently renders every track). Reads the whole file
+        // as mono (channel-summed) samples so RMS/diff comparisons are format-agnostic.
+        auto wavMonoSamples = [] (const File& f) -> std::vector<float>
+        {
+            std::vector<float> out;
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (f));
+            if (reader == nullptr) return out;
+            const int numSamples = (int) reader->lengthInSamples;
+            if (numSamples <= 0) return out;
+            AudioBuffer<float> buf (juce::jmax (1, (int) reader->numChannels), numSamples);
+            if (! reader->read (&buf, 0, numSamples, 0, true, true)) return out;
+            out.resize ((size_t) numSamples);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float sum = 0.0f;
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    sum += buf.getSample (ch, i);
+                out[(size_t) i] = sum / (float) juce::jmax (1, buf.getNumChannels());
+            }
+            return out;
+        };
+        auto wavRms = [] (const std::vector<float>& v) -> double
+        {
+            if (v.empty()) return 0.0;
+            double sumSq = 0.0;
+            for (float s : v) sumSq += (double) s * (double) s;
+            return std::sqrt (sumSq / (double) v.size());
+        };
+        // RMS of the sample-by-sample DIFFERENCE between two equal-length signals —
+        // ~0.0 if they're the identical signal (e.g. both secretly the full mix),
+        // large if they're genuinely different content. Mirrors verify.py's diff_rms.
+        auto wavDiffRms = [] (const std::vector<float>& a, const std::vector<float>& b) -> double
+        {
+            if (a.empty() || b.empty() || a.size() != b.size()) return -1.0;
+            double sumSq = 0.0;
+            for (size_t i = 0; i < a.size(); ++i)
+            {
+                const double d = (double) a[i] - (double) b[i];
+                sumSq += d * d;
+            }
+            return std::sqrt (sumSq / (double) a.size());
+        };
+
+        // Fresh edit so the track/stem counts below are exact.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-selftest"))), "new_project (stem export isolation) ok");
+
+        auto ta = cmd (ops, "create_track", args1 ("name", "Track A"))["data"].getProperty ("trackId", var()).toString();
+        auto tb = cmd (ops, "create_track", args1 ("name", "Track B"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ta }, { "seconds", 1.0 }, { "freq", 220.0 }}))),
+               "stem test: Track A tone (220 Hz) added");
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tb }, { "seconds", 1.0 }, { "freq", 660.0 }}))),
+               "stem test: Track B tone (660 Hz) added");
+
+        auto stemDir = eng.sessionDir().getChildFile ("exports").getChildFile ("stems-selftest");
+        stemDir.deleteRecursively();
+
+        auto exp = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (exp), "export_stems ok");
+        check ((int) exp["data"].getProperty ("count", -1) == 2, "two stems for two non-empty tracks");
+        check (exp["data"].getProperty ("dir", var()).toString().isNotEmpty(), "export_stems reports the destination dir");
+
+        {
+            int64 firstLen = -1;
+            bool sawIndex0 = false, sawIndex1 = false;
+            File fileByIndex[2];
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+            {
+                check (arr->size() == 2, "stems array has exactly 2 entries");
+                for (auto& s : *arr)
+                {
+                    File f (s.getProperty ("file", var()).toString());
+                    check (f.existsAsFile() && f.getSize() > 0, "stem file exists and is non-empty");
+                    check (f.getFileExtension().toLowerCase() == ".wav", "stem defaults to .wav");
+                    check (s.getProperty ("name", var()).toString().isNotEmpty(), "stem entry carries the track name");
+                    check (s.getProperty ("logicalId", var()).toString().isNotEmpty(), "stem entry carries a logicalId");
+                    check (s.getProperty ("trackId", var()).toString().isNotEmpty(), "stem entry carries a trackId");
+
+                    const int idx = (int) s.getProperty ("index", -1);
+                    check (idx == 0 || idx == 1, "stem index is 0 or 1 for a fresh two-track edit");
+                    if (idx == 0) { sawIndex0 = true; fileByIndex[0] = f; }
+                    if (idx == 1) { sawIndex1 = true; fileByIndex[1] = f; }
+                    check (f.getFileName().startsWith (String (idx).paddedLeft ('0', 2) + "-"),
+                           "stem filename starts with its zero-padded index");
+
+                    const auto frames = wavFrames (f);
+                    check (frames > 0, "stem WAV has readable audio frames");
+                    if (firstLen < 0) firstLen = frames;
+                    else check (frames == firstLen, "both stems share the SAME frame count (common zero point)");
+                }
+            }
+            else
+            {
+                check (false, "export_stems returned a stems array");
+            }
+            check (sawIndex0 && sawIndex1, "stem indices 0 and 1 each appear exactly once");
+
+            // ── Content isolation — the check this whole section exists to have.
+            // Track A carries a 220 Hz tone, Track B a 660 Hz tone (added above): two
+            // genuinely different signals. A broken isolation mechanism renders BOTH
+            // "stems" as the identical full mix (both tones summed) — frame-count,
+            // existence, and naming checks alone cannot detect that; a diff between
+            // the two stems' actual samples can.
+            if (sawIndex0 && sawIndex1)
+            {
+                const auto a = wavMonoSamples (fileByIndex[0]);
+                const auto b = wavMonoSamples (fileByIndex[1]);
+                check (! a.empty(), "stem A (index 0, Track A / 220 Hz) samples are readable");
+                check (! b.empty(), "stem B (index 1, Track B / 660 Hz) samples are readable");
+                check (wavRms (a) > 0.01, "stem A is non-silent (carries Track A's own tone)");
+                check (wavRms (b) > 0.01, "stem B is non-silent (carries Track B's own tone)");
+
+                const double diffRms = wavDiffRms (a, b);
+                // If both stems were secretly the full mix, diffRms would be ~0.0
+                // (identical signals). Two different sine tones diverge by a wide
+                // margin sample-for-sample, so genuine per-track isolation clears
+                // this threshold easily; a full-mix regression would read ~0.0 here.
+                check (diffRms > 0.05,
+                       "stem A and stem B are genuinely DIFFERENT signals, i.e. actually "
+                       "isolated per-track — not both secretly the full mix (diffRms="
+                       + String (diffRms, 4) + ")");
+            }
+        }
+
+        // Empty (clip-less) track is skipped by default; includeEmpty:true renders it too.
+        auto tc = cmd (ops, "create_track", args1 ("name", "Track C (empty)"))["data"].getProperty ("trackId", var()).toString();
+        juce::ignoreUnused (tc);
+        auto expSkip = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (expSkip) && (int) expSkip["data"].getProperty ("count", -1) == 2,
+               "clip-less track skipped by default (count stays 2)");
+
+        auto expInclude = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "includeEmpty", true }}));
+        check (ok (expInclude) && (int) expInclude["data"].getProperty ("count", -1) == 3,
+               "includeEmpty:true renders the clip-less track too (count 3)");
+
+        // Hidden-track exclusion: the Phase-2 beneath-render track (created by a MIDI
+        // re-imagine landing its hidden audio) must never produce a stem. Synthesized via
+        // the REAL production path (create_render_layer + render_layer on a MIDI clip),
+        // not a hand-rolled flag, so this proves the actual moshHidden gate in cmdExportStems.
+        {
+            auto mt = cmd (ops, "create_track", args1 ("name", "MidiGen"))["data"].getProperty ("trackId", var()).toString();
+            auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", mt }, { "length", 1.0 }}));
+            check (ok (mc), "stem test: MIDI clip added");
+            const auto mcid = mc["data"].getProperty ("clipId", var()).toString();
+            cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 60 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 100 }}));
+            cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
+            auto rr = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+            check (ok (rr), "stem test: MIDI re-imagine rendered (creates the hidden beneath-render track)");
+
+            auto expHidden = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+            check (ok (expHidden), "export_stems ok with a hidden render track present");
+            // Visible non-empty tracks: A, B, MidiGen (has a muted MIDI clip -> counted,
+            // silent by design — see the spec's mute/solo semantics note); C stays skipped
+            // (still clip-less). The hidden beneath-render track must NOT add a 4th.
+            check ((int) expHidden["data"].getProperty ("count", -1) == 3,
+                   "hidden beneath-render track excluded from the stem set (count 3, not 4)");
+            if (auto* arr2 = expHidden["data"].getProperty ("stems", var()).getArray())
+                for (auto& s : *arr2)
+                    check (! s.getProperty ("name", var()).toString().containsIgnoreCase ("hidden"),
+                           "no stem is named for the hidden render track");
+        }
+
+        // Format / bit-depth rejection — validated before any render (shared with
+        // export_audio's resolution logic, duplicated rather than extracted; see the
+        // comment above cmdExportStems).
+        auto badFormat = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "mp3" }}));
+        check (! ok (badFormat), "export_stems rejects an unsupported format (mp3)");
+        auto badDepth = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "wav" }, { "bitDepth", 7 }}));
+        check (! ok (badDepth), "export_stems rejects an unsupported bit depth (wav 7)");
+
+        // No renderable tracks -> a clean error, not a hang/crash.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-empty"))), "new_project (empty edit) ok");
+        auto expEmpty = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (! ok (expEmpty), "export_stems on an edit with no non-empty tracks returns a clean error");
+
+        stemDir.deleteRecursively();
+    }
+
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
     // Same shape as the SA3 "differs from input / silence stays silent" gate, but for
     // the drum instrument: a programmed beat exports NON-SILENT audio, an empty drum

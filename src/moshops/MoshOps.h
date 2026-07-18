@@ -297,6 +297,20 @@ private:
    #endif
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
+    // G7 — per-track stem export, one file per visible/non-empty audio track, all
+    // sharing the SAME {0, editLength} render window (the "common zero point": every
+    // stem is the same length and re-imports aligned). Mirrors cmdExportAudio's
+    // resolution/render machinery but loops tracks like bounceClipToWav. NON-undoable
+    // read/render (no ValueTree mutation besides the harmless logicalid backfill
+    // already used all over the snapshot path).
+    juce::var cmdExportStems      (const juce::var& args);
+    // cmdExportStems helper: a genuinely clip-less track (includeEmpty:true) can't be
+    // expressed via Renderer::Parameters::allowedClips (an EMPTY array means "no filter",
+    // i.e. ALL clips — there is no way to ask the renderer for "zero clips"). So a stem for
+    // such a track is written directly as digital silence at the common-zero-point length,
+    // bypassing te::Renderer entirely. See the comment in cmdExportStems for the full story.
+    bool writeSilentStemFile (const juce::File& dest, juce::AudioFormat* format, int bitDepth,
+                              double sampleRate, double lengthSeconds);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)

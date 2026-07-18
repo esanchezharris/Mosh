@@ -22,6 +22,10 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     // P4 self-heal (PR-1): backend-only, no clip/track target in its args, never
     // contends for a track -- same posture as the other mp_* internals above.
     REQUIRE (LockManager::classify ("mp_fetch_missing_stems") == Scope::Unguarded);
+    // G7: a render/read like export_audio -- contends for no single track (it
+    // iterates ALL of them, one render at a time), so it is unguarded, not
+    // session-global.
+    REQUIRE (LockManager::classify ("export_stems") == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")

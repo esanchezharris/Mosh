@@ -24,7 +24,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
-        "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
+        "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
         "enable_all_meters", "set_audio_device", "set_buffer_size", "set_audio_threads",
