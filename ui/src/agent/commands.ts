@@ -115,6 +115,13 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── export ──────────────────────────────────────────────────────────────
   { command: "export_audio", desc: "Render the whole mix down to an audio file", args: [S("file", false, "destination path, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), S("range", false, '"full" (default) | "loop" | "custom"'), N("start", false, "seconds — with range:\"custom\""), N("end", false, "seconds — with range:\"custom\""), S("tail", false, '"cut" (default) | "include" — carry a reverb/delay tail past the end'), N("tailSeconds", false, "with tail:\"include\", default 2")] },
   { command: "export_stems", desc: "Render every track to its own audio file (stems) into a directory", args: [S("dir", false, "destination directory, defaults under the session"), S("format", false, '"wav" (default) | "aiff" | "flac"'), N("bitDepth", false), N("sampleRate", false), S("renderMode", false, '"auto" (default) | "fast" | "realtime"'), B("includeEmpty", false, "write silent stems for empty tracks too")] },
+  // ── parameter automation ───────────────────────────────────────────────────
+  { command: "add_automation_point", desc: "Add a point to a plugin parameter's automation curve", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), N("time", true, "seconds"), N("value", true, "0-1")] },
+  { command: "remove_automation_point", desc: "Remove a point from a plugin parameter's automation curve by index", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), N("pointIndex")] },
+  { command: "set_automation_point", desc: "Move an automation point to a new time/value", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), N("pointIndex"), N("time", false, "seconds"), N("value", false, "0-1")] },
+  { command: "clear_automation", desc: "Clear all automation points on a plugin parameter", args: [S("trackId"), N("pluginIndex"), N("paramIndex")] },
+  { command: "set_track_automation_mode", desc: "Arm a track's automation recording mode — write mode captures a point on every plugin-param change on that track from here on (touch/latch are accepted but currently inert, v0)", args: [S("trackId"), S("mode", true, '"read" | "touch" | "latch" | "write"')] },
+  { command: "write_automation_curve", desc: "Bulk-author a plugin parameter's automation curve in ONE undoable step — replace (default) clears the covered time span first, merge only adds", args: [S("trackId"), N("pluginIndex"), N("paramIndex"), S("points", true, 'JSON array of {"t":seconds,"v":0-1} ascending in t, e.g. \'[{"t":0,"v":0.2},{"t":2,"v":0.8}]\''), S("apply", false, '"replace" (default) | "merge"')] },
 
   // ── generative (Tier-B) ─────────────────────────────────────────────────
   { command: "create_render_layer", desc: "Attach a generative re-imagine layer to ANY clip — wave, MIDI or drum (MIDI/drum is auto-bounced to audio first), optionally scoped to a beat range, in seconds", args: [S("clipId"), S("adapter", false), N("regionStart", false, "scope start in seconds"), N("regionEnd", false, "scope end in seconds")] },
@@ -237,6 +244,12 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "reorder_plugin": return `Reordered a plugin`;
     case "open_plugin_editor": return `Opened a plugin editor`;
     case "remove_plugin": return `Removed a plugin`;
+    case "add_automation_point": return `Added an automation point`;
+    case "remove_automation_point": return `Removed an automation point`;
+    case "set_automation_point": return `Moved an automation point`;
+    case "clear_automation": return `Cleared automation`;
+    case "set_track_automation_mode": return `Set automation mode to ${String(a.mode ?? "read")}`;
+    case "write_automation_curve": return `Wrote an automation curve`;
     case "create_render_layer": return `Attached a generative layer`;
     case "set_render_param": return `Set a render parameter`;
     case "compile_render": return `Compiled a generative render`;

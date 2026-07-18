@@ -260,6 +260,12 @@ private:
     juce::var cmdRemoveAutomationPoint (const juce::var& args);
     juce::var cmdSetAutomationPoint     (const juce::var& args);
     juce::var cmdClearAutomation        (const juce::var& args);
+    // G10 — automation RECORDING (v0). set_track_automation_mode arms/disarms a track's
+    // record mode (all 4 values stored; only "write" is behavioral, see the design doc);
+    // write_automation_curve is a composite bulk-authoring command (DRM-002-style: validate
+    // the WHOLE point array before mutating, one undoable transaction).
+    juce::var cmdSetTrackAutomationMode (const juce::var& args);
+    juce::var cmdWriteAutomationCurve   (const juce::var& args);
     juce::var cmdOpenPluginEditor (const juce::var& args);
     juce::var cmdAddMidiClip    (const juce::var& args);
     juce::var cmdAddDrumPattern (const juce::var& args);  // DRM-002: whole grid, one command
@@ -573,7 +579,11 @@ private:
     // audible immediately. No-op when an instrument is already present.
     void                 ensureDefaultInstrument (te::AudioTrack&, bool drum);
     te::Plugin*     findPlugin (const juce::String& trackId, int index);
-    te::AutomatableParameter* findParam (const juce::var& args);
+    // G10 — takes the 3 keys explicitly (not the whole `args` var) so every caller reads
+    // them inline via args.getProperty(...), matching findPlugin's calling convention —
+    // commands.contract.test.ts's handler-body scan only sees getProperty calls literally
+    // inside each cmdXxx handler's own source span, not inside a shared helper it calls.
+    te::AutomatableParameter* findParam (const juce::String& trackId, int pluginIndex, int paramIndex);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
     int                  allocateBusNumber();
