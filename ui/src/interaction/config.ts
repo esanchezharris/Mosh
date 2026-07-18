@@ -32,6 +32,15 @@ export function gestureTableName(get: Getter): string {
   return typeof v === "string" ? v : "mosh";
 }
 
+export function applyReservedKeyCombos(
+  keymap: ScopedKeymap,
+  reservedKeyCombos: readonly string[],
+): ScopedKeymap {
+  let next = keymap;
+  for (const combo of reservedKeyCombos) next = removeCombo(next, combo);
+  return next;
+}
+
 // Active keymap = the selected preset with any non-empty key.* override layered on.
 export function buildKeymap(get: Getter): ScopedKeymap {
   const shell = get("uiShell");
@@ -45,10 +54,7 @@ export function buildKeymap(get: Getter): ScopedKeymap {
     const v = get(`key.${action}`);
     if (typeof v === "string" && v.trim()) km = rebindAction(km, action, v.trim());
   }
-  if (shell !== "classic") {
-    for (const combo of profile.reservedKeyCombos) km = removeCombo(km, combo);
-  }
-  return km;
+  return shell === "classic" ? km : applyReservedKeyCombos(km, profile.reservedKeyCombos);
 }
 
 // ── live readers (event-time): the handlers call these so the latest settings apply

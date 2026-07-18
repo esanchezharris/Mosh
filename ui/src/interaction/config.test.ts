@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { defaultSettings, type SettingValue } from "../settings/schema";
-import { buildFeel, buildKeymap, gestureTableName } from "./config";
-import { resolveKey } from "./keymap";
+import { applyReservedKeyCombos, buildFeel, buildKeymap, gestureTableName } from "./config";
+import { getKeymap, resolveKey } from "./keymap";
 import { FEEL_DEFAULTS } from "./feel";
 import { EditorAction as A } from "./actions";
 
@@ -34,9 +32,11 @@ describe("gestureTableName", () => {
 });
 
 describe("buildKeymap", () => {
-  it("consumes reserved combos from profile metadata without duplicating Mod+E", () => {
-    const source = readFileSync(resolve("src/interaction/config.ts"), "utf8");
-    expect(source).not.toContain('"Mod+E"');
+  it("consumes arbitrary reserved combo metadata", () => {
+    const reserved = applyReservedKeyCombos(getKeymap("mosh"), ["Space", "Mod+O"]);
+    expect(resolveKey(reserved, { key: " " })).toBeNull();
+    expect(resolveKey(reserved, { key: "o", metaKey: true })).toBeNull();
+    expect(resolveKey(reserved, { key: "z", metaKey: true })).toBe(A.UNDO);
   });
 
   it("keeps Classic on the selected legacy keymap axis", () => {

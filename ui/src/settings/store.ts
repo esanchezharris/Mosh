@@ -91,7 +91,7 @@ function sanitizeKeyOverrides(raw: unknown): KeyOverrides {
   return out;
 }
 
-function sanitizeWorkspaceOverride(raw: unknown): WorkflowWorkspaceOverride {
+export function sanitizeWorkspaceOverride(raw: unknown): WorkflowWorkspaceOverride {
   if (!raw || typeof raw !== "object") return {};
   const input = raw as Record<string, unknown>;
   const out: WorkflowWorkspaceOverride = {};

@@ -10,8 +10,8 @@ FS-ST3 defines the cold, UI-local contract that the later v2 integration consume
 shell two explicit workflow profiles:
 
 - **Mosh** is the native profile and the visual identity remains Mosh.
-- **FL** is beta behavior/workspace parity only. It selects FL key and mouse behavior, but never
-  changes skin, branding, or theme and never creates a user-facing FLP import path.
+- **FL** is beta behavior/workspace parity only. It declares the FL key and mouse contract, but
+  never changes skin, branding, or theme and never creates a user-facing FLP import path.
 
 The registry owns profile metadata, the exhaustive FL v1 capability matrix, strict-mouse support,
 reserved shortcut combos, and resting workspace intent. The settings store owns only local
@@ -30,15 +30,19 @@ profiles are `mosh` and `fl`. Each record carries:
 - the Mosh-only visual policy;
 - strict-mouse support;
 - browser, right-rail, section-zoom, sounds-tab, and drum-window defaults; and
-- capability rows with stable id, label, status, surface, safe/strict scope, input when applicable,
-  concise semantics, and an official Image-Line source whenever FL behavior is claimed.
+- capability rows with stable id, label, status, typed delivery, surface, safe/strict scope, input
+  when applicable, concise semantics, and an official Image-Line source whenever FL behavior is
+  claimed.
 
-The FL matrix has 28 unique rows: 20 supported, 3 explicit divergences, and 5 deferred. Supported
-rows cover the complete v1 global/file, arrangement, view, and opt-in Strict FL mouse promises.
-The safe default never advertises destructive right-click behavior as active. Divergences pin
-conventional Mosh undo/redo, Mosh visual identity, and the Mosh project model. Deferred rows name
-Step Edit, the remaining Playlist tools, Pattern/Song mode, right-drag multi-erase, and user-facing
-FLP import without implying that any is implemented.
+The FL matrix has 32 unique rows: 20 supported, 3 explicit divergences, and 9 deferred. Its delivery
+axis separately records 12 wired rows, 11 `integration-pending` rows, and 9 deferred rows. Supported
+is the FL v1 contract, not a claim that every hot effect executes. Option-drag snap bypass, all five
+view bindings, and all five opt-in Strict FL mouse rows are explicitly integration-pending until the
+v2 edge lands. The safe default never advertises destructive right-click behavior as active.
+Divergences pin conventional Mosh undo/redo, Mosh visual identity, and the Mosh project model.
+Deferred rows give Step Edit, Paint, Draw, Delete, Slip, Mute, Pattern/Song mode, and right-drag
+multi-erase their own structured inputs; user-facing FLP import remains deferred without implying
+that any importer is exposed.
 
 The shortcut seam is complete for this cold contract: the FL registry reserves `Mod+E` for deferred
 Step Edit, and the effective v2 keymap resolver consumes profile reservation metadata after applying
@@ -75,7 +79,7 @@ therefore fall back to the selected profile's defaults.
 
 | Acceptance clause | Repository proof |
 |---|---|
-| Exhaustive 28-row FL v1 matrix, official sources, and Mosh-only visual policy | `ui/src/settings/workflowProfiles.ts` and `workflowProfiles.test.ts` |
+| Exhaustive 32-row FL v1 status/delivery matrix, official sources, and Mosh-only visual policy | `ui/src/settings/workflowProfiles.ts` and `workflowProfiles.test.ts` |
 | Workflow schema controls; no other v2-ready DAW profiles | `schema.ts` and schema tests |
 | v2→v3 migration, new-install onboarding, corrupt fallback, no legacy-FL inference | store tests and persisted JSON assertions |
 | Key override preservation/scoping, workspace defaults/overrides, reset | store tests covering v2, Classic, reload, and reset |
@@ -90,7 +94,8 @@ Required focused checks for this lane:
 ```sh
 cd ui
 npm test -- src/settings/workflowProfiles.test.ts src/settings/store.test.ts \
-  src/settings/schema.test.ts src/settings/templates.test.ts src/interaction/config.test.ts
+  src/settings/workflowProfilePersistence.test.ts src/settings/schema.test.ts \
+  src/settings/templates.test.ts src/interaction/config.test.ts
 npm test
 npm run typecheck
 cd ..
@@ -105,13 +110,14 @@ and attach native menu ownership plus installed-app proof before clearing the bl
 | Path | Role |
 |---|---|
 | `ui/src/settings/workflowProfiles.ts` | authoritative cold profile registry and FL v1 matrix |
-| `ui/src/settings/workflowProfiles.test.ts` | registry, migration, workspace, and onboarding tests |
+| `ui/src/settings/workflowProfiles.test.ts` | focused registry and capability-matrix tests |
+| `ui/src/settings/workflowProfilePersistence.test.ts` | focused migration, workspace, and onboarding tests |
 | `ui/src/settings/schema.ts` | Workflow settings descriptors |
 | `ui/src/settings/schema.test.ts` | Workflow category and default invariants |
 | `ui/src/settings/store.ts` | v3 persistence, migration, and store-local operations |
 | `ui/src/settings/store.test.ts` | existing settings and persistence regression coverage |
 | `ui/src/interaction/config.ts` | registry-driven effective keymap reservations |
-| `ui/src/interaction/config.test.ts` | reservation behavior and no-duplicate-combo proof |
+| `ui/src/interaction/config.test.ts` | effective and arbitrary-combo reservation behavior |
 | `ui/src/settings/templates.ts` | existing Classic definitions, intentionally unchanged |
 | `docs/first-stranger-program/backlog.jsonl` | FS-ST3 owner-merge registration |
 | `docs/first-stranger-program/lanes/fs-st3.md` | this lane plan and acceptance map |
