@@ -70,6 +70,41 @@ def test_validity_production_and_exploits():
     assert not bad, f"surviving exploits (≥0.7): {bad}"
 
 
+def _key_only(tonic: str, mode: str, pitches: list[int]) -> dict:
+    return {"tempo": 140, "key": {"tonic": tonic, "mode": mode}, "bars": 2, "tracks": [
+        {"name": "Lead", "role": "melody", "notes": [
+            {"pitch": p, "start": i * 0.5, "length": 0.5, "velocity": 88 + (i % 4) * 6}
+            for i, p in enumerate(pitches)]}]}
+
+
+def _key_dim(tonic: str, mode: str, pitches: list[int]) -> float:
+    return verify_recipe(_key_only(tonic, mode, pitches))["dims"]["key"]
+
+
+def test_key_graded_against_declared_mode():
+    """MODE PARITY (SCL-002) — mirrors the TS 'key is graded against the declared mode' block.
+
+    v2 collapsed every mode onto natural minor, so a correctly-modal melody was penalised for
+    its own characteristic tone. The six modes are the `set_key` domain; keep these assertions
+    in lockstep with ui/src/agent/recipeVerifier.test.ts.
+    """
+    # D dorian = D E F G A B C — its identity vs D minor is the major 6th (B♮, not B♭).
+    assert _key_dim("D", "dorian", [62, 64, 65, 67, 69, 71, 72]) == 1.0
+    assert _key_dim("D", "minor", [71]) == 0.0        # the same B♮ IS out of D minor
+    # G mixolydian = G A B C D E F — major 3rd with a ♭7.
+    assert _key_dim("G", "mixolydian", [67, 69, 71, 72, 74, 76, 77]) == 1.0
+    # A minor pentatonic = A C D E G — STRICTER than A minor (no 2nd, no ♭6).
+    assert _key_dim("A", "pentatonic", [69, 72, 74, 76, 79]) == 1.0
+    assert _key_dim("A", "pentatonic", [71]) == 0.0   # B is in A minor, not A pentatonic
+    # chromatic declares no constraint → neutral, never a free 1.0 (see recipe_verifier.py).
+    assert _key_dim("C", "chromatic", [60, 61, 62, 63, 64, 65, 66]) == 0.7
+    # unchanged: major/minor, and out-of-domain strings still read as they did in v2.
+    assert _key_dim("C", "major", [60, 62, 64, 65, 67, 69, 71]) == 1.0
+    assert _key_dim("A", "minor", [69, 71, 72, 74, 76, 77, 79]) == 1.0
+    assert _key_dim("C", "Major", [60, 64, 67]) == 1.0
+    assert _key_dim("A", "aeolian", [69, 72, 76]) == 1.0
+
+
 def test_program_adapter_roundtrip():
     # a tiny run-script-shaped rollout: tempo + 2 tracks (capture vars) + notes via clip refs
     prog = [

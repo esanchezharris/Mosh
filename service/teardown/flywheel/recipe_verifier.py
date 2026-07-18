@@ -20,12 +20,22 @@ from __future__ import annotations
 import math
 from typing import Any
 
-SEMITONE = {
+# Mirrors of ui/src/musicalKey.ts NOTE_PC / SCALES — itself pinned in lockstep with
+# ui/src/vendor/voice.js by musicalKey.test.ts. This module is deliberately pure stdlib, so
+# the tables are duplicated rather than imported; recipe_verifier_test.py's mode block keeps
+# them honest against the TS. SCALES keys are the native `set_key` validator's six-mode domain.
+NOTE_PC = {
     "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4, "F": 5, "F#": 6,
     "Gb": 6, "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
 }
-MINOR = [0, 2, 3, 5, 7, 8, 10]
-MAJOR = [0, 2, 4, 5, 7, 9, 11]
+SCALES = {
+    "major": [0, 2, 4, 5, 7, 9, 11],
+    "minor": [0, 2, 3, 5, 7, 8, 10],
+    "dorian": [0, 2, 3, 5, 7, 9, 10],
+    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+    "pentatonic": [0, 3, 5, 7, 10],          # MINOR pentatonic
+    "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+}
 KICK = 36
 HAT_PADS = {42, 44, 46}
 SNARE_PADS = {38, 40}
@@ -92,12 +102,19 @@ def _pc(p: float) -> int:
     return int((p % 12 + 12) % 12)
 
 
-def _scale_set(mode: str) -> set[int]:
-    return set(MAJOR if mode.lower().startswith("maj") else MINOR)
+def _mode_of(mode: str) -> str:
+    """The declared mode resolved into the six-mode `set_key` domain. Out-of-domain strings
+    keep v2's coarse major-prefix heuristic (everything else read as minor) so grading never
+    silently flips for a string the domain doesn't cover — the engine's `set_key` validates,
+    but a raw command program reaching recipe_from_program may carry anything."""
+    m = (mode or "").lower()
+    if m in SCALES:
+        return m
+    return "major" if m.startswith("maj") else "minor"
 
 
 def _tonic_pc(tonic: str) -> int:
-    return SEMITONE.get(tonic, 9)
+    return NOTE_PC.get(tonic, 9)
 
 
 def _on_grid(s: float) -> bool:
@@ -202,13 +219,25 @@ def _score_grid(r: dict, reasons: list[str]) -> float:
     return frac
 
 
+# A chromatic key declares NO pitch constraint, so there is nothing to verify — every pitch is
+# trivially "in scale". Scoring that 1.0 would pay the agent this dimension's full 0.12 of
+# weight for REMOVING its own constraint (it authors `set_key`, so the exploit is reachable),
+# which is exactly the Goodhart class v2 was hardened against. So chromatic takes the module's
+# established "can't measure -> neutral" value, the same 0.7 dynamics/variation/realness use.
+KEY_UNVERIFIABLE = 0.7
+
+
 def _score_key(r: dict, reasons: list[str]) -> float:
-    scale = _scale_set(r["key"]["mode"])
-    tonic = _tonic_pc(r["key"]["tonic"])
+    mode = _mode_of(r["key"]["mode"])
     mel = [n for t in _melodic_tracks(r) for n in t["notes"]]
     if not mel:
         reasons.append("key: no melodic content to check")
         return 0.0
+    if mode == "chromatic":
+        reasons.append("key: chromatic declares no pitch constraint — key left unscored")
+        return KEY_UNVERIFIABLE
+    scale = set(SCALES[mode])
+    tonic = _tonic_pc(r["key"]["tonic"])
     frac = len([n for n in mel if _pc(n["pitch"] - tonic) in scale]) / len(mel)
     if frac < 0.85:
         reasons.append(f"key: {_jsround((1 - frac) * 100)}% of melodic notes out of {r['key']['tonic']} {r['key']['mode']}")
