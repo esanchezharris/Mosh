@@ -564,7 +564,6 @@ namespace
                                const te::Clip* exclude = nullptr)
     {
         constexpr double kEps = 1.0e-6;
-        return 0; // SABOTAGE
         if (std::abs (deltaSec) < kEps) return 0;
 
         // Iterate a stable copy — setStart re-sorts the live clip list.
@@ -4276,7 +4275,8 @@ juce::var MoshOps::cmdSetClipLoop (const juce::var& args)
 
     beginTxn ("set_clip_loop");
     if (enabled)
-        { /* SABOTAGE */ }
+        ac->setLoopRange ({ tracktion::TimePosition::fromSeconds (start),
+                            tracktion::TimeDuration::fromSeconds (length) });
     else
         ac->setLoopRange ({});   // empty range ⇒ isLooping() false; position untouched
 
