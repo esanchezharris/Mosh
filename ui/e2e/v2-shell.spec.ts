@@ -300,6 +300,20 @@ test("the inspector tablist carries an accessible name (a11y, matches sibling v2
   await expect(page.locator('[data-testid="v2-inspector"] [role="tablist"]')).toHaveAttribute("aria-label", "Inspector tabs");
 });
 
+test("the inspector body is a role=tabpanel labelled by the active tab (finishes the WAI-ARIA pattern)", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click(); // bind the always-on inspector
+  const body = page.getByTestId("v2-insp-body");
+  await expect(body).toBeVisible();
+  // Default tab is Mix — the panel names its owning tab, and that tab controls this panel.
+  await expect(body).toHaveAttribute("role", "tabpanel");
+  await expect(body).toHaveAttribute("aria-labelledby", "v2-insp-tab-mix");
+  await expect(page.getByTestId("v2-insp-tab-mix")).toHaveAttribute("aria-controls", "v2-insp-body");
+  // Switching tabs moves aria-labelledby to the newly-active tab.
+  await page.getByTestId("v2-insp-tab-fx").click();
+  await expect(body).toHaveAttribute("aria-labelledby", "v2-insp-tab-fx");
+});
+
 test("inspector Mix tab: Mute/Solo are toggles (aria-pressed reflects state)", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();

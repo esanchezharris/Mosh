@@ -50,11 +50,11 @@ export function Inspector() {
       <div className="v2-card-head"><span>Inspector · {track.name}</span></div>
       <div className="v2-insp-tabs" role="tablist" aria-label="Inspector tabs">
         {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "on" : ""}
+          <button key={t.id} id={`v2-insp-tab-${t.id}`} role="tab" aria-selected={active === t.id} aria-controls="v2-insp-body" className={active === t.id ? "on" : ""}
             data-testid={`v2-insp-tab-${t.id}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
-      <div className="v2-insp-body" data-testid="v2-insp-body">
+      <div className="v2-insp-body" id="v2-insp-body" role="tabpanel" aria-labelledby={`v2-insp-tab-${active}`} data-testid="v2-insp-body">
         {active === "mix" && <MixTab track={track} />}
         {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
