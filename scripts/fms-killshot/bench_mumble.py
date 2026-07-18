@@ -5,17 +5,21 @@ Two parts:
   1. WORD SELECTION (pure, stdlib, seeded-deterministic) — pick a fraction ρ of words to
      mumble, biased toward function / short / unstressed words first, because a real mumble
      keeps the stressed content words clearer. Golden-testable with no audio.
-  2. DEGRADATION (lazy numpy/scipy/librosa) — the design-panel + adversarial-verify winner
-     (`formant_shift`): cepstral envelope flattening + FULL excitation-phase randomization +
-     a ~1750 Hz lowpass + an energy-envelope re-match, applied only inside the selected word
-     spans (raised-cosine crossfade; bit-clean outside).
+  2. DEGRADATION (lazy numpy/scipy/librosa) — cepstral envelope flattening + a 2500 Hz
+     lowpass + an energy-envelope re-match, applied only inside the selected word spans
+     (raised-cosine crossfade; bit-clean outside). Strength is CALIBRATED against real
+     mumbles; see the constants block for the evidence.
 
-Why phase randomization is the lever (measured, not guessed): Whisper reads words from
-phase-carried consonant/formant transitions, so scrambling phase destroys intelligibility —
-while pyin/YIN F0 is autocorrelation-based (power spectrum only, phase-blind), so the pitch
-survives as long as the harmonic comb is kept in the magnitude. Fresh-span measurement:
-ASR conf drop ≈0.57 (degraded_conf ≈0.41), F0 median Δ ≈0.2 st (voiced_kept ≈0.95), energy
-corr ≈0.98. See mumble_probe.py for the ruler.
+Phase randomization is available (`phase_rand`) and is genuinely the intelligibility lever:
+Whisper reads words from phase-carried consonant/formant transitions, so scrambling phase
+destroys them, while pyin/YIN F0 is autocorrelation-based (power spectrum only, phase-blind)
+and survives via the harmonic comb. But calibration against the owner's REAL mumbles showed
+applying it in full **overshoots reality by ~6x** on word recovery, so it now defaults OFF.
+The lesson: "maximizes the ASR confidence drop" is not the same goal as "resembles a real
+mumble", and only real pairs can tell the two apart.
+
+Rulers: mumble_probe.py (ASR/F0/energy signature) and bench_mumble_realism.py (the
+real-vs-synthetic comparison that set the constants).
 """
 from __future__ import annotations
 
@@ -79,8 +83,27 @@ def spans_for(words, indices):
 
 NFFT, HOP = 2048, 512
 Q_LOW, Q_HIGH = 1, 40          # zero the low-quefrency formant envelope; keep gain + pitch comb
-LP_HZ = 1750.0                 # plateau center of the ASR-drop sweep (1650–1850 Hz)
 XFADE_MS = 10.0
+
+# ── CALIBRATED against REAL mumbles (2026-07-18, bench_mumble_realism.py) ───────────────
+# The original settings (LP_HZ 1750, PHASE_RAND 1.0) were tuned to maximize an ASR
+# confidence drop, with no real mumble to check against. The owner's 3 real
+# (mumble -> finished) pairs showed that overshot badly: measured on word recovery — the
+# axis the benchmark actually scores — his real mumbles retain **0.157 mean** (0.071-0.261,
+# against a ~0.36 human ceiling), while the old setting produced **0.041**, destroying words
+# a real mumble keeps. Sweeps: phase_rand >= 0.6 collapses recovery to ~0.04 (a cliff, not a
+# gradient); phase_rand 0.0 with a 2500 Hz lowpass lands at 0.216 mean, halving the error
+# (0.059 vs 0.116). So cepstral flattening + a gentler lowpass IS the realistic degradation;
+# stacking full phase randomization on top is what made it unreal.
+#
+# NOTE: NUS runs before this date used the old, too-aggressive setting and are not
+# comparable to later ones. Two caveats no degradation strength can fix, by construction:
+#   (1) real per-song difficulty varies 0.071-0.261 (how the person mumbled that day); a
+#       fixed transform yields ~0.17-0.25 for every song. Synthetic = FIXED difficulty.
+#   (2) a synthetic mumble is the SAME performance with words smeared (energy corr 0.993);
+#       a real mumble is a DIFFERENT performance (0.559). Only the own-pairs lane tests that.
+LP_HZ = 2500.0
+PHASE_RAND = 0.0
 
 
 def _cepstral_flatten(x, sr, phase_rand, seed):
@@ -116,7 +139,7 @@ def _match_envelope(clean, deg, sr, win_ms=30.0):
     return deg * np.clip(env(clean) / env(deg), 0.0, 12.0)
 
 
-def degrade(mono, sr, spans, *, seed=0, phase_rand=1.0, lp_hz=LP_HZ, xfade_ms=XFADE_MS):
+def degrade(mono, sr, spans, *, seed=0, phase_rand=PHASE_RAND, lp_hz=LP_HZ, xfade_ms=XFADE_MS):
     """Mumble the audio ONLY inside `spans` (raised-cosine crossfade, bit-clean outside)."""
     import numpy as np
     from scipy.signal import butter, sosfiltfilt
@@ -150,8 +173,12 @@ def degrade(mono, sr, spans, *, seed=0, phase_rand=1.0, lp_hz=LP_HZ, xfade_ms=XF
     return mono * (1.0 - mask) + deg * mask
 
 
-def mumble_wav(clean_wav, words, ratio, out_wav, *, seed=0):
-    """Mumble a fraction ρ of `words` in clean_wav → out_wav. Returns the selection + spans."""
+def mumble_wav(clean_wav, words, ratio, out_wav, *, seed=0, phase_rand=PHASE_RAND, lp_hz=LP_HZ):
+    """Mumble a fraction ρ of `words` in clean_wav → out_wav. Returns the selection + spans.
+
+    `phase_rand`/`lp_hz` expose the degradation STRENGTH so it can be calibrated against
+    real mumbles (bench_mumble_realism.py). Defaults are the shipped values, so every
+    existing caller and golden is byte-identical."""
     import numpy as np
     import soundfile as sf
     idx = select_mumble_words(words, ratio, seed=seed)
@@ -159,9 +186,11 @@ def mumble_wav(clean_wav, words, ratio, out_wav, *, seed=0):
     y, sr = sf.read(clean_wav)
     if getattr(y, "ndim", 1) > 1:
         y = y.mean(axis=1)
-    out = degrade(np.asarray(y, dtype=np.float64), sr, spans, seed=seed)
+    out = degrade(np.asarray(y, dtype=np.float64), sr, spans, seed=seed,
+                  phase_rand=phase_rand, lp_hz=lp_hz)
     sf.write(out_wav, out.astype(np.float32), sr)
     return {"ratio": ratio, "seed": seed, "n_words": len(words),
+            "phase_rand": phase_rand, "lp_hz": lp_hz,
             "mumbled": [{"word": words[i].get("word", ""), "start": float(words[i]["start"]),
                          "end": float(words[i]["end"])} for i in idx],
             "spans": [list(s) for s in spans]}
@@ -179,8 +208,11 @@ def main():
     ap.add_argument("--ratio", type=float, required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--phase-rand", type=float, default=PHASE_RAND, help="degradation strength (0..1)")
+    ap.add_argument("--lp-hz", type=float, default=LP_HZ)
     a = ap.parse_args()
-    info = mumble_wav(a.clean, json.load(open(a.words)), a.ratio, a.out, seed=a.seed)
+    info = mumble_wav(a.clean, json.load(open(a.words)), a.ratio, a.out, seed=a.seed,
+                      phase_rand=a.phase_rand, lp_hz=a.lp_hz)
     print(json.dumps(info))
 
 
