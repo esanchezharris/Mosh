@@ -83,6 +83,16 @@ def fill_unvoiced_pitches(slots, fallback=57):
     return out
 
 
+def take_voiced_frac(f0, a, b):
+    """Fraction of [a,b) f0 frames that are voiced (absolute clock). No frames -> 0."""
+    n = v = 0
+    for t, h, vo in f0:
+        if a <= t < b:
+            n += 1
+            v += 1 if (vo and h and h > 0) else 0
+    return v / n if n else 0.0
+
+
 def chain_long_segments(segs, max_s):
     """Split any segment longer than `max_s` into equal SAME-PITCH pieces.
 
@@ -193,8 +203,15 @@ def main():
                                  min_hold_s=float(data.get("melismaHoldS") or 0.12),
                                  default_pitch=None)
             # sustain-chain: long notes become same-pitch continuation chains so the model
-            # is COMMANDED to keep voicing through the tail (absent/0 = off, byte-identical)
-            segs = chain_long_segments(segs, float(data.get("sustainChainS") or 0.0))
+            # is COMMANDED to keep voicing through the tail (absent/0 = off, byte-identical).
+            # GATED on the take's own voicing: chain only words the singer sang through —
+            # round-6 chained everything and cost stage10's articulation (drop 0.37->0.53,
+            # past its take's own 0.42 ruler level); where the take itself decays, the
+            # model's natural decay is the right behavior.
+            chain_s = float(data.get("sustainChainS") or 0.0)
+            gate = float(data.get("chainVoicedGate") or 0.90)
+            if chain_s > 0 and take_voiced_frac(f0, s, e) >= gate:
+                segs = chain_long_segments(segs, chain_s)
         else:
             n = nsyl(w["word"])
             segs = []

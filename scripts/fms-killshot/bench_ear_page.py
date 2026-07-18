@@ -147,17 +147,24 @@ def _crop(src, a, b, dst):
     return dst
 
 
-def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_song=None):
+def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_song=None,
+                  cache_tag="", panels=None):
     """Blind A/B of the SAME arm across two runs — isolates one change.
 
     `catch_song`: for that song BOTH blind clips are byte-identical (a catch trial). It looks
     exactly like a real comparison; if the owner hears a difference there, the round is
     position-biased noise and its other verdicts are void. This is the guard for the failure
-    that made the last two A/B rounds unusable ("B on all three" under a scrambled map)."""
+    that made the last two A/B rounds unusable ("B on all three" under a scrambled map).
+
+    `cache_tag`: appended as ?v=<tag> to every media URL — the panel replays stale cached
+    clips across rounds otherwise (it burned a round once; never serve untagged again).
+    `panels`: optional {song: png_path} take-vs-render waveform panels embedded under the
+    anchors — the owner's "waveforms never lie" instrument, on the page itself."""
     rows = {r["item"]: r for r in json.load(open(run_a))}
     rowsb = {r["item"]: r for r in json.load(open(run_b))}
     clips = os.path.join(out_dir, "clips")
     os.makedirs(clips, exist_ok=True)
+    q = f"?v={cache_tag}" if cache_tag else ""
     mapping, cards = {}, []
 
     for idx, item in enumerate(sorted(set(rows) & set(rowsb))):
@@ -187,7 +194,7 @@ def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_son
             src, a0, a1 = srcs[key]
             _crop(src, a0, a1, os.path.join(clips, dst))
             blind_html.append(f'<div class="arm"><div class="lab">{letter}</div>'
-                              f'<audio controls preload="none" src="clips/{dst}"></audio></div>')
+                              f'<audio controls preload="none" src="clips/{dst}{q}"></audio></div>')
         anchors = []
         for key, lab in (("mumble", "your mumble (the input)"),
                          ("reference", "your finished take (the target)")):
@@ -195,16 +202,25 @@ def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_son
                 dst = f"{song}_{key}.wav"
                 _crop(rb[key]["wav"], t0 - wb[0], t1 - wb[0], os.path.join(clips, dst))
                 anchors.append(f'<div class="arm anchor"><div class="lab">{lab}</div>'
-                               f'<audio controls preload="none" src="clips/{dst}"></audio></div>')
+                               f'<audio controls preload="none" src="clips/{dst}{q}"></audio></div>')
+        panel_html = ""
+        if panels and panels.get(song) and os.path.isfile(panels[song]):
+            dst = f"{song}_panel.png"
+            shutil.copyfile(panels[song], os.path.join(clips, dst))
+            panel_html = (f'<p class="ctx">Waveforms — your finished take (top) vs the new '
+                          f'render (below), same clock:</p>'
+                          f'<img src="clips/{dst}{q}" style="width:100%;border-radius:6px">')
         cards.append(f"""<section>
   <h2>{song}</h2>
   <p class="ctx">Anchors — not blind:</p>
   {''.join(anchors)}
+  {panel_html}
   <p class="ctx">Blind. Which is closer to <em>your</em> rhythm and words?</p>
   {''.join(blind_html)}
 </section>""")
 
-    open(os.path.join(out_dir, "index.html"), "w").write(_page("Words fix — blind A/B", blurb, cards))
+    open(os.path.join(out_dir, "index.html"), "w").write(
+        _page(f"{label_b} — blind A/B", blurb, cards))
     return mapping
 
 
@@ -217,13 +233,17 @@ def main():
     ap.add_argument("--label-b", default="real-lyrics")
     ap.add_argument("--blurb", default=None)
     ap.add_argument("--catch", default=None, help="song to make a catch trial (identical A/B)")
+    ap.add_argument("--cache-tag", default="", help="?v= token on every media URL")
+    ap.add_argument("--panels", default=None,
+                    help="JSON {song: png} of take-vs-render waveform panels to embed")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/ear-gate"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.compare:
         mapping = build_compare(
             a.run, a.compare, a.out, a.arm, a.label_a, a.label_b,
-            a.blurb or "Same pipeline, one change.", catch_song=a.catch)
+            a.blurb or "Same pipeline, one change.", catch_song=a.catch,
+            cache_tag=a.cache_tag, panels=json.loads(a.panels) if a.panels else None)
     else:
         mapping = build(a.run, a.out)
     # mapping lives OUTSIDE the served dir so the page cannot leak the answer

@@ -118,3 +118,36 @@ commanded-silence fix (`trim_word_ends` + sustained-gap bridging with a voiced-f
 replacing the flat cap); round 6 = `chain_long_segments` sustain-chains (long notes as
 same-pitch note_type-3 continuation chains — V4b proved continuation chains hold voicing
 continuously, an in-distribution "keep singing the tail" command).
+
+## Lineup rounds 5–8 (executed, seeded, one change per round)
+
+Means across the 3 songs; missing/spurious are the owner's lineup criterion:
+
+| round | change | missing | spurious | within-1st | rhythm ms | drop |
+|---|---|---|---|---|---|---|
+| 3 (prev oracle) | — | 27.7% | 17.2% | 0.744 | 65.8 | 0.234 |
+| 5 | trim + sustained-gap bridge | 25.2% | 8.3% | — | — | — |
+| 5b | + extend_word_ends | 24.7% | 8.6% | 0.762 | 49.9 | 0.257 |
+| 6 | + chain 0.45s (ungated) | 20.4% | 12.0% | 0.789 | 56.6 | 0.356 |
+| 7 | chain gated take-voiced ≥.90 | 23.5% | 8.0% | **0.809** | **47.0** | 0.327 |
+| 8 | gate softened to ≥.75 | **20.9%** | 9.1% | 0.771 | 52.9 | 0.356 |
+
+Findings the rounds pinned down:
+
+- **stage10's commanded-silence class is CLOSED**: missing@rest 1.13 s → 0, spurious@note
+  0.30 s → 0 (round 5/5b). The remaining missing everywhere is `missing@note` tail decay.
+- **extend_word_ends fired on every song** (13/7/11 words): MMS ends held vowels early
+  universally, not just on stage10 — a systemic aligner property, now compensated.
+- **Sustain-chains work** (missing improved on all 3 songs the moment they were commanded)
+  but chaining words the take itself decays through costs articulation — the take-voiced
+  gate recovers pitch/rhythm; gate strictness trades missing vs articulation (r7 vs r8).
+- Missing plateaus ~20–21% across chain variants (2 rounds no improvement → stop rule).
+  The residual is the model's attack/release shape inside notes — the register/NSF
+  territory already parked, not an authoring lever.
+
+**Nominated for the ear: round 8** (best on the owner's stated lineup criterion), with
+round 7 held as the fallback if the ear flags articulation loss. Served as a blind
+catch-trial A/B vs the round-3 oracle at `~/mosh-fms-ksb/bench/ear-lineup/` (:8199,
+cache-tag lineup8, catch = LookinBack), with take-vs-render waveform panels embedded per
+song — the owner's "waveforms never lie" instrument on the page itself. Every served clip
+provenance-verified sample-exact against its round source before serving.

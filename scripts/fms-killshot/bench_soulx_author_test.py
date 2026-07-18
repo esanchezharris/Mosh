@@ -119,6 +119,14 @@ check("None pitch survives chaining (filler back-fills later)",
       all(c["pitch"] is None for c in
           bsa.chain_long_segments([{"start": 0.0, "end": 1.0, "pitch": None}], 0.45)))
 
+# ── take_voiced_frac: the chain gate asks whether the SINGER sang through ───────────────
+VF = [(round(0.01 * i, 4), 220.0, 1) for i in range(50)] + \
+     [(round(0.01 * i, 4), 0.0, 0) for i in range(50, 100)]
+check("fully-voiced span reads 1.0", bsa.take_voiced_frac(VF, 0.0, 0.5) == 1.0)
+check("fully-unvoiced span reads 0.0", bsa.take_voiced_frac(VF, 0.5, 1.0) == 0.0)
+check("half-voiced span reads 0.5", abs(bsa.take_voiced_frac(VF, 0.25, 0.75) - 0.5) < 0.03)
+check("no frames -> 0.0 (never chains on no evidence)", bsa.take_voiced_frac(VF, 2.0, 3.0) == 0.0)
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402
