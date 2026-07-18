@@ -284,6 +284,12 @@ gate_native() {
   # vitest too (a native PR may also move ui/).
   ensure_node_modules
   run_step "vitest" bash -c 'cd ui && npm test'
+
+  # DAW-parity P5 replay lane (ADVISORY for its first stable week — the `|| true` makes a
+  # replay failure visible in the step log without failing the gate; promote to blocking
+  # by dropping the `|| true`): replay the e2e-captured UI command traces through the
+  # freshly-built binary. No traces captured -> clean no-op.
+  run_step "replay_e2e" bash -c "python3 scripts/daw-conformance/replay_e2e_log.py '$bin' || true"
 }
 
 finish() {

@@ -2688,6 +2688,20 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
   const res = dispatch(c.command, c.args ?? {});
   if (!READONLY.has(c.command))
     cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now() });
+  // DAW-parity P5 replay lane: a dev-only FULL trace (args + result ids) on window, so an
+  // e2e run can dump the commands its UI gestures emitted and the native lane can replay
+  // them through `Mosh --run-script` (scripts/daw-conformance/replay_e2e_log.py rebinds
+  // mock ids → engine ids via the resultIds captured here). NOT part of the command
+  // contract — get_command_log stays args-free, mirroring native.
+  if (typeof window !== "undefined" && !READONLY.has(c.command)) {
+    const w = window as unknown as { __moshCmdTrace?: unknown[] };
+    if (!w.__moshCmdTrace) w.__moshCmdTrace = [];
+    const data = (res as { data?: Record<string, unknown> }).data ?? {};
+    const resultIds: Record<string, unknown> = {};
+    for (const k of ["trackId", "clipId", "index", "busNumber", "groupId"])
+      if (data[k] !== undefined) resultIds[k] = data[k];
+    w.__moshCmdTrace.push({ command: c.command, args: c.args ?? {}, ok: res.ok, resultIds });
+  }
   return Promise.resolve(res as unknown as T);
 }
 export function mockSnapshot<T = unknown>(): Promise<T> {
