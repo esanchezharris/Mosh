@@ -19,8 +19,8 @@ import { join } from "node:path";
 import { buildSystemPrompt, DEFAULT_RULES, parseReply } from "../src/agent/brainCore";
 import { RULES_WITH_EXAMPLES } from "../src/agent/fewshot";
 import { validateCommand } from "../src/agent/commands";
-import { BENCH_CASES, type BenchCase, type Check, type Cmd } from "../src/bench/cases";
-import type { Snapshot } from "../src/types";
+import { BENCH_CASES, type BenchCase, type Cmd } from "../src/bench/cases";
+import { grade } from "../src/bench/goalChecks";
 import { argFlag, brainConfigFromEnv, callBrain, findBin, loadEnv, snapshotAt, runScript, type BrainUsage } from "./lib/realEngine.mts";
 
 const env = loadEnv();
@@ -37,111 +37,8 @@ const REPAIR = process.argv.includes("--repair");
 const ART_DIR = join(homedir(), "mosh-bench-artifacts", TAG);
 mkdirSync(OUT_DIR, { recursive: true });
 
-type Tracks = Array<Record<string, unknown>>;
-const tracksOf = (s: Snapshot): Tracks => ((s as any).tracks ?? []) as Tracks;
-const findTrack = (s: Snapshot, name: string) => {
-  const ts = tracksOf(s);
-  return ts.find((t) => t.name === name) ?? ts.find((t) => String(t.name ?? "").toLowerCase().includes(name.toLowerCase()));
-};
-const num = (v: unknown): number => (typeof v === "number" ? v : NaN);
-
-type CheckResult = { check: Check; pass: boolean; note: string };
-
-function grade(check: Check, before: Snapshot, after: Snapshot, cmdResults: Array<{ command: string; ok: boolean }>): CheckResult {
-  const fail = (note: string): CheckResult => ({ check, pass: false, note });
-  const pass = (note: string): CheckResult => ({ check, pass: true, note });
-  const sesA = (after as any).session ?? {};
-  switch (check.kind) {
-    case "tempo": {
-      const t = num(sesA.tempo);
-      if (check.eq !== undefined) return Math.abs(t - check.eq) <= (check.tol ?? 0.01) ? pass(`tempo ${t}`) : fail(`tempo ${t} ≠ ${check.eq}`);
-      if (check.min !== undefined && t < check.min) return fail(`tempo ${t} < ${check.min}`);
-      if (check.max !== undefined && t > check.max) return fail(`tempo ${t} > ${check.max}`);
-      return pass(`tempo ${t}`);
-    }
-    case "timeSig": {
-      const n = num(sesA.timeSigNumerator), d = num(sesA.timeSigDenominator);
-      return n === check.num && d === check.den ? pass(`${n}/${d}`) : fail(`${n}/${d} ≠ ${check.num}/${check.den}`);
-    }
-    case "trackCount": {
-      const delta = tracksOf(after).length - tracksOf(before).length;
-      return delta === check.delta ? pass(`Δtracks ${delta}`) : fail(`Δtracks ${delta} ≠ ${check.delta}`);
-    }
-    case "trackExists": {
-      const found = !!findTrack(after, check.name);
-      return found !== !!check.negate ? pass(`"${check.name}" ${found ? "exists" : "absent"}`) : fail(`"${check.name}" ${found ? "unexpectedly exists" : "missing"}`);
-    }
-    case "trackField": {
-      const t = findTrack(after, check.track);
-      if (!t) return fail(`track "${check.track}" not found`);
-      const v = (t as any)[check.field];
-      if (check.eq !== undefined) {
-        if (typeof check.eq === "number") return Math.abs(num(v) - check.eq) <= (check.tol ?? 0.25) ? pass(`${check.field}=${v}`) : fail(`${check.field}=${v} ≠ ${check.eq}`);
-        return v === check.eq ? pass(`${check.field}=${v}`) : fail(`${check.field}=${v} ≠ ${check.eq}`);
-      }
-      if (check.min !== undefined && num(v) < check.min) return fail(`${check.field}=${v} < ${check.min}`);
-      if (check.max !== undefined && num(v) > check.max) return fail(`${check.field}=${v} > ${check.max}`);
-      return pass(`${check.field}=${v}`);
-    }
-    case "trackDelta": {
-      const tb = findTrack(before, check.track), ta = findTrack(after, check.track);
-      if (!tb || !ta) return fail(`track "${check.track}" not found`);
-      const d = num((ta as any)[check.field]) - num((tb as any)[check.field]);
-      const signed = check.dir === "down" ? -d : d;
-      return signed >= check.min && signed <= check.max
-        ? pass(`${check.field} moved ${check.dir} ${Math.abs(d).toFixed(1)}`)
-        : fail(`${check.field} Δ${d.toFixed(1)} not ${check.dir} within [${check.min},${check.max}]`);
-    }
-    case "clipCount": {
-      const tb = findTrack(before, check.track), ta = findTrack(after, check.track);
-      if (!ta) return fail(`track "${check.track}" not found`);
-      const d = (((ta as any).clips ?? []) as unknown[]).length - (((tb as any)?.clips ?? []) as unknown[]).length;
-      return d === check.delta ? pass(`Δclips ${d}`) : fail(`Δclips ${d} ≠ ${check.delta}`);
-    }
-    case "clipStart": {
-      const ta = findTrack(after, check.track);
-      const clip = (((ta as any)?.clips ?? []) as Array<Record<string, unknown>>)[check.clipIndex];
-      if (!clip) return fail(`clip[${check.clipIndex}] on "${check.track}" not found`);
-      const s = num(clip.start);
-      return s >= check.minSec && s <= check.maxSec ? pass(`start ${s}s`) : fail(`start ${s}s ∉ [${check.minSec},${check.maxSec}]`);
-    }
-    case "transport": {
-      const v = ((after as any).transport ?? {})[check.field];
-      return v === check.eq ? pass(`${check.field}=${v}`) : fail(`${check.field}=${v} ≠ ${check.eq}`);
-    }
-    case "transportPos": {
-      const p = num(((after as any).transport ?? {}).position);
-      return p >= check.minSec && p <= check.maxSec ? pass(`pos ${p}s`) : fail(`pos ${p}s ∉ [${check.minSec},${check.maxSec}]`);
-    }
-    case "sectionExists": {
-      const secs = ((after as any).sections ?? []) as Array<Record<string, unknown>>;
-      const hit = secs.find((x) => String(x.name ?? "").toLowerCase() === check.name.toLowerCase());
-      if (check.negate) return hit ? fail(`section "${check.name}" unexpectedly exists`) : pass(`section "${check.name}" absent`);
-      if (!hit) return fail(`section "${check.name}" missing (have: ${secs.map((x) => x.name).join(",") || "none"})`);
-      const tol = check.tolBeats ?? 1;
-      if (check.startBeat !== undefined && Math.abs(num(hit.startBeat) - check.startBeat) > tol) return fail(`startBeat ${hit.startBeat}`);
-      if (check.endBeat !== undefined && Math.abs(num(hit.endBeat) - check.endBeat) > tol) return fail(`endBeat ${hit.endBeat}`);
-      return pass(`section "${check.name}" ok`);
-    }
-    case "pluginOnTrack": {
-      const ta = findTrack(after, check.track);
-      if (!ta) return fail(`track "${check.track}" not found`);
-      const blob = JSON.stringify((ta as any).plugins ?? []).toLowerCase();
-      const found = blob.includes(check.nameIncludes.toLowerCase());
-      return found !== !!check.negate ? pass(`plugin ~"${check.nameIncludes}" ${found ? "present" : "absent"}`) : fail(`plugin ~"${check.nameIncludes}" ${found ? "unexpectedly present" : "missing"}`);
-    }
-    case "cmdOk": {
-      const n = cmdResults.filter((c) => c.command === check.name && c.ok).length;
-      return n >= check.min ? pass(`${check.name} ×${n}`) : fail(`${check.name} ×${n} < ${check.min}`);
-    }
-    case "defer":
-      // A defer passes only on a GENUINE deferral — a parseable reply that chose to emit
-      // zero commands. Invalid-only output (the model TRIED to act and failed validation)
-      // and brain errors are failures, not deferrals (2026-07 audit: vacuous-pass hole
-      // inflated local-base by one case).
-      return cmdResults.length === 0 ? pass("deferred") : fail(`emitted ${cmdResults.length} command(s) on a defer case`);
-  }
-}
+// grade() lives in src/bench/goalChecks.ts now — shared verbatim with
+// MoshAgentBench (scripts/agentBench.mts) and the vitest harness smoke.
 
 const DESTRUCTIVE = /^(remove|delete|clear)_/;
 async function runCase(c: BenchCase, usage: BrainUsage) {

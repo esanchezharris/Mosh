@@ -459,7 +459,7 @@ function mockCompile(instruction: string): { mode: string; envelope?: Record<str
   const correctiveSubtypes: Array<[string[], string, string, string]> = [
     [["in tune", "out of tune", "off-key", "off key", "off-pitch", "pitchy", "tune it", "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct", "fix the tuning", "fix the pitch", "intonation"], "pitch", "moshAutoTune", "That's a tuning issue — AutoTune corrects the pitch in place; it doesn't re-perform the take."],
     [["tighten", "on the beat", "off the beat", "off-beat", "quantize", "fix the timing", "fix timing", "loose timing", "sloppy timing", "lock it to the grid"], "timing", "quantize_notes", "That's a timing issue — quantize snaps the notes to the grid (MIDI clips); it doesn't re-perform the take."],
-    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "eq", "That's a tone issue — an EQ shapes it without re-performing the take."],
+    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "4bandEq", "That's a tone issue — an EQ shapes it without re-performing the take."],
     [["too quiet", "too loud", "uneven", "inconsistent level", "levels are", "level it", "even it out", "compress the", "fix the dynamics", "dynamics are"], "dynamics", "moshOTT", "Uneven levels — OTT evens them out without re-performing."],
   ];
   for (const [trig, subtype, tool, say] of correctiveSubtypes) {
@@ -514,11 +514,23 @@ function trainingState(): TrainingState {
 }
 
 // ── plugin / generative catalog (dev-mock only) ─────────────────────
+// Kept in lockstep with the NATIVE kBuiltins TYPE names (MoshOps.cpp) — the
+// Phase-A agent bench caught the drift: the mock accepted "eq" (native rejects
+// it; the real type is "4bandEq") and was missing compressor/sampler/chorus/
+// phaser/lowpass/pitchShifter entirely, so an agent following the real
+// list_builtins vocabulary failed only in dev/e2e. Display names stay the
+// mock's shorter forms where the UI already shows them.
 const BUILTINS = [
   { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
+  { type: "sampler", name: "Sampler", category: "Instruments", isInstrument: true, builtin: true as const },
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "4bandEq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "compressor", name: "Compressor", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "chorus", name: "Chorus", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "phaser", name: "Phaser", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "lowpass", name: "Low / High-Pass Filter", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "pitchShifter", name: "Pitch Shifter", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
