@@ -68,6 +68,13 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
               data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
               onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}>♩</button>
+            <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
+              title="Count-in before recording — an audible click plays through the pre-roll"
+              onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+              <option value={0}>Count-in: Off</option>
+              <option value={1}>Count-in: 1 bar</option>
+              <option value={2}>Count-in: 2 bars</option>
+            </select>
           </div>
         </div>
       </div>

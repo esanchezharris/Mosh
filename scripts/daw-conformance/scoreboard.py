@@ -36,7 +36,11 @@ BACKLOG = [
     ("G4",  "Clip inspector (gain/mute/rename) + clip fades", "must", "native",
      "set_clip_gain/mute/rename agent-only; NO fade command exists; Inspector is track-only.", "inv 27,29,30"),
     ("G2",  "Recording count-in / pre-roll + mic-permission UX", "must", "native",
-     "No count-in token anywhere; record degrades to a silent no-op with no permission surface.", "inv 5,41,45,49"),
+     "G2a (mic-permission/failure UX) landed via #254. G2b (count-in) landed: set_count_in "
+     "(project preference, same MOSH_PROJECT node/template as set_key) is wired into "
+     "tracktion_engine's own pre-roll (te::Edit::setCountInMode); snapshot.countInBars "
+     "exposes it. Re-run conformance.py against a built binary to flip fam_record_countin "
+     "from gap to hardware and regenerate this row.", "inv 5,41,45,49"),
     ("G14", "set_track_volume / pan undo restores prior value", "must", "native",
      "DISCOVERED: vp->setVolumeDb() bypasses the UndoManager → empty txn; undo does not revert (logs undoable:true).", "inv 97"),
     ("G11", "MIDI-input picker + live-monitor surface", "nice", "cheap",

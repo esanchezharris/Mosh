@@ -522,6 +522,11 @@ export type Snapshot = {
     timeSigNumerator?: number;
     timeSigDenominator?: number;
     metronome?: boolean;
+    // G2b — count-in / pre-roll bars before recording (0=off, 1=one bar, 2=two
+    // bars). Mirrors session.project.countInBars (set_count_in writes it); ALWAYS
+    // present, defaulting to 0. tracktion_engine plays an audible click through
+    // the pre-roll and delays capture until the actual punch-in point.
+    countInBars?: number;
     raveAvailable?: boolean;   // Route C.2 — anira build hosts the real-time RAVE insert
     singVoiceEnrolled?: boolean;  // FMS Phase-3 — ~/Library/Mosh/voice reference exists (locked-to-self)
     // Musical key (set_key command writes it; always defaulted on the backend).
@@ -581,6 +586,10 @@ export type Snapshot = {
       sampleRate: number;
       bitDepth: number;
       timeBase: "seconds" | "barsBeats";
+      // G2b — the source of truth cmdSetCountIn writes to; mirrored to the
+      // top-level session.countInBars above (like session.project.key vs
+      // session.key). Additive/optional so this stays a non-breaking type change.
+      countInBars?: number;
     };
   };
   tracks: Track[];

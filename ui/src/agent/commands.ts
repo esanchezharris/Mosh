@@ -59,6 +59,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
   { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
+  { command: "set_count_in", desc: "Set the count-in / pre-roll before recording (0=off, 1=one bar, 2=two bars) — an audible click plays through the pre-roll before capture starts", args: [N("bars", true, "0, 1, or 2")] },
   { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
 
   // ── recording / takes ─────────────────────────────────────────────────────
@@ -188,6 +189,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
     case "set_key": return `Set key to ${a.tonic ?? ""} ${a.mode ?? ""}`.trim();
+    case "set_count_in": return Number(a.bars) > 0 ? `Set a ${a.bars}-bar count-in` : `Turned the count-in off`;
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
     case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
     case "stop_recording": return `Stopped recording`;

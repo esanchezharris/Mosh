@@ -116,7 +116,7 @@ function seedSnapshot(): Snapshot {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
-      metronome: false, length: 16, editFile: "/mock/session.mosh",
+      metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
@@ -1180,6 +1180,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
+    case "set_count_in": {
+      const bars = num(args.bars, snapshot.session.countInBars ?? 0);
+      if (![0, 1, 2].includes(bars)) return err(command, "bars must be 0 (off), 1 (one bar), or 2 (two bars)");
+      // Preference — NOT undoable (mirrors native's logLine(..., false); see cmdSetCountIn
+      // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
+      snapshot.session.countInBars = bars; invalidate(); return ok(command);
+    }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {

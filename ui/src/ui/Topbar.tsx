@@ -67,9 +67,10 @@ export function Topbar({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-// Editable tempo + time-signature + a metronome toggle, sitting by the timecode.
-// Pure command surface: each edit is a set_tempo / set_time_signature, and the
-// metronome button is a set_metronome — all through store.exec, no engine concepts.
+// Editable tempo + time-signature + a metronome toggle + a count-in selector,
+// sitting by the timecode. Pure command surface: each edit is a set_tempo /
+// set_time_signature, the metronome button is a set_metronome, and the count-in
+// selector is a set_count_in — all through store.exec, no engine concepts.
 // The uncontrolled number inputs re-sync from the snapshot via a value-keyed remount
 // (so undo/redo and remote edits reflow into the field).
 function TempoMeterControl({ snapshot }: { snapshot: Snapshot }) {
@@ -78,6 +79,7 @@ function TempoMeterControl({ snapshot }: { snapshot: Snapshot }) {
   const num = snapshot.session.timeSigNumerator ?? 4;
   const den = snapshot.session.timeSigDenominator ?? 4;
   const metronome = Boolean(snapshot.session.metronome);
+  const countInBars = snapshot.session.countInBars ?? 0;
   const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
   };
@@ -102,6 +104,13 @@ function TempoMeterControl({ snapshot }: { snapshot: Snapshot }) {
       <button className={`btn icon metronome${metronome ? " on" : ""}`} aria-label="Metronome" aria-pressed={metronome}
         data-state={metronome ? "on" : "off"} title="Metronome click"
         onClick={() => void exec("set_metronome", { enabled: !metronome })}>♩</button>
+      <select className="btn ghost count-in tc" aria-label="Count-in" value={countInBars}
+        title="Count-in before recording — an audible click plays through the pre-roll"
+        onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+        <option value={0}>Count-in: Off</option>
+        <option value={1}>Count-in: 1 bar</option>
+        <option value={2}>Count-in: 2 bars</option>
+      </select>
     </div>
   );
 }

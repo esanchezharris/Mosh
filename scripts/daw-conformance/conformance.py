@@ -210,9 +210,40 @@ def fam_record_no_fake_clip(ctx):
 
 
 def fam_record_countin(ctx):
-    # G2: count-in / pre-roll capability is absent (no count/preRoll token in the engine).
-    return verdict(GAP, "hardware", [5, 41, 42],
-                   {"gap": "G2", "note": "count-in/pre-roll not implemented; live capture also needs a mic (Phase 1)."})
+    # G2b landed: set_count_in is a real project-wide preference (same MOSH_PROJECT
+    # node/template as set_key), wired into tracktion_engine's own pre-roll
+    # (te::Edit::setCountInMode, consulted by TransportControl's record-start logic
+    # to roll the playhead back N bars and play an audible click before capture
+    # begins). The STATE surface (persisted setting + snapshot field) is provable
+    # headless, exercised below; the AUDIBLE pre-roll + delayed capture start needs
+    # a live audio device (headless record() is a no-op without CoreAudio, same as
+    # fam_transport_play) -> verdict stays "hardware", proven in the Phase 1
+    # hardware pass. The prior "no count-in token anywhere" GAP is closed by this
+    # command existing at all.
+    cmds = [
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "set_count_in", "args": {"bars": 1}},
+        {"command": "__snapshot", "args": {"label": "one_bar"}},
+        {"command": "set_count_in", "args": {"bars": 2}},
+        {"command": "__snapshot", "args": {"label": "two_bars"}},
+        {"command": "set_count_in", "args": {"bars": 0}},   # restore default
+        {"command": "__snapshot", "args": {"label": "after"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-record-countin")
+    if cmd_fails(results):
+        return verdict(FAIL, "hardware", [5, 41, 42], _err(proc, {"failed": cmd_fails(results)}))
+
+    before = (snaps.get("before", {}).get("session", {}) or {}).get("countInBars")
+    one_bar = (snaps.get("one_bar", {}).get("session", {}) or {}).get("countInBars")
+    two_bars = (snaps.get("two_bars", {}).get("session", {}) or {}).get("countInBars")
+    after = (snaps.get("after", {}).get("session", {}) or {}).get("countInBars")
+    ok = before == 0 and one_bar == 1 and two_bars == 2 and after == 0
+
+    return verdict(HARDWARE if ok else FAIL, "hardware", [5, 41, 42],
+                   {"note": "count-in/pre-roll state proven headless (before=0, one_bar=1, two_bars=2, "
+                            "restored=0); the audible click + delayed capture start still needs a live "
+                            "device -- covered by the Phase 1 hardware pass, same posture as transport play.",
+                    "before": before, "one_bar": one_bar, "two_bars": two_bars, "after": after})
 
 
 def fam_clip_move(ctx):

@@ -146,7 +146,7 @@ namespace
 {
     // Extracts every command name from MoshOps.cpp's dispatch table: lines of
     // the exact, consistently-used shape `if (name == "xxx")  return ...;`
-    // (179 such lines currently; the only other `name ==` occurrences in the
+    // (180 such lines currently; the only other `name ==` occurrences in the
     // file are an unrelated recipe-command allow-list and a plugin-name
     // comparison, neither of which has "return" on the same line, so they are
     // correctly excluded by the filter below).
@@ -192,6 +192,11 @@ namespace
             "set_key",
             "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
             "set_metronome", "delete_time_range",
+            // G2b — count-in / pre-roll bars is a project-wide recording preference,
+            // same fail-closed SessionGlobal default as set_metronome/set_tempo above
+            // (unlike set_key, which is classified Unguarded in LockManager.cpp), not
+            // per-track.
+            "set_count_in",
             // The master bus is not "a track" -- it is the session's one mix bus.
             "set_master_volume", "set_master_pan",
             // Project/session lifecycle.

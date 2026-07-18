@@ -13,6 +13,7 @@ target_sources(MoshTests PRIVATE
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
     test_migrations.cpp
+    test_count_in.cpp
     test_sections.cpp
     test_lyrics.cpp
     test_annotations.cpp

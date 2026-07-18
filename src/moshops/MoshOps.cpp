@@ -7,6 +7,7 @@
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Migrations.h"
+#include "state/CountIn.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
 #include "state/Lyrics.h"
@@ -1014,6 +1015,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
+    if (name == "set_count_in")      return broadcastStructuralIfActive (name, args, cmdSetCountIn (args));
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -2348,6 +2350,12 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     }
     else if (action == "record" && eng.hasAudio())
     {
+        // G2b — re-sync the live Edit's pre-roll to the stored project preference
+        // right before every record start, so a save/reload that swapped in a
+        // different Edit instance (or a countInBars change from another session)
+        // is always honored. transport.record() below is what actually consults
+        // it (te::Edit::getNumCountInBeats(), via TransportControl).
+        applyCountInToEdit();
         eng.ensurePlaybackContext();
         transport.record (false);
     }
@@ -2629,11 +2637,17 @@ juce::var MoshOps::projectSettingsToVar()
     key->setProperty ("tonic", tonic);
     key->setProperty ("mode", keyMode);
 
+    // G2b — count-in / pre-roll bars, ALWAYS present (default 0/off) so the UI
+    // never sees a missing field, mirroring the key default above.
+    const int countInBars = node.hasProperty (ids::countInBars)
+                                ? (int) node.getProperty (ids::countInBars) : 0;
+
     auto* o = new DynamicObject();
     o->setProperty ("sampleRate", sr);
     o->setProperty ("bitDepth", bd);
     o->setProperty ("timeBase", tb);
     o->setProperty ("key", var (key));
+    o->setProperty ("countInBars", countInBars);
     // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
     // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
     o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
@@ -2719,6 +2733,65 @@ juce::var MoshOps::cmdSetKey (const juce::var& args)
     logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_key", projectSettingsToVar());
+}
+
+// G2b — count-in / pre-roll bars. te::Edit::CountIn's none/oneBar/twoBar values
+// are 0/1/2 — exactly mosh::countin's {0,1,2} bars domain — so a validated bars
+// value casts straight across with no lookup table. Asserted here (rather than in
+// the engine-free state/CountIn.h) because only this translation unit can see the
+// real tracktion_engine enum.
+static_assert (static_cast<int> (te::Edit::CountIn::none)   == 0
+            && static_cast<int> (te::Edit::CountIn::oneBar) == 1
+            && static_cast<int> (te::Edit::CountIn::twoBar) == 2,
+               "mosh::countin's {0,1,2} bars domain assumes te::Edit::CountIn's "
+               "none/oneBar/twoBar == 0/1/2 — update the cast in applyCountInToEdit "
+               "if tracktion_engine ever renumbers this enum");
+
+void MoshOps::applyCountInToEdit()
+{
+    // Re-applies the STORED preference to the LIVE Edit's real pre-roll every time
+    // it's called (cmdSetCountIn, and cmdSetTransport's "record" branch) rather
+    // than only at load time — so recording always honors the CURRENT project
+    // setting regardless of when/how the Edit was loaded. Cheap (writes engine
+    // property storage; no audio device needed) and safe headless.
+    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    const int bars = node.hasProperty (ids::countInBars) ? (int) node.getProperty (ids::countInBars) : 0;
+    const int clamped = mosh::countin::isValidBars (bars) ? bars : 0;   // defensive: never feed the engine a bad value
+    eng.edit().setCountInMode (static_cast<te::Edit::CountIn> (clamped));
+}
+
+juce::var MoshOps::cmdSetCountIn (const juce::var& args)
+{
+    // G2b — count-in / pre-roll bars before recording. Producer INTENT, stored on
+    // the same MOSH_PROJECT node as timeBase/key, following the cmdSetKey template
+    // exactly: validate-then-write, NO Tracktion transaction (no
+    // beginNewTransaction), logLine(..., false) → NON-undoable preference,
+    // emitSnapshotInvalidated. Works headless (no audio device required).
+    //
+    // ENGINE-WIRED, not just stored: applyCountInToEdit() below pushes the value
+    // straight into tracktion_engine's own pre-roll (te::Edit::setCountInMode),
+    // which TransportControl's record-start logic already consults
+    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an
+    // audible click through the pre-roll before capture actually begins — see
+    // tracktion_TransportControl.cpp's performRecord. No new recording machinery was
+    // needed; Mosh just exposes + persists the setting the engine already honors.
+    if (! args.hasProperty ("bars"))
+        return errResult ("set_count_in", "bars is required");
+
+    const int bars = (int) args.getProperty ("bars", 0);
+    if (! mosh::countin::isValidBars (bars))
+        return errResult ("set_count_in", mosh::countin::validationError());
+
+    auto node = projectSettingsTree();
+    node.setProperty (ids::countInBars, bars, nullptr);
+    applyCountInToEdit();                                  // immediate effect this session
+
+    eng.markDirty();                                        // edit-state change → needs re-save (gap 1)
+    logLine ("set_count_in", args, true, {}, false);        // preference — NOT undoable
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("countInBars", bars);
+    return okResult ("set_count_in", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9804,7 +9877,13 @@ juce::var MoshOps::snapshot()
     // Single source: the MOSH_PROJECT node via projectSettingsToVar; a convenience mirror,
     // not a second store.
     if (auto* po = projectVar.getDynamicObject())
+    {
         session->setProperty ("key", po->getProperty ("key"));
+        // G2b — same mirror for the count-in / pre-roll bars, so the UI can read
+        // session.countInBars directly (like session.metronome) without reaching
+        // into session.project.
+        session->setProperty ("countInBars", po->getProperty ("countInBars"));
+    }
 
     Array<var> tracks;
     int index = 0;
