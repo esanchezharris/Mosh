@@ -758,6 +758,40 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
+    case "rename_bus": {
+      const bus = num(args.bus, -1);
+      const b = (snapshot.buses ?? []).find((x) => x.bus === bus);
+      if (!b) return err(command, "no such bus");
+      pushUndo();
+      b.name = str(args.name, b.name);
+      const rt = snapshot.tracks.find((t) => t.isReturn && t.returnBus === bus);
+      if (rt) rt.name = b.name;
+      invalidate();
+      return ok(command, { bus, name: b.name });
+    }
+    case "remove_bus": {
+      const bus = num(args.bus, -1);
+      const bi = (snapshot.buses ?? []).findIndex((x) => x.bus === bus);
+      if (bi < 0) return err(command, "no such bus");
+      pushUndo();
+      snapshot.buses!.splice(bi, 1);
+      const ti = snapshot.tracks.findIndex((t) => t.isReturn && t.returnBus === bus);
+      if (ti >= 0) { snapshot.tracks.splice(ti, 1); snapshot.tracks.forEach((t, i) => (t.index = i)); }
+      snapshot.tracks.forEach((t) => { if (t.sends) t.sends = t.sends.filter((s) => s.bus !== bus); });
+      invalidate();
+      return ok(command, { bus });
+    }
+    case "export_stems": {
+      // G7: one file per visible, non-empty audio track (return/bus tracks excluded).
+      const fmt = str(args.format, "wav");
+      const stems = snapshot.tracks.filter((t) => t.type === "audio" && !t.isReturn && (args.includeEmpty ? true : (t.clips?.length ?? 0) > 0));
+      return ok(command, {
+        dir: str(args.dir) || "/mock/stems",
+        format: fmt,
+        count: stems.length,
+        files: stems.map((t, i) => `${String(i).padStart(2, "0")}_${t.name}.${fmt}`),
+      });
+    }
 
     case "create_section": {
       pushUndo();
