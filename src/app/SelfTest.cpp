@@ -8539,9 +8539,13 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     // Captured variables: a command may "capture":{"VAR":"dataField"} a field of its
     // result.data, and any later string arg of the exact form "${VAR}" is replaced with
     // the captured value. This keeps scripts self-contained and robust to engine-assigned
-    // ids (trackId/clipId/index) without hard-coding them.
+    // ids (trackId/clipId/index) without hard-coding them. Substitution RECURSES into
+    // arrays and nested objects — commands like create_group_track {trackIds:["${T1}"]}
+    // and delete_time_range {trackIds:[...]} take captured ids inside arrays, and the
+    // old top-level-only pass left them as literal "${T1}" strings, silently no-op'ing
+    // (found by the DAW-parity P3 families).
     HashMap<String, var> vars;
-    auto subst = [&vars] (const var& v) -> var
+    std::function<var (const var&)> subst = [&vars, &subst] (const var& v) -> var
     {
         if (v.isString())
         {
@@ -8551,6 +8555,21 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
                 const auto key = s.substring (2, s.length() - 1);
                 if (vars.contains (key)) return vars[key];
             }
+            return v;
+        }
+        if (v.isArray())
+        {
+            Array<var> out;
+            for (const auto& e : *v.getArray())
+                out.add (subst (e));
+            return var (out);
+        }
+        if (auto* o = v.getDynamicObject())
+        {
+            auto* no = new DynamicObject();
+            for (const auto& p : o->getProperties())
+                no->setProperty (p.name, subst (p.value));
+            return var (no);
         }
         return v;
     };

@@ -171,6 +171,104 @@
   "note": "Monster is outside the conventional-parity pass"
  },
  {
+  "area": "Post-pack",
+  "action": "automation bulk curve author (replace/merge windows)",
+  "status": "pass",
+  "invariants": [
+   63
+  ]
+ },
+ {
+  "area": "Post-pack",
+  "action": "automation write-mode knob capture",
+  "status": "pass",
+  "invariants": [
+   63,
+   64
+  ]
+ },
+ {
+  "area": "Post-pack",
+  "action": "clip auto-crossfade + loop region",
+  "status": "pass",
+  "invariants": []
+ },
+ {
+  "area": "Post-pack",
+  "action": "clip fades (in/out + curve) state+undo",
+  "status": "pass",
+  "invariants": [
+   30,
+   56,
+   79
+  ],
+  "note": "fade curve AUDIBILITY is the verify.py check_clip_fades golden."
+ },
+ {
+  "area": "Post-pack",
+  "action": "clip reverse + non-destructive normalize",
+  "status": "pass",
+  "invariants": [
+   97
+  ]
+ },
+ {
+  "area": "Post-pack",
+  "action": "easy warp: detect BPM + stretch to bars",
+  "status": "pass",
+  "invariants": [
+   24
+  ],
+  "note": "pitch preservation at this ratio is the verify.py check_warp_stretch lane."
+ },
+ {
+  "area": "Post-pack",
+  "action": "master-bus chain (insert + fader + bypass)",
+  "status": "pass",
+  "invariants": [
+   97
+  ],
+  "note": "master audibility is the verify.py check_master_chain golden."
+ },
+ {
+  "area": "Post-pack",
+  "action": "mid-session track metering (METER-001)",
+  "status": "pass",
+  "invariants": [],
+  "note": "live level VALUES ride the 30 Hz levels event \u2014 hardware lane."
+ },
+ {
+  "area": "Post-pack",
+  "action": "musical key persists; scale lock never rewrites notes",
+  "status": "pass",
+  "invariants": [
+   88
+  ],
+  "note": "the pitch-resolving input aid itself is UI-side (piano roll shading) \u2014 e2e lane."
+ },
+ {
+  "area": "Post-pack",
+  "action": "recording surface graceful headless (takes/arm/monitor)",
+  "status": "pass",
+  "invariants": [],
+  "note": "arm/monitor accept + no-op headless (no input device); live capture + count-in audibility = the owner runbook REC rows."
+ },
+ {
+  "area": "Post-pack",
+  "action": "ripple delete closes the gap, one undo",
+  "status": "pass",
+  "invariants": []
+ },
+ {
+  "area": "Post-pack",
+  "action": "sends/buses + group (submix) routing",
+  "status": "pass",
+  "invariants": [
+   59
+  ],
+  "note": "send-path audibility is the verify.py check_send_return lane."
+ },
+ {
   "area": "Recording",
   "action": "Deny mic permission and try to record",
   "status": "pass",

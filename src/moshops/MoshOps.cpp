@@ -4320,13 +4320,20 @@ juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
     auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (wave == nullptr) return errResult ("normalize_clip", "no wave clip");
 
-    auto file = wave->getCurrentSourceFile();
+    // A REVERSED clip's current source is a generated reversed proxy that may not exist
+    // yet (proxy generation is async, and never runs headless) — createReaderFor would
+    // return nullptr and normalize would spuriously fail. Peak level is reversal-
+    // invariant, so read the ORIGINAL file instead, over its WHOLE span (the audible-
+    // span offsets are mirrored under reversal; whole-file is the same conservative
+    // fallback the WARPED CAVEAT below already takes). Found by fam_clip_reverse_normalize.
+    const bool reversed = wave->getIsReversed();
+    auto file = reversed ? wave->getOriginalFile() : wave->getCurrentSourceFile();
     juce::AudioFormatManager fm; fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
     if (reader == nullptr) return errResult ("normalize_clip", "cannot read source");
 
     const auto span = clipAudibleSourceSpan (*wave);
-    const float peakLinear = span.lengthSec < 0.0
+    const float peakLinear = (reversed || span.lengthSec < 0.0)
         ? findSourcePeak (*reader)
         : findSourcePeak (*reader,
                            (juce::int64) std::llround (span.startSec * reader->sampleRate),
