@@ -1,5 +1,6 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
+#include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Migrations.h"
@@ -507,14 +508,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // the user's real ~/Library/Mosh/loras can never leak into a hermetic run.
     mosh::setEnvVar ("MOSH_ENABLE_LORAS", "0");
     {
-        auto emptyLoraDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                .getChildFile ("mosh-selftest-loras-empty");
+        auto emptyLoraDir = selftestTempPath (eng, "loras-empty");
         emptyLoraDir.createDirectory();
         mosh::setEnvVar ("MOSH_LORA_DIR", emptyLoraDir.getFullPathName().toRawUTF8());
     }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
+    // The session dir is now per-process by default, so name it: this run's exports,
+    // saved edit and mosh-log.jsonl live HERE, not in a shared fixed path.
+    std::cerr << "session dir: " << eng.sessionDir().getFullPathName() << "\n";
     section ("Stage 1: command surface / cold snapshot");
 
     // Capture emitted events (type history + the latest full event, so a scoped-invalidation
@@ -534,6 +537,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // own private session dir (so concurrent worktree runs don't clobber each other).
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
         check (eng.sessionDir().getFileName() == s, "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
+
+    // 1a'. ALWAYS: whichever route got us here, this run must own its session dir. A bare
+    // shared leaf means a concurrent selftest is wiping our exports/save/log mid-run and
+    // every result below is untrustworthy -- so assert it rather than emit a plausible
+    // pass. (SLF-CONC-001: a plain run auto-isolates per process; an explicit
+    // MOSH_SELFTEST_SESSION is the caller's own private leaf.)
+    {
+        const auto leaf = eng.sessionDir().getFileName();
+        const auto explicitLeaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+        check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf) || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
+               "session dir is private to this run, not a shared fixed path (" + leaf + ")");
+    }
 
     // 1b. import-error integrity (no partial mutation): importing an INVALID audio
     // file onto an edit with no audio tracks must NOT auto-create a stray track.
@@ -7450,8 +7465,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // fetch the stem IMMEDIATELY.
             MultiplayerClient syncPeer;
             check (syncPeer.joinSession (syncCode, "SyncPeer", "#777777"), "sync-switch: peer joined the session");
-            auto syncTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                               .getChildFile ("mosh-mp-syncswitch-" + syncHash + "." + syncExt);
+            auto syncTmp = selftestTempPath (eng, "mp-syncswitch-" + syncHash + "." + syncExt);
             syncTmp.deleteFile();
             check (syncPeer.downloadBlob (syncHash, syncExt, syncTmp),
                    "sync-switch: peer fetched the stem immediately, no drain needed [" + syncPeer.lastError() + "]");
@@ -7496,8 +7510,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // hook targets. The uploaded bytes/hash don't need to be a real WAV --
             // uploadBlob is rejected by the relay before any hash/content matters.
             const juce::String failPayload ("bytes-for-the-rejected-commit-upload-check");
-            juce::File failSrc = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                     .getChildFile ("mosh-selftest-commitfail-src.failtest");
+            juce::File failSrc = selftestTempPath (eng, "commitfail-src.failtest");
             failSrc.replaceWithText (failPayload);
             juce::FileInputStream failFis (failSrc);
             const auto failHash = juce::SHA256 (failFis).toHexString();
@@ -7794,8 +7807,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // Upload a KNOWN payload under the reserved "corrupttest" ext -- the relay's
             // hook targets exactly (and only) this ext for the whole run.
             const juce::String payload ("known-stem-bytes-for-the-corruption-rejection-check");
-            juce::File srcTmp = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                    .getChildFile ("mosh-selftest-corrupt-src.corrupttest");
+            juce::File srcTmp = selftestTempPath (eng, "corrupt-src.corrupttest");
             srcTmp.replaceWithText (payload);
             juce::FileInputStream fis (srcTmp);
             const auto hash = juce::SHA256 (fis).toHexString();
@@ -7803,8 +7815,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "corrupt: host uploaded the known payload [" + corruptHost.lastError() + "]");
             srcTmp.deleteFile();
 
-            juce::File dest = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                  .getChildFile ("mosh-selftest-corrupt-dest-" + hash + ".corrupttest");
+            juce::File dest = selftestTempPath (eng, "corrupt-dest-" + hash + ".corrupttest");
             dest.deleteFile();
             const bool got = corruptPeer.downloadBlob (hash, "corrupttest", dest);
             check (! got, "corrupt: downloadBlob correctly REJECTS the corrupted transfer (returns false)");
@@ -7816,16 +7827,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // hook) must still succeed right after -- the rejection above doesn't wedge
             // the client or the relay into a permanently-broken state.
             const juce::String payload2 ("clean-retry-bytes-prove-the-client-recovers");
-            juce::File srcTmp2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                     .getChildFile ("mosh-selftest-corrupt-retry-src.wav");
+            juce::File srcTmp2 = selftestTempPath (eng, "corrupt-retry-src.wav");
             srcTmp2.replaceWithText (payload2);
             juce::FileInputStream fis2 (srcTmp2);
             const auto hash2 = juce::SHA256 (fis2).toHexString();
             check (corruptHost.uploadBlob (hash2, "wav", srcTmp2),
                    "corrupt: host uploaded a second (clean-path) payload [" + corruptHost.lastError() + "]");
             srcTmp2.deleteFile();
-            juce::File dest2 = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                   .getChildFile ("mosh-selftest-corrupt-retry-dest-" + hash2 + ".wav");
+            juce::File dest2 = selftestTempPath (eng, "corrupt-retry-dest-" + hash2 + ".wav");
             dest2.deleteFile();
             // NOTE: lastError() is sticky (only ever set, never cleared on success) --
             // don't print it here, it would misleadingly show the PRIOR rejection's

@@ -5,6 +5,7 @@
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
 #include "engine/MoshEngine.h"
+#include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
@@ -120,27 +121,28 @@ public:
             mosh::setEnvVar ("MOSH_SCAN_AU", "1");
         }
 
-        juce::String freshSessionName = undoSelfTest ? "session-selftest-undo"
-                                            : (goldenSelfTest ? "session-golden-selftest"
-                                            : (liveAudioSmoke ? "session-live-audio-smoke"
-                                            : (scanDeep ? "session-scan"
-                                            : (runScript ? "session-run-script"
-                                            : (demoGui ? "session-demo"
-                                            : (voiceSmoke ? "session-voice-smoke"
-                                                              : "session-selftest"))))));
-        // Concurrent harness runs (e.g. parallel git worktrees each looping
-        // --selftest) otherwise share the global session-selftest dir + freshSession
-        // wipes it at startup, so one run clobbers another mid-test. MOSH_SELFTEST_SESSION
-        // overrides the leaf so each run gets a private session dir (pair with a
-        // distinct MOSH_SERVICE_PORT for full isolation). Also honored for scripted
-        // GUI demos so UI automation never mutates or reads the owner's GUI session.
-        // Honored for ANY launch — including the plain interactive GUI — whenever the env is
-        // EXPLICITLY set. Normal GUI use never sets it (→ stays "session"), so this is a no-op
-        // there; a set value lets UI automation / a live demo run on an ISOLATED session and never
-        // mutate or read the owner's real GUI "session".
-        if (const auto s = juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {});
-            s.trim().isNotEmpty())
-            freshSessionName = s.trim();
+        // The session BASE leaf for this launch. MoshEngine turns it into the actual dir
+        // (applying MOSH_SELFTEST_SESSION and per-process auto-isolation) — one place owns
+        // that policy, see src/engine/SessionPaths.h.
+        //
+        // An empty base means "the interactive GUI", i.e. the owner's real "session" dir.
+        // This ternary previously fell through to "session-selftest" for EVERY launch, and
+        // #246 then inverted MoshEngine's precedence so that name won over the GUI leaf —
+        // which quietly moved the interactive app into the very dir `--selftest` wipes with
+        // deleteRecursively(). harnessSessionBase() keeps the GUI out of harness dirs, and
+        // deliberately still hands a bare MOSH_NO_AUDIO=1 launch a harness base (it wipes,
+        // so it must not land on "session").
+        mosh::sessionpaths::HarnessModes modes;
+        modes.selfTest       = commandLine.contains ("--selftest");   // also true for --selftest-undo
+        modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
+        modes.goldenSelfTest = goldenSelfTest;
+        modes.liveAudioSmoke = liveAudioSmoke;
+        modes.scanDeep       = scanDeep;
+        modes.runScript      = runScript;
+        modes.voiceSmoke     = voiceSmoke;
+        modes.demoGui        = demoGui;
+        modes.envNoAudio     = envNoAudio;
+        const juce::String sessionBaseName = mosh::sessionpaths::harnessSessionBase (modes);
 
         // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
@@ -160,7 +162,7 @@ public:
             && juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim().isNotEmpty();
         engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
                                                 /*freshSession=*/ (noAudio || liveAudio || demoGui) && ! keepSession,
-                                                freshSessionName);
+                                                sessionBaseName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
