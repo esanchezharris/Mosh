@@ -197,6 +197,7 @@ if __name__ == "__main__":
     test_validity_production_and_exploits()
     test_program_adapter_roundtrip()
     g, d, e = test_program_reward_gradient()
+    test_key_graded_against_declared_mode()
     items = _load()
     by = {i["name"]: verify_recipe(i["recipe"])["total"] for i in items}
     refs = {"good", "good_real", "good_stock", "partial_real"}
@@ -205,4 +206,5 @@ if __name__ == "__main__":
     print(f"VALIDITY OK: good_real {by['good_real']:.4f} > 0.85;  good_stock {by['good_stock']:.4f} < 0.6 "
           f"(stock-outline crushed, gap {by['good_real'] - by['good_stock']:.3f});  all 24 exploits < 0.7 (max {foolmax:.4f})")
     print("PROGRAM ADAPTER OK: rollout commands → recipe roundtrip")
+    print("KEY MODE OK: dorian/mixolydian/pentatonic graded against the DECLARED mode, not major/minor")
     print(f"GRADIENT OK: good {g:.3f} > degraded {d:.3f} > empty {e:.3f} (spread {g - e:.3f}) — valid reward gradient, no render")
