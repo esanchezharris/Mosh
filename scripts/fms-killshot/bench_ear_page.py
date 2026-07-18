@@ -203,12 +203,16 @@ def main():
     ap.add_argument("--run", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run/own_run.json"))
     ap.add_argument("--compare", help="second run json; enables the A/B mode")
     ap.add_argument("--arm", default="pipeline+snap")
+    ap.add_argument("--label-a", default="asr-words")
+    ap.add_argument("--label-b", default="real-lyrics")
+    ap.add_argument("--blurb", default=None)
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/ear-gate"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.compare:
         mapping = build_compare(
-            a.run, a.compare, a.out, a.arm, "asr-words", "real-lyrics",
+            a.run, a.compare, a.out, a.arm, a.label_a, a.label_b,
+            a.blurb or (
             "Same pipeline, same settings, <strong>one change</strong>: the words it was told "
             "to sing. Before, they came from Whisper transcribing your finished take — which "
             "in these windows got 15–55% of words below its own confidence gate "
@@ -217,7 +221,7 @@ def main():
             "score allocates about one note-slot per syllable, wrong words also moved the "
             "notes — so this should change the <strong>rhythm</strong>, not just the words. "
             "The window now ends on a real breath instead of a stopwatch, so nothing is cut "
-            "off mid-phrase.")
+            "off mid-phrase."))
     else:
         mapping = build(a.run, a.out)
     # mapping lives OUTSIDE the served dir so the page cannot leak the answer

@@ -69,5 +69,31 @@ check("'bout vs about is a real spelling difference the parser preserves",
 check("piñata survives as one token (Whisper split it into 'pin yet')",
       [t["word"] for t in bl.parse_lyrics("smashing the piñata")] == ["smashing", "the", "piñata"])
 
+# ── legato gap closing: only REAL rests survive as commanded silence ────────────────────
+# 100 frames @10ms = 1.0s. Loud everywhere except a genuine quiet stretch at 0.40-0.60s.
+ENV = [1.0] * 100
+for i in range(40, 60):
+    ENV[i] = 0.01
+WORDS = [{"word": "a", "start": 0.00, "end": 0.18},   # gap 0.18-0.22, take LOUD -> legato
+         {"word": "b", "start": 0.22, "end": 0.40},   # gap 0.40-0.60, take QUIET -> real rest
+         {"word": "c", "start": 0.60, "end": 0.80}]
+got = bl.close_legato_gaps(WORDS, ENV)
+check("closes a gap the singer sang THROUGH (take still has energy)",
+      got[0]["end"] == 0.22 and got[0].get("legato") is True)
+check("KEEPS a gap where the take actually goes quiet (that is a breath)",
+      got[1]["end"] == 0.40 and "legato" not in got[1])
+check("never moves a word's start", [w["start"] for w in got] == [0.0, 0.22, 0.60])
+check("leaves the final word alone", got[-1]["end"] == 0.80)
+check("refuses to bridge an implausibly long gap even if energy looks present",
+      bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
+                            {"word": "b", "start": 0.9, "end": 1.0}], ENV)[0]["end"] == 0.1)
+check("no envelope -> unchanged (safe no-op, never invents legato)",
+      [w["end"] for w in bl.close_legato_gaps(WORDS, [])] == [0.18, 0.40, 0.80])
+check("empty input is empty", bl.close_legato_gaps([], ENV) == [])
+check("does not mutate the caller's words", WORDS[0]["end"] == 0.18)
+check("overlapping words are left alone (nothing to close)",
+      bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.3},
+                            {"word": "b", "start": 0.2, "end": 0.4}], ENV)[0]["end"] == 0.3)
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: " + ", ".join(fails)))
 sys.exit(1 if fails else 0)
