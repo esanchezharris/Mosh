@@ -41,6 +41,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
+  { command: "set_clip_fade", desc: "Set a clip's fade-in / fade-out (seconds)",
+    args: [S("clipId"), N("fadeInSec", false, "seconds"), N("fadeOutSec", false, "seconds"),
+           S("curveIn", false, "linear|convex|concave|sCurve"), S("curveOut", false, "linear|convex|concave|sCurve")] },
   { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
   { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
 
@@ -59,6 +62,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
   { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
+  { command: "set_count_in", desc: "Set the count-in / pre-roll before recording (0=off, 1=one bar, 2=two bars) — an audible click plays through the pre-roll before capture starts", args: [N("bars", true, "0, 1, or 2")] },
   { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
 
   // ── recording / takes ─────────────────────────────────────────────────────
@@ -176,6 +180,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
+    case "set_clip_fade": return `Set clip fades (in ${a.fadeInSec ?? "–"}s, out ${a.fadeOutSec ?? "–"}s)`;
     case "stretch_clip": return a.bars ? `Stretched a clip to ${a.bars} bar${Number(a.bars) > 1 ? "s" : ""}` : `Stretched a clip to ${a.length}s`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
@@ -188,6 +193,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
     case "set_key": return `Set key to ${a.tonic ?? ""} ${a.mode ?? ""}`.trim();
+    case "set_count_in": return Number(a.bars) > 0 ? `Set a ${a.bars}-bar count-in` : `Turned the count-in off`;
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
     case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
     case "stop_recording": return `Stopped recording`;

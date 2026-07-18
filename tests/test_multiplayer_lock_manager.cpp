@@ -22,6 +22,10 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     // P4 self-heal (PR-1): backend-only, no clip/track target in its args, never
     // contends for a track -- same posture as the other mp_* internals above.
     REQUIRE (LockManager::classify ("mp_fetch_missing_stems") == Scope::Unguarded);
+    // G7: a render/read like export_audio -- contends for no single track (it
+    // iterates ALL of them, one render at a time), so it is unguarded, not
+    // session-global.
+    REQUIRE (LockManager::classify ("export_stems") == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")
@@ -44,6 +48,12 @@ TEST_CASE ("classify: clip mutations are clip-scoped", "[multiplayer][lock]")
     REQUIRE (LockManager::classify ("split_clip")     == Scope::Clip);
     REQUIRE (LockManager::classify ("add_note")       == Scope::Clip);
     REQUIRE (LockManager::classify ("set_clip_gain")  == Scope::Clip);
+    // G4A — the clip Inspector's gain/mute/rename commands were agent-only until now
+    // (no UI surface); set_clip_gain was already covered above, these two were not.
+    REQUIRE (LockManager::classify ("rename_clip")    == Scope::Clip);
+    REQUIRE (LockManager::classify ("set_clip_mute")  == Scope::Clip);
+    // G4b — clip fades carry a clipId like gain/mute; same clip-scoped key resolution.
+    REQUIRE (LockManager::classify ("set_clip_fade")  == Scope::Clip);
 }
 
 TEST_CASE ("classify: render-layer mutations are clip-scoped", "[multiplayer][lock]")
@@ -142,7 +152,7 @@ namespace
 {
     // Extracts every command name from MoshOps.cpp's dispatch table: lines of
     // the exact, consistently-used shape `if (name == "xxx")  return ...;`
-    // (179 such lines currently; the only other `name ==` occurrences in the
+    // (180 such lines currently; the only other `name ==` occurrences in the
     // file are an unrelated recipe-command allow-list and a plugin-name
     // comparison, neither of which has "return" on the same line, so they are
     // correctly excluded by the filter below).
@@ -188,6 +198,11 @@ namespace
             "set_key",
             "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
             "set_metronome", "delete_time_range",
+            // G2b — count-in / pre-roll bars is a project-wide recording preference,
+            // same fail-closed SessionGlobal default as set_metronome/set_tempo above
+            // (unlike set_key, which is classified Unguarded in LockManager.cpp), not
+            // per-track.
+            "set_count_in",
             // The master bus is not "a track" -- it is the session's one mix bus.
             "set_master_volume", "set_master_pan",
             // Project/session lifecycle.

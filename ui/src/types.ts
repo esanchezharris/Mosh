@@ -195,6 +195,12 @@ export type Clip = {
   // same track beneath the muted source. Filtered out of the lanes (it's not a clip to manage).
   hidden?: boolean;
   gainDb?: number;
+  // G4b — clip-edge fades (wave clips only). Seconds; type is 1=linear 2=convex
+  // 3=concave 4=sCurve (optional — the v1 UI only drives durations).
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  fadeInType?: number;
+  fadeOutType?: number;
   sourceFile?: string;
   sourceMissing?: boolean;   // gap 3 — source file absent on disk; offer relink
   sourceLength?: number;
@@ -522,6 +528,11 @@ export type Snapshot = {
     timeSigNumerator?: number;
     timeSigDenominator?: number;
     metronome?: boolean;
+    // G2b — count-in / pre-roll bars before recording (0=off, 1=one bar, 2=two
+    // bars). Mirrors session.project.countInBars (set_count_in writes it); ALWAYS
+    // present, defaulting to 0. tracktion_engine plays an audible click through
+    // the pre-roll and delays capture until the actual punch-in point.
+    countInBars?: number;
     raveAvailable?: boolean;   // Route C.2 — anira build hosts the real-time RAVE insert
     singVoiceEnrolled?: boolean;  // FMS Phase-3 — ~/Library/Mosh/voice reference exists (locked-to-self)
     // Musical key (set_key command writes it; always defaulted on the backend).
@@ -581,6 +592,10 @@ export type Snapshot = {
       sampleRate: number;
       bitDepth: number;
       timeBase: "seconds" | "barsBeats";
+      // G2b — the source of truth cmdSetCountIn writes to; mirrored to the
+      // top-level session.countInBars above (like session.project.key vs
+      // session.key). Additive/optional so this stays a non-breaking type change.
+      countInBars?: number;
     };
   };
   tracks: Track[];
@@ -613,6 +628,12 @@ export type ExportResult = {
   sampleRate: number;
   bytes: number;
   renderMode: string;
+  // G1: export range (78) + delay-tail policy (81) — all optional/additive.
+  range?: "full" | "loop" | "custom";
+  rangeStart?: number;
+  rangeEnd?: number;
+  tail?: "cut" | "include";
+  endAllowance?: number;
 };
 
 // get_command_log result (AGT-001): a read-only window over the canonical command

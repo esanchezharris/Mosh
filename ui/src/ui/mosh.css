@@ -230,6 +230,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .tempo-ctl .tempo-slash { opacity: 0.6; }
 .tempo-ctl .metronome { font-size: 14px; line-height: 1; padding: 3px 6px; }
 .tempo-ctl .metronome.on { color: var(--lime, #b6ff3c); border-color: var(--lime, #b6ff3c); }
+.tempo-ctl .count-in { font-size: 10px; padding: 3px 6px; }
 
 /* song-key control by the readout — drives Moshi's in-key voice (set_key command) */
 .key-ctl { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
@@ -300,7 +301,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
   .toolbar { flex-wrap: wrap; overflow-x: hidden; row-gap: 6px; padding: 6px 8px; }
   .toolbar .sep { margin: 0 2px; }
 }
-@media (max-width: 880px)  { .tempo-ctl .tempo-sig, .tempo-ctl .tempo-unit { display: none; } .key-ctl .key-mode { display: none; } }
+@media (max-width: 880px)  { .tempo-ctl .tempo-sig, .tempo-ctl .tempo-unit, .tempo-ctl .count-in { display: none; } .key-ctl .key-mode { display: none; } }
 
 /* the scroll surface holds ruler + lanes so they share one horizontal scroll */
 .timeline { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -823,6 +824,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-label { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bone-dim); }
 .pop-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--bone); }
 .pop-row select { background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
+/* G1 — export Range/Tail: two side-by-side numeric bounds inputs (start/end seconds). */
+.pop-inline { display: flex; gap: 5px; }
+.pop-inline input[type="number"] { width: 60px; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
+.pop-row > input[type="number"] { width: 60px; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .pop-note { font-size: 10px; color: var(--bone-dim); word-break: break-all; }
 /* Post-export "where did my file go" block — no native Reveal-in-Finder command exists,

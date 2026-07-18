@@ -35,6 +35,9 @@ const nextSectionId = () => "sec-" + ++sectionSeq;
 let annotationSeq = 1; // seed uses ann-1
 const nextAnnotationId = () => "ann-" + ++annotationSeq;
 
+// G4b — fade curve name -> te::AudioFadeCurve::Type int (1..4), mirroring the native enum.
+const FADE_CURVE_TYPE: Record<string, number> = { linear: 1, convex: 2, concave: 3, sCurve: 4 };
+
 function waveClip(name: string, start: number, length: number): Clip {
   return {
     id: nextClipId(),
@@ -46,6 +49,11 @@ function waveClip(name: string, start: number, length: number): Clip {
     sourceFile: `/mock/${name}.wav`,
     sourceLength: length,
     hasRenderLayer: false,
+    // G4b — default to 0/0 (linear) so the Clip tab's fade controls render deterministically.
+    fadeInSec: 0,
+    fadeOutSec: 0,
+    fadeInType: 1,
+    fadeOutType: 1,
   };
 }
 
@@ -116,7 +124,7 @@ function seedSnapshot(): Snapshot {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
-      metronome: false, length: 16, editFile: "/mock/session.mosh",
+      metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
@@ -1048,6 +1056,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "rename_clip": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.name = str(args.name, f.clip.name); invalidate(); return ok(command); }
     case "set_clip_mute": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.mute = Boolean(args.mute); invalidate(); return ok(command); }
     case "set_clip_gain": { const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found"); pushUndo(); f.clip.gainDb = num(args.gainDb); invalidate(); return ok(command); }
+    // G4b — clip fades: clamps each dimension present in args to [0, clip.length]
+    // (mirrors the engine's no-boundary-move clamp). Curve names map to the same
+    // te::AudioFadeCurve::Type ints (1..4) the native snapshot carries. Like
+    // set_clip_gain above, the mock does not gate on clip type — the UI only ever
+    // calls this for wave clips (ClipTab), and the real audio-clip-only rejection
+    // is a backend contract proven by the native selftest, not re-derived here.
+    case "set_clip_fade": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      pushUndo();
+      if ("fadeInSec" in args) f.clip.fadeInSec = Math.max(0, Math.min(num(args.fadeInSec), f.clip.length));
+      if ("fadeOutSec" in args) f.clip.fadeOutSec = Math.max(0, Math.min(num(args.fadeOutSec), f.clip.length));
+      if ("curveIn" in args) f.clip.fadeInType = FADE_CURVE_TYPE[str(args.curveIn)] ?? 1;
+      if ("curveOut" in args) f.clip.fadeOutType = FADE_CURVE_TYPE[str(args.curveOut)] ?? 1;
+      invalidate();
+      return ok(command, { clipId: f.clip.id, fadeInSec: f.clip.fadeInSec, fadeOutSec: f.clip.fadeOutSec });
+    }
 
     // Audio warp (auto-tempo): the clip follows the tempo map + time-stretches (SoundTouch).
     // Wave clips only; `autoTempo` is required (mirrors cmdSetClipWarp). Enabling with no
@@ -1180,6 +1204,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
+    case "set_count_in": {
+      const bars = num(args.bars, snapshot.session.countInBars ?? 0);
+      if (![0, 1, 2].includes(bars)) return err(command, "bars must be 0 (off), 1 (one bar), or 2 (two bars)");
+      // Preference — NOT undoable (mirrors native's logLine(..., false); see cmdSetCountIn
+      // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
+      snapshot.session.countInBars = bars; invalidate(); return ok(command);
+    }
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {
@@ -1329,7 +1360,23 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       snapshot.session.timeSigDenominator = num(args.denominator, snapshot.session.timeSigDenominator);
       invalidate(); return ok(command);
     }
-    case "export_audio": return ok(command, { file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"), bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR), bytes: 794000, renderMode: "offline" });
+    case "export_audio": {
+      // G1: range (78) + delay-tail (81) — echo a faithful envelope so the requested
+      // span is reflected in seconds/bytes (a UI test can assert a shorter render).
+      const MOCK_EDIT_LEN = 4;   // seconds — the mock's nominal "edit length"
+      const rng = str(args.range, args.start !== undefined && args.end !== undefined ? "custom" : "full");
+      const rs = rng === "custom" ? num(args.start, 0) : rng === "loop" ? num(snapshot.transport.loopStart, 0) : 0;
+      const re = rng === "custom" ? num(args.end, MOCK_EDIT_LEN) : rng === "loop" ? num(snapshot.transport.loopEnd, MOCK_EDIT_LEN) : MOCK_EDIT_LEN;
+      const tail = str(args.tail, "cut");
+      const endAllowance = tail === "include" ? num(args.tailSeconds, 2) : 0;
+      const seconds = Math.max(0, re - rs);
+      return ok(command, {
+        file: str(args.file) || "/mock/mixdown." + str(args.format, "wav"), format: str(args.format, "wav"),
+        bitDepth: num(args.bitDepth, 24), sampleRate: num(args.sampleRate, SR),
+        bytes: Math.round(794000 * (seconds / MOCK_EDIT_LEN)), seconds, renderMode: "offline",
+        range: rng, rangeStart: rs, rangeEnd: re, tail, endAllowance,
+      });
+    }
     case "get_command_log": {
       const limit = Math.max(1, num(args.limit, 50));
       return ok(command, { entries: cmdLog.slice(-limit).reverse(), total: cmdLog.length });

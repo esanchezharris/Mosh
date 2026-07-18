@@ -24,7 +24,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
-        "stop_audition", "export_audio", "save", "reload", "save_as", "new_project",
+        "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
         "enable_all_meters", "set_audio_device", "set_buffer_size", "set_audio_threads",
@@ -71,7 +71,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // logicalId, resolved by MoshOps.
     static const std::set<juce::String> clip {
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp", "stretch_clip",
+        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",

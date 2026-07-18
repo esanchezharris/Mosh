@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 
-export type InspectorTab = "mix" | "fx" | "gen" | "lyrics" | "midi" | "takes" | "warp";
+export type InspectorTab = "mix" | "fx" | "gen" | "lyrics" | "midi" | "takes" | "warp" | "clip";
 export type SectionZoom = "8b" | "16b" | "full";
 export type BrowserTab = "sounds" | "plugins";
 

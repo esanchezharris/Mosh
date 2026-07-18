@@ -185,6 +185,9 @@ private:
     juce::var cmdRenameClip     (const juce::var& args);
     juce::var cmdSetClipMute    (const juce::var& args);
     juce::var cmdSetClipGain    (const juce::var& args);
+    // G4b — clip fades (fade-in/fade-out + curve type). Audio-clip-only, mirrors
+    // cmdSetClipGain; fades render NATIVELY through AudioClipBase (no src/state change).
+    juce::var cmdSetClipFade    (const juce::var& args);
     juce::var cmdRelinkClip     (const juce::var& args);   // gap 3 — re-point a missing wave source
     // Audio warp — auto-tempo: the clip re-anchors in BEATS and time-stretches to
     // follow the tempo map (SoundTouch; warp MARKERS are a deferred subsystem).
@@ -297,6 +300,20 @@ private:
    #endif
     // Stage 6 — consolidation
     juce::var cmdExportAudio      (const juce::var& args);
+    // G7 — per-track stem export, one file per visible/non-empty audio track, all
+    // sharing the SAME {0, editLength} render window (the "common zero point": every
+    // stem is the same length and re-imports aligned). Mirrors cmdExportAudio's
+    // resolution/render machinery but loops tracks like bounceClipToWav. NON-undoable
+    // read/render (no ValueTree mutation besides the harmless logicalid backfill
+    // already used all over the snapshot path).
+    juce::var cmdExportStems      (const juce::var& args);
+    // cmdExportStems helper: a genuinely clip-less track (includeEmpty:true) can't be
+    // expressed via Renderer::Parameters::allowedClips (an EMPTY array means "no filter",
+    // i.e. ALL clips — there is no way to ask the renderer for "zero clips"). So a stem for
+    // such a track is written directly as digital silence at the common-zero-point length,
+    // bypassing te::Renderer entirely. See the comment in cmdExportStems for the full story.
+    bool writeSilentStemFile (const juce::File& dest, juce::AudioFormat* format, int bitDepth,
+                              double sampleRate, double lengthSeconds);
     // Wave: settings — audio device picker + project lifecycle (both NON-undoable)
     juce::var cmdListAudioDevices (const juce::var& args);   // read-only (no log/transaction)
     juce::var cmdListMidiInputs   (const juce::var& args);   // read-only MIDI-input enumeration (CTL-001)
@@ -324,6 +341,12 @@ private:
     // validated against the voice.js NOTE_PC/SCALES domains; feeds the snapshot
     // (session.project.key) + the RenderLayer fingerprint (a key change = cache MISS).
     juce::var cmdSetKey (const juce::var& args);
+    // G2b — count-in / pre-roll bars before recording, same MOSH_PROJECT node +
+    // NON-undoable-preference template as cmdSetKey. Domain {0,1,2} validated by
+    // mosh::countin::isValidBars (state/CountIn.h); applyCountInToEdit() syncs the
+    // live Edit's real tracktion_engine pre-roll (te::Edit::setCountInMode) so the
+    // setting is ENGINE-WIRED, not just stored.
+    juce::var cmdSetCountIn (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -362,6 +385,13 @@ private:
     // INTENT where set, falling back to the live device readout when a field is
     // unset (timeBase falls back to "seconds"). Used by the snapshot + cmd result.
     juce::var projectSettingsToVar();
+    // G2b — re-applies the stored countInBars preference to the LIVE Edit's real
+    // tracktion_engine pre-roll (te::Edit::setCountInMode). Called from
+    // cmdSetCountIn (immediate effect) and from cmdSetTransport's "record" branch
+    // (so recording always honors the CURRENT project setting even across a
+    // save/reload that swapped in a different Edit instance). Cheap + headless-safe
+    // (writes engine property storage, no audio device required).
+    void applyCountInToEdit();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.

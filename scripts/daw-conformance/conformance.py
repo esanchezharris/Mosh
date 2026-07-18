@@ -210,9 +210,40 @@ def fam_record_no_fake_clip(ctx):
 
 
 def fam_record_countin(ctx):
-    # G2: count-in / pre-roll capability is absent (no count/preRoll token in the engine).
-    return verdict(GAP, "hardware", [5, 41, 42],
-                   {"gap": "G2", "note": "count-in/pre-roll not implemented; live capture also needs a mic (Phase 1)."})
+    # G2b landed: set_count_in is a real project-wide preference (same MOSH_PROJECT
+    # node/template as set_key), wired into tracktion_engine's own pre-roll
+    # (te::Edit::setCountInMode, consulted by TransportControl's record-start logic
+    # to roll the playhead back N bars and play an audible click before capture
+    # begins). The STATE surface (persisted setting + snapshot field) is provable
+    # headless, exercised below; the AUDIBLE pre-roll + delayed capture start needs
+    # a live audio device (headless record() is a no-op without CoreAudio, same as
+    # fam_transport_play) -> verdict stays "hardware", proven in the Phase 1
+    # hardware pass. The prior "no count-in token anywhere" GAP is closed by this
+    # command existing at all.
+    cmds = [
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "set_count_in", "args": {"bars": 1}},
+        {"command": "__snapshot", "args": {"label": "one_bar"}},
+        {"command": "set_count_in", "args": {"bars": 2}},
+        {"command": "__snapshot", "args": {"label": "two_bars"}},
+        {"command": "set_count_in", "args": {"bars": 0}},   # restore default
+        {"command": "__snapshot", "args": {"label": "after"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-record-countin")
+    if cmd_fails(results):
+        return verdict(FAIL, "hardware", [5, 41, 42], _err(proc, {"failed": cmd_fails(results)}))
+
+    before = (snaps.get("before", {}).get("session", {}) or {}).get("countInBars")
+    one_bar = (snaps.get("one_bar", {}).get("session", {}) or {}).get("countInBars")
+    two_bars = (snaps.get("two_bars", {}).get("session", {}) or {}).get("countInBars")
+    after = (snaps.get("after", {}).get("session", {}) or {}).get("countInBars")
+    ok = before == 0 and one_bar == 1 and two_bars == 2 and after == 0
+
+    return verdict(HARDWARE if ok else FAIL, "hardware", [5, 41, 42],
+                   {"note": "count-in/pre-roll state proven headless (before=0, one_bar=1, two_bars=2, "
+                            "restored=0); the audible click + delayed capture start still needs a live "
+                            "device -- covered by the Phase 1 hardware pass, same posture as transport play.",
+                    "before": before, "one_bar": one_bar, "two_bars": two_bars, "after": after})
 
 
 def fam_clip_move(ctx):
@@ -475,10 +506,60 @@ def fam_export_mixdown(ctx):
 
 
 def fam_export_range_tail(ctx):
-    # G1: export_audio has no range (loop/section) arg and no delay-tail policy — always
-    # renders {0, getLength()} over all tracks. Capability absent.
-    return verdict(GAP, "audio", [78, 81],
-                   {"gap": "G1", "note": "export has no range/section selection and no tail-inclusion policy."})
+    # G1: export_audio range (full/loop/custom) + delay-tail (cut/include) policy.
+    # Drives a REAL headless render for each span and asserts the ACTUAL rendered
+    # duration matches the requested span (invariant 78) and that an included tail
+    # captures MORE audio than a cut one on the same short custom range, with a
+    # reverb actually ringing (invariant 81). Relational (duration_s/frames), not
+    # golden-PCM, so it stays robust to any reverb-tail float noise across runs.
+    rtype = _find_builtin_type(ctx, "reverb")
+    if not rt_ok(rtype):
+        return verdict(FAIL, "audio", [78, 81], {"error": "no built-in reverb found in list_builtins"})
+
+    full_out = ARTDIR / "export_range_full.wav"
+    loop_out = ARTDIR / "export_range_loop.wav"
+    custom_out = ARTDIR / "export_range_custom.wav"
+    tail_cut_out = ARTDIR / "export_range_tail_cut.wav"
+    tail_include_out = ARTDIR / "export_range_tail_include.wav"
+
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rng"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 4.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(full_out)}},
+        {"command": "set_transport", "args": {"loopStart": 0.5, "loopEnd": 2.5}},
+        {"command": "export_audio", "args": {"file": str(loop_out), "range": "loop"}},
+        {"command": "export_audio", "args": {"file": str(custom_out), "range": "custom", "start": 1.0, "end": 3.0}},
+        # Push a built-in reverb hot (big room, fully wet) so tail:'include' actually
+        # captures decaying tail audio past the range end — a silence-trim edge case
+        # (no decaying source) would make include==cut, which would NOT prove the policy.
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": rtype}, "capture": {"I": "index"}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 0, "value": 0.95}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 2, "value": 1.0}},
+        {"command": "export_audio", "args": {"file": str(tail_cut_out), "range": "custom", "start": 0.0, "end": 1.0, "tail": "cut"}},
+        {"command": "export_audio", "args": {"file": str(tail_include_out), "range": "custom", "start": 0.0, "end": 1.0,
+                                              "tail": "include", "tailSeconds": 1.5}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-export-range-tail")
+    if cmd_fails(results):
+        return verdict(FAIL, "audio", [78, 81], _err(proc, {"failed": cmd_fails(results)}))
+    for p in (full_out, loop_out, custom_out, tail_cut_out, tail_include_out):
+        if not p.exists():
+            return verdict(FAIL, "audio", [78, 81], {"error": f"{p.name} was not produced"})
+
+    full_s, loop_s, custom_s = verify.stats(full_out), verify.stats(loop_out), verify.stats(custom_out)
+    cut_s, inc_s = verify.stats(tail_cut_out), verify.stats(tail_include_out)
+
+    span_ok = (
+        1.5 < full_s["duration_s"] < 6.0
+        and abs(loop_s["duration_s"] - 2.0) < 0.2 and loop_s["duration_s"] < full_s["duration_s"]
+        and abs(custom_s["duration_s"] - 2.0) < 0.2 and custom_s["duration_s"] < full_s["duration_s"]
+    )
+    tail_ok = inc_s["duration_s"] > cut_s["duration_s"] or inc_s["frames"] > cut_s["frames"]
+    ok = span_ok and tail_ok
+    return verdict(PASS if ok else FAIL, "audio", [78, 81],
+                   {"full_duration_s": full_s["duration_s"], "loop_duration_s": loop_s["duration_s"],
+                    "custom_duration_s": custom_s["duration_s"], "tail_cut_duration_s": cut_s["duration_s"],
+                    "tail_include_duration_s": inc_s["duration_s"], "span_ok": span_ok, "tail_ok": tail_ok})
 
 
 def rt_ok(t):

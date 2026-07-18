@@ -1,11 +1,14 @@
 #include "MoshOps.h"
 #include "DrumPattern.h"
+#include "ExportRange.h"
 #include "ScanProgress.h"
+#include "StemExport.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Migrations.h"
+#include "state/CountIn.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
 #include "state/Lyrics.h"
@@ -911,6 +914,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "rename_clip")       return cmdRenameClip (args);
     if (name == "set_clip_mute")     return cmdSetClipMute (args);
     if (name == "set_clip_gain")     return cmdSetClipGain (args);
+    if (name == "set_clip_fade")     return cmdSetClipFade (args);
     if (name == "relink_clip")       return cmdRelinkClip (args);
     if (name == "set_clip_warp")     return cmdSetClipWarp (args);
     if (name == "stretch_clip")      return cmdStretchClip (args);
@@ -997,6 +1001,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "reset_rave")        return cmdResetRave (args);
    #endif
     if (name == "export_audio")      return cmdExportAudio (args);
+    if (name == "export_stems")      return cmdExportStems (args);
     if (name == "list_audio_devices")return cmdListAudioDevices (args);
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
@@ -1012,6 +1017,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "save_as")           return cmdSaveAs (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
+    if (name == "set_count_in")      return broadcastStructuralIfActive (name, args, cmdSetCountIn (args));
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -2346,6 +2352,12 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
     }
     else if (action == "record" && eng.hasAudio())
     {
+        // G2b — re-sync the live Edit's pre-roll to the stored project preference
+        // right before every record start, so a save/reload that swapped in a
+        // different Edit instance (or a countInBars change from another session)
+        // is always honored. transport.record() below is what actually consults
+        // it (te::Edit::getNumCountInBeats(), via TransportControl).
+        applyCountInToEdit();
         eng.ensurePlaybackContext();
         transport.record (false);
     }
@@ -2627,11 +2639,17 @@ juce::var MoshOps::projectSettingsToVar()
     key->setProperty ("tonic", tonic);
     key->setProperty ("mode", keyMode);
 
+    // G2b — count-in / pre-roll bars, ALWAYS present (default 0/off) so the UI
+    // never sees a missing field, mirroring the key default above.
+    const int countInBars = node.hasProperty (ids::countInBars)
+                                ? (int) node.getProperty (ids::countInBars) : 0;
+
     auto* o = new DynamicObject();
     o->setProperty ("sampleRate", sr);
     o->setProperty ("bitDepth", bd);
     o->setProperty ("timeBase", tb);
     o->setProperty ("key", var (key));
+    o->setProperty ("countInBars", countInBars);
     // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
     // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
     o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
@@ -2717,6 +2735,65 @@ juce::var MoshOps::cmdSetKey (const juce::var& args)
     logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
     emitSnapshotInvalidated();
     return okResult ("set_key", projectSettingsToVar());
+}
+
+// G2b — count-in / pre-roll bars. te::Edit::CountIn's none/oneBar/twoBar values
+// are 0/1/2 — exactly mosh::countin's {0,1,2} bars domain — so a validated bars
+// value casts straight across with no lookup table. Asserted here (rather than in
+// the engine-free state/CountIn.h) because only this translation unit can see the
+// real tracktion_engine enum.
+static_assert (static_cast<int> (te::Edit::CountIn::none)   == 0
+            && static_cast<int> (te::Edit::CountIn::oneBar) == 1
+            && static_cast<int> (te::Edit::CountIn::twoBar) == 2,
+               "mosh::countin's {0,1,2} bars domain assumes te::Edit::CountIn's "
+               "none/oneBar/twoBar == 0/1/2 — update the cast in applyCountInToEdit "
+               "if tracktion_engine ever renumbers this enum");
+
+void MoshOps::applyCountInToEdit()
+{
+    // Re-applies the STORED preference to the LIVE Edit's real pre-roll every time
+    // it's called (cmdSetCountIn, and cmdSetTransport's "record" branch) rather
+    // than only at load time — so recording always honors the CURRENT project
+    // setting regardless of when/how the Edit was loaded. Cheap (writes engine
+    // property storage; no audio device needed) and safe headless.
+    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    const int bars = node.hasProperty (ids::countInBars) ? (int) node.getProperty (ids::countInBars) : 0;
+    const int clamped = mosh::countin::isValidBars (bars) ? bars : 0;   // defensive: never feed the engine a bad value
+    eng.edit().setCountInMode (static_cast<te::Edit::CountIn> (clamped));
+}
+
+juce::var MoshOps::cmdSetCountIn (const juce::var& args)
+{
+    // G2b — count-in / pre-roll bars before recording. Producer INTENT, stored on
+    // the same MOSH_PROJECT node as timeBase/key, following the cmdSetKey template
+    // exactly: validate-then-write, NO Tracktion transaction (no
+    // beginNewTransaction), logLine(..., false) → NON-undoable preference,
+    // emitSnapshotInvalidated. Works headless (no audio device required).
+    //
+    // ENGINE-WIRED, not just stored: applyCountInToEdit() below pushes the value
+    // straight into tracktion_engine's own pre-roll (te::Edit::setCountInMode),
+    // which TransportControl's record-start logic already consults
+    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an
+    // audible click through the pre-roll before capture actually begins — see
+    // tracktion_TransportControl.cpp's performRecord. No new recording machinery was
+    // needed; Mosh just exposes + persists the setting the engine already honors.
+    if (! args.hasProperty ("bars"))
+        return errResult ("set_count_in", "bars is required");
+
+    const int bars = (int) args.getProperty ("bars", 0);
+    if (! mosh::countin::isValidBars (bars))
+        return errResult ("set_count_in", mosh::countin::validationError());
+
+    auto node = projectSettingsTree();
+    node.setProperty (ids::countInBars, bars, nullptr);
+    applyCountInToEdit();                                  // immediate effect this session
+
+    eng.markDirty();                                        // edit-state change → needs re-save (gap 1)
+    logLine ("set_count_in", args, true, {}, false);        // preference — NOT undoable
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("countInBars", bars);
+    return okResult ("set_count_in", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3829,6 +3906,44 @@ juce::var MoshOps::cmdSetClipGain (const juce::var& args)
     logLine ("set_clip_gain", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_clip_gain");
+}
+
+// G4b — clip fades. String -> AudioFadeCurve::Type, default linear (mirrors the enum
+// tracktion_AudioFadeCurve.h ships: linear=1, convex=2, concave=3, sCurve=4).
+static te::AudioFadeCurve::Type fadeCurveFromName (const juce::String& name)
+{
+    if (name.equalsIgnoreCase ("convex"))  return te::AudioFadeCurve::convex;
+    if (name.equalsIgnoreCase ("concave")) return te::AudioFadeCurve::concave;
+    if (name.equalsIgnoreCase ("sCurve") || name.equalsIgnoreCase ("scurve")) return te::AudioFadeCurve::sCurve;
+    return te::AudioFadeCurve::linear;
+}
+
+juce::var MoshOps::cmdSetClipFade (const juce::var& args)
+{
+    // Clip-edge fades (reality-pack inv 30: "affect edges without moving clip boundaries").
+    // setFadeIn/setFadeOut (AudioClipBase.cpp) clamp to [0, clipLength] and rescale if
+    // fadeIn+fadeOut exceeds the clip length — no boundary move, ever. Audio-clip-only,
+    // mirrors set_clip_gain. Fades bind to the clip's own ValueTree via a plain
+    // CachedValue.referTo(state, id, um) — the SAME undo/persistence path as clip gain,
+    // so this is undoable + save/reload-durable with zero src/state schema change.
+    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (ac == nullptr) return errResult ("set_clip_fade", "not an audio clip");
+    beginTxn ("set_clip_fade");
+    if (args.hasProperty ("fadeInSec"))
+        ac->setFadeIn  (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeInSec",  0.0))));
+    if (args.hasProperty ("fadeOutSec"))
+        ac->setFadeOut (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeOutSec", 0.0))));
+    if (args.hasProperty ("curveIn"))
+        ac->setFadeInType  (fadeCurveFromName (args.getProperty ("curveIn",  "linear").toString()));
+    if (args.hasProperty ("curveOut"))
+        ac->setFadeOutType (fadeCurveFromName (args.getProperty ("curveOut", "linear").toString()));
+    logLine ("set_clip_fade", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", ac->itemID.toString());
+    data->setProperty ("fadeInSec",  ac->getFadeIn().inSeconds());
+    data->setProperty ("fadeOutSec", ac->getFadeOut().inSeconds());
+    return okResult ("set_clip_fade", var (data));
 }
 
 juce::var MoshOps::cmdRelinkClip (const juce::var& args)
@@ -8576,6 +8691,28 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
         renderModeReason = "requested fast render";
     }
 
+    // ── Export range (invariant 78) + delay-tail policy (invariant 81) ──────────
+    // Resolved + validated BEFORE the device teardown below so a bad range/tail arg
+    // returns an error without a needless freePlaybackContext(). getLoopRange() reads
+    // transport CachedValue state and is context-independent either way. The actual
+    // resolution/validation math is pure + engine-free (mosh::resolveExportRange,
+    // src/moshops/ExportRange.h) so it's unit-testable without a live MoshEngine —
+    // see tests/test_export_range.cpp.
+    const auto loopRange = edit.getTransport().getLoopRange();
+    const auto rangeRes = resolveExportRange (
+        edit.getLength().inSeconds(),
+        loopRange.getStart().inSeconds(), loopRange.getEnd().inSeconds(),
+        args.hasProperty ("range"), args.getProperty ("range", var()).toString(),
+        args.hasProperty ("start"), (double) args.getProperty ("start", 0.0),
+        args.hasProperty ("end"),   (double) args.getProperty ("end", 0.0),
+        args.hasProperty ("tail"),  args.getProperty ("tail", var()).toString(),
+        args.hasProperty ("tailSeconds"), (double) args.getProperty ("tailSeconds", 2.0));
+    if (! rangeRes.ok)
+        return errResult ("export_audio", rangeRes.error);
+    const double rStart = rangeRes.rangeStart, rEnd = rangeRes.rangeEnd;
+    const juce::String rangeKind = rangeRes.rangeKind, tailKind = rangeRes.tailKind;
+    const double tailSeconds = rangeRes.tailSeconds;
+
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
     // is attached. Tear down our level-meter taps first (the master tap lives on
@@ -8587,7 +8724,7 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     edit.getTransport().freePlaybackContext();
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the next ctx
 
-    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+    const double len = juce::jmax (0.1, rEnd - rStart);
 
     // Sample rate: honor a valid explicit request (>= 7000), else the stored
     // per-project setting (PRJ-008), else the device rate with the 44100 fallback.
@@ -8615,7 +8752,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
     if (params.blockSizeForAudio <= 0)
         params.blockSizeForAudio = 512;
-    params.time = { tracktion::TimePosition(), edit.getLength() };
+    params.time = { tracktion::TimePosition::fromSeconds (rStart),
+                     tracktion::TimePosition::fromSeconds (rEnd) };
+    params.endAllowance = tracktion::TimeDuration::fromSeconds (tailSeconds);
     params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
     params.usePlugins = true;
     params.useMasterPlugins = true;
@@ -8640,9 +8779,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             // forever. A no-progress watchdog + an absolute deadline (scaled to the edit
             // length to allow legitimate realtime renders) turn any such stall into a clean
             // error instead of an app hang.
-            const double editSeconds  = edit.getLength().inSeconds();
+            const double renderSpan   = (rEnd - rStart) + tailSeconds;   // actual rendered span, not the whole edit
             const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
-            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, editSeconds * 8000.0 + 60000.0);
+            const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, renderSpan * 8000.0 + 60000.0);
             const juce::uint32 stallMs    = 20000;   // abort if progress doesn't advance for 20s
             float  lastProgress   = -1.0f;
             juce::uint32 lastProgressMs = startMs;
@@ -8690,11 +8829,317 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     }
     data->setProperty ("bytes", (juce::int64) file.getSize());
     data->setProperty ("seconds", len);
+    data->setProperty ("range", rangeKind);
+    data->setProperty ("rangeStart", rStart);
+    data->setProperty ("rangeEnd", rEnd);
+    data->setProperty ("tail", tailKind);
+    data->setProperty ("endAllowance", tailSeconds);
     data->setProperty ("renderModeRequested", requestedMode);
     data->setProperty ("renderMode", renderMode);
     data->setProperty ("renderModeReason", renderModeReason);
     data->setProperty ("realTimeRender", params.realTimeRender);
     return okResult ("export_audio", var (data));
+}
+
+bool MoshOps::writeSilentStemFile (const juce::File& dest, juce::AudioFormat* format, int bitDepth,
+                                   double sampleRate, double lengthSeconds)
+{
+    if (format == nullptr) return false;
+    dest.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> os (dest.createOutputStream());
+    if (os == nullptr) return false;
+
+    const int numChannels = 2;   // stereo, matching the rest of the stem set
+    std::unique_ptr<juce::AudioFormatWriter> writer (
+        format->createWriterFor (os.get(), sampleRate, (unsigned) numChannels, bitDepth, {}, 0));
+    if (writer == nullptr) return false;
+    os.release();   // the writer owns the stream now
+
+    const int numSamples = juce::jmax (1, (int) std::ceil (lengthSeconds * sampleRate));
+    juce::AudioBuffer<float> silence (numChannels, numSamples);
+    silence.clear();
+    const bool wrote = writer->writeFromAudioSampleBuffer (silence, 0, numSamples);
+    writer.reset();   // flush + close before the caller reads the file back
+    return wrote;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G7 — cmdExportStems: one WAV/AIFF/FLAC per visible, non-empty audio track, ALL
+// sharing the same {0, editLength} render window (the "common zero point" — a
+// track whose clips start at bar 8 yields a stem with 8 bars of leading silence,
+// so every stem is the same length and re-imports aligned). Mirrors
+// cmdExportAudio's format/bit-depth/sample-rate resolution (deliberately kept
+// self-contained rather than sharing a helper — see the spec §2 "shared-helper
+// refactor (recommended)" note; duplication is the smaller, lower-risk diff and
+// the golden/verify gate catches any drift) and reuses bounceClipToWav's
+// single-track render primitive in a loop instead of a single all-tracks render.
+// NON-undoable (read/render, no ValueTree mutation the undo system needs to
+// know about) — same posture as export_audio.
+//
+// ── CORRECTNESS FIX (found by adversarial review, empirically reproduced): the
+// original version of this command set ONLY `params.tracksToDo = te::toBitSet(one)`
+// to try to isolate the single target track, per the spec's "NO allowedClips —
+// we render the whole track" design. That design was built on a false premise:
+// `te::toBitSet()` in the PINNED tracktion_engine clone (2877b621,
+// modules/tracktion_engine/model/edit/tracktion_EditUtilities.cpp:179-193) does
+// NOT restrict the bitset to the tracks passed in — it's an upstream bug. Its body
+// loops `t` over `getAllTracks(edit)` and sets the bit whenever
+// `allTracks.indexOf(t) >= 0`, which is trivially true for every t (t is drawn
+// FROM allTracks), so it unconditionally sets every track's bit regardless of the
+// `tracks` array argument. `params.tracksToDo` therefore evaluated to "every
+// track in the edit" no matter which single track was passed in, and
+// `cnp.allowedTracks` (tracktion_Renderer.cpp:38/140) ended up permitting ALL
+// tracks — so every "stem" actually rendered the full mix. Verified by reading
+// the upstream source (see the exact lines above); `bounceClipToWav` (:6867)
+// never hit this because it ALSO sets `params.allowedClips` to the one clip it
+// wants, and `allowedClips` is filtered independently, per-clip, in
+// EditNodeBuilder.cpp regardless of tracksToDo/allowedTracks — so its bug was
+// silently masked. The fix: populate `params.allowedClips` with every clip that
+// belongs to the target track (not just one), which genuinely isolates it the
+// same proven way bounceClipToWav does. `tracksToDo` is left set (harmless —
+// it's not load-bearing for isolation) only because the render-gate check below
+// reads `tracksToDo.countNumberOfSetBits() > 0`.
+//
+// One wrinkle: `allowedClips` can't express "zero clips" — an EMPTY array means
+// "no filter" (ALL clips), not "no clips." So a genuinely clip-less track
+// (`includeEmpty:true`) is written directly as silence via writeSilentStemFile,
+// bypassing te::Renderer for that one stem.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdExportStems (const juce::var& args)
+{
+    auto& edit = eng.edit();
+
+    // ── Format / extension resolution (trimmed-down cmdExportAudio copy — stems
+    // take a destination "dir", not a per-file "file", so there is no extension-
+    // inference-from-filename branch to mirror). ───────────────────────────────
+    auto& afm = edit.engine.getAudioFileFormatManager();
+    const auto requestedFormat = args.getProperty ("format", var()).toString().trim().toLowerCase();
+
+    struct FormatChoice { juce::AudioFormat* format = nullptr; juce::String extension; };
+    auto formatForKeyword = [&afm] (const juce::String& kw) -> FormatChoice
+    {
+        if (kw == "wav")  return { afm.getWavFormat(),  ".wav" };
+        if (kw == "aiff" || kw == "aif") return { afm.getAiffFormat(), ".aiff" };
+        if (kw == "flac") return { afm.getFlacFormat(), ".flac" };
+        return {};
+    };
+
+    juce::AudioFormat* audioFormat = afm.getWavFormat();
+    juce::String formatName = "wav";
+    juce::String extension = ".wav";
+    if (requestedFormat.isNotEmpty())
+    {
+        auto choice = formatForKeyword (requestedFormat);
+        if (choice.format == nullptr)
+            return errResult ("export_stems", "unsupported format: " + requestedFormat
+                              + " (supported: wav, aiff, flac)");
+        audioFormat = choice.format;
+        formatName  = requestedFormat == "aif" ? "aiff" : requestedFormat;
+        extension   = choice.extension;
+    }
+    if (audioFormat == nullptr)   // belt-and-braces: never render with a null format
+        audioFormat = afm.getDefaultFormat();
+
+    // ── Bit depth — PRJ-008: default from the stored per-project setting, same
+    // precedence as cmdExportAudio. ─────────────────────────────────────────────
+    auto projectSettings = edit.state.getChildWithName (ids::MOSH_PROJECT);
+    int bitDepth = projectSettings.hasProperty (ids::projectBitDepth)
+                       ? (int) projectSettings.getProperty (ids::projectBitDepth)
+                       : 24;
+    {
+        auto depths = audioFormat->getPossibleBitDepths();
+        if (args.hasProperty ("bitDepth"))
+        {
+            bitDepth = (int) args.getProperty ("bitDepth", 24);
+            if (! depths.contains (bitDepth))
+            {
+                juce::StringArray supported;
+                for (auto d : depths) supported.add (String (d));
+                return errResult ("export_stems", "format " + formatName + " does not support bit depth "
+                                  + String (bitDepth) + " (supported: " + supported.joinIntoString (", ") + ")");
+            }
+        }
+        else if (! depths.isEmpty() && ! depths.contains (bitDepth))
+        {
+            int best = depths[0];
+            for (auto d : depths) if (std::abs (d - 24) < std::abs (best - 24)) best = d;
+            bitDepth = best;
+        }
+    }
+
+    // ── Sample rate — same PRJ-008 precedence as cmdExportAudio. ────────────────
+    double sampleRate = edit.engine.getDeviceManager().getSampleRate();
+    if (sampleRate < 7000.0)
+        sampleRate = 44100.0;
+    if (! args.hasProperty ("sampleRate") && projectSettings.hasProperty (ids::projectSampleRate))
+    {
+        const double projSr = (double) projectSettings.getProperty (ids::projectSampleRate);
+        if (projSr >= 7000.0)
+            sampleRate = projSr;
+    }
+    if (args.hasProperty ("sampleRate"))
+    {
+        const double reqSr = (double) args.getProperty ("sampleRate", sampleRate);
+        if (reqSr >= 7000.0)
+            sampleRate = reqSr;
+    }
+
+    const auto requestedMode = args.getProperty ("renderMode", "auto").toString().toLowerCase();
+    if (requestedMode != "auto" && requestedMode != "fast" && requestedMode != "realtime")
+        return errResult ("export_stems", "renderMode must be 'auto', 'fast', or 'realtime'");
+
+    // Destination directory: explicit `dir` arg, else sessionDir/exports/stems-<ms>.
+    juce::File dir = args.getProperty ("dir", var()).toString().isNotEmpty()
+        ? juce::File (args.getProperty ("dir", var()).toString())
+        : eng.sessionDir().getChildFile ("exports")
+              .getChildFile ("stems-" + String (Time::getCurrentTime().toMilliseconds()));
+    dir.createDirectory();
+
+    const bool includeEmpty = (bool) args.getProperty ("includeEmpty", false);
+
+    // Render exclusivity (01 §5), done ONCE for the whole stem set — mirrors
+    // cmdExportAudio's teardown so the master meter re-attaches to the NEXT context.
+    unregisterAllMeterClients();
+    edit.getTransport().stop (false, false);
+    edit.getTransport().freePlaybackContext();
+    lastSeenContext = nullptr;
+
+    // Edit-wide render mode: one realtime-only hosted synth (e.g. Serum) anywhere in
+    // the edit forces ALL stems to render realtime — a safe superset, computed once
+    // rather than per-track (mirrors cmdExportAudio's "auto" resolution).
+    const bool realtime = requestedMode == "realtime"
+                          || (requestedMode == "auto" && findSerumRealtimeRenderReason (edit).isNotEmpty());
+
+    const double len = juce::jmax (0.1, edit.getLength().inSeconds());
+    int blockSize = edit.engine.getDeviceManager().getBlockSize();
+    if (blockSize <= 0) blockSize = 512;
+
+    juce::Array<var> stems;
+    juce::String firstError;
+    int index = 0;   // matches snapshot()'s track index (te::getAudioTracks, moshHidden filtered)
+
+    for (auto* t : te::getAudioTracks (edit))
+    {
+        if (t == nullptr) continue;
+        if ((bool) t->state.getProperty (ids::moshHidden, false)) continue;   // Phase-2 hidden beneath-render track — never a stem
+        const int myIndex = index++;
+        const juce::Array<te::Clip*> trackClips = t->getClips();             // THIS track's own clips (may be empty)
+        if (! includeEmpty && trackClips.isEmpty()) continue;                // skip silent tracks by default
+
+        auto file = dir.getChildFile (stemFileBaseName (myIndex, t->getName())).withFileExtension (extension);
+        file.deleteFile();
+
+        juce::String renderError;
+
+        if (trackClips.isEmpty())
+        {
+            // includeEmpty:true on a genuinely clip-less track — allowedClips can't express
+            // "zero clips" (see the comment above this function), so write silence directly
+            // at the common-zero-point length instead of going through te::Renderer.
+            if (! writeSilentStemFile (file, audioFormat, bitDepth, sampleRate, len))
+                renderError = "could not write a silent stem file";
+        }
+        else
+        {
+            te::Renderer::Parameters params (edit);
+            params.destFile           = file;
+            params.audioFormat        = audioFormat;
+            params.bitDepth           = bitDepth;
+            params.sampleRateForAudio = sampleRate;
+            params.blockSizeForAudio  = blockSize;
+            params.time               = { tracktion::TimePosition(), edit.getLength() };   // COMMON zero point — every stem shares this window
+            juce::Array<te::Track*> one; one.add (t);
+            params.tracksToDo         = te::toBitSet (one);   // kept for the countNumberOfSetBits() gate below; NOT load-bearing for isolation (see the comment above cmdExportStems)
+            params.allowedClips.addArray (trackClips);        // ← the ACTUAL per-track isolation mechanism
+            params.usePlugins         = true;                 // instrument + insert FX = the track's own post-fader sound
+            params.useMasterPlugins   = false;                // pre-master — sum of stems + master chain reproduces the mix
+            params.createMidiFile     = false;
+            params.realTimeRender     = realtime;
+
+            const te::Edit::ScopedRenderStatus srs (edit, true);
+            te::TransportControl::stopAllTransports (edit.engine, false, true);
+            te::Renderer::turnOffAllPlugins (edit);
+
+            if (params.tracksToDo.countNumberOfSetBits() > 0
+                && params.destFile.hasWriteAccess()
+                && ! params.destFile.isDirectory())
+            {
+                te::Renderer::RenderTask task ("Mosh stem export", params, nullptr, nullptr);
+
+                // Same no-progress watchdog + absolute deadline as cmdExportAudio /
+                // bounceClipToWav, so ONE bad track's stalled render (e.g. an unreadable
+                // source) errors cleanly instead of hanging the whole stem set.
+                const juce::uint32 startMs    = juce::Time::getMillisecondCounter();
+                const juce::uint32 deadlineMs = (juce::uint32) juce::jmax (60000.0, len * 8000.0 + 60000.0);
+                const juce::uint32 stallMs    = 20000;
+                float  lastProgress   = -1.0f;
+                juce::uint32 lastProgressMs = startMs;
+
+                while (task.runJob() == juce::ThreadPoolJob::jobNeedsRunningAgain)
+                {
+                    const juce::uint32 nowMs = juce::Time::getMillisecondCounter();
+                    const float p = task.getCurrentTaskProgress();
+                    if (p > lastProgress) { lastProgress = p; lastProgressMs = nowMs; }
+
+                    if (nowMs - lastProgressMs > stallMs || nowMs - startMs > deadlineMs)
+                    {
+                        if (task.errorMessage.isEmpty())
+                            task.errorMessage = "stem render stalled (a clip's audio source could not be read)";
+                        break;
+                    }
+                }
+
+                te::Renderer::turnOffAllPlugins (edit);
+
+                if (task.errorMessage.isNotEmpty())
+                {
+                    renderError = task.errorMessage;
+                    file.deleteFile();
+                }
+            }
+            else
+            {
+                renderError = "render target is not writable or no tracks are renderable";
+            }
+        }
+
+        if (renderError.isNotEmpty())
+        {
+            // Best-effort: one bad track must not abort the whole stem set — record the
+            // first failure (surfaced only if EVERY track ends up failing) and continue.
+            if (firstError.isEmpty())
+                firstError = t->getName() + ": " + renderError;
+            continue;
+        }
+
+        if (file.existsAsFile() && file.getSize() > 0)
+        {
+            auto* so = new DynamicObject();
+            so->setProperty ("trackId",   t->itemID.toString());
+            so->setProperty ("logicalId", logicalid::ensureTrack (t->state));
+            so->setProperty ("name",      t->getName());
+            so->setProperty ("index",     myIndex);
+            so->setProperty ("file",      file.getFullPathName());
+            so->setProperty ("bytes",     (juce::int64) file.getSize());
+            stems.add (var (so));
+        }
+    }
+
+    const bool ok = ! stems.isEmpty();
+    logLine ("export_stems", args, ok, ok ? String() : (firstError.isNotEmpty() ? firstError : String ("no renderable tracks")), false);
+    if (! ok)
+        return errResult ("export_stems", firstError.isNotEmpty() ? firstError
+                          : String ("no renderable tracks (all empty or hidden)"));
+
+    auto* data = new DynamicObject();
+    data->setProperty ("dir",        dir.getFullPathName());
+    data->setProperty ("format",     formatName);
+    data->setProperty ("bitDepth",   bitDepth);
+    data->setProperty ("sampleRate", sampleRate);
+    data->setProperty ("seconds",    len);
+    data->setProperty ("count",      stems.size());
+    data->setProperty ("stems",      var (stems));
+    return okResult ("export_stems", var (data));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9501,7 +9946,13 @@ juce::var MoshOps::snapshot()
     // Single source: the MOSH_PROJECT node via projectSettingsToVar; a convenience mirror,
     // not a second store.
     if (auto* po = projectVar.getDynamicObject())
+    {
         session->setProperty ("key", po->getProperty ("key"));
+        // G2b — same mirror for the count-in / pre-roll bars, so the UI can read
+        // session.countInBars directly (like session.metronome) without reaching
+        // into session.project.
+        session->setProperty ("countInBars", po->getProperty ("countInBars"));
+    }
 
     Array<var> tracks;
     int index = 0;
@@ -9822,6 +10273,14 @@ juce::var MoshOps::clipToVar (te::Clip& c)
         o->setProperty ("sourceMissing", ! w->getCurrentSourceFile().existsAsFile());   // gap 3 — relink cue
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
+        // G4b — clip fades: additive, unconditional (mirrors gainDb) so the snapshot always
+        // reflects the current fade even when it's the 0/0 default. getFadeIn()/getFadeOut()
+        // would auto-crossfade-adjust when autoCrossfade is on AND a neighbor overlaps; Mosh
+        // leaves autoCrossfade off, so this reads the raw stored fade in the common case.
+        o->setProperty ("fadeInSec",   w->getFadeIn().inSeconds());
+        o->setProperty ("fadeOutSec",  w->getFadeOut().inSeconds());
+        o->setProperty ("fadeInType",  (int) w->getFadeInType());   // 1..4 — UI only needs durations for v1
+        o->setProperty ("fadeOutType", (int) w->getFadeOutType());
         // Audio warp (auto-tempo): the clip follows the tempo map when on.
         o->setProperty ("autoTempo", w->getAutoTempo());
         if (w->getAutoTempo())
@@ -10327,7 +10786,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "create_track", "rename_track", "remove_track", "set_track_type",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
-        "set_clip_mute", "set_clip_gain", "relink_clip", "set_clip_warp",
+        "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
         "duplicate_clip", "delete_time_range", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
         "create_section", "rename_section", "move_section", "remove_section",

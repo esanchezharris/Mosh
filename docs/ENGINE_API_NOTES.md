@@ -152,9 +152,61 @@ Verified against the pinned clone for the composite grid command:
   `cmdAddMidiClip`; clip-note beats are clip-local (no clip-start offset).
 - clipId→track resolution: `clip->getTrack()` (proven via `lockKeyFor`'s Clip branch).
 
+## Count-in / pre-roll before recording (G2b `set_count_in`) — RESOLVED, engine ALREADY had it
+
+`tracktion_engine` ships a REAL, engine-native pre-roll — no new recording machinery was
+needed, only exposing + persisting the setting:
+
+- **`te::Edit::CountIn`** (`model/edit/tracktion_Edit.h:707`): `enum class CountIn { none=0,
+  oneBar=1, twoBar=2, twoBeat=3, oneBeat=4 }`; `void setCountInMode (CountIn)` / `CountIn
+  getCountInMode() const` / `int getNumCountInBeats() const` (`tracktion_Edit.cpp:2500`).
+  `setCountInMode` writes through `engine.getPropertyStorage()` — engine-global storage, NOT
+  part of the Edit's own ValueTree, so it does NOT persist with a specific project on its own.
+  Mosh's `countInBars` (0/1/2, matching `none`/`oneBar`/`twoBar`'s literal underlying values —
+  see `state/CountIn.h`) is instead the durable, per-project, on-tree source of truth (same
+  `MOSH_PROJECT` node as `timeBase`/`musicalTonic`); `MoshOps::applyCountInToEdit()` re-pushes
+  it into the live `Edit::setCountInMode` both immediately (`cmdSetCountIn`) and right before
+  every `record` action (`cmdSetTransport`), so the engine's live state always matches the
+  stored project preference regardless of load order.
+- **Where the engine actually consults it:** `TransportControl::performRecord()`
+  (`playback/tracktion_TransportControl.cpp:~1483`) reads `edit.getNumCountInBeats()`,
+  rolls `prerollStart` back that many beats from the punch-in time, and — when count-in beats
+  > 0 — calls `edit.setClickTrackRange(...)` so the click track audibly counts in through the
+  pre-roll; `playbackContext->prepareForRecording(prerollStart, punchInTime)` is what actually
+  delays capture until the real punch-in point. This is exactly "N bars of pre-roll before
+  capture begins" — Mosh gets it for free once `setCountInMode` is set correctly.
+- **v0 scope:** only `none`/`oneBar`/`twoBar` are exposed (bars 0/1/2); `oneBeat`/`twoBeat`
+  exist in the engine but aren't surfaced — a small future extension, not a v0 need.
+- **Verification ceiling:** headless (`--selftest`/`--run-script`) can prove the command's
+  validation/snapshot/persistence/non-undoable-preference contract, but NOT the audible click
+  or the actual delayed capture start — that needs a live audio device (`transport.record()`'s
+  branch is gated on `eng.hasAudio()`), same posture as `fam_transport_play` in
+  `scripts/daw-conformance/conformance.py`.
+
+## Export range/section + delay-tail policy (G1 `export_audio`) — RESOLVED
+
+Verified against the pinned clone (`model/export/tracktion_Renderer.h`):
+- `Renderer::Parameters::time` (`TimeRange`) is the render span — set from two
+  `TimePosition::fromSeconds(...)` values exactly like `params.time` was already built
+  from `TimePosition()`/`edit.getLength()`; no new idiom needed.
+- `Renderer::Parameters::endAllowance` (`TimeDuration`) is the delay-tail policy,
+  already built into the engine ("optional tail time for notes to end, delays/reverbs
+  to decay… stopped early once the level drops to silence within the allowance" —
+  `tracktion_NodeRenderContext.cpp:147,302-312`). `tail:"cut"` leaves it at the default
+  `0s`; `tail:"include"` sets it to the clamped `tailSeconds`.
+- `TransportControl::getLoopRange()` (`playback/tracktion_TransportControl.h:196`) reads
+  `CachedValue<TimePosition> loopPoint1/loopPoint2` — context-independent (no playback
+  context needed), so it's safe to read before the render-exclusivity teardown; a fresh
+  Edit's loop defaults to `{0,0}` (empty — the "no loop set" error case).
+- `endAllowance>0` disables the WAV ACID-loop metadata (`tracktion_Renderer.cpp:83`
+  only stamps it when `endAllowance==0s`) — harmless; a tail-included render isn't a
+  clean one-shot loop by definition.
+- Range/tail resolution + validation is pure and engine-free
+  (`mosh::resolveExportRange`, `src/moshops/ExportRange.h`), unit-tested directly by
+  `tests/test_export_range.cpp` without a live `MoshEngine`.
+
 ## Still to verify at their stages
 
-- **Renderer::Parameters** field names + `renderToFile` overload (`tracksToDo` bitset, `allowedClips`) — Stage 5. Grep `modules/tracktion_engine/.../tracktion_Renderer.h`.
 - **Takes / CompManager / WaveCompManager** external-take injection — Stage 5. If opaque → new-clip-on-neural-lane fallback (already a user-selectable mode, 05 §3.1).
 - **LatencyPlugin .h/.cpp** exact latency-reporting pattern — Stage 4. `modules/tracktion_engine/plugins/effects/`.
 - **anira `InferenceHandler::process/prepare`** signatures — Stage 4, against the pinned anira.

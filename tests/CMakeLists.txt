@@ -9,10 +9,12 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_drum_pattern.cpp
+    test_export_range.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
     test_migrations.cpp
+    test_count_in.cpp
     test_sections.cpp
     test_lyrics.cpp
     test_annotations.cpp
@@ -26,6 +28,7 @@ target_sources(MoshTests PRIVATE
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
     test_rave_engine.cpp
+    test_stem_export.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp

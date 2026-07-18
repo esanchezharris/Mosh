@@ -1052,6 +1052,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "set_metronome", args1 ("enabled", false));
         check (! (bool) sess().getProperty ("metronome", true), "metronome disabled in snapshot");
 
+        // G2b — count-in / pre-roll bars (smoke; full coverage in its own section below).
+        cmd (ops, "set_count_in", args1 ("bars", 1));
+        check ((int) sess().getProperty ("countInBars", -1) == 1, "countInBars reflects set_count_in in the Wave 2 smoke");
+        cmd (ops, "set_count_in", args1 ("bars", 0));   // restore default for the rest of Wave 2
+
         // Navigation: go-to-end / go-to-start.
         const double len = (double) sess().getProperty ("length", 0.0);
         cmd (ops, "set_transport", args1 ("action", "to_end"));
@@ -1140,6 +1145,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", cid }, { "name", "Renamed" }}))), "rename_clip ok");
         check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "clip name reflects rename");
+        // G4A — rename_clip is undoable (was uncovered): undo restores the prior name, redo re-applies.
+        check (ok (cmd (ops, "undo")), "undo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() != "Renamed", "undo restores clip's prior name");
+        check (ok (cmd (ops, "redo")), "redo rename_clip ok");
+        check (clipById (cid).getProperty ("name", var()).toString() == "Renamed", "redo re-applies clip rename");
 
         check (ok (cmd (ops, "set_clip_mute", objN ({{ "clipId", cid }, { "mute", true }}))), "set_clip_mute ok");
         check ((bool) clipById (cid).getProperty ("mute", false), "clip mute reflects in snapshot");
@@ -1159,6 +1169,78 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "undo")), "undo set_clip_gain ok");
         check (std::abs ((double) clipById (cid).getProperty ("gainDb", 0.0) - 24.0) < 0.5, "undo restores prior clip gain (+24)");
         cmd (ops, "set_clip_gain", objN ({{ "clipId", cid }, { "gainDb", 6.0 }}));   // sane default for downstream
+
+        // G4b — clip fades (fade-in / fade-out, + optional curve type). Audio-clip-only,
+        // undoable, JSONL-logged undoable:true, snapshot-invalidating. Fades render NATIVELY
+        // through Tracktion's AudioClipBase — no src/state schema change (free persistence
+        // + undo, proven below).
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", -1.0) - 0.0) < 0.02
+               && std::abs ((double) clipById (cid).getProperty ("fadeOutSec", -1.0) - 0.0) < 0.02,
+               "clip fades default to 0/0");
+        check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "fadeInSec", 0.5 }, { "fadeOutSec", 0.25 }}))),
+               "set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec reflects in snapshot");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec reflects in snapshot");
+
+        // Undo/redo — the plain CachedValue.referTo(state, id, um) path (same mechanism as
+        // clip gain), so this is undoable exactly like every other clip command.
+        check (ok (cmd (ops, "undo")), "undo set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", -1.0) - 0.0) < 0.02, "undo restores clip fadeInSec to 0");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", -1.0) - 0.0) < 0.02, "undo restores clip fadeOutSec to 0");
+        check (ok (cmd (ops, "redo")), "redo set_clip_fade ok");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "redo re-applies clip fadeInSec");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "redo re-applies clip fadeOutSec");
+
+        // Clamp / no-boundary-move (reality-pack inv 30): an over-length fade-in clamps to
+        // the clip's own length and NEVER moves the clip's start/length — the fade shapes
+        // the edge, it never relocates it.
+        {
+            const double startBefore  = (double) clipById (cid).getProperty ("start", -1.0);
+            const double lengthBefore = (double) clipById (cid).getProperty ("length", -1.0);
+            check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "fadeInSec", 5.0 }}))),
+                   "set_clip_fade (over-length fadeIn) ok");
+            check ((double) clipById (cid).getProperty ("fadeInSec", 0.0) <= lengthBefore + 0.02,
+                   "clip fadeInSec clamps to <= clip length");
+            check (std::abs ((double) clipById (cid).getProperty ("start", -1.0) - startBefore) < 0.001
+                   && std::abs ((double) clipById (cid).getProperty ("length", -1.0) - lengthBefore) < 0.001,
+                   "fade does not move clip start/length (inv 30)");
+            check (ok (cmd (ops, "undo")), "undo over-length fadeIn ok");   // restore 0.5/0.25 for downstream
+        }
+
+        // Type rejection: fades are audio-clip-only (mirrors set_clip_gain).
+        {
+            auto midiFade = cmd (ops, "add_midi_clip", objN ({{ "trackId", et }, { "length", 1.0 }}));
+            const auto midiFadeCid = midiFade["data"].getProperty ("clipId", var()).toString();
+            check (! ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", midiFadeCid }, { "fadeInSec", 0.2 }}))),
+                   "set_clip_fade on a MIDI clip rejected");
+            cmd (ops, "remove_clip", args1 ("clipId", midiFadeCid));   // tidy
+        }
+
+        // Save/reload persistence — proves the free-persistence claim: fades ride
+        // Tracktion's own ValueTree, no src/state code at all.
+        cmd (ops, "save"); cmd (ops, "reload");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeInSec", 0.0) - 0.5) < 0.02, "clip fadeInSec persists across save/reload");
+        check (std::abs ((double) clipById (cid).getProperty ("fadeOutSec", 0.0) - 0.25) < 0.02, "clip fadeOutSec persists across save/reload");
+
+        // JSONL: set_clip_fade logged undoable:true (mirror the warp assert).
+        {
+            auto flog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool fadeU = false;
+            for (auto& ln : StringArray::fromLines (flog))
+                if (ln.contains ("\"command\": \"set_clip_fade\"") && ln.contains ("\"undoable\": true")) fadeU = true;
+            check (fadeU, "set_clip_fade logged undoable:true");
+        }
+
+        // Curve types (optional args): curveIn/curveOut map to AudioFadeCurve::Type
+        // (1=linear 2=convex 3=concave 4=sCurve), surfaced on the snapshot as
+        // fadeInType/fadeOutType next to the durations.
+        check ((int) clipById (cid).getProperty ("fadeInType", 0) == 1
+               && (int) clipById (cid).getProperty ("fadeOutType", 0) == 1,
+               "clip fade curve types default to linear (1)");
+        check (ok (cmd (ops, "set_clip_fade", objN ({{ "clipId", cid }, { "curveIn", "convex" }, { "curveOut", "sCurve" }}))),
+               "set_clip_fade (curve) ok");
+        check ((int) clipById (cid).getProperty ("fadeInType", 0) == 2, "clip fadeInType reflects curveIn=convex");
+        check ((int) clipById (cid).getProperty ("fadeOutType", 0) == 4, "clip fadeOutType reflects curveOut=sCurve");
 
         const int before = trackById (et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
@@ -2103,6 +2185,119 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         aiffFile.deleteFile();
     }
 
+    // --- G1: export range/section + delay-tail policy --------------------------
+    // export_audio {range,start,end,tail,tailSeconds} — invariants 78 (render the
+    // intended span: full/loop/custom) and 81 (delay/reverb tails include-or-cut on
+    // an explicit policy). new_project isolates a clean edit (mirrors the mp-export
+    // and relink-export isolation sections above) so edit.getLength() is exactly the
+    // one 4s test-tone clip we add here, not the cumulative length of every clip the
+    // earlier sections in this run have staged.
+    section ("Export range + tail policy (G1)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "g1-export-selftest"))), "new_project (G1 export isolation) ok");
+
+        auto gt = cmd (ops, "create_track", args1 ("name", "G1 Tone"))["data"].getProperty ("trackId", var()).toString();
+        // freq 337 is unique to this section: add_test_tone_clip caches the generated
+        // WAV by int(freq) and reuses it (duration is NOT in the key — see the LoRA
+        // rack section's note above), so sharing a frequency with another section that
+        // expects a different duration (e.g. the 220Hz/2s tone elsewhere in this file)
+        // would silently give G1's clip the WRONG length and fail the rangeEnd/seconds
+        // assertions below.
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt }, { "seconds", 4.0 }, { "freq", 337.0 }}))),
+               "G1: add_test_tone_clip (4s) ok");
+
+        auto g1Dir = eng.sessionDir().getChildFile ("exports");
+
+        // range:'loop' with NO loop set yet (a fresh edit's loop is {0,0}) -> error,
+        // BEFORE any loop has been configured below.
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-noloop.wav").getFullPathName() },
+                                                       { "range", "loop" }}))),
+               "G1: range:'loop' errors when no loop region is set");
+
+        // Invalid enums / a degenerate custom range all error BEFORE any render
+        // (no partial file is ever produced by these).
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bogus-range.wav").getFullPathName() },
+                                                       { "range", "bogus" }}))),
+               "G1: rejects an invalid range enum");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bogus-tail.wav").getFullPathName() },
+                                                       { "tail", "bogus" }}))),
+               "G1: rejects an invalid tail enum");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-bad-custom.wav").getFullPathName() },
+                                                       { "range", "custom" }, { "start", 3.0 }, { "end", 1.0 }}))),
+               "G1: rejects a custom range where end <= start");
+        check (! ok (cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-missing-custom.wav").getFullPathName() },
+                                                       { "range", "custom" }}))),
+               "G1: range:'custom' without start/end errors");
+
+        // Full export (no new args) — behaviorally identical to pre-G1: whole edit, no tail.
+        auto expFull = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-full.wav").getFullPathName() }}));
+        check (ok (expFull), "G1: full export (no new args) ok");
+        check (expFull["data"].getProperty ("range", var()).toString() == "full", "G1: full export reports range=='full'");
+        check (std::abs ((double) expFull["data"].getProperty ("rangeStart", -1.0)) < 1.0e-6, "G1: full export rangeStart==0");
+        check (std::abs ((double) expFull["data"].getProperty ("rangeEnd", -1.0) - 4.0) < 0.05, "G1: full export rangeEnd~=4");
+        check (std::abs ((double) expFull["data"].getProperty ("seconds", -1.0) - 4.0) < 0.05, "G1: full export seconds~=4");
+        const juce::int64 bytesFull = (juce::int64) expFull["data"].getProperty ("bytes", 0);
+        check (bytesFull > 1000, "G1: full export produced a non-trivial file");
+
+        // Custom range renders ONLY [start,end] — the direct proof of invariant 78:
+        // a shorter requested span must produce a proportionally smaller file.
+        auto expCustom = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-custom.wav").getFullPathName() },
+                                                          { "range", "custom" }, { "start", 1.0 }, { "end", 3.0 }}));
+        check (ok (expCustom), "G1: custom range export ok");
+        check (expCustom["data"].getProperty ("range", var()).toString() == "custom", "G1: custom export reports range=='custom'");
+        check (std::abs ((double) expCustom["data"].getProperty ("rangeStart", -1.0) - 1.0) < 0.05, "G1: custom rangeStart~=1");
+        check (std::abs ((double) expCustom["data"].getProperty ("rangeEnd", -1.0) - 3.0) < 0.05, "G1: custom rangeEnd~=3");
+        check (std::abs ((double) expCustom["data"].getProperty ("seconds", -1.0) - 2.0) < 0.05, "G1: custom seconds~=2");
+        const juce::int64 bytesCustom = (juce::int64) expCustom["data"].getProperty ("bytes", 0);
+        check (bytesCustom > 0 && bytesCustom < bytesFull,
+               "G1: custom (2s) render is SMALLER than full (4s) render — proves only the range rendered");
+
+        // range:'loop' renders the transport loop region.
+        check (ok (cmd (ops, "set_transport", objN ({{ "loopStart", 0.5 }, { "loopEnd", 2.5 }}))),
+               "G1: set_transport loop 0.5-2.5 ok");
+        auto expLoop = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-loop.wav").getFullPathName() },
+                                                        { "range", "loop" }}));
+        check (ok (expLoop), "G1: loop export ok");
+        check (expLoop["data"].getProperty ("range", var()).toString() == "loop", "G1: loop export reports range=='loop'");
+        check (std::abs ((double) expLoop["data"].getProperty ("rangeStart", -1.0) - 0.5) < 0.05, "G1: loop rangeStart~=0.5");
+        check (std::abs ((double) expLoop["data"].getProperty ("rangeEnd", -1.0) - 2.5) < 0.05, "G1: loop rangeEnd~=2.5");
+
+        // Delay-tail policy (invariant 81) — needs something actually decaying: load a
+        // built-in reverb, pushed hot (big room, fully wet) so the tail rings well past
+        // the render's end, then compare tail:'cut' vs tail:'include' on the SAME short
+        // custom range. A silence-trim edge case (no decaying source) would make
+        // include==cut — see the spec's §6 note; the reverb is what makes this definitive.
+        auto rvLoad = cmd (ops, "load_builtin", objN ({{ "trackId", gt }, { "type", "reverb" }}));
+        check (ok (rvLoad), "G1: load reverb on the tone track ok");
+        const int rvIndex = (int) rvLoad["data"].getProperty ("index", -1);
+        // Param order (tracktion_Reverb.cpp): 0 roomSize, 1 damping, 2 wetLevel, 3 dryLevel, 4 width, 5 mode.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", rvIndex }, { "paramIndex", 0 }, { "value", 0.95 }}))),
+               "G1: reverb roomSize set high");
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", gt }, { "index", rvIndex }, { "paramIndex", 2 }, { "value", 1.0 }}))),
+               "G1: reverb wetLevel set high");
+
+        auto expCut = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-tail-cut.wav").getFullPathName() },
+                                                       { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }, { "tail", "cut" }}));
+        check (ok (expCut), "G1: tail=cut export ok");
+        check (expCut["data"].getProperty ("tail", var()).toString() == "cut", "G1: tail=cut echoed in result");
+        check (std::abs ((double) expCut["data"].getProperty ("endAllowance", -1.0)) < 1.0e-6, "G1: tail=cut endAllowance==0");
+        const juce::int64 bytesCut = (juce::int64) expCut["data"].getProperty ("bytes", 0);
+
+        auto expInclude = cmd (ops, "export_audio", objN ({{ "file", g1Dir.getChildFile ("g1-tail-include.wav").getFullPathName() },
+                                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 },
+                                                           { "tail", "include" }, { "tailSeconds", 2.0 }}));
+        check (ok (expInclude), "G1: tail=include export ok");
+        check (expInclude["data"].getProperty ("tail", var()).toString() == "include", "G1: tail=include echoed in result");
+        check (std::abs ((double) expInclude["data"].getProperty ("endAllowance", -1.0) - 2.0) < 0.05, "G1: tail=include endAllowance~=2");
+        const juce::int64 bytesInclude = (juce::int64) expInclude["data"].getProperty ("bytes", 0);
+        check (bytesInclude > bytesCut,
+               "G1: tail=include (reverb ringing) produces MORE audio than tail=cut — the tail is actually captured");
+
+        // Clean up the temp export files.
+        for (auto* nm : { "g1-full.wav", "g1-custom.wav", "g1-loop.wav", "g1-tail-cut.wav", "g1-tail-include.wav" })
+            g1Dir.getChildFile (nm).deleteFile();
+    }
+
     section ("Serum render compatibility (optional local plugin gate)");
     if (File ("/Library/Audio/Plug-Ins/VST3/Serum2.vst3").exists())
     {
@@ -2171,6 +2366,207 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     else
     {
         std::cerr << "  ..   (Serum2.vst3 not installed — skipping Serum-specific local gate)\n";
+    }
+
+    // --- G7: per-track stem export (common zero point) ---------------------------
+    // Reality-pack invariant 84: "Stem export names and aligns each stem from the
+    // same zero point." export_stems mirrors export_audio's render but loops
+    // tracks (bounceClipToWav's single-track primitive); every stem shares the
+    // SAME {0, editLength} window, so re-imported stems land aligned by construction.
+    section ("G7: per-track stem export (common zero point)");
+    {
+        // Frame-count reader (mirrors DRM-001's wavMagnitude helper below) — proves
+        // the structural half of "common zero point": every stem is the SAME length.
+        auto wavFrames = [] (const File& f) -> int64
+        {
+            AudioFormatManager fm; fm.registerBasicFormats();
+            if (std::unique_ptr<AudioFormatReader> reader { fm.createReaderFor (f) })
+                return reader->lengthInSamples;
+            return -1;
+        };
+
+        // Content-isolation readers — prove the OTHER half of "per-track stem": each
+        // stem contains ONLY its own track's audio, not the full mix. Frame-count/
+        // existence/naming checks (above) can't tell an isolated stem from an
+        // accidental full-mix render (a real regression: te::toBitSet() in the
+        // pinned tracktion_engine doesn't actually restrict tracksToDo to the given
+        // track — see the comment above MoshOps::cmdExportStems — so a "stem" built
+        // from tracksToDo alone silently renders every track). Reads the whole file
+        // as mono (channel-summed) samples so RMS/diff comparisons are format-agnostic.
+        auto wavMonoSamples = [] (const File& f) -> std::vector<float>
+        {
+            std::vector<float> out;
+            AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<AudioFormatReader> reader (fm.createReaderFor (f));
+            if (reader == nullptr) return out;
+            const int numSamples = (int) reader->lengthInSamples;
+            if (numSamples <= 0) return out;
+            AudioBuffer<float> buf (juce::jmax (1, (int) reader->numChannels), numSamples);
+            if (! reader->read (&buf, 0, numSamples, 0, true, true)) return out;
+            out.resize ((size_t) numSamples);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                float sum = 0.0f;
+                for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+                    sum += buf.getSample (ch, i);
+                out[(size_t) i] = sum / (float) juce::jmax (1, buf.getNumChannels());
+            }
+            return out;
+        };
+        auto wavRms = [] (const std::vector<float>& v) -> double
+        {
+            if (v.empty()) return 0.0;
+            double sumSq = 0.0;
+            for (float s : v) sumSq += (double) s * (double) s;
+            return std::sqrt (sumSq / (double) v.size());
+        };
+        // RMS of the sample-by-sample DIFFERENCE between two equal-length signals —
+        // ~0.0 if they're the identical signal (e.g. both secretly the full mix),
+        // large if they're genuinely different content. Mirrors verify.py's diff_rms.
+        auto wavDiffRms = [] (const std::vector<float>& a, const std::vector<float>& b) -> double
+        {
+            if (a.empty() || b.empty() || a.size() != b.size()) return -1.0;
+            double sumSq = 0.0;
+            for (size_t i = 0; i < a.size(); ++i)
+            {
+                const double d = (double) a[i] - (double) b[i];
+                sumSq += d * d;
+            }
+            return std::sqrt (sumSq / (double) a.size());
+        };
+
+        // Fresh edit so the track/stem counts below are exact.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-selftest"))), "new_project (stem export isolation) ok");
+
+        auto ta = cmd (ops, "create_track", args1 ("name", "Track A"))["data"].getProperty ("trackId", var()).toString();
+        auto tb = cmd (ops, "create_track", args1 ("name", "Track B"))["data"].getProperty ("trackId", var()).toString();
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", ta }, { "seconds", 1.0 }, { "freq", 220.0 }}))),
+               "stem test: Track A tone (220 Hz) added");
+        check (ok (cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tb }, { "seconds", 1.0 }, { "freq", 660.0 }}))),
+               "stem test: Track B tone (660 Hz) added");
+
+        auto stemDir = eng.sessionDir().getChildFile ("exports").getChildFile ("stems-selftest");
+        stemDir.deleteRecursively();
+
+        auto exp = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (exp), "export_stems ok");
+        check ((int) exp["data"].getProperty ("count", -1) == 2, "two stems for two non-empty tracks");
+        check (exp["data"].getProperty ("dir", var()).toString().isNotEmpty(), "export_stems reports the destination dir");
+
+        {
+            int64 firstLen = -1;
+            bool sawIndex0 = false, sawIndex1 = false;
+            File fileByIndex[2];
+            if (auto* arr = exp["data"].getProperty ("stems", var()).getArray())
+            {
+                check (arr->size() == 2, "stems array has exactly 2 entries");
+                for (auto& s : *arr)
+                {
+                    File f (s.getProperty ("file", var()).toString());
+                    check (f.existsAsFile() && f.getSize() > 0, "stem file exists and is non-empty");
+                    check (f.getFileExtension().toLowerCase() == ".wav", "stem defaults to .wav");
+                    check (s.getProperty ("name", var()).toString().isNotEmpty(), "stem entry carries the track name");
+                    check (s.getProperty ("logicalId", var()).toString().isNotEmpty(), "stem entry carries a logicalId");
+                    check (s.getProperty ("trackId", var()).toString().isNotEmpty(), "stem entry carries a trackId");
+
+                    const int idx = (int) s.getProperty ("index", -1);
+                    check (idx == 0 || idx == 1, "stem index is 0 or 1 for a fresh two-track edit");
+                    if (idx == 0) { sawIndex0 = true; fileByIndex[0] = f; }
+                    if (idx == 1) { sawIndex1 = true; fileByIndex[1] = f; }
+                    check (f.getFileName().startsWith (String (idx).paddedLeft ('0', 2) + "-"),
+                           "stem filename starts with its zero-padded index");
+
+                    const auto frames = wavFrames (f);
+                    check (frames > 0, "stem WAV has readable audio frames");
+                    if (firstLen < 0) firstLen = frames;
+                    else check (frames == firstLen, "both stems share the SAME frame count (common zero point)");
+                }
+            }
+            else
+            {
+                check (false, "export_stems returned a stems array");
+            }
+            check (sawIndex0 && sawIndex1, "stem indices 0 and 1 each appear exactly once");
+
+            // ── Content isolation — the check this whole section exists to have.
+            // Track A carries a 220 Hz tone, Track B a 660 Hz tone (added above): two
+            // genuinely different signals. A broken isolation mechanism renders BOTH
+            // "stems" as the identical full mix (both tones summed) — frame-count,
+            // existence, and naming checks alone cannot detect that; a diff between
+            // the two stems' actual samples can.
+            if (sawIndex0 && sawIndex1)
+            {
+                const auto a = wavMonoSamples (fileByIndex[0]);
+                const auto b = wavMonoSamples (fileByIndex[1]);
+                check (! a.empty(), "stem A (index 0, Track A / 220 Hz) samples are readable");
+                check (! b.empty(), "stem B (index 1, Track B / 660 Hz) samples are readable");
+                check (wavRms (a) > 0.01, "stem A is non-silent (carries Track A's own tone)");
+                check (wavRms (b) > 0.01, "stem B is non-silent (carries Track B's own tone)");
+
+                const double diffRms = wavDiffRms (a, b);
+                // If both stems were secretly the full mix, diffRms would be ~0.0
+                // (identical signals). Two different sine tones diverge by a wide
+                // margin sample-for-sample, so genuine per-track isolation clears
+                // this threshold easily; a full-mix regression would read ~0.0 here.
+                check (diffRms > 0.05,
+                       "stem A and stem B are genuinely DIFFERENT signals, i.e. actually "
+                       "isolated per-track — not both secretly the full mix (diffRms="
+                       + String (diffRms, 4) + ")");
+            }
+        }
+
+        // Empty (clip-less) track is skipped by default; includeEmpty:true renders it too.
+        auto tc = cmd (ops, "create_track", args1 ("name", "Track C (empty)"))["data"].getProperty ("trackId", var()).toString();
+        juce::ignoreUnused (tc);
+        auto expSkip = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (ok (expSkip) && (int) expSkip["data"].getProperty ("count", -1) == 2,
+               "clip-less track skipped by default (count stays 2)");
+
+        auto expInclude = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "includeEmpty", true }}));
+        check (ok (expInclude) && (int) expInclude["data"].getProperty ("count", -1) == 3,
+               "includeEmpty:true renders the clip-less track too (count 3)");
+
+        // Hidden-track exclusion: the Phase-2 beneath-render track (created by a MIDI
+        // re-imagine landing its hidden audio) must never produce a stem. Synthesized via
+        // the REAL production path (create_render_layer + render_layer on a MIDI clip),
+        // not a hand-rolled flag, so this proves the actual moshHidden gate in cmdExportStems.
+        {
+            auto mt = cmd (ops, "create_track", args1 ("name", "MidiGen"))["data"].getProperty ("trackId", var()).toString();
+            auto mc = cmd (ops, "add_midi_clip", objN ({{ "trackId", mt }, { "length", 1.0 }}));
+            check (ok (mc), "stem test: MIDI clip added");
+            const auto mcid = mc["data"].getProperty ("clipId", var()).toString();
+            cmd (ops, "add_note", objN ({{ "clipId", mcid }, { "pitch", 60 }, { "start", 0.0 }, { "length", 0.5 }, { "velocity", 100 }}));
+            cmd (ops, "create_render_layer", objN ({{ "clipId", mcid }, { "adapter", "fake" }}));
+            auto rr = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
+            check (ok (rr), "stem test: MIDI re-imagine rendered (creates the hidden beneath-render track)");
+
+            auto expHidden = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+            check (ok (expHidden), "export_stems ok with a hidden render track present");
+            // Visible non-empty tracks: A, B, MidiGen (has a muted MIDI clip -> counted,
+            // silent by design — see the spec's mute/solo semantics note); C stays skipped
+            // (still clip-less). The hidden beneath-render track must NOT add a 4th.
+            check ((int) expHidden["data"].getProperty ("count", -1) == 3,
+                   "hidden beneath-render track excluded from the stem set (count 3, not 4)");
+            if (auto* arr2 = expHidden["data"].getProperty ("stems", var()).getArray())
+                for (auto& s : *arr2)
+                    check (! s.getProperty ("name", var()).toString().containsIgnoreCase ("hidden"),
+                           "no stem is named for the hidden render track");
+        }
+
+        // Format / bit-depth rejection — validated before any render (shared with
+        // export_audio's resolution logic, duplicated rather than extracted; see the
+        // comment above cmdExportStems).
+        auto badFormat = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "mp3" }}));
+        check (! ok (badFormat), "export_stems rejects an unsupported format (mp3)");
+        auto badDepth = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }, { "format", "wav" }, { "bitDepth", 7 }}));
+        check (! ok (badDepth), "export_stems rejects an unsupported bit depth (wav 7)");
+
+        // No renderable tracks -> a clean error, not a hang/crash.
+        check (ok (cmd (ops, "new_project", args1 ("name", "stem-export-empty"))), "new_project (empty edit) ok");
+        auto expEmpty = cmd (ops, "export_stems", objN ({{ "dir", stemDir.getFullPathName() }}));
+        check (! ok (expEmpty), "export_stems on an edit with no non-empty tracks returns a clean error");
+
+        stemDir.deleteRecursively();
     }
 
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
@@ -4388,6 +4784,68 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Restore the default so later blocks see a clean project.
         check (ok (cmd (ops, "set_key", objN ({{ "tonic", "A" }, { "mode", "minor" }}))), "set_key restore default (A minor) ok");
+    }
+
+    // ─── G2b — count-in / pre-roll bars before recording ───
+    // Stored on the same MOSH_PROJECT node as key/timeBase (saves/reloads with the
+    // .tracktionedit); set_count_in is a NON-undoable preference (cmdSetKey template
+    // exactly). ENGINE-WIRED, not just stored: MoshOps::applyCountInToEdit() pushes the
+    // value into tracktion_engine's own pre-roll (te::Edit::setCountInMode), which
+    // TransportControl's record-start logic already consults
+    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an audible
+    // click before capture actually begins. bars is deliberately {0,1,2}, matching
+    // te::Edit::CountIn::none/oneBar/twoBar (headless selftest can't exercise the
+    // audible/timing behavior itself — that needs a real audio device — but proves the
+    // command's validation/snapshot/persistence/non-undoable-preference contract).
+    section ("G2b: count-in / pre-roll (set_count_in, snapshot.project.countInBars, persistence)");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto proj = [&] { return sess().getProperty ("project", var()); };
+
+        // Snapshot ALWAYS exposes session.project.countInBars with the 0 (off) default,
+        // mirrored to session.countInBars (like session.key / session.project.key).
+        check (proj().hasProperty ("countInBars"), "snapshot session.project.countInBars present");
+        check ((int) proj().getProperty ("countInBars", -1) == 0, "session.project.countInBars defaults to 0 (off)");
+        check ((int) sess().getProperty ("countInBars", -1) == 0, "session.countInBars mirror defaults to 0 (off)");
+
+        // Required arg.
+        check (! ok (cmd (ops, "set_count_in")), "set_count_in requires bars");
+
+        // Valid sets → ok + reflected in both the nested + mirrored snapshot fields.
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 1))), "set_count_in (1 bar) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 1, "session.project.countInBars == 1 after set");
+        check ((int) sess().getProperty ("countInBars", -1) == 1, "session.countInBars mirror == 1 after set");
+        // ENGINE-WIRED, not just stored: the stored preference actually reaches the
+        // live Edit's real pre-roll (applyCountInToEdit → te::Edit::setCountInMode).
+        check (eng.edit().getCountInMode() == te::Edit::CountIn::oneBar,
+               "set_count_in (1 bar) lands on the live engine (te::Edit::getCountInMode)");
+
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 2))), "set_count_in (2 bars) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "session.project.countInBars == 2 after set");
+
+        // Invalid bars rejected; storage stays at the last good value.
+        check (! ok (cmd (ops, "set_count_in", args1 ("bars", 3))), "set_count_in rejects bars > 2");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "rejected bars (3) left storage untouched (still 2)");
+        check (! ok (cmd (ops, "set_count_in", args1 ("bars", -1))), "set_count_in rejects negative bars");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "rejected negative bars left storage untouched (still 2)");
+
+        // Save → reload → the setting round-trips with the .tracktionedit.
+        check (ok (cmd (ops, "save")),   "save (count-in) ok");
+        check (ok (cmd (ops, "reload")), "reload (count-in) ok");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "session.project.countInBars survived save+reload");
+
+        // NON-undoable preference: logged undoable:false, and an undo right after must NOT
+        // revert it (no transaction was pushed) — mirrors the set_key check above.
+        auto ciLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool ciPref = false;
+        for (auto& ln : juce::StringArray::fromLines (ciLog))
+            if (ln.contains ("\"command\": \"set_count_in\"") && ln.contains ("\"undoable\": false")) ciPref = true;
+        check (ciPref, "set_count_in logged undoable:false (preference)");
+        cmd (ops, "undo");
+        check ((int) proj().getProperty ("countInBars", -1) == 2, "undo after set_count_in does NOT revert it (non-undoable)");
+
+        // Restore the default so later blocks/gates see a clean project.
+        check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
     }
 
     // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───
