@@ -7,6 +7,7 @@ import { runSkill, type SkillHarnessDeps } from "./skillHarness";
 import {
   ADD_VOCAL_WITH_LYRICS_SKILL,
   ARRANGE_BEAT_SKILL,
+  AUTOMATE_PARAMETER_SKILL,
   BUILD_DRUM_PATTERN_SKILL,
   HOST_PLUGIN_SKILL,
   REIMAGINE_CLIP_SKILL,
@@ -401,6 +402,54 @@ describe("workflow skill catalog", () => {
     const result = await runSkill(
       WARP_LOOP_TO_GRID_SKILL,
       { clipId: clip.id, bars: 4 },
+      { snapshot, runBatch, rollbackBatch: vi.fn() },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.stage).toBe("precondition");
+    expect(runBatch).not.toHaveBeenCalled();
+  });
+
+  it("runs automate_parameter end-to-end: arm write mode + a param tweak captures a point", async () => {
+    const before = await snapshot();
+    const track = firstTrack(before);
+    const index = track.plugins?.length ?? 0;
+    await useStore.getState().exec("load_plugin", { trackId: track.id, pluginId: "vital", index });
+    await useStore.getState().refresh();
+
+    const seen: string[] = [];
+    const deps: SkillHarnessDeps = {
+      ...mockDeps,
+      runBatch: async (label, calls) => {
+        seen.push(...calls.map((call) => call.command));
+        return runAgentBatch(label, calls);
+      },
+    };
+
+    const result = await runSkill(
+      AUTOMATE_PARAMETER_SKILL,
+      { trackId: track.id, index, paramIndex: 0, value: 0.65 },
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual(["set_track_automation_mode", "set_plugin_param"]);
+    const afterTrack = trackById(await snapshot(), track.id);
+    expect(afterTrack.automationMode).toBe("write");
+    const plugin = afterTrack.plugins?.find((candidate) => candidate.index === index);
+    const param = plugin?.params.find((candidate) => candidate.index === 0);
+    expect(param?.value).toBeCloseTo(0.65);
+    expect(param?.points?.length).toBeGreaterThan(0);
+    expect(param?.points?.[param.points.length - 1]?.v).toBeCloseTo(0.65);
+  });
+
+  it("rejects automate_parameter when the plugin chain position doesn't exist", async () => {
+    const track = firstTrack(await snapshot());
+    const runBatch = vi.fn();
+
+    const result = await runSkill(
+      AUTOMATE_PARAMETER_SKILL,
+      { trackId: track.id, index: 0, paramIndex: 0, value: 0.5 },
       { snapshot, runBatch, rollbackBatch: vi.fn() },
     );
 

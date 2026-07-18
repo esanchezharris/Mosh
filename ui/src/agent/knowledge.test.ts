@@ -389,3 +389,60 @@ describe("AG-KB4: tempo / bus / track-routing / stem-export (CONF-CATALOG newly 
     );
   });
 });
+
+describe("AG-KB-AUTO: parameter automation + clip-ops (set_track_automation_mode/write_automation_curve/add_automation_point/clear_automation, set_clip_reverse, set_clip_crossfade, normalize_clip)", () => {
+  // These commands just landed on main (G10 automation recording + clip-ops). Same
+  // pin-the-retrieval pattern as the AG-KB1/AG-KB-R2/AG-KB3/AG-KB4 blocks above: each
+  // query is how a producer would actually ask, and should surface the matching new
+  // card as the top result.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("automation: recording a move live -> set_track_automation_mode write-mode capture", () => {
+    expect(
+      top("I want to record automation live by literally moving the knob instead of typing out points"),
+    ).toBe("automation-write-mode-captures");
+  });
+
+  it("automation: what touch/latch actually do -> mode meanings", () => {
+    expect(
+      top("what's the difference between the automation record modes, does touch actually behave differently"),
+    ).toBe("automation-mode-meanings");
+  });
+
+  it("automation: authoring a known curve shape at once -> write_automation_curve", () => {
+    expect(
+      top("I already know the exact automation curve shape I want, can I author it as a list of points at once"),
+    ).toBe("automation-write-curve-bulk");
+  });
+
+  it("automation: one exact point or wiping a messy curve -> add_automation_point / clear_automation", () => {
+    expect(
+      top("this automation curve got messy, I just want to wipe it clean instead of deleting points one by one"),
+    ).toBe("automation-point-add-vs-clear");
+  });
+
+  it("clip-ops: playing a clip backwards -> set_clip_reverse", () => {
+    expect(top("I want this clip's audio to play backwards, like a reversed cymbal swell")).toBe(
+      "clip-reverse-playback",
+    );
+  });
+
+  it("clip-ops: crossfade did nothing on a clip with no neighbor -> set_clip_crossfade overlap-only", () => {
+    expect(
+      top("I turned on crossfade for this clip but it doesn't overlap any neighboring clip and nothing changed"),
+    ).toBe("clip-crossfade-overlap-only");
+  });
+
+  it("clip-ops: leveling a clip's peak without touching the file -> normalize_clip", () => {
+    expect(top("this clip's peak sits quieter than the others, can I level it to a target peak")).toBe(
+      "clip-normalize-nondestructive",
+    );
+  });
+
+  it("every new card's maps_to still resolves to a real AGENT_COMMANDS entry (bare command tokens)", () => {
+    const bare = PRODUCER_KNOWLEDGE.filter((c) => /^[a-z][a-z0-9_]*$/.test(c.maps_to)).map((c) => c.maps_to);
+    for (const name of bare) {
+      expect(AGENT_COMMAND_MAP.has(name)).toBe(true);
+    }
+  });
+});
