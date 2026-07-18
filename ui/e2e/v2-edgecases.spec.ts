@@ -73,6 +73,18 @@ test.describe("L1 · overlay/Escape stacking", () => {
     expect(await store(page).lastError()).toMatch(/no such room/i);    // global surface too
   });
 
+  test("lock-denied errors show the peer's NAME, not the raw UUID (#40)", async ({ page }) => {
+    await bootV2(page);
+    await store(page).setState({
+      peers: { "550e8400-e29b-41d4-a716-446655440000": { name: "Bo", color: "#e0457b", online: true } },
+      lastError: "blocked: locked by 550e8400-e29b-41d4-a716-446655440000",
+    });
+    const bar = page.getByTestId("v2-error");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText("locked by Bo");
+    await expect(bar).not.toContainText("550e8400");
+  });
+
   test("piano roll still closes on Escape (stack sanity)", async ({ page }) => {
     await bootV2(page);
     const midiClip = page.locator('[data-clip-id]').filter({ has: page.locator(":scope") }).nth(1);

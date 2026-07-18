@@ -35,11 +35,15 @@ import { SessionRail } from "./ui/SessionRail";
 import { AgentComposer } from "./ui/AgentComposer";
 import { SectionNavigator } from "./ui/SectionNavigator";
 import { FileOptions } from "./ui/FileOptions";
+import { formatPeerError } from "./multiplayer/peerErrors";
 
 export function AppLegacy() {
   // init() is owned by the App router (called once across shell switches), not here.
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  const peersForErrors = useStore((s) => s.peers);
+  // #40 — show peer display names, not raw UUIDs, in lock-denied errors.
+  const displayError = lastError ? formatPeerError(lastError, peersForErrors) : null;
   const view = useStore((s) => s.view);
   const redesign = useSettings((s) => Boolean(s.get("redesignShell")));
 
@@ -95,7 +99,7 @@ export function AppLegacy() {
       {!audioEnabled && (
         <div className="error-bar" role="status" aria-live="polite">⚠ No audio device — playback/record/export disabled.</div>
       )}
-      {lastError && <div className="error-bar" data-testid="error" role="alert">⚠ {lastError}</div>}
+      {displayError && <div className="error-bar" data-testid="error" role="alert">⚠ {displayError}</div>}
       <RecoveryNotice />
       <MissingMediaBanner />
 
