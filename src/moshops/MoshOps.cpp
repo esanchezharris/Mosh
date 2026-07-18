@@ -124,6 +124,39 @@ namespace
         const float valueBefore;
     };
 
+    // G10 — generalizes SetFaderValueAction (above) to ANY te::AutomatableParameter,
+    // not just a VolumeAndPanPlugin's vol/pan pair. cmdSetPluginParam previously called
+    // param->setParameter() directly, which is the SAME undo-broken path SetFaderValueAction
+    // was built to fix: setParameter() -> setParameterValue(value, false, useUndoManager=true)
+    // sets the ATOMIC currentValue member unconditionally, then separately writes the backing
+    // ValueTree property through a real UndoManager (attachedValue->setValue). On undo, that
+    // ValueTree-backed write correctly reverts the persisted property, but
+    // AutomatableParameter::valueTreePropertyChanged deliberately does NOT resync currentValue
+    // from it (the engine's own comment: "we shouldn't call attachedValue->updateParameterFromValue
+    // here as this will set the base value of the parameter") — so getCurrentValue() /
+    // getCurrentNormalisedValue() (what the snapshot's params[].value reads) stays STALE at the
+    // pre-undo value. Replaying via setParameterWithoutUndo on both perform() and undo() (same as
+    // SetFaderValueAction) keeps the atomic mirror and the persisted property in lockstep both
+    // ways, with THIS action — not JUCE's built-in property-undo — owning the transaction.
+    struct SetPluginParamValueAction final : public juce::UndoableAction
+    {
+        SetPluginParamValueAction (te::AutomatableParameter& p, float newValue)
+            : param (p), valueAfter (newValue), valueBefore (p.getCurrentValue()) {}
+
+        bool perform() override        { apply (valueAfter);  return true; }
+        bool undo() override           { apply (valueBefore); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        void apply (float v)
+        {
+            param.setParameterWithoutUndo (param.getValueRange().clipValue (v), juce::sendNotification);
+        }
+
+        te::AutomatableParameter& param;
+        const float valueAfter;
+        const float valueBefore;
+    };
+
     // Tracktion's compiled-in built-in plugin palette (registered unconditionally
     // by PluginManager). These ship inside the engine — no scan, no third-party
     // dependency — so the FX palette and built-in instruments are pure surface
@@ -5376,8 +5409,12 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
 
     auto param = plugin->getAutomatableParameter (pi);
     const float norm = juce::jlimit (0.0f, 1.0f, (float) (double) args.getProperty ("value", 0.0));
+    const float raw  = param->valueRange.convertFrom0to1 (norm);
     beginTxn ("set_plugin_param");
-    param->setParameter (param->valueRange.convertFrom0to1 (norm), juce::sendNotification);
+    // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
+    // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
+    // after undo; replaying through a custom UndoableAction keeps it correct both ways.
+    undoManager().perform (new SetPluginParamValueAction (*param, raw));
     logLine ("set_plugin_param", args, true, {}, true);
     // Scoped — param tweaks are the other rapid-fire case. A param that changes plugin
     // LATENCY leaves the session PDC readout briefly stale (self-corrects on the next

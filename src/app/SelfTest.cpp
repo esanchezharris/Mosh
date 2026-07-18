@@ -1296,6 +1296,42 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) paramVar (at, pidx, 0).getProperty ("automated", true), "clear_automation removes all points");
     }
 
+    // ─── G10 bug fix: cmdSetPluginParam undo correctness (G14-class regression) ───
+    section ("G10: set_plugin_param undo regression (G14-class)");
+    {
+        auto paramValueG10b = [&] (const String& trkId, int plugIdx, int paramIdx) -> double {
+            auto trk = trackById (trkId);
+            if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                        if (auto* params = p.getProperty ("params", var()).getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == paramIdx) return (double) pr.getProperty ("value", -1.0);
+            return -1.0;
+        };
+
+        auto puTrack = cmd (ops, "create_track", args1 ("name", "ParamUndo"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "load_builtin", objN ({{ "trackId", puTrack }, { "type", "compressor" }}));
+        int rpidx = -1;
+        { auto trk = trackById (puTrack);
+          if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "compressor") rpidx = (int) p.getProperty ("index", -1); }
+        check (rpidx >= 0, "G10 regression: compressor loaded");
+
+        const double before = paramValueG10b (puTrack, rpidx, 0);
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", puTrack }, { "index", rpidx }, { "paramIndex", 0 }, { "value", 0.95 }}))),
+               "G10 regression: set_plugin_param ok");
+        check (std::abs (paramValueG10b (puTrack, rpidx, 0) - 0.95) < 0.02, "G10 regression: value reflects the set");
+        check (ok (cmd (ops, "undo")), "G10 regression: undo ok");
+        // The exact G14-class assertion: pre-fix, AutomatableParameter::currentValue (and so
+        // getCurrentNormalisedValue(), what the snapshot's params[].value reads) stayed stale
+        // at the post-set value even though the persisted ValueTree property correctly reverted.
+        check (std::abs (paramValueG10b (puTrack, rpidx, 0) - before) < 0.02,
+               "G10 regression: undo restores the LIVE param value (not stale at the pre-undo value)");
+        check (ok (cmd (ops, "redo")), "G10 regression: redo ok");
+        check (std::abs (paramValueG10b (puTrack, rpidx, 0) - 0.95) < 0.02, "G10 regression: redo restores the set value");
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     section ("Wave 1: built-in plugin palette");
     {
