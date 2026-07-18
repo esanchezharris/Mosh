@@ -58,6 +58,7 @@ describe("useKeyboardShortcuts", () => {
       selection: new Set<string>(),
       editingClipId: null,
       automationTrackId: null,
+      snapshot: null,
     });
     vi.restoreAllMocks();
   });
@@ -163,6 +164,79 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "duplicate_clip", args: { clipId: "clip-1" } });
+  });
+
+  // FU-CLIP-NUDGE — fine clip nudge: fixed-increment move_clip, independent of
+  // drag/snap, bound to the plain arrow keys (unbound everywhere else).
+  it("dispatches ArrowRight to nudge the selected clip forward by one grid-division step", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      snapshot: {
+        session: {}, // 120bpm 4/4 default → "1/4" grid step = 0.5s
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "move_clip", args: { clipId: "clip-1", start: 2.5 } });
+  });
+
+  it("dispatches ArrowLeft to nudge the selected clip backward, clamped at 0", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 0.2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    });
+
+    expect(execCalls).toContainEqual({ command: "move_clip", args: { clipId: "clip-1", start: 0 } });
+  });
+
+  it("nudge is a no-op with nothing selected", () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    });
+
+    expect(execCalls.some((c) => c.command === "move_clip")).toBe(false);
+  });
+
+  it("suppresses nudge while a clip editor (piano-roll/automation) modal is open", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      editingClipId: "clip-1",
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    expect(execCalls.some((c) => c.command === "move_clip")).toBe(false);
   });
 
   it("preserves native menu open_project file payloads", () => {

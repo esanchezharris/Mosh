@@ -7,6 +7,7 @@
 
 import type { ActionId } from "./keymap";
 import type { Snapshot } from "./types";
+import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 
 export type { ActionId };
 
@@ -24,6 +25,9 @@ export interface ActionStore {
   snapshot?: Snapshot | null;
   clipboard?: unknown;
   setTool?: (tool: "move" | "split" | "range") => void;
+  // FU-CLIP-NUDGE — the grid resolution nudge steps by. Optional so test fakes can
+  // omit it (defaults to "1/4", the store's own default snap division).
+  snapDivision?: SnapDiv;
   // open clip-editor modals — Delete is suppressed on the arrangement while either
   // is set (the editor owns Delete then). Optional so test fakes can omit them.
   editingClipId?: string | null;
@@ -162,6 +166,24 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
         for (const clip of track.clips)
           if (store.selection.has(clip.id) && clip.start < position && position < clip.start + clip.length)
             await store.exec("split_clip", { clipId: clip.id, time: position });
+      return;
+    }
+    // FU-CLIP-NUDGE — fine-move every selected clip by a fixed increment: one step
+    // of the current grid division (session/tempo-aware, via the same snapStep the
+    // drag-time grid uses), evaluated at each clip's own position. This is a FIXED
+    // step, independent of the drag-time snap toggle — it always applies, snap on
+    // or off. Clamped so a clip can never nudge to a negative start.
+    case "nudge_left":
+    case "nudge_right": {
+      const dir = id === "nudge_left" ? -1 : 1;
+      const division = store.snapDivision ?? "1/4";
+      const map = tempoMapFrom(store.snapshot?.session);
+      for (const track of store.snapshot?.tracks ?? [])
+        for (const clip of track.clips)
+          if (store.selection.has(clip.id)) {
+            const step = snapStep(meterAt(map, clip.start), division);
+            await store.exec("move_clip", { clipId: clip.id, start: Math.max(0, clip.start + dir * step) });
+          }
       return;
     }
     case "tool_move":

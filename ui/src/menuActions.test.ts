@@ -209,3 +209,57 @@ describe("runAction — arrangement shortcuts", () => {
     expect(store.setTool).toHaveBeenNthCalledWith(3, "range");
   });
 });
+
+// FU-CLIP-NUDGE — fine clip nudge: fixed-increment move_clip, independent of
+// drag/snap. The increment is one step of the current snap division (default
+// "1/4"), evaluated at each clip's own position over the session's tempo map —
+// at the default 120bpm 4/4 session a "1/4" step is 0.5s.
+describe("runAction — clip nudge (FU-CLIP-NUDGE)", () => {
+  function snapshotWithClips(clips: { id: string; start: number; length?: number }[]) {
+    return {
+      session: {},
+      tracks: [
+        { id: "t1", isGroup: false, clips: clips.map((c) => ({ id: c.id, start: c.start, length: c.length ?? 2 })) },
+      ],
+    } as unknown as import("./types").Snapshot;
+  }
+
+  it("nudge_right moves every selected clip forward by one grid-division step", async () => {
+    const snapshot = snapshotWithClips([{ id: "c1", start: 2 }, { id: "c2", start: 5 }]);
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1", "c2"]), snapshot });
+    await runAction("nudge_right", ctx);
+    expect(execCalls).toEqual([
+      { command: "move_clip", args: { clipId: "c1", start: 2.5 } },
+      { command: "move_clip", args: { clipId: "c2", start: 5.5 } },
+    ]);
+  });
+
+  it("nudge_left moves every selected clip backward by one grid-division step", async () => {
+    const snapshot = snapshotWithClips([{ id: "c1", start: 2 }]);
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1"]), snapshot });
+    await runAction("nudge_left", ctx);
+    expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c1", start: 1.5 } }]);
+  });
+
+  it("clamps the new start at 0 instead of going negative", async () => {
+    const snapshot = snapshotWithClips([{ id: "c1", start: 0.2 }]);
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1"]), snapshot });
+    await runAction("nudge_left", ctx);
+    expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c1", start: 0 } }]);
+  });
+
+  it("is a no-op with nothing selected", async () => {
+    const snapshot = snapshotWithClips([{ id: "c1", start: 2 }]);
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(), snapshot });
+    await runAction("nudge_left", ctx);
+    await runAction("nudge_right", ctx);
+    expect(execCalls).toEqual([]);
+  });
+
+  it("steps by the CURRENT snap division, not a hardcoded amount", async () => {
+    const snapshot = snapshotWithClips([{ id: "c1", start: 2 }]);
+    const { ctx, execCalls } = makeCtx({}, { selection: new Set(["c1"]), snapshot, snapDivision: "1/8" });
+    await runAction("nudge_right", ctx);
+    expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c1", start: 2.25 } }]);
+  });
+});

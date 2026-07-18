@@ -217,7 +217,7 @@ function interactionSettings(): SettingDef[] {
     save: "Save", delete: "Delete", copy: "Copy", cut: "Cut", paste: "Paste",
     duplicate: "Duplicate", group: "Group", to_start: "To start", to_end: "To end",
     split: "Split at playhead", tool_move: "Move tool", tool_split: "Split tool",
-    tool_range: "Range tool",
+    tool_range: "Range tool", nudge_left: "Nudge clip left", nudge_right: "Nudge clip right",
   };
   const selectors: SettingDef[] = [
     {

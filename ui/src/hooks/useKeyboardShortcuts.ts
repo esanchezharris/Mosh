@@ -46,6 +46,20 @@ export function useKeyboardShortcuts() {
         case EA.PASTE: if (s.clipboard) { prevent(); void dispatch("paste"); } break;
         case EA.DUPLICATE: if (s.selection.size) { prevent(); void dispatch("duplicate"); } break;
         case EA.GROUP: prevent(); void dispatch("group"); break;
+        // FU-CLIP-NUDGE — no-op with no clip selected; suppressed while a clip
+        // editor modal (piano-roll/automation) is open, matching DELETE above.
+        case EA.NUDGE_LEFT:
+          if (s.editingClipId || s.automationTrackId) break;
+          if (s.selection.size === 0) break;
+          prevent();
+          void dispatch("nudge_left");
+          break;
+        case EA.NUDGE_RIGHT:
+          if (s.editingClipId || s.automationTrackId) break;
+          if (s.selection.size === 0) break;
+          prevent();
+          void dispatch("nudge_right");
+          break;
         case EA.TO_START: prevent(); void dispatch("to_start"); break;
         case EA.TO_END: prevent(); void dispatch("to_end"); break;
         case EA.TOOL_MOVE: void dispatch("tool_move"); break;

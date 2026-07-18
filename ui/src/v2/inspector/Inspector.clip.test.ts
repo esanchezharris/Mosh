@@ -303,6 +303,38 @@ describe("v2 Inspector Clip tab", () => {
     expect(call!.args).toMatchObject({ clipId: "c1", targetDb: 0 });
   });
 
+  // FU-CLIP-NUDGE — fine-move THIS clip via move_clip, one grid-division step
+  // (default session = 120bpm 4/4, "1/4" grid → 0.5s). Applies to every clip
+  // type since move_clip isn't wave-only.
+  it("clicking Nudge execs move_clip with a new start one grid-division step away", () => {
+    render(makeSnapshot(waveClip({ start: 3 })));
+    const left = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-nudge-left"]');
+    const right = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-nudge-right"]');
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
+
+    act(() => right!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(execCalls.find((c) => c.command === "move_clip")).toMatchObject({ args: { clipId: "c1", start: 3.5 } });
+
+    execCalls.length = 0;
+    act(() => left!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(execCalls.find((c) => c.command === "move_clip")).toMatchObject({ args: { clipId: "c1", start: 2.5 } });
+  });
+
+  it("clamps the nudge-left start at 0 instead of going negative", () => {
+    render(makeSnapshot(waveClip({ start: 0.2 })));
+    const left = host.querySelector<HTMLButtonElement>('[data-testid="v2-clip-nudge-left"]');
+    act(() => left!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(execCalls.find((c) => c.command === "move_clip")).toMatchObject({ args: { clipId: "c1", start: 0 } });
+  });
+
+  it("shows Nudge for a MIDI clip too (move_clip isn't wave-only)", () => {
+    act(() => useShell.setState({ selectedClipId: "m1", inspectorTab: "clip" }));
+    render(makeSnapshot(midiClip({ start: 1 })));
+    expect(host.querySelector('[data-testid="v2-clip-nudge-left"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="v2-clip-nudge-right"]')).not.toBeNull();
+  });
+
   it("changing the target dB field then clicking Normalize execs normalize_clip with that target", () => {
     render(makeSnapshot(waveClip()));
     const input = host.querySelector<HTMLInputElement>('[data-testid="v2-clip-normalize-target"]');
