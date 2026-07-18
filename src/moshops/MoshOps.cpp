@@ -140,21 +140,64 @@ namespace
     // pre-undo value. Replaying via setParameterWithoutUndo on both perform() and undo() (same as
     // SetFaderValueAction) keeps the atomic mirror and the persisted property in lockstep both
     // ways, with THIS action — not JUCE's built-in property-undo — owning the transaction.
+    //
+    // ADVERSARIAL-REVIEW FIX (use-after-free, blocking) — an earlier version of this action
+    // held a raw `te::AutomatableParameter&` captured at construction, mirroring
+    // SetFaderValueAction above. Unlike SetFaderValueAction's target (the track's own
+    // VolumeAndPanPlugin, which nothing can ever remove), THIS action's target is any plugin
+    // in track->pluginList — remove_plugin-reachable. Repro: set_plugin_param (pushes this
+    // action, holding a live param reference) -> remove_plugin (plugin->deleteFromParent()
+    // detaches it from the track; te::PluginCache's 1s timer purges the underlying C++
+    // Plugin/AutomatableParameter once the cache is its last owner, refcount==1) -> undo
+    // (Tracktion's built-in undo restores the removed ValueTree node, which carries the SAME
+    // te::EditItemID; PluginList::valueTreeChildAdded -> getOrCreatePluginFor(v) instantiates
+    // a NEW Plugin object at a NEW address for it) -> undo again: JUCE invokes THIS action's
+    // now-stale undo(), dereferencing the freed original AutomatableParameter&. An ordinary
+    // "tweak a knob, delete the plugin, undo twice" workflow.
+    //
+    // Fixed by never holding the reference across a perform()/undo() boundary. Instead this
+    // stores STABLE identifiers — the owning plugin's te::EditItemID (via
+    // AutomatableParameter::getOwnerID(), which survives remove+undo re-creation exactly
+    // because the restored ValueTree node keeps its id) plus the parameter's index within
+    // that plugin (the same (trackId,pluginIndex,paramIndex) addressing findParam() already
+    // uses for the automation-curve commands below) — and RE-RESOLVES the live
+    // AutomatableParameter* via the Edit's PluginCache on every perform()/undo() call. If the
+    // plugin can't be resolved (genuinely removed, cache-purged, no undo pending), apply() is
+    // a safe no-op rather than a dereference.
     struct SetPluginParamValueAction final : public juce::UndoableAction
     {
-        SetPluginParamValueAction (te::AutomatableParameter& p, float newValue)
-            : param (p), valueAfter (newValue), valueBefore (p.getCurrentValue()) {}
+        SetPluginParamValueAction (te::AutomatableParameter& p, int paramIdx, float newValue)
+            : edit (p.getEdit()), pluginItemId (p.getOwnerID()), paramIndex (paramIdx),
+              valueAfter (newValue), valueBefore (p.getCurrentValue()) {}
 
         bool perform() override        { apply (valueAfter);  return true; }
         bool undo() override           { apply (valueBefore); return true; }
         int  getSizeInUnits() override { return (int) sizeof (*this); }
 
-        void apply (float v)
+        // Looks up the live parameter fresh every call — never caches a pointer/reference
+        // across calls, so a remove_plugin (+ eventual PluginCache purge) in between just
+        // makes this resolve to nullptr instead of dereferencing freed memory. Mirrors
+        // MoshOps::findParam's (trackId,pluginIndex,paramIndex) addressing, but keyed by the
+        // plugin's stable EditItemID rather than its (reorder_plugin-mutable) list position.
+        te::AutomatableParameter* resolve() const
         {
-            param.setParameterWithoutUndo (param.getValueRange().clipValue (v), juce::sendNotification);
+            auto plugin = edit.getPluginCache().getPluginFor (pluginItemId);
+            if (plugin == nullptr) return nullptr;
+            if (paramIndex < 0 || paramIndex >= plugin->getNumAutomatableParameters()) return nullptr;
+            return plugin->getAutomatableParameter (paramIndex).get();
         }
 
-        te::AutomatableParameter& param;
+        void apply (float v)
+        {
+            if (auto* param = resolve())
+                param->setParameterWithoutUndo (param->getValueRange().clipValue (v), juce::sendNotification);
+            // else: plugin unresolvable right now (removed, cache-purged, no matching undo
+            // pending) — safe no-op instead of a use-after-free.
+        }
+
+        te::Edit& edit;
+        const te::EditItemID pluginItemId;
+        const int paramIndex;
         const float valueAfter;
         const float valueBefore;
     };
@@ -5420,7 +5463,9 @@ juce::var MoshOps::cmdSetPluginParam (const juce::var& args)
     // G14-class fix — see SetPluginParamValueAction's comment. param->setParameter() directly
     // left AutomatableParameter::currentValue (and thus the snapshot's params[].value) stale
     // after undo; replaying through a custom UndoableAction keeps it correct both ways.
-    undoManager().perform (new SetPluginParamValueAction (*param, raw));
+    // The action re-resolves the parameter by (pluginItemId,paramIndex) at apply time rather
+    // than holding this reference — see its comment for the remove_plugin UAF this avoids.
+    undoManager().perform (new SetPluginParamValueAction (*param, pi, raw));
     // G10 — parameter automation RECORDING (v0): when the owning track is armed `write`,
     // capture a point at the current transport position in the SAME transaction, so one
     // undo reverts the value AND the point together. Deliberately gated on automationMode

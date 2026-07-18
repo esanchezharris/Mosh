@@ -115,3 +115,62 @@ TEST_CASE ("parseAutomationCurvePoints rejects a JSON string that isn't an array
     auto r = parseAutomationCurvePoints (juce::var (juce::String ("{\"t\":0,\"v\":0.2}")));
     REQUIRE_FALSE (r.ok);
 }
+
+// ADVERSARIAL-REVIEW FIX — juce::var's numeric cast silently coerces a non-numeric value
+// (string/bool/null) to 0.0 instead of failing; a rejected-BEFORE-mutating validator must not
+// let a typo'd "t"/"v" silently become 0.0. Mirrors the mock's `typeof rec.t === "number"`
+// (ui/src/bridge.mock.ts write_automation_curve).
+TEST_CASE ("parseAutomationCurvePoints rejects a non-numeric t (string coerces to 0.0 otherwise)", "[automationcurvewrite]")
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("t", "oops");
+    o->setProperty ("v", 0.5);
+    auto r = parseAutomationCurvePoints (pointsArray ({ juce::var (o) }));
+    REQUIRE_FALSE (r.ok);
+    REQUIRE (r.error.contains ("\"t\""));
+    REQUIRE (r.error.contains ("numeric"));
+}
+
+TEST_CASE ("parseAutomationCurvePoints rejects a non-numeric v (string coerces to 0.0 otherwise)", "[automationcurvewrite]")
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("t", 0.0);
+    o->setProperty ("v", "half");
+    auto r = parseAutomationCurvePoints (pointsArray ({ juce::var (o) }));
+    REQUIRE_FALSE (r.ok);
+    REQUIRE (r.error.contains ("\"v\""));
+    REQUIRE (r.error.contains ("numeric"));
+}
+
+TEST_CASE ("parseAutomationCurvePoints rejects a bool t/v (bool is not numeric here)", "[automationcurvewrite]")
+{
+    auto* boolT = new juce::DynamicObject();
+    boolT->setProperty ("t", juce::var (true));
+    boolT->setProperty ("v", 0.5);
+    auto r1 = parseAutomationCurvePoints (pointsArray ({ juce::var (boolT) }));
+    REQUIRE_FALSE (r1.ok);
+
+    auto* boolV = new juce::DynamicObject();
+    boolV->setProperty ("t", 0.0);
+    boolV->setProperty ("v", juce::var (false));
+    auto r2 = parseAutomationCurvePoints (pointsArray ({ juce::var (boolV) }));
+    REQUIRE_FALSE (r2.ok);
+}
+
+TEST_CASE ("parseAutomationCurvePoints rejects a null t/v", "[automationcurvewrite]")
+{
+    auto* nullT = new juce::DynamicObject();
+    nullT->setProperty ("t", juce::var());
+    nullT->setProperty ("v", 0.5);
+    auto r = parseAutomationCurvePoints (pointsArray ({ juce::var (nullT) }));
+    REQUIRE_FALSE (r.ok);
+}
+
+TEST_CASE ("parseAutomationCurvePoints still accepts an integer-valued t/v (isInt(), not just isDouble())", "[automationcurvewrite]")
+{
+    // JSON::parse yields an int var for "0"/"1" (no decimal point) rather than a double one —
+    // the numeric guard must accept isInt()/isInt64() too, not just isDouble().
+    auto r = parseAutomationCurvePoints (juce::var (juce::String ("[{\"t\":0,\"v\":0},{\"t\":1,\"v\":1}]")));
+    REQUIRE (r.ok);
+    REQUIRE (r.points.size() == 2);
+}

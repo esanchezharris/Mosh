@@ -25,6 +25,19 @@ struct AutomationCurveWriteResult
     std::vector<AutomationCurvePointIn> points;   // validated, ascending in t (input order)
 };
 
+// ADVERSARIAL-REVIEW FIX — o->getProperty("t")/("v") were cast straight to (double) with no
+// type check. juce::var's numeric cast operator silently coerces a non-numeric var (e.g. a
+// JSON string, bool, or null) to 0.0 instead of failing, so a malformed point like
+// {"t":"oops","v":0.5} was silently accepted as {t:0.0,v:0.5} rather than rejected — the
+// DrumPattern.h-style "validate the WHOLE input before mutating anything" discipline this
+// file's header comment claims. The TypeScript mock is already stricter here
+// (`typeof rec.t === "number"`, ui/src/bridge.mock.ts write_automation_curve) so native and
+// mock disagreed on the same malformed input. isNumericVar() closes the gap.
+inline bool isNumericVar (const juce::var& v)
+{
+    return v.isDouble() || v.isInt() || v.isInt64();
+}
+
 /** pointsIn: a juce::var array of {t, v, curve?} objects, OR a JSON-encoded string of the
     same shape (the agent-catalog form). t must be >= 0 and strictly ascending across the
     array; v must be 0..1 (normalised, like every other automation command's value arg);
@@ -56,8 +69,15 @@ inline AutomationCurveWriteResult parseAutomationCurvePoints (const juce::var& p
         if (! o->hasProperty ("t") || ! o->hasProperty ("v"))
             return fail ("each point needs \"t\" and \"v\"");
 
-        const double t = (double) o->getProperty ("t");
-        const double v = (double) o->getProperty ("v");
+        const juce::var tVar = o->getProperty ("t");
+        const juce::var vVar = o->getProperty ("v");
+        if (! isNumericVar (tVar))
+            return fail ("point \"t\" must be numeric (got " + tVar.toString() + ")");
+        if (! isNumericVar (vVar))
+            return fail ("point \"v\" must be numeric (got " + vVar.toString() + ")");
+
+        const double t = (double) tVar;
+        const double v = (double) vVar;
         const double c = o->hasProperty ("curve") ? (double) o->getProperty ("curve") : 0.0;
 
         if (t < 0.0)

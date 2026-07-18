@@ -1451,6 +1451,102 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (std::abs (paramValueG10b (puTrack, rpidx, 0) - 0.95) < 0.02, "G10 regression: redo restores the set value");
     }
 
+    // ─── ADVERSARIAL-REVIEW FIX: SetPluginParamValueAction use-after-free (blocking) ───
+    // Repro found in review: set_plugin_param pushed a SetPluginParamValueAction holding a raw
+    // te::AutomatableParameter& captured at construction. remove_plugin detaches the plugin
+    // (plugin->deleteFromParent()); te::PluginCache purges the underlying C++
+    // Plugin/AutomatableParameter object via its own 1s JUCE::Timer once the cache is its last
+    // owner (refcount hits 1) — pumped for real below via runDispatchLoopUntil, so this test
+    // forces the ACTUAL purge headlessly rather than relying on same-address reuse masking the
+    // bug. undo (of remove_plugin) then re-adds the plugin as a BRAND-NEW C++ object at a new
+    // address (PluginList's ValueTreeObjectList rebuilds via getOrCreatePluginFor), restored
+    // from the same ValueTree node -> same te::EditItemID. A second undo (of the original
+    // set_plugin_param) invokes the now-STALE action's undo(): pre-fix this dereferenced the
+    // freed original AutomatableParameter& (undefined behavior / crash). Post-fix the action
+    // re-resolves the parameter fresh, by (pluginItemId,paramIndex) via the Edit's PluginCache,
+    // on every perform()/undo() call — so the WHOLE sequence below must complete without
+    // crashing, and must land the correct value on the RE-CREATED plugin object.
+    section ("ADVERSARIAL-REVIEW: SetPluginParamValueAction UAF across remove_plugin+undo");
+    {
+        auto paramValueUAF = [&] (const String& trkId, int plugIdx, int paramIdx) -> double {
+            auto trk = trackById (trkId);
+            if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                        if (auto* params = p.getProperty ("params", var()).getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == paramIdx) return (double) pr.getProperty ("value", -1.0);
+            return -1.0;
+        };
+        auto hasPluginAt = [&] (const String& trkId, int plugIdx) -> bool {
+            auto trk = trackById (trkId);
+            if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx) return true;
+            return false;
+        };
+
+        auto uafTrack = cmd (ops, "create_track", args1 ("name", "ParamUAF"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "load_builtin", objN ({{ "trackId", uafTrack }, { "type", "compressor" }}));
+        int uafIdx = -1;
+        { auto trk = trackById (uafTrack);
+          if (auto* plugins = trk.getProperty ("plugins", var()).getArray())
+            for (auto& p : *plugins) if (p.getProperty ("type", var()).toString() == "compressor") uafIdx = (int) p.getProperty ("index", -1); }
+        check (uafIdx >= 0, "UAF regression: compressor loaded");
+
+        const double uafBefore = paramValueUAF (uafTrack, uafIdx, 0);
+
+        // T1: set_plugin_param — pushes the SetPluginParamValueAction under test.
+        check (ok (cmd (ops, "set_plugin_param", objN ({{ "trackId", uafTrack }, { "index", uafIdx }, { "paramIndex", 0 }, { "value", 0.85 }}))),
+               "UAF regression: set_plugin_param ok");
+        check (std::abs (paramValueUAF (uafTrack, uafIdx, 0) - 0.85) < 0.02, "UAF regression: value reflects the set");
+
+        // T2: remove_plugin — detaches the plugin the T1 action's original param lived on.
+        check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", uafTrack }, { "index", uafIdx }}))),
+               "UAF regression: remove_plugin ok");
+        check (! hasPluginAt (uafTrack, uafIdx), "UAF regression: plugin gone after remove");
+
+        // Force the REAL te::PluginCache 1s purge timer to fire (pump the message loop past
+        // 1000ms in 50ms slices — mirrors the pump() idiom used elsewhere in this file for
+        // async waits) so the original Plugin/AutomatableParameter C++ objects are actually
+        // destroyed, not just detached — otherwise the repro is inert (same-address reuse would
+        // mask the bug even pre-fix).
+        {
+            auto* uafMm = juce::MessageManager::getInstanceWithoutCreating();
+            const auto uafPumpEnd = juce::Time::getMillisecondCounter() + (juce::uint32) 1300;
+            while (juce::Time::getMillisecondCounter() < uafPumpEnd)
+            {
+                if (uafMm != nullptr) uafMm->runDispatchLoopUntil (50);
+                else juce::Thread::sleep (50);
+            }
+        }
+
+        // Undo #1 reverts T2 (remove_plugin): Tracktion's built-in ValueTree undo restores the
+        // removed node — same te::EditItemID, but (since the cache purged the original) a NEW
+        // C++ Plugin object gets instantiated for it.
+        check (ok (cmd (ops, "undo")), "UAF regression: undo #1 (revert remove_plugin) ok, no crash");
+        check (hasPluginAt (uafTrack, uafIdx), "UAF regression: plugin restored after undo #1");
+        check (std::abs (paramValueUAF (uafTrack, uafIdx, 0) - 0.85) < 0.05,
+               "UAF regression: restored plugin's param reflects the value it had when removed");
+
+        // Undo #2 reverts T1 (set_plugin_param) — the STALE action. Pre-fix its raw
+        // AutomatableParameter& pointed at the now-freed original object; post-fix it
+        // re-resolves by (pluginItemId,paramIndex) against the (new) live plugin instead.
+        // Reaching + passing the assertions below is itself part of the proof (a UAF here is
+        // undefined behavior, not a silently-wrong-but-safe result).
+        check (ok (cmd (ops, "undo")), "UAF regression: undo #2 (revert set_plugin_param on the RE-CREATED plugin) ok, no crash");
+        check (hasPluginAt (uafTrack, uafIdx), "UAF regression: plugin still present after undo #2");
+        check (std::abs (paramValueUAF (uafTrack, uafIdx, 0) - uafBefore) < 0.05,
+               "UAF regression: undo #2 correctly restores the pre-set value on the RE-CREATED plugin object (not a crash, not a silent no-op)");
+
+        // Redo both, proving the re-resolving perform()/undo() path works in both directions
+        // post-purge, not just undo().
+        check (ok (cmd (ops, "redo")), "UAF regression: redo #1 (re-apply set_plugin_param) ok");
+        check (std::abs (paramValueUAF (uafTrack, uafIdx, 0) - 0.85) < 0.05, "UAF regression: redo #1 restores the set value");
+        check (ok (cmd (ops, "redo")), "UAF regression: redo #2 (re-apply remove_plugin) ok");
+        check (! hasPluginAt (uafTrack, uafIdx), "UAF regression: redo #2 removes the plugin again");
+    }
+
     // ─── Wave 1: engine built-in plugin palette (effects + instruments) ───
     section ("Wave 1: built-in plugin palette");
     {
