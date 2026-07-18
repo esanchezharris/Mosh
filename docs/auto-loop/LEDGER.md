@@ -51,6 +51,24 @@ after AL-002, even though dozens more `docs/auto-loop/backlog.jsonl` items merge
 this file's per-round discipline is tracked informally; the entry below resumes it for the one
 item in this session that came from `docs/auto-loop/backlog.jsonl` proper.
 
+### 2026-07-17 10:50:37 PDT — PR #377: claude/auto-polish-warp-badge-position  [MERGED ✅]
+- **Branch:** claude/auto-polish-warp-badge-position → PR #377
+- **Base:** origin/main @ 7e2431bed → squash-merged as 40c206d43
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 10:54:31 PDT — PR #378: claude/auto-polish-v2-btn-disabled  [MERGED ✅]
+- **Branch:** claude/auto-polish-v2-btn-disabled → PR #378
+- **Base:** origin/main @ 40c206d43 → squash-merged as cd2a00e54
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 11:11:11 PDT — PR #380: claude/auto-polish-working-badge-reduced-motion  [MERGED ✅]
+- **Branch:** claude/auto-polish-working-badge-reduced-motion → PR #380
+- **Base:** origin/main @ cd2a00e54 → squash-merged as bf3c11669
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
 ### 2026-07-17 11:31:59 PDT — PR #382: claude/auto-al-018  [MERGED ✅]
 - **Branch:** claude/auto-al-018 → PR #382
 - **Base:** origin/main @ bf3c1166 → squash-merged as 1d1930c5
@@ -84,3 +102,75 @@ generator (`scripts/auto-loop/merge-one.sh`) did not itself produce. Full descri
 - **Confirmed already-shipped, no PR opened:** FIT-003 (bounded plugin-scan — already landed via
   #348) and FS-T3 (project-file schema versioning — already satisfied by the June A1 hardening
   pass), both re-verified against `origin/main` rather than re-built.
+
+### 2026-07-17 12:09:58 PDT — PR #389: claude/auto-polish-record-btn-aria-pressed  [MERGED ✅]
+- **Branch:** claude/auto-polish-record-btn-aria-pressed → PR #389
+- **Base:** origin/main @ 14cb71e1d → squash-merged as 27067ab40
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 12:13:29 PDT — PR #388: claude/auto-polish-lyric-fill-aria-label  [MERGED ✅]
+- **Branch:** claude/auto-polish-lyric-fill-aria-label → PR #388
+- **Base:** origin/main @ 27067ab40 → squash-merged as 4f21056b1
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 13:02:22 PDT — PR #391: claude/auto-polish-warp-apply-btn-class  [MERGED ✅]
+- **Branch:** claude/auto-polish-warp-apply-btn-class → PR #391
+- **Base:** origin/main @ 4f21056b1 → squash-merged as 16b48cbf6
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 13:05:47 PDT — PR #392: claude/auto-polish-clip-working-badge-status-role  [MERGED ✅]
+- **Branch:** claude/auto-polish-clip-working-badge-status-role → PR #392
+- **Base:** origin/main @ 16b48cbf6 → squash-merged as 162bb3217
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 13:25:52 PDT — PR #393: claude/auto-polish-takes-aria-pressed  [MERGED ✅]
+- **Branch:** claude/auto-polish-takes-aria-pressed → PR #393
+- **Base:** origin/main @ 162bb3217 → squash-merged as 7ace56656
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 13:44:20 PDT — PR #395: claude/auto-polish-v2-zoom-role-group  [MERGED ✅]
+- **Branch:** claude/auto-polish-v2-zoom-role-group → PR #395
+- **Base:** origin/main @ 7ace56656 → squash-merged as 32b4bec75
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 13:47:55 PDT — PR #396: claude/auto-polish-v2-composer-radius-token  [MERGED ✅]
+- **Branch:** claude/auto-polish-v2-composer-radius-token → PR #396
+- **Base:** origin/main @ 32b4bec75 → squash-merged as fa31ec3e4
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 14:12:57 PDT — PR #398: claude/auto-polish-rhyme-error-role-alert  [MERGED ✅]
+- **Branch:** claude/auto-polish-rhyme-error-role-alert → PR #398
+- **Base:** origin/main @ fa31ec3e4 → squash-merged as 0b6b1b347
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 14:39:10 PDT — PR #399: claude/auto-polish-empty-stage-role-status  [MERGED ✅]
+- **Branch:** claude/auto-polish-empty-stage-role-status → PR #399
+- **Base:** origin/main @ 0b6b1b347 → squash-merged as 353c09303
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 14:43:59 PDT — PR #400: claude/auto-polish-sel-header-accent-token  [MERGED ✅]
+- **Branch:** claude/auto-polish-sel-header-accent-token → PR #400
+- **Base:** origin/main @ 353c09303 → squash-merged as 1044a51b2
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 15:09:34 PDT — PR #402: claude/auto-polish-plugin-dock-empty-live-region  [MERGED ✅]
+- **Branch:** claude/auto-polish-plugin-dock-empty-live-region → PR #402
+- **Base:** origin/main @ 1044a51b2 → squash-merged as 5f428d1a0
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-17 15:36:00 PDT — PR #407: claude/auto-polish-fs-xl-transport-clock  [MERGED ✅]
+- **Branch:** claude/auto-polish-fs-xl-transport-clock → PR #407
+- **Base:** origin/main @ 5f428d1a0 → squash-merged as abf5e1495
+- **Review:** APPROVE (polish-loop adversarial review)
+- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
