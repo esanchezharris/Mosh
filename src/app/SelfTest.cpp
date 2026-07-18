@@ -1855,14 +1855,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto masterPlugins = [&] () -> var {
             return ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
         };
+        // NOTE: `masterPlugins()` returns a fresh var by value each call. getArray() hands
+        // back a raw pointer into that var's (ref-counted) internal array storage, so the
+        // var itself MUST be kept alive (bound to a named local) for as long as the pointer
+        // is used. `if (auto* arr = masterPlugins().getArray())` looks equivalent but is a
+        // real use-after-free: the condition of an if-statement is its own full-expression,
+        // so the unnamed `masterPlugins()` temporary — and the array it owns — is destroyed
+        // the instant the condition finishes evaluating, BEFORE the loop body runs (unlike
+        // the `trk`/`snap`-named-local idiom used everywhere else in this file, where the
+        // owning var outlives the condition because it's a named variable in the enclosing
+        // scope). Every read below binds the result to a named local first.
         auto masterOrder = [&] () -> StringArray {
             StringArray order;
-            if (auto* arr = masterPlugins().getArray())
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
                 for (auto& p : *arr) order.add (p.getProperty ("type", var()).toString());
             return order;
         };
         auto masterIdxOf = [&] (const String& type) -> int {
-            if (auto* arr = masterPlugins().getArray())
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
                 for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return (int) p.getProperty ("index", -1);
             return -1;
         };
@@ -1882,13 +1894,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "set_master_plugin_param ok");
         {
             double v = -1.0;
-            if (auto* arr = masterPlugins().getArray())
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
                 for (auto& p : *arr)
                     if ((int) p.getProperty ("index", -1) == compIdx)
-                        if (auto* ps = p.getProperty ("params", var()).getArray())
+                    {
+                        auto params = p.getProperty ("params", var());
+                        if (auto* ps = params.getArray())
                             for (auto& pp : *ps)
                                 if ((int) pp.getProperty ("index", -1) == 0)
                                     v = (double) pp.getProperty ("value", -1.0);
+                    }
             check (std::abs (v - 0.65) < 0.02, "set_master_plugin_param value reflects in the snapshot");
         }
 
@@ -1896,7 +1912,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", compIdx }, { "bypassed", true }}))), "bypass_master_plugin ok");
         {
             bool bypassed = false;
-            if (auto* arr = masterPlugins().getArray())
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
                 for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == compIdx) bypassed = ! (bool) p.getProperty ("enabled", true);
             check (bypassed, "bypass_master_plugin disabled the plugin");
         }
@@ -1943,7 +1960,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // load_master_plugin/pluginId end-to-end when the harness has a hostable plugin.
         {
             String masterFxId;
-            if (auto* arr = cmd (ops, "list_plugins")["data"].getProperty ("plugins", var()).getArray())
+            auto lpMaster = cmd (ops, "list_plugins");
+            if (auto* arr = lpMaster["data"].getProperty ("plugins", var()).getArray())
                 for (auto& p : *arr)
                     if (isHarnessHostablePlugin (p) && ! (bool) p.getProperty ("isInstrument", false))
                     { masterFxId = p.getProperty ("id", var()).toString(); break; }
