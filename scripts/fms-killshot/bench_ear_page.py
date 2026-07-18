@@ -147,9 +147,13 @@ def _crop(src, a, b, dst):
     return dst
 
 
-def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb):
-    """Blind A/B of the SAME arm across two runs — isolates one change (here: ASR words +
-    fixed 12s cut vs the singer's real lyrics + phrase-aligned window)."""
+def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_song=None):
+    """Blind A/B of the SAME arm across two runs — isolates one change.
+
+    `catch_song`: for that song BOTH blind clips are byte-identical (a catch trial). It looks
+    exactly like a real comparison; if the owner hears a difference there, the round is
+    position-biased noise and its other verdicts are void. This is the guard for the failure
+    that made the last two A/B rounds unusable ("B on all three" under a scrambled map)."""
     rows = {r["item"]: r for r in json.load(open(run_a))}
     rowsb = {r["item"]: r for r in json.load(open(run_b))}
     clips = os.path.join(out_dir, "clips")
@@ -161,16 +165,22 @@ def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb):
         ra, rb = rows[item].get("arms", {}), rowsb[item].get("arms", {})
         if arm not in ra or arm not in rb:
             continue
+        is_catch = (song == catch_song)
         order = blind_order(song, [label_a, label_b], index=idx)
-        mapping[song] = order
+        mapping[song] = dict(order, catch=is_catch)
         # The two runs used different windows (fixed 12 s vs phrase-snapped), so the clips
         # differ in LENGTH — a systematic tell that would un-blind the test, and a second
         # variable riding along. Crop both to the same absolute span of the song so the
         # ONLY difference is the words.
         wa, wb = rows[item].get("window", [0, 0]), rowsb[item].get("window", [0, 0])
         t0, t1 = max(wa[0], wb[0]), min(wa[1], wb[1])
-        srcs = {label_a: (ra[arm]["wav"], t0 - wa[0], t1 - wa[0]),
-                label_b: (rb[arm]["wav"], t0 - wb[0], t1 - wb[0])}
+        if is_catch:
+            # BOTH clips = the SAME source (run B's arm). Identical audio under A and B.
+            srcs = {label_a: (rb[arm]["wav"], t0 - wb[0], t1 - wb[0]),
+                    label_b: (rb[arm]["wav"], t0 - wb[0], t1 - wb[0])}
+        else:
+            srcs = {label_a: (ra[arm]["wav"], t0 - wa[0], t1 - wa[0]),
+                    label_b: (rb[arm]["wav"], t0 - wb[0], t1 - wb[0])}
         blind_html = []
         for letter, key in order.items():
             dst = f"{song}_{letter}.wav"
@@ -206,22 +216,14 @@ def main():
     ap.add_argument("--label-a", default="asr-words")
     ap.add_argument("--label-b", default="real-lyrics")
     ap.add_argument("--blurb", default=None)
+    ap.add_argument("--catch", default=None, help="song to make a catch trial (identical A/B)")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/ear-gate"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.compare:
         mapping = build_compare(
             a.run, a.compare, a.out, a.arm, a.label_a, a.label_b,
-            a.blurb or (
-            "Same pipeline, same settings, <strong>one change</strong>: the words it was told "
-            "to sing. Before, they came from Whisper transcribing your finished take — which "
-            "in these windows got 15–55% of words below its own confidence gate "
-            "(&ldquo;Yattis bitch&rdquo;, &ldquo;I've already sleep&rdquo;, &ldquo;alligator "
-            "<em>around</em> my jeans&rdquo;). Now they are the lyrics you wrote. Because the "
-            "score allocates about one note-slot per syllable, wrong words also moved the "
-            "notes — so this should change the <strong>rhythm</strong>, not just the words. "
-            "The window now ends on a real breath instead of a stopwatch, so nothing is cut "
-            "off mid-phrase."))
+            a.blurb or "Same pipeline, one change.", catch_song=a.catch)
     else:
         mapping = build(a.run, a.out)
     # mapping lives OUTSIDE the served dir so the page cannot leak the answer
@@ -234,7 +236,8 @@ def main():
     print(f"key   : {key_path}  (outside the serve root)")
     print(f"serve : cd {a.out} && python3 -m http.server 8199")
     for song, order in sorted(mapping.items()):
-        print(f"  {song}: {len(order)} blind arms")
+        tag = "  ← CATCH (identical A/B)" if order.get("catch") else ""
+        print(f"  {song}: A={order.get('A')} B={order.get('B')}{tag}")
     return 0
 
 
