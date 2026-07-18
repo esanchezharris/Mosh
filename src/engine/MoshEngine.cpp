@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "SessionPaths.h"
 #include "SourceRef.h"
 #include "state/Migrations.h"
 
@@ -74,21 +75,31 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         std::move (behaviour));
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
-    // The harness gets an isolated "session-selftest" dir so it can't be polluted
-    // by (or clobber) a real GUI session — see freshSession below. Established BEFORE
-    // the device init so PRE-001 can restore the persisted device setup from it.
-    // An explicit freshSessionName ALWAYS isolates the dir — even when not wiping (A3's
-    // KEEP_SESSION recovery test). Only fall back to the GUI "session" leaf when no isolated
-    // name was given. (Decoupling the leaf from freshSession; the GUI passes no name, so it is
-    // unaffected.) Without this, a non-wiping headless run would clobber the owner's session.
-    const auto sessionLeaf = freshSessionName.isNotEmpty() ? freshSessionName
-                             : (freshSession ? juce::String ("session-selftest") : juce::String ("session"));
-    session = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                  .getChildFile ("Mosh")
-                  .getChildFile (sessionLeaf);
-    if (freshSession)
+    // Each harness run gets its own dir so it can't be polluted by (or clobber) a real
+    // GUI session, or another concurrent harness — see freshSession below. Established
+    // BEFORE the device init so PRE-001 can restore the persisted device setup from it.
+    // freshSessionName is a BASE leaf ("session-selftest", ...); empty means the GUI.
+    // resolveSessionLeaf applies the MOSH_SELFTEST_SESSION override (explicit always wins
+    // verbatim — gate.sh/verify.py read artifacts back out of that exact path) and otherwise
+    // auto-isolates headless runs per process, so two concurrent harnesses can no longer
+    // wipe each other's session dir mid-test. See src/engine/SessionPaths.h.
+    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
+        freshSessionName,
+        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
+        mosh::sessionpaths::processTag());
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                             .getChildFile ("Mosh");
+    session = moshDir.getChildFile (sessionLeaf);
+    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project. Nothing
+    // should route "session" here with freshSession set, but this is a data-loss class —
+    // guard it rather than trust every caller.
+    if (freshSession && sessionLeaf != "session")
         session.deleteRecursively();
+    else if (freshSession)
+        DBG ("MoshEngine: refusing to wipe the GUI \"session\" dir");
     session.createDirectory();
+    if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
+        mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);
     session.getChildFile ("audio").createDirectory();
     // A2 — latch the prior session's liveness sentinel BEFORE this run overwrites it. Present
     // ⇒ the last GUI session didn't shut down cleanly (crashed). Wiped freshSession dirs
