@@ -1,6 +1,7 @@
 #include "SelfTest.h"
 #include "engine/MoshEngine.h"
 #include "moshops/MoshOps.h"
+#include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
@@ -1342,6 +1343,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (ops, "remove_clip", args1 ("clipId", midiNormCid));
         }
 
+        // normalize_clip: AUDIBLE-SPAN correctness (clipAudibleSourceSpan), not the
+        // whole source file. A clip trimmed to a quiet segment of a longer take must
+        // normalize against the peak that actually PLAYS, not a transient elsewhere in
+        // the take that never sounds. Source WAV layout (2.5s @44.1kHz, 440Hz sine):
+        // [0.0,0.5) LOUD (peak 0.9, ~-0.92 dBFS), [0.5,1.0) EXACT SILENCE,
+        // [1.0,2.5) QUIET (peak 0.1, ~-20 dBFS). The core assertion below FAILS against
+        // the old whole-file findSourcePeak behavior: the old code always measured the
+        // loud segment's ~-0.92 dBFS peak regardless of where the clip is trimmed to,
+        // landing gain around +0.9 dB even when trimmed well clear of it into the quiet
+        // region — a ~19 dB silent under-normalization a producer would only catch by ear.
+        {
+            auto makeSpanWav = [&] () -> juce::File
+            {
+                const double sr = 44100.0;
+                const juce::int64 n = (juce::int64) (sr * 2.5);   // 2.5s total
+                juce::AudioBuffer<float> buf (1, (int) n);
+                buf.clear();
+                const juce::int64 loudEnd    = (juce::int64) (0.5 * sr);   // [0, loudEnd)    -> loud (0.9)
+                const juce::int64 quietStart = (juce::int64) (1.0 * sr);   // [quietStart, n) -> quiet (0.1)
+                                                                            // [loudEnd, quietStart) stays exact silence.
+                const double inc = juce::MathConstants<double>::twoPi * 440.0 / sr;
+                double phase = 0.0;
+                for (juce::int64 i = 0; i < loudEnd; ++i, phase += inc)
+                    buf.setSample (0, (int) i, (float) (std::sin (phase) * 0.9));
+                for (juce::int64 i = quietStart; i < n; ++i, phase += inc)
+                    buf.setSample (0, (int) i, (float) (std::sin (phase) * 0.1));
+
+                auto dir = eng.sessionDir().getChildFile ("normalize-span-test");
+                dir.createDirectory();
+                auto f = dir.getChildFile ("loud-silent-quiet.wav");
+                f.deleteFile();
+                juce::WavAudioFormat fmt;
+                if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+                {
+                    std::unique_ptr<juce::AudioFormatWriter> w (
+                        fmt.createWriterFor (os.get(), sr, 1u, 16, {}, 0));
+                    if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, (int) n); }
+                }
+                return f;
+            };
+            auto spanFile = makeSpanWav();
+            check (spanFile.existsAsFile(), "normalize span-test WAV synthesized (loud/silent/quiet)");
+
+            auto spanImp = cmd (ops, "import_clip", objN ({{ "trackId", et }, { "file", spanFile.getFullPathName() }}));
+            check (ok (spanImp), "normalize span-test clip imported");
+            const auto spanCid = spanImp["data"].getProperty ("clipId", var()).toString();
+
+            // Baseline: UNTRIMMED (offset 0, full 2.5s source) — the audible span IS the
+            // whole file here, so this must still find the LOUD peak (~-0.92 dBFS).
+            // Proves the fix is behavior-preserving for the common untrimmed case.
+            auto spanBase = cmd (ops, "normalize_clip", args1 ("clipId", spanCid));
+            check (ok (spanBase), "normalize_clip (untrimmed) ok");
+            check (std::abs ((double) spanBase["data"].getProperty ("peakDb", 0.0) - (-0.92)) < 0.5,
+                   "untrimmed clip normalizes against the LOUD segment (whole file == audible span)");
+
+            // Trim into [1.0s, 2.0s) — entirely inside the QUIET region, clear of both the
+            // loud segment and the silent gap. This is the core fix assertion.
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", spanCid }, { "offset", 1.0 }, { "length", 1.0 }}))),
+                   "trim_clip into the quiet region ok");
+            auto spanQuiet = cmd (ops, "normalize_clip", args1 ("clipId", spanCid));
+            check (ok (spanQuiet), "normalize_clip (trimmed to quiet region) ok");
+            check (std::abs ((double) spanQuiet["data"].getProperty ("peakDb", 0.0) - (-20.0)) < 0.5,
+                   "trimmed clip measures the QUIET region's ~-20 dBFS peak, not the loud transient outside its "
+                   "span (FAILS against the old whole-file scan, which would report ~-0.92 dBFS here)");
+            check (std::abs ((double) clipById (spanCid).getProperty ("gainDb", 0.0) - 20.0) < 0.5,
+                   "trimmed clip's normalize gain targets the audible (quiet) peak, ~+20 dB — not ~+0.9 dB");
+
+            // Trim to the EXACT-SILENCE gap [0.5s, 1.0s) — the audible SPAN is silent even
+            // though the source file as a whole isn't. Still the existing clean "silent"
+            // error — and now span-accurate (the old whole-file code would NOT have
+            // errored here, since it always saw the loud segment elsewhere in the file).
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", spanCid }, { "offset", 0.5 }, { "length", 0.5 }}))),
+                   "trim_clip into the silent gap ok");
+            check (! ok (cmd (ops, "normalize_clip", args1 ("clipId", spanCid))),
+                   "normalize_clip on a clip trimmed to a silent SPAN errors cleanly, even though the source file "
+                   "isn't silent elsewhere");
+
+            // EOF handling: a length running past the end of the source clamps gracefully
+            // (no crash, no out-of-range read) and measures only the clamped, in-range
+            // remainder (here: [2.3s, 2.5s), still inside the quiet region).
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", spanCid }, { "offset", 2.3 }, { "length", 5.0 }}))),
+                   "trim_clip with length past EOF ok (accepted, not rejected)");
+            auto spanEof = cmd (ops, "normalize_clip", args1 ("clipId", spanCid));
+            check (ok (spanEof), "normalize_clip with a length-past-EOF span still succeeds (clamped)");
+            check (std::abs ((double) spanEof["data"].getProperty ("peakDb", 0.0) - (-20.0)) < 0.5,
+                   "length-past-EOF span still measures the quiet region's peak from its clamped remainder");
+
+            // Offset entirely beyond EOF: the clamped audible range is empty -> the
+            // existing clean "silent" error, not a crash or an out-of-range read.
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", spanCid }, { "offset", 10.0 }, { "length", 1.0 }}))),
+                   "trim_clip with offset beyond EOF ok (accepted, not rejected)");
+            check (! ok (cmd (ops, "normalize_clip", args1 ("clipId", spanCid))),
+                   "normalize_clip with offset entirely beyond EOF errors cleanly, not a crash");
+
+            cmd (ops, "remove_clip", args1 ("clipId", spanCid));
+        }
+
         const int before = trackById (et).getProperty ("clips", var()).size();
         auto dup = cmd (ops, "duplicate_clip", args1 ("clipId", cid));
         check (ok (dup), "duplicate_clip ok");
@@ -1985,6 +2083,176 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}));
         }
         check (masterOrder().isEmpty(), "master bus cleaned up");
+    }
+
+    // ─── Master-bus internal-plugin boundary coverage: everything in the section
+    // above exercises isInternalMasterPlugin()/masterVisibleBoundary()/findMasterPlugin()
+    // only "by inspection" — the internal spectral tap is normally created lazily by
+    // emitSpectrum() during REAL playback (a live PlaybackContext), which headless
+    // --selftest never reaches, so the mapping logic that is supposed to protect the
+    // tap from user-facing commands has never actually run against a real internal
+    // plugin. This section constructs one directly — the SAME insertion call
+    // cmdLoadMasterBuiltin/ensureMasterSpectralTap use (PluginCache::createNewPlugin +
+    // PluginList::insertPlugin at the list's current end) — and proves the mapping
+    // holds around it, then tears it down by hand (there is deliberately no user-facing
+    // command that can reach an internal plugin) so later sections see a clean bus. ───
+    section ("Master bus: internal plugin (spectral tap) visible-index boundary");
+    {
+        auto masterPlugins = [&] () -> var {
+            return ops.snapshot().getProperty ("master", var()).getProperty ("plugins", var());
+        };
+        // See the NOTE on the masterPlugins()/masterOrder() lambdas in the section above —
+        // same use-after-free trap with an unnamed temporary; every read here binds to a
+        // named local first.
+        auto masterOrder = [&] () -> StringArray {
+            StringArray order;
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) order.add (p.getProperty ("type", var()).toString());
+            return order;
+        };
+        auto masterIdxOf = [&] (const String& type) -> int {
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) if (p.getProperty ("type", var()).toString() == type) return (int) p.getProperty ("index", -1);
+            return -1;
+        };
+        auto physicalCount = [&] { return eng.edit().getMasterPluginList().getPlugins().size(); };
+        auto physicalTypeAt = [&] (int i) -> String {
+            auto plugins = eng.edit().getMasterPluginList().getPlugins();
+            return (i >= 0 && i < plugins.size()) ? plugins[i]->getPluginType() : String();
+        };
+        const String tapType (MasterSpectralTapPlugin::xmlTypeName);
+
+        check (masterOrder().isEmpty(), "boundary section starts with a clean master bus");
+
+        // Three visible plugins, then the internal tap.
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "compressor" }}))), "compressor loaded");
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "reverb" }}))),     "reverb loaded");
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "delay" }}))),      "delay loaded");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "3 visible plugins load in order before the tap exists");
+        check (physicalCount() == 3, "physical master list has exactly 3 plugins pre-tap");
+
+        {
+            auto tap = eng.edit().getPluginCache().createNewPlugin (MasterSpectralTapPlugin::xmlTypeName, {});
+            check (tap != nullptr, "synthetic internal plugin (spectral tap) created");
+            auto& list = eng.edit().getMasterPluginList();
+            list.insertPlugin (tap, list.getPlugins().size(), nullptr);   // append — same call cmdLoadMasterBuiltin/ensureMasterSpectralTap use
+        }
+        check (physicalCount() == 4, "physical master list now has 4 plugins (3 visible + the internal tap)");
+        check (physicalTypeAt (3) == tapType, "the tap physically sits at index 3 (last)");
+
+        // (a) master.plugins EXCLUDES the internal plugin.
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "master.plugins still reports only the 3 visible plugins with the tap present");
+        check (masterPlugins().size() == 3, "master.plugins length unaffected by the internal plugin");
+
+        // (b) user-visible indices still resolve to the RIGHT physical plugins for
+        // load/remove/reorder/bypass/set_param, with the tap present.
+        const int reverbIdx = masterIdxOf ("reverb");
+        check (reverbIdx == 1, "reverb resolved at visible index 1");
+        check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", reverbIdx }, { "paramIndex", 0 }, { "value", 0.42 }}))),
+               "set_master_plugin_param on a visible index still resolves with the tap present");
+        check (ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", reverbIdx }, { "bypassed", true }}))),
+               "bypass_master_plugin on a visible index still resolves with the tap present");
+        {
+            bool bypassed = false;
+            auto plugins = masterPlugins();
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr) if ((int) p.getProperty ("index", -1) == reverbIdx) bypassed = ! (bool) p.getProperty ("enabled", true);
+            check (bypassed, "the bypass landed on reverb, not the tap");
+        }
+        check (ok (cmd (ops, "undo")), "undo bypass ok");
+        check (physicalTypeAt (3) == tapType, "the tap is untouched by a visible-plugin bypass+undo");
+
+        // (d) NO OFF-BY-ONE at the boundary: index == boundary (3, the tap's own
+        // physical slot) must NOT resolve. If masterVisibleBoundary()/findMasterPlugin()
+        // had an off-by-one (e.g. an inclusive `<=` bound instead of `<`), this would
+        // silently let a user-facing command reach into the internal tap.
+        check (! ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", 3 }, { "paramIndex", 0 }, { "value", 0.5 }}))),
+               "index == boundary (the tap's own slot) is rejected, not resolved to the tap");
+        check (! ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", 3 }, { "bypassed", true }}))),
+               "bypass at index == boundary is rejected");
+        check (! ok (cmd (ops, "remove_master_plugin", objN ({{ "index", 3 }}))),
+               "remove at index == boundary is rejected — the tap can't be deleted via the user command surface");
+        check (physicalCount() == 4, "the tap survived every boundary-index command attempt");
+        // ...and boundary - 1 (the LAST visible plugin, delay) still resolves correctly —
+        // the guard isn't over-conservative either.
+        const int delayIdx = masterIdxOf ("delay");
+        check (delayIdx == 2, "delay resolved at visible index 2 (== boundary - 1)");
+        check (ok (cmd (ops, "bypass_master_plugin", objN ({{ "index", delayIdx }, { "bypassed", true }}))),
+               "bypass at boundary - 1 (the last visible plugin) still resolves");
+        check (ok (cmd (ops, "undo")), "undo ok");
+
+        // (c) reorder/insert can NEVER place a user plugin after the internal tap — the
+        // tap must stay physically last so it taps the FULLY-PROCESSED master signal.
+        const int compIdx = masterIdxOf ("compressor");
+        check (ok (cmd (ops, "reorder_master_plugin", objN ({{ "index", compIdx }, { "toIndex", 99 }}))),
+               "reorder_master_plugin with an out-of-bounds toIndex clamps (ok, no crash) with the tap present");
+        check (masterOrder() == StringArray ({ "reverb", "delay", "compressor" }), "compressor moved to the end of the VISIBLE chain");
+        check (physicalTypeAt (3) == tapType, "the tap is still physically last after a max-index reorder");
+        check (ok (cmd (ops, "undo")), "undo reorder ok");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay" }), "undo restores the visible order");
+
+        // A new plugin load with NO explicit index must land BEFORE the tap, pushing the
+        // tap's physical slot from 3 to 4 — never after it. This is also the one check
+        // in this section that depends on te::EditLimits::maxNumMasterPlugins: Tracktion
+        // counts the (invisible) tap against that same cap, so without the
+        // MoshEngineBehaviour::getEditLimits() +1 override (see MoshEngine.cpp) this 4th
+        // VISIBLE plugin would silently fail to insert — PluginList::insertPlugin
+        // returns an empty Ptr with no error, and the pre-fix cmdLoadMasterBuiltin
+        // didn't check indexOf() either, so it would have reported "ok" for a plugin
+        // that was never actually added. This is a real bug this coverage caught
+        // (fixed alongside the coverage; see the belt-and-suspenders checks below and
+        // the MoshEngine.cpp/cmdLoadMasterPlugin/cmdLoadMasterBuiltin comments).
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "4bandEq" }}))), "4bandEq loaded (4th visible plugin)");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay", "4bandEq" }), "the 4th visible plugin appended before the tap");
+        check (physicalCount() == 5, "physical list now has 5 (4 visible + the tap)");
+        check (physicalTypeAt (4) == tapType, "the tap was pushed to index 4 — still physically last");
+        check (masterPlugins().size() == 4, "master.plugins still excludes the (now index-4) tap");
+
+        // Make room — the master bus caps at 4 VISIBLE plugins regardless of the tap
+        // (that part of the cap is pre-existing Tracktion behavior, out of scope here)
+        // — before proving an explicit, absurdly-out-of-range `index` on load ALSO
+        // clamps before the tap, not after it (mirrors cmdLoadMasterPlugin/
+        // cmdLoadMasterBuiltin's `index > boundary -> boundary` clamp).
+        check (ok (cmd (ops, "remove_master_plugin", objN ({{ "index", masterIdxOf ("4bandEq") }}))),
+               "4bandEq removed to make room for the next probe");
+        check (ok (cmd (ops, "load_master_builtin", objN ({{ "type", "4bandEq" }, { "index", 999 }}))),
+               "load_master_builtin with an absurd explicit index still succeeds (clamped)");
+        check (masterOrder() == StringArray ({ "compressor", "reverb", "delay", "4bandEq" }),
+               "the absurd-index load landed at the visible end (index 999 clamped to the boundary), not literally index 999");
+        check (physicalCount() == 5, "physical list is back to 5 (4 visible + the tap)");
+        check (physicalTypeAt (4) == tapType, "the tap is STILL physically last after an absurd-index load");
+        check (masterPlugins().size() == 4, "master.plugins reports 4 visible plugins, tap still excluded");
+
+        // Belt-and-suspenders: findMasterPlugin/cmdSetMasterPluginParam etc. resolve a
+        // freshly-loaded plugin correctly with the tap present (not the empty-Ptr/
+        // index -1 shape a silently-failed insert would have left behind).
+        {
+            const int eqIdx = masterIdxOf ("4bandEq");
+            check (eqIdx == 3, "4bandEq resolved at visible index 3, not -1");
+            check (ok (cmd (ops, "set_master_plugin_param", objN ({{ "index", eqIdx }, { "paramIndex", 0 }, { "value", 0.3 }}))),
+                   "set_master_plugin_param on the freshly-loaded 4th visible plugin resolves correctly");
+        }
+
+        // ── cleanup: remove every visible plugin via the command surface (proves
+        // remove_master_plugin keeps working with the tap present through to the end),
+        // then remove the synthetic internal plugin directly — mirrors its direct
+        // construction above; there is deliberately no user-facing command that can
+        // reach it — so later sections/demos see a fully clean master bus. ──
+        for (int guard = 0; guard < 8 && ! masterOrder().isEmpty(); ++guard)
+        {
+            const int idx = (int) masterPlugins()[0].getProperty ("index", -1);
+            cmd (ops, "remove_master_plugin", objN ({{ "index", idx }}));
+        }
+        check (masterOrder().isEmpty(), "all visible master plugins removed");
+        check (physicalCount() == 1, "only the internal tap remains physically");
+        {
+            auto plugins = eng.edit().getMasterPluginList().getPlugins();
+            if (! plugins.isEmpty())
+                plugins.getLast()->deleteFromParent();
+        }
+        check (eng.edit().getMasterPluginList().getPlugins().isEmpty(), "synthetic internal plugin cleaned up — master bus fully empty for later sections");
     }
 
     // ─── MON-004: total plugin delay compensation (PDC) readout in the snapshot ───

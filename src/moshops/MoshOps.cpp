@@ -474,22 +474,31 @@ namespace
         return peaks;
     }
 
-    // Overall absolute-value peak sample across a reader's whole span (linear, 0..~1+).
+    // Overall absolute-value peak sample within [startSample, endSample) of a reader
+    // (linear, 0..~1+). endSample < 0 (the default) means "to the end of the file" —
+    // callers that want the whole span (get_clip_peaks/bucketedPeaks's sibling use,
+    // or a normalize_clip fallback for warped clips, see clipAudibleSourceSpan below)
+    // just omit both bounds. Range is clamped to the reader's actual length so an
+    // offset/length that runs past EOF degrades gracefully instead of erroring.
     // Shared with normalize_clip — reuses the same block-read shape as bucketedPeaks
     // (Stage-2's get_clip_peaks path) instead of a dedicated render job (tracktion's
     // ClipEffects/NormaliseEffect are an unused, heavier subsystem for this).
-    float findSourcePeak (juce::AudioFormatReader& reader)
+    float findSourcePeak (juce::AudioFormatReader& reader, juce::int64 startSample = 0, juce::int64 endSample = -1)
     {
         const auto total = (juce::int64) reader.lengthInSamples;
         const int chans = (int) reader.numChannels;
         if (total <= 0 || chans <= 0) return 0.0f;
+        if (endSample < 0) endSample = total;
+        startSample = juce::jlimit ((juce::int64) 0, total, startSample);
+        endSample   = juce::jlimit (startSample, total, endSample);
+        if (endSample <= startSample) return 0.0f;
 
         constexpr juce::int64 blockSize = 65536;
-        juce::AudioBuffer<float> buf (chans, (int) juce::jmin (blockSize, total));
+        juce::AudioBuffer<float> buf (chans, (int) juce::jmin (blockSize, endSample - startSample));
         float peak = 0.0f;
-        for (juce::int64 start = 0; start < total; start += blockSize)
+        for (juce::int64 start = startSample; start < endSample; start += blockSize)
         {
-            const int n = (int) juce::jmin (blockSize, total - start);
+            const int n = (int) juce::jmin (blockSize, endSample - start);
             buf.clear();
             reader.read (&buf, 0, n, start, true, chans > 1);
             for (int c = 0; c < buf.getNumChannels(); ++c)
@@ -499,6 +508,39 @@ namespace
             }
         }
         return peak;
+    }
+
+    // Maps a clip's PLAYED span — position offset/length, or the loop range for a
+    // looping clip — onto a [startSec, lengthSec) window in SOURCE-FILE seconds: the
+    // samples that actually sound when the clip plays, as opposed to the whole
+    // (possibly much longer) source file it was trimmed from. Mirrors the arithmetic
+    // in the (private) non-auto-tempo branch of te::AudioClipBase::getReferencedItems
+    // — sourceSec = clipTimeSec * getSpeedRatio() — which is the same formula
+    // Tracktion itself uses to report a clip's "used" file range for export/reference
+    // purposes, just not exposed as a public helper.
+    //
+    // WARPED CAVEAT: auto-tempo (warp-locked) clips are deliberately NOT mapped —
+    // lengthSec is returned negative to mean "unmapped, scan the whole file", which
+    // callers should treat as a fallback. This matches Tracktion's own
+    // getReferencedItems, which ALSO falls back to the whole source file for
+    // auto-tempo clips (see the `if (getAutoTempo())` branch that resets
+    // firstTimeUsed/lengthUsed to the full file): the elastique-driven mapping from
+    // edit time to source time isn't a simple linear scale, so there's no cheap exact
+    // window to compute here either. A precise warped-clip mapping is a documented
+    // follow-up, not attempted in this pass.
+    struct ClipSourceSpan { double startSec = 0.0; double lengthSec = -1.0; };
+
+    ClipSourceSpan clipAudibleSourceSpan (te::AudioClipBase& ac)
+    {
+        if (ac.getAutoTempo())
+            return {};   // warped — see the WARPED CAVEAT above; caller scans the whole file
+
+        const double speed = ac.getSpeedRatio();
+        if (ac.isLooping())
+            return { ac.getLoopStart().inSeconds() * speed, ac.getLoopLength().inSeconds() * speed };
+
+        auto pos = ac.getPosition();
+        return { pos.getOffset().inSeconds() * speed, pos.getLength().inSeconds() * speed };
     }
 
     String findSerumRealtimeRenderReason (te::Edit& edit)
@@ -4134,6 +4176,12 @@ juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
     // so the peak lands at targetDb. Undo restores the prior gain exactly like
     // set_clip_gain. (newGainDb = targetDb - peakDb algebraically absorbs any gain
     // already on the clip, so "set" vs "add a delta" converge to the same result.)
+    //
+    // Scans only the clip's AUDIBLE span (clipAudibleSourceSpan), not the whole
+    // source file: a clip trimmed to a quiet segment of a longer take must normalize
+    // against the peak that actually plays, not a transient elsewhere in the take
+    // that never sounds. Warped (auto-tempo) clips fall back to the whole file — see
+    // clipAudibleSourceSpan's WARPED CAVEAT.
     auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (wave == nullptr) return errResult ("normalize_clip", "no wave clip");
 
@@ -4142,7 +4190,12 @@ juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
     if (reader == nullptr) return errResult ("normalize_clip", "cannot read source");
 
-    const float peakLinear = findSourcePeak (*reader);
+    const auto span = clipAudibleSourceSpan (*wave);
+    const float peakLinear = span.lengthSec < 0.0
+        ? findSourcePeak (*reader)
+        : findSourcePeak (*reader,
+                           (juce::int64) std::llround (span.startSec * reader->sampleRate),
+                           (juce::int64) std::llround ((span.startSec + span.lengthSec) * reader->sampleRate));
     if (peakLinear <= 0.0f) return errResult ("normalize_clip", "clip is silent (peak 0) — nothing to normalize");
 
     const double targetDb = args.hasProperty ("targetDb") ? (double) args.getProperty ("targetDb", 0.0) : 0.0;
@@ -5664,6 +5717,15 @@ juce::var MoshOps::cmdLoadMasterPlugin (const juce::var& args)
     if (index < 0 || index > boundary) index = boundary;   // append before any internal tap
     list.insertPlugin (plugin, index, nullptr);
 
+    // PluginList::insertPlugin SILENTLY no-ops (returns without inserting, no
+    // exception) once te::EditLimits::maxNumMasterPlugins is hit — the internal
+    // spectral tap (see MoshEngineBehaviour::getEditLimits()'s comment) counts
+    // against that same cap, so this can legitimately trip even though it never
+    // could before the tap existed. Report it as a clean error instead of an "ok"
+    // result describing a plugin that was never actually added (indexOf would be -1).
+    if (list.indexOf (plugin.get()) < 0)
+        return errResult ("load_master_plugin", "master bus is full");
+
     auto* data = new DynamicObject();
     data->setProperty ("index", list.indexOf (plugin.get()));
     data->setProperty ("name", plugin->getName());
@@ -5691,6 +5753,12 @@ juce::var MoshOps::cmdLoadMasterBuiltin (const juce::var& args)
     int index = (int) args.getProperty ("index", -1);
     if (index < 0 || index > boundary) index = boundary;   // append before any internal tap
     list.insertPlugin (plugin, index, nullptr);
+
+    // See the identical guard + comment in cmdLoadMasterPlugin — insertPlugin can
+    // silently no-op once maxNumMasterPlugins is hit (the internal tap counts against
+    // it too); turn that into a clean error rather than a bogus "ok".
+    if (list.indexOf (plugin.get()) < 0)
+        return errResult ("load_master_builtin", "master bus is full");
 
     auto* data = new DynamicObject();
     data->setProperty ("index", list.indexOf (plugin.get()));
