@@ -24,6 +24,15 @@ REGISTRY = {
         "language": "en",
         "default_root": os.path.expanduser("~/mosh-fms-ksb/bench/datasets/nus-48e/nus-smc-corpus_48"),
     },
+    # The owner's own (mumble -> finished) takes: real rough-draft prosody, in-voice, and —
+    # unlike every public corpus here — legal to TRAIN on, being his own voice and lyrics.
+    # Items carry `mumble_vocal` (a real mumble); see bench_own_pairs.py.
+    "own-pairs": {
+        "license": "owner's own recordings (own voice + own lyrics)",
+        "train_ok": True,
+        "language": "en",
+        "default_root": os.path.expanduser("~/mosh-fms-ksb/bench/datasets/own-pairs"),
+    },
 }
 
 
