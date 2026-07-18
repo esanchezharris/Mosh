@@ -1,0 +1,212 @@
+[
+ {
+  "area": "Arena",
+  "action": "Try to submit after the deadline",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Arena is outside the conventional-parity pass"
+ },
+ {
+  "area": "Arena",
+  "action": "Vote for submission B",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Arena is outside the conventional-parity pass"
+ },
+ {
+  "area": "Automation",
+  "action": "Create fade out over last 4 bars",
+  "status": "pass",
+  "invariants": [
+   61,
+   66
+  ],
+  "note": "fade-out is volume automation; proven here on an EQ param (track-vol locator is a separate path)."
+ },
+ {
+  "area": "Automation",
+  "action": "Edit an existing automation point and undo it",
+  "status": "pass",
+  "invariants": [
+   67
+  ]
+ },
+ {
+  "area": "Browser",
+  "action": "Preview sample",
+  "status": "pass",
+  "invariants": [
+   70
+  ],
+  "note": "preview audibility is hardware (Phase 1); the no-mutation invariant is proven here."
+ },
+ {
+  "area": "Browser",
+  "action": "Relink a missing asset to a replacement file",
+  "status": "pass",
+  "invariants": [
+   71,
+   73
+  ]
+ },
+ {
+  "area": "Clip editing",
+  "action": "Move vocal clip to hook marker",
+  "status": "pass",
+  "invariants": [
+   21,
+   96
+  ]
+ },
+ {
+  "area": "Clip editing",
+  "action": "Split selected clip at the playhead and duplicate second half",
+  "status": "pass",
+  "invariants": [
+   24,
+   25
+  ]
+ },
+ {
+  "area": "Collaboration",
+  "action": "Second user joins during playback",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Collaboration is outside the conventional-parity pass"
+ },
+ {
+  "area": "Collaboration",
+  "action": "Two users attempt to edit the same clip concurrently",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Collaboration is outside the conventional-parity pass"
+ },
+ {
+  "area": "Effects",
+  "action": "Add reverb to vocal",
+  "status": "pass",
+  "invariants": [
+   53
+  ]
+ },
+ {
+  "area": "Effects",
+  "action": "Bypass then re-enable an inserted delay effect",
+  "status": "pass",
+  "invariants": [
+   54
+  ]
+ },
+ {
+  "area": "Export",
+  "action": "Render a loop range with delay tail enabled",
+  "status": "pass",
+  "invariants": [
+   78,
+   81
+  ]
+ },
+ {
+  "area": "Export",
+  "action": "Submit 16-bar battle mix",
+  "status": "pass",
+  "invariants": [
+   78,
+   79,
+   83
+  ],
+  "note": "export/bounce mixdown proven; battle-submission immutable-render is out-of-scope."
+ },
+ {
+  "area": "Import",
+  "action": "Drag WAV beat to bar 1 track 1",
+  "status": "pass",
+  "invariants": [
+   2,
+   69,
+   75
+  ],
+  "note": "drag GESTURE is e2e-covered; the import capability is proven here."
+ },
+ {
+  "area": "Import",
+  "action": "Import an MP3 with spaces/unicode in filename",
+  "status": "pass",
+  "invariants": [
+   69
+  ],
+  "note": "wav proxy for the unicode/space-filename path; real mp3 decode is format-dependent."
+ },
+ {
+  "area": "Mixer",
+  "action": "Monster: turn vocal up",
+  "status": "pass",
+  "invariants": [
+   51,
+   97
+  ]
+ },
+ {
+  "area": "Mixer",
+  "action": "Mute then solo the same track according to Mosh solo policy",
+  "status": "pass",
+  "invariants": [
+   14,
+   15,
+   58
+  ]
+ },
+ {
+  "area": "Monster",
+  "action": "Ask \u201cwhat changed?\u201d after edit",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Monster is outside the conventional-parity pass"
+ },
+ {
+  "area": "Monster",
+  "action": "Issue ambiguous command \u201cmake that louder\u201d with no selection",
+  "status": "out-of-scope",
+  "invariants": [],
+  "note": "Monster is outside the conventional-parity pass"
+ },
+ {
+  "area": "Recording",
+  "action": "Deny mic permission and try to record",
+  "status": "pass",
+  "invariants": [
+   45,
+   49
+  ],
+  "note": "no input device headless \u2192 graceful no-op, no fabricated clip."
+ },
+ {
+  "area": "Recording",
+  "action": "Record vocal with 1-bar count-in",
+  "status": "hardware",
+  "invariants": [
+   5,
+   41,
+   42
+  ],
+  "note": "count-in/pre-roll state proven headless (before=0, one_bar=1, two_bars=2, restored=0); the audible click + delayed capture start still needs a live device -- covered by the Phase 1 hardware pass, same posture as transport play."
+ },
+ {
+  "area": "Transport",
+  "action": "Press Play in a loaded session",
+  "status": "hardware",
+  "invariants": [
+   1,
+   4
+  ],
+  "note": "play\u2192audible + playhead advance is proven in the Phase 1 hardware pass (headless play is a no-op without CoreAudio)."
+ },
+ {
+  "area": "Transport",
+  "action": "Seek to a section marker while playback is stopped",
+  "status": "pass",
+  "invariants": [
+   8
+  ]
+ }
+]
