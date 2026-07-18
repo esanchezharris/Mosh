@@ -14,12 +14,8 @@
 // and contour (pitch-CLASS variety + onset-rhythm + interval sanity), and hardens drums
 // (anti-saturation + kick/snare collision) and hygiene (flam + cluster). Pure + bridge-free.
 
-const SEMITONE: Record<string, number> = {
-  C: 0, "C#": 1, Db: 1, D: 2, "D#": 3, Eb: 3, E: 4, F: 5, "F#": 6,
-  Gb: 6, G: 7, "G#": 8, Ab: 8, A: 9, "A#": 10, Bb: 10, B: 11,
-};
-const MINOR = [0, 2, 3, 5, 7, 8, 10];
-const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+import { NOTE_PC, SCALES, isMode, type Mode } from "../musicalKey";
+
 const KICK = 36;
 const HAT_PADS = new Set([42, 44, 46]);
 const SNARE_PADS = new Set([38, 40]);
@@ -83,8 +79,15 @@ export function classifyInstrument(name: string): SoundRealness {
   return DEFAULT_INSTRUMENTS.has(name) ? "default" : "real";
 }
 
-const scaleSet = (mode: string): Set<number> => new Set(mode.toLowerCase().startsWith("maj") ? MAJOR : MINOR);
-const tonicPc = (tonic: string): number => SEMITONE[tonic] ?? 9;
+/** The declared mode resolved into the six-mode `set_key` domain. Out-of-domain strings
+ *  keep v2's coarse major-prefix heuristic (everything else read as minor) so grading never
+ *  silently flips for a string the domain doesn't cover — the engine's `set_key` validates,
+ *  but a raw command program reaching `recipeFromProgram` may carry anything. */
+const modeOf = (mode: string): Mode => {
+  const m = (mode || "").toLowerCase();
+  return isMode(m) ? m : m.startsWith("maj") ? "major" : "minor";
+};
+const tonicPc = (tonic: string): number => NOTE_PC[tonic] ?? 9;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const pc = (p: number) => ((p % 12) + 12) % 12;
@@ -149,11 +152,20 @@ function scoreGrid(r: Recipe, reasons: string[]): number {
   return frac;
 }
 
+// A chromatic key declares NO pitch constraint, so there is nothing to verify — every pitch
+// is trivially "in scale". Scoring that 1.0 would pay the agent this dimension's full 0.12 of
+// weight for REMOVING its own constraint (it authors `set_key`, so the exploit is reachable),
+// which is exactly the Goodhart class v2 was hardened against. So chromatic takes the file's
+// established "can't measure → neutral" value, the same 0.7 dynamics/variation/realness use.
+const KEY_UNVERIFIABLE = 0.7;
+
 function scoreKey(r: Recipe, reasons: string[]): number {
-  const scale = scaleSet(r.key.mode);
-  const tonic = tonicPc(r.key.tonic);
+  const mode = modeOf(r.key.mode);
   const mel = melodicTracks(r).flatMap((t) => t.notes);
   if (!mel.length) { reasons.push("key: no melodic content to check"); return 0; }
+  if (mode === "chromatic") { reasons.push("key: chromatic declares no pitch constraint — key left unscored"); return KEY_UNVERIFIABLE; }
+  const scale = new Set(SCALES[mode]);
+  const tonic = tonicPc(r.key.tonic);
   const frac = mel.filter((n) => scale.has(pc(n.pitch - tonic))).length / mel.length;
   if (frac < 0.85) reasons.push(`key: ${Math.round((1 - frac) * 100)}% of melodic notes out of ${r.key.tonic} ${r.key.mode}`);
   return frac;
