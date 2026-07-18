@@ -83,6 +83,32 @@ def fill_unvoiced_pitches(slots, fallback=57):
     return out
 
 
+def chain_long_segments(segs, max_s):
+    """Split any segment longer than `max_s` into equal SAME-PITCH pieces.
+
+    author_score renders a multi-segment slot as note_type-3 continuations — the melisma
+    mechanism V4b proved holds voicing CONTINUOUSLY across a chain. A single long note is
+    where SoulX decays its tail toward silence (lineup instrument on round 3: 26 of 27
+    missing spans were QUIET-SING, overwhelmingly @TAIL). The same total duration as a
+    continuation chain is an in-distribution "keep singing" command. 0/None = off, input
+    returned unchanged. Pure."""
+    if not max_s or max_s <= 0:
+        return segs
+    out = []
+    for sg in segs:
+        dur = sg["end"] - sg["start"]
+        if dur <= max_s:
+            out.append(sg)
+            continue
+        n = int(math.ceil(dur / max_s - 1e-9))
+        step = dur / n
+        for k in range(n):
+            out.append({"start": round(sg["start"] + k * step, 4),
+                        "end": sg["end"] if k == n - 1 else round(sg["start"] + (k + 1) * step, 4),
+                        "pitch": sg["pitch"]})
+    return out
+
+
 def word_segments(f0, s, e, t0, *, min_step_st=1.5, min_hold_s=0.12, max_segs=None,
                   default_pitch=57):
     """SoulX-convention segmentation of ONE word's span into notes.
@@ -166,6 +192,9 @@ def main():
                                  min_step_st=float(data.get("melismaStepSt") or 1.5),
                                  min_hold_s=float(data.get("melismaHoldS") or 0.12),
                                  default_pitch=None)
+            # sustain-chain: long notes become same-pitch continuation chains so the model
+            # is COMMANDED to keep voicing through the tail (absent/0 = off, byte-identical)
+            segs = chain_long_segments(segs, float(data.get("sustainChainS") or 0.0))
         else:
             n = nsyl(w["word"])
             segs = []

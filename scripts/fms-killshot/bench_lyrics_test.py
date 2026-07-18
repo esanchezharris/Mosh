@@ -84,9 +84,80 @@ check("KEEPS a gap where the take actually goes quiet (that is a breath)",
       got[1]["end"] == 0.40 and "legato" not in got[1])
 check("never moves a word's start", [w["start"] for w in got] == [0.0, 0.22, 0.60])
 check("leaves the final word alone", got[-1]["end"] == 0.80)
-check("refuses to bridge an implausibly long gap even if energy looks present",
+check("refuses a long gap containing a breath (voiced_frac guard)",
       bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
                             {"word": "b", "start": 0.9, "end": 1.0}], ENV)[0]["end"] == 0.1)
+
+# ── long SUSTAINED gaps bridge; long gaps with a breath never do ────────────────────────
+# The flat max_close_s cap left a 0.71s commanded rest inside a held vowel (stage10,
+# measured as missing@rest by the lineup instrument). A held vowel is voiced THROUGHOUT;
+# a breath cannot be. That distinction, not gap length, is the real guard.
+LOUD = [1.0] * 100
+got = bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
+                            {"word": "b", "start": 0.6, "end": 0.7}], LOUD)
+check("bridges a LONG gap the take sustains straight through (the stage10 hole)",
+      got[0]["end"] == 0.6 and got[0].get("legato") is True, str(got[0]))
+# mean alone would pass here (edges loud drag it to ~0.75) — only voiced_frac refuses
+MID_BREATH = [1.0] * 100
+for i in range(25, 45):
+    MID_BREATH[i] = 0.01
+got = bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
+                            {"word": "b", "start": 0.6, "end": 0.7}], MID_BREATH)
+check("a long gap whose MEAN looks voiced still keeps its rest if a breath sits inside",
+      got[0]["end"] == 0.1, str(got[0]))
+
+# ── trim_word_ends: commanded sound must stop where the singer stops ────────────────────
+# take voiced 0.0-0.20 then quiet; the aligner gave the word until 0.50 (overrun)
+TAIL_ENV = [1.0] * 20 + [0.01] * 80
+got = bl.trim_word_ends([{"word": "a", "start": 0.0, "end": 0.5}], TAIL_ENV)
+check("a long quiet tail is trimmed to last-voicing + pad",
+      got[0].get("trimmed") is True and abs(got[0]["end"] - 0.26) < 0.021, str(got[0]))
+check("trim never moves the start", got[0]["start"] == 0.0)
+got = bl.trim_word_ends([{"word": "a", "start": 0.0, "end": 0.28}], TAIL_ENV)
+check("a SHORT quiet tail (< min_tail_s) is left alone — natural decay survives",
+      "trimmed" not in got[0] and got[0]["end"] == 0.28, str(got[0]))
+got = bl.trim_word_ends([{"word": "a", "start": 0.3, "end": 0.9}], TAIL_ENV)
+check("a wholly-quiet word is untouched (alignment junk, not a tail)",
+      "trimmed" not in got[0] and got[0]["end"] == 0.9, str(got[0]))
+W_IN = [{"word": "a", "start": 0.0, "end": 0.5}]
+bl.trim_word_ends(W_IN, TAIL_ENV)
+check("trim does not mutate the caller's words", W_IN[0]["end"] == 0.5)
+check("trim with no envelope is a safe no-op",
+      bl.trim_word_ends(W_IN, [])[0]["end"] == 0.5)
+# ── extend_word_ends: the aligner ends a held vowel early; the singer did not ───────────
+# take voiced 0.0-0.50 then quiet; aligner gave the word only until 0.20; next word at 0.90
+HOLD_ENV = [1.0] * 50 + [0.01] * 50
+got = bl.extend_word_ends([{"word": "woah", "start": 0.0, "end": 0.2},
+                           {"word": "next", "start": 0.9, "end": 1.0}], HOLD_ENV)
+check("a held vowel extends to where voicing actually stops",
+      got[0].get("extended") is True and abs(got[0]["end"] - 0.54) < 0.021, str(got[0]))
+check("extend never touches the next word", got[1]["start"] == 0.9 and "extended" not in got[1])
+# a brief 30ms dip inside the sustain must not stop the walk
+DIP_ENV = [1.0] * 30 + [0.01] * 3 + [1.0] * 17 + [0.01] * 50
+got = bl.extend_word_ends([{"word": "a", "start": 0.0, "end": 0.2},
+                           {"word": "b", "start": 0.9, "end": 1.0}], DIP_ENV)
+check("a sub-quiet_run dip does not stop the extension walk",
+      got[0].get("extended") is True and got[0]["end"] > 0.45, str(got[0]))
+# voicing ending just past the word end is not worth extending
+got = bl.extend_word_ends([{"word": "a", "start": 0.0, "end": 0.45},
+                           {"word": "b", "start": 0.9, "end": 1.0}], HOLD_ENV)
+check("a tiny extension (< min_ext_s) is left alone", "extended" not in got[0], str(got[0]))
+# extension is capped at the next word's start
+got = bl.extend_word_ends([{"word": "a", "start": 0.0, "end": 0.2},
+                           {"word": "b", "start": 0.4, "end": 0.5}], HOLD_ENV)
+check("extension caps at the next word's start", got[0]["end"] <= 0.4, str(got[0]))
+W_IN2 = [{"word": "a", "start": 0.0, "end": 0.2}]
+bl.extend_word_ends(W_IN2, HOLD_ENV)
+check("extend does not mutate the caller's words", W_IN2[0]["end"] == 0.2)
+check("extend with no envelope is a safe no-op",
+      bl.extend_word_ends(W_IN2, [])[0]["end"] == 0.2)
+
+import hashlib as _hl
+import json as _js
+_det = {_hl.sha256(_js.dumps(
+    bl.close_legato_gaps(bl.extend_word_ends(bl.trim_word_ends(WORDS, ENV), ENV), ENV),
+    sort_keys=True).encode()).hexdigest() for _ in range(3)}
+check("trim+extend+close deterministic (3x)", len(_det) == 1)
 check("no envelope -> unchanged (safe no-op, never invents legato)",
       [w["end"] for w in bl.close_legato_gaps(WORDS, [])] == [0.18, 0.40, 0.80])
 check("empty input is empty", bl.close_legato_gaps([], ENV) == [])

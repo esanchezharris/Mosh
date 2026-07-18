@@ -100,6 +100,25 @@ check("fill does not mutate the caller's slots", SL[1]["pitch"] is None)
 check("word_segments(default_pitch=None) marks unvoiced as None for the filler",
       bsa.word_segments([], 0.0, 0.4, 0.0, default_pitch=None)[0]["pitch"] is None)
 
+# ── chain_long_segments: long notes -> same-pitch continuation chains ───────────────────
+segs = [{"start": 0.0, "end": 1.0, "pitch": 60}]
+ch = bsa.chain_long_segments(segs, 0.45)
+check("a 1.0s note chains into 3 pieces at max 0.45", len(ch) == 3, str(ch))
+check("chain pieces tile exactly (no gap, exact end)",
+      ch[0]["start"] == 0.0 and ch[-1]["end"] == 1.0
+      and all(abs(ch[k]["end"] - ch[k + 1]["start"]) < 1e-9 for k in range(len(ch) - 1)), str(ch))
+check("chain pieces keep the pitch", all(c["pitch"] == 60 for c in ch))
+check("a short note is untouched",
+      bsa.chain_long_segments([{"start": 0.0, "end": 0.4, "pitch": 60}], 0.45)
+      == [{"start": 0.0, "end": 0.4, "pitch": 60}])
+check("max_s=0 is the identity (default off)",
+      bsa.chain_long_segments(segs, 0.0) is segs)
+check("an exact-length note does not split (no epsilon sliver)",
+      len(bsa.chain_long_segments([{"start": 0.0, "end": 0.45, "pitch": 60}], 0.45)) == 1)
+check("None pitch survives chaining (filler back-fills later)",
+      all(c["pitch"] is None for c in
+          bsa.chain_long_segments([{"start": 0.0, "end": 1.0, "pitch": None}], 0.45)))
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402

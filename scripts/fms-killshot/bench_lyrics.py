@@ -65,7 +65,8 @@ def parse_lyrics(text):
     return out
 
 
-def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close_s=0.30):
+def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close_s=0.30,
+                      sustain_voiced_frac=0.90, sustain_mean_mult=2.0):
     """Close inter-word gaps the singer sang THROUGH, leaving only real rests.
 
     Forced alignment emits a boundary at every word, but a singer is legato across most of
@@ -76,8 +77,15 @@ def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close
 
     Rather than pick a threshold, ask the TAKE: if it still has energy across the gap, the
     singer sustained through it, so extend the word to meet the next one. If the take really
-    goes quiet, keep the rest — that is a breath and it belongs in the score. `max_close_s`
-    refuses to bridge implausibly long gaps even if energy looks present.
+    goes quiet, keep the rest — that is a breath and it belongs in the score.
+
+    Gaps LONGER than `max_close_s` get a stricter test instead of a flat refusal: bridge
+    only if the take is voiced essentially throughout (>= `sustain_voiced_frac` of frames
+    above the gate AND mean >= `sustain_mean_mult` x gate). The flat cap left a 0.71 s
+    commanded rest inside a held vowel on stage10 — measured by the lineup instrument as
+    `missing@rest`, the exact "silence where there's a sustained" the owner called out. A
+    mean test alone is not enough out there: word-edge energy can drag a breath's mean up,
+    but a breath cannot keep 90% of its frames voiced.
 
     `take_env` is an RMS envelope of the finished take at `sr_hop_s` per frame. Pure."""
     if not words:
@@ -92,13 +100,102 @@ def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close
         if a.get("end") is None or b.get("start") is None:
             continue
         gap = b["start"] - a["end"]
-        if gap <= 0 or gap > max_close_s:
+        if gap <= 0:
             continue
         i0, i1 = int(a["end"] / sr_hop_s), max(int(b["start"] / sr_hop_s), int(a["end"] / sr_hop_s) + 1)
         seg = take_env[max(0, i0):min(len(take_env), i1)]
-        if seg and (sum(seg) / len(seg)) >= th:      # the take sang through it -> legato
+        if not seg:
+            continue
+        mean = sum(seg) / len(seg)
+        if gap <= max_close_s:
+            bridge = mean >= th                       # the take sang through it -> legato
+        else:
+            voiced = sum(1 for e in seg if e >= th) / len(seg)
+            bridge = voiced >= sustain_voiced_frac and mean >= sustain_mean_mult * th
+        if bridge:
             a["end"] = b["start"]
             a["legato"] = True
+    return out
+
+
+def trim_word_ends(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, min_tail_s=0.12,
+                   pad_s=0.06, min_word_s=0.05):
+    """Pull a word's END back to where the take actually stops voicing.
+
+    Forced alignment can hand a word more span than the singer used — the score then
+    commands a NOTE through the take's silence, and the model sings it (measured as
+    `spurious@note` by the lineup instrument: the render singing past the take's last
+    word). Only a LONG quiet tail (>= `min_tail_s` after a `pad_s` grace) is trimmed, so
+    natural soft decays survive; a word with no voiced frames at all is left alone —
+    that is alignment junk, not a tail. Pure; input not mutated."""
+    if not words or not take_env:
+        return [dict(w) for w in words or []]
+    peak = sorted(take_env)[int(0.95 * (len(take_env) - 1))]
+    th = quiet_frac * peak
+    out = []
+    for w in words:
+        w = dict(w)
+        s, e = w.get("start"), w.get("end")
+        if s is None or e is None or e - s <= min_word_s:
+            out.append(w)
+            continue
+        i0, i1 = int(s / sr_hop_s), min(len(take_env), int(e / sr_hop_s))
+        seg = take_env[max(0, i0):i1]
+        last = None
+        for j in range(len(seg) - 1, -1, -1):
+            if seg[j] >= th:
+                last = j
+                break
+        if last is None:
+            out.append(w)                             # wholly quiet: junk, not a tail
+            continue
+        voiced_end = (max(0, i0) + last + 1) * sr_hop_s + pad_s
+        if e - voiced_end >= min_tail_s:
+            w["end"] = round(max(voiced_end, s + min_word_s), 4)
+            w["trimmed"] = True
+        out.append(w)
+    return out
+
+
+def extend_word_ends(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, pad_s=0.04,
+                     min_ext_s=0.10, quiet_run_s=0.06):
+    """Extend a word's END through take voicing the aligner did not give it.
+
+    MMS aligns phoneme CONTENT; a held vowel's sustain often lands after the aligner's
+    word end ("woah" held ~0.3 s past its end on stage10), leaving the sustain inside a
+    commanded rest — `missing@rest` that gap-bridging cannot fix, because the far half of
+    that gap is a real breath. Walk forward from the word end while the take stays voiced
+    (a run of >= `quiet_run_s` below the gate ends the walk); extend only if it buys
+    >= `min_ext_s`, capped at the next word's start. The trim/extend pair together say one
+    thing: commanded sound ends where the singer stops, not where the aligner did. Pure."""
+    if not words or not take_env:
+        return [dict(w) for w in words or []]
+    peak = sorted(take_env)[int(0.95 * (len(take_env) - 1))]
+    th = quiet_frac * peak
+    quiet_run = max(1, int(quiet_run_s / sr_hop_s))
+    out = [dict(w) for w in sorted(words, key=lambda x: (x.get("start") or 0.0))]
+    for i, w in enumerate(out):
+        e = w.get("end")
+        if e is None:
+            continue
+        cap = out[i + 1]["start"] if i + 1 < len(out) and out[i + 1].get("start") is not None \
+            else len(take_env) * sr_hop_s
+        j = int(e / sr_hop_s)
+        last_voiced, quiet = None, 0
+        while j < min(len(take_env), int(cap / sr_hop_s)):
+            if take_env[j] >= th:
+                last_voiced, quiet = j, 0
+            else:
+                quiet += 1
+                if quiet >= quiet_run:
+                    break
+            j += 1
+        if last_voiced is None:
+            continue
+        new_end = min((last_voiced + 1) * sr_hop_s + pad_s, cap)
+        if new_end - e >= min_ext_s:
+            w["end"] = round(new_end, 4)
+            w["extended"] = True
     return out
 
 
@@ -166,11 +263,14 @@ def align_lyrics(song, root=None, *, limit_s=16.0, legato=True):
                     "start": float(a.get("start", 0.0)), "end": float(a.get("end", 0.0)),
                     "score": round(float(a.get("score", 0.0)), 4), "source": "lyrics"})
     if legato:
-        # Only REAL rests should become commanded silence — see close_legato_gaps.
+        # Commanded sound must end where the singer stops; commanded silence only where the
+        # singer is silent. Trim FIRST (ends pulled to real voicing), then bridge gaps the
+        # take sang through — the two act on disjoint envelope conditions.
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "service"))
         from skeleton.core import energy_envelope
         head_n = int(min(limit_s, len(mono) / sr) * sr)
-        out = close_legato_gaps(out, list(energy_envelope(list(mono[:head_n]), sr, hop_ms=10.0)))
+        env = list(energy_envelope(list(mono[:head_n]), sr, hop_ms=10.0))
+        out = close_legato_gaps(extend_word_ends(trim_word_ends(out, env), env), env)
     return out
 
 

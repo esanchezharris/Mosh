@@ -197,6 +197,9 @@ def main():
                          "of the ground truth; the product benchmark arm stays 'mumble')")
     ap.add_argument("--skip-dyn", action="store_true",
                     help="skip the (refuted) dynamics probe arms — faster iterate rounds")
+    ap.add_argument("--sustain-chain-s", type=float, default=0.0,
+                    help="split sung notes longer than this into same-pitch continuation "
+                         "chains (the V4b melisma 'keep singing' command); 0 = off")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
 
@@ -220,9 +223,10 @@ def main():
             t0, t1 = float(w["t0"]), float(w["t1"])
         print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
+            extra = {"sustainChainS": a.sustain_chain_s} if a.sustain_chain_s > 0 else None
             rows.append(run_item(it, t0, t1, a.out, durations=dur_mode,
                                  convention=conv, note_floor_s=floor,
-                                 melody=a.melody, skip_dyn=a.skip_dyn))
+                                 melody=a.melody, skip_dyn=a.skip_dyn, author_extra=extra))
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)
