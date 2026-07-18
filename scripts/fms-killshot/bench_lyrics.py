@@ -66,7 +66,7 @@ def parse_lyrics(text):
 
 
 def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close_s=0.30,
-                      sustain_voiced_frac=0.90, sustain_mean_mult=2.0):
+                      sustain_voiced_frac=0.90, sustain_mean_mult=2.0, bridge_long=True):
     """Close inter-word gaps the singer sang THROUGH, leaving only real rests.
 
     Forced alignment emits a boundary at every word, but a singer is legato across most of
@@ -109,9 +109,11 @@ def close_legato_gaps(words, take_env, sr_hop_s=0.01, quiet_frac=0.10, max_close
         mean = sum(seg) / len(seg)
         if gap <= max_close_s:
             bridge = mean >= th                       # the take sang through it -> legato
-        else:
+        elif bridge_long:
             voiced = sum(1 for e in seg if e >= th) / len(seg)
             bridge = voiced >= sustain_voiced_frac and mean >= sustain_mean_mult * th
+        else:
+            bridge = False                            # r3 policy: flat cap, never bridge long
         if bridge:
             a["end"] = b["start"]
             a["legato"] = True
@@ -231,7 +233,7 @@ def snap_window(words, limit_s):
     return (t0, end if end is not None else t0 + limit_s)
 
 
-def align_lyrics(song, root=None, *, limit_s=16.0, legato=True):
+def align_lyrics(song, root=None, *, limit_s=16.0, legato=True, policy="r3"):
     """Force-align <song>.lyrics.txt against the FINISHED take -> words with real timings.
 
     Aligned against the take's first `limit_s` only: the owner supplied opening lyrics, and
@@ -263,14 +265,19 @@ def align_lyrics(song, root=None, *, limit_s=16.0, legato=True):
                     "start": float(a.get("start", 0.0)), "end": float(a.get("end", 0.0)),
                     "score": round(float(a.get("score", 0.0)), 4), "source": "lyrics"})
     if legato:
-        # Commanded sound must end where the singer stops; commanded silence only where the
-        # singer is silent. Trim FIRST (ends pulled to real voicing), then bridge gaps the
-        # take sang through — the two act on disjoint envelope conditions.
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "service"))
         from skeleton.core import energy_envelope
         head_n = int(min(limit_s, len(mono) / sr) * sr)
         env = list(energy_envelope(list(mono[:head_n]), sr, hop_ms=10.0))
-        out = close_legato_gaps(extend_word_ends(trim_word_ends(out, env), env), env)
+        if policy == "lineup":
+            # rounds 5b-8: trim ends to real voicing, extend through uncredited sustain,
+            # bridge any gap the take sings through. LOST the round-8 blind A/B to r3 —
+            # kept reachable for re-tuning, not the default.
+            out = close_legato_gaps(extend_word_ends(trim_word_ends(out, env), env), env)
+        else:
+            # "r3" — the EAR-WINNING baseline (commit 62f80fbd semantics): bridge short
+            # gaps the take sings through, flat 0.30s cap, no trim/extend.
+            out = close_legato_gaps(out, env, bridge_long=False)
     return out
 
 
@@ -286,6 +293,9 @@ def main():
     ap.add_argument("--limit", type=float, default=16.0, help="seconds of take to align against")
     ap.add_argument("--no-legato", action="store_true",
                     help="keep every aligner word-boundary as a commanded rest (old behaviour)")
+    ap.add_argument("--policy", default="r3", choices=["r3", "lineup"],
+                    help="silence policy: r3 = flat-cap bridge only (the ear-winner, "
+                         "default) | lineup = trim+extend+long-bridge (rounds 5b-8)")
     ap.add_argument("--write", action="store_true",
                     help="install as <song>.words.json (ASR kept as <song>.words.asr.json)")
     a = ap.parse_args()
@@ -294,7 +304,8 @@ def main():
         f[:-len(".lyrics.txt")] for f in os.listdir(root) if f.endswith(".lyrics.txt"))
 
     for song in songs:
-        words = align_lyrics(song, root, limit_s=a.limit, legato=not a.no_legato)
+        words = align_lyrics(song, root, limit_s=a.limit, legato=not a.no_legato,
+                             policy=a.policy)
         ok = [w for w in words if w["score"] > 0.3]
         leg = sum(1 for w in words if w.get("legato"))
         t0, t1 = snap_window(words, 12.0)

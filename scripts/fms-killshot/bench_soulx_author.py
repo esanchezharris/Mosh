@@ -83,6 +83,41 @@ def fill_unvoiced_pitches(slots, fallback=57):
     return out
 
 
+def enforce_word_budgets(words, nsyl_fn, syl_floor_s, t1, *, claim_cap_s=0.30,
+                         keep_rest_s=0.05):
+    """The lyric self-enforces its syllable count (owner, stage9orsum round).
+
+    A word's minimum time = nsyl(word) x syl_floor_s. Forced alignment under-times words
+    whose final syllable is sung QUIETLY (quiet singing is still singing) — the score then
+    crams the syllables into too little time and the word warps. An under-budget word
+    extends its END into the FOLLOWING gap, bounded by: the deficit, `claim_cap_s`, the
+    next word's start minus `keep_rest_s`, and the window end `t1`.
+
+    "If it makes sense with the melody": a claim never crosses a PHRASE boundary — a
+    phrase break is a breath. Words without phrase keys (the NUS lane) never claim, so
+    that path stays byte-identical. Pure; input not mutated; starts never move."""
+    if not words or not syl_floor_s or syl_floor_s <= 0:
+        return [dict(w) for w in words or []]
+    out = [dict(w) for w in words]
+    for i, w in enumerate(out):
+        s, e = float(w.get("start", 0.0)), float(w.get("end", 0.0))
+        deficit = nsyl_fn(str(w.get("word", ""))) * syl_floor_s - (e - s)
+        if deficit <= 0 or w.get("phrase") is None:
+            continue
+        if i + 1 < len(out):
+            nxt = out[i + 1]
+            if nxt.get("phrase") != w.get("phrase"):
+                continue                       # a breath: never claimed
+            room = float(nxt.get("start", e)) - keep_rest_s - e
+        else:
+            room = float(t1) - e
+        claim = min(deficit, claim_cap_s, max(0.0, room))
+        if claim > 1e-6:
+            w["end"] = round(e + claim, 4)
+            w["budgeted"] = True
+    return out
+
+
 def take_voiced_frac(f0, a, b):
     """Fraction of [a,b) f0 frames that are voiced (absolute clock). No frames -> 0."""
     n = v = 0
@@ -91,6 +126,19 @@ def take_voiced_frac(f0, a, b):
             n += 1
             v += 1 if (vo and h and h > 0) else 0
     return v / n if n else 0.0
+
+
+def snap_and_resync(slots, key):
+    """Snap every segment pitch to the song KEY (verbatim reuse of the ear-certified
+    flowfit.snap_slots_to_key — relative-key aware, ties UP) and re-sync each slot's
+    top-level pitch from its first segment. Must run AFTER fill_unvoiced_pitches (the
+    snapper does int(pitch)). Pure."""
+    from soulx.flowfit import snap_slots_to_key
+    out = snap_slots_to_key(slots, key)
+    for sl in out:
+        if sl.get("segments"):
+            sl["pitch"] = sl["segments"][0]["pitch"]
+    return out
 
 
 def chain_long_segments(segs, max_s):
@@ -189,6 +237,9 @@ def main():
                  if w["end"] > t0 and w["start"] < t1 and w["word"].isalpha()]
 
     convention = str(data.get("convention") or "syllable")
+    if convention == "soulx" and float(data.get("sylBudgetS") or 0.0) > 0:
+        # the lyric self-enforces its syllable count (quietly-sung tails reclaim time)
+        words = enforce_word_budgets(words, nsyl, float(data["sylBudgetS"]), t1)
     slots, texts = [], []
     for w in words:
         s, e = max(t0, float(w["start"])), min(t1, float(w["end"]))
@@ -227,6 +278,9 @@ def main():
         slots = fill_unvoiced_pitches(slots)
         for sl in slots:
             sl["pitch"] = sl["segments"][0]["pitch"] if sl.get("segments") else sl["pitch"]
+        if data.get("key"):
+            # score-side autotune: commanded pitches snap to the song's known key
+            slots = snap_and_resync(slots, str(data["key"]))
 
     if not slots:
         print(json.dumps({"ok": False, "error": "no words in window"}))

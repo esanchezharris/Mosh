@@ -158,6 +158,19 @@ _det = {_hl.sha256(_js.dumps(
     bl.close_legato_gaps(bl.extend_word_ends(bl.trim_word_ends(WORDS, ENV), ENV), ENV),
     sort_keys=True).encode()).hexdigest() for _ in range(3)}
 check("trim+extend+close deterministic (3x)", len(_det) == 1)
+
+# ── policy: r3 = flat cap, NEVER bridges a long gap even when fully sustained ───────────
+# (round-3 is the ear-winning baseline; round-8's long-bridge lost the blind A/B)
+got = bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
+                            {"word": "b", "start": 0.6, "end": 0.7}], LOUD, bridge_long=False)
+check("bridge_long=False: a fully-sustained LONG gap keeps its rest (r3 semantics)",
+      got[0]["end"] == 0.1, str(got[0]))
+got = bl.close_legato_gaps(WORDS, ENV, bridge_long=False)
+check("bridge_long=False: short sustained gaps still bridge (unchanged r3 behaviour)",
+      got[0]["end"] == 0.22 and got[0].get("legato") is True, str(got[0]))
+check("bridge_long default is True (lineup policy unchanged)",
+      bl.close_legato_gaps([{"word": "a", "start": 0.0, "end": 0.1},
+                            {"word": "b", "start": 0.6, "end": 0.7}], LOUD)[0]["end"] == 0.6)
 check("no envelope -> unchanged (safe no-op, never invents legato)",
       [w["end"] for w in bl.close_legato_gaps(WORDS, [])] == [0.18, 0.40, 0.80])
 check("empty input is empty", bl.close_legato_gaps([], ENV) == [])

@@ -200,6 +200,13 @@ def main():
     ap.add_argument("--sustain-chain-s", type=float, default=0.0,
                     help="split sung notes longer than this into same-pitch continuation "
                          "chains (the V4b melisma 'keep singing' command); 0 = off")
+    ap.add_argument("--syl-budget-s", type=float, default=0.0,
+                    help="lyric-enforced per-syllable time floor: a word gets at least "
+                         "nsyl x this, claiming its quiet tail from the following gap "
+                         "(same phrase only); 0 = off")
+    ap.add_argument("--key-snap", action="store_true",
+                    help="snap commanded pitches to the song key from <song>.meta.json "
+                         "(score-side autotune; no-op for songs without meta)")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
 
@@ -221,12 +228,26 @@ def main():
         if not a.fixed_window and os.path.isfile(wj):
             w = json.load(open(wj))
             t0, t1 = float(w["t0"]), float(w["t1"])
+        # owner-supplied ground truth (key/bpm) — always recorded for diagnostics,
+        # only ACTS on the score when --key-snap is passed
+        mj = os.path.join(os.path.dirname(it["clean_vocal"]), f"{it['song']}.meta.json")
+        meta = json.load(open(mj)) if os.path.isfile(mj) else {}
         print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
-            extra = {"sustainChainS": a.sustain_chain_s} if a.sustain_chain_s > 0 else None
-            rows.append(run_item(it, t0, t1, a.out, durations=dur_mode,
-                                 convention=conv, note_floor_s=floor,
-                                 melody=a.melody, skip_dyn=a.skip_dyn, author_extra=extra))
+            extra = {}
+            if a.sustain_chain_s > 0:
+                extra["sustainChainS"] = a.sustain_chain_s
+            if a.syl_budget_s > 0:
+                extra["sylBudgetS"] = a.syl_budget_s
+            if a.key_snap and meta.get("key"):
+                extra["key"] = meta["key"]
+            row = run_item(it, t0, t1, a.out, durations=dur_mode,
+                           convention=conv, note_floor_s=floor,
+                           melody=a.melody, skip_dyn=a.skip_dyn,
+                           author_extra=extra or None)
+            if meta:
+                row["meta"] = meta
+            rows.append(row)
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
     json.dump(rows, open(os.path.join(a.out, "own_run.json"), "w"), indent=1, sort_keys=True)

@@ -127,6 +127,65 @@ check("fully-unvoiced span reads 0.0", bsa.take_voiced_frac(VF, 0.5, 1.0) == 0.0
 check("half-voiced span reads 0.5", abs(bsa.take_voiced_frac(VF, 0.25, 0.75) - 0.5) < 0.03)
 check("no frames -> 0.0 (never chains on no evidence)", bsa.take_voiced_frac(VF, 2.0, 3.0) == 0.0)
 
+# ── enforce_word_budgets: the lyric self-enforces its syllable count ────────────────────
+NS = {"pinata": 3, "my": 1, "whole": 1}.get
+
+
+def _ns(w):
+    return NS(w) or 1
+
+
+# 3-syllable word given only 0.40s; the take pauses after it until the next word at 1.30
+WB = [{"word": "pinata", "start": 0.0, "end": 0.40, "phrase": 1},
+      {"word": "my", "start": 1.30, "end": 1.45, "phrase": 1}]
+got = bl_ = bsa.enforce_word_budgets(WB, _ns, 0.22, 9.0)
+check("under-budget word claims the following gap",
+      got[0].get("budgeted") is True and abs(got[0]["end"] - 0.66) < 1e-6, str(got[0]))
+check("budget claim never moves a start", got[1]["start"] == 1.30)
+# claim is capped by the next word's start minus keep_rest_s
+WB2 = [{"word": "pinata", "start": 0.0, "end": 0.40, "phrase": 1},
+       {"word": "my", "start": 0.50, "end": 0.65, "phrase": 1}]
+got = bsa.enforce_word_budgets(WB2, _ns, 0.22, 9.0)
+check("claim caps at next start - keep_rest_s", abs(got[0]["end"] - 0.45) < 1e-6, str(got[0]))
+# claim is capped by claim_cap_s
+WB3 = [{"word": "pinata", "start": 0.0, "end": 0.10, "phrase": 1},
+       {"word": "my", "start": 2.0, "end": 2.15, "phrase": 1}]
+got = bsa.enforce_word_budgets(WB3, _ns, 0.22, 9.0)
+check("claim caps at claim_cap_s (0.30)", abs(got[0]["end"] - 0.40) < 1e-6, str(got[0]))
+# a phrase boundary is a breath: never claimed across
+WB4 = [{"word": "pinata", "start": 0.0, "end": 0.40, "phrase": 1},
+       {"word": "my", "start": 1.30, "end": 1.45, "phrase": 2}]
+got = bsa.enforce_word_budgets(WB4, _ns, 0.22, 9.0)
+check("never claims across a phrase boundary", "budgeted" not in got[0], str(got[0]))
+# the last word of the window claims up to t1
+got = bsa.enforce_word_budgets([{"word": "pinata", "start": 0.0, "end": 0.40, "phrase": 1}],
+                               _ns, 0.22, 0.55)
+check("last word claims only up to t1", abs(got[0]["end"] - 0.55) < 1e-6, str(got[0]))
+# a word already at budget is untouched; phrase-less (NUS) words never claim
+got = bsa.enforce_word_budgets([{"word": "my", "start": 0.0, "end": 0.30, "phrase": 1},
+                                {"word": "whole", "start": 1.0, "end": 1.3, "phrase": 1}],
+                               _ns, 0.22, 9.0)
+check("at-budget words untouched", all("budgeted" not in w for w in got), str(got))
+check("phrase-less words never claim (NUS lane byte-identical)",
+      "budgeted" not in bsa.enforce_word_budgets(
+          [{"word": "pinata", "start": 0.0, "end": 0.1}], _ns, 0.22, 9.0)[0])
+check("sylBudgetS=0 is the identity",
+      bsa.enforce_word_budgets(WB, _ns, 0.0, 9.0) == WB)
+check("budgets do not mutate the caller's words", WB[0]["end"] == 0.40)
+
+# ── snap_and_resync: commanded pitches snap to the song key, slot pitch follows ─────────
+SLOTS = [{"start": 0.0, "end": 0.5, "pitch": 61,
+          "segments": [{"start": 0.0, "end": 0.5, "pitch": 61}]}]   # C#4 in B major? no ->
+got = bsa.snap_and_resync(SLOTS, "C major")                          # C#4 off C-major scale
+check("off-key segment pitch snaps to the scale", got[0]["segments"][0]["pitch"] in (60, 62),
+      str(got[0]))
+check("slot pitch re-syncs from segments[0]", got[0]["pitch"] == got[0]["segments"][0]["pitch"])
+check("snap ties resolve UP (61 -> 62 in C major)", got[0]["segments"][0]["pitch"] == 62)
+got = bsa.snap_and_resync([{"start": 0, "end": 1, "pitch": 64,
+                            "segments": [{"start": 0, "end": 1, "pitch": 64}]}], "C major")
+check("in-key pitch unchanged", got[0]["segments"][0]["pitch"] == 64)
+check("snap does not mutate the caller's slots", SLOTS[0]["segments"][0]["pitch"] == 61)
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402

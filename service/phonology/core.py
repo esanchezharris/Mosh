@@ -162,9 +162,22 @@ def internal_rhyme_pairs(words_phones: Sequence, strictness: str = "slant") -> L
 
 # ── Stdlib heuristic (used for OOV words and when no dictionary is present) ───────
 
+def fold_diacritics(word: str) -> str:
+    """Fold accented letters to their ASCII base ("piñata" -> "pinata", "naïve" -> "naive").
+
+    Every ASCII-stripping regex in the lyric chain used to DELETE the accented letter
+    outright — "piñata" became "piata", so g2p sang P-IY-AA-T-AH: the N literally vanished
+    from the phonemes (the owner's "nonsense word", stage9orsum 2026-07-18). NFD splits a
+    letter from its combining mark; dropping only the mark keeps the letter. Identity on
+    pure-ASCII input."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", word)
+                   if not unicodedata.combining(c))
+
+
 def heuristic_syllables(word: str) -> int:
     """Vowel-group syllable estimate. Deterministic; reliable enough for a live meter."""
-    w = re.sub(r"[^a-z]", "", word.lower())
+    w = re.sub(r"[^a-z]", "", fold_diacritics(word.lower()))
     if not w:
         return 0
     count = 0
@@ -183,8 +196,8 @@ def heuristic_syllables(word: str) -> int:
 
 def _heuristic_rhyme(w1: str, w2: str) -> bool:
     """Crude spelling-tail fallback for two OOV words (shared last >=2 letters)."""
-    a = re.sub(r"[^a-z]", "", w1.lower())
-    b = re.sub(r"[^a-z]", "", w2.lower())
+    a = re.sub(r"[^a-z]", "", fold_diacritics(w1.lower()))
+    b = re.sub(r"[^a-z]", "", fold_diacritics(w2.lower()))
     if not a or not b or a == b:
         return a == b and bool(a)
     n = min(len(a), len(b), 3)

@@ -45,7 +45,9 @@ def _pron() -> ph.Pronouncer:
 
 
 def _clean(word: str) -> str:
-    return re.sub(r"[^a-z']", "", word.lower())
+    # fold accents BEFORE stripping — "piñata" must reach g2p as "pinata", not "piata"
+    # (the bare strip deleted the N from the sung phonemes; see phonology.fold_diacritics)
+    return re.sub(r"[^a-z']", "", ph.fold_diacritics(word.lower()))
 
 
 def _phoneme(word: str, syl: int) -> str:

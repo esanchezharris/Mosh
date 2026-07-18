@@ -196,8 +196,20 @@ def main():
             if nt == 2 and tx not in ("<SP>",):
                 dedup.append(tx)
         rep = conformance(arms[a.arm]["wav"], arms["reference"]["wav"], clip, dedup)
+        # owner-supplied bpm -> musical readout (diagnostics only: is the residual a
+        # meaningful fraction of a 16th, or noise?). A 16th at 123-145 bpm = 103-122 ms.
+        bpm = (r.get("meta") or {}).get("bpm")
+        if bpm:
+            s16 = (60.0 / float(bpm)) / 4.0 * 1000.0
+            med = rep["summary"]["rhythm"]["abs_median_ms"]
+            rep["summary"]["rhythm"]["bpm"] = bpm
+            rep["summary"]["rhythm"]["median_16ths"] = \
+                round(med / s16, 2) if med is not None else None
         report[song] = rep
         print_report(song, rep)
+        if bpm and rep["summary"]["rhythm"].get("median_16ths") is not None:
+            print(f"  rhythm in 16ths @ {bpm}bpm: median = "
+                  f"{rep['summary']['rhythm']['median_16ths']} (16th = {s16:.0f} ms)")
     if a.out:
         os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
         json.dump(report, open(a.out, "w"), indent=1, sort_keys=True)

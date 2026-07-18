@@ -86,6 +86,13 @@ check("heuristic 'beat' == 1 (one vowel group 'ea')", core.heuristic_syllables("
 check("heuristic 'rapping' == 2", core.heuristic_syllables("rapping") == 2)
 check("heuristic 'hello' == 2", core.heuristic_syllables("hello") == 2)
 check("heuristic 'money' == 2 (trailing y is a vowel)", core.heuristic_syllables("money") == 2)
+# Diacritics fold to their base letter instead of being deleted — "piñata" used to strip to
+# "piata" (2 vowel groups) and, worse, reach g2p with the N deleted (the sung nonsense word).
+check("fold_diacritics: piñata -> pinata", core.fold_diacritics("piñata") == "pinata")
+check("fold_diacritics: naïve -> naive", core.fold_diacritics("naïve") == "naive")
+check("fold_diacritics is identity on ASCII", core.fold_diacritics("rapping") == "rapping")
+check("heuristic 'piñata' == 3 (ñ folds, not deleted)", core.heuristic_syllables("piñata") == 3)
+check("fold_diacritics deterministic", core.fold_diacritics("piñata") == core.fold_diacritics("piñata"))
 check("heuristic no-vowel token clamps to 1 ('skrt')", core.heuristic_syllables("skrt") == 1)
 check("heuristic empty token == 0", core.heuristic_syllables("") == 0)
 

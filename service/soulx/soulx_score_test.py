@@ -277,6 +277,13 @@ check("floor never pushes a donor sung note below the floor",
       all(fd[i] >= 0.1499 for i in (0, 1, 3, 4)), str(fd))
 check("apply_note_floor is pure (input clip untouched)", FLOOR_CLIP["duration"] == "0.30 0.06 0.20 0.04 0.20")
 
+# _clean folds diacritics instead of deleting the letter — "piñata" must reach the
+# pronouncer as "pinata" (the bare strip produced "piata": the N vanished from the sung
+# phonemes, the owner's stage9orsum "nonsense word"). Venv-independent (pure string).
+check("_clean folds ñ: piñata -> pinata", sx._clean("piñata") == "pinata", sx._clean("piñata"))
+check("_clean identity on ASCII (apostrophes kept)", sx._clean("'Bout") == "'bout")
+check("_clean deterministic", sx._clean("piñata") == sx._clean("piñata"))
+
 # author_score(note_floor_s=) is off by default → byte-identical to the plain call
 _base = sx.author_score(LINES) if "LINES" in dir() else None
 if _base and _base.get("ok"):
