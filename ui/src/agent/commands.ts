@@ -44,6 +44,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_clip_fade", desc: "Set a clip's fade-in / fade-out (seconds)",
     args: [S("clipId"), N("fadeInSec", false, "seconds"), N("fadeOutSec", false, "seconds"),
            S("curveIn", false, "linear|convex|concave|sCurve"), S("curveOut", false, "linear|convex|concave|sCurve")] },
+  { command: "set_clip_reverse", desc: "Reverse/un-reverse a wave clip's playback", args: [S("clipId"), B("reversed")] },
+  { command: "set_clip_crossfade", desc: "Enable/disable auto-crossfade on a wave clip (only audible where it overlaps a neighbor on the same track)", args: [S("clipId"), B("enabled")] },
+  { command: "normalize_clip", desc: "Non-destructively set a wave clip's gain so its peak sample hits a target dB (default 0 dB)", args: [S("clipId"), N("targetDb", false, "dB, default 0")] },
   { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
   { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
   { command: "transcribe_clip", desc: "Transcribe a wave clip's audio into a new, time-aligned MIDI clip (pitch detection)", args: [S("clipId"), S("mode", false, '"mono" (default) | "poly"'), B("wait", false)] },
@@ -201,6 +204,9 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
     case "set_clip_fade": return `Set clip fades (in ${a.fadeInSec ?? "–"}s, out ${a.fadeOutSec ?? "–"}s)`;
+    case "set_clip_reverse": return a.reversed ? `Reversed a clip` : `Un-reversed a clip`;
+    case "set_clip_crossfade": return a.enabled ? `Enabled auto-crossfade on a clip` : `Disabled auto-crossfade on a clip`;
+    case "normalize_clip": return `Normalized a clip${a.targetDb != null ? ` to ${a.targetDb} dB` : ""}`;
     case "stretch_clip": return a.bars ? `Stretched a clip to ${a.bars} bar${Number(a.bars) > 1 ? "s" : ""}` : `Stretched a clip to ${a.length}s`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;

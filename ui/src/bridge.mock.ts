@@ -54,6 +54,9 @@ function waveClip(name: string, start: number, length: number): Clip {
     fadeOutSec: 0,
     fadeInType: 1,
     fadeOutType: 1,
+    // clip-ops wave — default off, mirrors the native snapshot's unconditional serialization.
+    reversed: false,
+    autoCrossfade: false,
   };
 }
 
@@ -1105,6 +1108,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if ("curveOut" in args) f.clip.fadeOutType = FADE_CURVE_TYPE[str(args.curveOut)] ?? 1;
       invalidate();
       return ok(command, { clipId: f.clip.id, fadeInSec: f.clip.fadeInSec, fadeOutSec: f.clip.fadeOutSec });
+    }
+    // clip-ops wave — reverse / auto-crossfade: like set_clip_gain/set_clip_fade above,
+    // the mock does not gate on clip type (the UI only ever calls these for wave clips;
+    // the real audio-clip-only rejection is a backend contract proven natively).
+    case "set_clip_reverse": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      pushUndo(); f.clip.reversed = Boolean(args.reversed); invalidate(); return ok(command);
+    }
+    case "set_clip_crossfade": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      pushUndo(); f.clip.autoCrossfade = Boolean(args.enabled); invalidate(); return ok(command);
+    }
+    // normalize_clip: the dev mock has no real audio samples to scan, so it assumes a
+    // fixed nominal source peak of -6 dBFS (gain = targetDb - assumedPeakDb, mirroring
+    // the native formula) — deterministic and testable without decoding a WAV in-browser.
+    case "normalize_clip": {
+      const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
+      if (f.clip.type !== "wave") return err(command, "no wave clip");
+      pushUndo();
+      const targetDb = "targetDb" in args ? num(args.targetDb) : 0;
+      const assumedPeakDb = -6;
+      const gainDb = Math.max(-48, Math.min(24, targetDb - assumedPeakDb));
+      f.clip.gainDb = gainDb;
+      invalidate();
+      return ok(command, { clipId: f.clip.id, gainDb, peakDb: assumedPeakDb });
     }
 
     // Audio warp (auto-tempo): the clip follows the tempo map + time-stretches (SoundTouch).

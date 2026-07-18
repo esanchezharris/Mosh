@@ -153,4 +153,78 @@ describe("clip inspector: rename_clip / set_clip_mute / set_clip_gain via the mo
     await exec("set_clip_fade", { clipId, curveOut: "sCurve" });
     expect((await findClip(clipId)).fadeOutType).toBe(4);
   });
+
+  // clip-ops wave — reverse / auto-crossfade / normalize mock-bridge coverage.
+  it("set_clip_reverse flips reversed and undo/redo round-trips", async () => {
+    const { clipId } = await waveClip();
+    expect((await findClip(clipId)).reversed).toBeFalsy();
+
+    const r = await exec("set_clip_reverse", { clipId, reversed: true });
+    expect(r.ok).toBe(true);
+    expect((await findClip(clipId)).reversed).toBe(true);
+
+    await exec("undo", {});
+    expect((await findClip(clipId)).reversed).toBeFalsy();
+
+    await exec("redo", {});
+    expect((await findClip(clipId)).reversed).toBe(true);
+  });
+
+  it("set_clip_reverse errors on an unknown clipId", async () => {
+    const r = await exec("set_clip_reverse", { clipId: "does-not-exist", reversed: true });
+    expect(r.ok).toBe(false);
+  });
+
+  it("set_clip_crossfade flips autoCrossfade and undo/redo round-trips", async () => {
+    const { clipId } = await waveClip();
+    expect((await findClip(clipId)).autoCrossfade).toBeFalsy();
+
+    const r = await exec("set_clip_crossfade", { clipId, enabled: true });
+    expect(r.ok).toBe(true);
+    expect((await findClip(clipId)).autoCrossfade).toBe(true);
+
+    await exec("undo", {});
+    expect((await findClip(clipId)).autoCrossfade).toBeFalsy();
+
+    await exec("redo", {});
+    expect((await findClip(clipId)).autoCrossfade).toBe(true);
+  });
+
+  it("set_clip_crossfade errors on an unknown clipId", async () => {
+    const r = await exec("set_clip_crossfade", { clipId: "does-not-exist", enabled: true });
+    expect(r.ok).toBe(false);
+  });
+
+  it("normalize_clip sets gainDb toward the target and undo restores the prior value", async () => {
+    const { clipId } = await waveClip();
+
+    const r = await exec("normalize_clip", { clipId, targetDb: 0 });
+    expect(r.ok).toBe(true);
+    const after = await findClip(clipId);
+    expect(after.gainDb).toBeGreaterThan(0);   // mock assumes a -6 dBFS nominal peak
+
+    await exec("undo", {});
+    expect((await findClip(clipId)).gainDb ?? 0).toBe(0);
+
+    await exec("redo", {});
+    expect((await findClip(clipId)).gainDb).toBe(after.gainDb);
+  });
+
+  it("normalize_clip defaults targetDb to 0 when omitted", async () => {
+    const { clipId } = await waveClip();
+    const r = await exec("normalize_clip", { clipId });
+    expect(r.ok).toBe(true);
+    expect((r as CommandResult<{ gainDb: number }>).data?.gainDb).toBe(6);   // 0 - (-6)
+  });
+
+  it("normalize_clip rejects a MIDI clip", async () => {
+    const { clipId } = await midiClip();
+    const r = await exec("normalize_clip", { clipId, targetDb: 0 });
+    expect(r.ok).toBe(false);
+  });
+
+  it("normalize_clip errors on an unknown clipId", async () => {
+    const r = await exec("normalize_clip", { clipId: "does-not-exist" });
+    expect(r.ok).toBe(false);
+  });
 });

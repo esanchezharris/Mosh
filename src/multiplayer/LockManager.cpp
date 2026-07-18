@@ -75,6 +75,9 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     static const std::set<juce::String> clip {
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp", "stretch_clip",
+        // clip-ops wave — reverse / auto-crossfade / normalize all carry a clipId like
+        // gain/mute/fade; same clip-scoped key resolution.
+        "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
