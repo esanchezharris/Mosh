@@ -187,6 +187,30 @@ export const SETTINGS: SettingDef[] = [
       ],
     },
   },
+  {
+    id: "workflowProfile",
+    type: "enum",
+    default: "mosh",
+    scope: "app",
+    category: "Workflow",
+    label: "Workflow",
+    help: "Choose the v2 interaction profile. FL changes behavior and workspace defaults only; Mosh remains the visual identity.",
+    constraints: {
+      options: [
+        { value: "mosh", label: "Mosh" },
+        { value: "fl", label: "FL (beta)" },
+      ],
+    },
+  },
+  {
+    id: "strictFlMouse",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Workflow",
+    label: "Strict FL mouse",
+    help: "Use the stricter FL mouse contract when the FL workflow profile is active.",
+  },
   ...interactionSettings(),
 ];
 

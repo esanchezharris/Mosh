@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SETTINGS, defaultSettings, coerceSetting, settingsByCategory } from "./schema";
+import { SETTINGS, defaultSettings, coerceSetting, settingsByCategory, settingDef } from "./schema";
 
 // The schema is the single source of truth for app settings. These tests pin the
 // authoring invariants (every descriptor well-formed, defaults valid against their
@@ -22,6 +22,21 @@ describe("settings schema", () => {
   it("has no duplicate ids", () => {
     const ids = SETTINGS.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("declares the v2 workflow controls under Workflow", () => {
+    expect(SETTINGS.find((setting) => setting.id === "workflowProfile")).toMatchObject({
+      type: "enum",
+      default: "mosh",
+      category: "Workflow",
+      constraints: { options: [{ value: "mosh" }, { value: "fl" }] },
+    });
+    expect(SETTINGS.find((setting) => setting.id === "strictFlMouse")).toMatchObject({
+      type: "bool",
+      default: false,
+      category: "Workflow",
+    });
+    for (const id of ["workflowProfile", "strictFlMouse"]) expect(settingDef(id)).toBeDefined();
   });
 
   it("every enum descriptor carries non-empty options and a default in-set", () => {
@@ -51,7 +66,7 @@ describe("settingsByCategory", () => {
   it("groups settings, categories in first-appearance order", () => {
     const groups = settingsByCategory();
     expect(groups.map((g) => g.category)).toEqual([
-      "Appearance", "Moshi", "Layout", "Interaction", "Feel", "Keys",
+      "Appearance", "Moshi", "Layout", "Workflow", "Interaction", "Feel", "Keys",
     ]);
   });
 

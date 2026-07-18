@@ -51,8 +51,10 @@ describe("set + localStorage persistence round-trip", () => {
     savePersisted(localStorage, { template: "fl", values: { theme: "light" }, keyOverrides: {} });
     expect(loadPersisted(localStorage)).toEqual({
       template: "fl",
-      values: { theme: "light" },
+      values: { theme: "light", workflowProfile: "mosh" },
       keyOverrides: {},
+      workspaceByProfile: {},
+      workflowOnboardingDismissed: true,
     });
   });
 });
@@ -101,6 +103,7 @@ describe("reset", () => {
 
 describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
   it("scopes a key.* rebind to the active keymap — it doesn't bleed into another", () => {
+    useSettings.getState().set("uiShell", "classic");
     // On the Ableton keymap, rebind Undo.
     useSettings.getState().set("keymap", "ableton");
     useSettings.getState().set("key.undo", "Mod+P");
@@ -116,6 +119,7 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
   });
 
   it("round-trips per-keymap rebinds across a reload", () => {
+    useSettings.getState().set("uiShell", "classic");
     useSettings.getState().set("keymap", "ableton");
     useSettings.getState().set("key.undo", "Mod+P");
     useSettings.getState().set("keymap", "fl");
@@ -135,6 +139,7 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
   });
 
   it("clearing a rebind to '' removes the per-keymap entry (back to inherit)", () => {
+    useSettings.getState().set("uiShell", "classic");
     useSettings.getState().set("keymap", "ableton");
     useSettings.getState().set("key.undo", "Mod+P");
     useSettings.getState().set("key.undo", ""); // the SettingsPanel right-click clear
@@ -146,6 +151,7 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
   });
 
   it("reset clears per-keymap rebinds and they don't survive reload", () => {
+    useSettings.getState().set("uiShell", "classic");
     useSettings.getState().set("keymap", "ableton");
     useSettings.getState().set("key.undo", "Mod+P");
     useSettings.getState().reset();
@@ -159,13 +165,15 @@ describe("per-template (per-keymap) rebind persistence (AL-002)", () => {
   it("savePersisted/loadPersisted round-trip keyOverrides exactly", () => {
     savePersisted(localStorage, {
       template: "ableton",
-      values: { keymap: "ableton" },
+      values: { keymap: "ableton", workflowProfile: "mosh" },
       keyOverrides: { ableton: { "key.undo": "Mod+P" } },
     });
     expect(loadPersisted(localStorage)).toEqual({
       template: "ableton",
-      values: { keymap: "ableton" },
+      values: { keymap: "ableton", workflowProfile: "mosh" },
       keyOverrides: { ableton: { "key.undo": "Mod+P" } },
+      workspaceByProfile: {},
+      workflowOnboardingDismissed: true,
     });
   });
 

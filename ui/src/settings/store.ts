@@ -20,23 +20,37 @@ import {
 } from "./schema";
 import { templateValues } from "./templates";
 import { applySettingEffects } from "./effects";
+import {
+  DEFAULT_WORKFLOW_PROFILE_ID,
+  getWorkflowProfile,
+  type WorkflowProfileId,
+  type WorkflowWorkspace,
+  type WorkflowWorkspaceOverride,
+} from "./workflowProfiles";
 
 export const STORAGE_KEY = "mosh.settings";
 const LEGACY_VOICE_KEY = "mosh.voiceOn"; // pre-schema voice-mute flag ("0"/"1")
-const VERSION = 2; // v1 had no keyOverrides; a v1 blob hydrates with an empty map
+const VERSION = 3;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
 // Per-keymap keybind rebinds (AL-002). `key.<action>` overrides are scoped to the active
 // keymap (mosh/ableton/fl/…) instead of living globally in `values`, so a rebind made
 // under one DAW keymap doesn't bleed into another. Shape: { keymapName: { "key.undo": "Mod+P" } }.
-type KeyOverrides = Record<string, Record<string, string>>;
+export type KeyOverrides = Record<string, Record<string, string>>;
 
-interface Persisted {
+export type WorkspaceByProfile = Partial<Record<WorkflowProfileId, WorkflowWorkspaceOverride>>;
+
+export interface Persisted {
   template: string | null;
   values: Record<string, SettingValue>;
   keyOverrides: KeyOverrides;
+  workspaceByProfile: WorkspaceByProfile;
+  workflowOnboardingDismissed: boolean;
 }
+
+export type PersistedInput = Omit<Persisted, "workspaceByProfile" | "workflowOnboardingDismissed">
+  & Partial<Pick<Persisted, "workspaceByProfile" | "workflowOnboardingDismissed">>;
 
 // True for the rebindable `key.<action>` setting ids (the per-keymap-scoped ones).
 function isKeyId(id: string): boolean {
@@ -50,6 +64,11 @@ function activeKeymap(values: Record<string, SettingValue>): string {
   if (typeof v === "string") return v;
   const d = settingDef("keymap")?.default;
   return typeof d === "string" ? d : "mosh";
+}
+
+function activeKeyScope(values: Record<string, SettingValue>): string {
+  if (values.uiShell === "classic") return activeKeymap(values);
+  return getWorkflowProfile(values.workflowProfile).id;
 }
 
 // Sanitise a persisted keyOverrides blob: keep only string keymap buckets, drop any
@@ -70,27 +89,82 @@ function sanitizeKeyOverrides(raw: unknown): KeyOverrides {
   return out;
 }
 
+function sanitizeWorkspaceOverride(raw: unknown): WorkflowWorkspaceOverride {
+  if (!raw || typeof raw !== "object") return {};
+  const input = raw as Record<string, unknown>;
+  const out: WorkflowWorkspaceOverride = {};
+  if (typeof input.browserOpen === "boolean") out.browserOpen = input.browserOpen;
+  if (typeof input.browserTab === "string" && input.browserTab.length > 0) out.browserTab = input.browserTab;
+  if (typeof input.rightOpen === "boolean") out.rightOpen = input.rightOpen;
+  if (typeof input.sectionZoom === "string" && input.sectionZoom.length > 0) out.sectionZoom = input.sectionZoom;
+  if (typeof input.drumWindowOpen === "boolean") out.drumWindowOpen = input.drumWindowOpen;
+  return out;
+}
+
+function sanitizeWorkspaceMap(raw: unknown): WorkspaceByProfile {
+  const out: WorkspaceByProfile = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const profileId of ["mosh", "fl"] as const) {
+    const override = sanitizeWorkspaceOverride((raw as Record<string, unknown>)[profileId]);
+    if (Object.keys(override).length) out[profileId] = override;
+  }
+  return out;
+}
+
+function emptyPersisted(workflowOnboardingDismissed: boolean): Persisted {
+  return {
+    template: null,
+    values: {},
+    keyOverrides: {},
+    workspaceByProfile: {},
+    workflowOnboardingDismissed,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 // Read + sanitise persisted state. Unknown ids are dropped; every surviving value is
 // coerced against the schema. A parse failure degrades to empty (→ all defaults).
 export function loadPersisted(storage: Pick<Storage, "getItem">): Persisted {
+  let raw: string | null;
   try {
-    const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) return migrateLegacy(storage);
-    const parsed = JSON.parse(raw) as Partial<{
-      template: string;
-      values: Record<string, SettingValue>;
-      keyOverrides: unknown;
-    }>;
+    raw = storage.getItem(STORAGE_KEY);
+  } catch {
+    return emptyPersisted(true);
+  }
+
+  if (raw === null) return migrateLegacy(storage);
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isObject(parsed)) return emptyPersisted(true);
+    const rawValues = parsed.values;
+    if (rawValues !== undefined && !isObject(rawValues)) return emptyPersisted(true);
     const values: Record<string, SettingValue> = {};
-    for (const [id, v] of Object.entries(parsed.values ?? {}))
+    for (const [id, v] of Object.entries((rawValues ?? {}) as Record<string, unknown>))
       if (settingDef(id)) values[id] = coerceSetting(id, v as SettingValue);
+
+    const version = typeof parsed.version === "number" ? parsed.version : 1;
+    if (version > VERSION) return emptyPersisted(true);
+    const isV3 = version === VERSION;
+    const workflowProfile = isV3
+      ? getWorkflowProfile(values.workflowProfile).id
+      : DEFAULT_WORKFLOW_PROFILE_ID;
+    values.workflowProfile = workflowProfile;
+
+    const rawWorkspace = parsed.workspaceByProfile ?? parsed.workspace;
     return {
       template: typeof parsed.template === "string" ? parsed.template : null,
       values,
       keyOverrides: sanitizeKeyOverrides(parsed.keyOverrides),
+      workspaceByProfile: sanitizeWorkspaceMap(rawWorkspace),
+      workflowOnboardingDismissed: isV3 && typeof parsed.workflowOnboardingDismissed === "boolean"
+        ? parsed.workflowOnboardingDismissed
+        : true,
     };
   } catch {
-    return { template: null, values: {}, keyOverrides: {} };
+    return emptyPersisted(true);
   }
 }
 
@@ -99,14 +173,22 @@ export function loadPersisted(storage: Pick<Storage, "getItem">): Persisted {
 function migrateLegacy(storage: Pick<Storage, "getItem">): Persisted {
   try {
     const legacy = storage.getItem(LEGACY_VOICE_KEY);
-    if (legacy === "0") return { template: null, values: { voiceOn: false }, keyOverrides: {} };
+    if (legacy !== null) {
+      return {
+        template: null,
+        values: { ...(legacy === "0" ? { voiceOn: false } : {}), workflowProfile: DEFAULT_WORKFLOW_PROFILE_ID },
+        keyOverrides: {},
+        workspaceByProfile: {},
+        workflowOnboardingDismissed: true,
+      };
+    }
   } catch {
     /* noop */
   }
-  return { template: null, values: {}, keyOverrides: {} };
+  return emptyPersisted(false);
 }
 
-export function savePersisted(storage: Pick<Storage, "setItem">, state: Persisted): void {
+export function savePersisted(storage: Pick<Storage, "setItem">, state: PersistedInput): void {
   try {
     storage.setItem(
       STORAGE_KEY,
@@ -115,6 +197,8 @@ export function savePersisted(storage: Pick<Storage, "setItem">, state: Persiste
         template: state.template,
         values: state.values,
         keyOverrides: state.keyOverrides,
+        workspaceByProfile: state.workspaceByProfile ?? {},
+        workflowOnboardingDismissed: state.workflowOnboardingDismissed ?? true,
       }),
     );
   } catch {
@@ -136,9 +220,15 @@ interface SettingsState {
   template: string | null;
   values: Record<string, SettingValue>;
   keyOverrides: KeyOverrides;
+  workspaceByProfile: WorkspaceByProfile;
+  workflowOnboardingDismissed: boolean;
   get: (id: string) => SettingValue;
   set: (id: string, value: SettingValue) => void;
   applyTemplate: (name: string) => void;
+  setWorkflowProfile: (id: string) => void;
+  saveWorkspaceOverride: (profileId: string, override: WorkflowWorkspaceOverride) => void;
+  getEffectiveWorkspace: (profileId?: string) => WorkflowWorkspace;
+  dismissWorkflowOnboarding: () => void;
   reset: () => void;
   hydrate: () => void;
 }
@@ -154,13 +244,15 @@ export const useSettings = create<SettingsState>((set, get) => {
     template: null,
     values: {},
     keyOverrides: {},
+    workspaceByProfile: {},
+    workflowOnboardingDismissed: false,
 
     get: (id) => {
       const state = get();
       if (isKeyId(id)) {
         // Per-keymap rebind wins; fall back to a legacy global override (v1 blobs), then
         // the schema default ("" = inherit the preset).
-        const scoped = state.keyOverrides[activeKeymap(state.values)]?.[id];
+        const scoped = state.keyOverrides[activeKeyScope(state.values)]?.[id];
         if (scoped !== undefined) return scoped;
       }
       const v = state.values[id];
@@ -172,7 +264,7 @@ export const useSettings = create<SettingsState>((set, get) => {
       if (isKeyId(id)) {
         // Scope the rebind to the active keymap. Setting "" (the clear-to-inherit
         // affordance) DELETES the entry so it can't shadow the preset.
-        const km = activeKeymap(get().values);
+        const km = activeKeyScope(get().values);
         const keyOverrides: KeyOverrides = { ...get().keyOverrides };
         const bucket = { ...(keyOverrides[km] ?? {}) };
         const combo = coerceSetting(id, value) as string;
@@ -181,24 +273,96 @@ export const useSettings = create<SettingsState>((set, get) => {
         if (Object.keys(bucket).length) keyOverrides[km] = bucket;
         else delete keyOverrides[km];
         set({ keyOverrides });
-        persist({ template: get().template, values: get().values, keyOverrides });
+        persist({
+          template: get().template,
+          values: get().values,
+          keyOverrides,
+          workspaceByProfile: get().workspaceByProfile,
+          workflowOnboardingDismissed: get().workflowOnboardingDismissed,
+        });
         return;
       }
       const values = { ...get().values, [id]: coerceSetting(id, value) };
       set({ values });
-      persist({ template: get().template, values, keyOverrides: get().keyOverrides });
+      persist({
+        template: get().template,
+        values,
+        keyOverrides: get().keyOverrides,
+        workspaceByProfile: get().workspaceByProfile,
+        workflowOnboardingDismissed: get().workflowOnboardingDismissed,
+      });
     },
 
     applyTemplate: (name) => {
       const values = { ...get().values, ...templateValues(name) };
       set({ template: name, values });
-      persist({ template: name, values, keyOverrides: get().keyOverrides });
+      persist({
+        template: name,
+        values,
+        keyOverrides: get().keyOverrides,
+        workspaceByProfile: get().workspaceByProfile,
+        workflowOnboardingDismissed: get().workflowOnboardingDismissed,
+      });
+    },
+
+    setWorkflowProfile: (id) => {
+      const values = { ...get().values, workflowProfile: getWorkflowProfile(id).id };
+      set({ values });
+      persist({
+        template: get().template,
+        values,
+        keyOverrides: get().keyOverrides,
+        workspaceByProfile: get().workspaceByProfile,
+        workflowOnboardingDismissed: get().workflowOnboardingDismissed,
+      });
+    },
+
+    saveWorkspaceOverride: (profileId, override) => {
+      const id = getWorkflowProfile(profileId).id;
+      const clean = sanitizeWorkspaceOverride(override);
+      const workspaceByProfile: WorkspaceByProfile = { ...get().workspaceByProfile };
+      const merged = { ...(workspaceByProfile[id] ?? {}), ...clean };
+      if (Object.keys(merged).length) workspaceByProfile[id] = merged;
+      else delete workspaceByProfile[id];
+      set({ workspaceByProfile });
+      persist({
+        template: get().template,
+        values: get().values,
+        keyOverrides: get().keyOverrides,
+        workspaceByProfile,
+        workflowOnboardingDismissed: get().workflowOnboardingDismissed,
+      });
+    },
+
+    getEffectiveWorkspace: (profileId) => {
+      const id = getWorkflowProfile(profileId ?? get().get("workflowProfile")).id;
+      return {
+        ...getWorkflowProfile(id).workspaceDefaults,
+        ...(get().workspaceByProfile[id] ?? {}),
+      };
+    },
+
+    dismissWorkflowOnboarding: () => {
+      set({ workflowOnboardingDismissed: true });
+      persist({
+        template: get().template,
+        values: get().values,
+        keyOverrides: get().keyOverrides,
+        workspaceByProfile: get().workspaceByProfile,
+        workflowOnboardingDismissed: true,
+      });
     },
 
     // Back to schema defaults (no template, no overrides) — persisted, so a reload
     // doesn't resurrect cleared overrides. Used by the "Reset" affordance + tests.
     reset: () => {
-      const next: Persisted = { template: null, values: {}, keyOverrides: {} };
+      const next: Persisted = {
+        template: null,
+        values: {},
+        keyOverrides: {},
+        workspaceByProfile: {},
+        workflowOnboardingDismissed: true,
+      };
       set(next);
       persist(next);
     },
@@ -207,7 +371,7 @@ export const useSettings = create<SettingsState>((set, get) => {
     // BEFORE first render, so skin/theme/scale paint correctly with no flash.
     hydrate: () => {
       const s = storage();
-      const next = s ? loadPersisted(s) : { template: null, values: {}, keyOverrides: {} };
+      const next = s ? loadPersisted(s) : emptyPersisted(false);
       set(next);
       applySettingEffects(effectiveAll(next.values));
     },
