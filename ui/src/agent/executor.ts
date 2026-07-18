@@ -52,6 +52,9 @@ const DESTRUCTIVE = new Set<string>([
   // → te::WaveAudioClip::deleteAllUnusedTakes) — a "delete everything but one" spree
   // across many clips is exactly the runaway-tool-loop shape this guard exists for.
   "keep_take",
+  // Matches the delete_ prefix anyway; listed explicitly because it carries a
+  // non-default weight below (one call can clear a span across EVERY track).
+  "delete_time_range",
 ]);
 
 /** A command is destructive if it's a known delete OR matches the remove/delete/clear_
@@ -65,6 +68,18 @@ export const DESTRUCTIVE_BLOCK_REASON =
   `Blocked: too many destructive commands in one step (limit ${MAX_DESTRUCTIVE_PER_BATCH}). ` +
   `Delete in smaller steps or use the editor directly.`;
 
+// Per-command destructive WEIGHT. The screen budget counts weights, not calls:
+// most destructive commands weigh 1, but delete_time_range clears a whole time
+// span across EVERY track, so it consumes the full budget — at most one per
+// batch, and never alongside any other destructive call.
+const DESTRUCTIVE_WEIGHT: Readonly<Record<string, number>> = {
+  delete_time_range: MAX_DESTRUCTIVE_PER_BATCH,
+};
+
+export function destructiveWeight(command: string): number {
+  return isDestructiveCommand(command) ? (DESTRUCTIVE_WEIGHT[command] ?? 1) : 0;
+}
+
 export type DestructiveScreen = {
   readonly allowed: readonly AgentCommandCall[];
   readonly blocked: readonly AgentCommandCall[];
@@ -77,7 +92,7 @@ function screenByCommand<T extends AgentCommandCall>(
   max: number,
 ): { readonly allowed: readonly T[]; readonly blocked: readonly T[] } {
   const destructiveCount = calls.reduce(
-    (count, call) => count + (isDestructiveCommand(call.command) ? 1 : 0),
+    (count, call) => count + destructiveWeight(call.command),
     0,
   );
   if (destructiveCount <= max) return { allowed: calls, blocked: [] };

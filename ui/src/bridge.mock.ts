@@ -125,6 +125,9 @@ function seedSnapshot(): Snapshot {
     schemaVersion: 1,
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      // SES-001 — the tempo MAP; point 0 IS the base tempo (set_tempo edits it,
+      // remove_tempo_change refuses it), mirroring the native snapshot.
+      tempoMap: [{ time: 0, bpm: 120, curve: 1 }],
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
@@ -1068,9 +1071,20 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "trim_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo();
+      const oldEnd = f.clip.start + f.clip.length;
       if ("start" in args) f.clip.start = Math.max(0, num(args.start, f.clip.start));
       if ("length" in args) f.clip.length = Math.max(0.05, num(args.length, f.clip.length));
       if ("offset" in args) f.clip.offset = Math.max(0, num(args.offset, f.clip.offset));
+      // ARR-011 — opt-in ripple (default absent ⇒ path above unchanged): same-track
+      // clips at/after the OLD end follow the end delta (mirrors rippleShiftClipsAfter:
+      // negative-start clamp, the trimmed clip itself excluded).
+      if (args.ripple) {
+        const delta = f.clip.start + f.clip.length - oldEnd;
+        if (Math.abs(delta) > 1e-6)
+          for (const c of f.track.clips)
+            if (c.id !== f.clip.id && c.start >= oldEnd - 1e-6)
+              c.start = Math.max(0, c.start + delta);
+      }
       invalidate(); return ok(command);
     }
     case "split_clip": {
@@ -1096,6 +1110,67 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "remove_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo(); f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); invalidate(); return ok(command);
+    }
+    // ARR-011 — remove everything in [start, end] across ALL tracks (or an optional
+    // trackIds subset — a real JSON array, deliberately NOT in the agent catalog).
+    // Produces the same end state as the native split-at-bounds + remove-inside
+    // pipeline: straddling clips keep their outside piece(s), the right piece is a
+    // NEW clip (native splitClip mints the new id on the right half) whose source
+    // offset advances past the removed span; MIDI pieces keep the notes that fall
+    // inside them (beats re-based via the session tempo). ripple:true then slides
+    // every clip at/after the range END left by the range length (clamped at 0).
+    case "delete_time_range": {
+      const start = num(args.start, 0), end = num(args.end, 0);
+      if (!(start < end)) return err(command, "start must be less than end");
+      const ripple = Boolean(args.ripple);
+      const idsArg = Array.isArray(args.trackIds) ? (args.trackIds as unknown[]).map(String) : null;
+      const targets = idsArg ? snapshot.tracks.filter((t) => idsArg.includes(t.id)) : snapshot.tracks;
+      pushUndo();
+      const EPS = 5e-4;
+      const beatsPerSec = (snapshot.session.tempo || 120) / 60;
+      let removed = 0, splits = 0;
+      for (const t of targets) {
+        const next: typeof t.clips = [];
+        for (const c of t.clips) {
+          const c0 = c.start, c1 = c.start + c.length;
+          if (c1 <= start + EPS || c0 >= end - EPS) { next.push(c); continue; }   // fully outside
+          const leftKeep = c0 < start - EPS;
+          const rightKeep = c1 > end + EPS;
+          if (rightKeep) {
+            const right = JSON.parse(JSON.stringify(c)) as typeof c;
+            right.id = nextClipId();
+            right.start = end;
+            right.length = c1 - end;
+            right.offset = (c.offset ?? 0) + (end - c0);
+            if (right.notes) {
+              const cutBeats = (end - c0) * beatsPerSec;
+              right.notes = right.notes
+                .filter((n) => n.start >= cutBeats - 1e-9)
+                .map((n) => ({ ...n, start: n.start - cutBeats }));
+              reindexNotes(right);
+            }
+            next.push(right);
+            splits++;
+          }
+          if (leftKeep) {
+            c.length = start - c0;
+            if (c.notes) {
+              const keepBeats = (start - c0) * beatsPerSec;
+              c.notes = c.notes.filter((n) => n.start < keepBeats - 1e-9);
+              reindexNotes(c);
+            }
+            next.push(c);
+            splits++;
+          }
+          removed++;   // the middle segment is gone
+        }
+        t.clips = next.sort((a, b) => a.start - b.start);
+        if (ripple)
+          for (const c of t.clips)
+            if (c.start >= end - 1e-6) c.start = Math.max(0, c.start - (end - start));
+      }
+      invalidate();
+      return ok(command, { removed, splits, tracks: targets.length, ripple });
     }
     case "duplicate_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -1304,7 +1379,39 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
     }
 
-    case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
+    case "set_tempo": {
+      pushUndo();
+      snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo));
+      // Point 0 of the tempo map IS the base tempo — keep them in lockstep.
+      if (snapshot.session.tempoMap?.[0]) snapshot.session.tempoMap[0].bpm = snapshot.session.tempo;
+      invalidate(); return ok(command);
+    }
+    // SES-001 — tempo-map points beyond the base tempo. Times in seconds; a point's
+    // curve shapes the span from IT to the NEXT point (1 = step, (-1,1) = ramp).
+    // Error strings mirror MoshOps::cmdInsertTempoChange / cmdRemoveTempoChange.
+    case "insert_tempo_change": {
+      const time = num(args.time, -1);
+      if (time < 0) return err(command, "missing/negative 'time'");
+      const bpm = num(args.bpm, 0);
+      if (bpm < 20 || bpm > 999) return err(command, "bpm must be 20..999");
+      const curve = Math.max(-1, Math.min(1, num(args.curve, 1)));
+      pushUndo();
+      const map = (snapshot.session.tempoMap ??= [{ time: 0, bpm: snapshot.session.tempo, curve: 1 }]);
+      map.push({ time, bpm, curve });
+      map.sort((a, b) => a.time - b.time);
+      snapshot.session.tempo = map[0].bpm;
+      invalidate();
+      return ok(command, { time, bpm, curve, count: map.length });
+    }
+    case "remove_tempo_change": {
+      const map = snapshot.session.tempoMap ?? [];
+      const index = num(args.index, -1);
+      if (index <= 0 || index >= map.length) return err(command, "index must be 1..numTempos-1");
+      pushUndo();
+      map.splice(index, 1);
+      invalidate();
+      return ok(command, { count: map.length });
+    }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_count_in": {
       const bars = num(args.bars, snapshot.session.countInBars ?? 0);
