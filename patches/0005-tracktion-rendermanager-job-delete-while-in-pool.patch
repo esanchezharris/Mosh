@@ -1,0 +1,23 @@
+diff --git a/modules/tracktion_engine/model/export/tracktion_RenderManager.cpp b/modules/tracktion_engine/model/export/tracktion_RenderManager.cpp
+--- a/modules/tracktion_engine/model/export/tracktion_RenderManager.cpp
++++ b/modules/tracktion_engine/model/export/tracktion_RenderManager.cpp
+@@ -138,7 +138,18 @@
+ 
+         case UpdateMessage::succeded:
+         case UpdateMessage::cancelled:
+-            if (isRunning())
++            // MOSH PATCH 0005: isRunning() alone leaves a use-after-free window. After
++            // runJob() returns, ThreadPool::runNextJob's tail still touches the job under
++            // the pool's lock (isActive=false, shouldStop/delete-list reads) — but this
++            // completion path takes no pool lock, so a completion message processed in
++            // that window (trivially reachable when the host pumps the message loop, and
++            // in principle on any prompt dispatch) drops selfReference and deletes the
++            // job while the pool thread still reads it (ASan: heap-use-after-free in
++            // runNextJob, freed under ~ReverseRenderJob). ThreadPool::contains() takes
++            // the same lock as that tail section, so "no longer contained" proves the
++            // tail is fully done with the object; while contained, defer through the
++            // existing messagesToResend timer exactly like the isRunning() case.
++            if (isRunning() || engine.getBackgroundJobs().getPool().contains (this))
+             {
+                 const juce::ScopedLock sl (messageLock);
+                 messagesToResend.addIfNotAlreadyThere (type);
