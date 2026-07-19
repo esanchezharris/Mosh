@@ -98,6 +98,29 @@ preferred action) pairs, aligned with the owner by construction.
    internal eval harness; decide deliberately before anything ships in-product.
    (CLAP + Audiobox + AESCA + TuneJury's CLAP-only variant are clean.)
 
+### Answers (week-1 pass, 2026-07-19 — full detail in [`TASTE_WEEK1_2026-07-19.md`](TASTE_WEEK1_2026-07-19.md))
+
+1. **Unanswerable today — the label archive the brief assumed does not exist.**
+   Census of the surviving command log: 59 label events, 58 of them scripted-harness
+   replays that stamp accept AND reject on the same deterministic FakeAdapter render;
+   **1 organic accept, 0 organic rejects**. Causes: the harness labels into the real
+   `~/Library/Mosh`; the 06-30 in-place re-imagine overhaul removed the accept/reject
+   surface (labels stopped accumulating); SLF-CONC-001 wiped the 07-07→07-18 GUI logs.
+   The table INFRA is built and golden-tested (`service/taste/`), the CLAP + MERT
+   real-embedding lanes ran end-to-end on the surviving renders, and the table
+   regenerates with one command once labels exist. Reranker + disagreement queue
+   correctly NOT built (the stop rule fired one level earlier than priced).
+2. **Pending data** — zero felt-wrong captures existed before the hotkey shipped
+   (it landed in this pass); audit the first 30 real captures.
+3. **Implicit labels: 17 organic undos vs 1 explicit label** in the surviving log
+   (density claim directionally confirmed); self-repair pairs 0 (dpo-pairs archive
+   empty); correction-diff pairs 0 minable (JSONL carries no issuer tag). The
+   data-scarcity premise stands for now; trajectory-DPO stays premature.
+4. **Applied**: MERT-v0-public + LAION-CLAP (clean) are the embed lanes; TuneJury's
+   CC-BY-NC head isolated to an internal-eval venv (its HF weights are real and
+   cached; the README's pip install is broken upstream — `setup-taste.sh --tunejury`
+   is the working recipe); `service/taste/` stays out of the product bundle.
+
 ## The proposed one-week foothold (synthesis)
 
 Day 1–2 — **the correlation table** (question 1 above), plus GLM's felt-wrong
