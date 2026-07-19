@@ -783,7 +783,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 
 /* ── modal plugin browser ───────────────────────────────────────────────────*/
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 50; }
-.modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
+/* #44 — restate the classic text token: inside the v2 shell the inherited color is the
+   v2 DARK-PANEL text (#f0efe9), which vanishes on this modal's light-theme white bg.
+   --bone flips with [data-theme], so this reads correctly on both grounds. */
+.modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--ink-line); }
 .modal-head .pr-meta { margin-left: auto; color: var(--bone-dim); font-size: 11px; }
 .confirm-modal { width: min(92vw, 380px); }
@@ -1282,13 +1285,18 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-code-row .btn { flex: none; }
 .mp-roster { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .mp-peer { display: flex; align-items: center; gap: 7px; font-size: 12px; }
-.mp-peer-name { flex: 1; }
+/* #45 — a hostile (unbroken 200+ char) peer name must truncate, not blow the modal
+   open sideways: flex min-width defaults to content size, so pin it to 0. */
+.mp-peer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .mp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-line); flex: none; }
 .mp-dot.on { background: var(--lime); box-shadow: 0 0 5px var(--lime-dim); }
 .mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
 .mp-join { display: flex; gap: 6px; }
 .mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+/* #42 — inline join failure, right where the user is looking (the global error bar
+   alone was easy to miss behind the modal). */
+.mp-join-error { font-size: 12px; color: var(--err, #c02040); overflow-wrap: anywhere; }
 /* v2 shell's modal-based launcher (MultiplayerLauncher) — same panel, more room than
    the classic shell's small anchored popover. */
 .mp-launcher-modal { width: min(92vw, 420px); }

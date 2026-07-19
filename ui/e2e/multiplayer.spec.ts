@@ -72,7 +72,9 @@ test.describe("v2 multiplayer — discoverable Create/Join", () => {
     // "you have unsaved work" case, not a contrived one.
     await page.getByTestId("v2-share").click();
     const modal = page.getByTestId("mp-launcher-modal");
-    await modal.getByLabel("Room code to join").fill("REMOTE-CODE-1");
+    // Codes must use the mock's "MOCK-ROOM-…" format since the #42 failure path landed
+    // (unknown codes now deliberately fail with "no such room" — see bridge.mock.ts).
+    await modal.getByLabel("Room code to join").fill("MOCK-ROOM-remote-1");
     await modal.getByRole("button", { name: "Join", exact: true }).click();
 
     const confirm = page.getByTestId("mp-join-confirm");
@@ -88,7 +90,7 @@ test.describe("v2 multiplayer — discoverable Create/Join", () => {
     await expect(page.getByTestId("mp-join-confirm")).toBeVisible();
     await page.getByTestId("mp-join-confirm").getByRole("button", { name: "Join anyway" }).click();
     await expect(page.getByTestId("mp-join-confirm")).toHaveCount(0);
-    await expect(modal.getByLabel("Room code (share to invite)")).toHaveValue("REMOTE-CODE-1");
+    await expect(modal.getByLabel("Room code (share to invite)")).toHaveValue("MOCK-ROOM-remote-1");
   });
 
   test("Join on an empty project does not prompt for confirmation", async ({ page }) => {
@@ -96,10 +98,10 @@ test.describe("v2 multiplayer — discoverable Create/Join", () => {
     await clearLocalTracks(page);
     await page.getByTestId("v2-share").click();
     const modal = page.getByTestId("mp-launcher-modal");
-    await modal.getByLabel("Room code to join").fill("REMOTE-CODE-2");
+    await modal.getByLabel("Room code to join").fill("MOCK-ROOM-remote-2");
     await modal.getByRole("button", { name: "Join", exact: true }).click();
     await expect(page.getByTestId("mp-join-confirm")).toHaveCount(0);
-    await expect(modal.getByLabel("Room code (share to invite)")).toHaveValue("REMOTE-CODE-2");
+    await expect(modal.getByLabel("Room code (share to invite)")).toHaveValue("MOCK-ROOM-remote-2");
   });
 
   test("the right-rail 'Invite collaborator' button opens the same Create/Join modal", async ({ page }) => {

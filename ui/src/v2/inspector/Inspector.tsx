@@ -24,11 +24,17 @@ export function Inspector() {
   const tab = useShell((s) => s.inspectorTab);
   const setTab = useShell((s) => s.setInspectorTab);
 
-  const track = snapshot?.tracks.find((t) => t.id === selectedTrackId) ?? null;
-  if (!track) return null;
+  const selectedTrack = snapshot?.tracks.find((t) => t.id === selectedTrackId) ?? null;
   const clip = selectedClipId
     ? snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
     : undefined;
+  // #55 (EDGECASE_SWEEP_V2_2026-07-18) — the editing CONTEXT follows the selected
+  // clip's own track. Previously the header + Mix/FX/Gen named the track-selection
+  // track while Clip/Warp edited a clip living on a DIFFERENT track — the header
+  // lied about what the tabs operate on.
+  const clipTrack = clip ? snapshot?.tracks.find((t) => t.clips.some((c) => c.id === clip.id)) ?? null : null;
+  const track = clipTrack ?? selectedTrack;
+  if (!track) return null;
   const isMidi = clip?.type === "midi";
   const isWave = clip?.type === "wave";
   const hasTakes = (clip?.numTakes ?? 0) > 1;

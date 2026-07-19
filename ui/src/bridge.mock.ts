@@ -2433,6 +2433,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // roster, a locked-by badge, and a remote selection highlight without a relay.
     case "mp_create_session":
     case "mp_join_session": {
+      // #42 — deterministic join FAILURE for codes outside the mock's own format, so
+      // the inline join-error UI is exercisable without a relay. Divergence note:
+      // native fails via relay lookup; the mock fails on format — same result shape.
+      if (command === "mp_join_session" && !str(args.code).startsWith("MOCK-ROOM-"))
+        return err(command, "no such room: " + str(args.code));
       for (const t of snapshot.tracks) if (!t.logicalId) t.logicalId = "lid-" + t.id;
       const code = command === "mp_create_session" ? "MOCK-ROOM-abcdef0123456789" : str(args.code);
       const locked = snapshot.tracks[1];

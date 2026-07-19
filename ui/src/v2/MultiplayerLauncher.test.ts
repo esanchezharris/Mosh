@@ -25,7 +25,7 @@ describe("v2 MultiplayerLauncher", () => {
       mp: { active: false, roomCode: null, selfPeer: null, connected: false },
       peers: {},
       mpCreateSession: vi.fn(async () => {}),
-      mpJoinSession: vi.fn(async () => {}),
+      mpJoinSession: vi.fn(async () => ({ ok: true, command: "mp_join_session" })),
       mpLeaveSession: vi.fn(async () => {}),
       snapshot: { schemaVersion: 1, session: { editFile: "/mock/song.mosh" }, tracks: [] } as unknown as Snapshot,
     });

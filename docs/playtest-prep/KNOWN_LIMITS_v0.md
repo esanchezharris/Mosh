@@ -64,10 +64,12 @@ sweep-specific items and the "why" behind each one.*
   render but is quietly degraded and gets committed back to the host. **Guidance:** if
   you're the guest, avoid re-triggering "re-imagine" on a clip the host already rendered;
   let the host manage renders on clips they created.
-- A few lower-severity UI papercuts remain open (a raw peer-ID string in some lock-conflict
+- ~~A few lower-severity UI papercuts remain open (a raw peer-ID string in some lock-conflict
   messages, the multiplayer overflow menu not closing on Escape, join failures showing only
-  in the global error bar rather than inline in the join panel) — none of these block or
-  corrupt anything, they're just rough edges. Full list in the sweep ledger.
+  in the global error bar rather than inline in the join panel)~~ — **fixed in the
+  2026-07-18 edge-case pass** (peer names shown instead of ids, Escape dismisses the
+  overflow menu, join failures show inline in the panel). Ledger:
+  [EDGECASE_SWEEP_V2_2026-07-18.md](EDGECASE_SWEEP_V2_2026-07-18.md).
 
 ## Being replaced right now — async stem transfer (#354, pending merge)
 
