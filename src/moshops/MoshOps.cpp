@@ -4206,6 +4206,7 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 {
     const bool ok = eng.save();
     logLine ("save", args, ok, ok ? String() : String ("save failed"), false);
+    if (ok) logKeptRenderLabels();   // TASTE-002 — surviving applied renders = soft positives
     return ok ? okResult ("save") : errResult ("save", "save failed");
 }
 
@@ -8691,7 +8692,16 @@ juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
         node.setProperty (kLandedClipId, "", &undoManager());
         node.setProperty (kSourceMutedByLayer, false, &undoManager());
         node.setProperty (ids::status, "dirty", &undoManager());   // re-imagine is available again
-        logLine ("reset_render_layer", args, true, {}, false);
+        // JSONL TASTE LABEL (05 §9): with in-place/beneath auto-apply, reset IS the
+        // workflow's reject — carry the join keys (layerId/cacheKey/adapter) so the
+        // label pairs with the render artifact in the taste census.
+        {
+            auto* tl = new DynamicObject();
+            tl->setProperty ("clipId", clipId); tl->setProperty ("layerId", node[ids::id]);
+            tl->setProperty ("cacheKey", node[ids::cacheKey]);
+            tl->setProperty ("adapter", node[ids::modelAdapter]);
+            logLine ("reset_render_layer", var (tl), true, {}, false);
+        }
         emitSnapshotInvalidated();
         return okResult ("reset_render_layer");
     }
@@ -8707,9 +8717,45 @@ juce::var MoshOps::cmdResetRenderLayer (const juce::var& args)
     mosh::repointWaveClipSource (*wave, of, eng.editFile().getParentDirectory(), local);
     node.setProperty (ids::appliedInPlace, false, nullptr);
     node.setProperty (ids::status, "dirty", nullptr);   // re-imagine is available again
-    logLine ("reset_render_layer", args, true, {}, false);
+    // JSONL TASTE LABEL (05 §9): with in-place auto-apply, reset IS the workflow's
+    // reject — carry the join keys (layerId/cacheKey/adapter) so the label pairs with
+    // the render artifact in the taste census.
+    {
+        auto* tl = new DynamicObject();
+        tl->setProperty ("clipId", clipId); tl->setProperty ("layerId", node[ids::id]);
+        tl->setProperty ("cacheKey", node[ids::cacheKey]);
+        tl->setProperty ("adapter", node[ids::modelAdapter]);
+        logLine ("reset_render_layer", var (tl), true, {}, false);
+    }
     emitSnapshotInvalidated();
     return okResult ("reset_render_layer");
+}
+
+// TASTE-002 — the render_kept sweep. The 06-30 in-place overhaul removed accept/reject
+// from the wave loop, so the JSONL stopped accumulating organic taste labels. The
+// cheapest honest positive is survival: a render that is STILL applied when the
+// producer persists the project (save / export_audio) was implicitly kept. One label
+// per layer (deduped on layerId in renderKeptLogged_); bypassed layers are skipped —
+// at this moment the producer is A/B'd back to the original, so "kept" would overclaim.
+void MoshOps::logKeptRenderLabels()
+{
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        for (auto* c : t->getClips())
+        {
+            if (c == nullptr) continue;
+            auto rl = c->state.getChildWithName (ids::MOSH_RENDERLAYER);
+            if (! rl.isValid() || ! (bool) rl[ids::appliedInPlace]) continue;
+            if (rl[ids::status].toString() == "bypassed") continue;
+            const auto layerId = rl[ids::id].toString();
+            if (layerId.isEmpty() || renderKeptLogged_.contains (layerId)) continue;
+            renderKeptLogged_.add (layerId);
+            auto* tl = new DynamicObject();   // JSONL TASTE LABEL (05 §9): soft positive
+            tl->setProperty ("clipId", c->itemID.toString());
+            tl->setProperty ("layerId", layerId);
+            tl->setProperty ("cacheKey", rl[ids::cacheKey]);
+            tl->setProperty ("adapter", rl[ids::modelAdapter]);
+            logLine ("render_kept", var (tl), true, {}, false);
+        }
 }
 
 // ── Phase 3 — reactive auto-re-render ────────────────────────────────────────
@@ -9765,6 +9811,7 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     const bool ok = renderError.isEmpty() && file.existsAsFile() && file.getSize() > 0;
 
     logLine ("export_audio", args, ok, ok ? String() : (renderError.isNotEmpty() ? renderError : String ("render produced no file")), false);
+    if (ok) logKeptRenderLabels();   // TASTE-002 — surviving applied renders = soft positives
     if (! ok) return errResult ("export_audio", renderError.isNotEmpty() ? renderError : String ("export render failed"));
 
     auto* data = new DynamicObject();
