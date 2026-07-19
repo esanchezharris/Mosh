@@ -55,6 +55,13 @@ export type LoopDeps = {
   signal?: { aborted: boolean };
   onProgress?: (e: LoopProgressEvent) => void;
   now?: () => number;
+  /** M2 — an optional pre-rendered memory block (retrieveContext() in
+   *  agent/memory/retrieveContext.ts), computed ONCE by the caller (runTask.ts)
+   *  before the loop starts and passed through unchanged to every step's
+   *  buildLoopSystemPrompt call — hydration/ranking is not a per-step cost, and this
+   *  FSM stays pure/deps-injected (no bridge call inside the loop itself). Omitted ⇒
+   *  every step's prompt is byte-identical to the pre-M2 shape. */
+  memory?: string;
 };
 
 export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
@@ -83,7 +90,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
   const repliesLeft = () => Math.max(0, b.maxPlannerCalls - plannerCalls) + Math.max(0, b.maxStepCalls - stepCalls);
   const callModel = async (mode: TaskContextMode, goal?: string): Promise<LoopReply | null> => {
     const messages: ChatMessage[] = [
-      { role: "system", content: buildLoopSystemPrompt(snap, task.ask) },
+      { role: "system", content: buildLoopSystemPrompt(snap, task.ask, deps.memory) },
       { role: "user", content: renderTaskContext({
           ask: task.ask, plan, planIdx, history: transcript,
           stepsLeft: Math.max(0, b.maxSteps - transcript.length), repliesLeft: repliesLeft(),

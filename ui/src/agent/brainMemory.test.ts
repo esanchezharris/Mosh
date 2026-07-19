@@ -1,0 +1,105 @@
+// M2 — the end-to-end wiring proof for createBrain (brain.ts): the `agentMemory`
+// settings flag AND non-empty hydrated pools both gate whether a memory section ever
+// reaches the LLM system prompt. Separate from brain.test.ts because it needs its own
+// `../bridge` mock that actually answers agent_memory_read (brain.test.ts's mock
+// deliberately omits executeCommand — see hydrate.ts's fail-soft-to-[] contract,
+// which is what keeps brain.test.ts passing unmodified).
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { Snapshot } from "../types";
+
+const { brainChatMock, executeCommandMock } = vi.hoisted(() => ({
+  brainChatMock: vi.fn(),
+  executeCommandMock: vi.fn(),
+}));
+vi.mock("../bridge", () => ({
+  brainChat: brainChatMock,
+  executeCommand: executeCommandMock,
+  escalateCandidates: vi.fn(async () => null),
+  archivePair: vi.fn(async () => {}),
+}));
+
+import { createBrain } from "./brain";
+import { useSettings } from "../settings/store";
+import { __resetMemoryHydrationForTests } from "./memory/hydrate";
+
+const snap: Snapshot = {
+  schemaVersion: 1,
+  session: { sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "" },
+  tracks: [],
+  transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+  master: { volumeDb: 0, pan: 0 },
+};
+
+const systemOfLastCall = (): string => {
+  const calls = brainChatMock.mock.calls;
+  const messages = calls[calls.length - 1][0] as { role: string; content: string }[];
+  return messages[0].content;
+};
+
+// A believable agent_memory_read response for any {scope,kind} args — only the
+// "preference"-kind global read carries an item; everything else is empty, so the
+// test proves BOTH "memory shows up when relevant" and "an empty pool contributes
+// nothing" in one fixture.
+function mockReadResponses() {
+  executeCommandMock.mockImplementation(async (cmd: unknown) => {
+    const c = cmd as { command: string; args?: Record<string, unknown> };
+    if (c.command !== "agent_memory_read") return { ok: false, error: "unexpected command" };
+    if (c.args?.scope === "global" && c.args?.kind === "preference") {
+      return { ok: true, data: { items: [{ ts: 1, kind: "preference", explicit: true, item: "always keep the low end wide" }] } };
+    }
+    return { ok: true, data: { items: [] } };
+  });
+}
+
+describe("createBrain — M2 memory wiring (flag + non-empty pools gate)", () => {
+  beforeEach(() => {
+    brainChatMock.mockReset();
+    executeCommandMock.mockReset();
+    brainChatMock.mockResolvedValue({ content: '{"intent":"ACK_GOT_IT"}' });
+    __resetMemoryHydrationForTests();
+    useSettings.getState().set("agentMemory", true);
+  });
+
+  it("flag ON + a non-empty pool -> the memory section reaches the system prompt", async () => {
+    mockReadResponses();
+    const brain = createBrain(() => snap);
+    await brain.send("what should I do with the low end");
+    const sys = systemOfLastCall();
+    expect(sys).toContain("Memory —");
+    expect(sys).toContain("always keep the low end wide");
+  });
+
+  it("flag OFF -> no memory section, and agent_memory_read is never even called", async () => {
+    mockReadResponses();
+    useSettings.getState().set("agentMemory", false);
+    const brain = createBrain(() => snap);
+    await brain.send("what should I do with the low end");
+    expect(systemOfLastCall()).not.toContain("Memory —");
+    expect(executeCommandMock).not.toHaveBeenCalled();
+  });
+
+  it("flag ON but every pool empty -> no memory section (byte-identical to pre-M2)", async () => {
+    executeCommandMock.mockResolvedValue({ ok: true, data: { items: [] } });
+    const brain = createBrain(() => snap);
+    await brain.send("what should I do with the low end");
+    expect(systemOfLastCall()).not.toContain("Memory —");
+  });
+
+  it("hydration is memoized across turns in the same session — one round of reads only", async () => {
+    mockReadResponses();
+    const brain = createBrain(() => snap);
+    await brain.send("first turn");
+    const callsAfterFirst = executeCommandMock.mock.calls.length;
+    await brain.send("second turn");
+    expect(executeCommandMock.mock.calls.length).toBe(callsAfterFirst); // no NEW reads
+  });
+
+  it("a hydration failure degrades to no memory section, never throws into send()", async () => {
+    executeCommandMock.mockRejectedValue(new Error("native bridge unavailable"));
+    const brain = createBrain(() => snap);
+    const reply = await brain.send("what should I do with the low end");
+    expect(reply.intent).toBe("ACK_GOT_IT");
+    expect(systemOfLastCall()).not.toContain("Memory —");
+  });
+});

@@ -134,29 +134,20 @@ function parseKnowledge(jsonl: string): KnowledgeCard[] {
 export const PRODUCER_KNOWLEDGE: readonly KnowledgeCard[] = parseKnowledge(PRODUCER_KNOWLEDGE_JSONL);
 
 // ── deterministic tag/keyword retrieval (swappable seam) ──────────────────────────
+//
+// M2 (Phase-B memory lane): the generic scorer (tokenize/STOP/scorePool) was
+// extracted VERBATIM into memory/scoring.ts so retrieveContext.ts can score OTHER
+// pools (preferences, patterns) with the exact same algorithm. This is a pure
+// extraction — cardWeights/retrieveCards below produce byte-identical output to
+// before (knowledge.test.ts is the guard; it required zero changes).
 
-const TOKEN_RE = /[a-z0-9]+/g;
-// Very common / low-signal words carry no "which control" signal — exclude them.
-const STOP = new Set([
-  "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "at", "for", "with",
-  "i", "me", "my", "you", "your", "it", "its", "is", "are", "be", "am", "as", "so",
-  "that", "this", "do", "does", "did", "how", "should", "can", "could", "would",
-  "will", "if", "then", "than", "out", "up", "down", "more", "less", "not", "no",
-  "yes", "just", "now", "when", "why", "what", "some", "any", "get", "got",
-]);
-
-function tokenize(text: string): string[] {
-  const out: string[] = [];
-  for (const m of (text || "").toLowerCase().matchAll(TOKEN_RE)) {
-    const t = m[0];
-    if (t.length >= 2 && !STOP.has(t)) out.push(t);
-  }
-  return out;
-}
+import { tokenize, scorePool } from "./memory/scoring";
 
 // A card's token → weight bag. Tags are the primary signal (3); topic/maps_to next
 // (2); the prose (plain/when) lowest (1) so a producer's natural phrasing still hits.
-function cardWeights(card: KnowledgeCard): Map<string, number> {
+// Exported so retrieveContext.ts can fold a knowledge card into a unified pool without
+// re-deriving this weighting scheme.
+export function cardWeights(card: KnowledgeCard): Map<string, number> {
   const w = new Map<string, number>();
   const add = (text: string, weight: number) => {
     for (const t of tokenize(text)) if ((w.get(t) ?? 0) < weight) w.set(t, weight);
@@ -180,18 +171,8 @@ export type RetrieveOptions = {
 export function retrieveCards(query: string, opts: RetrieveOptions = {}): KnowledgeCard[] {
   const cards = opts.cards ?? PRODUCER_KNOWLEDGE;
   const limit = opts.limit ?? 3;
-  const qTokens = Array.from(new Set(tokenize(query)));
-  if (qTokens.length === 0) return [];
-  const scored = cards
-    .map((card) => {
-      const w = cardWeights(card);
-      let score = 0;
-      for (const t of qTokens) score += w.get(t) ?? 0;
-      return { card, score };
-    })
-    .filter((s) => s.score > 0);
-  scored.sort((a, b) => b.score - a.score || a.card.id.localeCompare(b.card.id));
-  return scored.slice(0, limit).map((s) => s.card);
+  const scored = scorePool(query, cards, cardWeights, (c) => c.id);
+  return scored.slice(0, limit).map((s) => s.item);
 }
 
 /** Render retrieved cards into a compact system-prompt block. Empty ⇒ "" (so the

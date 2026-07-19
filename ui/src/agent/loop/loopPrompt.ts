@@ -65,12 +65,16 @@ export function richSessionBlock(s: Snapshot): string {
 }
 
 /** System prompt for every loop call: loop preamble + full catalog +
- *  [knowledge for the ask] + loop rules + the RICH session. Rebuilt fresh each
- *  step (the session block is the observation). */
-export function buildLoopSystemPrompt(snap: Snapshot | null, query?: string): string {
+ *  [knowledge for the ask] + [memory] + loop rules + the RICH session. Rebuilt fresh
+ *  each step (the session block is the observation) — `memory` is computed ONCE per
+ *  TASK by the app-side glue (runTask.ts) before the loop starts (hydration/ranking
+ *  is not a per-step cost) and passed through unchanged on every step. Omitted ⇒
+ *  byte-identical to the pre-M2 shape (same guarantee as buildSystemPrompt). */
+export function buildLoopSystemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
   const parts = [LOOP_PREAMBLE, commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
+  if (memory) parts.push(memory);
   parts.push(LOOP_RULES, "Current session:", snap ? richSessionBlock(snap) : "(empty session)");
   return parts.join("\n");
 }

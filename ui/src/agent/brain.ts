@@ -10,12 +10,21 @@
 // service draws + ranks more candidates; any failure keeps the single-shot reply),
 // and corrective batches get ONE validator-retry re-prompt carrying the exact
 // validation failure. Living HERE means both shells + the voice path inherit it.
+//
+// M2 (Phase-B memory lane, flag `agentMemory`, default ON): before building the
+// system prompt, hydrate the agent-memory pools (memoized after the first turn — see
+// memory/hydrate.ts) and fold the few relevant preferences/patterns/project-notes
+// into the prompt via memory/retrieveContext.ts. A fresh install with nothing ever
+// written to agent memory hydrates to empty pools, so `memory` stays unpassed and
+// the prompt is byte-identical to the pre-M2 shape (systemPrompt's own contract).
 
 import { archivePair, brainChat, escalateCandidates } from "../bridge";
 import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
 import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
+import { ensureMemoryHydrated, poolsNonEmpty } from "./memory/hydrate";
+import { retrieveContext } from "./memory/retrieveContext";
 import type { Snapshot } from "../types";
 
 // Re-export the reply type so importers keep a single brain entry point (the pure
@@ -25,6 +34,19 @@ export type { BrainReply } from "./brainCore";
 export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => void };
 
 const bestOfNOn = (): boolean => useSettings.getState().get("bestOfNServing") === true;
+const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
+
+/** The M2 memory section for one turn's query, or "" when the flag is off or
+ *  hydration yields nothing relevant. Hydration itself is memoized (memory/hydrate.ts)
+ *  so only the FIRST call in a session pays the fetch; every call after resolves
+ *  from cache. Never throws — a hydration failure degrades to "" (readMemory in
+ *  hydrate.ts already fails soft per-pool). */
+async function memorySectionFor(query: string): Promise<string> {
+  if (!memoryOn()) return "";
+  const pools = await ensureMemoryHydrated();
+  if (!poolsNonEmpty(pools)) return "";
+  return retrieveContext(query, pools);
+}
 
 export function createBrain(getSnapshot: () => Snapshot | null): Brain {
   const history: { role: string; content: string }[] = [];
@@ -34,7 +56,8 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
       history.push({ role: "user", content: text });
       // Pass the turn text so systemPrompt injects the few relevant producer-knowledge
       // cards next to the command catalog (WHY/WHEN for the controls this request touches).
-      const messages = [{ role: "system", content: systemPrompt(snap, text) }, ...history.slice(-8)];
+      const memory = await memorySectionFor(text);
+      const messages = [{ role: "system", content: systemPrompt(snap, text, memory) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
         const reply = parseReply(content);

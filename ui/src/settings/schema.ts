@@ -150,6 +150,15 @@ export const SETTINGS: SettingDef[] = [
     help: "Moshi works bigger asks in steps: plans, acts, checks the result, and repairs — with live progress and a Stop button. One undo still reverts the whole task. Off = the classic one-shot behavior.",
   },
   {
+    id: "agentMemory",
+    type: "bool",
+    default: true,
+    scope: "app",
+    category: "Moshi",
+    label: "Agent memory (experimental)",
+    help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",

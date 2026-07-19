@@ -60,6 +60,45 @@ describe("buildLoopSystemPrompt", () => {
   });
 });
 
+describe("buildLoopSystemPrompt: M2 memory param — byte-stability + the one-section diff", () => {
+  it("omitting memory is byte-identical to the pre-M2 shape (2-arg and explicit-undefined 3rd arg)", () => {
+    const twoArg = buildLoopSystemPrompt(SNAP);
+    expect(buildLoopSystemPrompt(SNAP, undefined, undefined)).toBe(twoArg);
+    expect(buildLoopSystemPrompt(SNAP, undefined, "")).toBe(twoArg);
+    expect(twoArg).not.toContain("Memory —");
+  });
+
+  it("when memory IS provided, it's the only addition — everything else is untouched", () => {
+    const memory = "Memory — a made-up section for this test.\n- (this project) a fact";
+    const without = buildLoopSystemPrompt(SNAP);
+    const withMemory = buildLoopSystemPrompt(SNAP, undefined, memory);
+
+    const rulesFirstLine = LOOP_RULES.split("\n")[0]!;
+    const beforeLines = without.split("\n");
+    const afterLines = withMemory.split("\n");
+    const memoryLines = memory.split("\n");
+    const splitAt = beforeLines.indexOf(rulesFirstLine);
+    expect(splitAt).toBeGreaterThan(-1);
+    expect(afterLines.length).toBe(beforeLines.length + memoryLines.length);
+    expect(afterLines.slice(0, splitAt)).toEqual(beforeLines.slice(0, splitAt));
+    expect(afterLines.slice(splitAt, splitAt + memoryLines.length)).toEqual(memoryLines);
+    expect(afterLines.slice(splitAt + memoryLines.length)).toEqual(beforeLines.slice(splitAt));
+  });
+
+  it("memory slots after knowledge and before the loop rules, same as the single-shot path", () => {
+    const memory = "Memory — a made-up block.";
+    // buildLoopSystemPrompt computes its own knowledge internally from `query`; use a
+    // real query so a real knowledge block appears, then just check relative order.
+    const p = buildLoopSystemPrompt(SNAP, "put a compressor on the master bus", memory);
+    const knowIdx = p.indexOf("Producer knowledge");
+    const memIdx = p.indexOf(memory);
+    const rulesIdx = p.indexOf(LOOP_RULES.split("\n")[0]!);
+    expect(knowIdx).toBeGreaterThan(-1);
+    expect(memIdx).toBeGreaterThan(knowIdx);
+    expect(rulesIdx).toBeGreaterThan(memIdx);
+  });
+});
+
 describe("renderTaskContext", () => {
   it("renders plan progress, verbatim step errors and the budget line", () => {
     const ctx = renderTaskContext({
@@ -99,5 +138,28 @@ describe("legacy prompt byte-stability pin", () => {
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
     expect(hash).toBe("a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c");
+  });
+
+  // M2 extension: the pin above already proves the OMITTED-memory call is unmoved
+  // (systemPrompt(fixture) never passes a 3rd arg). This makes that explicit and
+  // proves the OPPOSITE isn't silently also true — the param genuinely threads
+  // through when a caller DOES supply it, so "byte-identical when omitted" is a real
+  // guarantee about the argument, not a dead/no-op parameter.
+  it("the SAME fixture with an explicit memory arg produces a DIFFERENT hash (the param is live)", () => {
+    const fixture = {
+      schemaVersion: 1,
+      session: { sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "" },
+      tracks: [
+        { id: "17", index: 0, name: "Drums", type: "audio", volumeDb: 0, mute: false, solo: false,
+          clips: [{ id: "101", name: "beat", type: "midi", start: 0, length: 4, offset: 0, hasRenderLayer: false }] },
+      ],
+      transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+      master: { volumeDb: 0, pan: 0 },
+    } as unknown as Snapshot;
+    const pinnedHash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
+    const withMemoryHash = createHash("sha256")
+      .update(systemPrompt(fixture, undefined, "Memory — a made-up section."))
+      .digest("hex");
+    expect(withMemoryHash).not.toBe(pinnedHash);
   });
 });

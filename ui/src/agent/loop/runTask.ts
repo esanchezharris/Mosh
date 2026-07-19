@@ -7,6 +7,14 @@
 //
 // Loop tasks deliberately do NOT set agentChangeSet — the drawer carries the
 // per-step detail, so the ChangeToast stays quiet for them by construction.
+//
+// M2 (Phase-B memory lane, flag `agentMemory`): the memory section is computed ONCE
+// here, before the loop starts (loop.ts's FSM is pure/deps-injected — it never calls
+// the bridge itself), and passed through LoopDeps.memory so every step's prompt
+// carries the SAME section (hydration/ranking is a one-time task cost, never a
+// per-step one). Empty pools (the common case until something is actually written to
+// agent memory) ⇒ memory stays undefined ⇒ every step's prompt is byte-identical to
+// the pre-M2 shape.
 
 import { archivePair, brainChat } from "../../bridge";
 import { useSettings } from "../../settings/store";
@@ -15,8 +23,22 @@ import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
 import { useTaskStore } from "./taskStore";
+import { ensureMemoryHydrated, poolsNonEmpty } from "../memory/hydrate";
+import { retrieveContext } from "../memory/retrieveContext";
 
 export const agenticLoopOn = (): boolean => useSettings.getState().get("agenticLoop") === true;
+const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
+
+/** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext
+ *  pairing, same fail-soft-to-"" posture. Kept as its own function (not shared with
+ *  brain.ts) since the two call sites differ in WHEN they call it: brain.ts per turn,
+ *  this one ONCE per task before the loop starts. */
+async function memorySectionFor(query: string): Promise<string | undefined> {
+  if (!memoryOn()) return undefined;
+  const pools = await ensureMemoryHydrated();
+  if (!poolsNonEmpty(pools)) return undefined;
+  return retrieveContext(query, pools);
+}
 
 /** The loop runs only when the flag is on AND we're not in a multiplayer
  *  session (v1: a long-lived open batch vs the MP lock table is unplaytested —
@@ -51,6 +73,7 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   ui.utter("ACK_WORKING");
 
   const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" }, { signal });
+  const memory = await memorySectionFor(text);
   let run: LoopRun;
   try {
     run = await runAgentLoop({ ask: text }, {
@@ -58,6 +81,7 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
       env: exec.env,
       signal,
       onProgress: (ev) => useTaskStore.getState().progress(ev),
+      memory,
     });
   } finally {
     await exec.close(); // the task's undo transaction closes on EVERY exit path

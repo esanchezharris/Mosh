@@ -52,25 +52,38 @@ export const DEFAULT_RULES = [
 ].join("\n");
 
 /** Assemble the full system prompt from an (optimizable) rules block + a snapshot.
- *  PREAMBLE + catalog + [knowledge] + rules + session — the order systemPrompt has
- *  always used, with the producer-knowledge block inserted next to the catalog.
- *  `catalog` swaps the command catalog (the small-model-mode eval arm); omitted =
- *  the full catalog. `knowledge` is a pre-rendered producer-knowledge block; omitted
- *  or empty ⇒ not inserted, so every existing caller (GEPA / SFT / harvest) is
- *  byte-unchanged. */
-export function buildSystemPrompt(rules: string, snap: Snapshot | null, catalog?: string, knowledge?: string): string {
+ *  PREAMBLE + catalog + [knowledge] + [memory] + rules + session — the order
+ *  systemPrompt has always used, with the producer-knowledge block inserted next to
+ *  the catalog and the M2 memory block (preferences/patterns/project notes) right
+ *  after it. `catalog` swaps the command catalog (the small-model-mode eval arm);
+ *  omitted = the full catalog. `knowledge` is a pre-rendered producer-knowledge
+ *  block; `memory` is a pre-rendered memory block (retrieveContext() in
+ *  agent/memory/retrieveContext.ts) — BOTH omitted or empty ⇒ not inserted, so every
+ *  existing caller (GEPA / SFT / harvest, and every call site that predates the M2
+ *  memory param) is byte-unchanged. */
+export function buildSystemPrompt(
+  rules: string,
+  snap: Snapshot | null,
+  catalog?: string,
+  knowledge?: string,
+  memory?: string,
+): string {
   const parts = [PREAMBLE, catalog ?? commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
+  if (memory) parts.push(memory);
   parts.push(rules, "Current session:", snap ? compactSnapshot(snap) : "(empty session)");
   return parts.join("\n");
 }
 
 /** The production system prompt. Pass the user's request as `query` to inject the few
  *  most-relevant producer-knowledge cards; omit it (e.g. offline harvest that has no
- *  turn text yet) for the byte-identical no-knowledge prompt. */
-export function systemPrompt(snap: Snapshot | null, query?: string): string {
+ *  turn text yet) for the byte-identical no-knowledge prompt. `memory` is an optional
+ *  pre-rendered memory block (M2) — the caller (brain.ts) computes it via
+ *  retrieveContext() behind the `agentMemory` settings flag; omitted ⇒ no change to
+ *  this function's prior (pre-M2) behavior. */
+export function systemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
-  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge);
+  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge, memory);
 }
 
 // Coerce a string token ("17", 132, true) to the type an arg expects.

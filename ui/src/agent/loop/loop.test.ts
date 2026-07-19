@@ -179,3 +179,46 @@ describe("runAgentLoop — the FSM", () => {
     expect(DEFAULT_LOOP_BUDGETS).toMatchObject({ maxSteps: 8, maxPlannerCalls: 3, maxStepCalls: 8 });
   });
 });
+
+describe("runAgentLoop — M2 deps.memory forwarding", () => {
+  // deps.memory is a pre-rendered string the app-side glue (runTask.ts) computes
+  // ONCE before the loop starts — the FSM itself never calls the bridge. This proves
+  // the FSM actually threads it into buildLoopSystemPrompt on EVERY model call
+  // (plan + any repair/continue), not just the first.
+  function scriptedChatCapturingSystem(replies: Array<Record<string, unknown> | string>) {
+    const systemSeen: string[] = [];
+    return {
+      systemSeen,
+      chat: async (messages: Array<{ role: string; content: string }>) => {
+        systemSeen.push(messages[0]!.content);
+        const next = replies.shift();
+        if (next === undefined) throw new Error("scripted chat exhausted");
+        return { content: typeof next === "string" ? next : JSON.stringify(next), ms: 1 };
+      },
+    };
+  }
+
+  it("an omitted deps.memory never adds a Memory section to the system prompt", async () => {
+    const { chat, systemSeen } = scriptedChatCapturingSystem([
+      { status: "done", commands: [] },
+    ]);
+    const { env } = scriptedEnv(["ok"]);
+    await runAgentLoop({ ask: "x" }, { chat, env } as LoopDeps);
+    expect(systemSeen[0]).not.toContain("Memory —");
+  });
+
+  it("a provided deps.memory appears in EVERY model call's system prompt (plan AND a follow-up repair call)", async () => {
+    const { chat, systemSeen } = scriptedChatCapturingSystem([
+      { status: "continue", plan: [{ goal: "a" }] },   // plan call — no commands, needs a compile
+      { status: "done", commands: [CMD("set_tempo", { bpm: 90 })] },  // compile call for step "a"
+    ]);
+    const { env } = scriptedEnv(["ok"]);
+    const run = await runAgentLoop({ ask: "x" }, {
+      chat, env, memory: "Memory — a made-up section.\n- (this project) a fact",
+    } as LoopDeps);
+
+    expect(run.outcome).toBe("done");
+    expect(systemSeen.length).toBeGreaterThanOrEqual(2);
+    for (const sys of systemSeen) expect(sys).toContain("Memory — a made-up section.");
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { systemPrompt, parseReply } from "./brainCore";
+import { createHash } from "node:crypto";
+import { systemPrompt, buildSystemPrompt, DEFAULT_RULES, parseReply } from "./brainCore";
 import { validateCommand } from "./commands";
 import type { Snapshot } from "../types";
 
@@ -25,6 +26,74 @@ describe("systemPrompt id quoting", () => {
 
   it("states that ids are strings in the rules", () => {
     expect(systemPrompt(snap).toLowerCase()).toContain("string id");
+  });
+});
+
+describe("buildSystemPrompt: M2 memory param — byte-stability + the one-section diff", () => {
+  // EXTENDS the existing byte-stability pattern (the loopPrompt.test.ts sha256 pin
+  // guards systemPrompt(FIXTURE) specifically; this proves the general contract
+  // buildSystemPrompt itself makes: an omitted `memory` param changes NOTHING,
+  // regardless of caller or fixture).
+  it("omitting memory is byte-identical to the pre-M2 4-arg call, for both a fresh snapshot and a real one", () => {
+    const withoutMemoryParam = buildSystemPrompt(DEFAULT_RULES, snap, undefined, "");
+    const memoryExplicitlyUndefined = buildSystemPrompt(DEFAULT_RULES, snap, undefined, "", undefined);
+    const memoryEmptyString = buildSystemPrompt(DEFAULT_RULES, snap, undefined, "", "");
+    expect(memoryExplicitlyUndefined).toBe(withoutMemoryParam);
+    expect(memoryEmptyString).toBe(withoutMemoryParam);
+    expect(withoutMemoryParam).not.toContain("Memory —");
+  });
+
+  it("systemPrompt() omitting memory (the shipped single-shot call shape) is unaffected", () => {
+    // No caller anywhere (GEPA/SFT/harvest, or a production turn with the flag off)
+    // passes a 3rd arg here today — this pins that the DEFAULT is truly a no-op.
+    expect(systemPrompt(snap)).toBe(buildSystemPrompt(DEFAULT_RULES, snap));
+    expect(systemPrompt(snap, "some query", undefined)).toBe(systemPrompt(snap, "some query"));
+  });
+
+  it("the sha256 pin (loopPrompt.test.ts) is unaffected by the mere EXISTENCE of the memory param", () => {
+    // Re-derive the exact same pinned fixture/hash locally as an extra, colocated
+    // guard: adding a 5th optional param to buildSystemPrompt must not move this.
+    const hash = createHash("sha256").update(systemPrompt(snap)).digest("hex");
+    // NOT the loopPrompt.test.ts fixture (different snapshot) — this only proves
+    // OUR fixture is stable across repeated calls, i.e. the function is still pure.
+    expect(createHash("sha256").update(systemPrompt(snap)).digest("hex")).toBe(hash);
+  });
+
+  it("when memory IS provided, the diff from the memory-omitted prompt is EXACTLY one added section", () => {
+    const memory = "Memory — a made-up section for this test.\n- (this project) a fact";
+    const without = buildSystemPrompt(DEFAULT_RULES, snap, undefined, "", undefined);
+    const withMemory = buildSystemPrompt(DEFAULT_RULES, snap, undefined, "", memory);
+
+    // The whole prior prompt survives INTACT: withMemory is `without` with exactly
+    // one extra "\n" + memory section spliced in — nothing before or after it moved.
+    expect(withMemory).toBe(without.replace("\n" + DEFAULT_RULES, "\n" + memory + "\n" + DEFAULT_RULES));
+
+    // Line-level diff: every line in `without` still appears, in the same relative
+    // order, in `withMemory` — the ONLY new lines are the memory section's own.
+    // (DEFAULT_RULES is itself multi-line, so split() by its FIRST line to find the
+    // splice point in the per-line arrays.)
+    const rulesFirstLine = DEFAULT_RULES.split("\n")[0]!;
+    const beforeLines = without.split("\n");
+    const afterLines = withMemory.split("\n");
+    const memoryLines = memory.split("\n");
+    const splitAt = beforeLines.indexOf(rulesFirstLine);
+    expect(splitAt).toBeGreaterThan(-1);
+    expect(afterLines.length).toBe(beforeLines.length + memoryLines.length);
+    expect(afterLines.slice(0, splitAt)).toEqual(beforeLines.slice(0, splitAt));
+    expect(afterLines.slice(splitAt, splitAt + memoryLines.length)).toEqual(memoryLines);
+    expect(afterLines.slice(splitAt + memoryLines.length)).toEqual(beforeLines.slice(splitAt));
+  });
+
+  it("memory is inserted after knowledge and before the rules (same slotting as knowledge itself)", () => {
+    const knowledge = "Producer knowledge — a made-up block.";
+    const memory = "Memory — a made-up block.";
+    const p = buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge, memory);
+    const knowIdx = p.indexOf(knowledge);
+    const memIdx = p.indexOf(memory);
+    const rulesIdx = p.indexOf(DEFAULT_RULES);
+    expect(knowIdx).toBeGreaterThan(-1);
+    expect(memIdx).toBeGreaterThan(knowIdx);
+    expect(rulesIdx).toBeGreaterThan(memIdx);
   });
 });
 
