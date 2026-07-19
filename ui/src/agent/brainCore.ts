@@ -86,10 +86,36 @@ function coerceArg(tok: string, type: "string" | "number" | "boolean"): unknown 
 // `add_midi_clip("17")` — instead of the {command,args} object (it mimics
 // commandCatalogPrompt()). Normalize that back to the object contract by mapping the
 // positional args onto the command's declared arg names. Returns null if unusable.
+// add_drum_pattern's NATIVE handler accepts the pattern as an object
+// ({kick:"x..."}) OR a flat lane-map string, but ArgSpec can only declare the
+// string form — and models naturally emit the object (it's the idiomatic JSON
+// shape; the Phase-A baseline measured every model losing compose-drums to
+// client-side validation over exactly this). Flatten the natively-valid object
+// into the declared flat form so validation matches the real contract.
+function normalizeDrumPatternArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const p = args.pattern;
+  if (p && typeof p === "object" && !Array.isArray(p)) {
+    const flat = Object.entries(p as Record<string, unknown>)
+      .map(([lane, cells]) => `${lane}: ${String(cells)}`)
+      .join("; ");
+    return { ...args, pattern: flat };
+  }
+  // Models also separate lanes with newlines instead of semicolons — the flat
+  // parser then reads the next lane's NAME as pattern chars. Canonicalize any
+  // newline/semicolon mix into the declared "; "-separated form.
+  if (typeof p === "string" && /[\r\n]/.test(p)) {
+    const flat = p.split(/[\r\n;]+/).map((s) => s.trim()).filter(Boolean).join("; ");
+    return { ...args, pattern: flat };
+  }
+  return args;
+}
+
 function normalizeCommand(c: unknown): AgentCommandCall | null {
   if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
     const o = c as AgentCommandCall;
-    return { command: o.command, args: (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown> };
+    let args = (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown>;
+    if (o.command === "add_drum_pattern") args = normalizeDrumPatternArgs(args);
+    return { command: o.command, args };
   }
   if (typeof c !== "string") return null;
   const m = c.match(/^\s*([a-zA-Z_]\w*)\s*(?:\(([\s\S]*)\))?\s*;?\s*$/);

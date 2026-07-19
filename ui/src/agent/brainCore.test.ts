@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { systemPrompt, parseReply } from "./brainCore";
+import { validateCommand } from "./commands";
 import type { Snapshot } from "../types";
 
 const snap: Snapshot = {
@@ -51,5 +52,61 @@ describe("parseReply", () => {
   it("drops unknown commands in string form but keeps valid object commands", () => {
     const r = parseReply('{"intent":"ACK_GOT_IT","commands":["nope(1)",{"command":"set_tempo","args":{"bpm":90}}]}');
     expect(r.commands).toEqual([{ command: "set_tempo", args: { bpm: 90 } }]);
+  });
+});
+
+describe("parseReply — add_drum_pattern object-form normalization", () => {
+  // DRM-002's NATIVE handler accepts the pattern as an object ({kick:"x..."})
+  // OR a flat string, but ArgSpec can only declare the string form — and the
+  // Phase-A baseline measured every model naturally emitting the object form
+  // and losing the whole compose-drums category to client-side validation.
+  // normalizeCommand flattens the (natively valid) object into the declared
+  // flat form so validation matches the real contract.
+  it("flattens an object pattern into the flat lane-map string", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "add_drum_pattern", args: { pattern: { kick: "x...x...", snare: "....x..." }, stepsPerBar: 8 } }],
+    }));
+    expect(r.commands).toHaveLength(1);
+    expect(r.commands![0].args).toEqual({ pattern: "kick: x...x...; snare: ....x...", stepsPerBar: 8 });
+    expect(validateCommand("add_drum_pattern", r.commands![0].args as Record<string, unknown>)).toBeNull();
+  });
+
+  it("leaves a flat string pattern untouched", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "add_drum_pattern", args: { pattern: "kick: x...; hat: x.x." } }],
+    }));
+    expect(r.commands![0].args).toEqual({ pattern: "kick: x...; hat: x.x." });
+  });
+
+  it("does not rewrite object args on other commands", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "set_render_param", args: { clipId: "9", prompt: "lofi" } }],
+    }));
+    expect(r.commands![0].args).toEqual({ clipId: "9", prompt: "lofi" });
+  });
+});
+
+describe("parseReply — add_drum_pattern newline-separated lanes", () => {
+  // The Phase-A baseline also caught models separating lanes with NEWLINES
+  // instead of semicolons — the flat parser then reads the next lane's name as
+  // pattern chars (`lane "kick" has invalid step char "s"`). Canonicalize any
+  // newline/semicolon mix into the declared "; "-separated form.
+  it("converts newline separators into the flat semicolon form", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "add_drum_pattern", args: { pattern: "kick: x...x...\nsnare: ....x..." } }],
+    }));
+    expect(r.commands![0]!.args!.pattern).toBe("kick: x...x...; snare: ....x...");
+  });
+
+  it("canonicalizes a semicolon+newline mix without minting empty lanes", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "add_drum_pattern", args: { pattern: "kick: x...;\nsnare: ....x...;\nhat: x.x." } }],
+    }));
+    expect(r.commands![0]!.args!.pattern).toBe("kick: x...; snare: ....x...; hat: x.x.");
   });
 });

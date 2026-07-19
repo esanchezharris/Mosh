@@ -173,7 +173,12 @@ function makeRunner(usage: BrainUsage): AgentRunner {
 type Row = {
   id: string; category: string; ask: string;
   score: TaskScore;
-  steps: number; commands: string[]; wallMs: number; brainError?: string;
+  steps: number; commands: string[];
+  /** Per-command envelopes (flattened over steps; errors truncated) — without
+   *  these, a "cmdOk ×0" failure can't be told apart from validation vs native
+   *  rejection when reading a scoreboard after the fact. */
+  results: Array<{ command: string; ok: boolean; error?: string }>;
+  wallMs: number; brainError?: string;
   renders: string[];
 };
 
@@ -205,6 +210,8 @@ async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
     score,
     steps: run.stepCount,
     commands: run.transcript.flatMap((s) => s.commands.map((c) => c.command)),
+    results: run.transcript.flatMap((s) =>
+      s.results.map((r) => ({ command: r.command, ok: r.ok, error: r.error?.slice(0, 160) }))),
     wallMs, brainError: run.error, renders,
   };
 }
