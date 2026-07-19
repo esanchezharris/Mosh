@@ -244,45 +244,63 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None,
         j2 = j if i > j else j - 1                  # j's index after the deletion
         floors[j2] = _note_floor(phons[j2])
 
-    guard = 0
-    while guard < 4 * len(durs) + 8:
-        guard += 1
-        i = next((k for k in range(len(durs))
-                  if types[k] != 1 and not skip[k] and durs[k] < floors[k] - eps), None)
-        if i is None:
-            break
-        if try_borrow(i):
-            continue
-        j = None
-        if types[i] == 3 and i > 0 and types[i - 1] != 1 and texts[i - 1] == texts[i]:
-            j, cross = i - 1, False
-        elif types[i] == 2 and i + 1 < len(durs) and types[i + 1] == 3 \
-                and texts[i + 1] == texts[i]:
-            j, cross = i + 1, False
-        else:
-            a, b = run_bounds(i)
-            sung = [k for k in range(a, b + 1) if k != i and types[k] != 1]
-            after = [k for k in sung if k > i]
-            before = [k for k in sung if k < i]
-            if after:
-                j, cross = min(after), True
-            elif before:
-                j, cross = max(before), True
-        if j is None:
-            impossible += 1
-            skip[i] = True                          # a lone note in a too-small run
-        else:
-            do_merge(i, j, cross)
-            merged += 1
+    def fixpoint():
+        nonlocal merged, impossible
+        guard = 0
+        while guard < 4 * len(durs) + 8:
+            guard += 1
+            i = next((k for k in range(len(durs))
+                      if types[k] != 1 and not skip[k] and durs[k] < floors[k] - eps), None)
+            if i is None:
+                return
+            if try_borrow(i):
+                continue
+            j = None
+            if types[i] == 3 and i > 0 and types[i - 1] != 1 and texts[i - 1] == texts[i]:
+                j, cross = i - 1, False
+            elif types[i] == 2 and i + 1 < len(durs) and types[i + 1] == 3 \
+                    and texts[i + 1] == texts[i]:
+                j, cross = i + 1, False
+            else:
+                a, b = run_bounds(i)
+                sung = [k for k in range(a, b + 1) if k != i and types[k] != 1]
+                after = [k for k in sung if k > i]
+                before = [k for k in sung if k < i]
+                if after:
+                    j, cross = min(after), True
+                elif before:
+                    j, cross = max(before), True
+            if j is None:
+                impossible += 1
+                skip[i] = True                      # a lone note in a too-small run
+            else:
+                do_merge(i, j, cross)
+                merged += 1
 
-    # drained rests are dead tokens — drop them rather than ship 0.0000 events
-    k = 0
-    while k < len(durs):
-        if types[k] == 1 and durs[k] <= 5e-5:
-            for arr in (durs, types, texts, phons, pitches, skip, floors):
-                del arr[k]
-        else:
-            k += 1
+    def drop_drained():
+        """Drop fully-drained rests. This JOINS the runs they separated, so a note that
+        was 'impossible' (alone in a too-small run) may now reach real donors — hence the
+        outer loop below: dropping and then stopping is what let leaks ship."""
+        dropped = 0
+        k = 0
+        while k < len(durs):
+            if types[k] == 1 and durs[k] <= 5e-5:
+                for arr in (durs, types, texts, phons, pitches, skip, floors):
+                    del arr[k]
+                dropped += 1
+            else:
+                k += 1
+        return dropped
+
+    # borrow/merge -> drop drained rests -> retry what was given up on, until nothing
+    # changes. Bounded by the token count (each pass drops a rest or merges, both of
+    # which strictly shrink the chain), so termination is structural.
+    for _ in range(len(durs) + 2):
+        fixpoint()
+        if not drop_drained():
+            break
+        impossible = 0
+        skip = [False] * len(durs)                  # the landscape changed: retry them
 
     # re-quantize on the error-diffused chain so summed timeline is bit-stable (as author_score)
     qdur, acc_true, acc_emit = [], 0.0, 0.0

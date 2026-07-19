@@ -218,6 +218,23 @@ def redeal_segments(segs, weights, f0, t0, *, floor_s=0.12):
     return out
 
 
+def clamp_word_span(s, e, *, min_s=0.05, hard_end=None):
+    """Guarantee a word a nonzero, singable span instead of dropping it.
+
+    Real per-word alignment over a whole song hands dense function words very short
+    spans; the author used to SKIP anything under 50 ms, so "i"/"a" disappeared from the
+    sung score and no render could ever say them (measured: ~20 of 154 words on one
+    song). A word the singer sang must be sung — clamp, never drop. `hard_end` bounds
+    the clamp (the window end / the next word's start). Pure."""
+    s, e = float(s), float(e)
+    if e - s >= min_s:
+        return (s, e)
+    end = s + min_s
+    if hard_end is not None:
+        end = min(end, float(hard_end))
+    return (s, max(end, s + 1e-4))
+
+
 def word_segments(f0, s, e, t0, *, min_step_st=1.5, min_hold_s=0.12, max_segs=None,
                   default_pitch=57):
     """SoulX-convention segmentation of ONE word's span into notes.
@@ -293,9 +310,12 @@ def main():
         words = enforce_word_budgets(words, nsyl, float(data["sylBudgetS"]), t1)
     slots, texts, audit = [], [], []
     redeal_s = float(data.get("stressRedeal") or 0.0)
-    for w in words:
+    for wi, w in enumerate(words):
         s, e = max(t0, float(w["start"])), min(t1, float(w["end"]))
-        if e - s < 0.05:
+        # never drop a sung word for being fast — clamp it up to the next word's onset
+        nxt = float(words[wi + 1]["start"]) if wi + 1 < len(words) else t1
+        s, e = clamp_word_span(s, e, hard_end=min(t1, nxt))
+        if e <= s:
             continue
         if convention == "soulx":
             # whole word on one note unless the take's F0 genuinely steps (a real melisma),

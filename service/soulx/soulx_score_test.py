@@ -403,6 +403,28 @@ vd = [float(d) for d in sx.apply_note_floor(
 check("a bare-vowel note keeps the scalar floor (no cluster surcharge)",
       abs(vd[1] - 0.15) < 2e-4, str(vd))
 
+# ── the floor must CONVERGE in one call (full-song regression, 2026-07-19) ─────────────
+# A lone sung note in a run bounded by two tiny rests cannot borrow: the rests hold less
+# than it needs and run_bounds stops at them. The old code marked it impossible, THEN
+# dropped the drained rests at the end — which joins the runs, so a SECOND call fixed
+# what the first gave up on. Measured on the real full-song score: pass1 leaks 11,
+# pass2 leaks 0. The floor is a hard invariant; one call must be enough.
+CONVERGE_CLIP = {"index": "t", "language": "English", "time": [0, 710],
+                 "duration": "0.02 0.08 0.01 0.30 0.30", "text": "<SP> a <SP> bee sea",
+                 "phoneme": "<SP> en_AH1 <SP> en_B-IY1 en_S-IY1",
+                 "note_pitch": "0 60 0 62 64", "note_type": "1 2 1 2 2"}
+cstat = {}
+cv = sx.apply_note_floor(dict(CONVERGE_CLIP), 0.15, stats=cstat)
+cvd = [float(d) for d in cv["duration"].split()]
+cvt = [int(t) for t in cv["note_type"].split()]
+check("floor converges in ONE call — no sung note left below the floor",
+      all(d >= 0.1498 for d, t in zip(cvd, cvt) if t != 1), str(cvd))
+check("converged call reports zero leaks", cstat.get("leaks") == 0, str(cstat))
+check("total timeline preserved across the convergence",
+      abs(sum(cvd) - 0.71) < 1e-3, str(sum(cvd)))
+check("a second call is a no-op (idempotent once converged)",
+      sx.apply_note_floor(dict(cv), 0.15)["duration"] == cv["duration"])
+
 import hashlib as _chl  # noqa: E402
 _cdet = {_chl.sha256(json.dumps(sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15, cluster_ms=CM),
                                 sort_keys=True).encode()).hexdigest() for _ in range(3)}

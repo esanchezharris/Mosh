@@ -236,6 +236,23 @@ det_rd = {_hl.sha256(_js.dumps(bsa.redeal_segments([dict(s) for s in PINATA], [1
                                sort_keys=True).encode()).hexdigest() for _ in range(3)}
 check("redeal deterministic (3x)", len(det_rd) == 1)
 
+# ── no word may be silently dropped for being fast (full-song regression, 2026-07-19) ──
+# Real per-word alignment over a whole song gives dense function words very short spans;
+# the author skipped anything under 50 ms, so "i" and "a" vanished from the sung score
+# entirely and the render could never say them. A word the singer sang must be sung.
+check("a sub-50ms word is KEPT (clamped), not dropped",
+      bsa.clamp_word_span(1.000, 1.030, min_s=0.05) == (1.0, 1.05),
+      str(bsa.clamp_word_span(1.000, 1.030, min_s=0.05)))
+check("a healthy word span is untouched",
+      bsa.clamp_word_span(1.0, 1.4, min_s=0.05) == (1.0, 1.4))
+check("clamping never runs past a hard end bound (the window/next word)",
+      bsa.clamp_word_span(1.00, 1.02, min_s=0.05, hard_end=1.03) == (1.0, 1.03),
+      str(bsa.clamp_word_span(1.00, 1.02, min_s=0.05, hard_end=1.03)))
+check("a zero-width span still yields a nonzero note",
+      bsa.clamp_word_span(2.0, 2.0, min_s=0.05)[1] > 2.0)
+check("clamp is pure/deterministic", bsa.clamp_word_span(1.0, 1.03, min_s=0.05)
+      == bsa.clamp_word_span(1.0, 1.03, min_s=0.05))
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402
