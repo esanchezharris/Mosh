@@ -84,12 +84,28 @@ fires, which is why concurrency is required to see it.
 **There are 12 `runDispatchLoopUntil` sites in `src/moshops/MoshOps.cpp`** and 4 more in
 `MoshEngine.cpp`. This is a pattern, not a one-off.
 
-## Why it does not affect the shipped app
+## Scope — CORRECTED, and worse than first written
 
-Every one of these pumps is guarded by `if (! eng.hasAudio())` — **headless only**. The
-GUI app has an audio device and never takes this path. So the cost is a **red CI gate and
-an untrustworthy harness**, not a user-facing crash. That should inform how much risk the
-fix is worth.
+**First pass said "headless only, not user-facing." That was wrong** and is corrected here.
+
+The pump on the path that *reproduces* the crash (`importWaveFileToTrack`) IS guarded by
+`if (! eng.hasAudio())`. But auditing all 15 sites, **six are NOT guarded and sit on
+paths a user reaches**:
+
+| site | path | user reaches it by |
+|---|---|---|
+| `MoshOps.cpp:5131` | `cmdStopRecording()` — pumps ×4 after `transport.stop()` to settle take landing | stopping a recording |
+| `MoshOps.cpp:10161` | audio-device setup (`setAudioDeviceSetup` → `rescanWaveDeviceList`) | changing the output device |
+| `MoshEngine.cpp:158` | `createEmptyEdit` + delete default tracks | new project |
+| `MoshEngine.cpp:602` | same, second construction site | loading / switching project |
+| `MoshEngine.cpp:218` | MIDI device enable, before `restartPlayback()` | enabling a MIDI input |
+| `MoshEngine.cpp:334` | audio output device open | app start / device change |
+
+So the re-entrancy hazard is **present in the shipped GUI app**. What has *not* been
+shown is a crash on those specific paths — the reproduction runs through the headless
+one. That is a gap in evidence, not evidence of safety, and `cmdStopRecording` is the
+one that should worry you most: it pumps four times immediately after a real recording
+lands, which is both a hot user path and the moment the most async work is in flight.
 
 ## Why no fix here
 
