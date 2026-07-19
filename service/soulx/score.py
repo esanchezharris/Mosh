@@ -139,7 +139,8 @@ def _word_units(words: List[str], slots: List[dict]):
     return units
 
 
-def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -> dict:
+def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None,
+                     cluster_ms: float = 0.0) -> dict:
     """Raise every sub-`floor_s` SUNG note (note_type 2/3) to the floor — a HARD
     INVARIANT, not best-effort. The old i±1-neighbour borrow gave up SILENTLY when both
     neighbours were pinned while spare sat two tokens away — stage10 shipped an
@@ -162,7 +163,12 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
 
     Fully-drained rests (0.0000) are dropped. `stats` (optional dict) receives
     {"merged", "leaks", "impossible"}. Total timeline preserved; pure; floor_s <= 0
-    returns the clip unchanged (byte-identical)."""
+    returns the clip unchanged (byte-identical).
+
+    cluster_ms > 0 (word campaign L5) makes the floor ARTICULATION-BUDGETED per note:
+    floor_i = floor_s + cluster_ms * max(0, consonants_i - 1) — a consonant-cluster
+    note (K-AO1-S-T) needs more than a bare vowel to articulate (fitted consonant_ms
+    ~0.0474, duration.py). 0 = the scalar floor, byte-identical."""
     if floor_s <= 0.0:
         return clip
     durs = [float(d) for d in clip["duration"].split()]
@@ -173,6 +179,15 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
     skip = [False] * len(durs)
     eps = 1e-9
     merged = impossible = 0
+
+    def _note_floor(phon):
+        if cluster_ms <= 0.0 or phon == "<SP>":
+            return floor_s
+        ps = (phon[3:] if phon.startswith("en_") else phon).split("-")
+        ncons = sum(1 for p in ps if p and not p[-1].isdigit())
+        return floor_s + cluster_ms * max(0, ncons - 1)
+
+    floors = [_note_floor(p) for p in phons]
 
     def run_bounds(i):
         a = i
@@ -188,14 +203,14 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
         return a, b
 
     def try_borrow(i):
-        need = floor_s - durs[i]
+        need = floors[i] - durs[i]
         a, b = run_bounds(i)
         donors = sorted((j for j in range(a, b + 1) if j != i),
                         key=lambda j: (0 if types[j] == 1 else 1, abs(j - i),
-                                       -(durs[j] if types[j] == 1 else durs[j] - floor_s),
+                                       -(durs[j] if types[j] == 1 else durs[j] - floors[j]),
                                        j))
         for j in donors:
-            spare = durs[j] if types[j] == 1 else max(0.0, durs[j] - floor_s)
+            spare = durs[j] if types[j] == 1 else max(0.0, durs[j] - floors[j])
             take = min(need, spare)
             if take <= eps:
                 continue
@@ -203,7 +218,7 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
             need -= take
             if need <= eps:
                 break
-        durs[i] = floor_s - max(0.0, need)
+        durs[i] = floors[i] - max(0.0, need)
         return need <= eps
 
     def _join(left, right):
@@ -224,14 +239,16 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
         if not cross_word and types[i] == 2:
             types[j] = 2                            # the survivor becomes the word onset
         durs[j] += durs[i]
-        for arr in (durs, types, texts, phons, pitches, skip):
+        for arr in (durs, types, texts, phons, pitches, skip, floors):
             del arr[i]
+        j2 = j if i > j else j - 1                  # j's index after the deletion
+        floors[j2] = _note_floor(phons[j2])
 
     guard = 0
     while guard < 4 * len(durs) + 8:
         guard += 1
         i = next((k for k in range(len(durs))
-                  if types[k] != 1 and not skip[k] and durs[k] < floor_s - eps), None)
+                  if types[k] != 1 and not skip[k] and durs[k] < floors[k] - eps), None)
         if i is None:
             break
         if try_borrow(i):
@@ -262,7 +279,7 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
     k = 0
     while k < len(durs):
         if types[k] == 1 and durs[k] <= 5e-5:
-            for arr in (durs, types, texts, phons, pitches, skip):
+            for arr in (durs, types, texts, phons, pitches, skip, floors):
                 del arr[k]
         else:
             k += 1
@@ -274,7 +291,7 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
         q = max(0.0, round(acc_true - acc_emit, 4))
         qdur.append(q)
         acc_emit += q
-    leaks = sum(1 for q, t in zip(qdur, types) if t != 1 and q < floor_s - 2e-4)
+    leaks = sum(1 for q, t, f in zip(qdur, types, floors) if t != 1 and q < f - 2e-4)
     if stats is not None:
         stats.update({"merged": merged, "leaks": leaks, "impossible": impossible})
     out = dict(clip)
@@ -288,7 +305,8 @@ def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -
 
 
 def author_score(lines: List[dict], language: str = "English", name: str = "mosh-sheet",
-                 durations: str = "verbatim", note_floor_s: float = 0.0) -> dict:
+                 durations: str = "verbatim", note_floor_s: float = 0.0,
+                 cluster_ms: float = 0.0) -> dict:
     """[{text, score: lyricScore-blob|None}, ...] -> {"ok", "score": [clip], stats}.
 
     Lines without a score blob are SKIPPED and counted (typed-later lines have no take
@@ -396,7 +414,8 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
     if note_floor_s > 0.0:
         # applied LAST so it floors whatever durations the derive step produced
         fstats: dict = {}
-        floored = apply_note_floor(result["score"][0], note_floor_s, stats=fstats)
+        floored = apply_note_floor(result["score"][0], note_floor_s, stats=fstats,
+                                   cluster_ms=cluster_ms)
         pre = [float(d) for d in result["score"][0]["duration"].split()]
         post = [float(d) for d in floored["duration"].split()]
         result["score"] = [floored]

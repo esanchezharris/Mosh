@@ -215,6 +215,10 @@ def main():
                     help="lyric-enforced per-syllable time floor: a word gets at least "
                          "nsyl x this, claiming its quiet tail from the following gap "
                          "(same phrase only); 0 = off")
+    ap.add_argument("--cluster-ms", type=float, default=0.0,
+                    help="L5 word-campaign lever: articulation-budgeted note floor — "
+                         "floor_i = note-floor + this x max(0, consonants-1) (fitted "
+                         "consonant_ms 0.0474); 0 = scalar floor")
     ap.add_argument("--melisma-step-st", type=float, default=0.0,
                     help="L2 word-campaign lever: raise the F0-step threshold that splits "
                          "a word into melisma notes (default author value 1.5; 4.0 = only "
@@ -295,6 +299,8 @@ def main():
                 extra["stressRedeal"] = a.stress_redeal
             if a.melisma_step_st > 0:
                 extra["melismaStepSt"] = a.melisma_step_st
+            if a.cluster_ms > 0:
+                extra["clusterMs"] = a.cluster_ms
             if a.key_snap and meta.get("key"):
                 extra["key"] = meta["key"]
             row = run_item(it, t0, t1, a.out, durations=dur_mode,

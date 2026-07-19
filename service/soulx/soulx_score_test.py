@@ -368,6 +368,46 @@ if _base and _base.get("ok"):
     check("author_score note_floor_s=0 leaves the score byte-identical",
           _f0["score"] == _base["score"])
 
+# ── cluster-aware note floor (word campaign L5): consonant clusters get a budgeted floor ─
+# the lacoste shape: a giant held vowel then the whole K-AO1-S-T cluster crammed at 0.15
+CLUSTER_CLIP = {"index": "t", "language": "English", "time": [0, 2012],
+                "duration": "0.10 1.7619 0.1500", "text": "<SP> lacoste lacoste",
+                "phoneme": "<SP> en_L-AA0 en_K-AO1-S-T", "note_pitch": "0 46 49",
+                "note_type": "1 2 3"}
+CM = 0.0474                                     # the fitted consonant_ms (duration.py, n=71)
+cl = sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15, cluster_ms=CM)
+cd = [float(d) for d in cl["duration"].split()]
+check("cluster note rises to its budgeted floor (0.15 + 2x0.0474 = 0.2448)",
+      cd[2] >= 0.2448 - 2e-4, str(cd))
+check("rest drains first (documented donor order); total timeline preserved",
+      abs(sum(cd) - (0.10 + 1.7619 + 0.15)) < 1e-3 and cd[0] < 0.10, str(cd))
+cstats = {}
+sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15, stats=cstats, cluster_ms=CM)
+check("no leaks under the raised floors", cstats.get("leaks") == 0, str(cstats))
+
+check("cluster_ms=0 is byte-identical to the scalar floor",
+      sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15, cluster_ms=0.0)
+      == sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15), "mismatch")
+
+AND_CLIP = {"index": "t", "language": "English", "time": [0, 1000],
+            "duration": "0.50 0.1500 0.35", "text": "<SP> and see",
+            "phoneme": "<SP> en_AH0-N-D en_S-IY1", "note_pitch": "0 50 52",
+            "note_type": "1 2 2"}
+ad = [float(d) for d in sx.apply_note_floor(dict(AND_CLIP), 0.15,
+                                            cluster_ms=CM)["duration"].split()]
+check("'and' (2 consonants) rises to 0.15 + 0.0474 borrowing from the rest",
+      ad[1] >= 0.1974 - 2e-4, str(ad))
+vd = [float(d) for d in sx.apply_note_floor(
+    dict(AND_CLIP, phoneme="<SP> en_AA1 en_S-IY1"), 0.15,
+    cluster_ms=CM)["duration"].split()]
+check("a bare-vowel note keeps the scalar floor (no cluster surcharge)",
+      abs(vd[1] - 0.15) < 2e-4, str(vd))
+
+import hashlib as _chl  # noqa: E402
+_cdet = {_chl.sha256(json.dumps(sx.apply_note_floor(dict(CLUSTER_CLIP), 0.15, cluster_ms=CM),
+                                sort_keys=True).encode()).hexdigest() for _ in range(3)}
+check("cluster floor deterministic (3x)", len(_cdet) == 1)
+
 if fails:
     print(f"\nFAILED: {len(fails)} failure(s): {fails}")
     sys.exit(1)

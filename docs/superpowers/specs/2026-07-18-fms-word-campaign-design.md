@@ -114,6 +114,21 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
   (History note: r8's lineup bundle containing a chain lever lost BY EAR on envelope
   grounds; this use is word-gate-adjudicated with guards, and the milestone ear
   still rules.) Kept levers accumulate: round 3 = L2 + L4, baseline = wc-r2.
+- **L4 verdict — REVERTED (round 3, defects 8→13)**: the chain never fired on its
+  LookinBack targets (take voiced-frac under the 0.90 gate on those held words) and
+  where it DID fire it wrecked stage10's dense passage (1→6 defects) — the instrument
+  now agrees with the old r8 ear loss. Chain retired for this campaign.
+- **L5 — cluster-aware note floor** (registered 2026-07-19 from round-3 evidence,
+  BEFORE round 4): the surviving fixable class is consonant-cluster notes at the
+  scalar floor — lacoste's K-AO1-S-T crammed at 0.15 s beside a 1.76 s vowel, "and"
+  (AH0-N-D) at 0.15 s. Per the fitted articulation budget (consonant_ms 47.4 ms,
+  n=71, duration.py), a note's floor becomes
+  `floor_s + cluster_ms x max(0, consonants - 1)`; the existing phrase borrow/merge
+  invariant redistributes (lacoste's own giant vowel is the natural donor).
+  Product `apply_note_floor(cluster_ms=)`, default 0 = byte-identical; payload knob
+  `clusterMs`; bench flag `--cluster-ms 0.0474`. Round 4 = L2 + L5, baseline wc-r2.
+  Residual class named for the milestone if it survives: bipolar/helena/bonham —
+  long-held melisma words that garble at any commanded geometry tried so far.
 - Further levers may be added by amendment BEFORE the round that uses them.
 
 ## Predictions (falsifiable, registered)

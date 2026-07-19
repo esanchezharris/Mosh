@@ -351,7 +351,8 @@ def main():
         sys.exit(1)
     line = {"text": " ".join(texts), "asserted": True, "score": {"slots": slots}}
     res = author_score([line], durations=str(data.get("durations") or "verbatim"),
-                       note_floor_s=float(data.get("noteFloorS") or 0.0))
+                       note_floor_s=float(data.get("noteFloorS") or 0.0),
+                       cluster_ms=float(data.get("clusterMs") or 0.0))
     if not res.get("ok"):
         print("author_score rejected:", json.dumps(res)[:300])
         sys.exit(1)
