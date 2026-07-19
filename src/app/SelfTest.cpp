@@ -8793,6 +8793,156 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ── DAW-parity P6: table-driven undo + persist matrices ──────────────────────
+    // The G14 bug class (a setter that applies but bypasses the UndoManager) has now
+    // recurred twice (set_track_volume, set_plugin_param) — exactly when hand-written
+    // per-command checks should become a TABLE. Every declared mutating command is run
+    // against a shared fixture and must (a) change the canonical snapshot, (b) restore
+    // it EXACTLY on one undo; then the whole mutated state must survive save/reload
+    // byte-for-byte (catches non-serialized CachedValues — fade/warp/loop-region fields
+    // are the fresh risk surface). NOT in the table (each deliberately): composite/async
+    // commands (add_drum_pattern, render_layer — own sections), service-spawning
+    // commands (lyrics/generative — hermeticity), non-undoable preferences
+    // (set_key/set_count_in/set_metronome — documented posture), read-only commands,
+    // and MP lock behavior (LockManager::classify fails CLOSED to SessionGlobal by
+    // design; per-command lock conduct is test_multiplayer_locks' lane).
+    {
+        section ("matrix: undo — every declared mutating command restores on ONE undo");
+
+        // Canonical snapshot: strip the volatile subtrees so string equality means
+        // STATE equality (transport rides its own rail; dirty flips on save/undo), and
+        // round every numeric leaf to 1e-6 — the fader's dB↔position curve round-trips
+        // with float epsilon (undo lands at -2.4e-07, not 0.0), which is restoration,
+        // not drift. (v == 0.0 assignment also normalizes negative zero.)
+        std::function<void (var&)> normNums = [&normNums] (var& v)
+        {
+            if (v.isDouble())
+            {
+                double d = std::round ((double) v * 1e6) / 1e6;
+                if (d == 0.0) d = 0.0;
+                v = d;
+            }
+            else if (v.isArray())
+            {
+                for (auto& e : *v.getArray()) normNums (e);
+            }
+            else if (auto* o = v.getDynamicObject())
+            {
+                for (auto& p : o->getProperties())
+                {
+                    var e = p.value;
+                    normNums (e);
+                    o->setProperty (p.name, e);
+                }
+            }
+        };
+        auto canon = [&]() -> String
+        {
+            auto s = ops.snapshot();
+            if (auto* o = s.getDynamicObject())
+            {
+                o->removeProperty ("transport");
+                o->removeProperty ("controller");
+                if (auto* sess = o->getProperty ("session").getDynamicObject())
+                {
+                    sess->removeProperty ("dirty");
+                    sess->removeProperty ("recentProjects");
+                    sess->removeProperty ("recoveryAvailable");
+                    sess->removeProperty ("recoverableCount");
+                }
+            }
+            normNums (s);
+            return JSON::toString (s, false);
+        };
+        auto rid = [] (const var& r, const char* k) {
+            return r.getProperty ("data", var()).getProperty (k, var()).toString(); };
+
+        // Fixture: a wave track with an EQ, a MIDI track with one OFF-GRID note (so
+        // quantize genuinely mutates), a disposable track+clip for the remove cases,
+        // and a bus for add_send.
+        const auto mt   = rid (cmd (ops, "create_track", args1 ("name", "MxWave")), "trackId");
+        const auto mwc  = rid (cmd (ops, "add_test_tone_clip",
+                                    objN ({ { "trackId", mt }, { "seconds", 2.0 }, { "freq", 220.0 } })), "clipId");
+        const auto eqR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "4bandEq" } }));
+        const int  eqIx = (int) eqR.getProperty ("data", var()).getProperty ("index", -1);
+        const auto mmt  = rid (cmd (ops, "create_track", args1 ("name", "MxMidi")), "trackId");
+        const auto mmc  = rid (cmd (ops, "add_midi_clip",
+                                    objN ({ { "trackId", mmt }, { "start", 0.0 }, { "length", 4.0 } })), "clipId");
+        cmd (ops, "add_note", objN ({ { "clipId", mmc }, { "pitch", 60 }, { "start", 0.13 }, { "length", 0.5 } }));
+        const auto dt   = rid (cmd (ops, "create_track", args1 ("name", "MxDisposable")), "trackId");
+        const auto dc   = rid (cmd (ops, "add_test_tone_clip",
+                                    objN ({ { "trackId", dt }, { "seconds", 1.0 }, { "freq", 330.0 } })), "clipId");
+        const int  mbus = (int) cmd (ops, "create_bus", args1 ("name", "MxBus"))
+                              .getProperty ("data", var()).getProperty ("busNumber", -1);
+        check (mt.isNotEmpty() && mwc.isNotEmpty() && eqIx >= 0 && mmc.isNotEmpty()
+               && dc.isNotEmpty() && mbus >= 0, "matrix fixture built");
+
+        Array<var> rippleTracks; rippleTracks.add (var (mt));
+        struct MatrixCase { String name; var args; };
+        const MatrixCase table[] = {
+            { "rename_track",         objN ({ { "trackId", mt }, { "name", "MxRenamed" } }) },
+            { "set_track_volume",     objN ({ { "trackId", mt }, { "db", -7.0 } }) },
+            { "set_track_pan",        objN ({ { "trackId", mt }, { "pan", 0.4 } }) },
+            { "set_track_mute",       objN ({ { "trackId", mt }, { "mute", true } }) },
+            { "set_track_solo",       objN ({ { "trackId", mt }, { "solo", true } }) },
+            { "move_clip",            objN ({ { "clipId", mwc }, { "start", 5.0 } }) },
+            { "rename_clip",          objN ({ { "clipId", mwc }, { "name", "MxClip" } }) },
+            { "set_clip_gain",        objN ({ { "clipId", mwc }, { "gainDb", -5.0 } }) },
+            { "set_clip_mute",        objN ({ { "clipId", mwc }, { "mute", true } }) },
+            { "set_clip_fade",        objN ({ { "clipId", mwc }, { "fadeInSec", 0.3 }, { "fadeOutSec", 0.4 } }) },
+            { "set_clip_crossfade",   objN ({ { "clipId", mwc }, { "enabled", true } }) },
+            { "set_clip_reverse",     objN ({ { "clipId", mwc }, { "reversed", true } }) },
+            { "set_clip_loop",        objN ({ { "clipId", mwc }, { "enabled", true }, { "start", 0.0 }, { "length", 1.0 } }) },
+            { "set_clip_warp",        objN ({ { "clipId", mwc }, { "autoTempo", true } }) },
+            { "stretch_clip",         objN ({ { "clipId", mwc }, { "bars", 1 } }) },
+            { "normalize_clip",       objN ({ { "clipId", mwc }, { "targetDb", 0.0 } }) },
+            { "duplicate_clip",       objN ({ { "clipId", mwc } }) },
+            { "add_note",             objN ({ { "clipId", mmc }, { "pitch", 64 }, { "start", 1.0 }, { "length", 0.5 } }) },
+            { "set_note",             objN ({ { "clipId", mmc }, { "noteIndex", 0 }, { "velocity", 70 } }) },
+            { "quantize_notes",       objN ({ { "clipId", mmc }, { "division", 0.25 }, { "strength", 1.0 } }) },
+            { "remove_note",          objN ({ { "clipId", mmc }, { "noteIndex", 0 } }) },
+            { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
+            { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
+            { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },
+            { "add_automation_point", objN ({ { "trackId", mt }, { "pluginIndex", eqIx }, { "paramIndex", 0 },
+                                              { "time", 1.0 }, { "value", 0.5 } }) },
+            { "set_master_volume",    objN ({ { "db", -5.0 } }) },
+            { "set_master_pan",       objN ({ { "pan", -0.3 } }) },
+            { "load_master_builtin",  objN ({ { "type", "delay" } }) },
+            { "set_tempo",            objN ({ { "bpm", 100.0 } }) },
+            { "insert_tempo_change",  objN ({ { "time", 4.0 }, { "bpm", 140.0 } }) },
+            { "set_time_signature",   objN ({ { "numerator", 3 }, { "denominator", 4 } }) },
+            { "insert_time_sig_change", objN ({ { "time", 8.0 }, { "numerator", 6 }, { "denominator", 8 } }) },
+            { "create_track",         objN ({ { "name", "MxNew" } }) },
+            { "remove_clip",          objN ({ { "clipId", dc } }) },
+            { "remove_track",         objN ({ { "trackId", dt } }) },
+            { "create_bus",           objN ({ { "name", "MxBus2" } }) },
+            { "add_send",             objN ({ { "trackId", mt }, { "bus", mbus }, { "db", -3.0 } }) },
+            { "delete_time_range",    objN ({ { "start", 0.5 }, { "end", 1.0 },
+                                              { "trackIds", var (rippleTracks) }, { "ripple", true } }) },
+        };
+
+        for (const auto& mc : table)
+        {
+            const auto s0 = canon();
+            check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " ok").toRawUTF8());
+            const auto s1 = canon();
+            check (s1 != s0, (mc.name + " mutates the canonical snapshot").toRawUTF8());
+            check (ok (cmd (ops, "undo")), (mc.name + " undo ok").toRawUTF8());
+            check (canon() == s0, (mc.name + " ONE undo restores the canonical snapshot").toRawUTF8());
+        }
+
+        section ("matrix: persist — the fully-mutated state survives save/reload");
+        // Re-apply the whole table cumulatively (no undo), then save → reload and demand
+        // canonical equality: ANY non-serialized property among the mutated fields fails.
+        for (const auto& mc : table)
+            check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " re-applied for persist").toRawUTF8());
+        const auto preSave = canon();
+        check (ok (cmd (ops, "save")), "matrix save ok");
+        check (ok (cmd (ops, "reload")), "matrix reload ok");
+        check (canon() == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
