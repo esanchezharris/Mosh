@@ -6,7 +6,7 @@
 //                                   [--runner single|single-repair|loop]
 //                                   [--tasks id,id] [--tag <label>] [--max-steps N]
 //                                   [--bin <Mosh binary>] [--out-dir <dir>] [--no-render]
-//                                   [--claude-cli]
+//                                   [--claude-cli | --codex-cli]
 //
 // Per task: replay the setup into a fresh engine → snapshot → hand the ask to an
 // AgentRunner (src/agent/loopSeam.ts). Each runner batch executes with FULL
@@ -31,13 +31,17 @@
 // names the env var carrying that endpoint's key. `--claude-cli` swaps the
 // transport entirely: chat calls shell out to `claude -p` under the owner's
 // Claude Code subscription (no API key; --model is required, e.g.
-// claude-opus-4-8). --chat-max-tokens is inert there — the CLI owns its caps.
+// claude-opus-4-8). `--codex-cli` does the same via `codex exec` under the
+// owner's ChatGPT/Codex subscription (models e.g. gpt-5.4 / gpt-5.5 /
+// gpt-5.6-sol; NOTE codex has no system-prompt override — the seat shape
+// differs, run a cross-transport control before comparing to HTTP boards).
+// --chat-max-tokens is inert on both CLI transports — the CLI owns its caps.
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  argFlag, brainConfigFromEnv, callBrain, callClaudeCli, findBin, loadEnv, runScript, snapshotAt,
+  argFlag, brainConfigFromEnv, callBrain, callClaudeCli, callCodexCli, findBin, loadEnv, runScript, snapshotAt,
   type BrainUsage, type Cmd as EngineCmd,
 } from "./lib/realEngine.mts";
 import { AGENT_TASKS, type AgentTask } from "../src/bench/agentTasks";
@@ -52,12 +56,15 @@ import type { Snapshot } from "../src/types";
 const env = loadEnv();
 const RUNNER = argFlag("runner", "single")!;
 const CLAUDE_CLI = process.argv.includes("--claude-cli");
+const CODEX_CLI = process.argv.includes("--codex-cli");
+if (CLAUDE_CLI && CODEX_CLI) throw new Error("--claude-cli and --codex-cli are mutually exclusive");
+const CLI_TRANSPORT = CLAUDE_CLI || CODEX_CLI;
 const baseOverride = argFlag("base");
 const keyEnv = argFlag("key-env");
 if (keyEnv && !env[keyEnv]) throw new Error(`--key-env ${keyEnv}: that env var is empty`);
-if (CLAUDE_CLI && !argFlag("model")) throw new Error("--claude-cli requires --model (e.g. claude-opus-4-8)");
-const cfg = CLAUDE_CLI
-  ? { base: "claude-cli(subscription)", key: "-", model: argFlag("model")! }
+if (CLI_TRANSPORT && !argFlag("model")) throw new Error("--claude-cli/--codex-cli require --model");
+const cfg = CLI_TRANSPORT
+  ? { base: CLAUDE_CLI ? "claude-cli(subscription)" : "codex-cli(subscription)", key: "-", model: argFlag("model")! }
   : brainConfigFromEnv(
       {
         ...env,
@@ -165,16 +172,17 @@ function makeRunner(usage: BrainUsage): AgentRunner {
   // keep-alive socket going down between the multi-second engine replays).
   // HTTP errors are real model/provider answers and are NOT retried.
   const chat = async (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => {
-    if (CLAUDE_CLI) {
+    if (CLI_TRANSPORT) {
+      const call = CLAUDE_CLI ? callClaudeCli : callCodexCli;
       try {
-        return callClaudeCli(cfg.model, messages, usage);
+        return call(cfg.model, messages, usage);
       } catch (e) {
         // Transient classes only (process spawn/timeout, 5xx/overloaded get one
         // slow retry); auth failures (401) and real model answers throw through.
         const s = String(e);
         if (/401/.test(s) || !/ETIMEDOUT|EAGAIN|spawn|5\d\d|overloaded/i.test(s)) throw e;
         await new Promise((r) => setTimeout(r, 10_000));
-        return callClaudeCli(cfg.model, messages, usage);
+        return call(cfg.model, messages, usage);
       }
     }
     const opts = { maxTokens: CHAT_MAX_TOKENS };

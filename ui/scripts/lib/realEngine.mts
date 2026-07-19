@@ -172,6 +172,65 @@ export function callClaudeCli(
   return { content: String(j.result ?? ""), ms };
 }
 
+// ── codex-CLI transport (ChatGPT/Codex subscription auth — no API key) ────────
+// Shells out to `codex exec` in an empty ephemeral cwd (--ignore-user-config,
+// read-only sandbox, --color never). Codex has NO system-prompt override, so
+// the system message is delivered inline at the top of the user prompt under a
+// [system] marker — the ~15k-token Codex harness prompt still wraps the seat.
+// That makes this seat shape DIFFERENT from the HTTP sweep: always run a
+// cross-transport control (a model with an existing OpenRouter board) before
+// trusting comparisons. Usage + the final agent_message come from --json events.
+export function callCodexCli(
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  usage?: BrainUsage,
+): { content: string; ms: number } {
+  const sys = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+  const rest = messages.filter((m) => m.role !== "system");
+  const convo = rest.length === 1
+    ? rest[0].content
+    : rest.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
+  // NB: the trailing guard must never say "commands" — that's the reply
+  // contract's field name, and a "do not run commands" phrasing measurably
+  // makes models defer (caught live on gpt-5.4: WRONG-DEFER on a clear ask).
+  const prompt = `[system]\n${sys}\n\n[user]\n${convo}\n\n` +
+    `Answer directly with the JSON object described in [system] — output nothing else and do not use any tools.`;
+
+  const dir = join(WORK, "codex-cli");
+  mkdirSync(dir, { recursive: true });
+  const t0 = Date.now();
+  const raw = spawnSync("codex", [
+    "exec", "-m", model,
+    "--ephemeral", "--ignore-user-config", "--skip-git-repo-check",
+    "-s", "read-only", "--color", "never", "--json", "-",
+  ], { cwd: dir, input: prompt, encoding: "utf8", timeout: 300_000 });
+  const ms = Date.now() - t0;
+  if (raw.error) throw raw.error;
+
+  let text: string | undefined;
+  const errors: string[] = [];
+  for (const line of String(raw.stdout).split("\n")) {
+    const s = line.trim();
+    if (!s.startsWith("{")) continue;
+    try {
+      const ev = JSON.parse(s) as Record<string, any>;
+      if (ev.type === "item.completed" && ev.item?.type === "agent_message") text = String(ev.item.text ?? "");
+      if (ev.type === "turn.completed" && usage && ev.usage) {
+        usage.promptTokens += ev.usage.input_tokens ?? 0;
+        usage.completionTokens += ev.usage.output_tokens ?? 0;
+        usage.calls += 1;
+      }
+      if (ev.type === "error" || ev.type === "turn.failed")
+        errors.push(JSON.stringify(ev).slice(0, 300));
+    } catch { /* tolerate non-JSON stdout lines */ }
+  }
+  if (text === undefined) {
+    throw new Error(`codex-cli: no agent_message (exit ${raw.status}): ` +
+      `${errors.join(" | ") || String(raw.stderr).slice(0, 300)}`);
+  }
+  return { content: text, ms };
+}
+
 export async function callBrain(
   cfg: BrainConfig,
   messages: Array<{ role: string; content: string }>,
