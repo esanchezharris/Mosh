@@ -16,6 +16,7 @@ import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
+import { FeltWrongDialog } from "../ui/FeltWrongDialog";
 import { MissingMediaBanner } from "../ui/MissingMediaBanner";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
@@ -51,6 +52,7 @@ export function AppV2() {
       {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
       <RecoveryNotice />
       <MissingMediaBanner />
+      <FeltWrongDialog />
 
       {/* symmetric push-docks frame a SMALL, CENTERED work area. Both flanks are collapsible
           pull-tab docks that occupy their OWN gutter — opening one fills its side and pushes,

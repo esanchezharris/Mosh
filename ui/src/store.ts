@@ -186,6 +186,8 @@ type State = {
   automationTrackId: string | null;        // track open in the automation editor
   openAutomation: (trackId: string) => void;
   closeAutomation: () => void;
+  feltWrongOpen: boolean;                  // taste loop: the ⌘⇧F capture dialog
+  setFeltWrongOpen: (open: boolean) => void;
   openBrowser: () => void;
   closeBrowser: () => void;
   ensurePluginCatalog: () => void;          // lazy-load the plugin list + built-ins (shared by the modal + the v2 drawer)
@@ -796,6 +798,8 @@ export const useStore = create<State>((set, get) => ({
   editingClipId: null,
   openPianoRoll: (clipId) => set({ editingClipId: clipId }),
   closePianoRoll: () => set({ editingClipId: null }),
+  feltWrongOpen: false,
+  setFeltWrongOpen: (open) => set({ feltWrongOpen: open }),
   automationTrackId: null,
   openAutomation: (trackId) => set({ automationTrackId: trackId }),
   closeAutomation: () => set({ automationTrackId: null }),
