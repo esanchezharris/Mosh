@@ -127,7 +127,7 @@ function coerceObjectArgs(command: string, args: Record<string, unknown>): Recor
   return out ?? args;
 }
 
-function normalizeCommand(c: unknown): AgentCommandCall | null {
+export function normalizeCommand(c: unknown): AgentCommandCall | null {
   if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
     const o = c as AgentCommandCall;
     let args = (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown>;
