@@ -6,6 +6,7 @@
 //                                   [--runner single|single-repair|loop]
 //                                   [--tasks id,id] [--tag <label>] [--max-steps N]
 //                                   [--bin <Mosh binary>] [--out-dir <dir>] [--no-render]
+//                                   [--claude-cli]
 //
 // Per task: replay the setup into a fresh engine → snapshot → hand the ask to an
 // AgentRunner (src/agent/loopSeam.ts). Each runner batch executes with FULL
@@ -27,13 +28,16 @@
 // Provider config mirrors moshi-bench (OPENAI_BASE_URL/OPENAI_API_KEY/
 // OPENAI_MODEL from ui/.env.local or env), with sweep-friendly overrides:
 // --base swaps the endpoint (e.g. https://openrouter.ai/api/v1) and --key-env
-// names the env var carrying that endpoint's key.
+// names the env var carrying that endpoint's key. `--claude-cli` swaps the
+// transport entirely: chat calls shell out to `claude -p` under the owner's
+// Claude Code subscription (no API key; --model is required, e.g.
+// claude-opus-4-8). --chat-max-tokens is inert there — the CLI owns its caps.
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  argFlag, brainConfigFromEnv, callBrain, findBin, loadEnv, runScript, snapshotAt,
+  argFlag, brainConfigFromEnv, callBrain, callClaudeCli, findBin, loadEnv, runScript, snapshotAt,
   type BrainUsage, type Cmd as EngineCmd,
 } from "./lib/realEngine.mts";
 import { AGENT_TASKS, type AgentTask } from "../src/bench/agentTasks";
@@ -47,17 +51,21 @@ import type { Snapshot } from "../src/types";
 
 const env = loadEnv();
 const RUNNER = argFlag("runner", "single")!;
+const CLAUDE_CLI = process.argv.includes("--claude-cli");
 const baseOverride = argFlag("base");
 const keyEnv = argFlag("key-env");
 if (keyEnv && !env[keyEnv]) throw new Error(`--key-env ${keyEnv}: that env var is empty`);
-const cfg = brainConfigFromEnv(
-  {
-    ...env,
-    ...(baseOverride ? { OPENAI_BASE_URL: baseOverride } : {}),
-    ...(keyEnv ? { OPENAI_API_KEY: env[keyEnv]! } : {}),
-  },
-  argFlag("model"),
-);
+if (CLAUDE_CLI && !argFlag("model")) throw new Error("--claude-cli requires --model (e.g. claude-opus-4-8)");
+const cfg = CLAUDE_CLI
+  ? { base: "claude-cli(subscription)", key: "-", model: argFlag("model")! }
+  : brainConfigFromEnv(
+      {
+        ...env,
+        ...(baseOverride ? { OPENAI_BASE_URL: baseOverride } : {}),
+        ...(keyEnv ? { OPENAI_API_KEY: env[keyEnv]! } : {}),
+      },
+      argFlag("model"),
+    );
 const BIN = findBin(argFlag("bin"));
 const TAG = argFlag("tag", `${cfg.model.replace(/[^a-zA-Z0-9.-]/g, "_")}-${RUNNER}`)!;
 const OUT_DIR = argFlag("out-dir", join(process.cwd(), "..", "docs", "agent-bench"))!;
@@ -157,6 +165,18 @@ function makeRunner(usage: BrainUsage): AgentRunner {
   // keep-alive socket going down between the multi-second engine replays).
   // HTTP errors are real model/provider answers and are NOT retried.
   const chat = async (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => {
+    if (CLAUDE_CLI) {
+      try {
+        return callClaudeCli(cfg.model, messages, usage);
+      } catch (e) {
+        // Transient classes only (process spawn/timeout, 5xx/overloaded get one
+        // slow retry); auth failures (401) and real model answers throw through.
+        const s = String(e);
+        if (/401/.test(s) || !/ETIMEDOUT|EAGAIN|spawn|5\d\d|overloaded/i.test(s)) throw e;
+        await new Promise((r) => setTimeout(r, 10_000));
+        return callClaudeCli(cfg.model, messages, usage);
+      }
+    }
     const opts = { maxTokens: CHAT_MAX_TOKENS };
     try {
       return await callBrain(cfg, messages, usage, opts);

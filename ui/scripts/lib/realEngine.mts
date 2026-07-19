@@ -7,7 +7,7 @@
 // so cumulative-prefix replay is sound. The read-only `__snapshot` directive
 // returns the same ops.snapshot() the WebView sees.
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -111,6 +111,65 @@ export function brainConfigFromEnv(env: Record<string, string>, modelOverride?: 
   const model = modelOverride || env.OPENAI_MODEL;
   if (!base || !key || !model) throw new Error("need OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL (ui/.env.local or env)");
   return { base, key, model };
+}
+
+// ── claude-CLI transport (Claude Code subscription auth — no API key) ─────────
+// Shells out to `claude -p`: the system message goes via --system-prompt-file
+// (REPLACES the CLI's default system prompt), the conversation arrives on
+// stdin, and --output-format json returns {result, usage, is_error}. The child
+// runs in an EMPTY scratch cwd so no CLAUDE.md/project context leaks into the
+// seat, and the core tools are disallowed — the seat answers from the prompt
+// alone, exactly like every HTTP seat in the sweep. There is no
+// response_format here; parseLoopReply/brainCore already strip code fences.
+// Auth note: an expired OAuth token surfaces as is_error + "401" in result —
+// thrown as an error so the bench records it instead of grading garbage.
+const CLI_TOOL_DENY = [
+  "Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+  "Task", "TodoWrite", "NotebookEdit",
+];
+
+export function callClaudeCli(
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  usage?: BrainUsage,
+): { content: string; ms: number } {
+  const sys = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+  const rest = messages.filter((m) => m.role !== "system");
+  const prompt = rest.length === 1
+    ? rest[0].content
+    : rest.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
+
+  const dir = join(WORK, "claude-cli");
+  mkdirSync(dir, { recursive: true });
+  const sysPath = join(dir, `sys-${process.hrtime.bigint()}.txt`);
+  writeFileSync(sysPath, sys);
+  const t0 = Date.now();
+  const raw = spawnSync("claude", [
+    "-p", "--model", model,
+    "--no-session-persistence", "--output-format", "json",
+    "--system-prompt-file", sysPath,
+    "--disallowedTools", ...CLI_TOOL_DENY,
+  ], { cwd: dir, input: prompt, encoding: "utf8", timeout: 300_000 });
+  const ms = Date.now() - t0;
+  rmSync(sysPath, { force: true });
+  if (raw.error) throw raw.error;
+
+  // -p --output-format json emits exactly one JSON envelope on stdout.
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(String(raw.stdout).trim()) as Record<string, unknown>;
+  } catch {
+    throw new Error(`claude-cli: unparseable output (exit ${raw.status}): ` +
+      `${String(raw.stdout).slice(0, 200)} | ${String(raw.stderr).slice(0, 200)}`);
+  }
+  if (j.is_error) throw new Error(`claude-cli: ${String(j.result).slice(0, 300)}`);
+  const u = (j.usage ?? {}) as Record<string, number>;
+  if (usage) {
+    usage.promptTokens += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+    usage.completionTokens += u.output_tokens ?? 0;
+    usage.calls += 1;
+  }
+  return { content: String(j.result ?? ""), ms };
 }
 
 export async function callBrain(
