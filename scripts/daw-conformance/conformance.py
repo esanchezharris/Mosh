@@ -997,6 +997,231 @@ def fam_takes_recording_graceful(ctx):
                             "+ count-in audibility = the owner runbook REC rows."})
 
 
+# ── golden producer workflows (DAW-parity P7) ─────────────────────────────────────
+# Workflow-level parity: single features passing ≠ the workflow working. Each is one
+# composite family over the real command surface; a missing capability mid-chain is a
+# tracked GAP, a broken step is a FAIL.
+def _canon_snap(snap):
+    """Python twin of the selftest matrix canon(): strip volatile subtrees so equality
+    means state equality."""
+    import copy
+    s = copy.deepcopy(snap)
+    s.pop("transport", None)
+    s.pop("controller", None)
+    sess = s.get("session", {})
+    for k in ("dirty", "recentProjects", "recoveryAvailable", "recoverableCount"):
+        sess.pop(k, None)
+
+    def rnd(x):
+        # Same 1e-6 rounding as the C++ matrix canon(): the fader dB<->position curve and
+        # save/reload float32 carry round-trip with epsilon — that is restoration, not drift.
+        if isinstance(x, float):
+            return round(x, 6) + 0.0
+        if isinstance(x, dict):
+            return {k: rnd(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [rnd(v) for v in x]
+        return x
+    return json.dumps(rnd(s), sort_keys=True)
+
+
+def fam_workflow_beat(ctx):
+    # W1: drums (composite pattern) → melody → quantize → arrange → balance → export.
+    out = ARTDIR / "wf_beat.wav"
+    cmds = [
+        {"command": "add_drum_pattern",
+         "args": {"pattern": "kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x."}},
+        {"command": "create_track", "args": {"name": "Melody"}, "capture": {"MT": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${MT}", "start": 0.0, "length": 4.0},
+         "capture": {"MC": "clipId"}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 60, "start": 0.06, "length": 0.5}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 63, "start": 1.1, "length": 0.5}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 67, "start": 2.05, "length": 0.5}},
+        {"command": "quantize_notes", "args": {"clipId": "${MC}", "division": 0.25, "strength": 1.0}},
+        {"command": "duplicate_clip", "args": {"clipId": "${MC}"}},
+        {"command": "set_track_volume", "args": {"trackId": "${MT}", "db": -4.0}},
+        {"command": "__snapshot", "args": {"label": "arranged"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-beat")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    if not out.exists():
+        return verdict(FAIL, "workflow", [], {"error": "no export produced"})
+    st = verify.stats(out)
+    snap = snaps.get("arranged", {})
+    drums = track_named(snap, "Drums")
+    melody_clips = len(clips_of(track_named(snap, "Melody")))
+    audible = st["rms"] > 0.005 and st["peak"] > 0.02   # the silent-drums class, workflow level
+    ok = drums is not None and melody_clips == 2 and audible
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"drum_track": drums is not None, "melody_clips": melody_clips,
+                    "export_rms": st["rms"], "export_s": st["duration_s"]})
+
+
+def fam_workflow_record_comp(ctx):
+    # W2: arm → count-in → (live capture + comp = the hardware half). The state spine is
+    # proven headless; the mic take itself is the owner runbook's REC rows.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Vox"}, "capture": {"T": "trackId"}},
+        {"command": "set_count_in", "args": {"bars": 1}},
+        {"command": "arm_track", "args": {"trackId": "${T}", "armed": True}},
+        {"command": "set_input_monitor", "args": {"trackId": "${T}", "mode": "automatic"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "list_takes", "args": {"clipId": "${C}"}},
+        {"command": "__snapshot", "args": {"label": "after"}},
+        {"command": "set_count_in", "args": {"bars": 0}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-record")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    countin = session_of(snaps.get("after", {})).get("countInBars")
+    takes = verify._data_field(results, "list_takes", "takes")
+    ok = countin == 1 and takes is not None
+    if not ok:
+        return verdict(FAIL, "workflow", [], {"countInBars": countin, "takes": takes})
+    return verdict(HARDWARE, "workflow", [],
+                   {"note": "arm/count-in/monitor/takes state proven headless; the live take + "
+                            "comp-by-ear is the owner runbook REC-mic row.",
+                    "countInBars": countin})
+
+
+def fam_workflow_mix_stems(ctx):
+    # W3: buses + sends + automation → stems; the stem sum NULLS against the mix at unity
+    # master (stems render pre-master — measured in verify.py's P4 pass).
+    stem_dir = ARTDIR / "wf_stems"
+    mix = ARTDIR / "wf_stems_mix.wav"
+    rtype = _find_builtin_type(ctx, "reverb")
+    etype = _find_builtin_type(ctx, "eq", "4band")
+    if not (rt_ok(rtype) and rt_ok(etype)):
+        return verdict(FAIL, "workflow", [], {"error": "builtins missing"})
+    cmds = [
+        {"command": "create_track", "args": {"name": "A"}, "capture": {"TA": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TA}", "seconds": 2.0, "freq": 220.0}},
+        {"command": "create_track", "args": {"name": "B"}, "capture": {"TB": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TB}", "seconds": 2.0, "freq": 660.0}},
+        {"command": "create_bus", "args": {"name": "Verb"}, "capture": {"BN": "busNumber", "RT": "trackId"}},
+        {"command": "load_builtin", "args": {"trackId": "${RT}", "type": rtype}, "capture": {"RV": "index"}},
+        {"command": "add_send", "args": {"trackId": "${TA}", "bus": "${BN}", "db": -6.0}},
+        {"command": "load_builtin", "args": {"trackId": "${TA}", "type": etype}, "capture": {"EQ": "index"}},
+        {"command": "write_automation_curve", "args": {"trackId": "${TA}", "pluginIndex": "${EQ}",
+                                                       "paramIndex": 1, "apply": "replace",
+                                                       "points": [{"t": 0.0, "v": 0.5}, {"t": 2.0, "v": 0.3}]}},
+        {"command": "set_master_volume", "args": {"db": 0.0}},
+        {"command": "export_stems", "args": {"dir": str(stem_dir)}},
+        {"command": "export_audio", "args": {"file": str(mix)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-mixstems")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    stems_res = next((r for r in results if r.get("command") == "export_stems"), {})
+    stems = stems_res.get("data", {}).get("stems", [])
+    files = [Path(s["file"]) for s in stems]
+    if len(files) < 2 or not all(f.exists() for f in files) or not mix.exists():
+        return verdict(FAIL, "workflow", [], {"stems": [str(f) for f in files]})
+    import numpy as np
+    total = None
+    for f in files:
+        d, _, _ = verify.load_wav(f)
+        m = verify.mono(d)
+        total = m if total is None else total[:min(total.size, m.size)] + m[:min(total.size, m.size)]
+    mm, _, _ = verify.load_wav(mix)
+    mm = verify.mono(mm)
+    n = min(total.size, mm.size)
+    null_rms = float(np.sqrt(np.mean((total[:n] - mm[:n]) ** 2)))
+    ok = null_rms < 1e-3 and verify.stats(mix)["rms"] > 0.01
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"stems": len(files), "null_rms": round(null_rms, 6),
+                    "note": "sum(stems) nulls against the unity-master mix — alignment + "
+                            "completeness with sends + automation live."})
+
+
+def fam_workflow_remix(ctx):
+    # W4: import → retempo → stretch to the new grid → split/rearrange → render matches
+    # the NEW arrangement length.
+    src = synth_wav(ARTDIR / "wf_remix_src.wav", seconds=2.0, freq=220.0)
+    out = ARTDIR / "wf_remix.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rx"}, "capture": {"T": "trackId"}},
+        {"command": "import_clip", "args": {"trackId": "${T}", "file": src}, "capture": {"C": "clipId"}},
+        {"command": "set_tempo", "args": {"bpm": 140.0}},
+        {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 1}},
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "split_clip", "args": {"clipId": "${C}", "time": 0.85}, "capture": {"N": "newClipId"}},
+        {"command": "move_clip", "args": {"clipId": "${N}", "start": 4.0}},
+        # The split minted a NEW warped clip whose render proxy generates in the
+        # background — pump again or the export sees an unreadable source (the same
+        # proxy class the P4 checks found).
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "__snapshot", "args": {"label": "arranged"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-remix")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    if not out.exists():
+        return verdict(FAIL, "workflow", [], {"error": "no export produced"})
+    st = verify.stats(out)
+    snap = snaps.get("arranged", {})
+    clips = clips_of(track_named(snap, "Rx"))
+    arr_end = max((c.get("start", 0) + c.get("length", 0)) for c in clips) if clips else 0
+    ok = len(clips) == 2 and abs(st["duration_s"] - arr_end) < 0.1 and st["rms"] > 0.005
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"clips": len(clips), "arrangement_end_s": round(arr_end, 3),
+                    "export_s": st["duration_s"], "export_rms": st["rms"]})
+
+
+def fam_workflow_torture(ctx):
+    # W5: a heavy edit chain → deep undo walk-back → redo walk-forward (exact canonical
+    # restore both ways) → save → reload → canonical equality.
+    edits = [
+        {"command": "create_track", "args": {"name": "T1"}, "capture": {"T1": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T1}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C1": "clipId"}},
+        {"command": "set_clip_fade", "args": {"clipId": "${C1}", "fadeInSec": 0.2}},
+        {"command": "set_clip_gain", "args": {"clipId": "${C1}", "gainDb": -4.0}},
+        {"command": "create_track", "args": {"name": "T2"}, "capture": {"T2": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T2}", "start": 0.0, "length": 4.0},
+         "capture": {"C2": "clipId"}},
+        {"command": "add_note", "args": {"clipId": "${C2}", "pitch": 62, "start": 0.3, "length": 0.5}},
+        {"command": "quantize_notes", "args": {"clipId": "${C2}", "division": 0.5, "strength": 1.0}},
+        {"command": "set_track_volume", "args": {"trackId": "${T2}", "db": -6.0}},
+        {"command": "set_master_volume", "args": {"db": -2.0}},
+        {"command": "set_tempo", "args": {"bpm": 96.0}},
+        {"command": "move_clip", "args": {"clipId": "${C1}", "start": 1.5}},
+    ]
+    n = len(edits)
+    # Prime the session with ONE save first: moshFormatVersion (PRJ-FMT) is stamped on
+    # the project node at save time, so a never-saved session's "final" snapshot would
+    # differ from the post-reload one by exactly that stamp (formatVersion 0 -> 1) —
+    # by-design behavior, not a persistence bug (found by this family's first run).
+    cmds = ([{"command": "save", "args": {}},
+             {"command": "__snapshot", "args": {"label": "start"}}]
+            + edits
+            + [{"command": "__snapshot", "args": {"label": "final"}}]
+            + [{"command": "undo", "args": {}} for _ in range(n)]
+            + [{"command": "__snapshot", "args": {"label": "unwound"}}]
+            + [{"command": "redo", "args": {}} for _ in range(n)]
+            + [{"command": "__snapshot", "args": {"label": "rewound"}}]
+            + [{"command": "save", "args": {}},
+               {"command": "reload", "args": {}},
+               {"command": "__snapshot", "args": {"label": "reloaded"}}])
+    results, snaps, proc = drive(cmds, "conf-wf-torture")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    start, final = _canon_snap(snaps["start"]), _canon_snap(snaps["final"])
+    unwound, rewound, reloaded = (_canon_snap(snaps[k]) for k in ("unwound", "rewound", "reloaded"))
+    mutated = final != start
+    undo_ok = unwound == start
+    redo_ok = rewound == final
+    reload_ok = reloaded == final
+    ok = mutated and undo_ok and redo_ok and reload_ok
+    return verdict(PASS if ok else FAIL, "workflow", [97],
+                   {"edits": n, "undo_walk_restores": undo_ok, "redo_walk_restores": redo_ok,
+                    "save_reload_equal": reload_ok})
+
+
 # ── registry: EXACT (area, user_action) → family ──────────────────────────────────
 FAMILIES = {
     ("Transport", "Press Play in a loaded session"): fam_transport_play,
@@ -1017,6 +1242,12 @@ FAMILIES = {
     ("Browser", "Relink a missing asset to a replacement file"): fam_browser_relink,
     ("Export", "Submit 16-bar battle mix"): fam_export_mixdown,
     ("Export", "Render a loop range with delay tail enabled"): fam_export_range_tail,
+    # Golden producer workflows (P7) — 1:1 rows DAW-301..305, no fan-out padding.
+    ("Workflow", "Build a beat from scratch: drums, melody, arrange, balance, export"): fam_workflow_beat,
+    ("Workflow", "Record a vocal: arm, count-in, takes, comp (capture is hardware)"): fam_workflow_record_comp,
+    ("Workflow", "Mix to stems: buses, sends, automation — stems null against the mix"): fam_workflow_mix_stems,
+    ("Workflow", "Remix an import: retempo, stretch to grid, split, rearrange, render"): fam_workflow_remix,
+    ("Workflow", "Session torture: heavy edit chain, deep undo/redo walk, save/reload equality"): fam_workflow_torture,
 }
 
 # Families for capabilities shipped AFTER the reality pack was gathered (2026-06-26),

@@ -306,5 +306,39 @@
   "invariants": [
    8
   ]
+ },
+ {
+  "area": "Workflow",
+  "action": "Build a beat from scratch: drums, melody, arrange, balance, export",
+  "status": "pass",
+  "invariants": []
+ },
+ {
+  "area": "Workflow",
+  "action": "Mix to stems: buses, sends, automation \u2014 stems null against the mix",
+  "status": "pass",
+  "invariants": [],
+  "note": "sum(stems) nulls against the unity-master mix \u2014 alignment + completeness with sends + automation live."
+ },
+ {
+  "area": "Workflow",
+  "action": "Record a vocal: arm, count-in, takes, comp (capture is hardware)",
+  "status": "hardware",
+  "invariants": [],
+  "note": "arm/count-in/monitor/takes state proven headless; the live take + comp-by-ear is the owner runbook REC-mic row."
+ },
+ {
+  "area": "Workflow",
+  "action": "Remix an import: retempo, stretch to grid, split, rearrange, render",
+  "status": "pass",
+  "invariants": []
+ },
+ {
+  "area": "Workflow",
+  "action": "Session torture: heavy edit chain, deep undo/redo walk, save/reload equality",
+  "status": "pass",
+  "invariants": [
+   97
+  ]
  }
 ]

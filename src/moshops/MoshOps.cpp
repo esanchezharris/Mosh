@@ -4921,7 +4921,14 @@ juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_mute", "no track");
     beginTxn ("set_track_mute");
-    track->setMute ((bool) args.getProperty ("mute", false));
+    // G14 class (found by the P6 undo matrix): te::Track::setMute writes its CachedValue
+    // with a NULL UndoManager, leaving this transaction EMPTY — undo then popped the
+    // PREVIOUS command's transaction (destroying the user's prior edit) while the mute
+    // stuck. A plain ValueTree write through the edit's UndoManager records correctly,
+    // and mute is a plain CachedValue<bool> (not an AutomatableParameter), so undo's
+    // CachedValue refresh is the complete story — no SetFaderValueAction-style replay
+    // needed here.
+    track->state.setProperty (te::IDs::mute, (bool) args.getProperty ("mute", false), &undoManager());
     logLine ("set_track_mute", args, true, {}, true);
     emitTrackPatch (*track);   // scoped — mute is purely track-local (unlike solo, which dims others)
     return okResult ("set_track_mute");
@@ -4932,7 +4939,8 @@ juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_solo", "no track");
     beginTxn ("set_track_solo");
-    track->setSolo ((bool) args.getProperty ("solo", false));
+    // Same G14-class fix as set_track_mute above (P6 undo matrix find).
+    track->state.setProperty (te::IDs::solo, (bool) args.getProperty ("solo", false), &undoManager());
     logLine ("set_track_solo", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_track_solo");
@@ -10844,11 +10852,17 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
 
     // Plugin chain (Stage 3). Indexed within pluginList (built-ins included). The
     // metering tap (Wave 9) is hidden from the rack but keeps its real index so
-    // plugin-addressed commands still resolve.
+    // plugin-addressed commands still resolve. The VolumeAndPan plugin is hidden the
+    // same way: the fader is already surfaced as the track's volumeDb/pan fields, and
+    // ensureVolumePlugin materializes the plugin lazily on the first fader touch — the
+    // P6 undo matrix caught it leaking into the rack as a bogus "Volume & Pan Plugin"
+    // row on any fresh track. (It is not a load_builtin type, so nothing a user loads
+    // can be hidden by this.)
     juce::Array<var> plugins;
     auto pl = t.pluginList.getPlugins();
     for (int i = 0; i < pl.size(); ++i)
-        if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr)
+        if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr
+                             && dynamic_cast<te::VolumeAndPanPlugin*> (pl[i].get()) == nullptr)
             plugins.add (pluginToVar (*pl[i], i, &t));
     o->setProperty ("plugins", plugins);
     // DRM-001/CTL-001 — does the track host an instrument (synth or builtin)? Lets the
@@ -11022,8 +11036,22 @@ juce::var MoshOps::clipToVar (te::Clip& c)
     if (auto* w = dynamic_cast<te::WaveAudioClip*> (&c))
     {
         o->setProperty ("type", "wave");
-        o->setProperty ("sourceFile", w->getCurrentSourceFile().getFullPathName());
-        o->setProperty ("sourceMissing", ! w->getCurrentSourceFile().existsAsFile());   // gap 3 — relink cue
+        // A REVERSED clip's CURRENT source is a per-session temp proxy
+        // (~/Library/Mosh/Temporary/edit_0_xx — a different name every reload); the UI
+        // must see the USER's file, and sourceMissing must cue relink on the original,
+        // not on a not-yet-generated proxy. Found by the P6 persist matrix (the proxy
+        // path was the one snapshot field that changed across save/reload).
+        const bool revClip = w->getIsReversed();
+        if (revClip)
+            w->getCurrentSourceFile();   // side effect kept deliberately: this kicks the
+            // reversed-proxy resolution the same eager way every pre-change snapshot did.
+            // Dropping the call (reporting only the original) let the proxy job spawn
+            // later, mid graph-rebuild, racing edit teardown — an upstream ThreadPoolJob
+            // deleted-while-in-pool assert + SIGSEGV, reproduced 2/2 in --selftest.
+        const auto srcFile = revClip ? w->getOriginalFile()
+                                     : w->getCurrentSourceFile();
+        o->setProperty ("sourceFile", srcFile.getFullPathName());
+        o->setProperty ("sourceMissing", ! srcFile.existsAsFile());   // gap 3 — relink cue
         o->setProperty ("sourceLength", w->getSourceLength().inSeconds());
         o->setProperty ("gainDb", w->getGainDB());
         // G4b — clip fades: additive, unconditional (mirrors gainDb) so the snapshot always
