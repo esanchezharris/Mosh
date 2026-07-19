@@ -199,7 +199,12 @@ export function callCodexCli(
   // NB: the trailing guard must never say "commands" — that's the reply
   // contract's field name, and a "do not run commands" phrasing measurably
   // makes models defer (caught live on gpt-5.4: WRONG-DEFER on a clear ask).
+  // MOSH_CODEX_EFFORT maps to `-c model_reasoning_effort=…` (low|medium|high|
+  //   xhigh). --ignore-user-config drops codex to its default effort, which
+  //   under-represents the owner's real config (xhigh) — set it explicitly when
+  //   benching what the subscription actually serves day-to-day.
   const seat = process.env.MOSH_CODEX_SEAT ?? "inline";
+  const effort = process.env.MOSH_CODEX_EFFORT;
   const guard = `Answer directly with the JSON object described in the instructions — output nothing else and do not use any tools.`;
   const dir = join(WORK, `codex-cli-${seat}`);
   mkdirSync(dir, { recursive: true });
@@ -213,9 +218,10 @@ export function callCodexCli(
   const t0 = Date.now();
   const raw = spawnSync("codex", [
     "exec", "-m", model,
+    ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
     "--ephemeral", "--ignore-user-config", "--skip-git-repo-check",
     "-s", "read-only", "--color", "never", "--json", "-",
-  ], { cwd: dir, input: prompt, encoding: "utf8", timeout: 300_000 });
+  ], { cwd: dir, input: prompt, encoding: "utf8", timeout: 600_000 });
   const ms = Date.now() - t0;
   if (raw.error) throw raw.error;
 
