@@ -166,6 +166,66 @@ def diagnostic_section(spec, clips_dir, q):
 </section>"""
 
 
+def build_milestone(run_json, out_dir, arm, gate_json=None, cache_tag="", panels=None,
+                    title="word campaign — milestone", blurb=None):
+    """The word-campaign MILESTONE page: LABELED, absolute judgment (not A/B).
+
+    Per song: your mumble / your finished take / the campaign's best render, plus the
+    word-gate readout (missed words and syllable deficits listed honestly). The owner's
+    question is "is this a usable guide vocal?" — nothing to de-bias, so no blinding,
+    no catch. Clips are copied (never re-encoded) so provenance stays sha-verifiable."""
+    rows = json.load(open(run_json))
+    gate = json.load(open(gate_json)) if gate_json and os.path.isfile(gate_json) else None
+    clips = os.path.join(out_dir, "clips")
+    os.makedirs(clips, exist_ok=True)
+    q = f"?v={cache_tag}" if cache_tag else ""
+    cards = []
+    for r in rows:
+        song = r["item"].replace("own-", "")
+        arms = r["arms"]
+        rend = (arms.get(arm) or {}).get("wav")
+        if not rend:
+            continue
+        rows_html = []
+        for key, label, wav in (("mumble", "your mumble (the input)",
+                                 (arms.get("mumble") or {}).get("wav")),
+                                ("reference", "your finished take (the target)",
+                                 (arms.get("reference") or {}).get("wav")),
+                                ("render", "the render (best round)", rend)):
+            if not wav:
+                continue
+            dst = f"{song}_{key}.wav"
+            shutil.copyfile(wav, os.path.join(clips, dst))
+            rows_html.append(f'<div class="arm anchor"><div class="lab">{label}</div>'
+                             f'<audio controls preload="none" src="clips/{dst}{q}"></audio></div>')
+        gate_html = ""
+        s = (gate or {}).get("songs", {}).get(song)
+        if s and "error" not in s:
+            missed = [m["word"] for m in s["missing"]]
+            defs_ = ["/".join(d["lyricWords"]) for d in s["sylDeficits"]]
+            verdict = "every demanded word heard" if s["pass"] else \
+                f"missed: {', '.join(missed) or '—'}; garbled: {', '.join(defs_) or '—'}"
+            gate_html = (f'<p class="ctx">word gate ({s["hits"]}/{s["demanded"]} demanded '
+                         f'words heard by ASR): {verdict}</p>')
+        panel_html = ""
+        if panels and panels.get(song) and os.path.isfile(panels[song]):
+            dst = f"{song}_panel.png"
+            shutil.copyfile(panels[song], os.path.join(clips, dst))
+            panel_html = (f'<p><img src="clips/{dst}{q}" alt="take vs render" '
+                          f'style="max-width:100%"></p>')
+        cards.append(f"""<section>
+  <h2>{song}</h2>
+  {''.join(rows_html)}
+  {gate_html}
+  {panel_html}
+</section>""")
+    blurb = blurb or ("The campaign's stop rule fired. Labeled on purpose — the question "
+                      "is absolute: <strong>is this a usable guide vocal?</strong> For each "
+                      "song, listen and rule guide-grade yes/no; if no, name what breaks it.")
+    open(os.path.join(out_dir, "index.html"), "w").write(_page(title, blurb, cards))
+    return out_dir
+
+
 def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_song=None,
                   cache_tag="", panels=None, diagnostic=None):
     """Blind A/B of the SAME arm across two runs — isolates one change.
@@ -261,9 +321,20 @@ def main():
                     help="JSON {title, blurb?, clips: [{label, wav, a, b}]} — a LABELED "
                          "card block above the blind cards (for tests where blinding is "
                          "meaningless, e.g. a different word)")
+    ap.add_argument("--milestone", action="store_true",
+                    help="LABELED milestone page (mumble/take/render + word-gate readout); "
+                         "absolute judgment, no blinding, no key")
+    ap.add_argument("--gate", default=None, help="words_gate.json for the milestone readout")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/ear-gate"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    if a.milestone:
+        build_milestone(a.run, a.out, a.arm, gate_json=a.gate, cache_tag=a.cache_tag,
+                        panels=json.loads(a.panels) if a.panels else None,
+                        blurb=a.blurb)
+        print(f"page  : {os.path.join(a.out, 'index.html')} (labeled milestone — no key)")
+        print(f"serve : cd {a.out} && python3 -m http.server 8199")
+        return 0
     if a.compare:
         mapping = build_compare(
             a.run, a.compare, a.out, a.arm, a.label_a, a.label_b,
