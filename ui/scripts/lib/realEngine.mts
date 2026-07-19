@@ -190,14 +190,26 @@ export function callCodexCli(
   const convo = rest.length === 1
     ? rest[0].content
     : rest.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
+  // Seat variants (MOSH_CODEX_SEAT):
+  //   inline   — system delivered as a [system] block inside the user prompt.
+  //              Measured cost on the 5.6-sol control: 58.8% vs 67.6% OpenRouter,
+  //              wrong-defers 4→7 — the Codex harness persona outranks quoted text.
+  //   agentsmd — system written to AGENTS.md in the scratch cwd (codex's native
+  //              instructions channel, doc-level authority); user turn stays pure.
   // NB: the trailing guard must never say "commands" — that's the reply
   // contract's field name, and a "do not run commands" phrasing measurably
   // makes models defer (caught live on gpt-5.4: WRONG-DEFER on a clear ask).
-  const prompt = `[system]\n${sys}\n\n[user]\n${convo}\n\n` +
-    `Answer directly with the JSON object described in [system] — output nothing else and do not use any tools.`;
-
-  const dir = join(WORK, "codex-cli");
+  const seat = process.env.MOSH_CODEX_SEAT ?? "inline";
+  const guard = `Answer directly with the JSON object described in the instructions — output nothing else and do not use any tools.`;
+  const dir = join(WORK, `codex-cli-${seat}`);
   mkdirSync(dir, { recursive: true });
+  let prompt: string;
+  if (seat === "agentsmd") {
+    writeFileSync(join(dir, "AGENTS.md"), sys);
+    prompt = `${convo}\n\n${guard}`;
+  } else {
+    prompt = `[system]\n${sys}\n\n[user]\n${convo}\n\n${guard}`;
+  }
   const t0 = Date.now();
   const raw = spawnSync("codex", [
     "exec", "-m", model,
