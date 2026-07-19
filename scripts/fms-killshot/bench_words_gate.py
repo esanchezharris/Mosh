@@ -62,6 +62,18 @@ def norm_word(w: str) -> str:
     return s.replace("'", "")
 
 
+_LYRIC_WORD_RE = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)*", re.UNICODE)
+
+
+def lyric_words(text):
+    """Tokenize a lyric sheet the SAME way bench_lyric_install does before alignment.
+
+    A naive `.split()` turns the owner's "him,(ah)" into one token that normalizes to
+    "himah" — a demanded word no render could ever satisfy. Ad-libs are separate sung
+    words; apostrophes and accents stay inside the word."""
+    return [m.group(0) for m in _LYRIC_WORD_RE.finditer(str(text))]
+
+
 def edit_distance(a: str, b: str) -> int:
     if len(a) < len(b):
         a, b = b, a
@@ -235,9 +247,9 @@ def gate_run(run_dir, arm="pipeline", dataset=DEFAULT_DATASET, songs=None, cache
         if not (os.path.exists(rend) and os.path.exists(lyr)):
             report["songs"][song] = {"error": f"missing {rend if not os.path.exists(rend) else lyr}"}
             continue
-        lyric_words = open(lyr).read().split()
+        lyric = lyric_words(open(lyr).read())
         span = (0.0, _wav_dur(ref))
-        rep = gate_song(lyric_words, transcribe(ref, cache), transcribe(rend, cache), span)
+        rep = gate_song(lyric, transcribe(ref, cache), transcribe(rend, cache), span)
         report["songs"][song] = rep
     oks = [s for s in report["songs"].values() if "error" not in s]
     report["pass"] = bool(oks) and all(s["pass"] for s in oks)

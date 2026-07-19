@@ -133,6 +133,18 @@ a3 = bwg.align_lyric(LYRIC3, TAKE3)
 check("repeated 'been's align 1:1 in order; god~good fuzzy-anchors",
       len(a3) == 6 and [t for _, t in a3] == [0, 1, 2, 3, 4, 5], str(a3))
 
+# ── lyric tokenization must match the installer's (or the gate demands impossible words) ─
+check("a parenthetical ad-lib splits into its own sung word",
+      bwg.lyric_words("think to you him,(ah) I think") ==
+      ["think", "to", "you", "him", "ah", "I", "think"],
+      str(bwg.lyric_words("think to you him,(ah) I think")))
+check("apostrophes and accents stay inside the word",
+      bwg.lyric_words("don't stop the piñata") == ["don't", "stop", "the", "piñata"],
+      str(bwg.lyric_words("don't stop the piñata")))
+check("newlines are word separators like spaces",
+      bwg.lyric_words("one two\nthree") == ["one", "two", "three"])
+check("bare punctuation never becomes a word", bwg.lyric_words("hey — yeah!") == ["hey", "yeah"])
+
 # ── determinism ────────────────────────────────────────────────────────────────────────
 det = {hashlib.sha256(json.dumps(bwg.gate_song(LYRIC, TAKE, RENDER_BAD, SPAN),
                                  sort_keys=True).encode()).hexdigest() for _ in range(3)}
