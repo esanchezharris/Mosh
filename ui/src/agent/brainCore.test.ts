@@ -110,3 +110,43 @@ describe("parseReply — add_drum_pattern newline-separated lanes", () => {
     expect(r.commands![0]!.args!.pattern).toBe("kick: x...; snare: ....x...; hat: x.x.");
   });
 });
+
+describe("parseReply — per-ArgSpec coercion of object-form args (B0)", () => {
+  // Models emit {"note":"42"} / {"mute":"true"} — string-typed values on
+  // declared number/boolean args. coerceArg already fixes this for the
+  // function-call STRING form; the object form got no coercion and the
+  // Phase-A baseline paid for it (set_drum_lane: "note" must be a number).
+  it("coerces numeric strings on declared number args", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "set_drum_lane", args: { trackId: "3", note: "42", mute: "true" } }],
+    }));
+    expect(r.commands![0]!.args).toEqual({ trackId: "3", note: 42, mute: true });
+    expect(validateCommand("set_drum_lane", r.commands![0]!.args as Record<string, unknown>)).toBeNull();
+  });
+
+  it("never coerces declared string args (a name that looks numeric stays a string)", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "rename_track", args: { trackId: "3", name: "42" } }],
+    }));
+    expect(r.commands![0]!.args).toEqual({ trackId: "3", name: "42" });
+  });
+
+  it("leaves non-numeric strings alone so validation still fails loudly", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "set_tempo", args: { bpm: "fast" } }],
+    }));
+    expect(r.commands![0]!.args).toEqual({ bpm: "fast" });
+    expect(validateCommand("set_tempo", r.commands![0]!.args as Record<string, unknown>)).not.toBeNull();
+  });
+
+  it("passes unknown commands through untouched (validation rejects them later)", () => {
+    const r = parseReply(JSON.stringify({
+      intent: "ACK_GOT_IT",
+      commands: [{ command: "not_a_command", args: { x: "1" } }],
+    }));
+    expect(r.commands![0]!.args).toEqual({ x: "1" });
+  });
+});

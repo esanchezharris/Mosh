@@ -110,11 +110,29 @@ function normalizeDrumPatternArgs(args: Record<string, unknown>): Record<string,
   return args;
 }
 
+// Models also emit string-typed values on declared number/boolean args in the
+// OBJECT form ({"note":"42"}, {"mute":"true"}) — the same class coerceArg fixes
+// for the function-call-string form. Coerce per the catalog's ArgSpec; anything
+// that doesn't parse cleanly is left alone so validation still fails loudly.
+function coerceObjectArgs(command: string, args: Record<string, unknown>): Record<string, unknown> {
+  const spec = AGENT_COMMAND_MAP.get(command);
+  if (!spec) return args;
+  let out: Record<string, unknown> | null = null;
+  for (const a of spec.args) {
+    const v = args[a.name];
+    if (typeof v !== "string" || a.type === "string") continue;
+    const coerced = coerceArg(v, a.type);
+    if (coerced !== v) (out ??= { ...args })[a.name] = coerced;
+  }
+  return out ?? args;
+}
+
 function normalizeCommand(c: unknown): AgentCommandCall | null {
   if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
     const o = c as AgentCommandCall;
     let args = (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown>;
     if (o.command === "add_drum_pattern") args = normalizeDrumPatternArgs(args);
+    args = coerceObjectArgs(o.command, args);
     return { command: o.command, args };
   }
   if (typeof c !== "string") return null;
