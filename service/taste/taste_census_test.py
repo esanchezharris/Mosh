@@ -173,6 +173,111 @@ with tempfile.TemporaryDirectory() as td:
     s2 = json.dumps(census.summarize(td), sort_keys=True)
     check("summarize deterministic", s1 == s2)
 
+
+# ── TASTE-002: the native spigot lines. PR #185's in-place overhaul removed
+# accept/reject from the wave loop; the restored spigot logs reset_render_layer as an
+# explicit NEGATIVE (with layerId/cacheKey/adapter join keys) and render_kept as a
+# save/export-time soft POSITIVE. The census must parse both, grade polarity, and let
+# an EXPLICIT label supersede the implicit soft positive within the same
+# no-re-render segment.
+def _inplace_boot(t0):
+    """An organic in-place session: two clips render + auto-apply; a save logs
+    render_kept for both; clip 88 is then reset (explicit negative) with no re-render
+    between — its kept row is superseded. Clip 77's kept row survives."""
+    rows = [
+        _line(t0 + 0, 1, "enable_all_meters", {}),
+        _line(t0 + 500, 2, "render_layer", {"clipId": "77"}),
+        _line(t0 + 800, 3, "render_layer", {"clipId": "88"}),
+    ]
+    seq = 4
+    for i in range(6):
+        rows.append(_line(t0 + 2000 + i * 700, seq, "set_transport",
+                          {"position": i * 1.5}, undoable=False))
+        seq += 1
+    rows.append(_line(t0 + 9000, seq, "save", {})); seq += 1
+    rows.append(_line(t0 + 9010, seq, "render_kept",
+                      {"clipId": "77", "layerId": "rl-keep", "cacheKey": "ck77",
+                       "adapter": "fake"})); seq += 1
+    rows.append(_line(t0 + 9020, seq, "render_kept",
+                      {"clipId": "88", "layerId": "rl-gone", "cacheKey": "ck88",
+                       "adapter": "fake"})); seq += 1
+    rows.append(_line(t0 + 20000, seq, "reset_render_layer",
+                      {"clipId": "88", "layerId": "rl-gone", "cacheKey": "ck88",
+                       "adapter": "fake"}))
+    return rows
+
+
+with tempfile.TemporaryDirectory() as td2:
+    _write_session(
+        td2,
+        boots=[_inplace_boot(1_783_000_000_000)],
+        renders=[
+            ("rl-keep", {"ok": True, "adapter": "fake", "pq": 0.7}, True),
+            ("rl-gone", {"ok": True, "adapter": "fake", "pq": 0.7}, True),
+        ],
+    )
+    boots2 = census.parse_boots(os.path.join(td2, "mosh-log.jsonl"))
+    labels2 = census.label_rows(boots2)
+    check("spigot lines parsed as labels", len(labels2) == 3, f"got {len(labels2)}")
+    verd = sorted(r["verdict"] for r in labels2)
+    check("verdict mapping: kept/kept/reset", verd == ["kept", "kept", "reset"], str(verd))
+    kept77 = [r for r in labels2 if r["clipId"] == "77"][0]
+    kept88 = [r for r in labels2 if r["clipId"] == "88" and r["verdict"] == "kept"][0]
+    reset88 = [r for r in labels2 if r["verdict"] == "reset"][0]
+    check("surviving kept is organic (not scripted/contradicted/superseded)",
+          not kept77["scripted"] and not kept77["contradicted"]
+          and not kept77["superseded"])
+    check("explicit reset supersedes the same clip's soft positive",
+          kept88["superseded"] and not kept77["superseded"])
+    check("kept->reset is supersession, NOT contradiction",
+          not kept88["contradicted"] and not reset88["contradicted"])
+    check("labels carry the native join keys (layerId/cacheKey/adapter)",
+          kept77["layerId"] == "rl-keep" and kept77["cacheKey"] == "ck77"
+          and kept77["adapter"] == "fake" and reset88["cacheKey"] == "ck88")
+
+    joined2 = census.join_renders(td2, labels2)
+    check("spigot labels join to on-disk renders directly by layerId",
+          all(r["wav"] is not None for r in joined2))
+
+    s = census.summarize(td2)
+    check("summary: organic kept/reset counts + superseded readout",
+          s["organic_kepts"] == 1 and s["organic_resets"] == 1
+          and s["superseded_kepts"] == 1, json.dumps(s, sort_keys=True))
+
+    # accept->reset (both EXPLICIT, opposite polarity, no re-render between) IS a
+    # contradiction — the same audio graded both ways.
+    xb = [[json.loads(_line(1_784_000_000_000, 1, "accept_render",
+                            {"clipId": "9", "layerId": "rl-x"})),
+           json.loads(_line(1_784_000_010_000, 2, "reset_render_layer",
+                            {"clipId": "9", "layerId": "rl-x", "cacheKey": "ckx",
+                             "adapter": "fake"}))]]
+    lx = census.label_rows(xb)
+    check("accept->reset without re-render = contradiction (explicit cross-polarity)",
+          len(lx) == 2 and all(r["contradicted"] for r in lx),
+          json.dumps(lx, sort_keys=True))
+
+    # reject->reset is the SAME polarity (double negative) — not a contradiction.
+    nb = [[json.loads(_line(1_785_000_000_000, 1, "reject_render", {"clipId": "9"})),
+           json.loads(_line(1_785_000_010_000, 2, "reset_render_layer",
+                            {"clipId": "9", "layerId": "rl-n", "cacheKey": "ckn",
+                             "adapter": "fake"}))]]
+    check("reject->reset same polarity is NOT a contradiction",
+          not any(r["contradicted"] for r in census.label_rows(nb)))
+
+    # Spigot labels without listening are scripted-harness, like accept/reject.
+    sb = [[json.loads(_line(1_786_000_000_000, 1, "render_layer", {"clipId": "5"})),
+           json.loads(_line(1_786_000_001_000, 2, "save", {})),
+           json.loads(_line(1_786_000_001_100, 3, "render_kept",
+                            {"clipId": "5", "layerId": "rl-s", "cacheKey": "cks",
+                             "adapter": "fake"}))]]
+    check("spigot labels without listening are scripted",
+          census.label_rows(sb)[0]["scripted"])
+
+    # Determinism over the spigot fixture too.
+    t1 = json.dumps(census.summarize(td2), sort_keys=True)
+    t2 = json.dumps(census.summarize(td2), sort_keys=True)
+    check("spigot summarize deterministic", t1 == t2)
+
 print()
 if fails:
     print(f"FAILED: {len(fails)} — {fails}")
