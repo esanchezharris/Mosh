@@ -20,6 +20,7 @@ target_sources(MoshTests PRIVATE
     test_count_in.cpp
     test_sections.cpp
     test_lyrics.cpp
+    test_agent_memory.cpp
     test_annotations.cpp
     test_remote_companion.cpp
     test_multiplayer_logical_id.cpp

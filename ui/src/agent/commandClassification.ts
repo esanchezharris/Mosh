@@ -68,6 +68,14 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   remove_lyric_sheet: "deletes a whole sheet behind a UI confirm; the agent edits/removes lines instead",
   get_lyric_corpus_stats: "UI cue ('N lines in your voice') — service-health-gated, no musical content",
 
+  // ── AGT-MEM (Phase-B memory lane, M1) — native store; no in-turn agent tool yet ──
+  // The store is the FOUNDATION a later memory-retrieval pass (M2+) reads FROM to
+  // enrich the system prompt automatically — not a tool the model calls mid-turn.
+  // Exposing raw read/write to the model now would let it silently self-modify its
+  // own future context with no retrieval/ranking/dedup layer in front of it yet.
+  agent_memory_read: "M1 ships the native store only — read access is for a future retrieval pass (M2+) to inject into the system prompt, not a mid-turn agent tool",
+  agent_memory_write: "M1 ships the native store only — write access needs a curation/dedup layer (M2+) before the model can self-modify its own persistent memory",
+
   // ── RAVE lab surface — model-install-gated builds only ────────────────────────
   add_rave_insert: "real-time RAVE insert is a model-install-gated lab surface (MOSH_ENABLE_ANIRA builds)",
   load_rave_model: "real-time RAVE insert is a model-install-gated lab surface (MOSH_ENABLE_ANIRA builds)",

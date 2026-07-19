@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "AgentMemoryStore.h"
 #include "DrumPattern.h"
 #include "AutomationMode.h"
 #include "AutomationCurveWrite.h"
@@ -1103,6 +1104,9 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "build_lyrics_from_clip") return cmdBuildLyricsFromClip (args);
     if (name == "build_skeleton_from_clip") return cmdBuildSkeletonFromClip (args);
     if (name == "confirm_skeleton")     return cmdConfirmSkeleton (args);
+    // AGT-MEM (Phase-B memory lane, M1) — the native agent-memory store.
+    if (name == "agent_memory_write")   return cmdAgentMemoryWrite (args);
+    if (name == "agent_memory_read")    return cmdAgentMemoryRead (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -2336,6 +2340,110 @@ juce::var MoshOps::cmdConfirmSkeleton (const juce::var& args)
     emitSnapshotInvalidated();
     auto* d = new DynamicObject(); d->setProperty ("confirmed", n);
     return okResult ("confirm_skeleton", var (d));
+}
+
+// ── AGT-MEM (Phase-B memory lane, M1): the native agent-memory store ────────────────
+// Pure file I/O via AgentMemoryStore.h — NO ValueTree/Edit mutation, NO snapshot change,
+// NO undo transaction (mirrors the training commands' non-undoable posture: no
+// beginTxn, logLine(..., /*undoable=*/false) — undo() therefore can never touch a
+// stored item, by construction, not by a special-cased guard). Global scope writes
+// preferences.jsonl / patterns/drums.jsonl / patterns/lyrics.jsonl under MOSH_AGENT_DIR
+// (else ~/Library/Mosh/agent/); project scope writes a sidecar JSON next to the current
+// edit file (<edit>.mosh-memory.json), copied on Save-As by cmdSaveAs below.
+juce::var MoshOps::cmdAgentMemoryWrite (const juce::var& args)
+{
+    const auto scope = args.getProperty ("scope", var()).toString();
+    if (scope != "global" && scope != "project")
+        return errResult ("agent_memory_write", "'scope' must be \"global\" or \"project\"");
+
+    const auto item = args.getProperty ("item", var());
+    const bool itemPresent = ! item.isVoid() && (item.isObject() || (item.isString() && item.toString().trim().isNotEmpty()));
+    if (! itemPresent)
+        return errResult ("agent_memory_write", "missing or invalid 'item' (must be a non-empty JSON object or string)");
+
+    const bool explicitFlag = (bool) args.getProperty ("explicit", false);
+
+    if (scope == "global")
+    {
+        const auto kind = args.getProperty ("kind", var()).toString();
+        if (! AgentMemoryStore::isValidGlobalKind (kind))
+            return errResult ("agent_memory_write",
+                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+
+        const auto root = AgentMemoryStore::globalRoot();
+        AgentMemoryStore::ensureGlobalMeta (root);
+        const auto file = AgentMemoryStore::globalStoreFile (root, kind);
+
+        auto items = AgentMemoryStore::readJsonlFile (file);
+        const auto record = AgentMemoryStore::makeRecord (kind, explicitFlag, item);
+        String error;
+        if (! AgentMemoryStore::applyWrite (items, record, error))
+        {
+            logLine ("agent_memory_write", args, false, error, false);
+            return errResult ("agent_memory_write", error);
+        }
+        if (! AgentMemoryStore::writeJsonlFile (file, items))
+        {
+            const auto ioErr = "failed to write " + file.getFullPathName();
+            logLine ("agent_memory_write", args, false, ioErr, false);
+            return errResult ("agent_memory_write", ioErr);
+        }
+
+        logLine ("agent_memory_write", args, true, {}, false);
+        auto* d = new DynamicObject(); d->setProperty ("count", items.size());
+        return okResult ("agent_memory_write", var (d));
+    }
+
+    // scope == "project" — kind defaults to "note"; the project-scope kind vocabulary
+    // is open (unlike global's closed 3-kind set).
+    const auto kind = args.hasProperty ("kind") ? args.getProperty ("kind", var()).toString() : String ("note");
+    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
+    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
+    const auto record = AgentMemoryStore::makeRecord (kind, explicitFlag, item);
+    String error;
+    if (! AgentMemoryStore::applyWrite (notes, record, error))
+    {
+        logLine ("agent_memory_write", args, false, error, false);
+        return errResult ("agent_memory_write", error);
+    }
+    if (! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
+    {
+        const auto ioErr = "failed to write " + sidecar.getFullPathName();
+        logLine ("agent_memory_write", args, false, ioErr, false);
+        return errResult ("agent_memory_write", ioErr);
+    }
+
+    logLine ("agent_memory_write", args, true, {}, false);
+    auto* d = new DynamicObject(); d->setProperty ("count", notes.size());
+    return okResult ("agent_memory_write", var (d));
+}
+
+// Read-only — deliberately does NOT call logLine (mirrors cmdGetLyricCorpusStats /
+// cmdGetRhymes' read posture: mosh-log.jsonl records mutations, not lookups).
+juce::var MoshOps::cmdAgentMemoryRead (const juce::var& args)
+{
+    const auto scope = args.getProperty ("scope", var()).toString();
+    if (scope != "global" && scope != "project")
+        return errResult ("agent_memory_read", "'scope' must be \"global\" or \"project\"");
+
+    const int limit = (int) args.getProperty ("limit", 50);
+
+    if (scope == "global")
+    {
+        const auto kind = args.getProperty ("kind", var()).toString();
+        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
+            return errResult ("agent_memory_read",
+                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+
+        const auto items = AgentMemoryStore::readGlobal (AgentMemoryStore::globalRoot(), kind, limit);
+        auto* d = new DynamicObject(); d->setProperty ("items", items);
+        return okResult ("agent_memory_read", var (d));
+    }
+
+    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
+    const auto items = AgentMemoryStore::selectForRead (AgentMemoryStore::readSidecarNotes (sidecar), limit);
+    auto* d = new DynamicObject(); d->setProperty ("items", items);
+    return okResult ("agent_memory_read", var (d));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
@@ -10348,9 +10456,20 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     if (file.getFileExtension().isEmpty())
         file = file.withFileExtension ("tracktionedit");
 
+    // AGT-MEM — capture the OLD edit file BEFORE saveProjectAs adopts the new one, so
+    // the project-scope agent-memory sidecar (a sibling of the edit file, keyed by its
+    // name) can be carried over below.
+    const auto oldEditFile = eng.editFile();
+
     const bool didSave = eng.saveProjectAs (file);   // saveAs + adopt the new backing file + consolidate wave/sampler audio
     logLine ("save_as", args, didSave, didSave ? String() : String ("saveAs failed"), false);
     if (! didSave) return errResult ("save_as", "saveAs failed");
+
+    // AGT-MEM — carry the project-scope agent-memory sidecar to the new location (the
+    // engine's own saveProjectAs only consolidates audio/sampler sources; it knows
+    // nothing about this sidecar). Best-effort: a copy failure must never fail the
+    // save_as command itself (matches consolidateRenderArtifacts' posture below).
+    mosh::AgentMemoryStore::copySidecarForSaveAs (oldEditFile, eng.editFile());
 
     // AL-009 — consolidate Tier-B render-layer artifacts too. eng.saveProjectAs localises
     // wave-clip sources + sampler sounds, but a render layer's cacheArtifact (the file

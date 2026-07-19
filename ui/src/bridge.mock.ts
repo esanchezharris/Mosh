@@ -166,6 +166,61 @@ function emptySession(): Snapshot {
 let snapshot: Snapshot = seedSnapshot();
 let mockCorpusLines = 0; // §7 — simulates the cross-song style corpus growing on accept
 
+// AGT-MEM (Phase-B memory lane, M1) — the agent-memory store, mirrored in-memory.
+// The native store is real file I/O (src/moshops/AgentMemoryStore.h); the mock has
+// no filesystem, so this is a plain in-process mirror of the SAME cap/eviction/
+// explicit-protection contract (kept in lockstep by hand — no shared source with the
+// C++ side, unlike DrumPattern.h/drumPatternUtil.ts, but the RULES are identical).
+type AgentMemoryRecord = { ts: number; kind: string; explicit: boolean; item: unknown };
+const AGENT_MEMORY_CAP = 500;
+const AGENT_MEMORY_GLOBAL_KINDS = ["preference", "drum_pattern", "lyric_framework"] as const;
+let mockAgentMemoryGlobal: Record<string, AgentMemoryRecord[]> = { preference: [], drum_pattern: [], lyric_framework: [] };
+let mockAgentMemoryProject: AgentMemoryRecord[] = [];
+let mockAgentMemoryTs = 0;   // a monotonic counter standing in for wall-clock ts (deterministic ordering in tests)
+
+/** Mirrors AgentMemoryStore::decideEviction — see src/moshops/AgentMemoryStore.h for
+ *  the full policy writeup. @p existing is oldest-first (push()-order), so "the
+ *  oldest X" is simply the first matching index. */
+function agentMemoryEvictIndex(
+  existing: AgentMemoryRecord[],
+  newExplicit: boolean,
+  cap: number,
+): { evictIndex: number; error?: string } {
+  if (existing.length < cap) return { evictIndex: -1 };
+  for (let i = 0; i < existing.length; i++) if (!existing[i].explicit) return { evictIndex: i };
+  if (!newExplicit) return { evictIndex: -1, error: "memory full of explicit items -- remove one first" };
+  return { evictIndex: 0 };   // every item is explicit AND the new one is explicit — evict the oldest explicit
+}
+
+/** Mirrors AgentMemoryStore::applyWrite: mutates @p existing in place; a rejected
+ *  write leaves it completely unchanged. */
+function agentMemoryApplyWrite(
+  existing: AgentMemoryRecord[],
+  record: AgentMemoryRecord,
+  cap = AGENT_MEMORY_CAP,
+): { ok: boolean; error?: string } {
+  const d = agentMemoryEvictIndex(existing, record.explicit, cap);
+  if (d.error) return { ok: false, error: d.error };
+  if (d.evictIndex >= 0) existing.splice(d.evictIndex, 1);
+  existing.push(record);
+  return { ok: true };
+}
+
+/** Mirrors AgentMemoryStore::selectForRead: newest-first by ts (Array.prototype.sort
+ *  is spec-guaranteed stable since ES2019), capped to @p limit (<=0 == no cap). */
+function agentMemorySelectForRead(items: AgentMemoryRecord[], limit: number): AgentMemoryRecord[] {
+  const sorted = [...items].sort((a, b) => b.ts - a.ts);
+  return limit > 0 ? sorted.slice(0, limit) : sorted;
+}
+
+/** Mirrors the native validation: item must be present and either a non-empty string
+ *  or a plain object (NOT an array — JUCE's var::isObject() excludes JSON arrays). */
+function agentMemoryItemValid(item: unknown): boolean {
+  if (item == null) return false;
+  if (typeof item === "string") return item.trim().length > 0;
+  return typeof item === "object" && !Array.isArray(item);
+}
+
 // G3 — mock audio routing. The current device selection (so set_audio_device shows
 // up in the next list_audio_devices) and the enumerated wave inputs (so the
 // per-track input picker has real choices and set_track_input can stick).
@@ -205,10 +260,12 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
+  "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
+  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
+  "agent_memory_write"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -1008,6 +1065,44 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "get_lyric_corpus_stats":
       return ok(command, { lines: mockCorpusLines });
+    case "agent_memory_write": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      if (!agentMemoryItemValid(args.item))
+        return err(command, "missing or invalid 'item' (must be a non-empty JSON object or string)");
+      const explicitFlag = Boolean(args.explicit);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (!(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const store = mockAgentMemoryGlobal[kind];
+        const res = agentMemoryApplyWrite(store, { ts: ++mockAgentMemoryTs, kind, explicit: explicitFlag, item: args.item });
+        if (!res.ok) return err(command, res.error!);
+        return ok(command, { count: store.length });
+      }
+
+      const kind = args.kind !== undefined ? str(args.kind) : "note";
+      const res = agentMemoryApplyWrite(mockAgentMemoryProject, { ts: ++mockAgentMemoryTs, kind, explicit: explicitFlag, item: args.item });
+      if (!res.ok) return err(command, res.error!);
+      return ok(command, { count: mockAgentMemoryProject.length });
+    }
+    case "agent_memory_read": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      const limit = num(args.limit, 50);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const merged = kind ? [...mockAgentMemoryGlobal[kind]] : AGENT_MEMORY_GLOBAL_KINDS.flatMap((k) => mockAgentMemoryGlobal[k]);
+        return ok(command, { items: agentMemorySelectForRead(merged, limit) });
+      }
+      return ok(command, { items: agentMemorySelectForRead(mockAgentMemoryProject, limit) });
+    }
     case "reject_lyric_proposal": {
       const t = findTrack(str(args.trackId));
       const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
@@ -2354,6 +2449,9 @@ export function __resetMockForTests(): void {
   trackSeq = 10;
   snapshot = seedSnapshot();
   mockCorpusLines = 0;
+  mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
+  mockAgentMemoryProject = [];
+  mockAgentMemoryTs = 0;
   history.length = 0;
   future.length = 0;
   inBatch = false;

@@ -2,6 +2,7 @@
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
+#include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
@@ -514,6 +515,11 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     }
     if (SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SA3", "0") != "1")
         mosh::setEnvVar ("MOSH_ENABLE_SA3", "0");
+    // AGT-MEM (Phase-B memory lane, M1) — pin the global agent-memory store INSIDE this
+    // run's already-isolated session dir (SLF-CONC-001) so a plain `--selftest` never
+    // touches the owner's real ~/Library/Mosh/agent, and two concurrent runs on this
+    // host can't collide on the same JSONL files.
+    mosh::setEnvVar ("MOSH_AGENT_DIR", eng.sessionDir().getChildFile ("agent").getFullPathName().toRawUTF8());
     std::cerr << "\n===== Mosh Stage 1 command-surface harness =====\n";
     // The session dir is now per-process by default, so name it: this run's exports,
     // saved edit and mosh-log.jsonl live HERE, not in a shared fixed path.
@@ -8101,6 +8107,209 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "set_lyric_line on a sheetless track fails cleanly");
         check (! ok (cmd (ops, "confirm_skeleton", objN ({ { "trackId", trackId } }))),
                "confirm_skeleton on a sheetless track fails cleanly");
+    }
+
+    // ─── AGT-MEM (Phase-B memory lane, M1): the native agent-memory store ───
+    // Pure file I/O (src/moshops/AgentMemoryStore.h) — no ValueTree/Edit mutation, no
+    // snapshot change, no undo transaction. MOSH_AGENT_DIR is already pinned (above)
+    // to a dir inside THIS run's isolated session, so this section is hermetic against
+    // both the owner's real ~/Library/Mosh/agent and any concurrent selftest run.
+    {
+        section ("Agent memory store (AGT-MEM)");
+
+        // ── validation: missing/invalid scope, kind, item ──
+        check (! ok (cmd (ops, "agent_memory_write", objN ({ { "kind", "preference" }, { "item", "x" } }))),
+               "agent_memory_write missing scope fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_write",
+                          objN ({ { "scope", "nonsense" }, { "kind", "preference" }, { "item", "x" } }))),
+               "agent_memory_write invalid scope fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_write", objN ({ { "scope", "global" }, { "item", "x" } }))),
+               "agent_memory_write global scope missing kind fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_write",
+                          objN ({ { "scope", "global" }, { "kind", "nonsense" }, { "item", "x" } }))),
+               "agent_memory_write global scope invalid kind fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_write", objN ({ { "scope", "global" }, { "kind", "preference" } }))),
+               "agent_memory_write missing item fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_read", objN ({ { "scope", "nonsense" } }))),
+               "agent_memory_read invalid scope fails cleanly");
+
+        // ── global write -> read round-trip + kind filtering ──
+        check (ok (cmd (ops, "agent_memory_write",
+                        objN ({ { "scope", "global" }, { "kind", "preference" }, { "explicit", true },
+                                { "item", "always keep the low end wide" } }))),
+               "agent_memory_write global/preference (explicit) ok");
+        auto prefWrite2 = cmd (ops, "agent_memory_write",
+                               objN ({ { "scope", "global" }, { "kind", "preference" },
+                                       { "item", objN ({ { "note", "leans on triplet hats" } }) } }));
+        check (ok (prefWrite2), "agent_memory_write global/preference (derived, object item) ok");
+        check ((int) prefWrite2.getProperty ("data", var()).getProperty ("count", -1) == 2,
+               "agent_memory_write returns the post-write count");
+
+        auto prefRead = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "preference" } }));
+        check (ok (prefRead), "agent_memory_read global/preference ok");
+        auto prefItems = prefRead.getProperty ("data", var()).getProperty ("items", var());
+        check (prefItems.size() == 2, "agent_memory_read returns both preference items");
+        check (prefItems[0].getProperty ("item", var()).getProperty ("note", var()).toString() == "leans on triplet hats",
+               "agent_memory_read is newest-first");
+        check (prefItems[1].getProperty ("item", var()).toString() == "always keep the low end wide",
+               "agent_memory_read's oldest item sorts last");
+        check ((bool) prefItems[1].getProperty ("explicit", false), "the explicit flag round-trips");
+
+        check (ok (cmd (ops, "agent_memory_write",
+                        objN ({ { "scope", "global" }, { "kind", "drum_pattern" },
+                                { "item", "four on the floor, ghost snares" } }))),
+               "agent_memory_write global/drum_pattern ok");
+        auto drumRead = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "drum_pattern" } }));
+        check ((int) drumRead.getProperty ("data", var()).getProperty ("items", var()).size() == 1,
+               "kind filtering isolates drum_pattern from preference");
+
+        auto allRead = cmd (ops, "agent_memory_read", args1 ("scope", "global"));
+        check (ok (allRead), "agent_memory_read global with no kind filter ok");
+        check ((int) allRead.getProperty ("data", var()).getProperty ("items", var()).size() >= 3,
+               "unfiltered global read merges every kind's store");
+
+        // ── write survives undo (non-undoable by construction: no Tracktion txn opened) ──
+        check (ok (cmd (ops, "create_track", args1 ("name", "AgtMemUndoProbe"))), "undo-probe create_track ok");
+        const int tAfterCreate = tracks (ops);
+        check (ok (cmd (ops, "agent_memory_write",
+                        objN ({ { "scope", "global" }, { "kind", "preference" }, { "item", "undo-probe item" } }))),
+               "agent_memory_write between the probe create_track and undo, ok");
+        check (ok (cmd (ops, "undo")), "undo after agent_memory_write ok");
+        check (tracks (ops) == tAfterCreate - 1,
+               "undo reverted the REAL prior transaction (create_track) -- agent_memory_write left no stray empty txn");
+        auto afterUndoRead = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "preference" } }));
+        bool undoProbeStillThere = false;
+        {
+            auto items = afterUndoRead.getProperty ("data", var()).getProperty ("items", var());
+            for (int i = 0; i < items.size(); ++i)
+                if (items[i].getProperty ("item", var()).toString() == "undo-probe item") undoProbeStillThere = true;
+        }
+        check (undoProbeStillThere, "agent_memory_write is NOT on the undo stack -- undo cannot remove a stored item");
+
+        // ── mosh-log.jsonl: writes logged undoable:false; reads not logged at all ──
+        {
+            auto slog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool writeLogged = false, writeUndoableFalse = false, readLogged = false;
+            for (auto& ln : StringArray::fromLines (slog))
+            {
+                if (ln.contains ("\"command\": \"agent_memory_write\""))
+                {
+                    writeLogged = true;
+                    if (ln.contains ("\"undoable\": false")) writeUndoableFalse = true;
+                }
+                if (ln.contains ("\"command\": \"agent_memory_read\"")) readLogged = true;
+            }
+            check (writeLogged, "mosh-log.jsonl records agent_memory_write");
+            check (writeUndoableFalse, "agent_memory_write logged undoable:false");
+            check (! readLogged, "mosh-log.jsonl records NO agent_memory_read lines (reads are unlogged)");
+        }
+
+        // ── cap eviction: an all-derived store at cap evicts the OLDEST item ──
+        {
+            auto root = AgentMemoryStore::globalRoot();
+            auto file = AgentMemoryStore::globalStoreFile (root, "lyric_framework");
+            Array<var> seeded;
+            for (int i = 0; i < AgentMemoryStore::kMaxItemsPerStore; ++i)
+            {
+                auto* o = new DynamicObject();
+                o->setProperty ("ts", (int64) i);
+                o->setProperty ("kind", "lyric_framework");
+                o->setProperty ("explicit", false);
+                o->setProperty ("item", "seed-" + String (i));
+                seeded.add (var (o));
+            }
+            check (AgentMemoryStore::writeJsonlFile (file, seeded),
+                   "seeded lyric_framework store to the cap (500 derived items)");
+
+            auto atCap = cmd (ops, "agent_memory_write",
+                              objN ({ { "scope", "global" }, { "kind", "lyric_framework" }, { "item", "seed-500" } }));
+            check (ok (atCap), "agent_memory_write at cap (all-derived store) still succeeds");
+            check ((int) atCap.getProperty ("data", var()).getProperty ("count", -1) == AgentMemoryStore::kMaxItemsPerStore,
+                   "count stays at the cap after eviction");
+
+            auto onDisk = AgentMemoryStore::readJsonlFile (file);
+            check (onDisk.size() == AgentMemoryStore::kMaxItemsPerStore, "on-disk store stays at the cap");
+            check (onDisk[0].getProperty ("item", var()).toString() == "seed-1",
+                   "the OLDEST item (seed-0) was evicted, not an arbitrary one");
+            check (onDisk[onDisk.size() - 1].getProperty ("item", var()).toString() == "seed-500",
+                   "the new item was appended at the end");
+        }
+
+        // ── cap eviction: an all-EXPLICIT store rejects a derived write, but accepts
+        //    (and evicts the oldest explicit item for) another explicit write ──
+        {
+            auto root = AgentMemoryStore::globalRoot();
+            auto file = AgentMemoryStore::globalStoreFile (root, "drum_pattern");
+            Array<var> seeded;
+            for (int i = 0; i < AgentMemoryStore::kMaxItemsPerStore; ++i)
+            {
+                auto* o = new DynamicObject();
+                o->setProperty ("ts", (int64) i);
+                o->setProperty ("kind", "drum_pattern");
+                o->setProperty ("explicit", true);
+                o->setProperty ("item", "explicit-" + String (i));
+                seeded.add (var (o));
+            }
+            check (AgentMemoryStore::writeJsonlFile (file, seeded),
+                   "seeded drum_pattern store to the cap (500 explicit items)");
+
+            auto rejected = cmd (ops, "agent_memory_write",
+                                 objN ({ { "scope", "global" }, { "kind", "drum_pattern" }, { "item", "should be rejected" } }));
+            check (! ok (rejected), "a derived write against an all-explicit, at-cap store is rejected");
+            check (rejected.getProperty ("error", var()).toString().contains ("explicit"),
+                   "the rejection error is self-describing");
+            check (AgentMemoryStore::readJsonlFile (file).size() == AgentMemoryStore::kMaxItemsPerStore,
+                   "the rejected write did not change the on-disk store");
+
+            auto explicitAtCap = cmd (ops, "agent_memory_write",
+                                      objN ({ { "scope", "global" }, { "kind", "drum_pattern" }, { "explicit", true },
+                                              { "item", "explicit-500" } }));
+            check (ok (explicitAtCap), "an EXPLICIT write against an all-explicit, at-cap store still succeeds");
+            auto onDisk2 = AgentMemoryStore::readJsonlFile (file);
+            check (onDisk2.size() == AgentMemoryStore::kMaxItemsPerStore, "count stays at the cap");
+            check (onDisk2[0].getProperty ("item", var()).toString() == "explicit-1",
+                   "the OLDEST explicit item (explicit-0) was the only valid eviction victim");
+        }
+
+        // ── meta.json stamped on first global write ──
+        check (AgentMemoryStore::globalRoot().getChildFile ("meta.json").existsAsFile(),
+               "meta.json exists after the first global write");
+        check ((int) JSON::fromString (AgentMemoryStore::globalRoot().getChildFile ("meta.json").loadFileAsString())
+                        .getProperty ("v", -1) == 1,
+               "meta.json carries v:1");
+
+        // ── project scope: write -> read, kind default, Save-As sidecar copy ──
+        check (ok (cmd (ops, "agent_memory_write",
+                        objN ({ { "scope", "project" }, { "item", "the bridge needs a bigger lift" } }))),
+               "agent_memory_write project (kind defaults to \"note\") ok");
+        check (ok (cmd (ops, "agent_memory_write",
+                        objN ({ { "scope", "project" }, { "kind", "mood" }, { "explicit", true },
+                                { "item", objN ({ { "mood", "triumphant" } }) } }))),
+               "agent_memory_write project (explicit, custom kind) ok");
+
+        auto projRead = cmd (ops, "agent_memory_read", args1 ("scope", "project"));
+        check (ok (projRead), "agent_memory_read project ok");
+        auto projItems = projRead.getProperty ("data", var()).getProperty ("items", var());
+        check (projItems.size() == 2, "project sidecar carries both notes");
+        check (projItems[0].getProperty ("kind", var()).toString() == "mood", "newest project note reads first");
+        check (projItems[1].getProperty ("kind", var()).toString() == "note", "kind defaulted to \"note\" when omitted");
+
+        const auto sidecarBefore = AgentMemoryStore::sidecarFileFor (eng.editFile());
+        check (sidecarBefore.existsAsFile(), "the project sidecar file exists next to the edit file");
+
+        auto agtSaFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-agtmem-saveas.tracktionedit");
+        agtSaFile.deleteFile();
+        AgentMemoryStore::sidecarFileFor (agtSaFile).deleteFile();
+        check (ok (cmd (ops, "save_as", args1 ("file", agtSaFile.getFullPathName()))), "save_as (agent-memory sidecar) ok");
+        check (AgentMemoryStore::sidecarFileFor (agtSaFile).existsAsFile(),
+               "save_as copied the project-scope sidecar to the new location");
+
+        auto projReadAfterSaveAs = cmd (ops, "agent_memory_read", args1 ("scope", "project"));
+        check ((int) projReadAfterSaveAs.getProperty ("data", var()).getProperty ("items", var()).size() == 2,
+               "both project notes survive Save-As via the copied sidecar");
+
+        check (! ok (cmd (ops, "agent_memory_write", objN ({ { "scope", "project" } }))),
+               "agent_memory_write project missing item fails cleanly");
     }
 
     finishSection();
