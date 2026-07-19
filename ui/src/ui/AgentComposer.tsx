@@ -12,6 +12,7 @@ import { handleFast } from "../agent/performer";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
+import { agenticLoopOn, runLoopTask } from "../agent/loop/runTask";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -166,6 +167,18 @@ export function AgentComposer() {
           runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
+        });
+        return;
+      }
+
+      // The agentic loop (flag-gated, default OFF): open-ended asks become
+      // multi-step tasks — plan, act, observe, repair — rendered live in the
+      // v2 agent drawer as ONE undo unit. Section-scope and the fast path keep
+      // their precedence above; hands-free still never reaches an LLM.
+      if (agenticLoopOn()) {
+        await runLoopTask(text, {
+          say: (t) => setSay(t),
+          utter: (intent, s) => pushAgentUtter(intent, s),
         });
         return;
       }
