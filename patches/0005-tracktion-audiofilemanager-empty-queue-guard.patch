@@ -1,0 +1,14 @@
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+index aefdfa5d942..371f0bee54c 100644
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+@@ -978,0 +979,9 @@ void AudioFileManager::handleAsyncUpdate()
++
++        // MOSH 0005: a delivery can land with nothing queued —
++        // checkFileForChangesAsync() calls addIfNotAlreadyThere() (conditional) but
++        // triggerAsyncUpdate() (unconditional), so triggers can outnumber entries.
++        // Without this guard, size() - 1 == -1 and getUnchecked(-1) reads values[-1]:
++        // a heap-buffer-overflow READ. A spurious delivery must be a no-op.
++        if (filesToCheck.isEmpty())
++            return;
++
