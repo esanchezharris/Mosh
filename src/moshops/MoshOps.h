@@ -110,6 +110,16 @@ private:
     // LYR Phase 2 — confirm the proposed flow grid → flips each line `proposed`→`seed` so it's
     // eligible for generation (the human-in-the-loop gate). Undoable; Track-scoped; agent-callable.
     juce::var cmdConfirmSkeleton     (const juce::var& args);
+    // AGT-MEM (Phase-B memory lane, M1) — the native agent-memory store. Pure file I/O
+    // (src/moshops/AgentMemoryStore.h) — no ValueTree/Edit mutation, no snapshot
+    // change, no undo transaction. Writes are logged (JSONL); reads are NOT (mirrors
+    // cmdGetLyricCorpusStats/cmdGetRhymes — read-only commands simply skip logLine).
+    juce::var cmdAgentMemoryWrite (const juce::var& args);
+    juce::var cmdAgentMemoryRead  (const juce::var& args);
+    // AGT-MEM (M3) — the memory drawer's per-item delete + per-tier clear. Mutations
+    // (logged, undoable:false — same posture as the write above).
+    juce::var cmdAgentMemoryDelete (const juce::var& args);
+    juce::var cmdAgentMemoryClear  (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);
@@ -658,6 +668,11 @@ private:
     void  emitTrackPatch (te::AudioTrack& track);
     void  logLine (const juce::String& command, const juce::var& args,
                    bool ok, const juce::String& error, bool undoable);
+    // TASTE-002 — the in-place workflow's soft POSITIVE: at save/export time, every
+    // still-applied (appliedInPlace, not bypassed) render layer logs ONE render_kept
+    // JSONL taste label, deduped on layerId for the life of this process.
+    void  logKeptRenderLabels();
+    juce::StringArray renderKeptLogged_;
 
     static juce::var okResult  (const juce::String& command, juce::var data = {});
     static juce::var errResult (const juce::String& command, const juce::String& message);

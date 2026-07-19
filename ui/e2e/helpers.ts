@@ -46,6 +46,20 @@ export async function bootRedesign(page: Page): Promise<void> {
   await expect(page.getByTestId("arrangement")).toBeVisible();
 }
 
+/** Boot the v2 shell via the dev `?shell=v2` override (promoted from v2-shell.spec's
+ *  local copy). `theme` defaults to the shipping default (cream/light ground); pass
+ *  "dark" to pin the dark ground — edge-case specs assert against BOTH. */
+export async function bootV2(page: Page, opts: { theme?: "dark" | "light" } = {}): Promise<void> {
+  const values = opts.theme ? { theme: opts.theme } : {};
+  await page.addInitScript((vals) => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: vals, keyOverrides: {} }));
+  }, values);
+  await page.goto("/?shell=v2");
+  await expect(page.getByTestId("v2-shell")).toBeVisible();
+  await expect(page.getByTestId("v2-timeline")).toBeVisible();
+}
+
 /** File → <action> through the in-WebView File menu (same runAction dispatch the native
  *  menu + keyboard use). */
 export async function fileMenu(page: Page, action: string): Promise<void> {

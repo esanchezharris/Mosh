@@ -45,7 +45,7 @@ describe("MultiplayerPanel — create/join UX + the join-replaces-project safety
     document.body.appendChild(host);
     root = createRoot(host);
     mpCreateSession = vi.fn(async () => {});
-    mpJoinSession = vi.fn(async () => {});
+    mpJoinSession = vi.fn(async () => ({ ok: true, command: "mp_join_session" }));
     mpLeaveSession = vi.fn(async () => {});
     useStore.setState({
       mp: { active: false, roomCode: null, selfPeer: null, connected: false },
@@ -150,5 +150,56 @@ describe("MultiplayerPanel — create/join UX + the join-replaces-project safety
     const leaveBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "Leave session")!;
     act(() => { leaveBtn.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     expect(mpLeaveSession).toHaveBeenCalled();
+  });
+
+  // #42 (EDGECASE_SWEEP_V2_2026-07-18) — join failures used to surface only in the
+  // global error bar; the panel the user is LOOKING AT stayed silent. These pin the
+  // inline pending + failure feedback.
+  const joinWith = (code: string) => {
+    const codeInput = host.querySelector<HTMLInputElement>('input[aria-label="Room code to join"]')!;
+    act(() => { setInputValue(codeInput, code); });
+    const joinBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Join"))!;
+    act(() => { joinBtn.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+  };
+
+  it("a failed join shows an inline error in the panel (#42)", async () => {
+    mpJoinSession.mockResolvedValue({ ok: false, command: "mp_join_session", error: "no such room: JUNK-1" });
+    render();
+    joinWith("JUNK-1");
+    await act(async () => {});
+    const errEl = host.querySelector('[data-testid="mp-join-error"]');
+    expect(errEl).not.toBeNull();
+    expect(errEl!.textContent).toContain("no such room");
+    expect(errEl!.getAttribute("role")).toBe("alert");
+  });
+
+  it("the Join control shows a pending state while the join is in flight", async () => {
+    let resolveJoin!: (r: unknown) => void;
+    mpJoinSession.mockReturnValue(new Promise((r) => { resolveJoin = r; }));
+    render();
+    joinWith("SLOW-ROOM");
+    const joinBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Join"))!;
+    expect(joinBtn.textContent).toMatch(/joining/i);
+    expect(joinBtn.hasAttribute("disabled")).toBe(true);
+    await act(async () => { resolveJoin({ ok: true, command: "mp_join_session" }); });
+  });
+
+  it("editing the code clears a stale join error", async () => {
+    mpJoinSession.mockResolvedValue({ ok: false, command: "mp_join_session", error: "no such room: JUNK-2" });
+    render();
+    joinWith("JUNK-2");
+    await act(async () => {});
+    expect(host.querySelector('[data-testid="mp-join-error"]')).not.toBeNull();
+    const codeInput = host.querySelector<HTMLInputElement>('input[aria-label="Room code to join"]')!;
+    act(() => { setInputValue(codeInput, "JUNK-3"); });
+    expect(host.querySelector('[data-testid="mp-join-error"]')).toBeNull();
+  });
+
+  it("a successful join shows no inline error", async () => {
+    mpJoinSession.mockResolvedValue({ ok: true, command: "mp_join_session" });
+    render();
+    joinWith("MOCK-ROOM-x");
+    await act(async () => {});
+    expect(host.querySelector('[data-testid="mp-join-error"]')).toBeNull();
   });
 });

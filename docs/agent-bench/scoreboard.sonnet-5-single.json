@@ -1,0 +1,1644 @@
+{
+  "tag": "sonnet-5-single",
+  "model": "anthropic/claude-sonnet-5",
+  "base": "https://openrouter.ai/api/v1",
+  "runner": "single",
+  "bin": "/Users/emiliosanchez-harris/Mosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "maxSteps": 8,
+  "ranAt": "2026-07-19T03:14:01.998Z",
+  "success": 0.7352941176470589,
+  "passed": 25,
+  "total": 34,
+  "stepEffMean": 1,
+  "cmdErrRateMean": 0.09803921568627451,
+  "invalidRateMean": 0.00980392156862745,
+  "wrongDefers": 2,
+  "deferCorrect": 1,
+  "byCat": {
+    "arrange": {
+      "pass": 5,
+      "total": 6
+    },
+    "compose-drums": {
+      "pass": 2,
+      "total": 4
+    },
+    "compose-melody": {
+      "pass": 4,
+      "total": 4
+    },
+    "mix": {
+      "pass": 3,
+      "total": 5
+    },
+    "master": {
+      "pass": 1,
+      "total": 3
+    },
+    "generative": {
+      "pass": 3,
+      "total": 3
+    },
+    "lyrics": {
+      "pass": 2,
+      "total": 2
+    },
+    "repair": {
+      "pass": 1,
+      "total": 3
+    },
+    "ambiguous": {
+      "pass": 4,
+      "total": 4
+    }
+  },
+  "usage": {
+    "promptTokens": 213335,
+    "completionTokens": 8075,
+    "calls": 34
+  },
+  "rows": [
+    {
+      "id": "arr-clear-middle",
+      "category": "arrange",
+      "ask": "wipe out everything between 4 and 8 seconds across the whole arrangement",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "timeRangeEmpty",
+              "startSec": 4,
+              "endSec": 8
+            },
+            "pass": true,
+            "note": "range [4,8] empty"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "delete_time_range",
+              "min": 1
+            },
+            "pass": true,
+            "note": "delete_time_range ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "delete_time_range"
+      ],
+      "results": [
+        {
+          "command": "delete_time_range",
+          "ok": true
+        }
+      ],
+      "wallMs": 5159,
+      "renders": []
+    },
+    {
+      "id": "arr-close-gap",
+      "category": "arrange",
+      "ask": "cut the dead space between 4 and 8 seconds and pull everything after it back",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "delete_time_range",
+              "min": 1
+            },
+            "pass": true,
+            "note": "delete_time_range ×1"
+          },
+          {
+            "check": {
+              "kind": "clipStart",
+              "track": "Drums",
+              "clipIndex": 1,
+              "minSec": 3.9,
+              "maxSec": 4.1
+            },
+            "pass": true,
+            "note": "start 4s"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "delete_time_range"
+      ],
+      "results": [
+        {
+          "command": "delete_time_range",
+          "ok": true
+        }
+      ],
+      "wallMs": 3779,
+      "renders": []
+    },
+    {
+      "id": "arr-loop-first-second",
+      "category": "arrange",
+      "ask": "loop just the first second of the drum clip's audio inside the clip",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "clipField",
+              "track": "Drums",
+              "clipIndex": 0,
+              "field": "loopEnabled",
+              "eq": true
+            },
+            "pass": true,
+            "note": "loopEnabled=true"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "set_clip_loop",
+              "min": 1
+            },
+            "pass": true,
+            "note": "set_clip_loop ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_clip_loop"
+      ],
+      "results": [
+        {
+          "command": "set_clip_loop",
+          "ok": true
+        }
+      ],
+      "wallMs": 6077,
+      "renders": []
+    },
+    {
+      "id": "arr-split-dup",
+      "category": "arrange",
+      "ask": "split the 808 clip down the middle and duplicate the back half so it repeats",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "clipCount",
+              "track": "808",
+              "delta": 2
+            },
+            "pass": false,
+            "note": "Δclips 0 ≠ 2"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "split_clip",
+              "min": 1
+            },
+            "pass": false,
+            "note": "split_clip ×0 < 1"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "duplicate_clip",
+              "min": 1
+            },
+            "pass": false,
+            "note": "duplicate_clip ×0 < 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 4856,
+      "renders": []
+    },
+    {
+      "id": "arr-map-sections",
+      "category": "arrange",
+      "ask": "map the song out: intro for the first 8 beats, verse from 8 to 24, hook from 24 to 40",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "sectionExists",
+              "name": "Intro",
+              "startBeat": 0,
+              "endBeat": 8,
+              "tolBeats": 1
+            },
+            "pass": true,
+            "note": "section \"Intro\" ok"
+          },
+          {
+            "check": {
+              "kind": "sectionExists",
+              "name": "Verse",
+              "startBeat": 8,
+              "endBeat": 24,
+              "tolBeats": 1
+            },
+            "pass": true,
+            "note": "section \"Verse\" ok"
+          },
+          {
+            "check": {
+              "kind": "sectionExists",
+              "name": "Hook",
+              "startBeat": 24,
+              "endBeat": 40,
+              "tolBeats": 1
+            },
+            "pass": true,
+            "note": "section \"Hook\" ok"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_section",
+        "create_section",
+        "create_section"
+      ],
+      "results": [
+        {
+          "command": "create_section",
+          "ok": true
+        },
+        {
+          "command": "create_section",
+          "ok": true
+        },
+        {
+          "command": "create_section",
+          "ok": true
+        }
+      ],
+      "wallMs": 5054,
+      "renders": []
+    },
+    {
+      "id": "arr-move-trim",
+      "category": "arrange",
+      "ask": "move the drum clip to start at bar 2 and make it exactly 2 seconds long",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "clipStart",
+              "track": "Drums",
+              "clipIndex": 0,
+              "minSec": 1.9,
+              "maxSec": 2.1
+            },
+            "pass": true,
+            "note": "start 2s"
+          },
+          {
+            "check": {
+              "kind": "clipField",
+              "track": "Drums",
+              "clipIndex": 0,
+              "field": "length",
+              "eq": 2,
+              "tol": 0.05
+            },
+            "pass": true,
+            "note": "length=2"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "trim_clip"
+      ],
+      "results": [
+        {
+          "command": "trim_clip",
+          "ok": true
+        }
+      ],
+      "wallMs": 5077,
+      "renders": []
+    },
+    {
+      "id": "drums-boombap",
+      "category": "compose-drums",
+      "ask": "give me two bars of a boom-bap drum groove at 90 bpm",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "eq": 90
+            },
+            "pass": true,
+            "note": "tempo 90"
+          },
+          {
+            "check": {
+              "kind": "trackCount",
+              "delta": 1
+            },
+            "pass": false,
+            "note": "Δtracks 2 ≠ 1"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": true,
+            "note": "add_drum_pattern ×1"
+          },
+          {
+            "check": {
+              "kind": "midiNoteCount",
+              "track": "Drums",
+              "min": 8
+            },
+            "pass": true,
+            "note": "24 notes"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_tempo",
+        "create_track",
+        "add_drum_pattern"
+      ],
+      "results": [
+        {
+          "command": "set_tempo",
+          "ok": true
+        },
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "add_drum_pattern",
+          "ok": true
+        }
+      ],
+      "wallMs": 15045,
+      "renders": []
+    },
+    {
+      "id": "drums-new-hats",
+      "category": "compose-drums",
+      "ask": "lay some steady 8th-note hats down",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": false,
+            "note": "add_drum_pattern ×0 < 1"
+          },
+          {
+            "check": {
+              "kind": "trackCount",
+              "delta": 1
+            },
+            "pass": false,
+            "note": "Δtracks 0 ≠ 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 1,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "add_drum_pattern"
+      ],
+      "results": [
+        {
+          "command": "add_drum_pattern",
+          "ok": false,
+          "error": "track holds wave audio — a drum sampler would silence it; use a drum track"
+        }
+      ],
+      "wallMs": 17069,
+      "renders": []
+    },
+    {
+      "id": "drums-trap-sketch",
+      "category": "compose-drums",
+      "ask": "start a trap sketch at 140 — rolling 16th hats, sparse kick, snare on beat 3",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "eq": 140
+            },
+            "pass": true,
+            "note": "tempo 140"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": true,
+            "note": "add_drum_pattern ×1"
+          },
+          {
+            "check": {
+              "kind": "midiNoteCount",
+              "track": "Drums",
+              "min": 16
+            },
+            "pass": true,
+            "note": "80 notes"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_tempo",
+        "create_track",
+        "add_drum_pattern"
+      ],
+      "results": [
+        {
+          "command": "set_tempo",
+          "ok": true
+        },
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "add_drum_pattern",
+          "ok": true
+        }
+      ],
+      "wallMs": 39658,
+      "renders": []
+    },
+    {
+      "id": "drums-mute-hat-lane",
+      "category": "compose-drums",
+      "ask": "the hats are way too much — kill just the hat lane, keep the rest",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "set_drum_lane",
+              "min": 1
+            },
+            "pass": true,
+            "note": "set_drum_lane ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_drum_lane"
+      ],
+      "results": [
+        {
+          "command": "set_drum_lane",
+          "ok": true
+        }
+      ],
+      "wallMs": 5146,
+      "renders": []
+    },
+    {
+      "id": "mel-bass-in-key",
+      "category": "compose-melody",
+      "ask": "write a simple one-bar bassline into the 808's midi clip",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_note",
+              "min": 3
+            },
+            "pass": true,
+            "note": "add_note ×5"
+          },
+          {
+            "check": {
+              "kind": "notesInKey",
+              "track": "808",
+              "tonic": "A",
+              "mode": "minor",
+              "minNotes": 3
+            },
+            "pass": true,
+            "note": "5/5 in A minor"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "results": [
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        }
+      ],
+      "wallMs": 10471,
+      "renders": []
+    },
+    {
+      "id": "mel-keys-in-key",
+      "category": "compose-melody",
+      "ask": "put a gentle four-note melody in the keys clip — keep it in key",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_note",
+              "min": 4
+            },
+            "pass": true,
+            "note": "add_note ×4"
+          },
+          {
+            "check": {
+              "kind": "notesInKey",
+              "track": "Keys",
+              "tonic": "C",
+              "mode": "major",
+              "minNotes": 4
+            },
+            "pass": true,
+            "note": "4/4 in C major"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "results": [
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        }
+      ],
+      "wallMs": 9839,
+      "renders": []
+    },
+    {
+      "id": "mel-quantize",
+      "category": "compose-melody",
+      "ask": "tighten up the keys timing to the grid",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "quantize_notes",
+              "min": 1
+            },
+            "pass": true,
+            "note": "quantize_notes ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "quantize_notes"
+      ],
+      "results": [
+        {
+          "command": "quantize_notes",
+          "ok": true
+        }
+      ],
+      "wallMs": 3746,
+      "renders": []
+    },
+    {
+      "id": "mel-set-key",
+      "category": "compose-melody",
+      "ask": "put us in D minor",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "sessionKey",
+              "tonic": "D",
+              "mode": "minor"
+            },
+            "pass": true,
+            "note": "key D minor"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_key"
+      ],
+      "results": [
+        {
+          "command": "set_key",
+          "ok": true
+        }
+      ],
+      "wallMs": 8708,
+      "renders": []
+    },
+    {
+      "id": "mix-balance",
+      "category": "mix",
+      "ask": "drop the drums about 3 dB and nudge the keys a bit to the right",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Drums",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1.5,
+              "max": 6
+            },
+            "pass": true,
+            "note": "volumeDb moved down 3.0"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Keys",
+              "field": "pan",
+              "min": 0.05,
+              "max": 0.6
+            },
+            "pass": true,
+            "note": "pan=0.25"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume",
+        "set_track_pan"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_pan",
+          "ok": true
+        }
+      ],
+      "wallMs": 6760,
+      "renders": []
+    },
+    {
+      "id": "mix-vocal-space",
+      "category": "mix",
+      "ask": "give the vocal some room — a reverb send — and tuck the drums about 2 dB",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "busCountDelta",
+              "delta": 1
+            },
+            "pass": true,
+            "note": "Δbuses 1"
+          },
+          {
+            "check": {
+              "kind": "sendExists",
+              "track": "Vocal"
+            },
+            "pass": false,
+            "note": "\"Vocal\" has no sends"
+          },
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Drums",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1,
+              "max": 4
+            },
+            "pass": true,
+            "note": "volumeDb moved down 2.0"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.3333333333333333,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_bus",
+        "add_send",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "create_bus",
+          "ok": true
+        },
+        {
+          "command": "add_send",
+          "ok": false,
+          "error": "no such bus"
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 10869,
+      "renders": []
+    },
+    {
+      "id": "mix-submix",
+      "category": "mix",
+      "ask": "route the drums and the 808 into a new track called Rhythm so I can treat them as one",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackExists",
+              "name": "Rhythm"
+            },
+            "pass": true,
+            "note": "\"Rhythm\" exists"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "set_track_output",
+              "min": 2
+            },
+            "pass": false,
+            "note": "set_track_output ×0 < 2"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.6666666666666666,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_track",
+        "set_track_output",
+        "set_track_output"
+      ],
+      "results": [
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "set_track_output",
+          "ok": false,
+          "error": "no destination track: Rhythm"
+        },
+        {
+          "command": "set_track_output",
+          "ok": false,
+          "error": "no destination track: Rhythm"
+        }
+      ],
+      "wallMs": 4673,
+      "renders": []
+    },
+    {
+      "id": "mix-clip-not-fader",
+      "category": "mix",
+      "ask": "the drum CLIP itself is too hot — take the clip down about 6 dB but leave the fader alone",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "clipField",
+              "track": "Drums",
+              "clipIndex": 0,
+              "field": "gainDb",
+              "eq": -6,
+              "tol": 2
+            },
+            "pass": true,
+            "note": "gainDb=-6"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Drums",
+              "field": "volumeDb",
+              "eq": 0,
+              "tol": 0.01
+            },
+            "pass": true,
+            "note": "volumeDb=0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_clip_gain"
+      ],
+      "results": [
+        {
+          "command": "set_clip_gain",
+          "ok": true
+        }
+      ],
+      "wallMs": 3936,
+      "renders": []
+    },
+    {
+      "id": "mix-cleanup",
+      "category": "mix",
+      "ask": "clear the solos and mutes so everything plays",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Vocal",
+              "field": "mute",
+              "eq": false
+            },
+            "pass": true,
+            "note": "mute=false"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "solo",
+              "eq": false
+            },
+            "pass": true,
+            "note": "solo=false"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_mute",
+        "set_track_solo"
+      ],
+      "results": [
+        {
+          "command": "set_track_mute",
+          "ok": true
+        },
+        {
+          "command": "set_track_solo",
+          "ok": true
+        }
+      ],
+      "wallMs": 6382,
+      "renders": []
+    },
+    {
+      "id": "master-glue",
+      "category": "master",
+      "ask": "put a gentle compressor on the master bus to glue the mix",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterChainContains",
+              "nameIncludes": "comp"
+            },
+            "pass": true,
+            "note": "master ~\"comp\" present"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "load_master_builtin"
+      ],
+      "results": [
+        {
+          "command": "load_master_builtin",
+          "ok": true
+        }
+      ],
+      "wallMs": 4439,
+      "renders": []
+    },
+    {
+      "id": "master-eq-before-comp",
+      "category": "master",
+      "ask": "add an EQ on the master before the compressor",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterChainContains",
+              "nameIncludes": "eq"
+            },
+            "pass": false,
+            "note": "master ~\"eq\" missing (chain: Compressor)"
+          },
+          {
+            "check": {
+              "kind": "masterChainOrder",
+              "first": "eq",
+              "then": "comp"
+            },
+            "pass": false,
+            "note": "master chain missing \"eq\""
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "list_builtins"
+      ],
+      "results": [
+        {
+          "command": "list_builtins",
+          "ok": true
+        }
+      ],
+      "wallMs": 11844,
+      "renders": []
+    },
+    {
+      "id": "master-trim",
+      "category": "master",
+      "ask": "the whole mix is running hot — pull the master down a couple dB",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterDelta",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1,
+              "max": 6
+            },
+            "pass": false,
+            "note": "master volumeDb Δ1.0 not down within [1,6]"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_master_volume"
+      ],
+      "results": [
+        {
+          "command": "set_master_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 3560,
+      "renders": []
+    },
+    {
+      "id": "gen-lofi",
+      "category": "generative",
+      "ask": "make the drum clip lo-fi",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOkAny",
+              "names": [
+                "compile_render",
+                "create_render_layer"
+              ],
+              "min": 1
+            },
+            "pass": true,
+            "note": "compile_render|create_render_layer ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "compile_render"
+      ],
+      "results": [
+        {
+          "command": "compile_render",
+          "ok": true
+        }
+      ],
+      "wallMs": 6176,
+      "renders": []
+    },
+    {
+      "id": "gen-reimagine-subtle",
+      "category": "generative",
+      "ask": "re-imagine the 808 clip, but keep it close to my original",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOkAny",
+              "names": [
+                "compile_render",
+                "create_render_layer"
+              ],
+              "min": 1
+            },
+            "pass": true,
+            "note": "compile_render|create_render_layer ×1"
+          },
+          {
+            "check": {
+              "kind": "clipField",
+              "track": "808",
+              "clipIndex": 0,
+              "field": "hasRenderLayer",
+              "eq": true
+            },
+            "pass": true,
+            "note": "hasRenderLayer=true"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0.3333333333333333,
+        "invalidRate": 0.3333333333333333,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_render_layer",
+        "set_render_param",
+        "render_layer"
+      ],
+      "results": [
+        {
+          "command": "create_render_layer",
+          "ok": true
+        },
+        {
+          "command": "set_render_param",
+          "ok": false,
+          "error": "set_render_param: \"coverage\" must be a string"
+        },
+        {
+          "command": "render_layer",
+          "ok": true
+        }
+      ],
+      "wallMs": 10176,
+      "renders": []
+    },
+    {
+      "id": "gen-run-render",
+      "category": "generative",
+      "ask": "run the render on the drum clip",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "render_layer",
+              "min": 1
+            },
+            "pass": true,
+            "note": "render_layer ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "render_layer"
+      ],
+      "results": [
+        {
+          "command": "render_layer",
+          "ok": true
+        }
+      ],
+      "wallMs": 9627,
+      "renders": []
+    },
+    {
+      "id": "lyr-start-sheet",
+      "category": "lyrics",
+      "ask": "start a lyric sheet on the vocal track — moody, about neon nights",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "create_lyric_sheet",
+              "min": 1
+            },
+            "pass": true,
+            "note": "create_lyric_sheet ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_lyric_sheet"
+      ],
+      "results": [
+        {
+          "command": "create_lyric_sheet",
+          "ok": true
+        }
+      ],
+      "wallMs": 8674,
+      "renders": []
+    },
+    {
+      "id": "lyr-first-line",
+      "category": "lyrics",
+      "ask": "write 'city lights burning cold' as the first line of the vocal's lyrics",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "set_lyric_line",
+              "min": 1
+            },
+            "pass": true,
+            "note": "set_lyric_line ×1"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0.5,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "create_lyric_sheet",
+        "set_lyric_line"
+      ],
+      "results": [
+        {
+          "command": "create_lyric_sheet",
+          "ok": false,
+          "error": "track already has a lyric sheet"
+        },
+        {
+          "command": "set_lyric_line",
+          "ok": true
+        }
+      ],
+      "wallMs": 4666,
+      "renders": []
+    },
+    {
+      "id": "rep-clipping-808",
+      "category": "repair",
+      "ask": "the 808 is clipping hard — fix it",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "netTrackLevelDelta",
+              "track": "808",
+              "dir": "down",
+              "minDb": 6
+            },
+            "pass": true,
+            "note": "net level moved down 15.0 dB"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "mute",
+              "eq": false
+            },
+            "pass": true,
+            "note": "mute=false"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_track_volume",
+        "normalize_clip"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "normalize_clip",
+          "ok": true
+        }
+      ],
+      "wallMs": 4863,
+      "renders": []
+    },
+    {
+      "id": "rep-move-comp",
+      "category": "repair",
+      "ask": "I meant that compressor for the drums, not the keys — sort it out",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "pluginOnTrack",
+              "track": "Keys",
+              "nameIncludes": "comp",
+              "negate": true
+            },
+            "pass": false,
+            "note": "plugin ~\"comp\" unexpectedly present"
+          },
+          {
+            "check": {
+              "kind": "pluginOnTrack",
+              "track": "Drums",
+              "nameIncludes": "comp"
+            },
+            "pass": false,
+            "note": "plugin ~\"comp\" missing"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.5,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "remove_plugin",
+        "load_builtin"
+      ],
+      "results": [
+        {
+          "command": "remove_plugin",
+          "ok": true
+        },
+        {
+          "command": "load_builtin",
+          "ok": false,
+          "error": "unknown builtin: Compressor"
+        }
+      ],
+      "wallMs": 15893,
+      "renders": []
+    },
+    {
+      "id": "rep-rogue-tempo",
+      "category": "repair",
+      "ask": "the song randomly takes off at 4 seconds — get rid of that",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempoMapPoint",
+              "time": 4,
+              "negate": true
+            },
+            "pass": false,
+            "note": "tempo point at 4s unexpectedly present"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "remove_tempo_change",
+              "min": 1
+            },
+            "pass": false,
+            "note": "remove_tempo_change ×0 < 1"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": true,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 7519,
+      "renders": []
+    },
+    {
+      "id": "amb-make-better",
+      "category": "ambiguous",
+      "ask": "make it better",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 3375,
+      "renders": []
+    },
+    {
+      "id": "amb-delete-bad",
+      "category": "ambiguous",
+      "ask": "delete the bad one",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 3905,
+      "renders": []
+    },
+    {
+      "id": "amb-fix-timing",
+      "category": "ambiguous",
+      "ask": "fix the timing",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 3293,
+      "renders": []
+    },
+    {
+      "id": "amb-upload",
+      "category": "ambiguous",
+      "ask": "master this and upload it to spotify for me",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 1,
+      "commands": [],
+      "results": [],
+      "wallMs": 5001,
+      "renders": []
+    }
+  ]
+}

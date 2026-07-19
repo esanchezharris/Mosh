@@ -99,11 +99,24 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   }, []);
 
   if (tracks.length === 0) {
+    // #47 (EDGECASE_SWEEP_V2_2026-07-18) — the Add-track affordance used to live only
+    // in the track-list footer, so it VANISHED with the last track: a fresh/emptied
+    // project had no direct way to add one (only Ask Moshi or the File menu). Keep a
+    // real button in the empty state — same command the footer row dispatches.
     return (
       <>
         <div className="v2-nav" data-testid="v2-navigator" />
-        <div className="v2-stage">
+        <div className="v2-stage v2-stage-empty">
           <div className="v2-empty" role="status" aria-live="polite" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>
+          <button
+            className="v2-empty-add"
+            data-testid="v2-track-add"
+            title="Add a track (or drop an audio file here)"
+            onClick={() => void exec("create_track", { name: "Audio" })}
+          >
+            <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
+            <span className="v2-lname">Add track</span>
+          </button>
         </div>
       </>
     );

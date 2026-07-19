@@ -112,6 +112,60 @@ describe("v2 timeline clip drag — time-axis guard", () => {
     expect(dragClip(GRID_SEC * PX_PER_SEC, 0)?.start).toBeCloseTo(1.5, 6);
   });
 
+  // EDGECASE_SWEEP_V2_2026-07-18 L3 — interrupted drags. A pointercancel (system
+  // gesture, alt-tab, palm rejection) or an Escape mid-drag must abandon the gesture:
+  // clear the optimistic preview, commit nothing, and leave later gestures clean.
+  const startEngagedDrag = (pointerId: number, dxPx: number) => {
+    const el = host.querySelector('[data-testid="v2-clip"]') as HTMLElement;
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 60, width: 400, height: 60, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const x0 = 200, y0 = 30;
+    act(() => { el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, button: 0, clientX: x0, clientY: y0 })); });
+    act(() => { el.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: x0 + dxPx, clientY: y0, buttons: 1 })); });
+    return { el, x0, y0 };
+  };
+  const clipLeft = () =>
+    (host.querySelector('[data-testid="v2-clip"]') as HTMLElement).style.left;
+
+  it("pointercancel mid-drag clears the preview and commits nothing", () => {
+    mount();
+    const origLeft = clipLeft();
+    const { el, x0, y0 } = startEngagedDrag(7, GRID_SEC * PX_PER_SEC);
+    expect(clipLeft()).not.toBe(origLeft); // preview engaged
+    act(() => { el.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 7, clientX: x0 + GRID_SEC * PX_PER_SEC, clientY: y0 })); });
+    expect(clipLeft()).toBe(origLeft); // optimistic position abandoned
+    // a stray up after the cancel must not resurrect the commit
+    act(() => { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 7, clientX: x0 + GRID_SEC * PX_PER_SEC, clientY: y0 })); });
+    expect(exec.mock.calls.some((c) => c[0] === "move_clip")).toBe(false);
+  });
+
+  it("Escape mid-drag cancels the gesture (preview cleared, nothing committed)", () => {
+    mount();
+    const origLeft = clipLeft();
+    const { el, x0, y0 } = startEngagedDrag(8, GRID_SEC * PX_PER_SEC);
+    expect(clipLeft()).not.toBe(origLeft);
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(clipLeft()).toBe(origLeft);
+    act(() => { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 8, clientX: x0 + GRID_SEC * PX_PER_SEC, clientY: y0 })); });
+    expect(exec.mock.calls.some((c) => c[0] === "move_clip")).toBe(false);
+  });
+
+  it("Escape mid-drag is consumed by the drag — an open overlay beneath stays open", async () => {
+    const { pushEscapeHandler } = await import("../../hooks/escapeStack");
+    mount();
+    const overlayClose = vi.fn();
+    const dispose = pushEscapeHandler(overlayClose);
+    try {
+      const { el, x0, y0 } = startEngagedDrag(9, GRID_SEC * PX_PER_SEC);
+      act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+      expect(overlayClose).not.toHaveBeenCalled(); // the drag took the key
+      act(() => { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 9, clientX: x0, clientY: y0 })); });
+      act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+      expect(overlayClose).toHaveBeenCalledTimes(1); // after the drag, the stack works again
+    } finally {
+      dispose();
+    }
+  });
+
   it("dragging a clip out and back to where it started commits nothing", () => {
     mount();
     // Skipping the preview inside the deadzone is not enough — the far-out one has

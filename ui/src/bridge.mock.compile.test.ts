@@ -76,7 +76,7 @@ describe("mock compile_render (prompt compiler)", () => {
     const clipId = await waveClipId();
     const cases: Array<[string, string, string]> = [
       ["tighten the timing", "timing", "quantize_notes"],
-      ["it sounds too muddy", "tone", "eq"],
+      ["it sounds too muddy", "tone", "4bandEq"],
       ["the levels are uneven", "dynamics", "moshOTT"],
     ];
     for (const [instr, subtype, tool] of cases) {

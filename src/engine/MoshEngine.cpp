@@ -3,6 +3,8 @@
 #include "SourceRef.h"
 #include "state/Migrations.h"
 
+#include <iostream>
+
 namespace mosh
 {
 namespace
@@ -100,7 +102,13 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     if (mayWipe)
         session.deleteRecursively();
     else if (freshSession)
-        DBG ("MoshEngine: refusing to wipe the GUI \"session\" dir");
+        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
+        // runs — so the refusal was invisible exactly where it matters. And refusing is
+        // not the end of it: the run then starts WARM off the GUI's existing project, so
+        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
+        // only: this is printed, and a redirected Windows console defaults to cp1252.
+        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
+                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
     session.createDirectory();
     if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
         mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);

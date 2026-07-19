@@ -141,6 +141,24 @@ export const SETTINGS: SettingDef[] = [
     help: "For creative asks (notes, re-imagine settings, arrangement), Moshi drafts several candidate plans in the cloud and picks the best-scoring one — slower on those turns. Chosen-vs-rejected drafts (your request text + the proposed edits) are saved locally to ~/Library/Mosh/dpo-pairs to improve Moshi.",
   },
   {
+    id: "agenticLoop",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Moshi",
+    label: "Agentic loop (experimental)",
+    help: "Moshi works bigger asks in steps: plans, acts, checks the result, and repairs — with live progress and a Stop button. One undo still reverts the whole task. Off = the classic one-shot behavior.",
+  },
+  {
+    id: "agentMemory",
+    type: "bool",
+    default: true,
+    scope: "app",
+    category: "Moshi",
+    label: "Agent memory (experimental)",
+    help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",
@@ -218,6 +236,7 @@ function interactionSettings(): SettingDef[] {
     duplicate: "Duplicate", group: "Group", to_start: "To start", to_end: "To end",
     split: "Split at playhead", tool_move: "Move tool", tool_split: "Split tool",
     tool_range: "Range tool", nudge_left: "Nudge clip left", nudge_right: "Nudge clip right",
+    felt_wrong: "Felt wrong (capture)",
   };
   const selectors: SettingDef[] = [
     {

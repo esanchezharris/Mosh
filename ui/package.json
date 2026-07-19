@@ -28,6 +28,7 @@
     "eval-sft": "tsx scripts/evalSft.mts",
     "drive-local": "tsx scripts/driveLocal.mts",
     "turn-factory": "tsx scripts/turnFactory.mts",
+    "agent-bench": "tsx scripts/agentBench.mts",
     "moshi-bench": "tsx scripts/moshiBench.mts",
     "policy-probe": "tsx scripts/policyProbe.mts",
     "synthesize": "tsx scripts/synthesizeDriver.mts"

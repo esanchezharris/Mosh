@@ -138,6 +138,11 @@ test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async
 });
 
 test("top-right primary controls stay visible and secondary tools move into overflow", async ({ page }) => {
+  // #52 (EDGECASE_SWEEP_V2_2026-07-18): below the shell's 1120px usability floor the
+  // layout SCROLLS horizontally instead of self-destructing (the old always-on-screen
+  // claim at 820px only held for the right-anchored cluster while the centred
+  // transport crushed the left meta controls). Above the floor, controls must be
+  // on-screen; below it, they must be reachable by scrolling the shell.
   for (const width of [1440, 820]) {
     await page.setViewportSize({ width, height: 900 });
     await bootV2(page);
@@ -149,6 +154,13 @@ test("top-right primary controls stay visible and secondary tools move into over
       page.getByTestId("v2-share"),
       page.getByTestId("v2-overflow"),
     ];
+    if (width < 1120) {
+      // floor active: shell scrolls; bring the right cluster into view first
+      await page.evaluate(() => {
+        const shell = document.querySelector('[data-testid="v2-shell"]')!;
+        shell.scrollLeft = shell.scrollWidth;
+      });
+    }
     for (const control of controls) {
       await expect(control).toBeVisible();
       const box = await control.boundingBox();

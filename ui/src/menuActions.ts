@@ -8,6 +8,10 @@
 import type { ActionId } from "./keymap";
 import type { Snapshot } from "./types";
 import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
+// AGT-MEM (M3, item 5) — session summaries on project switch (see writeSessionSummary
+// below, and sessionSummary.ts's own header for the design).
+import { getSessionLog, clearSessionLog } from "./agent/memory/sessionLog";
+import { buildSessionDigest, polishSessionSummary, type ChatFn } from "./agent/memory/sessionSummary";
 
 export type { ActionId };
 
@@ -16,6 +20,13 @@ export type { ActionId };
 export interface ActionStore {
   exec: (command: string, args?: Record<string, unknown>) => Promise<{ ok: boolean }>;
   refresh: () => Promise<void>;
+  // AGT-MEM (M3) — drops the cached agent-memory pools (agent/memory/hydrate.ts) so
+  // the NEXT retrieval re-fetches for whichever project is open. Optional so
+  // existing test fakes (and any caller that doesn't care about memory) stay valid;
+  // the real Zustand store always wires it. Called on every action that swaps the
+  // underlying Edit (new_project/open_project/open_recent) — a stale project's
+  // notes must never leak into the newly-opened one's prompts.
+  invalidateMemory?: () => void;
   copySelection: () => void;
   cutSelection: () => Promise<void>;
   pasteClipboard: () => Promise<void>;
@@ -32,13 +43,54 @@ export interface ActionStore {
   // is set (the editor owns Delete then). Optional so test fakes can omit them.
   editingClipId?: string | null;
   automationTrackId?: string | null;
+  // Taste loop (⌘⇧F) — opens the felt-wrong capture dialog. Optional for test fakes.
+  setFeltWrongOpen?: (open: boolean) => void;
 }
 
 export interface ActionCtx {
   store: ActionStore;
   pickFiles: (opts?: { multiple?: boolean; filters?: string; title?: string }) => Promise<{ ok: boolean; files: string[] }>;
   pickSaveFile: (opts?: { filters?: string; title?: string; defaultName?: string }) => Promise<{ ok: boolean; file: string }>;
+  // AGT-MEM (M3, item 5) — optional brain_chat polish for the outgoing project's
+  // session-summary note (see writeSessionSummary). Omitted -> the raw deterministic
+  // digest is written as-is (still a complete summary on its own); existing test fakes
+  // that don't care about this stay valid unchanged.
+  chat?: ChatFn;
 }
+
+// AGT-MEM (M3, item 5) — session summaries: a terse recap of THIS session's meaningful
+// commands, written as a project-scope memory note for the project currently open (i.e.
+// the one about to be REPLACED by new_project/open_project/open_recent) — so the next
+// time this song is opened, Moshi's memory carries a short "what happened last time"
+// instead of nothing.
+//
+// Split in two on purpose: sessionDigestFor() is a PURE, SYNCHRONOUS peek (no editFile,
+// or nothing worth summarizing, both resolve to "" with zero async cost) — writeSession-
+// Summary() is only ever called, and only ever awaited, when there is real work to do.
+// This matters beyond tidiness: runAction is fired fire-and-forget (`void runAction(...)`)
+// from a couple of call sites (e.g. the native-menu event handler in
+// useKeyboardShortcuts.ts), where a caller inspects the resulting store.exec call
+// synchronously-ish right after dispatch. Unconditionally awaiting an async function here
+// — even one that does nothing — costs at least one extra microtask tick before the REAL
+// store.exec(actionId, ...) fires, measurably shifting that timing. Gating the await on a
+// synchronous "is there anything to do" check keeps the common (nothing-to-summarize)
+// path exactly as fast as it was before this feature existed.
+function sessionDigestFor(ctx: ActionCtx): string {
+  const editFile = ctx.store.snapshot?.session.editFile ?? "";
+  return editFile ? buildSessionDigest(getSessionLog()) : "";
+}
+
+// Best-effort by design: a failed write or a chat-polish failure must NEVER block or
+// fail the project switch it's attached to — every failure path here is swallowed.
+async function writeSessionSummary(ctx: ActionCtx, digest: string): Promise<void> {
+  try {
+    const item = ctx.chat ? await polishSessionSummary(digest, ctx.chat) : digest;
+    await ctx.store.exec("agent_memory_write", { scope: "project", kind: "summary", item });
+  } catch {
+    // best-effort — see the function comment above
+  }
+}
+
 
 export interface RunActionOptions {
   file?: string;
@@ -62,10 +114,20 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
 export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOptions = {}): Promise<void> {
   const { store } = ctx;
   switch (id) {
-    case "new_project":
+    case "new_project": {
+      // See sessionDigestFor/writeSessionSummary's comments: this synchronous check
+      // means the common (nothing to summarize) path adds ZERO extra microtask ticks
+      // before the real store.exec below — load-bearing for fire-and-forget callers
+      // (e.g. the native-menu handler in useKeyboardShortcuts.ts) that inspect the
+      // dispatched command right after calling runAction without awaiting it.
+      const digest = sessionDigestFor(ctx);
+      if (digest) await writeSessionSummary(ctx, digest);
+      clearSessionLog();
       await store.exec("new_project");
       await store.refresh();
+      store.invalidateMemory?.();
       return;
+    }
 
     case "open_project": {
       let file = opts.file;
@@ -74,8 +136,12 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
         if (!r.ok || !r.files[0]) return;
         file = r.files[0];
       }
+      const digest = sessionDigestFor(ctx);
+      if (digest) await writeSessionSummary(ctx, digest);
+      clearSessionLog();
       await store.exec("open_project", { file });
       await store.refresh();
+      store.invalidateMemory?.();
       return;
     }
 
@@ -85,8 +151,12 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     // result the seam reports. Replaces the Edit, so refresh() resyncs the snapshot.
     case "open_recent": {
       const index = opts.index ?? 0;
+      const digest = sessionDigestFor(ctx);
+      if (digest) await writeSessionSummary(ctx, digest);
+      clearSessionLog();
       await store.exec("open_recent", { index });
       await store.refresh();
+      store.invalidateMemory?.();
       return;
     }
 
@@ -202,6 +272,11 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     case "loop_region":
       if (typeof opts.loopStart === "number" && typeof opts.loopEnd === "number")
         await store.exec("set_transport", { loop: true, loopStart: opts.loopStart, loopEnd: opts.loopEnd });
+      return;
+    case "felt_wrong":
+      // Taste loop (workshop 2026-07-19): opens the capture dialog; the dialog itself
+      // archives the row (no MoshOps command — the archive rides archive_pair).
+      store.setFeltWrongOpen?.(true);
       return;
   }
 }

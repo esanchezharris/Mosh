@@ -783,12 +783,17 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 
 /* ── modal plugin browser ───────────────────────────────────────────────────*/
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 50; }
-.modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
+/* #44 — restate the classic text token: inside the v2 shell the inherited color is the
+   v2 DARK-PANEL text (#f0efe9), which vanishes on this modal's light-theme white bg.
+   --bone flips with [data-theme], so this reads correctly on both grounds. */
+.modal { width: 460px; max-height: 70vh; display: flex; flex-direction: column; background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--ink-line); }
 .modal-head .pr-meta { margin-left: auto; color: var(--bone-dim); font-size: 11px; }
 .confirm-modal { width: min(92vw, 380px); }
 .confirm-body { padding: 4px 14px 0; font-size: 12px; line-height: 1.5; }
 .confirm-actions { padding: 12px 14px 14px; justify-content: flex-end; }
+/* Taste loop — the ⌘⇧F felt-wrong tag field (same field chrome as .xform-text). */
+.felt-wrong-input { display: block; width: calc(100% - 28px); margin: 10px 14px 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 5px 8px; font: inherit; font-size: 12px; }
 .modal-filters { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line-soft); }
 .modal-filters input { flex: 1 1 auto; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 7px; padding: 6px 9px; }
 .modal-list { overflow: auto; padding: 8px 10px; flex: 1 1 auto; min-height: 0; }
@@ -816,9 +821,17 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-wrap { position: relative; }
 .pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; width: 250px;
-  background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 10px;
+  background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 10px;
   padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 8px;
 }
+/* AGT-MEM (M3) discovery, fixed here as the shared root cause: without an explicit
+   `color`, any unstyled-color descendant (e.g. .pop-head, .cmdlog-name) inherited the
+   AMBIENT v2 text color instead — fine inside the v2 topbar's own dark chrome, but when
+   the SAME Pop is embedded in .v2-menu-panel's overflow menu (MemoryTool, CommandLogTool,
+   etc.) under the LIGHT theme, .pop's own --ink-raise background flips to near-white
+   while the inherited ambient color stays --v2-text (light-on-dark) — near-invisible
+   text. Declaring .pop's own color here makes it self-contained regardless of ambient
+   context, matching how it already owns its own background/border. */
 .pop-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.04em; }
 /* Guest degradation — e.g. the Type-beat Training popover's "preview" tag (fake backend,
    no GPU on this Mac). Generic so any pop-head can carry one. */
@@ -871,6 +884,23 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .cmdlog-dot { font-size: 8px; } .cmdlog-dot.ok { color: var(--lime); } .cmdlog-dot.err { color: var(--rec); }
 .cmdlog-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdlog-badge { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; }
+
+/* AGT-MEM (M3) — the memory panel (TopbarTools.tsx MemoryTool/MemoryBody). Reuses the
+   shared pop-*/cmdlog-* tokens verbatim (same "classic+v2 shared chrome" posture as
+   CommandLogBody and Meter.tsx — no v2-only tokens needed; the tokens below already
+   carry [data-theme="light"] overrides, so both themes fall out of the existing system). */
+.mem-tier { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid var(--ink-line-soft); }
+.mem-tier:first-of-type { border-top: none; padding-top: 0; }
+.mem-tier-head { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone-dim); }
+.mem-tier-label { flex: 1 1 auto; }
+.mem-tier-count { font-family: var(--font-mono); }
+.btn.mem-clear { font-size: 9px; padding: 2px 6px; min-width: 0; }
+.mem-item-list { max-height: 130px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.mem-item-row { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 0; }
+.mem-item-text { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--bone); }
+.mem-badge { color: var(--lime); font-size: 10px; flex: 0 0 auto; }
+.mem-kind { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; flex: 0 0 auto; }
+.btn.mem-del { padding: 2px 5px; min-width: 0; flex: 0 0 auto; }
 .remote-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.18em; text-align: center; color: var(--lime); }
 .remote-qr { width: 160px; height: 160px; align-self: center; border-radius: 8px; image-rendering: pixelated; }
 .cb-file { flex-direction: row; align-items: center; justify-content: space-between; }
@@ -1257,13 +1287,18 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .mp-code-row .btn { flex: none; }
 .mp-roster { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .mp-peer { display: flex; align-items: center; gap: 7px; font-size: 12px; }
-.mp-peer-name { flex: 1; }
+/* #45 — a hostile (unbroken 200+ char) peer name must truncate, not blow the modal
+   open sideways: flex min-width defaults to content size, so pin it to 0. */
+.mp-peer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .mp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-line); flex: none; }
 .mp-dot.on { background: var(--lime); box-shadow: 0 0 5px var(--lime-dim); }
 .mp-sep { font-size: 10px; color: var(--bone-dim); text-transform: uppercase; letter-spacing: .04em; text-align: center; }
 .mp-join { display: flex; gap: 6px; }
 .mp-join input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; }
+/* #42 — inline join failure, right where the user is looking (the global error bar
+   alone was easy to miss behind the modal). */
+.mp-join-error { font-size: 12px; color: var(--err, #c02040); overflow-wrap: anywhere; }
 /* v2 shell's modal-based launcher (MultiplayerLauncher) — same panel, more room than
    the classic shell's small anchored popover. */
 .mp-launcher-modal { width: min(92vw, 420px); }

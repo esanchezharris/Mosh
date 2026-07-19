@@ -8,6 +8,7 @@ import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { isNative } from "../bridge";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { formatPeerError } from "../multiplayer/peerErrors";
 import { useFileDrop } from "../hooks/useFileDrop";
 import { TopBar } from "./TopBar";
 import { TrackLaneList } from "./lanes/TrackLaneList";
@@ -16,15 +17,20 @@ import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
+import { FeltWrongDialog } from "../ui/FeltWrongDialog";
 import { MissingMediaBanner } from "../ui/MissingMediaBanner";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
 import { ChangeToast } from "./ChangeToast";
+import { MemoryToast } from "./MemoryToast";
 import "./shell.css";
 
 export function AppV2() {
   const snapshot = useStore((s) => s.snapshot);
   const lastError = useStore((s) => s.lastError);
+  const peers = useStore((s) => s.peers);
+  // #40 — show peer display names, not raw UUIDs, in lock-denied errors.
+  const displayError = lastError ? formatPeerError(lastError, peers) : null;
   const leftOpen = useShell((s) => s.browserOpen);  // LEFT push-dock (browser)
   const rightOpen = useShell((s) => s.rightOpen);   // RIGHT push-dock (agent rail)
 
@@ -47,9 +53,10 @@ export function AppV2() {
     <div className="v2-shell" data-testid="v2-shell"
       data-left-open={leftOpen} data-right-open={rightOpen}>
       {snapshot && <TopBar snapshot={snapshot} />}
-      {lastError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {lastError}</div>}
+      {displayError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {displayError}</div>}
       <RecoveryNotice />
       <MissingMediaBanner />
+      <FeltWrongDialog />
 
       {/* symmetric push-docks frame a SMALL, CENTERED work area. Both flanks are collapsible
           pull-tab docks that occupy their OWN gutter — opening one fills its side and pushes,
@@ -77,6 +84,7 @@ export function AppV2() {
       <AutomationPanel />
       <DrumWindow />
       <ChangeToast />
+      <MemoryToast />
     </div>
   );
 }

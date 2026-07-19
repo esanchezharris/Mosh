@@ -3,6 +3,9 @@
 // tests/test_drum_pattern.cpp and drumPatternUtil.test.ts — keep in lockstep.
 // Lane pitches MUST mirror DRUM_LANES (drumGrid.ts) / kDefaultKit (MoshOps.cpp).
 
+import type { MidiNote } from "../types";
+import { laneIndexForPitch, stepBeats } from "./drumGrid";
+
 export type DrumPatternStep = { pitch: number; step: number; velocity: number };
 
 export type DrumPatternParse =
@@ -117,4 +120,112 @@ export function parseDrumPattern(
     }
 
   return { ok: true, stepsPerBar, bars: outBars, totalSteps, steps, lanePitches: lanes.map((l) => l.pitch) };
+}
+
+// AGT-MEM (M4) — the exact inverse of parseDrumPattern, in the FLAT STRING form (the
+// agent catalog only declares the string form for add_drum_pattern, so that's the only
+// shape worth serializing to). Used by the "Save pattern to memory" affordance to turn a
+// live drum clip's steps back into a verbatim-replayable pattern string for a
+// DrumPatternCard, AND by the memory-retrieval renderer to show a saved card's groove.
+//
+// This is a PURE TS-only addition — parseDrumPattern's semantics are unchanged, so
+// src/moshops/DrumPattern.h (the C++ twin) needs no corresponding change; it never has
+// to serialize, only parse. The twin-lockstep discipline for THIS file only applies to
+// parse golden vectors, which stay untouched.
+//
+// Contract is a SEMANTIC round-trip, not a byte-identical one: parse(serialize(parse(s)))
+// must equal parse(s) (same stepsPerBar/bars/totalSteps/steps/lanePitches), not
+// serialize(parse(s)) === s. Concretely this means: (1) a tiled short lane ("kick: x.")
+// serializes back out at FULL LENGTH (16 chars for a 16-step bar) — still round-trips
+// correctly since the untiled full string parses to the identical step set; (2) '|'
+// cosmetic separators are dropped (parseDrumPattern strips them before use, so there is
+// nothing to preserve); (3) a lane's original alias ("hihat"/"closedhat"/"ch" all mean
+// pitch 42) is NOT preserved — one canonical name per known pitch is emitted instead,
+// which still round-trips to the same pitch; (4) velocity is necessarily binary in the
+// string format (parseDrumPattern's `velocity` param is one uniform default for every
+// "x" in a single parse call — there is no per-step velocity in the string DSL), so any
+// hit at velocity 127 serializes as an accent ('X') and everything else as a plain hit
+// ('x') — this matches what a re-parse can actually reconstruct.
+const CANONICAL_LANE_NAME: Record<number, string> = (() => {
+  const rev: Record<number, string> = {};
+  // LANE_PITCHES is defined in object-literal order above; the FIRST alias seen for a
+  // given pitch becomes canonical (kick/snare/clap/hat/openhat/lowtom/midtom/crash —
+  // never the later hihat/closedhat/ch/oh aliases).
+  for (const [name, pitch] of Object.entries(LANE_PITCHES)) if (!(pitch in rev)) rev[pitch] = name;
+  return rev;
+})();
+
+/** The lane label serializeDrumPattern emits for a pitch: its canonical name if known,
+ *  else the raw MIDI pitch number (mirroring the parser's "integer keys are raw
+ *  pitches" rule) — always something parseDrumPattern can read straight back. */
+export function drumPatternLaneName(pitch: number): string {
+  return CANONICAL_LANE_NAME[pitch] ?? String(pitch);
+}
+
+export type SerializableDrumPattern = {
+  stepsPerBar: number;
+  totalSteps: number;
+  steps: readonly DrumPatternStep[];
+  lanePitches: readonly number[];
+};
+
+/** Serializes a parsed pattern (or any equivalent step data — e.g. read live off a drum
+ *  clip's notes) back to the flat "lane: steps; lane: steps" string form. Lane order
+ *  mirrors `lanePitches` (parseDrumPattern's own "lanes in input order" contract), so a
+ *  re-parse reproduces steps in the identical order too. An all-rest lane (present in
+ *  `lanePitches` but with zero steps) serializes to an all-'.' lane, preserving its
+ *  presence for per-lane-replace semantics. */
+export function serializeDrumPattern(p: SerializableDrumPattern): string {
+  const lines = p.lanePitches.map((pitch) => {
+    const velocityAtStep = new Map<number, number>();
+    for (const s of p.steps) if (s.pitch === pitch) velocityAtStep.set(s.step, s.velocity);
+    let chars = "";
+    for (let i = 0; i < p.totalSteps; i++) {
+      const v = velocityAtStep.get(i);
+      chars += v === undefined ? "." : v >= 127 ? "X" : "x";
+    }
+    return `${drumPatternLaneName(pitch)}: ${chars}`;
+  });
+  return lines.join("; ");
+}
+
+// AGT-MEM (M4) — the OTHER direction: reads a live drum clip's MIDI notes into the same
+// step-shape serializeDrumPattern expects, for the "Save pattern to memory" affordance.
+// Reuses drumGrid.ts's stepBeats/laneIndexForPitch (the identical beat math + known-
+// lane-pitch set the drum-grid EDITOR itself uses) rather than re-deriving it here, so
+// what gets saved matches what's visually on the grid. A note off-lane (not a recognized
+// GM drum pitch) is skipped; every ON-lane note snaps to its NEAREST step (round-to-
+// nearest, unbounded — unlike drumGrid.ts's cellForNote, which only searches a fixed
+// step RANGE and so can reject a note as "off-grid" when nothing in range is close
+// enough, this function has no such range limit, so round-to-nearest always finds a
+// step and there is no separate off-grid case to reject).
+export function drumPatternFromNotes(
+  notes: readonly MidiNote[],
+  beatsPerBar: number,
+  stepsPerBar = 16,
+): SerializableDrumPattern {
+  const sb = stepBeats(beatsPerBar, stepsPerBar);
+  const hitAt = new Map<string, number>(); // `${pitch}:${step}` -> velocity (first note wins the cell)
+  const lanePitches: number[] = [];
+  const seenPitch = new Set<number>();
+  let maxStep = -1;
+  for (const n of notes) {
+    if (laneIndexForPitch(n.pitch) < 0) continue;
+    const step = Math.max(0, Math.round(n.start / sb));
+    const key = `${n.pitch}:${step}`;
+    if (!hitAt.has(key)) hitAt.set(key, n.velocity);
+    if (!seenPitch.has(n.pitch)) { seenPitch.add(n.pitch); lanePitches.push(n.pitch); }
+    if (step > maxStep) maxStep = step;
+  }
+  const bars = maxStep < 0 ? 1 : Math.max(1, Math.ceil((maxStep + 1) / stepsPerBar));
+  const totalSteps = stepsPerBar * bars;
+  const steps: DrumPatternStep[] = [];
+  for (const [key, velocity] of hitAt) {
+    const sep = key.lastIndexOf(":");
+    steps.push({ pitch: Number(key.slice(0, sep)), step: Number(key.slice(sep + 1)), velocity });
+  }
+  // Deterministic order (matches parseDrumPattern's own contract): lanes in
+  // first-encountered order, steps ascending within a lane.
+  steps.sort((a, b) => lanePitches.indexOf(a.pitch) - lanePitches.indexOf(b.pitch) || a.step - b.step);
+  return { stepsPerBar, totalSteps, steps, lanePitches };
 }

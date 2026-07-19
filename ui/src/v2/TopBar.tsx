@@ -4,15 +4,16 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
-import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
+import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import type { Snapshot } from "../types";
-import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStop, IconUsers } from "../ui/icons";
+import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
 function projectName(editFile: string): string {
   const base = editFile.split("/").pop() ?? "";
@@ -162,6 +163,13 @@ function AvatarCluster() {
 
 function OverflowMenu() {
   const [open, setOpen] = useState(false);
+  // #41/#43 — join the shared Escape STACK so Esc dismisses the menu, and dismisses
+  // it FIRST when it sits above another overlay (instead of falling through and
+  // closing the modal underneath). The close callback must be render-stable: the
+  // stack re-pushes whenever it changes, which would hoist this menu back to the
+  // top of the stack on unrelated re-renders.
+  const close = useCallback(() => setOpen(false), []);
+  useEscapeToClose(open, close);
   const exec = useStore((s) => s.exec);
   const training = useStore((s) => s.snapshot?.training ?? null);
   const theme = useStore((s) => s.theme);
@@ -205,6 +213,13 @@ function OverflowMenu() {
                 className="v2-overflow-tool"
                 ariaLabel="Open command log"
                 testId="v2-tool-command-log"
+              />
+              <MemoryTool
+                label={<IconStar size={15} />}
+                title="What Moshi remembers"
+                className="v2-overflow-tool"
+                ariaLabel="What Moshi remembers"
+                testId="v2-tool-memory"
               />
               <RemoteTool
                 label={<IconPhone size={15} />}

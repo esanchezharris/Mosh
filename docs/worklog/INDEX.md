@@ -6,10 +6,13 @@ to load every session. **Nothing was edited** — each note is verbatim, one fil
 CLAUDE.md keeps the standing rules (prime directives, stage gates, and the gotchas that still bite).
 This is the history: *why* a thing is the way it is, and what it cost to learn.
 
-42 notes, 2026-06-18 → 2026-07-18.
+45 notes, 2026-06-18 → 2026-07-19.
 
 | date | note |
 |---|---|
+| 2026-07-19 | [TASTE-002 — taste-label spigot restored for the in-place workflow (2026-07-19).](2026-07-19-taste-002-taste-label-spigot-restored-for-the-in-place-workf.md) |
+| 2026-07-19 | [AGENTIC PASS — memory lane M1–M4 SHIPPED + subscription bench lanes (2026-07-19, same branch/PR #441).](2026-07-19-agentic-pass-memory-lane-m1-m4-shipped-subscription-bench-la.md) |
+| 2026-07-18 | [AGENTIC PASS Phase A — audit closure + MoshAgentBench + baseline (2026-07-18, branch `claude/agentic-interaction-research-9e0e44`).](2026-07-18-agentic-pass-phase-a-audit-closure-moshagentbench-baseline-2.md) |
 | 2026-07-18 | [SLF-CONC-001 — `--selftest` made hermetic against a CONCURRENT selftest, and a GUI data-loss regression found on the way (2026-07-18)](2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md) |
 | 2026-07-18 | [AUD-001 — the intermittent `--selftest` crash: reproduced and diagnosed](2026-07-18-selftest-sigsegv-reproduction-and-diagnosis.md) |
 | 2026-07-18 | [METER-001 — v2 track/master level meters + a real coverage bug fixed (2026-07-18)](2026-07-18-meter-001-v2-track-master-level-meters-a-real-coverage-bug-f.md) |

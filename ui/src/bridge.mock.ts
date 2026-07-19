@@ -125,6 +125,9 @@ function seedSnapshot(): Snapshot {
     schemaVersion: 1,
     session: {
       sampleRate: SR, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      // SES-001 — the tempo MAP; point 0 IS the base tempo (set_tempo edits it,
+      // remove_tempo_change refuses it), mirroring the native snapshot.
+      tempoMap: [{ time: 0, bpm: 120, curve: 1 }],
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
@@ -162,6 +165,61 @@ function emptySession(): Snapshot {
 
 let snapshot: Snapshot = seedSnapshot();
 let mockCorpusLines = 0; // §7 — simulates the cross-song style corpus growing on accept
+
+// AGT-MEM (Phase-B memory lane, M1) — the agent-memory store, mirrored in-memory.
+// The native store is real file I/O (src/moshops/AgentMemoryStore.h); the mock has
+// no filesystem, so this is a plain in-process mirror of the SAME cap/eviction/
+// explicit-protection contract (kept in lockstep by hand — no shared source with the
+// C++ side, unlike DrumPattern.h/drumPatternUtil.ts, but the RULES are identical).
+type AgentMemoryRecord = { ts: number; kind: string; explicit: boolean; item: unknown };
+const AGENT_MEMORY_CAP = 500;
+const AGENT_MEMORY_GLOBAL_KINDS = ["preference", "drum_pattern", "lyric_framework"] as const;
+let mockAgentMemoryGlobal: Record<string, AgentMemoryRecord[]> = { preference: [], drum_pattern: [], lyric_framework: [] };
+let mockAgentMemoryProject: AgentMemoryRecord[] = [];
+let mockAgentMemoryTs = 0;   // a monotonic counter standing in for wall-clock ts (deterministic ordering in tests)
+
+/** Mirrors AgentMemoryStore::decideEviction — see src/moshops/AgentMemoryStore.h for
+ *  the full policy writeup. @p existing is oldest-first (push()-order), so "the
+ *  oldest X" is simply the first matching index. */
+function agentMemoryEvictIndex(
+  existing: AgentMemoryRecord[],
+  newExplicit: boolean,
+  cap: number,
+): { evictIndex: number; error?: string } {
+  if (existing.length < cap) return { evictIndex: -1 };
+  for (let i = 0; i < existing.length; i++) if (!existing[i].explicit) return { evictIndex: i };
+  if (!newExplicit) return { evictIndex: -1, error: "memory full of explicit items -- remove one first" };
+  return { evictIndex: 0 };   // every item is explicit AND the new one is explicit — evict the oldest explicit
+}
+
+/** Mirrors AgentMemoryStore::applyWrite: mutates @p existing in place; a rejected
+ *  write leaves it completely unchanged. */
+function agentMemoryApplyWrite(
+  existing: AgentMemoryRecord[],
+  record: AgentMemoryRecord,
+  cap = AGENT_MEMORY_CAP,
+): { ok: boolean; error?: string } {
+  const d = agentMemoryEvictIndex(existing, record.explicit, cap);
+  if (d.error) return { ok: false, error: d.error };
+  if (d.evictIndex >= 0) existing.splice(d.evictIndex, 1);
+  existing.push(record);
+  return { ok: true };
+}
+
+/** Mirrors AgentMemoryStore::selectForRead: newest-first by ts (Array.prototype.sort
+ *  is spec-guaranteed stable since ES2019), capped to @p limit (<=0 == no cap). */
+function agentMemorySelectForRead(items: AgentMemoryRecord[], limit: number): AgentMemoryRecord[] {
+  const sorted = [...items].sort((a, b) => b.ts - a.ts);
+  return limit > 0 ? sorted.slice(0, limit) : sorted;
+}
+
+/** Mirrors the native validation: item must be present and either a non-empty string
+ *  or a plain object (NOT an array — JUCE's var::isObject() excludes JSON arrays). */
+function agentMemoryItemValid(item: unknown): boolean {
+  if (item == null) return false;
+  if (typeof item === "string") return item.trim().length > 0;
+  return typeof item === "object" && !Array.isArray(item);
+}
 
 // G3 — mock audio routing. The current device selection (so set_audio_device shows
 // up in the next list_audio_devices) and the enumerated wave inputs (so the
@@ -202,10 +260,12 @@ const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
-const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters"]);
+const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
+  "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
-  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats"]);  // accept_lyric_proposal IS undoable
+  "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
+  "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -456,7 +516,7 @@ function mockCompile(instruction: string): { mode: string; envelope?: Record<str
   const correctiveSubtypes: Array<[string[], string, string, string]> = [
     [["in tune", "out of tune", "off-key", "off key", "off-pitch", "pitchy", "tune it", "tune the", "tune my", "retune", "autotune", "auto-tune", "pitch correct", "fix the tuning", "fix the pitch", "intonation"], "pitch", "moshAutoTune", "That's a tuning issue — AutoTune corrects the pitch in place; it doesn't re-perform the take."],
     [["tighten", "on the beat", "off the beat", "off-beat", "quantize", "fix the timing", "fix timing", "loose timing", "sloppy timing", "lock it to the grid"], "timing", "quantize_notes", "That's a timing issue — quantize snaps the notes to the grid (MIDI clips); it doesn't re-perform the take."],
-    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "eq", "That's a tone issue — an EQ shapes it without re-performing the take."],
+    [["too muddy", "muddy", "too harsh", "harsh", "boomy", "boxy", "too thin", "tinny", "fix the tone", "honky"], "tone", "4bandEq", "That's a tone issue — an EQ shapes it without re-performing the take."],
     [["too quiet", "too loud", "uneven", "inconsistent level", "levels are", "level it", "even it out", "compress the", "fix the dynamics", "dynamics are"], "dynamics", "moshOTT", "Uneven levels — OTT evens them out without re-performing."],
   ];
   for (const [trig, subtype, tool, say] of correctiveSubtypes) {
@@ -511,11 +571,23 @@ function trainingState(): TrainingState {
 }
 
 // ── plugin / generative catalog (dev-mock only) ─────────────────────
+// Kept in lockstep with the NATIVE kBuiltins TYPE names (MoshOps.cpp) — the
+// Phase-A agent bench caught the drift: the mock accepted "eq" (native rejects
+// it; the real type is "4bandEq") and was missing compressor/sampler/chorus/
+// phaser/lowpass/pitchShifter entirely, so an agent following the real
+// list_builtins vocabulary failed only in dev/e2e. Display names stay the
+// mock's shorter forms where the UI already shows them.
 const BUILTINS = [
   { type: "4osc", name: "4OSC", category: "Instruments", isInstrument: true, builtin: true as const },
+  { type: "sampler", name: "Sampler", category: "Instruments", isInstrument: true, builtin: true as const },
   { type: "reverb", name: "Reverb", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "delay", name: "Delay", category: "Effects", isInstrument: false, builtin: true as const },
-  { type: "eq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "4bandEq", name: "4-Band EQ", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "compressor", name: "Compressor", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "chorus", name: "Chorus", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "phaser", name: "Phaser", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "lowpass", name: "Low / High-Pass Filter", category: "Effects", isInstrument: false, builtin: true as const },
+  { type: "pitchShifter", name: "Pitch Shifter", category: "Effects", isInstrument: false, builtin: true as const },
   { type: "moshAutoTune", name: "Mosh AutoTune", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshOTT", name: "Mosh OTT", category: "Mosh FX", isInstrument: false, builtin: true as const },
   { type: "moshXFeedback", name: "Mosh X-FDBK", category: "Mosh FX", isInstrument: false, builtin: true as const },
@@ -993,6 +1065,107 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "get_lyric_corpus_stats":
       return ok(command, { lines: mockCorpusLines });
+    case "agent_memory_write": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      if (!agentMemoryItemValid(args.item))
+        return err(command, "missing or invalid 'item' (must be a non-empty JSON object or string)");
+      const explicitFlag = Boolean(args.explicit);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (!(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const store = mockAgentMemoryGlobal[kind];
+        const res = agentMemoryApplyWrite(store, { ts: ++mockAgentMemoryTs, kind, explicit: explicitFlag, item: args.item });
+        if (!res.ok) return err(command, res.error!);
+        return ok(command, { count: store.length });
+      }
+
+      const kind = args.kind !== undefined ? str(args.kind) : "note";
+      const res = agentMemoryApplyWrite(mockAgentMemoryProject, { ts: ++mockAgentMemoryTs, kind, explicit: explicitFlag, item: args.item });
+      if (!res.ok) return err(command, res.error!);
+      return ok(command, { count: mockAgentMemoryProject.length });
+    }
+    case "agent_memory_read": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      const limit = num(args.limit, 50);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const merged = kind ? [...mockAgentMemoryGlobal[kind]] : AGENT_MEMORY_GLOBAL_KINDS.flatMap((k) => mockAgentMemoryGlobal[k]);
+        return ok(command, { items: agentMemorySelectForRead(merged, limit) });
+      }
+      return ok(command, { items: agentMemorySelectForRead(mockAgentMemoryProject, limit) });
+    }
+    // AGT-MEM (M3) — mirrors MoshOps::cmdAgentMemoryDelete: global scope's `kind`
+    // selects WHICH FILE to search (all three when omitted); project scope's `kind`,
+    // if given, is an extra safety check against the found item's own kind field.
+    case "agent_memory_delete": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      if (args.ts === undefined) return err(command, "missing 'ts'");
+      const ts = num(args.ts, NaN);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const kindsToSearch = kind ? [kind] : AGENT_MEMORY_GLOBAL_KINDS;
+        for (const k of kindsToSearch) {
+          const store = mockAgentMemoryGlobal[k];
+          const idx = store.findIndex((r) => r.ts === ts);
+          if (idx >= 0) {
+            store.splice(idx, 1);
+            return ok(command, { count: store.length });
+          }
+        }
+        return err(command, `no item with ts ${ts} found`);
+      }
+
+      const kind = str(args.kind);
+      const idx = mockAgentMemoryProject.findIndex((r) => r.ts === ts && (!kind || r.kind === kind));
+      if (idx < 0) return err(command, `no item with ts ${ts} found`);
+      mockAgentMemoryProject.splice(idx, 1);
+      return ok(command, { count: mockAgentMemoryProject.length });
+    }
+    // AGT-MEM (M3) — mirrors MoshOps::cmdAgentMemoryClear: global scope's `kind`
+    // wipes just that ONE kind's store (all three when omitted); project scope's
+    // `kind`, if given, removes only notes carrying that kind field.
+    case "agent_memory_clear": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      const kind = str(args.kind);
+
+      if (scope === "global") {
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const kindsToClear = kind ? [kind] : AGENT_MEMORY_GLOBAL_KINDS;
+        let cleared = 0;
+        for (const k of kindsToClear) {
+          cleared += mockAgentMemoryGlobal[k].length;
+          mockAgentMemoryGlobal[k] = [];
+        }
+        return ok(command, { cleared });
+      }
+
+      const before = mockAgentMemoryProject.length;
+      if (!kind) {
+        mockAgentMemoryProject = [];
+        return ok(command, { cleared: before });
+      }
+      const kept = mockAgentMemoryProject.filter((r) => r.kind !== kind);
+      const cleared = mockAgentMemoryProject.length - kept.length;
+      mockAgentMemoryProject = kept;
+      return ok(command, { cleared });
+    }
     case "reject_lyric_proposal": {
       const t = findTrack(str(args.trackId));
       const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
@@ -1068,9 +1241,20 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "trim_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo();
+      const oldEnd = f.clip.start + f.clip.length;
       if ("start" in args) f.clip.start = Math.max(0, num(args.start, f.clip.start));
       if ("length" in args) f.clip.length = Math.max(0.05, num(args.length, f.clip.length));
       if ("offset" in args) f.clip.offset = Math.max(0, num(args.offset, f.clip.offset));
+      // ARR-011 — opt-in ripple (default absent ⇒ path above unchanged): same-track
+      // clips at/after the OLD end follow the end delta (mirrors rippleShiftClipsAfter:
+      // negative-start clamp, the trimmed clip itself excluded).
+      if (args.ripple) {
+        const delta = f.clip.start + f.clip.length - oldEnd;
+        if (Math.abs(delta) > 1e-6)
+          for (const c of f.track.clips)
+            if (c.id !== f.clip.id && c.start >= oldEnd - 1e-6)
+              c.start = Math.max(0, c.start + delta);
+      }
       invalidate(); return ok(command);
     }
     case "split_clip": {
@@ -1096,6 +1280,67 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     case "remove_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
       pushUndo(); f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); invalidate(); return ok(command);
+    }
+    // ARR-011 — remove everything in [start, end] across ALL tracks (or an optional
+    // trackIds subset — a real JSON array, deliberately NOT in the agent catalog).
+    // Produces the same end state as the native split-at-bounds + remove-inside
+    // pipeline: straddling clips keep their outside piece(s), the right piece is a
+    // NEW clip (native splitClip mints the new id on the right half) whose source
+    // offset advances past the removed span; MIDI pieces keep the notes that fall
+    // inside them (beats re-based via the session tempo). ripple:true then slides
+    // every clip at/after the range END left by the range length (clamped at 0).
+    case "delete_time_range": {
+      const start = num(args.start, 0), end = num(args.end, 0);
+      if (!(start < end)) return err(command, "start must be less than end");
+      const ripple = Boolean(args.ripple);
+      const idsArg = Array.isArray(args.trackIds) ? (args.trackIds as unknown[]).map(String) : null;
+      const targets = idsArg ? snapshot.tracks.filter((t) => idsArg.includes(t.id)) : snapshot.tracks;
+      pushUndo();
+      const EPS = 5e-4;
+      const beatsPerSec = (snapshot.session.tempo || 120) / 60;
+      let removed = 0, splits = 0;
+      for (const t of targets) {
+        const next: typeof t.clips = [];
+        for (const c of t.clips) {
+          const c0 = c.start, c1 = c.start + c.length;
+          if (c1 <= start + EPS || c0 >= end - EPS) { next.push(c); continue; }   // fully outside
+          const leftKeep = c0 < start - EPS;
+          const rightKeep = c1 > end + EPS;
+          if (rightKeep) {
+            const right = JSON.parse(JSON.stringify(c)) as typeof c;
+            right.id = nextClipId();
+            right.start = end;
+            right.length = c1 - end;
+            right.offset = (c.offset ?? 0) + (end - c0);
+            if (right.notes) {
+              const cutBeats = (end - c0) * beatsPerSec;
+              right.notes = right.notes
+                .filter((n) => n.start >= cutBeats - 1e-9)
+                .map((n) => ({ ...n, start: n.start - cutBeats }));
+              reindexNotes(right);
+            }
+            next.push(right);
+            splits++;
+          }
+          if (leftKeep) {
+            c.length = start - c0;
+            if (c.notes) {
+              const keepBeats = (start - c0) * beatsPerSec;
+              c.notes = c.notes.filter((n) => n.start < keepBeats - 1e-9);
+              reindexNotes(c);
+            }
+            next.push(c);
+            splits++;
+          }
+          removed++;   // the middle segment is gone
+        }
+        t.clips = next.sort((a, b) => a.start - b.start);
+        if (ripple)
+          for (const c of t.clips)
+            if (c.start >= end - 1e-6) c.start = Math.max(0, c.start - (end - start));
+      }
+      invalidate();
+      return ok(command, { removed, splits, tracks: targets.length, ripple });
     }
     case "duplicate_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
@@ -1304,7 +1549,39 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
     }
 
-    case "set_tempo": { pushUndo(); snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo)); invalidate(); return ok(command); }
+    case "set_tempo": {
+      pushUndo();
+      snapshot.session.tempo = Math.max(20, num(args.bpm, snapshot.session.tempo));
+      // Point 0 of the tempo map IS the base tempo — keep them in lockstep.
+      if (snapshot.session.tempoMap?.[0]) snapshot.session.tempoMap[0].bpm = snapshot.session.tempo;
+      invalidate(); return ok(command);
+    }
+    // SES-001 — tempo-map points beyond the base tempo. Times in seconds; a point's
+    // curve shapes the span from IT to the NEXT point (1 = step, (-1,1) = ramp).
+    // Error strings mirror MoshOps::cmdInsertTempoChange / cmdRemoveTempoChange.
+    case "insert_tempo_change": {
+      const time = num(args.time, -1);
+      if (time < 0) return err(command, "missing/negative 'time'");
+      const bpm = num(args.bpm, 0);
+      if (bpm < 20 || bpm > 999) return err(command, "bpm must be 20..999");
+      const curve = Math.max(-1, Math.min(1, num(args.curve, 1)));
+      pushUndo();
+      const map = (snapshot.session.tempoMap ??= [{ time: 0, bpm: snapshot.session.tempo, curve: 1 }]);
+      map.push({ time, bpm, curve });
+      map.sort((a, b) => a.time - b.time);
+      snapshot.session.tempo = map[0].bpm;
+      invalidate();
+      return ok(command, { time, bpm, curve, count: map.length });
+    }
+    case "remove_tempo_change": {
+      const map = snapshot.session.tempoMap ?? [];
+      const index = num(args.index, -1);
+      if (index <= 0 || index >= map.length) return err(command, "index must be 1..numTempos-1");
+      pushUndo();
+      map.splice(index, 1);
+      invalidate();
+      return ok(command, { count: map.length });
+    }
     case "set_key": { pushUndo(); snapshot.session.key = { tonic: str(args.tonic, snapshot.session.key?.tonic ?? "A"), mode: str(args.mode, snapshot.session.key?.mode ?? "minor") }; invalidate(); return ok(command); }
     case "set_count_in": {
       const bars = num(args.bars, snapshot.session.countInBars ?? 0);
@@ -2156,6 +2433,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // roster, a locked-by badge, and a remote selection highlight without a relay.
     case "mp_create_session":
     case "mp_join_session": {
+      // #42 — deterministic join FAILURE for codes outside the mock's own format, so
+      // the inline join-error UI is exercisable without a relay. Divergence note:
+      // native fails via relay lookup; the mock fails on format — same result shape.
+      if (command === "mp_join_session" && !str(args.code).startsWith("MOCK-ROOM-"))
+        return err(command, "no such room: " + str(args.code));
       for (const t of snapshot.tracks) if (!t.logicalId) t.logicalId = "lid-" + t.id;
       const code = command === "mp_create_session" ? "MOCK-ROOM-abcdef0123456789" : str(args.code);
       const locked = snapshot.tracks[1];
@@ -2235,6 +2517,9 @@ export function __resetMockForTests(): void {
   trackSeq = 10;
   snapshot = seedSnapshot();
   mockCorpusLines = 0;
+  mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
+  mockAgentMemoryProject = [];
+  mockAgentMemoryTs = 0;
   history.length = 0;
   future.length = 0;
   inBatch = false;

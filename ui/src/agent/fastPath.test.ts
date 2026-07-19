@@ -120,3 +120,61 @@ describe("matchFastPath — state-aware track ops (mute/solo by name)", () => {
     expect(matchFastPath("solo the drums", tctx("recording"))).toBeNull();
   });
 });
+
+describe("matchFastPath — 'remember (that/my/I…) X' (AGT-MEM, M3)", () => {
+  it("captures the remainder verbatim (case/punctuation preserved), defaulting to global scope", () => {
+    const a = matchFastPath("remember that I like heavy 808s", ctx());
+    expect(a).toMatchObject({ kind: "remember", text: "I like heavy 808s", scope: "global" });
+  });
+
+  it("accepts the 'my'/'I' and bare forms", () => {
+    expect(matchFastPath("remember my favorite reverb is the plate", ctx())).toMatchObject({
+      kind: "remember", text: "favorite reverb is the plate", scope: "global",
+    });
+    expect(matchFastPath("remember I always quantize to 16ths", ctx())).toMatchObject({
+      kind: "remember", text: "always quantize to 16ths", scope: "global",
+    });
+    expect(matchFastPath("remember the hook needs a bigger lift", ctx())).toMatchObject({
+      kind: "remember", text: "the hook needs a bigger lift", scope: "global",
+    });
+  });
+
+  it("routes to project scope when the phrasing names this song/track/project", () => {
+    expect(matchFastPath("remember that the bridge is too long for this song", ctx())).toMatchObject({
+      kind: "remember", text: "the bridge is too long", scope: "project",
+    });
+    expect(matchFastPath("remember to double the vocal for this track", ctx())).toMatchObject({
+      kind: "remember", text: "to double the vocal", scope: "project",
+    });
+    expect(matchFastPath("remember the intro should be shorter for this project", ctx())).toMatchObject({
+      kind: "remember", text: "the intro should be shorter", scope: "project",
+    });
+  });
+
+  it("strips a leading voice-prefix (\"hey moshi,\" / \"okay,\") before matching", () => {
+    expect(matchFastPath("hey moshi, remember that I like the bass boosted", ctx())).toMatchObject({
+      kind: "remember", text: "I like the bass boosted",
+    });
+    expect(matchFastPath("okay, remember I hate autotune", ctx())).toMatchObject({
+      kind: "remember", text: "hate autotune",
+    });
+  });
+
+  it("trims trailing punctuation", () => {
+    expect(matchFastPath("remember that I like it loud!", ctx())).toMatchObject({ text: "I like it loud" });
+  });
+
+  it("never fires while recording (a stray word mid-take shouldn't write memory)", () => {
+    expect(matchFastPath("remember that I like heavy 808s", ctx("recording"))).toBeNull();
+  });
+
+  it("does not fire on a bare 'remember' with nothing to remember", () => {
+    expect(matchFastPath("remember", ctx())).toBeNull();
+    expect(matchFastPath("remember that", ctx())).toBeNull();
+  });
+
+  it("takes precedence over the track-mute rules (a track named e.g. 'reverb' shouldn't steal it)", () => {
+    const a = matchFastPath("remember the reverb should be shorter", ctx("idle"));
+    expect(a).toMatchObject({ kind: "remember" });
+  });
+});

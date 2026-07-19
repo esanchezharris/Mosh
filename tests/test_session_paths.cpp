@@ -168,6 +168,12 @@ TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved"
     oldRun.createDirectory();
     newRun.createDirectory();
 
+    // Populate the old run so "replaced" can be told apart from "followed". An empty
+    // target would pass this test even if the pointer were cleared with a symlink-
+    // following recursive delete.
+    const auto oldArtifact = oldRun.getChildFile ("mosh-log.jsonl");
+    oldArtifact.replaceWithText ("{\"seq\":1}");
+
     const auto pointer = moshDir.getChildFile ("session-selftest");
     juce::File::createSymbolicLink (pointer, oldRun.getFullPathName(), true);
 
@@ -177,6 +183,11 @@ TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved"
     juce::Array<juce::File> littered;
     moshDir.findChildFiles (littered, juce::File::findDirectories, false, "session-selftest-legacy-*");
     REQUIRE (littered.isEmpty());
+
+    // Unlinking the pointer must not reach THROUGH it: the previous run's dir is a real
+    // directory that a concurrent run may still be writing to.
+    REQUIRE (oldArtifact.existsAsFile());
+    REQUIRE (oldArtifact.loadFileAsString() == "{\"seq\":1}");
 
     moshDir.deleteRecursively();
 }

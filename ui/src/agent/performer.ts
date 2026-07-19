@@ -10,6 +10,10 @@ export type FastDeps = {
   keepTake: () => Promise<void>;
   navTake: (delta: number) => Promise<void>;
   utter: (intent: string, say?: string) => void;
+  // AGT-MEM (M3) — its own dep (not routed through runBatch) because
+  // agent_memory_write is deliberately outside AGENT_COMMANDS/validateCommand — see
+  // fastPath.ts's "remember" FastAction comment.
+  remember?: (text: string, scope: "global" | "project") => Promise<void>;
 };
 
 export async function handleFast(a: FastAction, d: FastDeps): Promise<void> {
@@ -20,5 +24,6 @@ export async function handleFast(a: FastAction, d: FastDeps): Promise<void> {
     case "stopRecord": await d.stopRecord(); break;
     case "keepTake": await d.keepTake(); break;
     case "navTake": await d.navTake(a.delta); break;
+    case "remember": await d.remember?.(a.text, a.scope); break;
   }
 }

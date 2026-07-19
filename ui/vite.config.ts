@@ -13,6 +13,9 @@ function moshiBrain(env: Record<string, string>): Plugin {
     deepseek: { url: env.DEEPSEEK_BASE_URL, key: env.DEEPSEEK_API_KEY, model: env.DEEPSEEK_MODEL, label: "DEEPSEEK" },
     openai:   { url: env.OPENAI_BASE_URL,   key: env.OPENAI_API_KEY,   model: env.OPENAI_MODEL,   label: "OPENAI" },
     xai:      { url: env.XAI_BASE_URL,      key: env.XAI_API_KEY,      model: env.XAI_MODEL,      label: "GROK" },
+    // The MLX seat: an OpenAI-compatible local server (mlx_lm.server). Key is a
+    // formality for local endpoints — default it so LOCAL_BASE_URL+MODEL suffice.
+    local:    { url: env.LOCAL_BASE_URL,    key: env.LOCAL_API_KEY ?? (env.LOCAL_BASE_URL ? "local" : undefined), model: env.LOCAL_MODEL, label: "LOCAL" },
   };
   const ok = (n: string) => !!(P[n] && P[n].key && P[n].url && P[n].model);
   const def = ok(env.MOSHI_BRAIN_PROVIDER) ? env.MOSHI_BRAIN_PROVIDER : (Object.keys(P).find(ok) ?? null);

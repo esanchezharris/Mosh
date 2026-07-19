@@ -1,5 +1,5 @@
 // The curated tool catalog Moshi's brain is allowed to call. It deliberately
-// exposes a high-value, low-blast-radius subset (~99 of the ~190 MoshOps commands) — no
+// exposes a high-value, low-blast-radius subset (~124 of the ~203 MoshOps commands) — no
 // project IO, device settings, scans, or anything that could lose the user's work.
 // Each entry feeds two consumers: (1) the LLM system prompt (so the brain knows
 // what it can do), and (2) client-side validation, so a malformed or unknown
@@ -34,10 +34,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "import_clip", desc: "Import an audio file onto a track at a given time", args: [S("file"), S("trackId", false), S("name", false), N("startSeconds", false, "seconds on the timeline")] },
   { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "seconds")] },
   { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
-  { command: "trim_clip", desc: "Set a clip's start and length", args: [S("clipId"), N("start"), N("length")] },
+  { command: "trim_clip", desc: "Set a clip's start and length — ripple:true makes same-track neighbors follow the moved end (close or open the gap)", args: [S("clipId"), N("start"), N("length"), B("ripple", false, "shift later clips on the SAME track by the end delta")] },
   { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("time", true, "seconds")] },
   { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
+  { command: "delete_time_range", desc: "Remove everything in a time span across ALL tracks (splits straddling clips at the bounds) — destructive, one per step; ripple:true closes the gap by sliding later clips left", args: [N("start", true, "seconds"), N("end", true, "seconds"), B("ripple", false, "close the gap — later clips slide left by the range length")] },
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
@@ -51,6 +52,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
            N("length", false, "loop length in seconds; must be > 0 when enabling (default: the clip's length)")] },
   { command: "normalize_clip", desc: "Non-destructively set a wave clip's gain so its peak sample hits a target dB (default 0 dB)", args: [S("clipId"), N("targetDb", false, "dB, default 0")] },
   { command: "stretch_clip", desc: "Time-stretch a wave clip (warp) to a target length in seconds OR a bar count — e.g. make this loop fill 4 bars", args: [S("clipId"), N("length", false, "target warped length, seconds"), N("bars", false, "target length in bars")] },
+  { command: "set_clip_warp", desc: "Toggle a wave clip's auto-tempo warp so it time-stretches to follow the tempo map continuously (vs stretch_clip's one-shot fit) — detect:true estimates the loop's own BPM and locks it to the grid", args: [S("clipId"), B("autoTempo", true, "on/off"), N("sourceBpm", false, "the loop's own BPM; omit to use the map tempo (a 1:1 no-op) or detect"), B("detect", false, "estimate the loop's BPM from its audio and lock it to the grid"), S("mode", false, "time-stretch mode name; omit for the default")] },
   { command: "detect_clip_bpm", desc: "Estimate the BPM of a wave clip's audio (read-only)", args: [S("clipId")] },
   { command: "transcribe_clip", desc: "Transcribe a wave clip's audio into a new, time-aligned MIDI clip (pitch detection)", args: [S("clipId"), S("mode", false, '"mono" (default) | "poly"'), B("wait", false)] },
 
@@ -67,6 +69,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
+  { command: "insert_tempo_change", desc: "Add a tempo-map point beyond the base tempo (speed the song up/down partway through) — the point's curve shapes the span from IT to the NEXT point", args: [N("time", true, "seconds"), N("bpm", true, "20-999"), N("curve", false, "1 = step (default); values in (-1,1) ramp: <0 log, 0 linear, >0 exponential")] },
+  { command: "remove_tempo_change", desc: "Remove a tempo-map point by index from session.tempoMap — index 0 is the base tempo (edit that via set_tempo, never remove it)", args: [N("index", true, "1..N-1 from session.tempoMap")] },
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
   { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
@@ -107,6 +111,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_track_output", desc: "Route a track's output — into another track (a submix), to a hardware device, or back to 'default'", args: [S("trackId"), S("destTrackId", false, "route into this track instead of the master"), S("deviceID", false, "route to a hardware output device (from list_track_outputs)"), S("output", false, "'default' resets to normal master routing")] },
 
   // ── plugins ─────────────────────────────────────────────────────────────
+  { command: "list_builtins", desc: "List the built-in effects/instruments available to load (read-only) — the 'type' names load_builtin/load_master_builtin take", args: [] },
+  { command: "list_plugins", desc: "List the scanned VST3/AU plugins available to load (read-only) — the 'pluginId' names load_plugin/load_master_plugin take", args: [] },
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
   { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash)", args: [S("trackId")] },
@@ -163,6 +169,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "suggest_next_line", desc: "Suggest the next lyric line (a ghost line after the given index)", args: [S("trackId"), N("afterIndex")] },
   { command: "regenerate_lyric", desc: "Re-generate proposals for one lyric line with a fresh sample", args: [S("trackId"), N("lineIndex")] },
   { command: "accept_lyric_proposal", desc: "Accept a generated lyric proposal (commits its text into the line)", args: [S("trackId"), N("lineIndex"), N("proposalIndex", false, "default 0 = top-ranked")] },
+  { command: "reject_lyric_proposal", desc: "Reject a line's generated proposals (clears them; logs a negative taste label)", args: [S("trackId"), N("lineIndex")] },
   { command: "assert_lyric_line", desc: "Assert final words for one lyric line before sing render", args: [S("trackId"), N("lineIndex"), S("text", false)] },
   { command: "analyze_lyrics", desc: "Precise per-line phonology (syllables, stress contour, rhyme grade vs the group anchor) for the flow visualizer — no LLM", args: [S("trackId")] },
   { command: "build_skeleton_from_clip", desc: "Turn a hummed/mumbled wave take into an editable rhythmic flow skeleton (syllable grid + stress, no words) on the clip's track — the producer confirms the grid, then 'Finish gaps' writes the words", args: [S("clipId"), S("grid", false), B("wait", false)] },
@@ -201,6 +208,13 @@ export function commandCatalogPrompt(): string {
 export function describeCommand(command: string, args: Record<string, unknown>): string {
   const a = args as Record<string, string | number | boolean | undefined>;
   switch (command) {
+    // AGT-MEM (M3) — remember_preference is a PSEUDO-command (never in
+    // AGENT_COMMANDS/the catalog — see memory/rememberPreference.ts), but the
+    // executor still routes its intercepted result through the SAME entries/results
+    // arrays as a real command, so it needs a real summary here too (the generic
+    // command.replace(/_/g," ") fallback would just say "remember preference",
+    // dropping the actual remembered text).
+    case "remember_preference": return `Remembered: "${a.text ?? ""}"`;
     case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
     case "remove_track": return `Removed a track`;
@@ -212,6 +226,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "split_clip": return `Split a clip at ${a.time}s`;
     case "duplicate_clip": return `Duplicated a clip`;
     case "remove_clip": return `Removed a clip`;
+    case "delete_time_range": return `Cleared ${a.start}–${a.end}s across all tracks${a.ripple ? " and closed the gap" : ""}`;
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;
@@ -221,6 +236,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_clip_loop": return a.enabled ? `Looped a clip region (${a.length ?? "–"}s from ${a.start ?? 0}s)` : `Turned off a clip's loop`;
     case "normalize_clip": return `Normalized a clip${a.targetDb != null ? ` to ${a.targetDb} dB` : ""}`;
     case "stretch_clip": return a.bars ? `Stretched a clip to ${a.bars} bar${Number(a.bars) > 1 ? "s" : ""}` : `Stretched a clip to ${a.length}s`;
+    case "set_clip_warp": return a.autoTempo ? `Warped a clip to follow the tempo${a.detect ? " (detected its BPM)" : ""}` : `Turned off a clip's warp`;
     case "detect_clip_bpm": return `Detected a clip's BPM`;
     case "sketch_beatbox": return `Turned a beatbox into a drum clip`;
     case "add_note": return `Added a note`;
@@ -229,6 +245,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_note": return `Edited a note`;
     case "quantize_notes": return `Quantized notes${a.division != null ? ` (${a.division}-beat grid)` : ""}`;
     case "set_tempo": return `Set tempo to ${a.bpm} BPM`;
+    case "insert_tempo_change": return `Added a tempo change to ${a.bpm} BPM at ${a.time}s`;
+    case "remove_tempo_change": return `Removed a tempo change`;
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
     case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
     case "set_key": return `Set key to ${a.tonic ?? ""} ${a.mode ?? ""}`.trim();
@@ -253,6 +271,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "add_send": return `Added a send to bus ${a.bus}`;
     case "set_send_level": return `Set send to bus ${a.bus} to ${a.db} dB`;
     case "remove_send": return `Removed a send to bus ${a.bus}`;
+    case "list_builtins": return `Listed the built-in effects`;
+    case "list_plugins": return `Listed the available plugins`;
     case "load_builtin": return `Added ${a.type}`;
     case "set_track_type": return a.type === "drum" ? `Made it a drum track` : `Made it an audio track`;
     case "load_drum_kit": return `Loaded the drum kit`;

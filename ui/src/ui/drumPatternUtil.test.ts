@@ -3,9 +3,15 @@
 // parser must stay in lockstep (the kDefaultKit ⇄ DRUM_LANES "MUST mirror"
 // discipline). Change a vector here → change it there.
 import { describe, expect, it } from "vitest";
-import { drumPatternLanePitch, parseDrumPattern } from "./drumPatternUtil";
+import {
+  drumPatternLanePitch, drumPatternLaneName, parseDrumPattern, serializeDrumPattern, drumPatternFromNotes,
+} from "./drumPatternUtil";
 import type { DrumPatternParse } from "./drumPatternUtil";
 import { stepBeats } from "./drumGrid";
+import type { MidiNote } from "../types";
+
+const note = (pitch: number, start: number, velocity = 100, length = 0.25, i = 0): MidiNote =>
+  ({ i, pitch, start, length, velocity });
 
 const okOf = (r: DrumPatternParse) => {
   if (!r.ok) throw new Error(`expected ok, got error: ${r.error}`);
@@ -154,6 +160,142 @@ describe("parseDrumPattern", () => {
     expect(parseDrumPattern({}, 16, 0, 100).ok).toBe(false); // no lanes
     expect(parseDrumPattern({ hat: "" }, 16, 0, 100).ok).toBe(false); // empty lane
     expect(parseDrumPattern("kick x...", 16, 0, 100).ok).toBe(false); // no ':' in string form
+  });
+});
+
+// ── AGT-MEM (M4): serializeDrumPattern — the exact inverse, flat-string form ───────
+describe("serializeDrumPattern", () => {
+  // Semantic round-trip: parse(serialize(parse(s))) ≡ parse(s). NOT serialize(parse(s))
+  // === s — see serializeDrumPattern's own header comment for why (tiling expands,
+  // aliases canonicalize, '|' cosmetics never survive parsing to begin with).
+  const roundTrips = (s: string, stepsPerBar = 16, bars = 0, velocity = 100) => {
+    const first = okOf(parseDrumPattern(s, stepsPerBar, bars, velocity));
+    const out = serializeDrumPattern(first);
+    const second = okOf(parseDrumPattern(out, stepsPerBar, bars, velocity));
+    expect(second).toEqual(first);
+    return out;
+  };
+
+  it("round-trips the canonical 3-lane trap grid", () => {
+    roundTrips("kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x.");
+  });
+
+  it("emits a canonical lane name (not necessarily the input alias), still round-tripping", () => {
+    const out = roundTrips("ch: x...x...x...x...", 16, 0, 100); // "ch" aliases to hat/42
+    expect(out.startsWith("hat:")).toBe(true); // canonical name, not "ch"
+  });
+
+  it("round-trips accents (X = velocity 127) distinctly from plain hits", () => {
+    const out = roundTrips("kick: x-X.", 4, 0, 90);
+    expect(out).toBe("kick: x.X.");
+  });
+
+  it("round-trips rests ('.' and '-' both normalize to '.')", () => {
+    const out = roundTrips("kick: x-x-", 4, 0, 100);
+    expect(out).toBe("kick: x.x.");
+  });
+
+  it("a tiled short lane serializes at FULL LENGTH, but still round-trips to the same steps", () => {
+    const out = roundTrips("hat: x.", 16, 0, 100);
+    expect(out).toBe("hat: x.x.x.x.x.x.x.x."); // 16 chars, not the original 2
+  });
+
+  it("drops '|' cosmetic separators canonically", () => {
+    const out = roundTrips(" x... | x... | x... | x... ".replace(/^/, "kick: "), 16, 0, 100);
+    expect(out).not.toContain("|");
+    expect(out).toBe("kick: x...x...x...x...");
+  });
+
+  it("round-trips a raw numeric-pitch lane (an unmapped pitch, e.g. a custom pad)", () => {
+    const out = roundTrips("60: x...............", 16, 0, 100); // 60 has no LANE_PITCHES alias
+    expect(out).toBe("60: x...............");
+  });
+
+  it("round-trips an all-rest lane (registers its pitch with zero hits)", () => {
+    const out = roundTrips("snare: ................", 16, 0, 100);
+    expect(out).toBe("snare: ................");
+  });
+
+  it("preserves multi-lane order (lanePitches order), not alphabetical", () => {
+    const out = roundTrips("hat: x...x...x...x...; kick: x.x.x.x.x.x.x.x.; snare: ....x.......x...", 16, 0, 100);
+    const lanes = out.split("; ").map((l) => l.split(":")[0]);
+    expect(lanes).toEqual(["hat", "kick", "snare"]); // input order, not re-sorted
+  });
+
+  it("round-trips a multi-bar pattern (bars derived from the longest lane)", () => {
+    roundTrips("kick: x...x...x...x...x...x...x...x...; snare: ....x...", 16, 0, 100);
+  });
+
+  it("drumPatternLaneName: known pitches map to their canonical alias; unknown pitches fall back to the number", () => {
+    expect(drumPatternLaneName(36)).toBe("kick");
+    expect(drumPatternLaneName(38)).toBe("snare");
+    expect(drumPatternLaneName(39)).toBe("clap");
+    expect(drumPatternLaneName(42)).toBe("hat"); // canonical alias, not hihat/closedhat/ch
+    expect(drumPatternLaneName(46)).toBe("openhat"); // canonical alias, not oh
+    expect(drumPatternLaneName(45)).toBe("lowtom");
+    expect(drumPatternLaneName(47)).toBe("midtom");
+    expect(drumPatternLaneName(49)).toBe("crash");
+    expect(drumPatternLaneName(55)).toBe("55"); // unknown -> raw pitch string
+  });
+});
+
+// ── AGT-MEM (M4): drumPatternFromNotes — reads a live clip's notes into pattern shape ─
+describe("drumPatternFromNotes", () => {
+  it("quantizes notes onto the 16-step grid at their nearest step (kick on beats, hats on 8ths)", () => {
+    // 4/4 bar, 16 steps/bar -> stepBeats(4,16) = 0.25 beats/step.
+    const notes = [
+      note(36, 0), note(36, 1), note(36, 2), note(36, 3), // kick on every beat: steps 0,4,8,12
+      note(42, 0), note(42, 0.5), note(42, 1), note(42, 1.5), // hats on 8ths: steps 0,2,4,6
+    ];
+    const p = drumPatternFromNotes(notes, 4, 16);
+    expect(p.stepsPerBar).toBe(16);
+    expect(p.totalSteps).toBe(16);
+    expect(p.lanePitches).toEqual([36, 42]); // first-encountered order
+    const kickSteps = p.steps.filter((s) => s.pitch === 36).map((s) => s.step);
+    expect(kickSteps).toEqual([0, 4, 8, 12]);
+    const hatSteps = p.steps.filter((s) => s.pitch === 42).map((s) => s.step);
+    expect(hatSteps).toEqual([0, 2, 4, 6]);
+  });
+
+  it("round-trips through serializeDrumPattern back into an equivalent add_drum_pattern-ready string", () => {
+    const notes = [note(36, 0, 100), note(36, 2, 127), note(38, 1, 100)];
+    const built = drumPatternFromNotes(notes, 4, 16);
+    const patternString = serializeDrumPattern(built);
+    const reparsed = parseDrumPattern(patternString, built.stepsPerBar, 0, 100);
+    if (!reparsed.ok) throw new Error(reparsed.error);
+    expect(reparsed.steps).toEqual(built.steps);
+    expect(reparsed.lanePitches).toEqual(built.lanePitches);
+    expect(reparsed.totalSteps).toBe(built.totalSteps);
+  });
+
+  it("skips notes on unrecognized (non-drum-lane) pitches", () => {
+    const p = drumPatternFromNotes([note(36, 0), note(60, 0)], 4, 16); // 60 is not a drum lane
+    expect(p.lanePitches).toEqual([36]);
+    expect(p.steps).toEqual([{ pitch: 36, step: 0, velocity: 100 }]);
+  });
+
+  it("snaps a slightly-off-grid note to its nearest step (round-to-nearest, unbounded)", () => {
+    // sb = 0.25 beats/step; 0.13 beats is closer to step 1 (0.25) than step 0 (0.0).
+    const p = drumPatternFromNotes([note(36, 0.13)], 4, 16);
+    expect(p.steps).toEqual([{ pitch: 36, step: 1, velocity: 100 }]);
+  });
+
+  it("first note wins a cell when two notes land on the same lane+step", () => {
+    const p = drumPatternFromNotes([note(36, 0, 60), note(36, 0.02, 127)], 4, 16); // both quantize to step 0
+    expect(p.steps).toEqual([{ pitch: 36, step: 0, velocity: 60 }]);
+  });
+
+  it("derives bars from the furthest hit, rounding up to a full bar", () => {
+    const p = drumPatternFromNotes([note(36, 4.5)], 4, 16); // beat 4.5 of bar 2 -> step 18
+    expect(p.totalSteps).toBe(32); // 2 bars @ 16 steps
+    expect(p.steps).toEqual([{ pitch: 36, step: 18, velocity: 100 }]);
+  });
+
+  it("an empty note list produces an empty (1-bar) pattern with no lanes", () => {
+    const p = drumPatternFromNotes([], 4, 16);
+    expect(p.lanePitches).toEqual([]);
+    expect(p.steps).toEqual([]);
+    expect(p.totalSteps).toBe(16);
   });
 });
 

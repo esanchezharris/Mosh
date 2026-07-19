@@ -107,13 +107,25 @@
 
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  /* Flex column (was `grid: auto 1fr`): the grid template mis-rowed whenever the
+     conditional banners (errbar / RecoveryNotice / MissingMediaBanner) rendered —
+     the SECOND child landed in the 1fr row, so with an error showing, the errbar
+     took the flexible row and the body fell to an implicit one. Flex keeps every
+     banner content-sized and the body (below) flexes, whatever renders. */
+  display: flex;
+  flex-direction: column;
   background: var(--v2-bg);
   color: var(--v2-text);
   font-family: var(--font-body);
-  overflow: hidden;
+  /* #52 — usability floor. Below ~1120px the topbar's centred transport starts
+     covering the left meta controls and by ~560px the whole shell piled up on
+     itself. Keep a minimum layout width and let the SHELL scroll horizontally
+     (body is overflow:hidden) — an honest scrollbar instead of self-destruction. */
+  overflow-x: auto;
+  overflow-y: hidden;
 }
+.v2-shell > * { min-width: 1120px; flex: none; }
+.v2-shell > .v2-body { flex: 1; min-height: 0; }
 
 /* dock open-state → live column widths (the .v2-body grid reads these). Collapsed = a thin
    pull-tab rail; open = the panel width. Symmetric on both flanks. */
@@ -129,6 +141,9 @@
 [data-theme="light"] .v2-shell {
   --v2-bg: radial-gradient(135% 105% at 50% -8%, #f7f1e6 0%, #f1ebde 52%, #ebe3d2 100%);
   --v2-ink: #0c0c0c;
+  /* #54 — the errbar sits on the CREAM ground here; the dark theme's pale-pink
+     danger text (#ffb3c1) is near-invisible on it. Deep red on the rose wash. */
+  --status-danger-text: #8c1228;
   --v2-surface: #1b1b1d;
   --v2-surface-2: #242427;
   --v2-surface-sunken: #141416;
@@ -338,6 +353,19 @@
 .v2-menu-tools .pop {
   right: 0;
   left: auto;
+}
+/* AGT-MEM (M3) discovery — `.v2-menu-tools .btn` above (a plain descendant selector,
+   meant only to size the 5 tool-TRIGGER buttons in the grid) also matches every button
+   INSIDE an opened popover's content, since .pop is itself a descendant of .pop-wrap,
+   which is a descendant of .v2-menu-tools. Forced every popover button (Refresh, Clear,
+   Copy path, per-item Forget, …) to width:100%/height:38px of its flex row, collapsing
+   any adjacent flex-1 text to 0 width — invisible content, not a color bug. Pre-existing
+   (reproduces on the unmodified CommandLogTool's Refresh button too), surfaced by the
+   memory panel's denser button-next-to-text rows. Scoped reset, more specific than the
+   rule above by one compound selector so it wins regardless of source order. */
+.v2-menu-tools .pop .btn {
+  width: auto;
+  height: auto;
 }
 .v2-menu {
   position: static;
@@ -567,7 +595,9 @@
 }
 .v2-clip { cursor: grab; }
 .v2-clip:active { cursor: grabbing; }
-.v2-clip.sel { outline: 2px solid var(--v2-accent); outline-offset: -1px; }
+/* #48 — selection raises the clip so a fully-overlapped clip (selected via marquee or
+   the inspector) becomes reachable by pointer instead of being buried forever. */
+.v2-clip.sel { outline: 2px solid var(--v2-accent); outline-offset: -1px; z-index: 1; }
 .v2-trim { position: absolute; top: 0; bottom: 0; cursor: ew-resize; }
 .v2-trim.l { left: 0; }
 .v2-trim.r { right: 0; }
@@ -625,6 +655,17 @@
 
 .v2-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--v2-faint); font-size: 13px; }
 
+/* #47 — zero-track empty state keeps a REAL add-track affordance (the footer row it
+   used to rely on lives inside the track list, which doesn't render here). */
+.v2-stage-empty { display: grid; place-items: center; align-content: center; gap: 12px; }
+.v2-stage-empty .v2-empty { position: static; inset: auto; }
+.v2-empty-add {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border: 1px dashed var(--v2-ground-line-strong); border-radius: 10px;
+  background: transparent; color: var(--v2-ground-dim); font: inherit; font-size: 13px;
+}
+.v2-empty-add:hover { color: var(--v2-accent-ink); border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+
 /* trailing add-track row — the "one more track" of room. The header cell is sticky-left
    (always visible like the real headers); the lane cell is the droppable blackspace. */
 .v2-lhead-add {
@@ -644,6 +685,9 @@
   font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-dim);
   padding: 12px 14px 0;
 }
+/* #49 — card titles carry user content ("Inspector · <track name>"): truncate to one
+   line so a hostile name can't wrap the head across the panel and push controls out. */
+.v2-card-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v2-collab-kicker {
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -1124,7 +1168,10 @@
 .v2-shell .v2-dock-body .modal-list { max-height: none !important; overflow: auto; }
 
 /* error + drop overlay (reuse legacy semantics, restyled) */
-.v2-errbar { margin: 0 14px; padding: 7px 14px; background: color-mix(in srgb, var(--status-danger-glow) 14%, transparent); color: var(--status-danger-text); border: 1px solid color-mix(in srgb, var(--status-danger-glow) 40%, transparent); border-radius: 10px; font-size: 12px; }
+/* #53 — an unbroken token (path/UUID/arg dump) must wrap, not become the bar's
+   min-content width: without overflow-wrap the shell's single grid column inflated to
+   the message width and the whole stage displaced sideways. Tall messages scroll. */
+.v2-errbar { margin: 0 14px; padding: 7px 14px; background: color-mix(in srgb, var(--status-danger-glow) 14%, transparent); color: var(--status-danger-text); border: 1px solid color-mix(in srgb, var(--status-danger-glow) 40%, transparent); border-radius: 10px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
 .v2-drop { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(5, 8, 20, 0.7); color: var(--v2-accent); font-size: 16px; border: 2px dashed var(--v2-accent); border-radius: var(--v2-radius); }
 
 /* agent-change toast — self-dismissing, with an Undo grace window (hover to pause) */
@@ -1384,3 +1431,48 @@
 .v2-skel-grid { display: inline-flex; gap: 3px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .v2-skel-pip { color: var(--v2-accent); font-size: 9px; line-height: 1; }
 .v2-skel-count { font-variant-numeric: tabular-nums; color: var(--v2-dim); font-size: 11px; white-space: nowrap; }
+
+/* ── agent drawer (Phase B4) — docks above the composer; progressive disclosure ──
+   Token-routed colors only, so the cream/[data-theme] override pair styles both
+   themes (the flat-black-overlay lesson: never hardcode a panel color). */
+.v2-composer-stack { justify-self: center; width: min(860px, 100%); display: flex; flex-direction: column; gap: 8px; }
+.v2-composer-stack .v2-composer { justify-self: auto; width: 100%; }
+.v2-agent-drawer {
+  border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
+  background: var(--v2-surface); box-shadow: var(--v2-glow);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  animation: v2AgentDrawerIn 160ms ease-out;
+}
+@keyframes v2AgentDrawerIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.v2-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v2-agent-head-title { font-size: 12px; font-weight: 600; color: var(--v2-text); }
+.v2-agent-drawer.live .v2-agent-head-title { color: var(--v2-accent); }
+.v2-agent-head-actions { display: flex; gap: 6px; }
+.v2-agent-btn {
+  font-size: 11px; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--v2-surface-sunken); color: var(--v2-text); border: 1px solid var(--v2-line);
+}
+.v2-agent-btn:hover { border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+.v2-agent-btn.stop { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-agent-turn-ask { font-size: 11px; color: var(--v2-text-dim, var(--v2-text)); opacity: 0.75; }
+.v2-agent-plan { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; color: var(--v2-text); opacity: 0.85; }
+.v2-agent-plan-step.done { opacity: 0.45; text-decoration: line-through; }
+.v2-agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-agent-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text);
+}
+.v2-agent-chip .v2-agent-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-agent-chip.ok .v2-agent-chip-state { color: var(--v2-accent); }
+.v2-agent-chip.error { border-color: color-mix(in srgb, #d33 55%, var(--v2-line)); }
+.v2-agent-chip.error .v2-agent-chip-state { color: #d33; }
+.v2-agent-spin {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  border: 1.5px solid var(--v2-line); border-top-color: var(--v2-accent);
+  animation: v2AgentSpin 700ms linear infinite;
+}
+@keyframes v2AgentSpin { to { transform: rotate(360deg); } }
+.v2-agent-say { font-size: 12px; color: var(--v2-text); font-style: italic; }
+.v2-composer-face-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
+.v2-composer-face-btn:hover { outline: 2px solid var(--v2-accent-soft); }

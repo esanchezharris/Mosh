@@ -52,25 +52,38 @@ export const DEFAULT_RULES = [
 ].join("\n");
 
 /** Assemble the full system prompt from an (optimizable) rules block + a snapshot.
- *  PREAMBLE + catalog + [knowledge] + rules + session — the order systemPrompt has
- *  always used, with the producer-knowledge block inserted next to the catalog.
- *  `catalog` swaps the command catalog (the small-model-mode eval arm); omitted =
- *  the full catalog. `knowledge` is a pre-rendered producer-knowledge block; omitted
- *  or empty ⇒ not inserted, so every existing caller (GEPA / SFT / harvest) is
- *  byte-unchanged. */
-export function buildSystemPrompt(rules: string, snap: Snapshot | null, catalog?: string, knowledge?: string): string {
+ *  PREAMBLE + catalog + [knowledge] + [memory] + rules + session — the order
+ *  systemPrompt has always used, with the producer-knowledge block inserted next to
+ *  the catalog and the M2 memory block (preferences/patterns/project notes) right
+ *  after it. `catalog` swaps the command catalog (the small-model-mode eval arm);
+ *  omitted = the full catalog. `knowledge` is a pre-rendered producer-knowledge
+ *  block; `memory` is a pre-rendered memory block (retrieveContext() in
+ *  agent/memory/retrieveContext.ts) — BOTH omitted or empty ⇒ not inserted, so every
+ *  existing caller (GEPA / SFT / harvest, and every call site that predates the M2
+ *  memory param) is byte-unchanged. */
+export function buildSystemPrompt(
+  rules: string,
+  snap: Snapshot | null,
+  catalog?: string,
+  knowledge?: string,
+  memory?: string,
+): string {
   const parts = [PREAMBLE, catalog ?? commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
+  if (memory) parts.push(memory);
   parts.push(rules, "Current session:", snap ? compactSnapshot(snap) : "(empty session)");
   return parts.join("\n");
 }
 
 /** The production system prompt. Pass the user's request as `query` to inject the few
  *  most-relevant producer-knowledge cards; omit it (e.g. offline harvest that has no
- *  turn text yet) for the byte-identical no-knowledge prompt. */
-export function systemPrompt(snap: Snapshot | null, query?: string): string {
+ *  turn text yet) for the byte-identical no-knowledge prompt. `memory` is an optional
+ *  pre-rendered memory block (M2) — the caller (brain.ts) computes it via
+ *  retrieveContext() behind the `agentMemory` settings flag; omitted ⇒ no change to
+ *  this function's prior (pre-M2) behavior. */
+export function systemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
-  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge);
+  return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge, memory);
 }
 
 // Coerce a string token ("17", 132, true) to the type an arg expects.
@@ -86,10 +99,54 @@ function coerceArg(tok: string, type: "string" | "number" | "boolean"): unknown 
 // `add_midi_clip("17")` — instead of the {command,args} object (it mimics
 // commandCatalogPrompt()). Normalize that back to the object contract by mapping the
 // positional args onto the command's declared arg names. Returns null if unusable.
-function normalizeCommand(c: unknown): AgentCommandCall | null {
+// add_drum_pattern's NATIVE handler accepts the pattern as an object
+// ({kick:"x..."}) OR a flat lane-map string, but ArgSpec can only declare the
+// string form — and models naturally emit the object (it's the idiomatic JSON
+// shape; the Phase-A baseline measured every model losing compose-drums to
+// client-side validation over exactly this). Flatten the natively-valid object
+// into the declared flat form so validation matches the real contract.
+function normalizeDrumPatternArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const p = args.pattern;
+  if (p && typeof p === "object" && !Array.isArray(p)) {
+    const flat = Object.entries(p as Record<string, unknown>)
+      .map(([lane, cells]) => `${lane}: ${String(cells)}`)
+      .join("; ");
+    return { ...args, pattern: flat };
+  }
+  // Models also separate lanes with newlines instead of semicolons — the flat
+  // parser then reads the next lane's NAME as pattern chars. Canonicalize any
+  // newline/semicolon mix into the declared "; "-separated form.
+  if (typeof p === "string" && /[\r\n]/.test(p)) {
+    const flat = p.split(/[\r\n;]+/).map((s) => s.trim()).filter(Boolean).join("; ");
+    return { ...args, pattern: flat };
+  }
+  return args;
+}
+
+// Models also emit string-typed values on declared number/boolean args in the
+// OBJECT form ({"note":"42"}, {"mute":"true"}) — the same class coerceArg fixes
+// for the function-call-string form. Coerce per the catalog's ArgSpec; anything
+// that doesn't parse cleanly is left alone so validation still fails loudly.
+function coerceObjectArgs(command: string, args: Record<string, unknown>): Record<string, unknown> {
+  const spec = AGENT_COMMAND_MAP.get(command);
+  if (!spec) return args;
+  let out: Record<string, unknown> | null = null;
+  for (const a of spec.args) {
+    const v = args[a.name];
+    if (typeof v !== "string" || a.type === "string") continue;
+    const coerced = coerceArg(v, a.type);
+    if (coerced !== v) (out ??= { ...args })[a.name] = coerced;
+  }
+  return out ?? args;
+}
+
+export function normalizeCommand(c: unknown): AgentCommandCall | null {
   if (c && typeof c === "object" && typeof (c as AgentCommandCall).command === "string") {
     const o = c as AgentCommandCall;
-    return { command: o.command, args: (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown> };
+    let args = (o.args && typeof o.args === "object" ? o.args : {}) as Record<string, unknown>;
+    if (o.command === "add_drum_pattern") args = normalizeDrumPatternArgs(args);
+    args = coerceObjectArgs(o.command, args);
+    return { command: o.command, args };
   }
   if (typeof c !== "string") return null;
   const m = c.match(/^\s*([a-zA-Z_]\w*)\s*(?:\(([\s\S]*)\))?\s*;?\s*$/);

@@ -21,6 +21,12 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "list_directory", "list_training_sources", "list_lora_adapters",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
+        // AGT-MEM (Phase-B memory lane, M1) — pure file I/O (no ValueTree mutation,
+        // no track/clip target), same posture as get_rhymes/get_lyric_corpus_stats above.
+        // M3 adds delete/clear (the memory drawer's per-item delete + per-tier
+        // clear) — same posture: pure file I/O, no track/clip target, even though
+        // (unlike read) they DO mutate a store file.
+        "agent_memory_read", "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",

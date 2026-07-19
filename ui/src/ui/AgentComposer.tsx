@@ -9,9 +9,12 @@ import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
+import { writePreference } from "../agent/memory/writePreference";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
+import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
+import { routeAsk } from "../agent/loop/router";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -50,6 +53,14 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
           runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { source: "voice" })); },
           enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
           utter: (intent, say) => { s.pushAgentUtter(intent, say); },
+          // AGT-MEM (M3) — same "remember" flow as the composer below, no local
+          // component state available here so a write failure just utters UHOH
+          // (matches this hook's existing error-feedback level for other actions).
+          remember: async (rtext, scope) => {
+            const res = await writePreference(s.exec, rtext, scope, true);
+            if (res.ok) s.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
+            else s.pushAgentUtter("UHOH", "couldn't remember that");
+          },
         });
       },
       makeSource: (cb) => createContinuousVoiceInput(cb),
@@ -166,6 +177,28 @@ export function AgentComposer() {
           runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
+          // AGT-MEM (M3) — writes explicit:true (a user, not the model, asked for
+          // this) and surfaces the confirm toast (MemoryToast, v2) with its
+          // delete-by-ts Undo affordance — memory writes are non-undoable by design.
+          remember: async (rtext, scope) => {
+            const res = await writePreference(st.exec, rtext, scope, true);
+            if (res.ok) st.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
+            else setSay(`couldn't remember that — ${res.error}`);
+          },
+        });
+        return;
+      }
+
+      // The agentic loop (flag-gated, default OFF; gated off in multiplayer):
+      // the ROUTER sends multi-step-shaped asks — sequential clauses, creative
+      // builds, vague-taste work — into the loop (plan, act, observe, repair,
+      // ONE undo unit, live in the v2 drawer); short single-move asks stay on
+      // the cheap single-shot path below. Section-scope and the fast path keep
+      // their precedence above; hands-free still never reaches an LLM.
+      if (loopAllowed() && routeAsk(text) === "loop") {
+        await runLoopTask(text, {
+          say: (t) => setSay(t),
+          utter: (intent, s) => pushAgentUtter(intent, s),
         });
         return;
       }
