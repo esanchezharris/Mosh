@@ -113,6 +113,9 @@ const MOSH: Keymap = {
   [A.TOOL_MOVE]: "1",
   [A.TOOL_SPLIT]: "2",
   [A.TOOL_RANGE]: "3",
+  // Taste loop: "felt wrong" capture. Mod+Shift+F is free in every preset below
+  // (no keymap or gesture collision), and inherited by all of them.
+  [A.FELT_WRONG]: "Mod+Shift+F",
 };
 
 // Per-DAW variants — the core is shared; only a few flavor bindings differ so a

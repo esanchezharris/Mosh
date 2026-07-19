@@ -53,6 +53,10 @@ export const EditorAction = {
   TOOL_MOVE: "tool_move",
   TOOL_SPLIT: "tool_split",
   TOOL_RANGE: "tool_range",
+
+  // keyboard — taste loop (workshop 2026-07-19): "this passed but FEELS wrong" →
+  // capture tag + command-diff + snapshot into the felt-wrong archive lane.
+  FELT_WRONG: "felt_wrong",
 } as const;
 
 export type EditorAction = (typeof EditorAction)[keyof typeof EditorAction];

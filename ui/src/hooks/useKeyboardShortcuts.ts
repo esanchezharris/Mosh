@@ -66,6 +66,7 @@ export function useKeyboardShortcuts() {
         case EA.TOOL_SPLIT: void dispatch("tool_split"); break;
         case EA.TOOL_RANGE: void dispatch("tool_range"); break;
         case EA.SPLIT: prevent(); void dispatch("split"); break;
+        case EA.FELT_WRONG: prevent(); void dispatch("felt_wrong"); break;
         default: break;
       }
     };
