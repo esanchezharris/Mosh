@@ -48,7 +48,7 @@
     },
     "clip_fades": {
       "kind": "checksum",
-      "pcm_sha256": "8c253e07f4cd2fb84310b69288370f3c9ae9fc2aa069c18e835bd83525d2658a",
+      "pcm_sha256": "65aa605e4c991da5e3a5bd0c9ee070801f96a187608d561d6f979a4f6b841f04",
       "features": {
         "frames": 88200,
         "peak": 0.17699,
