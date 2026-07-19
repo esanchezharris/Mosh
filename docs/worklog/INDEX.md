@@ -6,11 +6,12 @@ to load every session. **Nothing was edited** — each note is verbatim, one fil
 CLAUDE.md keeps the standing rules (prime directives, stage gates, and the gotchas that still bite).
 This is the history: *why* a thing is the way it is, and what it cost to learn.
 
-41 notes, 2026-06-18 → 2026-07-18.
+42 notes, 2026-06-18 → 2026-07-18.
 
 | date | note |
 |---|---|
 | 2026-07-18 | [SLF-CONC-001 — `--selftest` made hermetic against a CONCURRENT selftest, and a GUI data-loss regression found on the way (2026-07-18)](2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md) |
+| 2026-07-18 | [AUD-001 — the intermittent `--selftest` crash: reproduced and diagnosed](2026-07-18-selftest-sigsegv-reproduction-and-diagnosis.md) |
 | 2026-07-18 | [METER-001 — v2 track/master level meters + a real coverage bug fixed (2026-07-18)](2026-07-18-meter-001-v2-track-master-level-meters-a-real-coverage-bug-f.md) |
 | 2026-07-18 | [Arrangement/editing throughput window — 18 PRs, #410–#427 (2026-07-18)](2026-07-18-arrangement-editing-throughput-window-18-prs-410-427.md) |
 | 2026-07-17 | [Playtest-prep push — 8 PRs landed ahead of the remote two-Mac playtest (2026-07-17, #345–#350, #353, #354-pending)](2026-07-17-playtest-prep-push-8-prs-landed-ahead-of-the-remote-two-mac-.md) |
