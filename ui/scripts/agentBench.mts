@@ -61,6 +61,9 @@ const BIN = findBin(argFlag("bin"));
 const TAG = argFlag("tag", `${cfg.model.replace(/[^a-zA-Z0-9.-]/g, "_")}-${RUNNER}`)!;
 const OUT_DIR = argFlag("out-dir", join(process.cwd(), "..", "docs", "agent-bench"))!;
 const MAX_STEPS = Number(argFlag("max-steps", "8"));
+// Reply-token cap per chat call. 800 = the shipped BrainProxy default;
+// always-on-thinking models need headroom (their reasoning spends the cap).
+const CHAT_MAX_TOKENS = Number(argFlag("chat-max-tokens", "800"));
 const TASK_FILTER = (argFlag("tasks", "all") || "all").split(",");
 const RENDER = !process.argv.includes("--no-render");
 const ART_DIR = join(homedir(), "mosh-agentbench-artifacts", TAG);
@@ -153,12 +156,13 @@ function makeRunner(usage: BrainUsage): AgentRunner {
   // keep-alive socket going down between the multi-second engine replays).
   // HTTP errors are real model/provider answers and are NOT retried.
   const chat = async (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => {
+    const opts = { maxTokens: CHAT_MAX_TOKENS };
     try {
-      return await callBrain(cfg, messages, usage);
+      return await callBrain(cfg, messages, usage, opts);
     } catch (e) {
       if (!/fetch failed|ECONNRESET|socket/i.test(String(e))) throw e;
       await new Promise((r) => setTimeout(r, 250));
-      return callBrain(cfg, messages, usage);
+      return callBrain(cfg, messages, usage, opts);
     }
   };
   if (RUNNER === "single") return makeSingleShotRunner({ chat });

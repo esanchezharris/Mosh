@@ -117,12 +117,16 @@ export async function callBrain(
   cfg: BrainConfig,
   messages: Array<{ role: string; content: string }>,
   usage?: BrainUsage,
-  opts?: { noThink?: boolean },
+  opts?: { noThink?: boolean; maxTokens?: number },
 ): Promise<{ content: string; ms: number }> {
   const isReasoning = /^(gpt-5|gpt-6|o[0-9])/.test(cfg.model);
+  // 800 is the shipped BrainProxy cap and stays the default; always-on-thinking
+  // models (Fable/K3/…) spend the cap on reasoning tokens and return truncated
+  // or empty JSON at 800 — sweeps raise it via opts.maxTokens.
+  const cap = opts?.maxTokens ?? 800;
   const payload: Record<string, unknown> = { model: cfg.model, messages, response_format: { type: "json_object" } };
-  if (isReasoning) payload.max_completion_tokens = 800;
-  else Object.assign(payload, { max_tokens: 800, temperature: 0 });
+  if (isReasoning) payload.max_completion_tokens = cap;
+  else Object.assign(payload, { max_tokens: cap, temperature: 0 });
   // local mlx_lm thinking models only — cloud APIs reject unknown fields, so flag-gated
   if (opts?.noThink) payload.chat_template_kwargs = { enable_thinking: false };
   const t0 = Date.now();
