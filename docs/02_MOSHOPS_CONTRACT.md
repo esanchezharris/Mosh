@@ -115,3 +115,5 @@ One line per executed command — the semantic audit trail / taste-signal flywhe
 { "ts": 1719…, "seq": 7, "command": "import_clip", "args": {…}, "ok": true, "undoable": true }
 ```
 Stage 5 adds `accept_render` / `reject_render` lines as explicit **taste labels**.
+
+*TASTE-002 (2026-07-19): the in-place overhaul (PR #185) removed accept/reject from the wave loop, so the flywheel stalled. The restored spigot: `reset_render_layer` logs as the workflow's explicit **negative** label, and a successful `save` / `export_audio` sweeps every still-applied (`appliedInPlace`, not bypassed) layer and logs one `render_kept` line — a **soft positive**, deduped on layerId per process. `render_kept` is a log-line type, NOT an executable command. All three carry `{clipId, layerId, cacheKey, adapter}` so each label joins to its render artifact. Consumer: `service/taste/census.py` (branch `claude/taste-loop-week1`) — explicit labels supersede a same-segment `render_kept`.*

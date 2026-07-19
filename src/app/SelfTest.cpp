@@ -2486,6 +2486,57 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (rRe), "re-render after reset ok");
         check ((bool) layerOf (gcid).getProperty ("appliedInPlace", false), "re-render re-applies in place");
 
+        // ── TASTE-002: the taste-label spigot (the in-place workflow's labels) ──
+        // PR #185's in-place auto-apply removed accept/reject from the wave loop, so organic
+        // taste labels stopped accumulating (census 2026-07-19: 1 accept, 0 rejects survive).
+        // The spigot: reset_render_layer logs an explicit NEGATIVE carrying the render join
+        // keys (layerId/cacheKey/adapter), and save/export while a render is still applied
+        // logs ONE render_kept soft POSITIVE per layer (deduped on layerId).
+        section ("TASTE-002: taste-label spigot (reset negative + render_kept positive)");
+        const auto tasteLayerId = layerOf (gcid).getProperty ("id", var()).toString();
+        check (tasteLayerId.isNotEmpty(), "layer id is a visible join key in the snapshot");
+        auto tasteLines = [&] (const String& command) -> Array<var>
+        {
+            Array<var> out;
+            for (auto& l : StringArray::fromLines (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+            {
+                if (! l.contains ("\"" + command + "\"")) continue;
+                const auto row = JSON::parse (l);   // named local — the var-temporary UAF class
+                if (row.getProperty ("command", var()).toString() == command) out.add (row);
+            }
+            return out;
+        };
+        {
+            auto resets = tasteLines ("reset_render_layer");
+            check (resets.size() > 0, "reset_render_layer is in the JSONL log");
+            const auto ra = resets.getLast().getProperty ("args", var());
+            check (ra.getProperty ("clipId", var()).toString() == gcid, "reset taste label carries clipId");
+            check (ra.getProperty ("layerId", var()).toString() == tasteLayerId, "reset taste label carries layerId (joins to the render)");
+            check (ra.getProperty ("cacheKey", var()).toString().isNotEmpty(), "reset taste label carries the render cacheKey");
+            check (ra.getProperty ("adapter", var()).toString() == "fake", "reset taste label carries the adapter");
+        }
+        auto keptFor = [&] (const String& layerId) -> int
+        {
+            int n = 0;
+            for (auto& row : tasteLines ("render_kept"))
+                if (row.getProperty ("args", var()).getProperty ("layerId", var()).toString() == layerId) ++n;
+            return n;
+        };
+        check (keptFor (tasteLayerId) == 0, "no render_kept before any save (the label fires at persistence time)");
+        check (ok (cmd (ops, "save")), "save ok (render_kept sweep runs)");
+        check (keptFor (tasteLayerId) == 1, "save logs render_kept for the surviving applied layer");
+        {
+            auto kept = tasteLines ("render_kept");
+            check (kept.size() == 1, "render_kept logged ONLY for the applied layer (no spurious labels)");
+            const auto ka = kept.getLast().getProperty ("args", var());
+            check (ka.getProperty ("clipId", var()).toString() == gcid
+                       && ka.getProperty ("cacheKey", var()).toString().isNotEmpty()
+                       && ka.getProperty ("adapter", var()).toString() == "fake",
+                   "render_kept carries the join keys (clipId/cacheKey/adapter)");
+        }
+        check (ok (cmd (ops, "save")), "second save ok");
+        check (keptFor (tasteLayerId) == 1, "render_kept deduped on layerId (a second save adds NO new label)");
+
         // bypass_layer toggles status ready<->bypassed (the wave A/B swaps the source to the
         // original when bypassed; here we round-trip the status flag).
         check (ok (cmd (ops, "bypass_layer", objN ({{ "clipId", gcid }, { "bypassed", true }}))), "bypass_layer ok");
@@ -2577,6 +2628,37 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         };
         check ((bool) xLayer().getProperty ("appliedInPlace", false), "wave transform AUTO-APPLIES in place");
         check ((bool) xLayer().getProperty ("hasOriginal", false), "transform stored the original (Reset available)");
+
+        // TASTE-002 — the EXPORT trigger: export_audio runs the same render_kept sweep as
+        // save. The transform layer is applied and unlogged here; the earlier re-imagine
+        // layer was already logged by save — the export must add exactly ONE new label
+        // (cross-trigger dedupe on layerId).
+        {
+            auto keptRows = [&] () -> Array<var>
+            {
+                Array<var> out;
+                for (auto& l : StringArray::fromLines (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                {
+                    if (! l.contains ("\"render_kept\"")) continue;
+                    const auto row = JSON::parse (l);   // named local — the var-temporary UAF class
+                    if (row.getProperty ("command", var()).toString() == "render_kept") out.add (row);
+                }
+                return out;
+            };
+            check (keptRows().size() == 1, "before the export exactly one render_kept exists (the saved re-imagine layer)");
+            auto expFile = eng.sessionDir().getChildFile ("taste-export-trigger.wav");
+            check (ok (cmd (ops, "export_audio", objN ({{ "file", expFile.getFullPathName() }, { "format", "wav" }}))),
+                   "export_audio ok (render_kept sweep runs on export)");
+            auto rows = keptRows();
+            check (rows.size() == 2, "export adds exactly ONE render_kept (new transform layer; earlier layer deduped)");
+            const auto ea = rows.getLast().getProperty ("args", var());
+            check (ea.getProperty ("clipId", var()).toString() == xcid
+                       && ea.getProperty ("layerId", var()).toString().isNotEmpty()
+                       && ea.getProperty ("cacheKey", var()).toString().isNotEmpty()
+                       && ea.getProperty ("adapter", var()).toString() == "transform",
+                   "export-triggered render_kept carries the join keys (clipId/layerId/cacheKey/adapter)");
+        }
+
         check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", xcid))), "reset after transform ok");
         check (! (bool) xLayer().getProperty ("appliedInPlace", true), "reset cleared the applied transform");
     }
@@ -2776,6 +2858,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "reset_render_layer", args1 ("clipId", mcid))), "reset_render_layer (MIDI) ok");
         check (! (bool) midiClipVar().getProperty ("mute", true), "reset un-muted the MIDI");
         check (! reimagineActive(), "reset cleared reimagineActive (hidden clip gone)");
+
+        // TASTE-002 — the beneath-model reset is the SAME negative taste event: the label
+        // must carry the join keys from the layer node (layerId/cacheKey).
+        {
+            var lastReset;
+            for (auto& l : StringArray::fromLines (eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString()))
+                if (l.contains ("\"reset_render_layer\""))
+                {
+                    const auto row = JSON::parse (l);   // named local — the var-temporary UAF class
+                    if (row.getProperty ("command", var()).toString() == "reset_render_layer") lastReset = row;
+                }
+            const auto ba = lastReset.getProperty ("args", var());
+            check (ba.getProperty ("clipId", var()).toString() == mcid
+                       && ba.getProperty ("layerId", var()).toString().isNotEmpty()
+                       && ba.getProperty ("cacheKey", var()).toString().isNotEmpty(),
+                   "beneath-model reset logs the taste label with join keys (clipId/layerId/cacheKey)");
+        }
 
         // re-render after reset re-applies beneath (cache HIT re-lands the hidden clip).
         auto rRe = cmd (ops, "render_layer", objN ({{ "clipId", mcid }, { "wait", true }}));
