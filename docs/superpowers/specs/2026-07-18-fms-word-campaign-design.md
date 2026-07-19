@@ -102,6 +102,18 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
 - **L3 — singability audit** (diagnostic, not a mutation; always-on file beside the
   score): per-word flags — syllable/segment counts, min segment duration, the
   stressed syllable's segment duration, re-deal fired — for round diagnosis.
+- **L4 — sustain chains for long notes** (registered 2026-07-19 from round-2 evidence,
+  BEFORE round 3): round 2 KEPT (defects 10→8, piñata articulates as one whole-word
+  note, guards improved). Every surviving multi-syllable garble is a LONG-note word
+  where the take melismas — helena 1.37+0.91 s, bonham 1.34 s, lacoste 1.76 s with
+  the K-AO1-S-T cluster crammed into 0.15 s (the syllable cap on `word_segments`
+  forbids the held-vowel continuation notes SoulX's own scores use). L4 = the
+  existing `sustainChainS` knob at 0.60 s (voiced-gate 0.90 unchanged): long notes
+  split into same-pitch chains, `_slot_phonemes` then gives consonant clusters their
+  own note and holds the vowel on the tail — the in-distribution held-word shape.
+  (History note: r8's lineup bundle containing a chain lever lost BY EAR on envelope
+  grounds; this use is word-gate-adjudicated with guards, and the milestone ear
+  still rules.) Kept levers accumulate: round 3 = L2 + L4, baseline = wc-r2.
 - Further levers may be added by amendment BEFORE the round that uses them.
 
 ## Predictions (falsifiable, registered)
