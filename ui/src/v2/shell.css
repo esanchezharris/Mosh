@@ -107,19 +107,25 @@
 
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  /* Flex column (was `grid: auto 1fr`): the grid template mis-rowed whenever the
+     conditional banners (errbar / RecoveryNotice / MissingMediaBanner) rendered —
+     the SECOND child landed in the 1fr row, so with an error showing, the errbar
+     took the flexible row and the body fell to an implicit one. Flex keeps every
+     banner content-sized and the body (below) flexes, whatever renders. */
+  display: flex;
+  flex-direction: column;
+  background: var(--v2-bg);
+  color: var(--v2-text);
+  font-family: var(--font-body);
   /* #52 — usability floor. Below ~1120px the topbar's centred transport starts
      covering the left meta controls and by ~560px the whole shell piled up on
      itself. Keep a minimum layout width and let the SHELL scroll horizontally
      (body is overflow:hidden) — an honest scrollbar instead of self-destruction. */
-  grid-template-columns: minmax(1120px, 1fr);
-  background: var(--v2-bg);
-  color: var(--v2-text);
-  font-family: var(--font-body);
   overflow-x: auto;
   overflow-y: hidden;
 }
+.v2-shell > * { min-width: 1120px; flex: none; }
+.v2-shell > .v2-body { flex: 1; min-height: 0; }
 
 /* dock open-state → live column widths (the .v2-body grid reads these). Collapsed = a thin
    pull-tab rail; open = the panel width. Symmetric on both flanks. */
