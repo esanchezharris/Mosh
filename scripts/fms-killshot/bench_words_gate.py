@@ -137,9 +137,15 @@ def demand_and_gaps(lyric_words, take_words, span):
         heard = take_words[lo:hi]
         if not heard:
             continue                      # the take never voiced these words: unsupported
+        take_syl = sum(_syl(w["word"]) for w in heard)
+        lyric_syl = sum(_syl(w) for w in missing_lyric)
+        # registered refinement (2026-07-19): demand the WORD's syllables, floored by
+        # what the take demonstrates — never the take's ornament count (melisma pulses
+        # are not lexical content; "lacoste" needs 2, not the take's 9)
         gaps.append({"lyricWords": list(missing_lyric), "t0": t0, "t1": t1,
                      "takeWords": [dict(w) for w in heard],
-                     "takeSyl": sum(_syl(w["word"]) for w in heard)})
+                     "takeSyl": take_syl, "lyricSyl": lyric_syl,
+                     "demandSyl": min(take_syl, lyric_syl)})
     return demands, gaps
 
 
@@ -170,10 +176,11 @@ def gate_song(lyric_words, take_words, render_words, span,
                if k not in claimed
                and g["t0"] - gap_pad_s <= float(rw["start"]) <= g["t1"] + gap_pad_s]
         rsyl = sum(_syl(rw["word"]) for _, rw in win)
-        if rsyl < g["takeSyl"]:
+        if rsyl < g["demandSyl"]:
             deficits.append({"lyricWords": g["lyricWords"],
                              "t0": round(g["t0"], 3), "t1": round(g["t1"], 3),
-                             "takeSyl": g["takeSyl"], "renderSyl": rsyl,
+                             "takeSyl": g["takeSyl"], "demandSyl": g["demandSyl"],
+                             "renderSyl": rsyl,
                              "takeHeard": " ".join(w["word"].strip() for w in g["takeWords"]),
                              "renderHeard": " ".join(rw["word"].strip() for _, rw in win)})
 

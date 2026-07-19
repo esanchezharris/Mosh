@@ -101,6 +101,23 @@ check("missing row reports what the render DID sing nearby",
       "renderHeard" in rep_miss["missing"][0])
 check("gate fails on a missing word", rep_miss["pass"] is False)
 
+# ── melisma calibration: the demand is the WORD's syllables, not the take's ornament ───
+# (registered gate refinement, 2026-07-19: "lacoste" = 2 lexical syllables; the take's 9
+# ornamented pulses are melisma, not lexical content — a render that articulates la-coste
+# sounds like the word and must PASS)
+LYRIC_M = "must be lacoste".split()
+TAKE_M = [W("must", 0.0), W("be", 0.3),
+          W("like", 0.6), W("awww", 0.9), W("way", 1.2), W("up", 1.5), W("on", 1.8),
+          W("the", 2.1), W("top", 2.4), W("rope", 2.7)]      # whisper's ornament read: 9+ syl
+REND_M = [W("must", 0.0), W("be", 0.3), W("lacoste", 0.8)]   # 2 heard syllables: the word
+rep_m = bwg.gate_song(LYRIC_M, TAKE_M, REND_M, (0.0, 3.2))
+check("melisma gap demands min(takeSyl, lyricSyl): la-coste (2) passes vs 9 ornament pulses",
+      rep_m["sylDeficits"] == [] and rep_m["pass"] is True, json.dumps(rep_m["sylDeficits"]))
+rep_m2 = bwg.gate_song(LYRIC_M, TAKE_M, [W("must", 0.0), W("be", 0.3), W("love", 0.8)], (0.0, 3.2))
+check("but a 1-syllable collapse ('love') still fails the 2-syllable word",
+      len(rep_m2["sylDeficits"]) == 1 and rep_m2["sylDeficits"][0]["demandSyl"] == 2,
+      json.dumps(rep_m2["sylDeficits"]))
+
 # ── gap with no take words = unsupported (never demanded) ──────────────────────────────
 LYRIC2 = "we ride tonight".split()
 TAKE2 = [W("we", 0.0), W("tonight", 1.0)]     # 'ride' never voiced by the take

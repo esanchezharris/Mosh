@@ -63,6 +63,15 @@ Whisper-small on the piñata microscope crops (round r11 page, `ear-consonants`)
 Ruler validation (registered): on round 0 the gate MUST flag piñata-class words where
 the owner already heard garbling. Zero findings = broken ruler; fix before any lever.
 
+**Gate refinement (2026-07-19, registered BEFORE round 5, ledger re-scored under it):**
+round 4 exposed a calibration bug — the syllable-gap demand used the TAKE's ornament
+count, demanding 9 heard syllables for the 2-syllable word "lacoste" and 15 for
+"Helena Bonham" (4 lexical syllables). Intelligibility = articulating the WORD's
+syllables, floored by what the take demonstrates: the demand becomes
+`min(takeSyl, lyricSyl)` per gap. All prior rounds re-scored under the refined gate
+so keep/revert comparisons stay apples-to-apples; both old and new counts recorded
+in the verdict doc.
+
 ## Guards (so the gate can't be gamed)
 
 Guide grade needs melody + rhythm too. A kept round must hold, vs the round-0
