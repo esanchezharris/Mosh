@@ -43,6 +43,8 @@ export interface ActionStore {
   // is set (the editor owns Delete then). Optional so test fakes can omit them.
   editingClipId?: string | null;
   automationTrackId?: string | null;
+  // Taste loop (⌘⇧F) — opens the felt-wrong capture dialog. Optional for test fakes.
+  setFeltWrongOpen?: (open: boolean) => void;
 }
 
 export interface ActionCtx {
@@ -270,6 +272,11 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     case "loop_region":
       if (typeof opts.loopStart === "number" && typeof opts.loopEnd === "number")
         await store.exec("set_transport", { loop: true, loopStart: opts.loopStart, loopEnd: opts.loopEnd });
+      return;
+    case "felt_wrong":
+      // Taste loop (workshop 2026-07-19): opens the capture dialog; the dialog itself
+      // archives the row (no MoshOps command — the archive rides archive_pair).
+      store.setFeltWrongOpen?.(true);
       return;
   }
 }

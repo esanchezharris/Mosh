@@ -792,6 +792,8 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .confirm-modal { width: min(92vw, 380px); }
 .confirm-body { padding: 4px 14px 0; font-size: 12px; line-height: 1.5; }
 .confirm-actions { padding: 12px 14px 14px; justify-content: flex-end; }
+/* Taste loop — the ⌘⇧F felt-wrong tag field (same field chrome as .xform-text). */
+.felt-wrong-input { display: block; width: calc(100% - 28px); margin: 10px 14px 0; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 5px; padding: 5px 8px; font: inherit; font-size: 12px; }
 .modal-filters { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line-soft); }
 .modal-filters input { flex: 1 1 auto; background: var(--ink); border: 1px solid var(--ink-line); color: var(--bone); border-radius: 7px; padding: 6px 9px; }
 .modal-list { overflow: auto; padding: 8px 10px; flex: 1 1 auto; min-height: 0; }

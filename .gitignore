@@ -37,6 +37,9 @@ ui/*.tsbuildinfo
 service/.venv/
 # machine-local SA3 paths written by setup-sa3.sh
 service/.sa3.env
+# Taste-eval lane: machine-local TASTE_PY/TUNEJURY_PY (setup-taste.sh). Internal
+# eval only — service/taste is deliberately NOT in the deploy-bundle whitelist.
+service/taste/.taste.env
 # Basic Pitch venv (100s of MB) + machine-local BASIC_PITCH_PY (setup-transcribe.sh)
 service/transcribe/.venv/
 service/transcribe/.transcribe.env
