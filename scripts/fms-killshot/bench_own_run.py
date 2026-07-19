@@ -261,7 +261,13 @@ def main():
         t0, t1 = a.t0, a.t1
         wj = os.path.join(os.path.dirname(it["clean_vocal"]), f"{it['song']}.window.json")
         if a.full_span:
-            t0, t1 = 0.0, wav_duration_s(it["clean_vocal"])
+            # the full VERIFIED span: the render may only sing words whose true lyric is
+            # installed (known-words foundation — ASR-guessed words are never sung), so
+            # the span ends at the last verified word. Once full lyrics + realignment
+            # land, this automatically covers the whole take.
+            t0 = 0.0
+            t1 = min(wav_duration_s(it["clean_vocal"]),
+                     max(float(w["end"]) for w in it["words"]) + 0.3)
         elif not a.fixed_window and os.path.isfile(wj):
             w = json.load(open(wj))
             t0, t1 = float(w["t0"]), float(w["t1"])

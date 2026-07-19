@@ -103,6 +103,20 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
   never showed (long rests / section boundaries) — this is why round 0 precedes any
   lever.
 
+## Amendment — the "full song" span (2026-07-18, before round 0 completed)
+
+Building the full-span path surfaced a data constraint: verified TRUE lyrics exist
+only for the first ~13–15 s of each song (28/34/25 words); the installed word
+timelines end there, while ASR words cover the whole 47–55 s takes. Singing
+ASR-guessed words would break the bench's known-words foundation (ASR ranks, never
+declares — and the gate would turn circular). So **`--full-span` = the full VERIFIED
+span** (≈2× the old windows: 15.6 / 15.3 / 13.3 s), auto-extending to the whole take
+the moment the owner supplies full lyrics and the alignment is re-run. P3 stands
+partially confirmed before any render: the first full-span attempt (span = take
+length) mismatched score vs reference and was killed pre-scoring.
+**Owner ask (non-blocking):** paste the full lyrics for the three songs to unlock
+true full-take rounds.
+
 ## Protocol details
 
 - Seeds pinned: SOULX_SEED=4242, SOULX_CFG=5.0, SOULX_NSTEPS=32; any score delta
