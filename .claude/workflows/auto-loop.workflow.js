@@ -129,7 +129,9 @@ Return JSON ONLY: {verdict:"APPROVE"|"REJECT", blockers:<int>, reasons:[...]}. "
 
 const finalizePrompt = (it, prep) => `${RUN} ${ROOT}/merge-one.sh finalize ${slugOf(it.id)} ${it.prNumber} ${prep.baseSha} "APPROVE (adversarial self-review)"
 Run EXACTLY that command. It re-checks the kill switch + that origin/main has not advanced since ${prep.baseSha},
-then squash-merges (gh pr merge --squash --admin --delete-branch), appends the ledger, and removes the worktree.
+then waits for main's required "cheap gate" status check and squash-merges (gh pr merge --squash — NOT
+--admin, which cannot bypass a required check while enforce_admins is on), appends the ledger, and
+removes the worktree. A red or absent check is fail-closed: finalize refuses to merge.
 Return its JSON verbatim: {merged, mergeSha, reason}.`
 
 const rejectAction = (it, sublabel, reason) =>
