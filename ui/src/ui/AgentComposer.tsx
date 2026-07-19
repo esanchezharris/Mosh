@@ -9,6 +9,7 @@ import { createBrain, type Brain } from "../agent/brain";
 import { runAgentBatch } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
+import { writePreference } from "../agent/memory/writePreference";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
@@ -52,6 +53,14 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
           runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { source: "voice" })); },
           enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
           utter: (intent, say) => { s.pushAgentUtter(intent, say); },
+          // AGT-MEM (M3) — same "remember" flow as the composer below, no local
+          // component state available here so a write failure just utters UHOH
+          // (matches this hook's existing error-feedback level for other actions).
+          remember: async (rtext, scope) => {
+            const res = await writePreference(s.exec, rtext, scope, true);
+            if (res.ok) s.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
+            else s.pushAgentUtter("UHOH", "couldn't remember that");
+          },
         });
       },
       makeSource: (cb) => createContinuousVoiceInput(cb),
@@ -168,6 +177,14 @@ export function AgentComposer() {
           runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
+          // AGT-MEM (M3) — writes explicit:true (a user, not the model, asked for
+          // this) and surfaces the confirm toast (MemoryToast, v2) with its
+          // delete-by-ts Undo affordance — memory writes are non-undoable by design.
+          remember: async (rtext, scope) => {
+            const res = await writePreference(st.exec, rtext, scope, true);
+            if (res.ok) st.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
+            else setSay(`couldn't remember that — ${res.error}`);
+          },
         });
         return;
       }

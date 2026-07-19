@@ -339,6 +339,19 @@
   right: 0;
   left: auto;
 }
+/* AGT-MEM (M3) discovery — `.v2-menu-tools .btn` above (a plain descendant selector,
+   meant only to size the 5 tool-TRIGGER buttons in the grid) also matches every button
+   INSIDE an opened popover's content, since .pop is itself a descendant of .pop-wrap,
+   which is a descendant of .v2-menu-tools. Forced every popover button (Refresh, Clear,
+   Copy path, per-item Forget, …) to width:100%/height:38px of its flex row, collapsing
+   any adjacent flex-1 text to 0 width — invisible content, not a color bug. Pre-existing
+   (reproduces on the unmodified CommandLogTool's Refresh button too), surfaced by the
+   memory panel's denser button-next-to-text rows. Scoped reset, more specific than the
+   rule above by one compound selector so it wins regardless of source order. */
+.v2-menu-tools .pop .btn {
+  width: auto;
+  height: auto;
+}
 .v2-menu {
   position: static;
   min-width: 0;

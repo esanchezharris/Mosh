@@ -139,6 +139,27 @@ describe("command classification guard — every native command is deliberately 
   });
 });
 
+describe("AGT-MEM (M3) — remember_preference stays a pseudo-command, never the real catalog", () => {
+  // MEMORY_COMMANDS (memory/rememberPreference.ts) names are intercepted by the
+  // executor BEFORE validateCommand and are deliberately NEVER added to
+  // AGENT_COMMANDS/commandCatalogPrompt() — the SFT/GEPA/bench prompt must stay
+  // byte-stable (see brainCore.ts's buildSystemPrompt contract). This is the guard:
+  // if a future change ever adds "remember_preference" (or any future memory
+  // pseudo-command) to the real catalog, this fails loudly instead of silently
+  // duplicating/contradicting the serve-time-only doc path.
+  it("MEMORY_COMMANDS ∩ AGENT_COMMANDS is empty", async () => {
+    const { MEMORY_COMMANDS } = await import("./memory/rememberPreference");
+    const overlap = [...MEMORY_COMMANDS].filter((name) => AGENT_COMMAND_MAP.has(name));
+    expect(overlap, `pseudo-command(s) leaked into the real catalog: ${overlap.join(", ")}`).toEqual([]);
+  });
+
+  it("MEMORY_COMMANDS is also not in the native dispatch table (it's a client-only interception, not a real command)", async () => {
+    const { MEMORY_COMMANDS } = await import("./memory/rememberPreference");
+    const leaked = [...MEMORY_COMMANDS].filter((name) => dispatch.has(name));
+    expect(leaked, `pseudo-command(s) leaked into MoshOps.cpp's real dispatch table: ${leaked.join(", ")}`).toEqual([]);
+  });
+});
+
 function isSlotReference(value: SkillValue): value is { slot: string } {
   return value !== null && typeof value === "object";
 }

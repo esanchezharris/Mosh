@@ -8,7 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { pickFiles, pickSaveFile } from "../bridge";
+import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
@@ -17,6 +17,11 @@ import { trainingPreviewLabel } from "../capabilities";
 import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { copyText } from "../clipboard";
+import type { MemoryRecord } from "../agent/memory/retrieveContext";
+import { invalidateMemoryHydration } from "../agent/memory/hydrate";
+import { projectMemoryPath } from "../agent/memory/projectMemoryPath";
 import {
   IconCheck,
   IconDownload,
@@ -155,7 +160,7 @@ export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const recents = (s.recentProjects ?? []).slice(0, 8);
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
-    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
+    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat }, opts);
   return (
     <Pop label="File" title="File menu" ariaLabel="File" className="menu-pop">
       {(close) => (
@@ -515,6 +520,153 @@ export function CommandLogTool({ label, title, className, ariaLabel, testId }: T
       testId={testId}
     >
       {() => <CommandLogBody log={log} loading={loading} load={() => void load()} />}
+    </Pop>
+  );
+}
+
+// AGT-MEM (M3) — the memory panel: what Moshi has stored, per tier, with per-item
+// forget + per-tier clear + a path-to-clipboard "reveal" (no native reveal-in-finder
+// bridge command exists — see exportPath.ts/ExportControls.tsx's identical posture,
+// reused verbatim here). Fully reloads on every open (no cross-open cache like
+// CommandLogBody's — a delete/clear/remember made since the last open must show up
+// immediately, and a manual Refresh is also offered for mid-session changes from chat).
+type MemoryTierId = "preference" | "drum_pattern" | "lyric_framework" | "project";
+type MemoryTierDef = { id: MemoryTierId; label: string; scope: "global" | "project"; kind?: string };
+const MEMORY_TIERS: readonly MemoryTierDef[] = [
+  { id: "preference", label: "Preferences", scope: "global", kind: "preference" },
+  { id: "drum_pattern", label: "Drum patterns", scope: "global", kind: "drum_pattern" },
+  { id: "lyric_framework", label: "Lyric frameworks", scope: "global", kind: "lyric_framework" },
+  { id: "project", label: "This project", scope: "project" },
+];
+
+function formatMemoryItem(item: unknown): string {
+  if (typeof item === "string") return item;
+  try { return JSON.stringify(item); } catch { return String(item); }
+}
+
+function MemoryBody({ editFile }: { editFile: string }) {
+  const exec = useStore((s) => s.exec);
+  const [tiers, setTiers] = useState<Record<MemoryTierId, MemoryRecord[]> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState<"global" | "project" | null>(null);
+  const [pendingClear, setPendingClear] = useState<MemoryTierId | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const results = await Promise.all(
+      MEMORY_TIERS.map((t) => exec("agent_memory_read", t.kind ? { scope: t.scope, kind: t.kind } : { scope: t.scope })),
+    );
+    const next = {} as Record<MemoryTierId, MemoryRecord[]>;
+    MEMORY_TIERS.forEach((t, i) => {
+      const r = results[i];
+      const items = r.ok ? (r.data as { items?: MemoryRecord[] } | undefined)?.items : undefined;
+      next[t.id] = Array.isArray(items) ? items : [];
+    });
+    setTiers(next);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (!tiers && !loading) void load();
+    // Load once on open; the panel fully remounts on close (Pop unmounts its render-
+    // prop children), so reopening always re-runs this — that IS the "fully reloads on
+    // every open" behavior described above, not a bug in the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const remove = async (t: MemoryTierDef, rec: MemoryRecord) => {
+    const r = await exec("agent_memory_delete", t.kind ? { scope: t.scope, kind: t.kind, ts: rec.ts } : { scope: t.scope, ts: rec.ts });
+    if (r.ok) { invalidateMemoryHydration(); await load(); }
+  };
+
+  const clearTier = async (t: MemoryTierDef) => {
+    const r = await exec("agent_memory_clear", t.kind ? { scope: t.scope, kind: t.kind } : { scope: t.scope });
+    setPendingClear(null);
+    if (r.ok) { invalidateMemoryHydration(); await load(); }
+  };
+
+  const copyPath = async (which: "global" | "project") => {
+    const path = which === "global" ? "~/Library/Mosh/agent" : projectMemoryPath(editFile);
+    if (!path) return;
+    const ok = await copyText(path);
+    if (ok) { setCopied(which); window.setTimeout(() => setCopied(null), 1600); }
+  };
+
+  const pendingTier = pendingClear ? MEMORY_TIERS.find((t) => t.id === pendingClear) : undefined;
+
+  return (
+    <>
+      <div className="pop-head">
+        <span>What Moshi remembers</span>
+        <button className="btn icon" title="Refresh" aria-label="Refresh memory" onClick={() => void load()}><IconRefresh size={14} /></button>
+      </div>
+      <div className="pop-note">{loading ? "Loading…" : "newest first · pruned locally, folded into a few prompts each turn"}</div>
+      {MEMORY_TIERS.map((t) => {
+        const items = tiers?.[t.id] ?? [];
+        return (
+          <div className="mem-tier" key={t.id} data-testid={`memory-tier-${t.id}`}>
+            <div className="mem-tier-head">
+              <span className="mem-tier-label">{t.label}</span>
+              <span className="mem-tier-count">{items.length}</span>
+              {items.length > 0 && (
+                <button className="btn mem-clear" onClick={() => setPendingClear(t.id)}>Clear</button>
+              )}
+            </div>
+            {items.length === 0 && !loading ? (
+              <div className="rack-empty">nothing yet</div>
+            ) : (
+              <div className="mem-item-list">
+                {items.map((rec) => (
+                  <div className="mem-item-row" key={rec.ts}>
+                    {rec.explicit && <span className="mem-badge" title="You asked Moshi to remember this">★</span>}
+                    {t.id === "project" && rec.kind !== "preference" && <span className="mem-kind" title="kind">{rec.kind}</span>}
+                    <span className="mem-item-text" title={formatMemoryItem(rec.item)}>{formatMemoryItem(rec.item)}</span>
+                    <button className="btn icon mem-del" title="Forget this" aria-label="Forget this" onClick={() => void remove(t, rec)}><IconX size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="pop-group">
+        <div className="pop-actions">
+          <button className="btn" onClick={() => void copyPath("global")}>{copied === "global" ? "Copied ✓" : "Copy global memory path"}</button>
+          {editFile && <button className="btn" onClick={() => void copyPath("project")}>{copied === "project" ? "Copied ✓" : "Copy this project's memory path"}</button>}
+        </div>
+        <div className="pop-note">Folder hidden by default — in Finder press ⌘⇧G (Go to Folder) and paste it.</div>
+      </div>
+      {pendingTier && (
+        <ConfirmDialog
+          title={`Clear ${pendingTier.label}?`}
+          body="This removes everything Moshi has stored here, including anything you explicitly asked it to remember. This can't be undone."
+          confirmLabel="Clear"
+          danger
+          onConfirm={() => void clearTier(pendingTier)}
+          onCancel={() => setPendingClear(null)}
+          testId="memory-clear-confirm"
+        />
+      )}
+    </>
+  );
+}
+
+export function MemoryTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
+  // Respect the agentMemory flag: with recall off there's nothing to show or prune, so
+  // the tool doesn't render at all (mirrors the flag's "no recall" framing in
+  // settings/schema.ts rather than showing an always-empty panel).
+  const memoryOn = useSettings((s) => s.get("agentMemory") !== false);
+  const editFile = useStore((s) => s.snapshot?.session.editFile ?? "");
+  if (!memoryOn) return null;
+  return (
+    <Pop
+      label={label ?? "✶"}
+      title={title ?? "What Moshi remembers"}
+      className={className}
+      ariaLabel={ariaLabel ?? "What Moshi remembers"}
+      testId={testId}
+    >
+      {() => <MemoryBody editFile={editFile} />}
     </Pop>
   );
 }

@@ -8310,6 +8310,176 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         check (! ok (cmd (ops, "agent_memory_write", objN ({ { "scope", "project" } }))),
                "agent_memory_write project missing item fails cleanly");
+
+        // ── delete / clear (M3): validation ──
+        check (! ok (cmd (ops, "agent_memory_delete", objN ({ { "kind", "preference" }, { "ts", (int64) 1 } }))),
+               "agent_memory_delete missing scope fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_delete", objN ({ { "scope", "global" }, { "kind", "preference" } }))),
+               "agent_memory_delete missing ts fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_delete",
+                          objN ({ { "scope", "global" }, { "kind", "nonsense" }, { "ts", (int64) 1 } }))),
+               "agent_memory_delete global invalid kind fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_clear", objN ({ { "kind", "preference" } }))),
+               "agent_memory_clear missing scope fails cleanly");
+        check (! ok (cmd (ops, "agent_memory_clear",
+                          objN ({ { "scope", "global" }, { "kind", "nonsense" } }))),
+               "agent_memory_clear global invalid kind fails cleanly");
+
+        // ── global delete: by ts with kind given, and with kind OMITTED (search all 3) ──
+        {
+            auto tsOfLastWrite = [&] (const juce::String& scope, const juce::String& kind) -> int64
+            {
+                auto r = cmd (ops, "agent_memory_read", objN ({ { "scope", scope }, { "kind", kind }, { "limit", 1 } }));
+                return (int64) r.getProperty ("data", var()).getProperty ("items", var())[0].getProperty ("ts", var ((int64) 0));
+            };
+
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "global" }, { "kind", "preference" }, { "item", "delete-target-1" } }))),
+                   "seed for delete test 1 ok");
+            const int64 ts1 = tsOfLastWrite ("global", "preference");
+            check (ts1 != 0, "captured a real ts for the seeded item");
+
+            check (! ok (cmd (ops, "agent_memory_delete",
+                              objN ({ { "scope", "global" }, { "kind", "preference" }, { "ts", (int64) 999999 } }))),
+                   "agent_memory_delete with a missing ts fails cleanly");
+
+            auto beforeCount = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "preference" }, { "limit", 1000 } }))
+                                   .getProperty ("data", var()).getProperty ("items", var()).size();
+            check (ok (cmd (ops, "agent_memory_delete",
+                            objN ({ { "scope", "global" }, { "kind", "preference" }, { "ts", ts1 } }))),
+                   "agent_memory_delete global (kind given) ok");
+            auto afterCount = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "preference" }, { "limit", 1000 } }))
+                                  .getProperty ("data", var()).getProperty ("items", var()).size();
+            check (afterCount == beforeCount - 1, "delete removed exactly one item from the preference store");
+
+            // A second delete of the SAME ts now fails (already gone).
+            check (! ok (cmd (ops, "agent_memory_delete",
+                              objN ({ { "scope", "global" }, { "kind", "preference" }, { "ts", ts1 } }))),
+                   "deleting an already-deleted ts fails cleanly");
+
+            // kind OMITTED: search across all three global kind files. explicit:true
+            // here because the earlier "cap eviction: an all-EXPLICIT store" checks
+            // above left drum_pattern AT CAP with every item explicit — a non-explicit
+            // write there would be correctly REJECTED (that's the whole point of that
+            // policy); explicit:true evicts the oldest explicit one instead, same as
+            // it would against a fresh/non-full store.
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "global" }, { "kind", "drum_pattern" }, { "explicit", true },
+                                    { "item", "delete-target-2" } }))),
+                   "seed for delete test 2 (drum_pattern) ok");
+            const int64 ts2 = tsOfLastWrite ("global", "drum_pattern");
+            check (ok (cmd (ops, "agent_memory_delete", objN ({ { "scope", "global" }, { "ts", ts2 } }))),
+                   "agent_memory_delete global with NO kind finds the right file by searching all three");
+            auto drumAfter = cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "drum_pattern" }, { "limit", 1000 } }))
+                                 .getProperty ("data", var()).getProperty ("items", var());
+            bool stillThere = false;
+            for (int i = 0; i < drumAfter.size(); ++i)
+                if (drumAfter[i].getProperty ("item", var()).toString() == "delete-target-2") stillThere = true;
+            check (! stillThere, "the kind-omitted delete actually removed it from drum_pattern");
+        }
+
+        // ── global clear: per-kind vs whole-scope ──
+        {
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "global" }, { "kind", "preference" }, { "item", "clear-pref-1" } }))),
+                   "seed clear-pref-1 ok");
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "global" }, { "kind", "lyric_framework" }, { "item", "clear-lyric-1" } }))),
+                   "seed clear-lyric-1 ok");
+
+            auto clearPref = cmd (ops, "agent_memory_clear", objN ({ { "scope", "global" }, { "kind", "preference" } }));
+            check (ok (clearPref), "agent_memory_clear global (kind given) ok");
+            check ((int) clearPref.getProperty ("data", var()).getProperty ("cleared", -1) > 0,
+                   "clear reports how many it removed");
+            check ((int) cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "preference" } }))
+                          .getProperty ("data", var()).getProperty ("items", var()).size() == 0,
+                   "preference store is empty after a kind-scoped clear");
+            check ((int) cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "lyric_framework" } }))
+                          .getProperty ("data", var()).getProperty ("items", var()).size() > 0,
+                   "a kind-scoped clear does NOT touch other kinds");
+
+            check (ok (cmd (ops, "agent_memory_clear", args1 ("scope", "global"))),
+                   "agent_memory_clear global with NO kind (whole-scope) ok");
+            check ((int) cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "lyric_framework" } }))
+                          .getProperty ("data", var()).getProperty ("items", var()).size() == 0,
+                   "whole-scope clear also emptied lyric_framework");
+            check ((int) cmd (ops, "agent_memory_read", objN ({ { "scope", "global" }, { "kind", "drum_pattern" } }))
+                          .getProperty ("data", var()).getProperty ("items", var()).size() == 0,
+                   "whole-scope clear also emptied drum_pattern (incl. the earlier undo-probe item)");
+        }
+
+        // ── project delete / clear: per-kind vs whole-scope, using the note field ──
+        {
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "project" }, { "item", "project-delete-note" } }))),
+                   "seed project note (kind=note) ok");
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "project" }, { "kind", "mood" }, { "item", "project-mood-x" } }))),
+                   "seed project note (kind=mood) ok");
+
+            auto projSnapshot = cmd (ops, "agent_memory_read", objN ({ { "scope", "project" }, { "limit", 1000 } }))
+                                     .getProperty ("data", var()).getProperty ("items", var());
+            int64 noteTs = 0;
+            for (int i = 0; i < projSnapshot.size(); ++i)
+                if (projSnapshot[i].getProperty ("item", var()).toString() == "project-delete-note")
+                    noteTs = (int64) projSnapshot[i].getProperty ("ts", var ((int64) 0));
+            check (noteTs != 0, "captured the project note's ts");
+
+            // Wrong-kind filter refuses even with the right ts.
+            check (! ok (cmd (ops, "agent_memory_delete",
+                              objN ({ { "scope", "project" }, { "kind", "mood" }, { "ts", noteTs } }))),
+                   "project delete with a kind filter that doesn't match the item's own kind fails cleanly");
+            check (ok (cmd (ops, "agent_memory_delete", objN ({ { "scope", "project" }, { "ts", noteTs } }))),
+                   "project delete by ts (no kind filter) ok");
+
+            auto afterProjDelete = cmd (ops, "agent_memory_read", objN ({ { "scope", "project" }, { "limit", 1000 } }))
+                                        .getProperty ("data", var()).getProperty ("items", var());
+            bool moodStillThere = false;
+            for (int i = 0; i < afterProjDelete.size(); ++i)
+                if (afterProjDelete[i].getProperty ("item", var()).toString() == "project-mood-x") moodStillThere = true;
+            check (moodStillThere, "deleting the \"note\"-kind item left the \"mood\"-kind item alone");
+
+            auto clearMood = cmd (ops, "agent_memory_clear", objN ({ { "scope", "project" }, { "kind", "mood" } }));
+            check (ok (clearMood), "project clear (kind=mood) ok");
+            auto afterMoodClear = cmd (ops, "agent_memory_read", objN ({ { "scope", "project" }, { "limit", 1000 } }))
+                                       .getProperty ("data", var()).getProperty ("items", var());
+            bool anyMoodLeft = false;
+            for (int i = 0; i < afterMoodClear.size(); ++i)
+                if (afterMoodClear[i].getProperty ("kind", var()).toString() == "mood") anyMoodLeft = true;
+            check (! anyMoodLeft, "project kind-scoped clear removed every \"mood\" item");
+
+            check (ok (cmd (ops, "agent_memory_write",
+                            objN ({ { "scope", "project" }, { "item", "one-more-project-note" } }))),
+                   "seed one more project note before the whole-scope clear");
+            check (ok (cmd (ops, "agent_memory_clear", args1 ("scope", "project"))),
+                   "project clear with NO kind (whole-scope) ok");
+            check ((int) cmd (ops, "agent_memory_read", objN ({ { "scope", "project" }, { "limit", 1000 } }))
+                          .getProperty ("data", var()).getProperty ("items", var()).size() == 0,
+                   "whole-scope project clear leaves the sidecar's notes empty");
+        }
+
+        // ── delete/clear mosh-log.jsonl posture: logged, undoable:false (they ARE mutations) ──
+        {
+            auto slog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool deleteLogged = false, deleteUndoableFalse = false, clearLogged = false, clearUndoableFalse = false;
+            for (auto& ln : StringArray::fromLines (slog))
+            {
+                if (ln.contains ("\"command\": \"agent_memory_delete\""))
+                {
+                    deleteLogged = true;
+                    if (ln.contains ("\"undoable\": false")) deleteUndoableFalse = true;
+                }
+                if (ln.contains ("\"command\": \"agent_memory_clear\""))
+                {
+                    clearLogged = true;
+                    if (ln.contains ("\"undoable\": false")) clearUndoableFalse = true;
+                }
+            }
+            check (deleteLogged, "mosh-log.jsonl records agent_memory_delete");
+            check (deleteUndoableFalse, "agent_memory_delete logged undoable:false");
+            check (clearLogged, "mosh-log.jsonl records agent_memory_clear");
+            check (clearUndoableFalse, "agent_memory_clear logged undoable:false");
+        }
     }
 
     finishSection();

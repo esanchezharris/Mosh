@@ -116,6 +116,10 @@ private:
     // cmdGetLyricCorpusStats/cmdGetRhymes — read-only commands simply skip logLine).
     juce::var cmdAgentMemoryWrite (const juce::var& args);
     juce::var cmdAgentMemoryRead  (const juce::var& args);
+    // AGT-MEM (M3) — the memory drawer's per-item delete + per-tier clear. Mutations
+    // (logged, undoable:false — same posture as the write above).
+    juce::var cmdAgentMemoryDelete (const juce::var& args);
+    juce::var cmdAgentMemoryClear  (const juce::var& args);
     // ANN-001 — authored timeline annotations (MOSH_ANNOTATIONS tree; undoable +
     // multiplayer-broadcast). create self-broadcasts its resolved cross-peer id.
     juce::var cmdCreateAnnotation (const juce::var& args);

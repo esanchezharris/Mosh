@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
-import { pickFiles, pickSaveFile, onEvent, nativeMenuPresent } from "../bridge";
+import { pickFiles, pickSaveFile, onEvent, nativeMenuPresent, brainChat } from "../bridge";
 import { runAction, type ActionCtx, type ActionId } from "../menuActions";
 import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
 import { isEditableTarget, resolveKey } from "../interaction/keymap";
 
-const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile });
+const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat });
 
 const NATIVE_MENU_ACTIONS = new Set<string>([EA.UNDO, EA.REDO, EA.CUT, EA.COPY, EA.PASTE, EA.SAVE, EA.PLAY_PAUSE]);
 

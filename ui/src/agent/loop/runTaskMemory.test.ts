@@ -69,10 +69,17 @@ describe("runLoopTask — M2 memory wiring", () => {
     expect(runAgentLoopSpy.mock.calls[0]![0]).toBeUndefined();
   });
 
-  it("nothing ever written to agent memory -> runAgentLoop receives undefined (byte-identical to pre-M2)", async () => {
+  it("nothing ever written to agent memory -> STILL carries the remember_preference tool doc (M3)", async () => {
+    // M2's original contract here was "runAgentLoop receives undefined" (byte-
+    // identical to pre-M2). M3 intentionally changes this: the remember_preference
+    // doc must reach the model even on a fresh install with nothing written yet —
+    // see runTask.ts's memorySectionFor comment — so `memory` is now a real string
+    // whenever the flag is on, never undefined just because pools are empty.
     await runLoopTask("build me a lofi sketch", noopUi);
 
     expect(runAgentLoopSpy).toHaveBeenCalledTimes(1);
-    expect(runAgentLoopSpy.mock.calls[0]![0]).toBeUndefined();
+    const memory = runAgentLoopSpy.mock.calls[0]![0] as string | undefined;
+    expect(memory).toContain("remember_preference");
+    expect(memory).not.toContain("Memory —");
   });
 });

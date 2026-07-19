@@ -1107,6 +1107,9 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     // AGT-MEM (Phase-B memory lane, M1) — the native agent-memory store.
     if (name == "agent_memory_write")   return cmdAgentMemoryWrite (args);
     if (name == "agent_memory_read")    return cmdAgentMemoryRead (args);
+    // AGT-MEM (M3) — the memory drawer's per-item delete + per-tier clear.
+    if (name == "agent_memory_delete")  return cmdAgentMemoryDelete (args);
+    if (name == "agent_memory_clear")   return cmdAgentMemoryClear (args);
     // Annotations broadcast over MP (shared collaborator comments). create self-broadcasts
     // its resolved cross-peer id; the rest address by that id via the generic wrapper.
     if (name == "create_annotation") return cmdCreateAnnotation (args);
@@ -2444,6 +2447,123 @@ juce::var MoshOps::cmdAgentMemoryRead (const juce::var& args)
     const auto items = AgentMemoryStore::selectForRead (AgentMemoryStore::readSidecarNotes (sidecar), limit);
     auto* d = new DynamicObject(); d->setProperty ("items", items);
     return okResult ("agent_memory_read", var (d));
+}
+
+// AGT-MEM (M3) — deletes ONE item by its exact `ts` (nextTs() makes it a unique id
+// within a process's lifetime — see AgentMemoryStore.h). Global scope: `kind`
+// selects WHICH FILE to search (all three when omitted); project scope: `kind`, if
+// given, is an extra safety check against the found item's own kind field (ts alone
+// already locates it). A mutation — logged, non-undoable, same posture as write.
+juce::var MoshOps::cmdAgentMemoryDelete (const juce::var& args)
+{
+    const auto scope = args.getProperty ("scope", var()).toString();
+    if (scope != "global" && scope != "project")
+        return errResult ("agent_memory_delete", "'scope' must be \"global\" or \"project\"");
+    if (! args.hasProperty ("ts"))
+        return errResult ("agent_memory_delete", "missing 'ts'");
+    const juce::int64 ts = (juce::int64) args.getProperty ("ts", var (0));
+    const auto kind = args.getProperty ("kind", var()).toString();
+
+    if (scope == "global")
+    {
+        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
+            return errResult ("agent_memory_delete",
+                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+
+        const auto root = AgentMemoryStore::globalRoot();
+        const auto kindsToSearch = kind.isNotEmpty() ? StringArray { kind } : AgentMemoryStore::allGlobalKinds();
+        for (auto& k : kindsToSearch)
+        {
+            const auto file = AgentMemoryStore::globalStoreFile (root, k);
+            auto items = AgentMemoryStore::readJsonlFile (file);
+            if (! AgentMemoryStore::deleteByTsAndKind (items, ts, {}))
+                continue;
+            if (! AgentMemoryStore::writeJsonlFile (file, items))
+            {
+                const auto ioErr = "failed to write " + file.getFullPathName();
+                logLine ("agent_memory_delete", args, false, ioErr, false);
+                return errResult ("agent_memory_delete", ioErr);
+            }
+            logLine ("agent_memory_delete", args, true, {}, false);
+            auto* d = new DynamicObject(); d->setProperty ("count", items.size());
+            return okResult ("agent_memory_delete", var (d));
+        }
+        const auto notFound = "no item with ts " + String (ts) + " found";
+        logLine ("agent_memory_delete", args, false, notFound, false);
+        return errResult ("agent_memory_delete", notFound);
+    }
+
+    // scope == "project"
+    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
+    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
+    if (! AgentMemoryStore::deleteByTsAndKind (notes, ts, kind))
+    {
+        const auto notFound = "no item with ts " + String (ts) + " found";
+        logLine ("agent_memory_delete", args, false, notFound, false);
+        return errResult ("agent_memory_delete", notFound);
+    }
+    if (! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
+    {
+        const auto ioErr = "failed to write " + sidecar.getFullPathName();
+        logLine ("agent_memory_delete", args, false, ioErr, false);
+        return errResult ("agent_memory_delete", ioErr);
+    }
+    logLine ("agent_memory_delete", args, true, {}, false);
+    auto* d = new DynamicObject(); d->setProperty ("count", notes.size());
+    return okResult ("agent_memory_delete", var (d));
+}
+
+// AGT-MEM (M3) — clears a whole tier. Global scope: `kind` wipes just that ONE kind's
+// FILE (a global kind IS a file); omitted wipes all three. Project scope: `kind`, if
+// given, removes only notes carrying that kind field (leaving other kinds in the
+// sidecar untouched); omitted clears the whole notes array. A mutation — logged,
+// non-undoable, same posture as write/delete.
+juce::var MoshOps::cmdAgentMemoryClear (const juce::var& args)
+{
+    const auto scope = args.getProperty ("scope", var()).toString();
+    if (scope != "global" && scope != "project")
+        return errResult ("agent_memory_clear", "'scope' must be \"global\" or \"project\"");
+    const auto kind = args.getProperty ("kind", var()).toString();
+
+    if (scope == "global")
+    {
+        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
+            return errResult ("agent_memory_clear",
+                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+
+        const auto root = AgentMemoryStore::globalRoot();
+        const auto kindsToClear = kind.isNotEmpty() ? StringArray { kind } : AgentMemoryStore::allGlobalKinds();
+        int cleared = 0;
+        for (auto& k : kindsToClear)
+        {
+            const auto file = AgentMemoryStore::globalStoreFile (root, k);
+            const auto items = AgentMemoryStore::readJsonlFile (file);
+            cleared += items.size();
+            if (! AgentMemoryStore::writeJsonlFile (file, Array<var>()))
+            {
+                const auto ioErr = "failed to write " + file.getFullPathName();
+                logLine ("agent_memory_clear", args, false, ioErr, false);
+                return errResult ("agent_memory_clear", ioErr);
+            }
+        }
+        logLine ("agent_memory_clear", args, true, {}, false);
+        auto* d = new DynamicObject(); d->setProperty ("cleared", cleared);
+        return okResult ("agent_memory_clear", var (d));
+    }
+
+    // scope == "project"
+    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
+    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
+    const int cleared = AgentMemoryStore::clearMatchingKind (notes, kind);
+    if (cleared > 0 && ! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
+    {
+        const auto ioErr = "failed to write " + sidecar.getFullPathName();
+        logLine ("agent_memory_clear", args, false, ioErr, false);
+        return errResult ("agent_memory_clear", ioErr);
+    }
+    logLine ("agent_memory_clear", args, true, {}, false);
+    auto* d = new DynamicObject(); d->setProperty ("cleared", cleared);
+    return okResult ("agent_memory_clear", var (d));
 }
 
 // ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-

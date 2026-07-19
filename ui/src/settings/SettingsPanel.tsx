@@ -11,7 +11,7 @@
 
 import { useEffect } from "react";
 import { useStore } from "../store";
-import { pickFiles, pickSaveFile } from "../bridge";
+import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import type { Snapshot } from "../types";
 import { useSettings } from "./store";
 import { settingsByCategory, type SettingDef } from "./schema";
@@ -261,7 +261,7 @@ const PROJECT_ACTIONS = FILE_MENU.filter((m) => m.id !== "export_audio");
 export function ProjectSettings({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
   const run = (id: ActionId, opts?: { index?: number }) =>
-    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
+    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat }, opts);
   return (
     <div className="pop-group">
       <div className="pop-label">Project{s.dirty ? <span className="pop-note" title="Unsaved changes (auto-saved)"> • unsaved</span> : null}</div>

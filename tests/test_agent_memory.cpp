@@ -409,6 +409,38 @@ TEST_CASE ("makeRecord/nextTs: back-to-back records never collide, even within o
     REQUIRE_FALSE (everTied);
 }
 
+TEST_CASE ("nextTs: stays within JS's safe-integer range (M3 round-trips ts through the WebView bridge)", "[agentmemory][read]")
+{
+    // RED-PROOF context: an earlier version bit-packed a tie-breaker into the low 20
+    // bits of `ms << 20`, producing values ~200x past Number.MAX_SAFE_INTEGER
+    // (2^53 - 1) -- silently losing precision the instant a `ts` crossed the WebView
+    // bridge as JSON and got parsed by JS as a double. M3's agent_memory_delete sends
+    // a `ts` value BACK from JS, so that precision loss would make deletes
+    // intermittently fail with "no item found" for a real, present item.
+    constexpr juce::int64 kJsMaxSafeInteger = 9007199254740991LL;   // 2^53 - 1
+    for (int i = 0; i < 100; ++i)
+    {
+        const auto t = AgentMemoryStore::nextTs();
+        REQUIRE (t <= kJsMaxSafeInteger);
+        REQUIRE (t > 0);
+    }
+}
+
+TEST_CASE ("nextTs: never falls behind real wall-clock time", "[agentmemory][read]")
+{
+    // The hybrid-clock design promises ts >= nowMs always (never a value that reads
+    // as "in the past" relative to when it was actually generated) -- checking only
+    // the LOWER bound here is deliberate: `lastTs` is a function-local static shared
+    // by every TEST_CASE in this binary (Catch2 runs them all in one process), so an
+    // earlier burst-heavy test (the 1000-call collision proof above) can leave it
+    // drifted arbitrarily far AHEAD of real time by the time this one runs -- that
+    // drift is expected/harmless (see nextTs()'s own comment), just not something a
+    // tight upper-bound assertion here could distinguish from a bug.
+    const auto before = juce::Time::getCurrentTime().toMilliseconds();
+    const auto t = AgentMemoryStore::nextTs();
+    REQUIRE (t >= before);
+}
+
 // ───────────────────────────── the whole write pipeline, end-to-end at the store level ─────────────────────────────
 
 TEST_CASE ("full write pipeline: read -> applyWrite -> writeJsonlFile round-trips through disk", "[agentmemory][pipeline]")
@@ -455,4 +487,87 @@ TEST_CASE ("full write pipeline: read -> applyWrite -> writeJsonlFile round-trip
     // Nothing was written to disk (the command handler would bail before writeJsonlFile).
     auto stillOnDisk = AgentMemoryStore::readJsonlFile (file2);
     REQUIRE (stillOnDisk.size() == 3);
+}
+
+// ───────────────────────────── delete / clear (M3) ─────────────────────────────
+
+TEST_CASE ("deleteByTsAndKind: removes the ONE item matching ts, leaves the rest untouched", "[agentmemory][delete]")
+{
+    Array<var> items;
+    items.add (record (10, "preference", false, "a"));
+    items.add (record (20, "preference", false, "b"));
+    items.add (record (30, "preference", false, "c"));
+
+    REQUIRE (AgentMemoryStore::deleteByTsAndKind (items, 20, {}));
+    REQUIRE (items.size() == 2);
+    juce::StringArray remaining;
+    for (auto& it : items) remaining.add (it.getProperty ("item", var()).toString());
+    REQUIRE (remaining.contains ("a"));
+    REQUIRE (remaining.contains ("c"));
+    REQUIRE_FALSE (remaining.contains ("b"));
+}
+
+TEST_CASE ("deleteByTsAndKind: a missing ts returns false and leaves items UNCHANGED", "[agentmemory][delete]")
+{
+    Array<var> items;
+    items.add (record (10, "preference", false, "a"));
+    auto before = items;
+
+    REQUIRE_FALSE (AgentMemoryStore::deleteByTsAndKind (items, 999, {}));
+    REQUIRE (items.size() == before.size());
+    REQUIRE (items[0].getProperty ("item", var()).toString() == "a");
+}
+
+TEST_CASE ("deleteByTsAndKind: a kindFilter that doesn't match the found ts's own kind refuses (RED-proof: kind is a real check, not decorative)", "[agentmemory][delete]")
+{
+    Array<var> items;
+    items.add (record (10, "mood", false, "the note"));
+
+    // Right ts, WRONG kind filter -> must not delete.
+    REQUIRE_FALSE (AgentMemoryStore::deleteByTsAndKind (items, 10, "note"));
+    REQUIRE (items.size() == 1);
+
+    // Right ts, RIGHT kind filter -> deletes.
+    REQUIRE (AgentMemoryStore::deleteByTsAndKind (items, 10, "mood"));
+    REQUIRE (items.isEmpty());
+}
+
+TEST_CASE ("deleteByTsAndKind: an empty kindFilter matches any kind (the global-scope posture)", "[agentmemory][delete]")
+{
+    Array<var> items;
+    items.add (record (10, "drum_pattern", false, "x"));
+    REQUIRE (AgentMemoryStore::deleteByTsAndKind (items, 10, {}));
+    REQUIRE (items.isEmpty());
+}
+
+TEST_CASE ("clearMatchingKind: an empty kindFilter clears EVERYTHING", "[agentmemory][clear]")
+{
+    Array<var> items;
+    items.add (record (1, "note", false, "a"));
+    items.add (record (2, "mood", false, "b"));
+    items.add (record (3, "note", true, "c"));   // explicit doesn't protect from clear -- clear is explicit user intent
+
+    REQUIRE (AgentMemoryStore::clearMatchingKind (items, {}) == 3);
+    REQUIRE (items.isEmpty());
+}
+
+TEST_CASE ("clearMatchingKind: a kindFilter removes ONLY that kind, leaving other kinds intact", "[agentmemory][clear]")
+{
+    Array<var> items;
+    items.add (record (1, "note", false, "a"));
+    items.add (record (2, "mood", false, "b"));
+    items.add (record (3, "note", false, "c"));
+    items.add (record (4, "mood", false, "d"));
+
+    REQUIRE (AgentMemoryStore::clearMatchingKind (items, "note") == 2);
+    REQUIRE (items.size() == 2);
+    for (auto& it : items) REQUIRE (it.getProperty ("kind", var()).toString() == "mood");
+}
+
+TEST_CASE ("clearMatchingKind: a kindFilter matching nothing removes nothing and reports 0", "[agentmemory][clear]")
+{
+    Array<var> items;
+    items.add (record (1, "note", false, "a"));
+    REQUIRE (AgentMemoryStore::clearMatchingKind (items, "nonexistent-kind") == 0);
+    REQUIRE (items.size() == 1);
 }

@@ -21,6 +21,7 @@ import {
   destructiveWeight, isDestructiveCommand,
   MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
 } from "../destructiveScreen";
+import { MEMORY_COMMANDS, handleRememberPreference } from "../memory/rememberPreference";
 import type { AgentEnv, StepCommandResult } from "../loopSeam";
 import type { Snapshot } from "../../types";
 import { awaitRendersSettled, RENDER_JOB_COMMANDS } from "./jobWait";
@@ -97,7 +98,19 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       type Entry = StepCommandResult & { index: number };
       const entries: Entry[] = [];
       const valid: Array<{ index: number; command: string; args: Record<string, unknown> }> = [];
+      const memoryCalls = calls
+        .map((c, index) => ({ c, index }))
+        .filter(({ c }) => MEMORY_COMMANDS.has(c.command));
+      // AGT-MEM (M3) — same interception as executor.ts's runAgentBatch: intercepted
+      // BEFORE validateCommand, run immediately (no batch_begin needed — a memory
+      // write touches no ValueTree), never counted toward the destructive screen or
+      // ensureOpen()'s "does this step need the undo transaction" check below.
+      for (const { c, index } of memoryCalls) {
+        const r = await handleRememberPreference(c.args, exec);
+        entries.push({ index, command: r.command, ok: r.ok, error: r.error });
+      }
       calls.forEach((c, index) => {
+        if (MEMORY_COMMANDS.has(c.command)) return;   // already handled above
         const err = validateCommand(c.command, (c.args ?? {}) as Record<string, unknown>);
         if (err) entries.push({ index, command: c.command, ok: false, error: err });
         else valid.push({ index, command: c.command, args: (c.args ?? {}) as Record<string, unknown> });

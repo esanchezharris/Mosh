@@ -265,7 +265,7 @@ const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audit
 const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
-  "agent_memory_write"]);  // accept_lyric_proposal IS undoable
+  "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
 
 // AL-017 — fail-closed default. A command the mock does NOT explicitly case must not
 // silently report success: for a MUTATING command that means the dev/e2e UI looks like
@@ -1102,6 +1102,69 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         return ok(command, { items: agentMemorySelectForRead(merged, limit) });
       }
       return ok(command, { items: agentMemorySelectForRead(mockAgentMemoryProject, limit) });
+    }
+    // AGT-MEM (M3) — mirrors MoshOps::cmdAgentMemoryDelete: global scope's `kind`
+    // selects WHICH FILE to search (all three when omitted); project scope's `kind`,
+    // if given, is an extra safety check against the found item's own kind field.
+    case "agent_memory_delete": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      if (args.ts === undefined) return err(command, "missing 'ts'");
+      const ts = num(args.ts, NaN);
+
+      if (scope === "global") {
+        const kind = str(args.kind);
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const kindsToSearch = kind ? [kind] : AGENT_MEMORY_GLOBAL_KINDS;
+        for (const k of kindsToSearch) {
+          const store = mockAgentMemoryGlobal[k];
+          const idx = store.findIndex((r) => r.ts === ts);
+          if (idx >= 0) {
+            store.splice(idx, 1);
+            return ok(command, { count: store.length });
+          }
+        }
+        return err(command, `no item with ts ${ts} found`);
+      }
+
+      const kind = str(args.kind);
+      const idx = mockAgentMemoryProject.findIndex((r) => r.ts === ts && (!kind || r.kind === kind));
+      if (idx < 0) return err(command, `no item with ts ${ts} found`);
+      mockAgentMemoryProject.splice(idx, 1);
+      return ok(command, { count: mockAgentMemoryProject.length });
+    }
+    // AGT-MEM (M3) — mirrors MoshOps::cmdAgentMemoryClear: global scope's `kind`
+    // wipes just that ONE kind's store (all three when omitted); project scope's
+    // `kind`, if given, removes only notes carrying that kind field.
+    case "agent_memory_clear": {
+      const scope = str(args.scope);
+      if (scope !== "global" && scope !== "project")
+        return err(command, "'scope' must be \"global\" or \"project\"");
+      const kind = str(args.kind);
+
+      if (scope === "global") {
+        if (kind && !(AGENT_MEMORY_GLOBAL_KINDS as readonly string[]).includes(kind))
+          return err(command, "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
+        const kindsToClear = kind ? [kind] : AGENT_MEMORY_GLOBAL_KINDS;
+        let cleared = 0;
+        for (const k of kindsToClear) {
+          cleared += mockAgentMemoryGlobal[k].length;
+          mockAgentMemoryGlobal[k] = [];
+        }
+        return ok(command, { cleared });
+      }
+
+      const before = mockAgentMemoryProject.length;
+      if (!kind) {
+        mockAgentMemoryProject = [];
+        return ok(command, { cleared: before });
+      }
+      const kept = mockAgentMemoryProject.filter((r) => r.kind !== kind);
+      const cleared = mockAgentMemoryProject.length - kept.length;
+      mockAgentMemoryProject = kept;
+      return ok(command, { cleared });
     }
     case "reject_lyric_proposal": {
       const t = findTrack(str(args.trackId));

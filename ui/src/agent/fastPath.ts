@@ -10,7 +10,14 @@ export type FastAction =
   | { kind: "enterRecord"; bar?: number; intent: string; say?: string }
   | { kind: "stopRecord"; intent: string; say?: string }
   | { kind: "keepTake"; intent: string; say?: string }
-  | { kind: "navTake"; delta: 1 | -1; intent: string; say?: string };
+  | { kind: "navTake"; delta: 1 | -1; intent: string; say?: string }
+  // AGT-MEM (M3) — "remember (that/my/I…) X" saves X as an EXPLICIT agent-memory
+  // preference. Its own kind (not "commands") because agent_memory_write is
+  // deliberately NOT in AGENT_COMMANDS (see commandClassification.ts) — routing it
+  // through the ordinary runBatch/validateCommand path would reject it as "not an
+  // allowed command". scope:"project" only when the phrasing names this song/track/
+  // project explicitly; otherwise scope:"global" (a producer-wide preference).
+  | { kind: "remember"; text: string; scope: "global" | "project"; intent: string; say?: string };
 export type TrackLite = { id: string; name: string; mute?: boolean; solo?: boolean };
 export type FastCtx = { mode: Mode; tempo: number; timeSigNum: number; tracks?: TrackLite[] };
 
@@ -65,6 +72,45 @@ const RULES: Rule[] = [
   { aliases: ["redo", "redo that"], modes: ["idle", "reviewing"], build: () => cmd("redo", {}, "ACK_GOT_IT") },
   { aliases: ["save", "save it", "save the project"], modes: ["idle", "reviewing"], build: () => cmd("save", {}, "DONE", "saved") },
 ];
+
+// "remember (that/my/I…) X [for this song/track/project]" — a free-text capture, so
+// (unlike the RULES table's fuzzy alias match) this operates on the RAW utterance,
+// not the lowercased/filler-stripped `norm`, so the saved preference keeps the
+// producer's own casing/punctuation. A small, deliberately narrow leading-filler
+// strip ("hey moshi,", "okay,", "please") mirrors normalize()'s FILLER set closely
+// enough to catch the common voice-prefixed phrasing without touching the payload.
+const LEADING_FILLER_RE = /^(?:(?:hey\s+)?moshi[,:]?\s+|ok(?:ay)?[,:]?\s+|please\s+)*/i;
+const REMEMBER_RE = /^remember\b\s*(.*)$/i;
+// Strips exactly ONE leading connector word (that/my/I) — but only when something
+// real follows it; "remember that" alone must NOT capture the bare word "that" as if
+// it were the payload (see the bare-filler check below).
+const LEADING_CONNECTOR_RE = /^(?:that|my|i)\s+(.+)$/i;
+const BARE_CONNECTOR_RE = /^(?:that|my|i)$/i;
+const PROJECT_SCOPE_RE = /^(.+?)\s+(?:for|in)\s+this\s+(?:song|track|project)$/i;
+
+function matchRemember(rawText: string, ctx: FastCtx): FastAction | null {
+  if (ctx.mode === "recording") return null;   // never mid-take — a stray word shouldn't write memory
+  const cleaned = rawText.trim().replace(LEADING_FILLER_RE, "");
+  const m = cleaned.match(REMEMBER_RE);
+  if (!m) return null;
+  let text = m[1].trim();
+  if (!text) return null;
+
+  const connector = text.match(LEADING_CONNECTOR_RE);
+  if (connector) text = connector[1].trim();
+  if (BARE_CONNECTOR_RE.test(text)) return null;   // "remember that" / "remember my" / "remember i" alone
+
+  text = text.replace(/[.!?]+$/, "").trim();
+  if (!text) return null;
+
+  let scope: "global" | "project" = "global";
+  const scoped = text.match(PROJECT_SCOPE_RE);
+  if (scoped && scoped[1].trim()) {
+    scope = "project";
+    text = scoped[1].trim();
+  }
+  return { kind: "remember", text, scope, intent: "DONE", say: "got it — i'll remember that" };
+}
 
 function parseTrackNames(s: string): string[] {
   return s
@@ -160,6 +206,8 @@ function matchTrackOp(norm: string, ctx: FastCtx): FastAction | null {
 }
 
 export function matchFastPath(text: string, ctx: FastCtx): FastAction | null {
+  const remember = matchRemember(text, ctx);
+  if (remember) return remember;
   const norm = normalize(text);
   if (!norm) return null;
   const trackOp = matchTrackOp(norm, ctx);

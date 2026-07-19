@@ -17,6 +17,14 @@
 // into the prompt via memory/retrieveContext.ts. A fresh install with nothing ever
 // written to agent memory hydrates to empty pools, so `memory` stays unpassed and
 // the prompt is byte-identical to the pre-M2 shape (systemPrompt's own contract).
+//
+// M3: the memory section ALSO carries the remember_preference pseudo-command's
+// serve-time doc (memory/rememberPreference.ts) whenever the flag is on —
+// REGARDLESS of whether any pool has content yet. Gating the doc on non-empty
+// pools would make the tool undiscoverable on a fresh install (nothing to retrieve
+// ⇒ never told the tool exists ⇒ never able to write the FIRST memory). So `memory`
+// is now non-empty for every flag-on session, not just ones with existing content —
+// an intentional M3 change from M2's "only when pools are non-empty" gate.
 
 import { archivePair, brainChat, escalateCandidates } from "../bridge";
 import { mockBrainReply } from "./brainMock";
@@ -25,6 +33,7 @@ import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
 import { ensureMemoryHydrated, poolsNonEmpty } from "./memory/hydrate";
 import { retrieveContext } from "./memory/retrieveContext";
+import { rememberPreferenceToolDoc } from "./memory/rememberPreference";
 import type { Snapshot } from "../types";
 
 // Re-export the reply type so importers keep a single brain entry point (the pure
@@ -36,16 +45,18 @@ export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => 
 const bestOfNOn = (): boolean => useSettings.getState().get("bestOfNServing") === true;
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
-/** The M2 memory section for one turn's query, or "" when the flag is off or
- *  hydration yields nothing relevant. Hydration itself is memoized (memory/hydrate.ts)
- *  so only the FIRST call in a session pays the fetch; every call after resolves
- *  from cache. Never throws — a hydration failure degrades to "" (readMemory in
- *  hydrate.ts already fails soft per-pool). */
+/** The M2/M3 memory section for one turn's query: the remember_preference tool doc
+ *  (always, when the flag is on) plus whatever's relevant from the pools (M2 —
+ *  omitted when nothing overlaps the query). "" only when the flag itself is off.
+ *  Hydration is memoized (memory/hydrate.ts) so only the FIRST call in a session
+ *  pays the fetch. Never throws — a hydration failure degrades to no retrieved
+ *  content (readMemory in hydrate.ts already fails soft per-pool); the tool doc is
+ *  pure/synchronous and always succeeds. */
 async function memorySectionFor(query: string): Promise<string> {
   if (!memoryOn()) return "";
   const pools = await ensureMemoryHydrated();
-  if (!poolsNonEmpty(pools)) return "";
-  return retrieveContext(query, pools);
+  const retrieved = poolsNonEmpty(pools) ? retrieveContext(query, pools) : "";
+  return [retrieved, rememberPreferenceToolDoc()].filter(Boolean).join("\n\n");
 }
 
 export function createBrain(getSnapshot: () => Snapshot | null): Brain {

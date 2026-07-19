@@ -9,10 +9,10 @@ import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
-import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool } from "../ui/TopbarTools";
+import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import type { Snapshot } from "../types";
-import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStop, IconUsers } from "../ui/icons";
+import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
 function projectName(editFile: string): string {
   const base = editFile.split("/").pop() ?? "";
@@ -205,6 +205,13 @@ function OverflowMenu() {
                 className="v2-overflow-tool"
                 ariaLabel="Open command log"
                 testId="v2-tool-command-log"
+              />
+              <MemoryTool
+                label={<IconStar size={15} />}
+                title="What Moshi remembers"
+                className="v2-overflow-tool"
+                ariaLabel="What Moshi remembers"
+                testId="v2-tool-memory"
               />
               <RemoteTool
                 label={<IconPhone size={15} />}

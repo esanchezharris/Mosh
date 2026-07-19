@@ -208,6 +208,13 @@ export function commandCatalogPrompt(): string {
 export function describeCommand(command: string, args: Record<string, unknown>): string {
   const a = args as Record<string, string | number | boolean | undefined>;
   switch (command) {
+    // AGT-MEM (M3) — remember_preference is a PSEUDO-command (never in
+    // AGENT_COMMANDS/the catalog — see memory/rememberPreference.ts), but the
+    // executor still routes its intercepted result through the SAME entries/results
+    // arrays as a real command, so it needs a real summary here too (the generic
+    // command.replace(/_/g," ") fallback would just say "remember preference",
+    // dropping the actual remembered text).
+    case "remember_preference": return `Remembered: "${a.text ?? ""}"`;
     case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
     case "remove_track": return `Removed a track`;

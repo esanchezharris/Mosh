@@ -70,20 +70,29 @@ describe("createBrain — M2 memory wiring (flag + non-empty pools gate)", () =>
     expect(sys).toContain("always keep the low end wide");
   });
 
-  it("flag OFF -> no memory section, and agent_memory_read is never even called", async () => {
+  it("flag OFF -> no memory section AT ALL (not even the tool doc), and agent_memory_read is never called", async () => {
     mockReadResponses();
     useSettings.getState().set("agentMemory", false);
     const brain = createBrain(() => snap);
     await brain.send("what should I do with the low end");
-    expect(systemOfLastCall()).not.toContain("Memory —");
+    const sys = systemOfLastCall();
+    expect(sys).not.toContain("Memory —");
+    expect(sys).not.toContain("remember_preference");
     expect(executeCommandMock).not.toHaveBeenCalled();
   });
 
-  it("flag ON but every pool empty -> no memory section (byte-identical to pre-M2)", async () => {
+  it("flag ON but every pool empty -> STILL carries the remember_preference tool doc (M3), just no retrieved content", async () => {
+    // M2's original contract here was "no memory section at all when pools are
+    // empty" (byte-identical to pre-M2). M3 intentionally changes this: the
+    // remember_preference doc must reach the model even on a fresh install with
+    // nothing to retrieve yet (see brain.ts's memorySectionFor comment) — so the
+    // section is now non-empty whenever the flag is on, period.
     executeCommandMock.mockResolvedValue({ ok: true, data: { items: [] } });
     const brain = createBrain(() => snap);
     await brain.send("what should I do with the low end");
-    expect(systemOfLastCall()).not.toContain("Memory —");
+    const sys = systemOfLastCall();
+    expect(sys).toContain("remember_preference");
+    expect(sys).not.toContain("Memory —");   // the retrieveContext header only appears with actual retrieved content
   });
 
   it("hydration is memoized across turns in the same session — one round of reads only", async () => {
@@ -95,11 +104,15 @@ describe("createBrain — M2 memory wiring (flag + non-empty pools gate)", () =>
     expect(executeCommandMock.mock.calls.length).toBe(callsAfterFirst); // no NEW reads
   });
 
-  it("a hydration failure degrades to no memory section, never throws into send()", async () => {
+  it("a hydration failure degrades gracefully (no retrieved content, no crash) — the tool doc is unaffected", async () => {
+    // rememberPreferenceToolDoc() is pure/synchronous and never depends on
+    // hydration succeeding — it's still there even when every read rejects.
     executeCommandMock.mockRejectedValue(new Error("native bridge unavailable"));
     const brain = createBrain(() => snap);
     const reply = await brain.send("what should I do with the low end");
     expect(reply.intent).toBe("ACK_GOT_IT");
-    expect(systemOfLastCall()).not.toContain("Memory —");
+    const sys = systemOfLastCall();
+    expect(sys).toContain("remember_preference");
+    expect(sys).not.toContain("Memory —");
   });
 });

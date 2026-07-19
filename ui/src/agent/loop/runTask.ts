@@ -12,9 +12,14 @@
 // here, before the loop starts (loop.ts's FSM is pure/deps-injected — it never calls
 // the bridge itself), and passed through LoopDeps.memory so every step's prompt
 // carries the SAME section (hydration/ranking is a one-time task cost, never a
-// per-step one). Empty pools (the common case until something is actually written to
-// agent memory) ⇒ memory stays undefined ⇒ every step's prompt is byte-identical to
-// the pre-M2 shape.
+// per-step one).
+//
+// M3: the memory section ALSO carries the remember_preference pseudo-command's
+// serve-time doc (memory/rememberPreference.ts) whenever the flag is on, regardless
+// of pool content — see brain.ts's memorySectionFor for why (a fresh install must
+// still learn the tool exists). `memory` is undefined only when the flag itself is
+// off, so it's the ONLY case where every step's prompt stays byte-identical to the
+// pre-M2 shape.
 
 import { archivePair, brainChat } from "../../bridge";
 import { useSettings } from "../../settings/store";
@@ -25,19 +30,22 @@ import { mockLoopChat } from "./loopBrainMock";
 import { useTaskStore } from "./taskStore";
 import { ensureMemoryHydrated, poolsNonEmpty } from "../memory/hydrate";
 import { retrieveContext } from "../memory/retrieveContext";
+import { rememberPreferenceToolDoc } from "../memory/rememberPreference";
 
 export const agenticLoopOn = (): boolean => useSettings.getState().get("agenticLoop") === true;
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
 
-/** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext
- *  pairing, same fail-soft-to-"" posture. Kept as its own function (not shared with
- *  brain.ts) since the two call sites differ in WHEN they call it: brain.ts per turn,
- *  this one ONCE per task before the loop starts. */
+/** Mirrors brain.ts's memorySectionFor — same flag, same hydrate+retrieveContext+
+ *  tool-doc pairing. Kept as its own function (not shared with brain.ts) since the
+ *  two call sites differ in WHEN they call it: brain.ts per turn, this one ONCE per
+ *  task before the loop starts. Returns undefined (not "") only when the flag is
+ *  off — LoopDeps.memory is itself optional, and buildLoopSystemPrompt's own
+ *  omitted/undefined contract is what keeps that path byte-identical when off. */
 async function memorySectionFor(query: string): Promise<string | undefined> {
   if (!memoryOn()) return undefined;
   const pools = await ensureMemoryHydrated();
-  if (!poolsNonEmpty(pools)) return undefined;
-  return retrieveContext(query, pools);
+  const retrieved = poolsNonEmpty(pools) ? retrieveContext(query, pools) : "";
+  return [retrieved, rememberPreferenceToolDoc()].filter(Boolean).join("\n\n");
 }
 
 /** The loop runs only when the flag is on AND we're not in a multiplayer

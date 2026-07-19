@@ -33,6 +33,8 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     // posture as get_rhymes/get_lyric_corpus_stats above.
     REQUIRE (LockManager::classify ("agent_memory_read")  == Scope::Unguarded);
     REQUIRE (LockManager::classify ("agent_memory_write") == Scope::Unguarded);
+    REQUIRE (LockManager::classify ("agent_memory_delete") == Scope::Unguarded);
+    REQUIRE (LockManager::classify ("agent_memory_clear")  == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")

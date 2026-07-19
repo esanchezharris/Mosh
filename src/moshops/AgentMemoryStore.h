@@ -40,9 +40,11 @@
 // preserves insertion order on the tie — i.e. OLDEST first, the opposite of the
 // contract. (Reproduced: --selftest's AGT-MEM section failed "agent_memory_read is
 // newest-first" on the very first run, entirely within ONE store, before this fix.)
-// nextTs() below fixes this at the source: every record's `ts` is wall-clock
-// milliseconds with a strictly-increasing per-process tie-breaker folded into the low
-// bits, so no two records from one process run ever compare equal.
+// nextTs() below fixes this at the source: a hybrid logical clock (wall-clock ms,
+// nudged forward just enough to stay strictly ahead of the previous value), so no two
+// records from one process run ever compare equal — and, unlike an earlier bit-packed
+// version, the result stays within JS's safe-integer range when it round-trips
+// through the WebView bridge as JSON (see nextTs()'s own comment for the story).
 
 #pragma once
 
@@ -247,19 +249,37 @@ struct AgentMemoryStore
         return d;
     }
 
-    /** Wall-clock milliseconds with a strictly-increasing per-process tie-breaker
-        folded into the low 20 bits (a static atomic counter, reset each process
-        launch). Guarantees no two records ever compare equal within one run, so a
-        `ts`-descending sort never has to fall back to insertion order on a tie — see
-        the file header for why a raw millisecond timestamp is NOT safe here. Still
-        monotonic with wall-clock time (the high bits dominate any ordering
-        comparison), so it reads as "approximately when this was written". */
+    /** A hybrid logical clock: wall-clock milliseconds, nudged forward by whatever it
+        takes to stay strictly ahead of the PREVIOUS value this process returned —
+        `max(nowMs, lastTs + 1)`. Guarantees no two records from one process run ever
+        compare equal (a `ts`-descending sort never falls back to insertion order on
+        a tie — see the file header for why a raw millisecond timestamp alone is NOT
+        safe here), while staying numerically equal to real wall-clock ms except
+        during an actual same-millisecond burst (where it drifts at most a few units
+        ahead, then real time catches back up on the next tick).
+        DELIBERATELY NOT bit-packed (an earlier version folded a tie-breaker into the
+        low 20 bits of `ms << 20`): that produced values around 1.9e18 — 200x past
+        Number.MAX_SAFE_INTEGER (2^53 ≈ 9.007e15) — silently losing precision the
+        moment a record's `ts` crosses the WebView bridge as JSON and gets parsed by
+        JS as a double. M3's agent_memory_delete round-trips a `ts` value THROUGH
+        JS (read it from a prior agent_memory_read, send it back to delete-by-ts), so
+        that precision loss would make deletes intermittently fail with "not found."
+        A plain incrementing ms-based value stays JS-safe for centuries. */
     static juce::int64 nextTs()
     {
-        static std::atomic<juce::int64> counter { 0 };
-        const auto ms = juce::Time::getCurrentTime().toMilliseconds();
-        const auto tie = counter.fetch_add (1, std::memory_order_relaxed) & 0xFFFFF;
-        return (ms << 20) | tie;
+        static std::atomic<juce::int64> lastTs { 0 };
+        juce::int64 prev = lastTs.load (std::memory_order_relaxed);
+        juce::int64 next;
+        for (;;)
+        {
+            const auto nowMs = juce::Time::getCurrentTime().toMilliseconds();
+            next = juce::jmax (nowMs, prev + 1);
+            if (lastTs.compare_exchange_weak (prev, next, std::memory_order_relaxed))
+                break;
+            // compare_exchange_weak refreshed `prev` to the current value on failure
+            // (another thread raced us) -- loop retries against that fresh value.
+        }
+        return next;
     }
 
     /** Builds the {ts,kind,explicit,item} record written verbatim to a store. */
@@ -335,6 +355,51 @@ struct AgentMemoryStore
             if (limit > 0 && out.size() >= limit) break;
         }
         return out;
+    }
+
+    // ------------------------------------------------------- delete / clear (M3) ----
+
+    /** Deletes the item whose `ts` matches @p ts from @p items IN PLACE (there is at
+        most one — nextTs() is unique per process run). @p kindFilter, when non-empty,
+        additionally requires that item's `kind` to match — used by the project-scope
+        delete path as a safety check (ts alone already locates it uniquely; a
+        supplied kind that doesn't match the found item is a caller mistake, not a
+        silent success) and is irrelevant to the global-scope path (there, `kind`
+        already selected WHICH FILE `items` came from, so pass "" there). Returns
+        true iff something was removed. */
+    static bool deleteByTsAndKind (juce::Array<juce::var>& items, juce::int64 ts,
+                                   const juce::String& kindFilter)
+    {
+        for (int i = 0; i < items.size(); ++i)
+        {
+            const auto& it = items.getReference (i);
+            if ((juce::int64) it.getProperty ("ts", 0) != ts) continue;
+            if (kindFilter.isNotEmpty() && it.getProperty ("kind", juce::var()).toString() != kindFilter)
+                continue;
+            items.remove (i);
+            return true;
+        }
+        return false;
+    }
+
+    /** Removes every item in @p items IN PLACE whose `kind` matches @p kindFilter, or
+        EVERY item when @p kindFilter is empty. Returns the number removed. Used by
+        the project-scope clear path (global-scope clear instead wipes a whole kind
+        FILE — see cmdAgentMemoryClear — since a global kind IS a file, not a
+        per-item field to filter on). */
+    static int clearMatchingKind (juce::Array<juce::var>& items, const juce::String& kindFilter)
+    {
+        if (kindFilter.isEmpty())
+        {
+            const int n = items.size();
+            items.clearQuick();
+            return n;
+        }
+        int removed = 0;
+        for (int i = items.size() - 1; i >= 0; --i)
+            if (items.getReference (i).getProperty ("kind", juce::var()).toString() == kindFilter)
+            { items.remove (i); ++removed; }
+        return removed;
     }
 };
 

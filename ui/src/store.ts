@@ -25,6 +25,11 @@ import { useSettings } from "./settings/store";
 // Which shell is active — the v2 shell also surfaces collaborator video, so the
 // webrtc_signal gate must honor it (not just the legacy redesignShell flag).
 import { isV2Active } from "./v2/shellFlag";
+// AGT-MEM (M3) — drops the cached agent-memory pools on a project switch.
+import { invalidateMemoryHydration } from "./agent/memory/hydrate";
+// AGT-MEM (M3, item 5) — mirrors every exec() call into the in-session ring buffer
+// sessionSummary.ts digests into a project note on the next project switch.
+import { recordSessionCommand } from "./agent/memory/sessionLog";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
   deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
@@ -146,6 +151,10 @@ type State = {
 
   refresh: () => Promise<void>;
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+  // AGT-MEM (M3) — satisfies menuActions.ts's ActionStore.invalidateMemory: drops
+  // the cached agent-memory pools so a project switch never leaks a stale project's
+  // notes into the newly-opened one's prompts.
+  invalidateMemory: () => void;
   init: () => void;
   refreshRemote: () => Promise<void>;
   startRemotePairing: () => Promise<void>;
@@ -226,6 +235,13 @@ type State = {
   setAgentChangeSet: (cs: ChangeSet | null) => void;
   pushAgentUtter: (intent: string, say?: string) => void;
   setAgentListening: (b: boolean) => void;
+
+  // AGT-MEM (M3) — the "remember that…" fastPath rule's confirm toast. A memory
+  // write is non-undoable BY DESIGN (M1) — this toast's Undo therefore calls
+  // agent_memory_delete on the just-written item's `ts`, never the real undo
+  // command. UI-local (mirrors agentChangeSet's ChangeToast posture, one level down).
+  memoryToast: { text: string; scope: "global" | "project"; kind: string; ts: number } | null;
+  setMemoryToast: (t: State["memoryToast"]) => void;
 
   // Performer mode (hands-free voice take recording). `recording` is derived from the
   // live snapshot; `takeDecisionPending` marks "a just-recorded take awaits keep/redo".
@@ -347,6 +363,7 @@ export const useStore = create<State>((set, get) => ({
 
   exec: async (command, args = {}) => {
     const res = await executeCommand<CommandResult>({ command, args });
+    recordSessionCommand(command, args, res.ok);
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
       // A success clears a stale transient error — but never the persistent version
@@ -358,6 +375,8 @@ export const useStore = create<State>((set, get) => ({
     }
     return res;
   },
+
+  invalidateMemory: () => invalidateMemoryHydration(),
 
   init: () => {
     onEvent("mosh_event", (raw) => {
@@ -965,6 +984,9 @@ export const useStore = create<State>((set, get) => ({
   pushAgentUtter: (intent, say) =>
     set((s) => ({ agentUtter: { intent, say, tick: (s.agentUtter?.tick ?? 0) + 1 } })),
   setAgentListening: (b) => set({ agentListening: b }),
+
+  memoryToast: null,
+  setMemoryToast: (t) => set({ memoryToast: t }),
 
   takeDecisionPending: false,
   lastTakeClipId: null,

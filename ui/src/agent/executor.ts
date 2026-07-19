@@ -7,6 +7,7 @@
 import { useStore } from "../store";
 import { validateCommand, describeCommand } from "./commands";
 import { screenByCommand, MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON } from "./destructiveScreen";
+import { MEMORY_COMMANDS, handleRememberPreference } from "./memory/rememberPreference";
 
 // The destructive screen itself lives in ./destructiveScreen (a PURE module the
 // Node-side bench runners can import without the store/bridge chain); it is
@@ -78,6 +79,16 @@ export async function runAgentBatch(
   const valid: IndexedCommandCall[] = [];
 
   for (const [index, c] of calls.entries()) {
+    // AGT-MEM (M3) — remember_preference is a PSEUDO-command: intercepted here,
+    // BEFORE validateCommand (which would reject it as "not an allowed command" —
+    // it has no ArgSpec and is deliberately never added to AGENT_COMMANDS). Runs
+    // immediately, outside the batch_begin/batch_end transaction below (a memory
+    // write is non-undoable and touches no ValueTree — see M1).
+    if (MEMORY_COMMANDS.has(c.command)) {
+      const r = await handleRememberPreference(c.args, exec);
+      entries.push({ index, command: r.command, summary: describeCommand(r.command, c.args ?? {}), ok: r.ok, error: r.error });
+      continue;
+    }
     const err = validateCommand(c.command, c.args ?? {});
     if (err) {
       entries.push({
