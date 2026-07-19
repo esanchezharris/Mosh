@@ -225,6 +225,28 @@ gate_native() {
   # same freshly-built binary + numpy. A parity fix that closes a gap flips its row to pass.
   run_step "daw_conformance" bash -c "python3 scripts/daw-conformance/conformance.py --bin '$bin'"
 
+  # …and assert the committed SCOREBOARD still matches that run. conformance.py only
+  # writes report.json; regenerating docs/FEATURE_AUDIT.md was a MANUAL step nobody did,
+  # so the headline number went stale for ~3 weeks and ~18 PRs — it advertised "134/152,
+  # 17 gap" while the real figure was 150/152 with ZERO gaps (every Export row it listed
+  # as missing had shipped). A stale scoreboard is worse than none: it makes the product
+  # look less finished than it is, and it hides real regressions in the same table.
+  #
+  # scoreboard.py is deterministic for a given report.json (verified: byte-identical
+  # across runs, no embedded timestamp), so a plain diff is a safe gate. This does NOT
+  # regenerate-and-commit — it fails and tells you to, keeping generated files honest
+  # without the gate mutating tracked state.
+  run_step "daw_scoreboard_current" bash -c '
+    cp docs/FEATURE_AUDIT.md /tmp/_fa_committed.md
+    python3 scripts/daw-conformance/scoreboard.py >/dev/null
+    if ! diff -q /tmp/_fa_committed.md docs/FEATURE_AUDIT.md >/dev/null; then
+      echo "docs/FEATURE_AUDIT.md is STALE vs this conformance run. Regenerate and commit:"
+      echo "  python3 scripts/daw-conformance/scoreboard.py"
+      diff /tmp/_fa_committed.md docs/FEATURE_AUDIT.md | head -40
+      cp /tmp/_fa_committed.md docs/FEATURE_AUDIT.md   # leave the tree as we found it
+      exit 1
+    fi'
+
   # vitest too (a native PR may also move ui/).
   ensure_node_modules
   run_step "vitest" bash -c 'cd ui && npm test'
