@@ -138,6 +138,17 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
   `clusterMs`; bench flag `--cluster-ms 0.0474`. Round 4 = L2 + L5, baseline wc-r2.
   Residual class named for the milestone if it survives: bipolar/helena/bonham —
   long-held melisma words that garble at any commanded geometry tried so far.
+- **L5 verdict — KEPT (round 4, defects 8→6 raw / 7→5 refined-gate)**: bipolar and
+  "and" articulate; LookinBack 20/20 and stage10 19/19 on demanded words.
+- **L4b — retuned chain for the true held-note class** (registered 2026-07-19,
+  BEFORE round 5): the r3 chain failed for two SEPARABLE reasons — it never fired on
+  its LookinBack targets (voiced-gate 0.90 excluded the echo-tailed held words) and
+  it over-fired on stage10's moderate notes (chain_s 0.6). L4b raises the length
+  threshold to 0.9 s (touches only helena 1.37/0.91, bonham 1.34, lacoste 1.76 —
+  stage10's dense passage has no 0.9 s notes) and lowers the voiced gate to 0.75 so
+  the echo-tailed targets actually chain. Round 5 = L2 + L5 + L4b, baseline wc-r4.
+  If it reverts, the chain mechanism is retired for good and Helena/Bonham/lacoste
+  go to the milestone as the named residual (held-melisma articulation).
 - Further levers may be added by amendment BEFORE the round that uses them.
 
 ## Predictions (falsifiable, registered)

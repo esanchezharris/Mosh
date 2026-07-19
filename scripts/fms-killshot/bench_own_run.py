@@ -211,6 +211,9 @@ def main():
     ap.add_argument("--sustain-chain-s", type=float, default=0.0,
                     help="split sung notes longer than this into same-pitch continuation "
                          "chains (the V4b melisma 'keep singing' command); 0 = off")
+    ap.add_argument("--chain-voiced-gate", type=float, default=0.0,
+                    help="override the take-voiced fraction required before a word may "
+                         "chain (author default 0.90); 0 = author default")
     ap.add_argument("--syl-budget-s", type=float, default=0.0,
                     help="lyric-enforced per-syllable time floor: a word gets at least "
                          "nsyl x this, claiming its quiet tail from the following gap "
@@ -293,6 +296,8 @@ def main():
             extra = {}
             if a.sustain_chain_s > 0:
                 extra["sustainChainS"] = a.sustain_chain_s
+            if a.chain_voiced_gate > 0:
+                extra["chainVoicedGate"] = a.chain_voiced_gate
             if a.syl_budget_s > 0:
                 extra["sylBudgetS"] = a.syl_budget_s
             if a.stress_redeal > 0:
