@@ -215,6 +215,11 @@ def main():
                     help="lyric-enforced per-syllable time floor: a word gets at least "
                          "nsyl x this, claiming its quiet tail from the following gap "
                          "(same phrase only); 0 = off")
+    ap.add_argument("--melisma-step-st", type=float, default=0.0,
+                    help="L2 word-campaign lever: raise the F0-step threshold that splits "
+                         "a word into melisma notes (default author value 1.5; 4.0 = only "
+                         "large genuine steps split, pinata-class words become one "
+                         "whole-word note, the SoulX-native convention); 0 = author default")
     ap.add_argument("--stress-redeal", type=float, default=0.0,
                     help="L1 word-campaign lever: when a word's 1:1 F0 segments hold a "
                          "sub-floor sliver (< this many seconds), re-deal the word's span "
@@ -288,6 +293,8 @@ def main():
                 extra["sylBudgetS"] = a.syl_budget_s
             if a.stress_redeal > 0:
                 extra["stressRedeal"] = a.stress_redeal
+            if a.melisma_step_st > 0:
+                extra["melismaStepSt"] = a.melisma_step_st
             if a.key_snap and meta.get("key"):
                 extra["key"] = meta["key"]
             row = run_item(it, t0, t1, a.out, durations=dur_mode,

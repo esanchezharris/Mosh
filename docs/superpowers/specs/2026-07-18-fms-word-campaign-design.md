@@ -85,8 +85,20 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
   floor per segment, order preserved, span exact; segment pitches re-measured from
   the take F0 over the new spans. Off by default (payload knob `stressRedeal`), pure,
   RED-first golden on the piñata-shaped fixture.
-- **L2 — reserved**: defined from round evidence, registered by amendment BEFORE the
-  round that uses it.
+- **L2 — whole-word note consolidation** (registered 2026-07-19 from round-1 evidence,
+  BEFORE round 2): round 1 falsified duration geometry as sufficient — piñata with
+  perfect 1:1 stress-dealt notes (0.214/0.255/0.214, N present, stressed longest)
+  STILL collapses to one heard syllable, and register is ruled out (failing and
+  passing notes share the same B2–C3 range). The remaining structural difference:
+  every garbled multi-syllable word is a multi-NOTE melisma split, while SoulX's own
+  shipped scores ride whole words on ONE note ("beautiful" = 8 phonemes/note).
+  L2 raises `melismaStepSt` 1.5→4.0 so only large genuine steps split a word —
+  piñata-class words become one whole-word note (the in-distribution convention),
+  trading commanded melisma pitch detail for articulation. Guard risk acknowledged:
+  within-1st may drop as internal word pitch flattens; the 10% band adjudicates.
+  Round-1 side-finding recorded: score-change re-rolls make borderline words flicker
+  (busy/getting flipped on LookinBack) — total-defect comparisons carry seed-lottery
+  noise; targeted-defect movement is reported alongside the registered total rule.
 - **L3 — singability audit** (diagnostic, not a mutation; always-on file beside the
   score): per-word flags — syllable/segment counts, min segment duration, the
   stressed syllable's segment duration, re-deal fired — for round diagnosis.
