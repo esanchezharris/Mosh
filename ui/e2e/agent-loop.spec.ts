@@ -42,7 +42,9 @@ test("a lofi ask runs as a two-step task in the drawer and one Undo reverts it",
 
 test("an unscripted ask parks politely with no steps", async ({ page }) => {
   const input = page.getByTestId("agent-input");
-  await input.fill("do the mysterious thing");
+  // vague-taste phrasing so the ROUTER sends it to the loop (a plain short ask
+  // stays on the legacy single-shot path by design)
+  await input.fill("give the whole thing a better vibe");
   await page.getByTestId("agent-send").click();
 
   const drawer = page.getByTestId("agent-drawer");

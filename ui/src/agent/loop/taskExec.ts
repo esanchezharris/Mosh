@@ -23,6 +23,7 @@ import {
 } from "../destructiveScreen";
 import type { AgentEnv, StepCommandResult } from "../loopSeam";
 import type { Snapshot } from "../../types";
+import { awaitRendersSettled, RENDER_JOB_COMMANDS } from "./jobWait";
 
 export type TaskMeta = { utterance?: string; source?: string };
 
@@ -30,6 +31,10 @@ type ExecResult = { ok: boolean; error?: string; data?: unknown };
 export type TaskExecDeps = {
   exec?: (command: string, args?: Record<string, unknown>) => Promise<ExecResult>;
   refresh?: () => Promise<void>;
+  /** The task's abort signal — a settle-wait cancels pending renders on abort. */
+  signal?: { aborted: boolean };
+  /** Render-settle timeout override (tests). */
+  settleTimeoutMs?: number;
 };
 
 // Commands a step may run WITHOUT opening the task's undo transaction. Kept
@@ -115,6 +120,19 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
         const r = await exec(c.command, c.args);
         entries.push({ index: c.index, command: c.command, ok: r.ok, error: r.ok ? undefined : r.error });
       }
+
+      // A render's ok = "job submitted"; the OBSERVATION must see the settled
+      // state (the audio landed / errored) or the next step reasons over limbo.
+      const started = allowed.filter((c) =>
+        RENDER_JOB_COMMANDS.has(c.command)
+        && entries.some((e) => e.index === c.index && e.ok)
+        && typeof c.args.clipId === "string");
+      if (started.length > 0)
+        await awaitRendersSettled({ getSnapshot }, started.map((c) => c.args.clipId as string), {
+          signal: deps.signal,
+          timeoutMs: deps.settleTimeoutMs,
+          onAbort: async (clipId) => { await exec("cancel_render", { clipId }); },
+        });
 
       entries.sort((a, b) => a.index - b.index);
       return {

@@ -12,7 +12,8 @@ import { handleFast } from "../agent/performer";
 import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
-import { agenticLoopOn, runLoopTask } from "../agent/loop/runTask";
+import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
+import { routeAsk } from "../agent/loop/router";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -171,11 +172,13 @@ export function AgentComposer() {
         return;
       }
 
-      // The agentic loop (flag-gated, default OFF): open-ended asks become
-      // multi-step tasks — plan, act, observe, repair — rendered live in the
-      // v2 agent drawer as ONE undo unit. Section-scope and the fast path keep
+      // The agentic loop (flag-gated, default OFF; gated off in multiplayer):
+      // the ROUTER sends multi-step-shaped asks — sequential clauses, creative
+      // builds, vague-taste work — into the loop (plan, act, observe, repair,
+      // ONE undo unit, live in the v2 drawer); short single-move asks stay on
+      // the cheap single-shot path below. Section-scope and the fast path keep
       // their precedence above; hands-free still never reaches an LLM.
-      if (agenticLoopOn()) {
+      if (loopAllowed() && routeAsk(text) === "loop") {
         await runLoopTask(text, {
           say: (t) => setSay(t),
           utter: (intent, s) => pushAgentUtter(intent, s),

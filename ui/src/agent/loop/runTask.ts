@@ -10,12 +10,18 @@
 
 import { brainChat } from "../../bridge";
 import { useSettings } from "../../settings/store";
+import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
 import { createTaskExecutor, undoAgentTask } from "./taskExec";
 import { mockLoopChat } from "./loopBrainMock";
 import { useTaskStore } from "./taskStore";
 
 export const agenticLoopOn = (): boolean => useSettings.getState().get("agenticLoop") === true;
+
+/** The loop runs only when the flag is on AND we're not in a multiplayer
+ *  session (v1: a long-lived open batch vs the MP lock table is unplaytested —
+ *  gate it off; the legacy single-shot path stays available in MP). */
+export const loopAllowed = (): boolean => agenticLoopOn() && !useStore.getState().mp.active;
 
 export type TaskUi = {
   say(text: string | null): void;
@@ -44,7 +50,7 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   const signal = store.begin(text);
   ui.utter("ACK_WORKING");
 
-  const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" });
+  const exec = createTaskExecutor(text.slice(0, 48), { utterance: text, source: "agent_loop" }, { signal });
   let run: LoopRun;
   try {
     run = await runAgentLoop({ ask: text }, {
