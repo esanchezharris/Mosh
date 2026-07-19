@@ -8,7 +8,7 @@
 // Loop tasks deliberately do NOT set agentChangeSet — the drawer carries the
 // per-step detail, so the ChangeToast stays quiet for them by construction.
 
-import { brainChat } from "../../bridge";
+import { archivePair, brainChat } from "../../bridge";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
@@ -64,6 +64,21 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   }
 
   useTaskStore.getState().finish(run);
+
+  // Archive the task transcript for the future LOOP dataset lane — a NEW,
+  // versioned surface (source-tagged; the multi-step reply contract must never
+  // fold into the single-shot SFT mixes). Best-effort, no-op outside native.
+  void archivePair({
+    source: "agent-loop",
+    v: 1,
+    utterance: text,
+    outcome: run.outcome,
+    steps: run.transcript.map((s) => ({
+      commands: s.commands,
+      results: s.results.map((r) => ({ command: r.command, ok: r.ok, error: r.error })),
+    })),
+  }).catch(() => { /* archival must never affect the task */ });
+
   const end = END_UTTER[run.outcome];
   const sayText = run.say ?? end.fallback;
   ui.say(sayText ?? null);
