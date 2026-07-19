@@ -72,22 +72,31 @@ words by flattening melody or smearing rhythm is a reverted lever.
 
 ## Lever menu (registered order; one lever per round)
 
-- **L1 — sliver-fold** (the previously registered r12 lever): fold sub-floor F0-glide
-  word segments into the longer neighbor BEFORE syllables are dealt. Target: the
-  piñata stress inversion (stressed N-AA1 dealt onto a 40 ms sliver).
-- **L2 — stress-weighted within-word re-deal**: syllable order preserved;
-  redistribute a word's total duration across its syllables by stress weights (each ≥
-  floor; stressed ≥ unstressed × factor).
-- **L3 — singability audit** (diagnostic, not a mutation): per-word flags —
-  stressed-syllable minimum, consonant-cluster budget (via `duration.py`
-  consonant_ms) — feeding round diagnosis.
+*Amended 2026-07-18, BEFORE round 1 (permitted: edits precede the affected round).
+Reading the emit path (`score.py::_slot_phonemes`) showed the originally registered
+"sliver-fold by merging" would drop the word into the n_slots < n_syllables branch —
+surplus syllables flattened onto one note, the exact B2.1 cram class removed for
+garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.*
+
+- **L1 — stress-weighted within-word re-deal** (subsumes the r12 sliver-fold): when a
+  word's F0-cut segments are 1:1 with its syllables AND any segment is sub-floor
+  (< 0.12 s — the piñata 40 ms sliver), re-deal the word's span across its segments
+  by syllable-stress weights (primary 1.5, secondary 1.25, unstressed 1.0), soft
+  floor per segment, order preserved, span exact; segment pitches re-measured from
+  the take F0 over the new spans. Off by default (payload knob `stressRedeal`), pure,
+  RED-first golden on the piñata-shaped fixture.
+- **L2 — reserved**: defined from round evidence, registered by amendment BEFORE the
+  round that uses it.
+- **L3 — singability audit** (diagnostic, not a mutation; always-on file beside the
+  score): per-word flags — syllable/segment counts, min segment duration, the
+  stressed syllable's segment duration, re-deal fired — for round diagnosis.
 - Further levers may be added by amendment BEFORE the round that uses them.
 
 ## Predictions (falsifiable, registered)
 
 - **P1**: Round-0 word-gate FAILS on all 3 songs; misses localize to
   segmentation-sliver / dense-phrase words, including piñata on stage9orsum.
-- **P2**: L1 (sliver-fold) clears the piñata-class misses without breaking the
+- **P2**: L1 (stress re-deal) clears the piñata-class misses without breaking the
   guards. (If L1 clears piñata but new misses appear elsewhere, that is P2-partial:
   the lever is right, coverage continues via the loop.)
 - **P3**: The full-span renders surface at least one failure class the 8–10 s windows

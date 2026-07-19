@@ -215,6 +215,10 @@ def main():
                     help="lyric-enforced per-syllable time floor: a word gets at least "
                          "nsyl x this, claiming its quiet tail from the following gap "
                          "(same phrase only); 0 = off")
+    ap.add_argument("--stress-redeal", type=float, default=0.0,
+                    help="L1 word-campaign lever: when a word's 1:1 F0 segments hold a "
+                         "sub-floor sliver (< this many seconds), re-deal the word's span "
+                         "by syllable stress (the pinata stress-inversion fix); 0 = off")
     ap.add_argument("--key-snap", action="store_true",
                     help="snap commanded pitches to the song key from <song>.meta.json "
                          "(score-side autotune; no-op for songs without meta)")
@@ -276,6 +280,8 @@ def main():
                 extra["sustainChainS"] = a.sustain_chain_s
             if a.syl_budget_s > 0:
                 extra["sylBudgetS"] = a.syl_budget_s
+            if a.stress_redeal > 0:
+                extra["stressRedeal"] = a.stress_redeal
             if a.key_snap and meta.get("key"):
                 extra["key"] = meta["key"]
             row = run_item(it, t0, t1, a.out, durations=dur_mode,

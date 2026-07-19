@@ -186,6 +186,56 @@ got = bsa.snap_and_resync([{"start": 0, "end": 1, "pitch": 64,
 check("in-key pitch unchanged", got[0]["segments"][0]["pitch"] == 64)
 check("snap does not mutate the caller's slots", SLOTS[0]["segments"][0]["pitch"] == 61)
 
+# ── L1 (word campaign): stress-weighted within-word re-deal ────────────────────────────
+ws = bsa.syllable_stress_weights("banana")
+check("stress weights: banana = [1.0, 1.5, 1.0] (primary on 2nd syllable)",
+      ws == [1.0, 1.5, 1.0], str(ws))
+
+# the pinata shape: 1:1 segments, the STRESSED syllable dealt onto a 40 ms sliver
+PINATA = [{"start": 1.0, "end": 1.282, "pitch": 60},
+          {"start": 1.282, "end": 1.322, "pitch": 64},
+          {"start": 1.322, "end": 1.59, "pitch": 62}]
+out = bsa.redeal_segments([dict(s) for s in PINATA], [1.0, 1.5, 1.0], [], 0.0, floor_s=0.12)
+durs = [round(s["end"] - s["start"], 4) for s in out]
+check("re-deal eliminates the sliver: every segment >= floor", min(durs) >= 0.12, str(durs))
+check("the stressed syllable's segment is the LONGEST", durs[1] == max(durs), str(durs))
+check("word span exact, order and count preserved",
+      len(out) == 3 and out[0]["start"] == 1.0 and abs(out[-1]["end"] - 1.59) < 1e-9
+      and all(abs(a["end"] - b["start"]) < 1e-9 for a, b in zip(out[:-1], out[1:])), str(out))
+check("empty F0 -> pitches fall back to the original per-index assignment",
+      [s["pitch"] for s in out] == [60, 64, 62], str(out))
+check("input segments not mutated", PINATA[1]["end"] == 1.322)
+
+healthy = [{"start": 0.0, "end": 0.30, "pitch": 60}, {"start": 0.30, "end": 0.62, "pitch": 62}]
+check("no-op when every segment is already >= floor",
+      bsa.redeal_segments([dict(s) for s in healthy], [1.5, 1.0], [], 0.0, floor_s=0.12) == healthy)
+check("no-op when floor_s = 0 (knob off)",
+      bsa.redeal_segments([dict(s) for s in PINATA], [1.0, 1.5, 1.0], [], 0.0, floor_s=0.0) == PINATA)
+check("no-op on weight/segment count mismatch (not 1:1)",
+      bsa.redeal_segments([dict(s) for s in PINATA], [1.0, 1.5], [], 0.0, floor_s=0.12) == PINATA)
+
+tight = [{"start": 0.0, "end": 0.05, "pitch": 60}, {"start": 0.05, "end": 0.10, "pitch": 64},
+         {"start": 0.10, "end": 0.30, "pitch": 62}]
+out_t = bsa.redeal_segments([dict(s) for s in tight], [1.0, 1.5, 1.0], [], 0.0, floor_s=0.12)
+durs_t = [round(s["end"] - s["start"], 4) for s in out_t]
+check("infeasible floor (3x0.12 > 0.30 span) -> proportional by weight, span exact",
+      abs(out_t[-1]["end"] - 0.30) < 1e-9 and durs_t[1] == max(durs_t), str(durs_t))
+
+f0_re = contour([(0.3, 55), (0.3, 67), (0.3, 58)])
+out_f = bsa.redeal_segments([{"start": 0.0, "end": 0.28, "pitch": 60},
+                             {"start": 0.28, "end": 0.32, "pitch": 64},
+                             {"start": 0.32, "end": 0.90, "pitch": 62}],
+                            [1.0, 1.5, 1.0], f0_re, 0.0, floor_s=0.12)
+check("with F0 present, pitches re-measure over the NEW spans",
+      out_f[0]["pitch"] == 55 and out_f[-1]["pitch"] == 58, str(out_f))
+
+import hashlib as _hl  # noqa: E402
+import json as _js  # noqa: E402
+det_rd = {_hl.sha256(_js.dumps(bsa.redeal_segments([dict(s) for s in PINATA], [1.0, 1.5, 1.0],
+                                                   [], 0.0, floor_s=0.12),
+                               sort_keys=True).encode()).hexdigest() for _ in range(3)}
+check("redeal deterministic (3x)", len(det_rd) == 1)
+
 # ── determinism ─────────────────────────────────────────────────────────────────────────
 import hashlib  # noqa: E402
 import json  # noqa: E402

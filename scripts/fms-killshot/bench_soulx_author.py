@@ -167,6 +167,57 @@ def chain_long_segments(segs, max_s):
     return out
 
 
+def syllable_stress_weights(word):
+    """Per-syllable stress weights via the pronouncer: primary 1.5, secondary 1.25,
+    unstressed 1.0. Empty list when phones are unavailable (no re-deal signal). Pure."""
+    try:
+        phones = _pron.phones(word)
+        groups = ph.syllabify_phones(phones) if phones else None
+    except Exception:
+        groups = None
+    if not groups:
+        return []
+    out = []
+    for g in groups:
+        d = next((p[-1] for p in g if p and p[-1].isdigit()), "0")
+        out.append(1.5 if d == "1" else 1.25 if d == "2" else 1.0)
+    return out
+
+
+def redeal_segments(segs, weights, f0, t0, *, floor_s=0.12):
+    """L1 (word campaign): stress-weighted within-word duration re-deal.
+
+    `word_segments` cuts at F0 steps, and a passing glide can leave a sub-floor sliver
+    that the 1:1 syllable dealing then hands the STRESSED syllable (the pinata stress
+    inversion — 40 ms for N-AA1 while the unstressed syllables hold ~0.28 s). When any
+    segment is sub-floor, re-deal the word's whole span across its segments by syllable
+    stress: soft floor per segment (proportional fallback if the span can't afford
+    n*floor), ORDER PRESERVED, span exact. Segment pitches re-measure from the take F0
+    over the new spans (per-index fallback where F0 is silent). This deliberately keeps
+    n_segments == n_syllables — merging the sliver away would drop the word into
+    _slot_phonemes' surplus-fold branch, the B2.1 cram class. Fires only on a 1:1
+    weights/segments match; floor_s<=0 or a healthy word returns the input. Pure."""
+    if floor_s <= 0 or len(segs) < 2 or len(weights) != len(segs):
+        return segs
+    if min(sg["end"] - sg["start"] for sg in segs) >= floor_s:
+        return segs
+    span = segs[-1]["end"] - segs[0]["start"]
+    n, wsum = len(segs), float(sum(weights))
+    if span >= n * floor_s:
+        extra = span - n * floor_s
+        durs = [floor_s + extra * w / wsum for w in weights]
+    else:
+        durs = [span * w / wsum for w in weights]
+    out, cur, acc = [], segs[0]["start"], segs[0]["start"]
+    for k, d in enumerate(durs):
+        acc += d
+        end = segs[-1]["end"] if k == n - 1 else round(acc, 4)
+        pitch = _pitch(f0, t0 + cur, t0 + end) or segs[k]["pitch"]
+        out.append({"start": round(cur, 4), "end": end, "pitch": pitch})
+        cur = end
+    return out
+
+
 def word_segments(f0, s, e, t0, *, min_step_st=1.5, min_hold_s=0.12, max_segs=None,
                   default_pitch=57):
     """SoulX-convention segmentation of ONE word's span into notes.
@@ -240,7 +291,8 @@ def main():
     if convention == "soulx" and float(data.get("sylBudgetS") or 0.0) > 0:
         # the lyric self-enforces its syllable count (quietly-sung tails reclaim time)
         words = enforce_word_budgets(words, nsyl, float(data["sylBudgetS"]), t1)
-    slots, texts = [], []
+    slots, texts, audit = [], [], []
+    redeal_s = float(data.get("stressRedeal") or 0.0)
     for w in words:
         s, e = max(t0, float(w["start"])), min(t1, float(w["end"]))
         if e - s < 0.05:
@@ -253,6 +305,18 @@ def main():
                                  min_step_st=float(data.get("melismaStepSt") or 1.5),
                                  min_hold_s=float(data.get("melismaHoldS") or 0.12),
                                  default_pitch=None)
+            # L1 (word campaign): stress-weighted within-word re-deal — knob-gated,
+            # fires only on a 1:1 syllable/segment match with a sub-floor sliver.
+            ws_stress = syllable_stress_weights(w["word"]) if redeal_s > 0 else []
+            pre = segs
+            if redeal_s > 0 and len(ws_stress) == len(segs):
+                segs = redeal_segments(segs, ws_stress, f0, t0, floor_s=redeal_s)
+            # L3 audit (always-on diagnostic): the singability geometry per word
+            sdurs = [round(sg["end"] - sg["start"], 4) for sg in segs]
+            si = ws_stress.index(max(ws_stress)) if ws_stress and len(ws_stress) == len(segs) else None
+            audit.append({"word": w["word"], "nSyl": nsyl(w["word"]), "nSegs": len(segs),
+                          "minSegS": min(sdurs), "stressSegS": sdurs[si] if si is not None else None,
+                          "redealt": segs is not pre})
             # sustain-chain: long notes become same-pitch continuation chains so the model
             # is COMMANDED to keep voicing through the tail (absent/0 = off, byte-identical).
             # GATED on the take's own voicing: chain only words the singer sang through —
@@ -292,6 +356,11 @@ def main():
         print("author_score rejected:", json.dumps(res)[:300])
         sys.exit(1)
     json.dump(res["score"], open(sys.argv[2], "w"), indent=1)
+    if audit:
+        # L3 singability audit: diagnostic file beside the score, never a mutation
+        apath = (sys.argv[2][: -len("_score.json")] + "_audit.json"
+                 if sys.argv[2].endswith("_score.json") else sys.argv[2] + ".audit.json")
+        json.dump(audit, open(apath, "w"), indent=1)
     clip = res["score"][0] if isinstance(res["score"], list) else res["score"]
     print("events:", len(clip["note_type"].split()))
     print("WORDS " + json.dumps(texts))          # last line: the true words (real text)
