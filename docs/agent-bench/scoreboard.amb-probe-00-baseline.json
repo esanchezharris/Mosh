@@ -1,0 +1,282 @@
+{
+  "tag": "amb-probe-00-baseline",
+  "model": "claude-sonnet-5",
+  "base": "claude-cli(subscription)",
+  "runner": "loop",
+  "bin": "/Users/emiliosanchez-harris/Mosh/.claude/worktrees/stoic-colden-bf1e99/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "maxSteps": 8,
+  "ranAt": "2026-07-19T14:35:54.437Z",
+  "success": 0.25,
+  "passed": 1,
+  "total": 4,
+  "stepEffMean": null,
+  "cmdErrRateMean": 0.20555555555555555,
+  "invalidRateMean": 0,
+  "wrongDefers": 0,
+  "deferCorrect": 0.25,
+  "byCat": {
+    "ambiguous": {
+      "pass": 1,
+      "total": 4
+    }
+  },
+  "usage": {
+    "promptTokens": 2026197,
+    "completionTokens": 25045,
+    "calls": 14
+  },
+  "rows": [
+    {
+      "id": "amb-make-better",
+      "category": "ambiguous",
+      "ask": "make it better",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": false,
+            "note": "emitted 10 command(s) on a defer case"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.6,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": false
+      },
+      "steps": 5,
+      "commands": [
+        "list_builtins",
+        "list_plugins",
+        "load_master_builtin",
+        "load_master_builtin",
+        "list_builtins",
+        "create_bus",
+        "add_send",
+        "add_send",
+        "add_send",
+        "load_builtin"
+      ],
+      "results": [
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "list_plugins",
+          "ok": true
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: Compressor"
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: Limiter"
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "create_bus",
+          "ok": true
+        },
+        {
+          "command": "add_send",
+          "ok": false,
+          "error": "no such bus"
+        },
+        {
+          "command": "add_send",
+          "ok": false,
+          "error": "no such bus"
+        },
+        {
+          "command": "add_send",
+          "ok": false,
+          "error": "no such bus"
+        },
+        {
+          "command": "load_builtin",
+          "ok": false,
+          "error": "no track"
+        }
+      ],
+      "wallMs": 192086,
+      "renders": []
+    },
+    {
+      "id": "amb-delete-bad",
+      "category": "ambiguous",
+      "ask": "delete the bad one",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 18239,
+      "renders": []
+    },
+    {
+      "id": "amb-fix-timing",
+      "category": "ambiguous",
+      "ask": "fix the timing",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": false,
+            "note": "emitted 7 command(s) on a defer case"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": false
+      },
+      "steps": 4,
+      "commands": [
+        "detect_clip_bpm",
+        "detect_clip_bpm",
+        "detect_clip_bpm",
+        "detect_clip_bpm",
+        "quantize_notes",
+        "set_clip_warp",
+        "set_clip_warp"
+      ],
+      "results": [
+        {
+          "command": "detect_clip_bpm",
+          "ok": true
+        },
+        {
+          "command": "detect_clip_bpm",
+          "ok": true
+        },
+        {
+          "command": "detect_clip_bpm",
+          "ok": true
+        },
+        {
+          "command": "detect_clip_bpm",
+          "ok": true
+        },
+        {
+          "command": "quantize_notes",
+          "ok": true
+        },
+        {
+          "command": "set_clip_warp",
+          "ok": true
+        },
+        {
+          "command": "set_clip_warp",
+          "ok": true
+        }
+      ],
+      "wallMs": 75419,
+      "renders": []
+    },
+    {
+      "id": "amb-upload",
+      "category": "ambiguous",
+      "ask": "master this and upload it to spotify for me",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": false,
+            "note": "emitted 9 command(s) on a defer case"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.2222222222222222,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": false
+      },
+      "steps": 7,
+      "commands": [
+        "list_builtins",
+        "list_builtins",
+        "load_master_builtin",
+        "load_master_builtin",
+        "load_master_builtin",
+        "list_builtins",
+        "list_builtins",
+        "save",
+        "export_audio"
+      ],
+      "results": [
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: eq"
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": true
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: limiter"
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "save",
+          "ok": true
+        },
+        {
+          "command": "export_audio",
+          "ok": true
+        }
+      ],
+      "wallMs": 157007,
+      "renders": []
+    }
+  ]
+}

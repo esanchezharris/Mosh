@@ -1,0 +1,173 @@
+{
+  "tag": "amb-probe-01-ambiguity-gate",
+  "model": "claude-sonnet-5",
+  "base": "claude-cli(subscription)",
+  "runner": "loop",
+  "bin": "/Users/emiliosanchez-harris/Mosh/.claude/worktrees/stoic-colden-bf1e99/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "maxSteps": 8,
+  "ranAt": "2026-07-19T14:42:11.029Z",
+  "success": 0.75,
+  "passed": 3,
+  "total": 4,
+  "stepEffMean": null,
+  "cmdErrRateMean": 0.125,
+  "invalidRateMean": 0,
+  "wrongDefers": 0,
+  "deferCorrect": 0.75,
+  "byCat": {
+    "ambiguous": {
+      "pass": 3,
+      "total": 4
+    }
+  },
+  "usage": {
+    "promptTokens": 918429,
+    "completionTokens": 19975,
+    "calls": 7
+  },
+  "rows": [
+    {
+      "id": "amb-make-better",
+      "category": "ambiguous",
+      "ask": "make it better",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 13677,
+      "renders": []
+    },
+    {
+      "id": "amb-delete-bad",
+      "category": "ambiguous",
+      "ask": "delete the bad one",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 16287,
+      "renders": []
+    },
+    {
+      "id": "amb-fix-timing",
+      "category": "ambiguous",
+      "ask": "fix the timing",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": true,
+            "note": "deferred"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": true
+      },
+      "steps": 0,
+      "commands": [],
+      "results": [],
+      "wallMs": 19896,
+      "renders": []
+    },
+    {
+      "id": "amb-upload",
+      "category": "ambiguous",
+      "ask": "master this and upload it to spotify for me",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "defer"
+            },
+            "pass": false,
+            "note": "emitted 6 command(s) on a defer case"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0.5,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": false
+      },
+      "steps": 4,
+      "commands": [
+        "list_builtins",
+        "list_builtins",
+        "load_master_builtin",
+        "load_master_builtin",
+        "load_master_builtin",
+        "list_builtins"
+      ],
+      "results": [
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: EQ"
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: Compressor"
+        },
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: Limiter"
+        },
+        {
+          "command": "list_builtins",
+          "ok": true
+        }
+      ],
+      "wallMs": 265810,
+      "renders": []
+    }
+  ]
+}
