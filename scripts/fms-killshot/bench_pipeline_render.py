@@ -131,12 +131,86 @@ def author_payload(item, t0, t1, f0, durations="verbatim", convention="syllable"
     return payload
 
 
+def place_chunk(y, a_ms, b_ms, sr):
+    """Return exactly the chunk's span [a_ms,b_ms) from a chunk render.
+
+    SoulX honors the score's time[0] (used2 GOTCHA), so a chunk render may arrive
+    SELF-PLACED on the span clock (length ≈ b_ms) with leading silence — or CHUNK-LOCAL
+    (length ≈ b_ms−a_ms). Decide by nearest length, slice/trim, zero-pad short tails."""
+    import numpy as np
+    y = np.asarray(y, dtype=np.float64)
+    n_abs = int(round(b_ms / 1000.0 * sr))
+    n_loc = int(round((b_ms - a_ms) / 1000.0 * sr))
+    seg = y[n_abs - n_loc:] if abs(len(y) - n_abs) < abs(len(y) - n_loc) else y
+    seg = seg[:n_loc]
+    if len(seg) < n_loc:
+        seg = np.concatenate([seg, np.zeros(n_loc - len(seg))])
+    return seg
+
+
+def assemble_chunks(rendered, chunks_meta, sr):
+    """Concatenate per-chunk renders on the span clock (chunks tile — plain placement,
+    NO adelay: the double-offset gotcha). Total length == the last chunk's end."""
+    import numpy as np
+    return np.concatenate([place_chunk(y, m["time"][0], m["time"][1], sr)
+                           for y, m in zip(rendered, chunks_meta)])
+
+
+def chunk_chain_ok(clips, chunks, tol_s=0.01):
+    """Chain-sum guard: the chunks' durations must re-sum to the clips' total and the
+    chunk timeline must tile without gaps."""
+    total = sum(float(d) for c in clips for d in str(c["duration"]).split())
+    csum = sum(float(d) for c in chunks for d in str(c["duration"]).split())
+    if abs(total - csum) > tol_s:
+        return False
+    for a, b in zip(chunks[:-1], chunks[1:]):
+        if a["time"][1] != b["time"][0]:
+            return False
+    span_ms = chunks[-1]["time"][1] - chunks[0]["time"][0]
+    return abs(span_ms / 1000.0 - total) <= tol_s + 0.001 * len(chunks)
+
+
+def _render_chunked(scorej, work, base, ref_wav, ref_json, chunk_s, out_wav):
+    """Full-span render: chunk the authored score (≤chunk_s, melisma-safe breaks),
+    render each chunk separately, reassemble on the span clock."""
+    import numpy as np
+    import soundfile as sf
+    from asserted_proof_score import chunk_score
+    clips = json.load(open(scorej))
+    clips = clips if isinstance(clips, list) else [clips]
+    chunks = chunk_score(clips, max_chunk_s=chunk_s)
+    if len(chunks) <= 1:
+        gen = render_chunk(scorej, os.path.join(work, base + "_render"), ref_wav, ref_json)
+        import shutil
+        shutil.copyfile(gen, out_wav)
+        return out_wav
+    if not chunk_chain_ok(clips, chunks):
+        raise RuntimeError("chunk chain-sum mismatch — refusing to render")
+    import mumble_probe as mp
+    rendered, sr = [], None
+    for i, ch in enumerate(chunks):
+        cj = os.path.join(work, f"{base}_c{i:02d}_score.json")
+        json.dump([ch], open(cj, "w"))
+        gen = render_chunk(cj, os.path.join(work, f"{base}_c{i:02d}_render"), ref_wav, ref_json)
+        y, y_sr = mp._read_mono(gen)
+        if sr is None:
+            sr = y_sr
+        elif y_sr != sr:
+            raise RuntimeError(f"chunk {i} sample rate {y_sr} != {sr}")
+        rendered.append(y)
+        print(f"    chunk {i + 1}/{len(chunks)} rendered "
+              f"[{ch['time'][0] / 1000:.1f}-{ch['time'][1] / 1000:.1f}s]", flush=True)
+    audio = assemble_chunks(rendered, chunks, sr)
+    sf.write(out_wav, np.asarray(audio, dtype=np.float32), sr, subtype="PCM_16")
+    return out_wav
+
+
 def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=None,
                       f0_from="clean_vocal", durations="verbatim", convention="syllable",
-                      note_floor_s=0.0, author_extra=None):
+                      note_floor_s=0.0, author_extra=None, chunk_s=None):
     """THE real `pipeline` generator: true words + F0 → product author_score (phonology venv)
-    → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics, one ≤12 s
-    window.
+    → local SoulX render → out_wav. Returns (out_wav, true_words). Oracle-lyrics; one ≤12 s
+    window by default, or a chunked full span when `chunk_s` is set.
 
     `f0_from` names the item key the melody is read from, and is LOAD-BEARING. For NUS the
     default `clean_vocal` is correct: there the clean vocal IS the source being degraded, so
@@ -168,6 +242,9 @@ def pipeline_generate(item, out_wav, *, t0=0.0, t1=12.0, ref_wav=None, ref_json=
             true_words = json.loads(line[6:])
 
     # 3. render via the local SoulX bridge, move generated.wav to out_wav
+    if chunk_s:
+        _render_chunked(scorej, work, base, ref_wav, ref_json, chunk_s, out_wav)
+        return out_wav, true_words
     outd = os.path.join(work, base + "_render")
     gen = render_chunk(scorej, outd, ref_wav, ref_json)
     import shutil

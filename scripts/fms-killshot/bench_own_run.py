@@ -101,8 +101,14 @@ def _dynamics_arm(src_wav, ref_wav, out_dir, base, mode):
         return None
 
 
+def wav_duration_s(path):
+    with wave.open(path, "rb") as w:
+        return w.getnframes() / float(w.getframerate())
+
+
 def run_item(item, t0, t1, out_dir, *, durations="verbatim", convention="syllable",
-             note_floor_s=0.0, melody="mumble", skip_dyn=False, author_extra=None):
+             note_floor_s=0.0, melody="mumble", skip_dyn=False, author_extra=None,
+             chunk_s=None):
     import bench_align
     import bench_human_baseline as hb
     import bench_naturalness
@@ -123,7 +129,8 @@ def run_item(item, t0, t1, out_dir, *, durations="verbatim", convention="syllabl
     f0_from = "clean_vocal" if melody == "finished" else "mumble_vocal"
     pipe, true_words = pr.pipeline_generate(item, pipe, t0=t0, t1=t1, f0_from=f0_from,
                                             durations=durations, convention=convention,
-                                            note_floor_s=note_floor_s, author_extra=author_extra)
+                                            note_floor_s=note_floor_s, author_extra=author_extra,
+                                            chunk_s=chunk_s)
     snapped = _snap_arm(pipe, ref_slice, out_dir, base)
 
     ref_mono = fin[int(t0 * sr):int(t1 * sr)]
@@ -183,6 +190,10 @@ def main():
     ap.add_argument("--songs")
     ap.add_argument("--fixed-window", action="store_true",
                     help="ignore per-song phrase windows and use --t0/--t1")
+    ap.add_argument("--full-span", action="store_true",
+                    help="render the ENTIRE paired span (word-campaign vehicle): t0=0, "
+                         "t1=the finished take's duration; the authored score is chunked "
+                         "≤12 s at melisma-safe breaks and reassembled on the span clock")
     ap.add_argument("--durations", default="verbatim",
                     help="verbatim (shipped default) | derived (B1-lite)")
     ap.add_argument("--convention", default="syllable",
@@ -245,7 +256,9 @@ def main():
         # both the render and the scoring at the boundary; ending on a real breath does not.
         t0, t1 = a.t0, a.t1
         wj = os.path.join(os.path.dirname(it["clean_vocal"]), f"{it['song']}.window.json")
-        if not a.fixed_window and os.path.isfile(wj):
+        if a.full_span:
+            t0, t1 = 0.0, wav_duration_s(it["clean_vocal"])
+        elif not a.fixed_window and os.path.isfile(wj):
             w = json.load(open(wj))
             t0, t1 = float(w["t0"]), float(w["t1"])
         # owner-supplied ground truth (key/bpm) — always recorded for diagnostics,
@@ -268,7 +281,8 @@ def main():
             row = run_item(it, t0, t1, a.out, durations=dur_mode,
                            convention=conv, note_floor_s=floor,
                            melody=a.melody, skip_dyn=a.skip_dyn,
-                           author_extra=extra or None)
+                           author_extra=extra or None,
+                           chunk_s=12.0 if a.full_span else None)
             if meta:
                 row["meta"] = meta
             if swaps:
