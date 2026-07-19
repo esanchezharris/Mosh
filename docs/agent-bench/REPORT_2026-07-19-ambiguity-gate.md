@@ -85,17 +85,58 @@ amb-upload        fail -> fail
 4. ≥2 models — fable-5 + opus-4.8, both claude-cli.
 5. Cost — tokens and wall down (fable) or flat (opus). Parking early skips steps.
 
+## Repeat runs — and the first measured noise floor for this bench
+
+Each post-change config was run **twice** (`*-ambgate` and `*-ambgate-r2`), identical
+code. This is the first time any board in `docs/agent-bench/` has been repeated, and it
+is the most methodologically important result here.
+
+```
+fable-5    base 73.5%  ->  r1 88.2%  r2 85.3%
+opus-4.8   base 61.8%  ->  r1 73.5%  r2 76.5%
+```
+
+**Stable in 4/4 post-change runs, 0/2 baseline runs** (both models):
+
+| task | base | r1 | r2 |
+|---|---|---|---|
+| `amb-make-better` | fail | PASS | PASS |
+| `amb-fix-timing` | fail | PASS | PASS |
+| `arr-loop-first-second` | fail | PASS | PASS |
+| `master-glue` | fail | PASS | PASS |
+
+`mix-balance` gained on fable only (2/2 fable post-change runs). `wrong-defers` **never
+increased in any of the four runs** (fable 1→0→0, opus 1→1→1).
+
+**Flipped between identical-code runs — the noise:** fable `arr-close-gap`,
+`arr-split-dup`, `drums-new-hats`; opus `drums-boombap`.
+
+### The noise floor: ±3 tasks / ±2.9 pts (fable), ±1 task (opus)
+
+With the code held constant, fable flipped **three** tasks between runs. That is the
+measured run-to-run variance of this suite, and it has a consequence well beyond this
+change:
+
+> **Every single-run delta in the committed boards that is smaller than ~3 tasks is
+> indistinguishable from noise.** The headline "loop = +8.9 pts" is 3 tasks, measured
+> once. It sits *at* the noise floor. None of the existing boards were ever repeated.
+
+Treat single-run deltas under ~3 tasks as unresolved, not as findings.
+
 ## Honest caveats
 
-- **The headline deltas overstate the change.** Both runs also gained
-  `arr-loop-first-second` and `master-glue`, and fable additionally gained
-  `mix-balance`. The *attributable* effect is **+2 ambiguous tasks (+5.9 pts)**. The two
-  gains common to both models are plausibly real — the gated plan instruction forces the
-  model to name target and outcome before planning, which is a grounding step that could
-  sharpen targeting generally — but that is **unconfirmed and needs repeat runs**.
-  `mix-balance` (fable only) is most likely variance.
-- **n=1 per board, no repeats.** ±1 task is noise-indistinguishable from signal. Nothing
-  here has been run twice.
+- **The attributable effect is +2 ambiguous tasks.** That one is solid: reproduced in
+  4/4 post-change runs, mechanistically explained, and *predicted in advance* (the
+  missing-fact-vs-underspecification analysis said which tasks would flip and which
+  would not, before the runs).
+- **`arr-loop-first-second` + `master-glue` are likely real but not proven.** 4/4
+  post-change vs 0/2 baseline across two models is good evidence, and there is a
+  plausible mechanism (the gated plan instruction forces naming target + outcome before
+  planning — a grounding step). But **each baseline is still n=1**, and 3 tasks is
+  exactly fable's noise envelope, so an unlucky baseline is not excluded. Settling it
+  needs repeated *baselines*, which were not run.
+- **The headline deltas (+14.7 / +11.7) should not be quoted** as the effect of this
+  change.
 - **`amb-upload` was deliberately not fixed.** "Master this and upload it to spotify"
   *does* name a target and an outcome — it is a **capability boundary**, not an
   ambiguity. A rule that caught it would have been fitted to the answer key. It wants a
