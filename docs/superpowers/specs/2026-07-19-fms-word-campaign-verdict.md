@@ -56,6 +56,36 @@ readout + take-vs-render waveform panels. All 9 served clips provenance-verified
 sample-exact against wc-r4. **Owner rules guide-grade yes/no per song; if no, names
 the residual that breaks it.**
 
+## OWNER VERDICT on the full-song milestone (2026-07-19) — guide-grade NO
+
+> "these sound kinda the same - ok not very good"
+
+**The campaign's thesis is refuted by the ear.** Word recovery reached 89.0% with both
+guards at their best of any round, and it did not buy guide-grade. Two readings of
+"sound kinda the same", both damning in the same direction:
+
+- *same as previous rounds* — the word fixes are inaudible against the residual;
+- *the three songs sound like each other* — the render imposes one generic voice
+  character over three different performances.
+
+Either way the dominant term is **not** word placement. It is the thing the program
+registered as parked: **SoulX's articulation/naturalness character**. Words-first was
+run to exhaustion (every registered lever kept or refuted, two genuine data bugs found
+and fixed, coverage taken from 15 s to whole songs) and the answer is that the words
+were never the binding constraint.
+
+**This is the fifth time an instrument win lost by ear** (four envelope-family metrics,
+now the ASR word gate). The gate is not wrong — it measured exactly what it claimed,
+and it found real bugs — it is simply not the axis that decides guide-grade. Recorded
+so no future round re-litigates it.
+
+**Implication for what comes next (owner decides; nothing started):** the queued
+campaigns (mumble-melody, key-snap) are both refinements of *placement* and would
+inherit the same ceiling. The honest options are (a) attack naturalness directly —
+which is the NSF re-vocode lane, blocked on a licence-clean self-trained checkpoint,
+or a different engine; (b) re-scope what a "guide vocal" has to be; or (c) stop here
+and bank the instruments. No work is queued pending that call.
+
 ## Open items
 
 - **Full lyrics (owner, non-blocking)**: verified lyrics cover only the first
