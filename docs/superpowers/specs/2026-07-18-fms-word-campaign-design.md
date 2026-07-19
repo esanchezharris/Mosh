@@ -149,7 +149,20 @@ garbling. The lever is redefined to keep the 1:1 geometry and fix the DURATIONS.
   the echo-tailed targets actually chain. Round 5 = L2 + L5 + L4b, baseline wc-r4.
   If it reverts, the chain mechanism is retired for good and Helena/Bonham/lacoste
   go to the milestone as the named residual (held-melisma articulation).
-- Further levers may be added by amendment BEFORE the round that uses them.
+- **L4b verdict — REVERTED (round 5, 5 !< 5)**: chains never fired on helena/lacoste
+  even at gate 0.75 — the TAKE's own voicing decays below 0.75 through those words,
+  the exact condition where chaining commands what the singer didn't sustain (r6
+  lesson). Where it fired (bonham) the gap deficit remained. Chain mechanism retired.
+- **Stop amendment (2026-07-19, BEFORE any round 6)**: every registered lever class
+  is now kept or refuted, and the residual decomposes into named MODEL-articulation
+  classes — (a) held-melisma words over decaying takes (Helena/Bonham, lacoste);
+  (b) dense function-word substitution/swallowing ("that"→"the", one "I");
+  (c) seed-lottery flicker on borderline words (wandering/sheee class). A round 6
+  would be a guaranteed-dry byte-identical re-render of the best config — burning it
+  to fire the 2-dry-rounds clause mechanically adds no information. The campaign
+  stops at round 5 by residual exhaustion; best = round 4 (L2 + L5), defects
+  9 → 5 under the refined gate (44% down), both guards improved vs baseline
+  (within-1st 0.787→0.829, rhythm 87.9→51.7 ms), zero floor leaks throughout.
 
 ## Predictions (falsifiable, registered)
 
