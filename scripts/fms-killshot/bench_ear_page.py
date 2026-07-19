@@ -147,8 +147,27 @@ def _crop(src, a, b, dst):
     return dst
 
 
+def diagnostic_section(spec, clips_dir, q):
+    """A LABELED (not blind) card block from {"title", "blurb"?, "clips":
+    [{"label", "wav", "a", "b"}]} — for experiments where blinding is meaningless
+    (e.g. a different WORD is trivially identifiable). Each clip is cropped [a,b]."""
+    rows = []
+    for i, c in enumerate(spec.get("clips", [])):
+        dst = f"diag_{i}.wav"
+        _crop(c["wav"], float(c.get("a", 0.0)), float(c.get("b", 1e9)),
+              os.path.join(clips_dir, dst))
+        rows.append(f'<div class="arm anchor"><div class="lab">{c["label"]}</div>'
+                    f'<audio controls preload="none" src="clips/{dst}{q}"></audio></div>')
+    blurb = f'<p class="ctx">{spec["blurb"]}</p>' if spec.get("blurb") else ""
+    return f"""<section>
+  <h2>{spec.get('title', 'Diagnostic')}</h2>
+  {blurb}
+  {''.join(rows)}
+</section>"""
+
+
 def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_song=None,
-                  cache_tag="", panels=None):
+                  cache_tag="", panels=None, diagnostic=None):
     """Blind A/B of the SAME arm across two runs — isolates one change.
 
     `catch_song`: for that song BOTH blind clips are byte-identical (a catch trial). It looks
@@ -166,6 +185,8 @@ def build_compare(run_a, run_b, out_dir, arm, label_a, label_b, blurb, catch_son
     os.makedirs(clips, exist_ok=True)
     q = f"?v={cache_tag}" if cache_tag else ""
     mapping, cards = {}, []
+    if diagnostic:
+        cards.append(diagnostic_section(diagnostic, clips, q))
 
     for idx, item in enumerate(sorted(set(rows) & set(rowsb))):
         song = item.replace("own-", "")
@@ -236,6 +257,10 @@ def main():
     ap.add_argument("--cache-tag", default="", help="?v= token on every media URL")
     ap.add_argument("--panels", default=None,
                     help="JSON {song: png} of take-vs-render waveform panels to embed")
+    ap.add_argument("--diagnostic", default=None,
+                    help="JSON {title, blurb?, clips: [{label, wav, a, b}]} — a LABELED "
+                         "card block above the blind cards (for tests where blinding is "
+                         "meaningless, e.g. a different word)")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/ear-gate"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -243,7 +268,8 @@ def main():
         mapping = build_compare(
             a.run, a.compare, a.out, a.arm, a.label_a, a.label_b,
             a.blurb or "Same pipeline, one change.", catch_song=a.catch,
-            cache_tag=a.cache_tag, panels=json.loads(a.panels) if a.panels else None)
+            cache_tag=a.cache_tag, panels=json.loads(a.panels) if a.panels else None,
+            diagnostic=json.loads(a.diagnostic) if a.diagnostic else None)
     else:
         mapping = build(a.run, a.out)
     # mapping lives OUTSIDE the served dir so the page cannot leak the answer

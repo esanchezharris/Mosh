@@ -267,15 +267,92 @@ check("floor 0 is byte-identical (the shipped-default contract)",
 
 fl = sx.apply_note_floor(FLOOR_CLIP, 0.15)
 fd = [float(x) for x in fl["duration"].split()]
-check("floor raises the 0.06s sung note to >= 0.15s", fd[1] >= 0.1499, str(fd))
-check("floor raises the 0.04s sung note to >= 0.15s", fd[3] >= 0.1499, str(fd))
+ft = [int(x) for x in fl["note_type"].split()]
+check("floor raises every sung note to >= 0.15s",
+      all(d >= 0.1499 for d, t in zip(fd, ft) if t != 1), str(fd))
 check("floor preserves the TOTAL timeline (borrowed, not invented)",
       abs(sum(fd) - 0.80) < 1e-3, f"sum={sum(fd):.4f}")
-check("floor borrows from the adjacent REST first (the rest at idx2 shrinks)",
-      fd[2] < 0.20, f"rest now {fd[2]:.3f}")
+check("floor borrows from the REST first and a fully-drained rest is DROPPED",
+      1 not in ft and len(fd) == 4, f"types={ft} durs={fd}")
 check("floor never pushes a donor sung note below the floor",
-      all(fd[i] >= 0.1499 for i in (0, 1, 3, 4)), str(fd))
+      all(d >= 0.1499 for d in fd), str(fd))
 check("apply_note_floor is pure (input clip untouched)", FLOOR_CLIP["duration"] == "0.30 0.06 0.20 0.04 0.20")
+
+# ── the floor is a HARD INVARIANT: phrase-scoped borrow + merge fallback ────────────────
+# RED fixture = the EXACT r9b stage10 pre-floor chain that SHIPPED a 0.1233s "and": the
+# old i±1 borrow found both neighbours pinned and gave up silently while "see" (two
+# tokens away) held 0.27s of spare.
+LEAK_CLIP = {"index": "t_0_2725", "language": "English", "time": [0, 2725],
+             "duration": "0.4438 0.1233 0.1233 0.1233 0.2553 0.0400 0.1052 0.6767 0.6234",
+             "text": "see you and i get <SP> to fumbling fumbling",
+             "phoneme": "en_S-IY1 en_Y-UW1 en_AH0-N-D en_AY1 en_G-EH1-T <SP> "
+                        "en_T-UW1 en_F-AH1-M en_B-L-IH0-NG",
+             "note_pitch": "57 57 57 57 57 0 57 57 57",
+             "note_type": "2 2 2 2 2 1 2 2 3"}
+lstats = {}
+lk = sx.apply_note_floor(LEAK_CLIP, 0.15, stats=lstats)
+ld = [float(x) for x in lk["duration"].split()]
+lt = [int(x) for x in lk["note_type"].split()]
+check("INVARIANT: no sung note below the floor (the stage10 'and' leak, RED-proven)",
+      all(d >= 0.1499 for d, t in zip(ld, lt) if t != 1), f"durs={ld}")
+_lsum = sum(float(x) for x in LEAK_CLIP["duration"].split())
+check("invariant run preserves the total timeline",
+      abs(sum(ld) - _lsum) < 2e-3, f"sum={sum(ld):.4f} vs {_lsum:.4f}")
+check("stats report zero leaks on the stage10 fixture", lstats.get("leaks") == 0, str(lstats))
+check("phrase-scoped borrow reaches 'see' two tokens away (no merge needed here)",
+      lstats.get("merged") == 0 and ld[0] < 0.4438, f"{lstats} see={ld[0]}")
+# 'to' (after the rest) is itself sub-floor and borrows from ITS OWN phrase ('fumbling');
+# the far continuation had spare but distance ranks the nearer donor first — it never moves
+check("phrase-2 borrowing stays inside phrase 2 (far continuation untouched)",
+      abs(ld[-1] - 0.6234) < 2e-3, str(ld[-3:]))
+
+# merge fallback: a piñata-SHAPED word (3 notes, no spare anywhere in its run)
+MERGE_CLIP = {"index": "t_0_390", "language": "English", "time": [0, 390],
+              "duration": "0.15 0.10 0.04 0.10", "text": "my pinata pinata pinata",
+              "phoneme": "en_M-AY1 en_P-IH0 en_N-AA1 en_T-AH0",
+              "note_pitch": "57 51 47 50", "note_type": "2 2 3 3"}
+mstats = {}
+mg = sx.apply_note_floor(MERGE_CLIP, 0.15, stats=mstats)
+md = [float(x) for x in mg["duration"].split()]
+mt = [int(x) for x in mg["note_type"].split()]
+mp = mg["phoneme"].split()
+check("merge fires when the run has no spare", mstats.get("merged", 0) >= 1, str(mstats))
+check("merged clip has NO sung note below the floor (invariant holds via merge)",
+      all(d >= 0.1499 for d, t in zip(md, mt) if t != 1) and mstats.get("leaks") == 0,
+      f"durs={md} stats={mstats}")
+check("merge preserves the total timeline", abs(sum(md) - 0.39) < 2e-3, f"sum={sum(md):.4f}")
+check("merged phones re-join dash-wise (no phone lost)",
+      "".join(mp).count("N-AA1") == 1 and "".join(mp).count("T-AH0") == 1, str(mp))
+check("the word still starts with a type-2 onset and continues type-3",
+      mt[1] == 2 and all(t == 3 for t in mt[2:]) if len(mt) > 2 else mt[1] == 2, str(mt))
+check("word_event_spans parses a merged clip consistently (2 words, contiguous)",
+      len(sx.word_event_spans(mg)) == 2, str(sx.word_event_spans(mg)))
+
+# cross-word fold: a single-note word with zero spare anywhere folds forward
+XW_CLIP = {"index": "t_0_330", "language": "English", "time": [0, 330],
+           "duration": "0.15 0.03 0.15", "text": "you and i",
+           "phoneme": "en_Y-UW1 en_AH0-N-D en_AY1",
+           "note_pitch": "57 57 57", "note_type": "2 2 2"}
+xstats = {}
+xw = sx.apply_note_floor(XW_CLIP, 0.15, stats=xstats)
+check("single-note word folds into the FOLLOWING sung note",
+      xw["text"].split()[1] == "and+i" and "AH0-N-D-AY1" in xw["phoneme"].split()[1],
+      f"{xw['text']} | {xw['phoneme']}")
+check("cross-word fold keeps the survivor's note_type",
+      [int(t) for t in xw["note_type"].split()] == [2, 2], xw["note_type"])
+check("cross-word fold: invariant + timeline hold",
+      xstats.get("leaks") == 0 and abs(sum(float(d) for d in xw["duration"].split()) - 0.33) < 2e-3,
+      str(xstats))
+
+# determinism x3 on the invariant fixtures
+import hashlib as _h
+_det = {_h.sha256(str((sx.apply_note_floor(LEAK_CLIP, 0.15),
+                       sx.apply_note_floor(MERGE_CLIP, 0.15),
+                       sx.apply_note_floor(XW_CLIP, 0.15))).encode()).hexdigest()
+        for _ in range(3)}
+check("floor invariant deterministic (3x)", len(_det) == 1)
+check("apply_note_floor stays pure on the new fixtures",
+      LEAK_CLIP["duration"].startswith("0.4438") and MERGE_CLIP["duration"] == "0.15 0.10 0.04 0.10")
 
 # _clean folds diacritics instead of deleting the letter — "piñata" must reach the
 # pronouncer as "pinata" (the bare strip produced "piata": the N vanished from the sung

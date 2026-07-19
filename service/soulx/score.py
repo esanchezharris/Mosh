@@ -139,32 +139,134 @@ def _word_units(words: List[str], slots: List[dict]):
     return units
 
 
-def apply_note_floor(clip: dict, floor_s: float) -> dict:
-    """Raise every sub-`floor_s` SUNG note (note_type 2/3) to the floor, taking the deficit
-    from an adjacent REST if one exists, else from the longest sung neighbour. The total
-    timeline is preserved (sum of durations unchanged), so the take alignment holds. Pure;
-    floor_s <= 0 returns the clip unchanged (byte-identical)."""
+def apply_note_floor(clip: dict, floor_s: float, stats: Optional[dict] = None) -> dict:
+    """Raise every sub-`floor_s` SUNG note (note_type 2/3) to the floor — a HARD
+    INVARIANT, not best-effort. The old i±1-neighbour borrow gave up SILENTLY when both
+    neighbours were pinned while spare sat two tokens away — stage10 shipped an
+    unsingable "and" at 0.1233 s in r9b, and a rest drained to a 0.0000 token survived.
+
+    Two stages, looped to fixpoint:
+      1. PHRASE-SCOPED BORROW — donors are every token in the contiguous run bounded by
+         (and including) the nearest flanking rests: rests drain to zero first, then
+         sung notes by (distance, largest spare), never below the floor themselves, and
+         never across a rest (a breath bounds a phrase; timing outside the run never
+         moves).
+      2. MERGE FALLBACK — when the run's spare is exhausted, an unsingable note FOLDS
+         into a neighbour instead of shipping: a type-3 continuation merges LEFT into
+         its same-word predecessor; a type-2 onset merges RIGHT into its own
+         continuation (the survivor becomes the type-2 onset); a single-note word folds
+         into the nearest sung neighbour in the run (following preferred; text joined
+         with '+', cosmetic — SoulX consumes only the phoneme stream). Phones re-join
+         dash-wise; within a word the LONGER constituent's pitch wins (a 40 ms sliver's
+         pitch is glide noise).
+
+    Fully-drained rests (0.0000) are dropped. `stats` (optional dict) receives
+    {"merged", "leaks", "impossible"}. Total timeline preserved; pure; floor_s <= 0
+    returns the clip unchanged (byte-identical)."""
     if floor_s <= 0.0:
         return clip
     durs = [float(d) for d in clip["duration"].split()]
     types = [int(t) for t in clip["note_type"].split()]
-    n = len(durs)
-    for i in range(n):
-        if types[i] == 1 or durs[i] >= floor_s:
-            continue
+    texts = clip["text"].split()
+    phons = clip["phoneme"].split()
+    pitches = clip["note_pitch"].split()
+    skip = [False] * len(durs)
+    eps = 1e-9
+    merged = impossible = 0
+
+    def run_bounds(i):
+        a = i
+        while a > 0 and types[a - 1] != 1:
+            a -= 1
+        if a > 0:
+            a -= 1                                  # the flanking rest is a donor too
+        b = i
+        while b < len(durs) - 1 and types[b + 1] != 1:
+            b += 1
+        if b < len(durs) - 1:
+            b += 1
+        return a, b
+
+    def try_borrow(i):
         need = floor_s - durs[i]
-        # donors: adjacent rests first (silence is the cheapest place to borrow), then the
-        # longest sung neighbour that can spare it without itself dropping below the floor.
-        order = sorted((j for j in (i - 1, i + 1) if 0 <= j < n),
-                       key=lambda j: (0 if types[j] == 1 else 1, -durs[j]))
-        for j in order:
+        a, b = run_bounds(i)
+        donors = sorted((j for j in range(a, b + 1) if j != i),
+                        key=lambda j: (0 if types[j] == 1 else 1, abs(j - i),
+                                       -(durs[j] if types[j] == 1 else durs[j] - floor_s),
+                                       j))
+        for j in donors:
             spare = durs[j] if types[j] == 1 else max(0.0, durs[j] - floor_s)
             take = min(need, spare)
+            if take <= eps:
+                continue
             durs[j] -= take
             need -= take
-            if need <= 1e-9:
+            if need <= eps:
                 break
-        durs[i] = floor_s - max(0.0, need)      # if nobody could spare it, take what we got
+        durs[i] = floor_s - max(0.0, need)
+        return need <= eps
+
+    def _join(left, right):
+        return left + "-" + (right[3:] if right.startswith("en_") else right)
+
+    def do_merge(i, j, cross_word):
+        # fold token i INTO token j (j survives); pre-merge durations decide the pitch
+        if not cross_word:
+            pitches[j] = pitches[j] if durs[j] >= durs[i] else pitches[i]
+        if i < j:
+            phons[j] = _join(phons[i], phons[j])
+            if cross_word:
+                texts[j] = texts[i] + "+" + texts[j]
+        else:
+            phons[j] = _join(phons[j], phons[i])
+            if cross_word:
+                texts[j] = texts[j] + "+" + texts[i]
+        if not cross_word and types[i] == 2:
+            types[j] = 2                            # the survivor becomes the word onset
+        durs[j] += durs[i]
+        for arr in (durs, types, texts, phons, pitches, skip):
+            del arr[i]
+
+    guard = 0
+    while guard < 4 * len(durs) + 8:
+        guard += 1
+        i = next((k for k in range(len(durs))
+                  if types[k] != 1 and not skip[k] and durs[k] < floor_s - eps), None)
+        if i is None:
+            break
+        if try_borrow(i):
+            continue
+        j = None
+        if types[i] == 3 and i > 0 and types[i - 1] != 1 and texts[i - 1] == texts[i]:
+            j, cross = i - 1, False
+        elif types[i] == 2 and i + 1 < len(durs) and types[i + 1] == 3 \
+                and texts[i + 1] == texts[i]:
+            j, cross = i + 1, False
+        else:
+            a, b = run_bounds(i)
+            sung = [k for k in range(a, b + 1) if k != i and types[k] != 1]
+            after = [k for k in sung if k > i]
+            before = [k for k in sung if k < i]
+            if after:
+                j, cross = min(after), True
+            elif before:
+                j, cross = max(before), True
+        if j is None:
+            impossible += 1
+            skip[i] = True                          # a lone note in a too-small run
+        else:
+            do_merge(i, j, cross)
+            merged += 1
+
+    # drained rests are dead tokens — drop them rather than ship 0.0000 events
+    k = 0
+    while k < len(durs):
+        if types[k] == 1 and durs[k] <= 5e-5:
+            for arr in (durs, types, texts, phons, pitches, skip):
+                del arr[k]
+        else:
+            k += 1
+
     # re-quantize on the error-diffused chain so summed timeline is bit-stable (as author_score)
     qdur, acc_true, acc_emit = [], 0.0, 0.0
     for d in durs:
@@ -172,8 +274,15 @@ def apply_note_floor(clip: dict, floor_s: float) -> dict:
         q = max(0.0, round(acc_true - acc_emit, 4))
         qdur.append(q)
         acc_emit += q
+    leaks = sum(1 for q, t in zip(qdur, types) if t != 1 and q < floor_s - 2e-4)
+    if stats is not None:
+        stats.update({"merged": merged, "leaks": leaks, "impossible": impossible})
     out = dict(clip)
     out["duration"] = " ".join(f"{q:.4f}" for q in qdur)
+    out["text"] = " ".join(texts)
+    out["phoneme"] = " ".join(phons)
+    out["note_pitch"] = " ".join(pitches)
+    out["note_type"] = " ".join(str(t) for t in types)
     out["time"] = [clip["time"][0], clip["time"][0] + round(acc_emit * 1000)]
     return out
 
@@ -286,12 +395,17 @@ def author_score(lines: List[dict], language: str = "English", name: str = "mosh
         result["deriveChainOk"] = bool(dlog.get("chain_check", {}).get("ok"))
     if note_floor_s > 0.0:
         # applied LAST so it floors whatever durations the derive step produced
-        floored = apply_note_floor(result["score"][0], note_floor_s)
+        fstats: dict = {}
+        floored = apply_note_floor(result["score"][0], note_floor_s, stats=fstats)
         pre = [float(d) for d in result["score"][0]["duration"].split()]
         post = [float(d) for d in floored["duration"].split()]
         result["score"] = [floored]
         result["noteFloorS"] = note_floor_s
         result["noteFloorRaised"] = sum(1 for a, b in zip(pre, post) if b - a > 0.0005)
+        result["noteFloorMerged"] = fstats.get("merged", 0)
+        result["noteFloorLeaks"] = fstats.get("leaks", 0)   # the invariant: must be 0
+        if fstats.get("impossible"):
+            result["noteFloorImpossible"] = fstats["impossible"]
     return result
 
 

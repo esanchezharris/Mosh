@@ -207,6 +207,11 @@ def main():
     ap.add_argument("--key-snap", action="store_true",
                     help="snap commanded pitches to the song key from <song>.meta.json "
                          "(score-side autotune; no-op for songs without meta)")
+    ap.add_argument("--swap-word", action="append", default=[],
+                    help="DIAGNOSTIC lyric substitution 'from=to' (repeatable). Applied "
+                         "to the in-memory payload words only — the installed words.json "
+                         "is never touched; timing/phrase fields ride along unchanged. "
+                         "Match is casefolded + diacritic-folded.")
     ap.add_argument("--out", default=os.path.expanduser("~/mosh-fms-ksb/bench/own-run"))
     a = ap.parse_args()
 
@@ -217,6 +222,21 @@ def main():
     import bench_own_pairs as op
     items = op.own_pairs_items(songs=a.songs.split(",") if a.songs else None)
     os.makedirs(a.out, exist_ok=True)
+
+    def _fold(w):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "service"))
+        from phonology.core import fold_diacritics
+        return fold_diacritics(str(w)).casefold()
+
+    swaps = {}
+    for spec in a.swap_word:
+        src, _, dst = spec.partition("=")
+        if not dst:
+            raise SystemExit(f"--swap-word needs 'from=to', got {spec!r}")
+        swaps[_fold(src)] = dst
+    if swaps:
+        print(f"  DIAGNOSTIC (not blind): word swap {swaps} — payload-only, "
+              f"installed words.json untouched", flush=True)
 
     rows = []
     for it in items:
@@ -232,6 +252,10 @@ def main():
         # only ACTS on the score when --key-snap is passed
         mj = os.path.join(os.path.dirname(it["clean_vocal"]), f"{it['song']}.meta.json")
         meta = json.load(open(mj)) if os.path.isfile(mj) else {}
+        if swaps:
+            it = dict(it, words=[dict(w, word=swaps.get(_fold(w.get("word", "")),
+                                                        w.get("word", "")))
+                                 for w in it["words"]])
         print(f"  {it['id']} [{t0:.2f}-{t1:.2f}s] …", flush=True)
         try:
             extra = {}
@@ -247,6 +271,8 @@ def main():
                            author_extra=extra or None)
             if meta:
                 row["meta"] = meta
+            if swaps:
+                row["swapWord"] = dict(swaps)
             rows.append(row)
         except Exception as e:
             print(f"    FAILED: {str(e)[:220]}", flush=True)
