@@ -34,6 +34,40 @@ permissions:
   contents: read
 
 jobs:
+  # ── Classifier: decides whether the expensive macOS native lane is needed. ──
+  # Reuses scripts/auto-loop/classify.sh — the SAME classifier the local gate and
+  # the auto-loop use — so CI's skip decision can never drift from local truth.
+  # Runs on ubuntu (1× billing) to gate a macos-14 job (10× billing): a docs- or
+  # UI-only PR skips ~12 min of macOS build, the single largest line on the bill.
+  #
+  # FAIL-CLOSED: native-gate's `if` runs the native lane unless this job
+  # SUCCEEDED *and* said "cheap". A crash, a timeout, or an unparseable result
+  # all fall through to running the full gate.
+  classify:
+    name: classify change (cheap vs native)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      class: ${{ steps.c.outputs.class }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: c
+        name: Classify the diff
+        run: |
+          set -o pipefail
+          base_ref="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags origin "$base_ref:refs/remotes/origin/$base_ref" || true
+          out="$(./scripts/auto-loop/classify.sh "origin/$base_ref" "$PWD")"
+          echo "$out"
+          cls="$(printf '%s' "$out" | jq -r '.class // "native"')"
+          # Anything that is not exactly "cheap" means run the native lane.
+          [ "$cls" = "cheap" ] || cls=native
+          echo "class=$cls" >> "$GITHUB_OUTPUT"
+          echo "### Change class: \`$cls\`" >> "$GITHUB_STEP_SUMMARY"
+
   # ── Cheap lane: no native build. The required check. ────────────────────────
   cheap-gate:
     name: cheap gate (typecheck · vitest · e2e · py)
@@ -101,6 +135,17 @@ jobs:
   # ── Native lane: full compiled gate. Heavy — promote to required once green. ─
   native-gate:
     name: native gate (build · Catch2 · selftest ×3 · verify.py · conformance)
+    needs: classify
+    # Skip ONLY when the classifier positively succeeded and said "cheap" on a PR.
+    # Every push to main still runs the full lane unconditionally: a cheap-class PR
+    # gets no native coverage of its own, so main's post-merge run is that change's
+    # only native validation — and with `strict: false` on branch protection it is
+    # also the only place a bad PR *combination* is ever compiled.
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' ||
+       needs.classify.result != 'success' ||
+       needs.classify.outputs.class != 'cheap')
     runs-on: macos-14
     timeout-minutes: 120
     steps:

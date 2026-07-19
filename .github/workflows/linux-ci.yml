@@ -11,7 +11,12 @@ name: linux-ci
 
 on:
   push:
-    branches: [main, "claude/**"]
+    # main only. A `claude/**` branch with an open PR was matching BOTH this and the
+    # pull_request trigger below on the same commit, and their concurrency groups
+    # differ (refs/heads/... vs refs/pull/N/merge) so neither cancelled the other —
+    # every push ran linux-x64 twice. PR branches are covered by pull_request; this
+    # trigger now exists for post-merge main validation only.
+    branches: [main]
     paths:
       - "CMakeLists.txt"
       - "CMakePresets.json"
