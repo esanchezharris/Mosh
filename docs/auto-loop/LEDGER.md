@@ -174,3 +174,34 @@ generator (`scripts/auto-loop/merge-one.sh`) did not itself produce. Full descri
 - **Base:** origin/main @ 5f428d1a0 → squash-merged as abf5e1495
 - **Review:** APPROVE (polish-loop adversarial review)
 - **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+
+### 2026-07-18 — Full-repo audit pass (manual, not the loop)  [AUD-001..AUD-016 seeded]
+
+Not a loop run: a requested full-repo audit, 10 parallel dimension auditors plus
+independent verification of the highest-stakes claims. Findings that were confirmed
+against code, CI logs or crash dumps are seeded as `AUD-*` rows in `backlog.jsonl`.
+
+**Landed in the same pass** (PR #442):
+- `main` had **no required status check** (`required_status_checks` → HTTP 404) despite
+  `ci.yml:9` always naming the cheap gate as the intended one. That is why 40+
+  consecutive red commits landed. Now required; `#403` (red) correctly reports `BLOCKED`.
+- `merge-one.sh` no longer uses `--admin` — with `enforce_admins:true` it cannot bypass a
+  required check, so every loop merge would have started failing. It now waits for the
+  cheap gate and merges normally (fail-closed on failure/timeout/absent).
+- `MOSH_SELFTEST_BASELINE` armed at **1656** (the hermetic CI count — a dev Mac reports
+  ~1681 and pasting that number would red every run). The floor was implemented in
+  `gate.sh` but never set anywhere, so a silent drop in check count was green.
+- `docs/FEATURE_AUDIT.md` regenerated: **150/152, 0 gaps** vs the committed 134/152 with
+  17 gaps. Every Export gap it listed had already shipped. A `daw_scoreboard_current`
+  gate step now fails if the committed scoreboard drifts from the run.
+- `CLAUDE.md` split 112 KB → 23 KB; 41 dated notes moved verbatim to `docs/worklog/`.
+
+**Left open, deliberately:** `AUD-001`, the intermittent `--selftest` SIGSEGV that reds
+main. It reproduces in CI (2 of 3 runs) but **not locally** — Debug+ASan is clean 3/3
+serial and 5-way concurrent, and the Jul-16 Release binary is clean 6/6, which brackets
+the regression to after 2026-07-16. No fix was written, because no root cause was
+established. `macos-arm64-asan` / `-tsan` presets were added so the next attempt starts
+with a tool rather than a guess.
+
+**Not in scope, owner-gated:** `#403`/`#404`/`#405` are the First-Stranger critical path
+(owner tasks O1/O4), not a backlog of loose ends.

@@ -64,6 +64,35 @@ option(MOSH_BUILD_PLUGIN_FIXTURES "Build deterministic in-repo VST3 fixtures for
 # (needs libjack-dev); it is additive — the ALSA path is unchanged when this is OFF.
 option(MOSH_ENABLE_JACK "Also enable the JACK audio backend on Linux (needs libjack-dev)" OFF)
 
+# ── Sanitizers (diagnostic builds only) ──────────────────────────────────────────
+# MOSH_SANITIZE = address | thread | undefined | "" (default, OFF).
+#
+# Why this exists: `--selftest` intermittently SIGSEGVs (rc=139) with the faulting
+# frame in juce::ThreadPool::runNextJob and a PAC-garbage pointer — the signature of
+# a freed ThreadPoolJob. That is a use-after-free / data race, and the ONLY cheap way
+# to name the object and both stacks is a sanitizer build. Before this, the repo had
+# no sanitizer path at all (MOSH_RT_GUARD is a Debug-only alloc tripwire on the audio
+# thread, a different tool for a different job).
+#
+# NOT wired into any preset that ships or gates: this is opt-in, it changes codegen
+# and is far too slow for the merge gate. Use it to diagnose, then pin the fix with a
+# normal test.
+#
+# address+undefined compose; thread must be built alone (ASan and TSan are mutually
+# exclusive in clang).
+set(MOSH_SANITIZE "" CACHE STRING "Sanitizer for diagnostic builds: address|thread|undefined (empty = off)")
+if(MOSH_SANITIZE)
+  if(MSVC)
+    message(FATAL_ERROR "MOSH_SANITIZE is clang/gcc-only; not supported under MSVC")
+  endif()
+  set(_mosh_san_flags -fsanitize=${MOSH_SANITIZE} -fno-omit-frame-pointer -g)
+  # Keep symbol names readable in the report and stop the optimiser folding the
+  # frames we need to read.
+  add_compile_options(${_mosh_san_flags} -fno-optimize-sibling-calls)
+  add_link_options(${_mosh_san_flags})
+  message(STATUS "Mosh: SANITIZER BUILD (-fsanitize=${MOSH_SANITIZE}) — diagnostic only, never a gate build")
+endif()
+
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
