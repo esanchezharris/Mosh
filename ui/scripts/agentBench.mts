@@ -41,6 +41,7 @@ import { scoreTask, type TaskScore } from "../src/bench/goalChecks";
 import { validateCommand } from "../src/agent/commands";
 import { screenDestructive, DESTRUCTIVE_BLOCK_REASON, type AgentCommandCall } from "../src/agent/destructiveScreen";
 import { makeSingleShotRunner } from "../src/bench/singleShotRunner";
+import { makeLoopRunner } from "../src/bench/loopRunner";
 import type { AgentEnv, AgentRunner, StepCommandResult } from "../src/agent/loopSeam";
 import type { Snapshot } from "../src/types";
 
@@ -167,8 +168,7 @@ function makeRunner(usage: BrainUsage): AgentRunner {
   };
   if (RUNNER === "single") return makeSingleShotRunner({ chat });
   if (RUNNER === "single-repair") return makeSingleShotRunner({ chat, repair: true });
-  if (RUNNER === "loop")
-    throw new Error("--runner loop lands with the Phase-B agentic loop (it will export an AgentRunner through src/agent/loopSeam.ts)");
+  if (RUNNER === "loop") return makeLoopRunner({ chat });
   throw new Error(`unknown --runner ${RUNNER}`);
 }
 

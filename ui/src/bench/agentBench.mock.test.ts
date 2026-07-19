@@ -12,6 +12,7 @@ import { __resetMockForTests } from "../bridge.mock";
 import { AGENT_TASKS, taskById } from "./agentTasks";
 import { scoreTask, grade } from "./goalChecks";
 import { makeSingleShotRunner, type ChatMessage } from "./singleShotRunner";
+import { makeLoopRunner } from "./loopRunner";
 import { makeMockEnv, runMockSetup } from "./mockEnv";
 import { AGENT_COMMAND_MAP } from "../agent/commands";
 
@@ -254,5 +255,58 @@ describe("goal predicates against real mock state", () => {
     ]);
     expect(grade({ kind: "netTrackLevelDelta", track: "808", dir: "down", minDb: 6 }, before, after, []).pass).toBe(true);
     expect(grade({ kind: "netTrackLevelDelta", track: "808", dir: "down", minDb: 20 }, before, after, []).pass).toBe(false);
+  });
+});
+
+describe("loop runner on the mock env — the Phase-B integration", () => {
+  beforeEach(() => __resetMockForTests());
+
+  it("mix-vocal-space: plan → observe the new bus → route + tuck, scored success", async () => {
+    // The task single-shot models kept guessing at: the bus NUMBER only exists
+    // after create_bus runs — the loop reads it from the observed session.
+    const { task, env, before } = await freshEnvFor("mix-vocal-space");
+    const snap0 = await env.getSnapshot();
+    const vocal = snap0.tracks.find((t) => t.name === "Vocal")!.id;
+    const drums = snap0.tracks.find((t) => t.name === "Drums")!.id;
+
+    // Reply 2 is computed FROM the observed session block — the scripted brain
+    // reads the bus number the loop showed it, exactly what a real model does
+    // (and what single-shot structurally cannot: the number exists only after
+    // create_bus runs — both substrates allocate from 0, so a "bus 1" guess
+    // fails; the observation is the only honest source).
+    const seen: ChatMessage[][] = [];
+    const chat = async (messages: ChatMessage[]) => {
+      seen.push(messages);
+      if (seen.length === 1)
+        return { content: JSON.stringify({
+          intent: "ACK_WORKING", say: "making room", status: "continue",
+          plan: [
+            { goal: "create the reverb return", commands: [{ command: "create_bus", args: { name: "Reverb" } }] },
+            { goal: "send the vocal into it and tuck the drums" },
+          ],
+        }), ms: 1 };
+      const observedBus = messages[0]!.content.match(/buses: (\d+) "Reverb"/)?.[1];
+      expect(observedBus, "the rich session block must carry the new bus").toBeDefined();
+      return { content: JSON.stringify({
+        intent: "ACK_GOT_IT", status: "done",
+        commands: [
+          { command: "add_send", args: { trackId: vocal, bus: Number(observedBus), db: -10 } },
+          { command: "set_track_volume", args: { trackId: drums, db: -2 } },
+        ],
+      }), ms: 1 };
+    };
+
+    const run = await makeLoopRunner({ chat })(task, env, { maxSteps: 8 });
+    expect(run.transcript.every((s) => s.results.every((r) => r.ok))).toBe(true);
+    expect(run.stepCount).toBe(2);
+    expect(seen).toHaveLength(2);
+    // the second call's SYSTEM prompt carried the observed bus (0-allocated
+    // on both substrates) — the rich block IS the observation
+    expect(seen[1]![0]!.content).toContain('buses: 0 "Reverb"');
+
+    const score = scoreTask(task, before, run);
+    expect(score.checks.filter((c) => !c.pass).map((c) => c.note)).toEqual([]);
+    expect(score.success).toBe(true);
+    expect(score.stepEff).toBe(1); // par 2, steps 2
   });
 });
