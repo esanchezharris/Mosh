@@ -8,7 +8,8 @@
 #                                 gate passed (and a human/agent review still required).
 #   finalize <slug> <pr> <base_sha> [review_note]
 #                                 re-check kill-switch + origin/main UNMOVED since
-#                                 base_sha → gh pr merge --squash --admin → ledger →
+#                                 base_sha → wait for the required "cheap gate" check →
+#                                 gh pr merge --squash (NO --admin) → ledger →
 #                                 remove worktree. Holds an flock so two finalizes can
 #                                 never overlap.
 #   reject   <slug> <pr> <sublabel> <reason>
@@ -28,6 +29,58 @@ slug_wt() { printf '%s/.claude/worktrees/auto-%s\n' "$MAIN" "$1"; }
 branch_of() { printf 'claude/auto-%s\n' "$1"; }
 
 ensure_label() { gh label create "$1" --color "${2:-EDEDED}" --force >/dev/null 2>&1 || true; }
+
+# ── required-check wait ──────────────────────────────────────────────────────────
+# main requires the "cheap gate" status check, and branch protection has
+# enforce_admins:true — so `gh pr merge --admin` CANNOT bypass it and would just
+# fail. We therefore wait for the check to go green and then merge normally.
+#
+# This is strictly stronger than the old --admin merge: a loop merge is now gated
+# by the same check a human merge is. The local gate.sh run in `prepare` stays as
+# the primary proof; this is the remote confirmation of it.
+#
+# Fail-closed: any outcome that is not an observed green (failure, timeout, gh
+# error, check never appearing) returns non-zero and finalize refuses to merge.
+# Matching is on the "cheap gate" PREFIX — the full context string carries U+00B7
+# separators ("cheap gate (typecheck · vitest · e2e · py)") that are fragile to
+# quote through shell/jq.
+AL_REQUIRED_CHECK_PREFIX="${AL_REQUIRED_CHECK_PREFIX:-cheap gate}"
+AL_CHECK_TIMEOUT_S="${AL_CHECK_TIMEOUT_S:-1800}"   # 25-30 min; the lane runs ~4-10 min
+AL_CHECK_POLL_S="${AL_CHECK_POLL_S:-20}"
+
+# Echoes a one-word state for the required check: SUCCESS | FAILURE | PENDING | ABSENT
+required_check_state() {
+  local pr="$1" out
+  out="$(gh pr checks "$pr" --json name,state 2>/dev/null)" || { printf 'ABSENT\n'; return; }
+  printf '%s\n' "$out" | jq -r --arg p "$AL_REQUIRED_CHECK_PREFIX" '
+    [ .[] | select(.name | startswith($p)) ] as $m
+    | if   ($m | length) == 0                              then "ABSENT"
+      elif ($m | map(select(.state == "FAILURE"
+                         or .state == "ERROR"
+                         or .state == "CANCELLED"
+                         or .state == "TIMED_OUT"))
+                | length) > 0                              then "FAILURE"
+      elif ($m | map(select(.state != "SUCCESS"))
+                | length) > 0                              then "PENDING"
+      else "SUCCESS" end' 2>/dev/null || printf 'ABSENT\n'
+}
+
+# 0 = observed green. non-zero = do not merge. Reason on stdout.
+wait_for_required_check() {
+  local pr="$1" waited=0 st
+  while [ "$waited" -lt "$AL_CHECK_TIMEOUT_S" ]; do
+    st="$(required_check_state "$pr")"
+    case "$st" in
+      SUCCESS) return 0 ;;
+      FAILURE) printf 'required check "%s*" failed on PR #%s\n' "$AL_REQUIRED_CHECK_PREFIX" "$pr"; return 1 ;;
+      *)       sleep "$AL_CHECK_POLL_S"; waited=$(( waited + AL_CHECK_POLL_S )) ;;
+    esac
+  done
+  # ABSENT for the whole window is fail-closed too: we never merge on "no signal".
+  printf 'timed out after %ss waiting for required check "%s*" on PR #%s (last state: %s)\n' \
+    "$AL_CHECK_TIMEOUT_S" "$AL_REQUIRED_CHECK_PREFIX" "$pr" "${st:-unknown}"
+  return 1
+}
 
 # ── prepare ──────────────────────────────────────────────────────────────────────
 cmd_prepare() {
@@ -114,10 +167,19 @@ cmd_finalize() {
 
   local mlog; mlog="$(mktemp)"
   gh pr ready "$pr" >/dev/null 2>&1 || true   # a draft PR can't be merged
+
+  # main REQUIRES the cheap gate and enforces protection on admins, so --admin is
+  # not an escape hatch any more — wait for the real signal, fail-closed.
+  local wlog; wlog="$(wait_for_required_check "$pr")"
+  if [ $? -ne 0 ]; then
+    jq -nc --arg r "$wlog" '{merged:false,phase:"finalize",reason:$r}'
+    rm -f "$mlog"; return
+  fi
+
   # NOT --delete-branch: the branch is checked out in a worktree, so gh's delete step
   # returns non-zero even though the MERGE succeeded (a false failure). We delete it
   # ourselves after removing the worktree, below.
-  gh pr merge "$pr" --squash --admin >"$mlog" 2>&1
+  gh pr merge "$pr" --squash >"$mlog" 2>&1
   local mrc=$?
   if [ "$mrc" -ne 0 ]; then
     jq -nc --arg log "$(LC_ALL=C tr -cd '[:print:] ' <"$mlog")" '{merged:false,phase:"finalize",reason:"gh pr merge failed",log:$log}'

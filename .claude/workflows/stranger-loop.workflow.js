@@ -153,7 +153,9 @@ Return JSON ONLY: {verdict:"APPROVE"|"REJECT", blockers:<int>, reasons:[...]}. "
 
 const finalizePrompt = (it, prep) => `${RUN} ${ROOT}/merge-one.sh finalize ${slugOf(it.id)} ${it.prNumber} ${prep.baseSha} "APPROVE (adversarial self-review)"
 Run EXACTLY that command. It re-checks the STOP switch + that origin/main has not advanced since ${prep.baseSha},
-then squash-merges (--admin --delete-branch), appends the program ledger, removes the worktree.
+then waits for main's required "cheap gate" status check and squash-merges (NO --admin — it cannot
+bypass a required check while enforce_admins is on), appends the program ledger, removes the worktree.
+A red or absent check is fail-closed: finalize refuses to merge.
 Return its JSON verbatim: {merged, mergeSha, reason}.`
 
 // SAFE ⇔ auto-mergeable: cheap class AND not exclusion-list AND the item is not owner-taste-gated.

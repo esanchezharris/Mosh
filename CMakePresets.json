@@ -95,6 +95,36 @@
         "MOSH_BUILD_UI": "ON",
         "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
       }
+    },
+    {
+      "name": "macos-arm64-asan",
+      "displayName": "macOS arm64 Debug + AddressSanitizer (diagnostic only)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-macos-arm64-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "OFF",
+        "MOSH_SANITIZE": "address"
+      }
+    },
+    {
+      "name": "macos-arm64-tsan",
+      "displayName": "macOS arm64 Debug + ThreadSanitizer (diagnostic only)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-macos-arm64-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "OFF",
+        "MOSH_SANITIZE": "thread"
+      }
     }
   ],
   "buildPresets": [
@@ -247,6 +277,20 @@
       "targets": [
         "Mosh",
         "MoshStageUI"
+      ]
+    },
+    {
+      "name": "macos-arm64-asan-app",
+      "configurePreset": "macos-arm64-asan",
+      "targets": [
+        "Mosh"
+      ]
+    },
+    {
+      "name": "macos-arm64-tsan-app",
+      "configurePreset": "macos-arm64-tsan",
+      "targets": [
+        "Mosh"
       ]
     }
   ]

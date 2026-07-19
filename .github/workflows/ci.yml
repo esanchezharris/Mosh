@@ -218,6 +218,23 @@ jobs:
       - name: Run native gate
         env:
           MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
+          # Anti-vacuity RATCHET. gate.sh only reds on "the 3 runs disagree" and
+          # "a check failed" — so a change that silently stops RUNNING a whole
+          # selftest section is green, because all 3 runs agree on the new, lower
+          # number. This floor is the guard that catches that; without it the
+          # check at gate.sh's baseline block is dead code ("baseline":"unset").
+          #
+          # It is a ratchet: RAISING it is a normal commit. LOWERING it requires a
+          # stated reason in the PR body — a drop is either a deleted section
+          # (justify it) or the #424 `return 0; // SABOTAGE` class (fix it).
+          #
+          # 1656 is THIS LANE's number, not the Mac's. Counts are gate-dependent:
+          # a dev Mac with SA3/RAVE/whisper weights installed reports ~1681, while
+          # CI runs the hermetic default (MOSH_ENABLE_SA3=0 / _TRANSFORM=0 etc.)
+          # and reports 1656 — verified deterministic across runs 29643334376,
+          # 29642707322, 29667786187, 29666934939. Do NOT paste a local count in
+          # here: a 1681 floor reds every CI run.
+          MOSH_SELFTEST_BASELINE: 1656
         run: |
           set -o pipefail
           # Leave CPM_SOURCE_CACHE / FETCHCONTENT_BASE_DIR at the CMakeLists defaults
