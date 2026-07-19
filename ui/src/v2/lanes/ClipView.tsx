@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
+import { useSettings } from "../../settings/store";
 import { useShell } from "../shellState";
 import { beatSeconds } from "../../time";
 import { meterOf } from "../timeline/geom";
@@ -27,6 +28,13 @@ import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
 import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/Arrange";
 import type { Clip, Snapshot } from "../../types";
 import { AI_SETUP_HINT, transcriptionMenuEnabled } from "../../capabilities";
+// AGT-MEM (M4, item 3) — "Save pattern to memory": reads the clip's own notes into
+// pattern-string shape, builds a DrumPatternCard, and writes it as an explicit global
+// memory item (the confirm toast is the SAME M3 v2-memory-toast surface the "remember"
+// fastPath already uses, with the same true-Undo-via-delete affordance).
+import { drumPatternFromNotes } from "../../ui/drumPatternUtil";
+import { buildDrumPatternCard } from "../../agent/memory/patternCards";
+import { saveDrumPatternCard } from "../../agent/memory/savePatternCard";
 
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
 const TABLE = () => getGestureTable("mosh"); // v2 = single Mosh interaction model
@@ -147,6 +155,15 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview);
       return;
     }
+    // A non-left button's release (right-click → context menu, middle-click) must NOT
+    // feed the double-click-to-open detector below — onDown already ignores it
+    // (`e.button !== 0` bails before engaging a drag), so drag.current is null here
+    // exactly like a genuine left click's pointerup, and without this guard a
+    // right-click's own release masqueraded as a normal click for double-click timing
+    // purposes: right-click (sets lastUp) then the context menu's OWN click handler
+    // reaching back here on close could pair up within doubleClickMs and pop the piano
+    // roll open as a surprising side effect of opening the context menu.
+    if (e.button !== 0) return;
     // pure click → manual double-click detection (feel.doubleClickMs) → open editor
     const now = performance.now();
     if (isDoubleClick(lastUp.current, now, liveFeel().doubleClickMs)) {
@@ -195,13 +212,21 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />
       <div className="v2-trim r" style={{ width: edgeGrab }} />
-      {menu && <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} onClose={() => setMenu(null)}
+          drumClip={drumClip} beatsPerBar={meterOf(snapshot).num} />
+      )}
     </div>
   );
 }
 
-function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: number; time: number; onClose: () => void }) {
+function ClipMenu({ clip, x, y, time, onClose, drumClip, beatsPerBar }: {
+  clip: Clip; x: number; y: number; time: number; onClose: () => void;
+  drumClip: boolean; beatsPerBar: number;
+}) {
   const exec = useStore((s) => s.exec);
+  const setMemoryToast = useStore((s) => s.setMemoryToast);
+  const memoryOn = useSettings((s) => s.get("agentMemory") !== false);
   // Guest degradation: these three actions all ultimately need Basic Pitch (transcribe)
   // to detect notes — on a Mac without the per-feature venvs they used to fail
   // cryptically. Stay VISIBLE (progressive disclosure — discoverable, not hidden) but
@@ -221,10 +246,21 @@ function ClipMenu({ clip, x, y, time, onClose }: { clip: Clip; x: number; y: num
     return () => { window.clearTimeout(t); window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
   const run = (fn: () => void) => { fn(); onClose(); };
+  const savePattern = async () => {
+    const parsed = drumPatternFromNotes(clip.notes ?? [], beatsPerBar, 16);
+    const card = buildDrumPatternCard(parsed, clip.name || "Drum pattern");
+    const res = await saveDrumPatternCard(exec, card);
+    if (res.ok) setMemoryToast({ text: `pattern "${card.name}"`, scope: "global", kind: "drum_pattern", ts: res.ts });
+  };
   return createPortal(
     <div className="v2-clipmenu" role="menu" data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
       <button role="menuitem" onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>Split here</button>
       <button role="menuitem" onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+      {drumClip && memoryOn && (
+        <button role="menuitem" data-testid="clip-save-pattern" onClick={() => run(() => void savePattern())}>
+          Save pattern to memory
+        </button>
+      )}
       {clip.type === "wave" && (
         <button role="menuitem" disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>

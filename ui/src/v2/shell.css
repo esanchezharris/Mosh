@@ -339,6 +339,19 @@
   right: 0;
   left: auto;
 }
+/* AGT-MEM (M3) discovery — `.v2-menu-tools .btn` above (a plain descendant selector,
+   meant only to size the 5 tool-TRIGGER buttons in the grid) also matches every button
+   INSIDE an opened popover's content, since .pop is itself a descendant of .pop-wrap,
+   which is a descendant of .v2-menu-tools. Forced every popover button (Refresh, Clear,
+   Copy path, per-item Forget, …) to width:100%/height:38px of its flex row, collapsing
+   any adjacent flex-1 text to 0 width — invisible content, not a color bug. Pre-existing
+   (reproduces on the unmodified CommandLogTool's Refresh button too), surfaced by the
+   memory panel's denser button-next-to-text rows. Scoped reset, more specific than the
+   rule above by one compound selector so it wins regardless of source order. */
+.v2-menu-tools .pop .btn {
+  width: auto;
+  height: auto;
+}
 .v2-menu {
   position: static;
   min-width: 0;
@@ -1384,3 +1397,48 @@
 .v2-skel-grid { display: inline-flex; gap: 3px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .v2-skel-pip { color: var(--v2-accent); font-size: 9px; line-height: 1; }
 .v2-skel-count { font-variant-numeric: tabular-nums; color: var(--v2-dim); font-size: 11px; white-space: nowrap; }
+
+/* ── agent drawer (Phase B4) — docks above the composer; progressive disclosure ──
+   Token-routed colors only, so the cream/[data-theme] override pair styles both
+   themes (the flat-black-overlay lesson: never hardcode a panel color). */
+.v2-composer-stack { justify-self: center; width: min(860px, 100%); display: flex; flex-direction: column; gap: 8px; }
+.v2-composer-stack .v2-composer { justify-self: auto; width: 100%; }
+.v2-agent-drawer {
+  border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
+  background: var(--v2-surface); box-shadow: var(--v2-glow);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  animation: v2AgentDrawerIn 160ms ease-out;
+}
+@keyframes v2AgentDrawerIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.v2-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v2-agent-head-title { font-size: 12px; font-weight: 600; color: var(--v2-text); }
+.v2-agent-drawer.live .v2-agent-head-title { color: var(--v2-accent); }
+.v2-agent-head-actions { display: flex; gap: 6px; }
+.v2-agent-btn {
+  font-size: 11px; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--v2-surface-sunken); color: var(--v2-text); border: 1px solid var(--v2-line);
+}
+.v2-agent-btn:hover { border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+.v2-agent-btn.stop { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-agent-turn-ask { font-size: 11px; color: var(--v2-text-dim, var(--v2-text)); opacity: 0.75; }
+.v2-agent-plan { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; color: var(--v2-text); opacity: 0.85; }
+.v2-agent-plan-step.done { opacity: 0.45; text-decoration: line-through; }
+.v2-agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-agent-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text);
+}
+.v2-agent-chip .v2-agent-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-agent-chip.ok .v2-agent-chip-state { color: var(--v2-accent); }
+.v2-agent-chip.error { border-color: color-mix(in srgb, #d33 55%, var(--v2-line)); }
+.v2-agent-chip.error .v2-agent-chip-state { color: #d33; }
+.v2-agent-spin {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  border: 1.5px solid var(--v2-line); border-top-color: var(--v2-accent);
+  animation: v2AgentSpin 700ms linear infinite;
+}
+@keyframes v2AgentSpin { to { transform: rotate(360deg); } }
+.v2-agent-say { font-size: 12px; color: var(--v2-text); font-style: italic; }
+.v2-composer-face-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
+.v2-composer-face-btn:hover { outline: 2px solid var(--v2-accent-soft); }

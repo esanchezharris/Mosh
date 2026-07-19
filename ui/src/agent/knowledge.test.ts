@@ -446,3 +446,82 @@ describe("AG-KB-AUTO: parameter automation + clip-ops (set_track_automation_mode
     }
   });
 });
+
+describe("AG-KB-R3 expanded categories (master bus / clip loop / ripple / delete range / tempo map / warp follow / sections / export tail)", () => {
+  // Round 3 rides the Phase-A catalog closure: cards for the recently shipped
+  // master-bus chain, clip loop region, ripple ops, tempo map, warp detect and
+  // export tail/range — plus a correction to the warp-drag-to-stretch card, whose
+  // "set_clip_warp is UI-only" claim the closure made false. Same pin-the-
+  // retrieval pattern as rounds 1-2.
+  const top = (q: string) => retrieveCards(q)[0]?.id;
+
+  it("master: compressor on the master bus -> master chain basics", () => {
+    expect(top("put a gentle compressor on the master bus to glue the whole mix")).toBe("master-chain-basics");
+  });
+
+  it("master: limiter before or after the eq -> chain order", () => {
+    expect(top("should the limiter go before or after the eq on the master chain")).toBe(
+      "master-chain-order-limiter-last",
+    );
+  });
+
+  it("master: hear the mix dry -> master param + bypass A/B", () => {
+    expect(top("bypass the master effects to compare against the dry mix")).toBe("master-param-bypass-ab");
+  });
+
+  it("clip loop: repeat a region of the source inside the clip -> set_clip_loop", () => {
+    expect(top("loop just the first bit of this sample inside the clip")).toBe("clip-loop-region");
+  });
+
+  it("clip loop: loop vs duplicate -> tiling one object vs independent copies", () => {
+    expect(top("should I loop this clip or just duplicate it a few times on the timeline")).toBe(
+      "clip-loop-vs-duplicate",
+    );
+  });
+
+  it("ripple: trim and let the later clips follow -> trim_clip ripple", () => {
+    expect(top("when I trim this clip shorter can the later clips slide over to close the gap")).toBe(
+      "ripple-trim-neighbors",
+    );
+  });
+
+  it("delete range: clear a span across every track -> delete_time_range", () => {
+    expect(top("clear out that whole section across every track and close the gap")).toBe(
+      "delete-range-scope-and-ripple",
+    );
+  });
+
+  it("tempo map: speed up partway through -> insert_tempo_change", () => {
+    expect(top("can the beat speed up partway through, like a faster back half")).toBe("tempo-map-points");
+  });
+
+  it("tempo map: glide vs jump between tempos -> curve span semantics", () => {
+    expect(top("can the tempo ramp gradually instead of a hard jump")).toBe("tempo-curve-span-semantics");
+  });
+
+  it("warp: keep following the tempo map -> set_clip_warp vs stretch_clip", () => {
+    expect(top("make this loop keep following the tempo map automatically when the tempo changes")).toBe(
+      "warp-auto-tempo-vs-stretch",
+    );
+  });
+
+  it("warp: detect the loop's own bpm and lock the grid -> set_clip_warp detect", () => {
+    expect(top("detect this loop's own bpm and lock it to the grid")).toBe("warp-detect-grid-lock");
+  });
+
+  it("sections: mark the hook to rework it -> sections as scope handles", () => {
+    expect(top("mark out the hook so we can rework just that part of the arrangement")).toBe(
+      "sections-as-scope-handles",
+    );
+  });
+
+  it("export: keep the reverb tail ringing -> export_audio tail/range", () => {
+    expect(top("export the mix but don't cut off the reverb tail at the end")).toBe("export-tail-and-range");
+  });
+
+  it("the warp-drag-to-stretch card no longer claims set_clip_warp is UI-only", () => {
+    const card = PRODUCER_KNOWLEDGE.find((c) => c.id === "warp-drag-to-stretch");
+    expect(card).toBeDefined();
+    expect(card!.plain).not.toMatch(/UI-only|not agent-callable/);
+  });
+});

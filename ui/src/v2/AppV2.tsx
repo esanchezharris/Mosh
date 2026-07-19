@@ -20,6 +20,7 @@ import { MissingMediaBanner } from "../ui/MissingMediaBanner";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
 import { ChangeToast } from "./ChangeToast";
+import { MemoryToast } from "./MemoryToast";
 import "./shell.css";
 
 export function AppV2() {
@@ -77,6 +78,7 @@ export function AppV2() {
       <AutomationPanel />
       <DrumWindow />
       <ChangeToast />
+      <MemoryToast />
     </div>
   );
 }

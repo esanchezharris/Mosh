@@ -166,6 +166,38 @@ describe("agent destructive-command scope limit (safety)", () => {
     expect(isDestructiveCommand("keep_take")).toBe(true);
   });
 
+  it("delete_time_range consumes the FULL destructive budget — one per batch, alone", () => {
+    // A single delete_time_range wipes a span across ALL tracks, so it is weighted
+    // at the whole budget: one alone is fine, two (or one + any other destructive
+    // call) blocks every destructive call in the batch.
+    const one = screenDestructive([{ command: "delete_time_range", args: { start: 0, end: 8 } }]);
+    expect(one.blocked).toHaveLength(0);
+    expect(one.allowed).toHaveLength(1);
+
+    const withRemove = screenDestructive([
+      { command: "delete_time_range", args: { start: 0, end: 8 } },
+      { command: "remove_clip", args: { clipId: "c1" } },
+    ]);
+    expect(withRemove.blocked).toHaveLength(2);
+    expect(withRemove.allowed).toHaveLength(0);
+
+    const two = screenDestructive([
+      { command: "delete_time_range", args: { start: 0, end: 8 } },
+      { command: "delete_time_range", args: { start: 8, end: 16 } },
+    ]);
+    expect(two.blocked).toHaveLength(2);
+  });
+
+  it("delete_time_range + constructive calls: only the range delete is budget-weighted, constructive still runs", () => {
+    const { allowed, blocked } = screenDestructive([
+      { command: "create_track", args: {} },
+      { command: "delete_time_range", args: { start: 0, end: 8 } },
+      { command: "remove_clip", args: { clipId: "c1" } },
+    ]);
+    expect(blocked.map((c) => c.command).sort()).toEqual(["delete_time_range", "remove_clip"]);
+    expect(allowed).toEqual([{ command: "create_track", args: {} }]);
+  });
+
   it("runAgentBatch: an over-limit MIXED-type destructive batch (remove_clip + keep_take) is fully blocked with the reason surfaced on every entry, while constructive commands still run and really mutate the session", async () => {
     // Real setup track, mutated only by the batch under test (proves execution, not just entry.ok).
     const setup = await useStore.getState().exec("create_track", { name: "Keep Me" });

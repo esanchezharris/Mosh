@@ -816,9 +816,17 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-wrap { position: relative; }
 .pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; width: 250px;
-  background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 10px;
+  background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 10px;
   padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 8px;
 }
+/* AGT-MEM (M3) discovery, fixed here as the shared root cause: without an explicit
+   `color`, any unstyled-color descendant (e.g. .pop-head, .cmdlog-name) inherited the
+   AMBIENT v2 text color instead — fine inside the v2 topbar's own dark chrome, but when
+   the SAME Pop is embedded in .v2-menu-panel's overflow menu (MemoryTool, CommandLogTool,
+   etc.) under the LIGHT theme, .pop's own --ink-raise background flips to near-white
+   while the inherited ambient color stays --v2-text (light-on-dark) — near-invisible
+   text. Declaring .pop's own color here makes it self-contained regardless of ambient
+   context, matching how it already owns its own background/border. */
 .pop-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.04em; }
 /* Guest degradation — e.g. the Type-beat Training popover's "preview" tag (fake backend,
    no GPU on this Mac). Generic so any pop-head can carry one. */
@@ -871,6 +879,23 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .cmdlog-dot { font-size: 8px; } .cmdlog-dot.ok { color: var(--lime); } .cmdlog-dot.err { color: var(--rec); }
 .cmdlog-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdlog-badge { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; }
+
+/* AGT-MEM (M3) — the memory panel (TopbarTools.tsx MemoryTool/MemoryBody). Reuses the
+   shared pop-*/cmdlog-* tokens verbatim (same "classic+v2 shared chrome" posture as
+   CommandLogBody and Meter.tsx — no v2-only tokens needed; the tokens below already
+   carry [data-theme="light"] overrides, so both themes fall out of the existing system). */
+.mem-tier { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid var(--ink-line-soft); }
+.mem-tier:first-of-type { border-top: none; padding-top: 0; }
+.mem-tier-head { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bone-dim); }
+.mem-tier-label { flex: 1 1 auto; }
+.mem-tier-count { font-family: var(--font-mono); }
+.btn.mem-clear { font-size: 9px; padding: 2px 6px; min-width: 0; }
+.mem-item-list { max-height: 130px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.mem-item-row { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 0; }
+.mem-item-text { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--bone); }
+.mem-badge { color: var(--lime); font-size: 10px; flex: 0 0 auto; }
+.mem-kind { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; flex: 0 0 auto; }
+.btn.mem-del { padding: 2px 5px; min-width: 0; flex: 0 0 auto; }
 .remote-code { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.18em; text-align: center; color: var(--lime); }
 .remote-qr { width: 160px; height: 160px; align-self: center; border-radius: 8px; image-rendering: pixelated; }
 .cb-file { flex-direction: row; align-items: center; justify-content: space-between; }

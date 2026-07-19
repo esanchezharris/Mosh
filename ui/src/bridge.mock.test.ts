@@ -32,6 +32,15 @@ const ALLOWLIST = new Set<string>([
   "paste_clip",
   // (create_group_track is dispatched by the configurable keymap's GROUP action and
   //  now has a real mock case — so it's intentionally NOT allowlisted.)
+  // AGT-MEM (M3) — a STATIC-SCAN FALSE POSITIVE, not a real drift: remember_preference
+  // is a PSEUDO-command the executor intercepts and handles BEFORE any dispatch (see
+  // agent/memory/rememberPreference.ts) — it is NEVER sent to executeCommand/the mock
+  // at runtime. The scanner's `command:\s*["']name["']` regex only matches this file
+  // because handleRememberPreference's RETURN value happens to use the same
+  // `{command, ok, error}` field shape as ChangeEntry/StepCommandResult (so the
+  // executor can push it into the same entries/results arrays as a real command) —
+  // an unrelated result-object literal, not a dispatch call.
+  "remember_preference",
 ]);
 
 function listSourceFiles(dir: string): string[] {

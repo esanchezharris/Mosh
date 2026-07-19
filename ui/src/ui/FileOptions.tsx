@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { pickFiles, pickSaveFile } from "../bridge";
+import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
@@ -37,7 +37,7 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
   const audioEnabled = s.audioEnabled ?? true;
   const recents = (s.recentProjects ?? []).slice(0, 8);
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
-    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile }, opts);
+    void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat }, opts);
 
   useEffect(() => {
     if (!open) return;

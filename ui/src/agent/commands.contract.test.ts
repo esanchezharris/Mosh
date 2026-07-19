@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { AGENT_COMMANDS, AGENT_COMMAND_MAP } from "./commands";
+import { UI_ONLY_COMMANDS } from "./commandClassification";
 import {
   SET_TRACK_LEVEL_SKILL,
   SKILL_CATALOG,
@@ -99,6 +100,64 @@ describe("agent catalog ⇄ MoshOps.cpp argument contract", () => {
         ).toBe(true);
     });
   }
+});
+
+describe("command classification guard — every native command is deliberately classified", () => {
+  // The dispatch table has 203 entries as of the Phase-A audit. A regex rot that
+  // silently shrinks the parsed table below the classification universe would make
+  // the exhaustiveness test below vacuous — pin a hard floor well above the old
+  // >50 sanity check.
+  it("the dispatch table is fully parsed (size floor)", () => {
+    expect(dispatch.size).toBeGreaterThanOrEqual(190);
+  });
+
+  it("every dispatch name is agent-callable OR allowlisted UI-only with a reason", () => {
+    const unclassified = [...dispatch.keys()].filter(
+      (name) => !AGENT_COMMAND_MAP.has(name) && !(name in UI_ONLY_COMMANDS),
+    );
+    expect(
+      unclassified,
+      `new native command(s) are unclassified: ${unclassified.join(", ")} — add each to ` +
+        `AGENT_COMMANDS (ui/src/agent/commands.ts) or UI_ONLY_COMMANDS ` +
+        `(ui/src/agent/commandClassification.ts) with a one-line reason`,
+    ).toEqual([]);
+  });
+
+  it("no command is both agent-callable and allowlisted UI-only", () => {
+    const overlap = Object.keys(UI_ONLY_COMMANDS).filter((name) => AGENT_COMMAND_MAP.has(name));
+    expect(overlap, `classified in BOTH homes: ${overlap.join(", ")}`).toEqual([]);
+  });
+
+  it("the allowlist carries no stale entries", () => {
+    const stale = Object.keys(UI_ONLY_COMMANDS).filter((name) => !dispatch.has(name));
+    expect(stale, `allowlisted but no longer in the dispatch table: ${stale.join(", ")}`).toEqual([]);
+  });
+
+  it("every exclusion carries a non-empty reason", () => {
+    for (const [name, reason] of Object.entries(UI_ONLY_COMMANDS))
+      expect(reason.trim().length, `${name} has an empty reason`).toBeGreaterThan(0);
+  });
+});
+
+describe("AGT-MEM (M3) — remember_preference stays a pseudo-command, never the real catalog", () => {
+  // MEMORY_COMMANDS (memory/rememberPreference.ts) names are intercepted by the
+  // executor BEFORE validateCommand and are deliberately NEVER added to
+  // AGENT_COMMANDS/commandCatalogPrompt() — the SFT/GEPA/bench prompt must stay
+  // byte-stable (see brainCore.ts's buildSystemPrompt contract). This is the guard:
+  // if a future change ever adds "remember_preference" (or any future memory
+  // pseudo-command) to the real catalog, this fails loudly instead of silently
+  // duplicating/contradicting the serve-time-only doc path.
+  it("MEMORY_COMMANDS ∩ AGENT_COMMANDS is empty", async () => {
+    const { MEMORY_COMMANDS } = await import("./memory/rememberPreference");
+    const overlap = [...MEMORY_COMMANDS].filter((name) => AGENT_COMMAND_MAP.has(name));
+    expect(overlap, `pseudo-command(s) leaked into the real catalog: ${overlap.join(", ")}`).toEqual([]);
+  });
+
+  it("MEMORY_COMMANDS is also not in the native dispatch table (it's a client-only interception, not a real command)", async () => {
+    const { MEMORY_COMMANDS } = await import("./memory/rememberPreference");
+    const leaked = [...MEMORY_COMMANDS].filter((name) => dispatch.has(name));
+    expect(leaked, `pseudo-command(s) leaked into MoshOps.cpp's real dispatch table: ${leaked.join(", ")}`).toEqual([]);
+  });
 });
 
 function isSlotReference(value: SkillValue): value is { slot: string } {
