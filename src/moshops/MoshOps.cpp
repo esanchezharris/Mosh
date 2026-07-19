@@ -2723,11 +2723,9 @@ juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
         return errResult (command, "insertWaveClip failed");
     }
 
-    // Tracktion queues a track/clip AsyncUpdater after a headless insert; drain
-    // it before returning so itemIDs settle (mirrors createAudioTrack).
-    if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     auto* data = new DynamicObject();
     data->setProperty ("clipId", clip->itemID.toString());
@@ -3338,11 +3336,9 @@ juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
         preceding = m;
     }
 
-    // Structural edits queue Tracktion async settling; drain headless so itemIDs
-    // and parent links are stable before the snapshot (mirrors createAudioTrack).
-    if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     auto* data = new DynamicObject();
     data->setProperty ("groupId", folder->itemID.toString());
@@ -3950,9 +3946,9 @@ juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
     }
     edit.deleteTrack (folder);
 
-    if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     auto* data = new DynamicObject();
     data->setProperty ("hoisted", children.size());
@@ -4958,11 +4954,8 @@ juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
                 }
             }
 
-            // Drain the queued ValueTree/AsyncUpdater settle so the new clip's
-            // start/end are committed before we read them in the next pass.
-            if (structurallyChanged && ! eng.hasAudio())
-                if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-                    mm->runDispatchLoopUntil (1);
+            // Deliberately NO message-loop pump: splitClip's position writes are
+            // synchronous ValueTree ops, visible immediately (AUD-001; patches/0005).
         }
 
         // Phase 2 — every clip now begins/ends on the range bounds. Remove the
@@ -4996,12 +4989,9 @@ juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
                 structurallyChanged = true;
     }
 
-    // After structural edits Tracktion queues an AsyncUpdater for track/clip
-    // settling; drain it here (mirrors createAudioTrack) so itemIDs/positions
-    // are stable before the snapshot is read.
-    if (structurallyChanged && ! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     auto* data = new DynamicObject();
     data->setProperty ("removed", removed);
@@ -5088,11 +5078,9 @@ juce::var MoshOps::cmdPasteClip (const juce::var& args)
     if (pasted == nullptr) return errResult ("paste_clip", "could not paste this clip type");
     pasted->setMuted ((bool) clipVar.getProperty ("mute", false));
 
-    // Tracktion queues a track/clip AsyncUpdater after a headless insert; drain
-    // it before returning so itemIDs settle (mirrors createAudioTrack).
-    if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     ensureTrackMeter (*track);   // METER-001 — self-healing: covers both the auto-created and the resolved-existing case
 
@@ -10754,12 +10742,9 @@ te::AudioTrack* MoshOps::createAudioTrack (const juce::String& name)
     if (name.isNotEmpty())
         track->setName (name);
 
-    // Tracktion queues a track-order AsyncUpdater after insertion. In headless
-    // command runs there is no normal GUI dispatch between commands, so drain it
-    // here before the next undo transaction is opened.
-    if (! eng.hasAudio())
-        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (1);
+    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
+    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
+    // async engine work — the AUD-001 use-after-free class (see patches/0005).
 
     return track.get();
 }
