@@ -75,11 +75,28 @@ describe("runLoopTask — M2 memory wiring", () => {
     // doc must reach the model even on a fresh install with nothing written yet —
     // see runTask.ts's memorySectionFor comment — so `memory` is now a real string
     // whenever the flag is on, never undefined just because pools are empty.
-    await runLoopTask("build me a lofi sketch", noopUi);
+    // Query deliberately avoids every M4 built-in drum-seed name/tag (boom-bap,
+    // trap, house/four-on-the-floor, lofi/swing, reggaeton/dembow, drum & bass/
+    // breakbeat) — hydrate.ts's empty-store seed fallback means "nothing ever
+    // written" no longer guarantees an empty patterns pool query-independently;
+    // this test's OWN claim is specifically about the tool-doc floor, not about
+    // pattern retrieval, so it keeps the query genuinely irrelevant to any seed.
+    await runLoopTask("rename track two to vocals", noopUi);
 
     expect(runAgentLoopSpy).toHaveBeenCalledTimes(1);
     const memory = runAgentLoopSpy.mock.calls[0]![0] as string | undefined;
     expect(memory).toContain("remember_preference");
     expect(memory).not.toContain("Memory —");
+  });
+
+  // M4 — the built-in drum-pattern seeds ARE real retrievable content once a query
+  // actually matches one, even with nothing ever explicitly written/saved.
+  it("nothing ever written, but the ask matches a built-in drum seed -> the seed surfaces in Memory —", async () => {
+    await runLoopTask("build me a lofi sketch", noopUi);
+
+    const memory = runAgentLoopSpy.mock.calls[0]![0] as string | undefined;
+    expect(memory).toContain("Memory —");
+    expect(memory).toContain("Lofi swing");
+    expect(memory).toContain("add_drum_pattern-ready");
   });
 });

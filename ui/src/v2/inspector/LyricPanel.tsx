@@ -6,11 +6,20 @@
 
 import { useEffect, useState } from "react";
 import { useStore } from "../../store";
+import { useSettings } from "../../settings/store";
 import { countSyllables, gridTarget, flowStatus, parseSeed } from "../../lyrics/flowMeter";
 import type { Track, LyricLine, LyricProposal, RhymeCandidate, LyricAnalysis } from "../../types";
+// AGT-MEM (M4, item 3) — "Save flow to memory": derives a structure-only
+// LyricFrameworkCard from the sheet's own grid/roles (never its text — see
+// patternCards.ts's style-corpus safety wall), same confirm-toast surface as the
+// drum-clip "Save pattern to memory" affordance (ClipView.tsx).
+import { buildLyricFrameworkCard } from "../../agent/memory/patternCards";
+import { saveLyricFrameworkCard } from "../../agent/memory/savePatternCard";
 
 export function LyricPanel({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
+  const setMemoryToast = useStore((s) => s.setMemoryToast);
+  const memoryOn = useSettings((s) => s.get("agentMemory") !== false);
   const sheet = track.lyricSheet;
   const [busy, setBusy] = useState(false);
   // The inline "ghost" next-bar suggestion: the index of the line currently shown as a
@@ -56,6 +65,12 @@ export function LyricPanel({ track }: { track: Track }) {
       setGhostIndex(next);
     } finally { setBusy(false); }
   };
+  const saveFlow = async () => {
+    const name = sheet.topic.trim() || `Flow (${sheet.lines.length} line${sheet.lines.length === 1 ? "" : "s"})`;
+    const card = buildLyricFrameworkCard(sheet, name);
+    const res = await saveLyricFrameworkCard(exec, card);
+    if (res.ok) setMemoryToast({ text: `flow "${card.name}"`, scope: "global", kind: "lyric_framework", ts: res.ts });
+  };
 
   return (
     <div className="v2-lyrics" data-testid="lyric-panel" data-has-sheet="true" data-busy={busy}>
@@ -95,6 +110,11 @@ export function LyricPanel({ track }: { track: Track }) {
         <button className="v2-btn" data-testid="lyric-analyze" disabled={busy || sheet.lines.length === 0}
           title="Precise phonology — syllables, stress, rhyme (dictionary, no LLM)"
           onClick={() => void run("analyze_lyrics", {})}>Analyze flow</button>
+        {memoryOn && (
+          <button className="v2-btn" data-testid="lyric-save-flow" disabled={busy || sheet.lines.length === 0}
+            title="Saves the syllable/stress/rhyme-scheme STRUCTURE only — never the words"
+            onClick={() => void saveFlow()}>Save flow to memory</button>
+        )}
       </div>
 
       {sheet.lines.some((l) => l.status === "skeleton") && (

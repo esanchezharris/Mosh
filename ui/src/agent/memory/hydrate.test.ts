@@ -12,9 +12,11 @@ import {
   poolsNonEmpty,
   __resetMemoryHydrationForTests,
 } from "./hydrate";
+import { DRUM_PATTERN_SEEDS } from "./drumSeeds";
+import type { CommandResult } from "../../types";
 
 async function write(args: Record<string, unknown>) {
-  return mockExecute({ command: "agent_memory_write", args });
+  return mockExecute<CommandResult>({ command: "agent_memory_write", args });
 }
 
 beforeEach(() => {
@@ -41,12 +43,33 @@ describe("ensureMemoryHydrated", () => {
     expect(pools.projectNotes?.map((r) => r.item)).toEqual(["chorus needs more energy"]);
   });
 
-  it("an empty store everywhere hydrates to empty (not an error)", async () => {
+  // M4 — an empty drum_pattern store hydrates to the built-in seed cards, not [], so
+  // retrieval has something to offer on day one (see hydrate.ts's SEED_DRUM_PATTERN_
+  // RECORDS). preferences/projectNotes have no such fallback (there is no tasteful
+  // universal seed for "your taste" or "this project") and stay empty.
+  it("an empty store everywhere hydrates preferences/projectNotes to empty, but patterns to the built-in drum seeds", async () => {
     const pools = await ensureMemoryHydrated();
     expect(pools.preferences).toEqual([]);
-    expect(pools.patterns).toEqual([]);
     expect(pools.projectNotes).toEqual([]);
-    expect(memoryHydrated()).toBe(true); // hydration itself succeeded, it just found nothing
+    expect(pools.patterns?.length).toBe(DRUM_PATTERN_SEEDS.length);
+    expect(pools.patterns?.every((r) => r.kind === "drum_pattern" && r.explicit === false)).toBe(true);
+    expect(pools.patterns?.map((r) => (r.item as { name: string }).name)).toEqual(
+      DRUM_PATTERN_SEEDS.map((s) => s.name),
+    );
+    expect(memoryHydrated()).toBe(true); // hydration itself succeeded, it just found nothing real
+  });
+
+  it("a real saved drum_pattern suppresses the seeds entirely (real saves always win)", async () => {
+    await write({ scope: "global", kind: "drum_pattern", item: { name: "my beat", pattern: "kick: x...", stepsPerBar: 4, bars: 1, tags: [], source: "saved", uses: 0 } });
+    const pools = await ensureMemoryHydrated();
+    expect(pools.patterns?.length).toBe(1);
+    expect((pools.patterns![0].item as { name: string }).name).toBe("my beat");
+  });
+
+  it("seeds are NEVER written to disk — a fresh read after hydration still shows an empty real store", async () => {
+    await ensureMemoryHydrated(); // hydrates patterns to the 6 in-memory seed cards
+    const check = await mockExecute<CommandResult<{ items: unknown[] }>>({ command: "agent_memory_read", args: { scope: "global", kind: "drum_pattern" } });
+    expect(check.data?.items).toEqual([]); // still empty on disk
   });
 
   it("caches: a second call does not re-issue agent_memory_read", async () => {

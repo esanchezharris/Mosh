@@ -153,3 +153,67 @@ describe("retrieveContext: end-to-end", () => {
     expect(out).toContain("wide low end always");
   });
 });
+
+// AGT-MEM (M4) — pattern-card-aware rendering: a DrumPatternCard/LyricFrameworkCard
+// shaped `item` gets its own compact, replay-ready render instead of the generic
+// "(a pattern you use) <json>" fallback.
+describe("retrieveContext: pattern-card rendering (M4)", () => {
+  const drumCard = (over: Partial<{ name: string; pattern: string; stepsPerBar: number; bars: number; tags: string[]; bpmRange?: [number, number]; uses: number }> = {}) => ({
+    name: "Boom-bap", pattern: "kick: x...x...x...x...; snare: ....x.......x...",
+    stepsPerBar: 16, bars: 1, tags: ["boom-bap"], bpmRange: [85, 95] as [number, number],
+    source: "seed" as const, uses: 0, ...over,
+  });
+  const frameworkCard = (over: Partial<{ name: string; grid: string; rhymeStrictness: string; frame: { role: string; syllables: number; stress: string; rhyme: string }[]; tags: string[]; uses: number }> = {}) => ({
+    name: "AABB verse", grid: "1/16", rhymeStrictness: "slant",
+    frame: [
+      { role: "verse", syllables: 8, stress: "xXxxxXxx", rhyme: "A" },
+      { role: "verse", syllables: 8, stress: "xXxxxXxx", rhyme: "A" },
+    ],
+    tags: ["punchy"], source: "seed" as const, uses: 0, ...over,
+  });
+
+  it("a DrumPatternCard renders with its VERBATIM add_drum_pattern-ready pattern string", () => {
+    const pools: MemoryPools = { patterns: [rec(drumCard(), 1, "drum_pattern")] };
+    const out = retrieveContext("boom bap drum pattern", pools);
+    expect(out).toContain("kick: x...x...x...x...; snare: ....x.......x...");
+    expect(out).toContain("add_drum_pattern-ready");
+    expect(out).toContain("Boom-bap");
+  });
+
+  it("a LyricFrameworkCard renders its grid compactly (role/syllables/rhyme, never text)", () => {
+    const pools: MemoryPools = { patterns: [rec(frameworkCard(), 1, "lyric_framework")] };
+    const out = retrieveContext("AABB verse framework", pools);
+    expect(out).toContain("AABB verse");
+    expect(out).toContain("grid 1/16");
+    expect(out).toContain("verse(8)/A");
+  });
+
+  it("a very long drum pattern degrades to a description instead of a truncated/corrupted pattern string", () => {
+    const longPattern = Array.from({ length: 40 }, (_, i) => `lane${i}: ${"x".repeat(16)}`).join("; ");
+    const pools: MemoryPools = { patterns: [rec(drumCard({ name: "Huge", pattern: longPattern, bars: 4 }), 1, "drum_pattern")] };
+    const out = retrieveContext("huge drum pattern", pools);
+    expect(out).not.toContain(longPattern); // never a truncated fragment of it either
+    expect(out).toContain("too long to include verbatim here");
+    expect(out).toContain("4 bar(s)");
+  });
+
+  it("still falls back to the generic render for a plain-string/non-card pattern item", () => {
+    const pools: MemoryPools = { patterns: [rec("kick on 1 and 3", 1, "drum_pattern")] };
+    const out = retrieveContext("kick pattern", pools);
+    expect(out).toContain("(a pattern you use) kick on 1 and 3");
+  });
+
+  it("higher `uses` wins the tie-break among otherwise-equally-relevant pattern cards", () => {
+    const lowUses = rec(drumCard({ name: "Rarely used", uses: 1 }), 10, "drum_pattern");
+    const highUses = rec(drumCard({ name: "Often used", uses: 50 }), 5, "drum_pattern"); // older ts, but way more used
+    const ranked = rankMemoryEntries("boom bap drum pattern", { patterns: [lowUses, highUses] });
+    expect(ranked.map((r) => r.render.includes("Often used"))).toEqual([true, false]);
+  });
+
+  it("recency breaks the tie when uses are equal", () => {
+    const older = rec(drumCard({ name: "Older", uses: 3 }), 1, "drum_pattern");
+    const newer = rec(drumCard({ name: "Newer", uses: 3 }), 99, "drum_pattern");
+    const ranked = rankMemoryEntries("boom bap drum pattern", { patterns: [older, newer] });
+    expect(ranked.map((r) => r.render.includes("Newer"))).toEqual([true, false]);
+  });
+});

@@ -11,6 +11,10 @@
 
 import { tokenize, scorePool } from "./scoring";
 import { cardWeights, type KnowledgeCard } from "../knowledge";
+import {
+  isDrumPatternCard, isLyricFrameworkCard,
+  type DrumPatternCard, type LyricFrameworkCard,
+} from "./patternCards";
 
 /** Mirrors the {ts,kind,explicit,item} shape AgentMemoryStore (native) and the mock
  *  both return from agent_memory_read. `item` is whatever was written — a string or a
@@ -96,12 +100,67 @@ function preferenceCandidate(rec: MemoryRecord, idx: number): Candidate {
   };
 }
 
+// AGT-MEM (M4) — a per-card cap on the RENDERED line, separate from the overall 2KB
+// section budget: a saved multi-bar pattern's verbatim string can run long, and one
+// such card should not be allowed to crowd out every other card/knowledge/preference
+// line in a single turn's prompt. When a card's full render (with its verbatim pattern/
+// grid) would exceed this, the render degrades to a short description instead of
+// truncating the pattern string mid-way — a half a pattern is actively worse than none
+// (it could parse to something the producer never asked for if re-submitted verbatim).
+const MAX_PATTERN_CARD_RENDER_BYTES = 400;
+
+function tagsSuffix(tags: readonly string[]): string {
+  return tags.length ? ` [${tags.join(", ")}]` : "";
+}
+
+function renderDrumPatternCard(card: DrumPatternCard): string {
+  const tags = tagsSuffix(card.tags);
+  const bpm = card.bpmRange ? ` ~${card.bpmRange[0]}-${card.bpmRange[1]}bpm` : "";
+  // Verbatim pattern string — the model can replay this groove directly via
+  // add_drum_pattern without having to re-derive or guess at step syntax.
+  const full = `- (drum pattern "${card.name}"${tags}${bpm}) add_drum_pattern-ready: ${card.pattern}`;
+  if (byteLength(full) <= MAX_PATTERN_CARD_RENDER_BYTES) return full;
+  return `- (drum pattern "${card.name}"${tags}${bpm}) ${card.bars} bar(s) @ ${card.stepsPerBar}/bar — too long to include verbatim here`;
+}
+
+function renderLyricFrameworkCard(card: LyricFrameworkCard): string {
+  const tags = tagsSuffix(card.tags);
+  const grid = card.frame.map((l) => `${l.role}(${l.syllables || "free"})/${l.rhyme}`).join(" ");
+  const full = `- (lyric framework "${card.name}"${tags}) grid ${card.grid}, ${card.rhymeStrictness} rhyme: ${grid}`;
+  if (byteLength(full) <= MAX_PATTERN_CARD_RENDER_BYTES) return full;
+  return `- (lyric framework "${card.name}"${tags}) ${card.frame.length} lines, grid ${card.grid} — too long to include in full here`;
+}
+
+function renderPatternItem(item: unknown): string {
+  if (isDrumPatternCard(item)) return renderDrumPatternCard(item);
+  if (isLyricFrameworkCard(item)) return renderLyricFrameworkCard(item);
+  return `- (a pattern you use) ${memoryItemText(item)}`;
+}
+
+// Uses-then-recency priority, encoded as a STRING prefix on the candidate id (which
+// scorePool uses as its tieBreakKey — see scoring.ts: ties in token-relevance score are
+// broken by tieBreakKey().localeCompare(), ascending). Higher `uses` and a more recent
+// `ts` both need to sort FIRST, so each is encoded as (a large constant − value),
+// zero-padded to a fixed width — smaller encoded string == higher real uses/ts == wins
+// the ascending sort. This only ever matters among items that already tied on genuine
+// query relevance ("within the existing weight scheme" — scorePool itself is untouched).
+function patternUses(item: unknown): number {
+  return item && typeof item === "object" && !Array.isArray(item) && typeof (item as { uses?: unknown }).uses === "number"
+    ? (item as { uses: number }).uses
+    : 0;
+}
+function patternPriorityPrefix(rec: MemoryRecord): string {
+  const usesRank = String(Math.max(0, 999_999 - patternUses(rec.item))).padStart(6, "0");
+  const tsRank = String(Number.MAX_SAFE_INTEGER - rec.ts).padStart(16, "0");
+  return `${usesRank}:${tsRank}`;
+}
+
 function patternCandidate(rec: MemoryRecord, idx: number): Candidate {
   const text = memoryItemText(rec.item);
   return {
-    id: `pattern:${idx}:${rec.ts}`,
+    id: `pattern:${patternPriorityPrefix(rec)}:${idx}`,
     pool: "pattern",
-    render: `- (a pattern you use) ${text}`,
+    render: renderPatternItem(rec.item),
     weights: flatWeights(text, POOL_WEIGHT.pattern),
   };
 }

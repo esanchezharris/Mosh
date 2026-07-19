@@ -20,6 +20,9 @@ import { deriveTrainingJob } from "./trainingJobView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { copyText } from "../clipboard";
 import type { MemoryRecord } from "../agent/memory/retrieveContext";
+import {
+  isDrumPatternCard, isLyricFrameworkCard, summarizeDrumPatternCard, summarizeLyricFrameworkCard,
+} from "../agent/memory/patternCards";
 import { invalidateMemoryHydration } from "../agent/memory/hydrate";
 import { projectMemoryPath } from "../agent/memory/projectMemoryPath";
 import {
@@ -541,6 +544,13 @@ const MEMORY_TIERS: readonly MemoryTierDef[] = [
 
 function formatMemoryItem(item: unknown): string {
   if (typeof item === "string") return item;
+  // AGT-MEM (M4) — a DrumPatternCard/LyricFrameworkCard gets its own compact, human-
+  // readable summary (verbatim pattern string / grid+rhyme+role breakdown) instead of
+  // falling through to raw JSON — this panel predates those card shapes (M3), so
+  // without this check any saved/seed pattern card would otherwise show as an
+  // unreadable JSON blob (caught by pattern-library.spec.ts's e2e read of this panel).
+  if (isDrumPatternCard(item)) return `"${item.name}" — ${summarizeDrumPatternCard(item)}`;
+  if (isLyricFrameworkCard(item)) return `"${item.name}" — ${summarizeLyricFrameworkCard(item)}`;
   try { return JSON.stringify(item); } catch { return String(item); }
 }
 

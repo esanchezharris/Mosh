@@ -17,6 +17,7 @@
 import { executeCommand } from "../../bridge";
 import type { CommandResult } from "../../types";
 import type { MemoryPools, MemoryRecord } from "./retrieveContext";
+import { DRUM_PATTERN_SEEDS } from "./drumSeeds";
 
 type ReadArgs = { scope: "global" | "project"; kind?: string; limit?: number };
 type ReadData = { items: MemoryRecord[] };
@@ -29,6 +30,20 @@ async function readMemory(args: ReadArgs): Promise<MemoryRecord[]> {
     return [];   // hydration must never throw into a prompt-build call site
   }
 }
+
+// M4 (Phase-B memory lane) — day-one pattern retrieval, without ever writing anything
+// uninvited. Wrapped as MemoryRecords (negative, synthetic `ts` so they never collide
+// with a real wall-clock write, and sort stably/deterministically among themselves;
+// `explicit: false` — nobody asked Moshi to remember these, they're just the built-in
+// starting library) so they flow through rankMemoryEntries/renderMemorySection exactly
+// like a real saved card. Computed once at module load (DRUM_PATTERN_SEEDS is a fixed
+// const), not per-call.
+const SEED_DRUM_PATTERN_RECORDS: readonly MemoryRecord[] = DRUM_PATTERN_SEEDS.map((card, i) => ({
+  ts: -(i + 1),
+  kind: "drum_pattern",
+  explicit: false,
+  item: card,
+}));
 
 let cache: MemoryPools | null = null;
 let inflight: Promise<MemoryPools> | null = null;
@@ -48,9 +63,14 @@ export function ensureMemoryHydrated(): Promise<MemoryPools> {
       readMemory({ scope: "global", kind: "lyric_framework" }),
       readMemory({ scope: "project" }),
     ]);
+    // Seeds fill in ONLY when the real global drum_pattern store is empty (never once
+    // a producer has saved their own — real saves always win, seeds never mix in
+    // alongside them). Never written to disk; this is purely an in-memory fallback at
+    // read time (see the SEED_DRUM_PATTERN_RECORDS comment above).
+    const drumPatternsOrSeed = drumPatterns.length > 0 ? drumPatterns : SEED_DRUM_PATTERN_RECORDS;
     const pools: MemoryPools = {
       preferences,
-      patterns: [...drumPatterns, ...lyricFrameworks],
+      patterns: [...drumPatternsOrSeed, ...lyricFrameworks],
       projectNotes,
     };
     cache = pools;

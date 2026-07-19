@@ -22,6 +22,7 @@ import {
   MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
 } from "../destructiveScreen";
 import { MEMORY_COMMANDS, handleRememberPreference } from "../memory/rememberPreference";
+import { bumpPatternUsesIfMatched } from "../memory/usesTracking";
 import type { AgentEnv, StepCommandResult } from "../loopSeam";
 import type { Snapshot } from "../../types";
 import { awaitRendersSettled, RENDER_JOB_COMMANDS } from "./jobWait";
@@ -132,6 +133,9 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
       for (const c of allowed) {
         const r = await exec(c.command, c.args);
         entries.push({ index: c.index, command: c.command, ok: r.ok, error: r.ok ? undefined : r.error });
+        // AGT-MEM (M4, item 6) — same fire-and-forget "uses" tracking as executor.ts's
+        // runAgentBatch (see that file's comment / usesTracking.ts's header).
+        if (r.ok) void bumpPatternUsesIfMatched(c.command, c.args, exec);
       }
 
       // A render's ok = "job submitted"; the OBSERVATION must see the settled

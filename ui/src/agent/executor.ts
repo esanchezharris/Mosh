@@ -8,6 +8,7 @@ import { useStore } from "../store";
 import { validateCommand, describeCommand } from "./commands";
 import { screenByCommand, MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON } from "./destructiveScreen";
 import { MEMORY_COMMANDS, handleRememberPreference } from "./memory/rememberPreference";
+import { bumpPatternUsesIfMatched } from "./memory/usesTracking";
 
 // The destructive screen itself lives in ./destructiveScreen (a PURE module the
 // Node-side bench runners can import without the store/bridge chain); it is
@@ -135,6 +136,10 @@ export async function runAgentBatch(
         ok: res.ok,
         error: res.ok ? undefined : res.error,
       });
+      // AGT-MEM (M4, item 6) — cheap "uses" tracking: fire-and-forget, never awaited
+      // (a secondary effect that must not add latency to this batch); no-ops unless
+      // this exact command replayed a saved pattern card verbatim.
+      if (res.ok) void bumpPatternUsesIfMatched(c.command, c.args, exec);
     }
     const end = await exec("batch_end", {});
     await refresh();
