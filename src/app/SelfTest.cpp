@@ -939,6 +939,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (countScanEvents() == scanEventsBefore,
                "sync VST3 rescan emits no plugin_scan_progress events (FIT-003)");
 
+        // AUD-SCAN — an explicit AU request without the opt-in must FAIL LOUDLY. It used
+        // to fall through to the VST3-only branch and answer status:"done" with a count,
+        // so a caller that asked for AudioUnits was told the scan had run. That silent
+        // success is how "the shipped app can never see an AU" stayed invisible: the env
+        // var MOSH_SCAN_AU was the only way in, and it is set in exactly one place in the
+        // tree (Main.cpp, for --scan-plugins-deep).
+        //
+        // Hermetic: this errors BEFORE any scanning, so no AU sweep runs here. The
+        // harness never passes allowAU and never requests format:"all", so --selftest
+        // still performs no AudioUnit scan of any kind.
+        auto auDenied = cmd (ops, "rescan_plugins", objN ({{ "format", "au" }}));
+        check (! ok (auDenied), "rescan_plugins(au) without allowAU is refused, not a silent success");
+        check (auDenied.getProperty ("error", var()).toString().containsIgnoreCase ("audio unit"),
+               "the AU refusal explains itself");
+        check (countScanEvents() == scanEventsBefore,
+               "a refused AU rescan starts no scan (no progress events)");
+
         // get_plugin_blocklist returns a well-formed (possibly empty) array.
         auto gb = cmd (ops, "get_plugin_blocklist");
         check (ok (gb), "get_plugin_blocklist ok");

@@ -106,8 +106,15 @@ export function AutomationPanel() {
             onChange={(e) => void exec("set_track_automation_mode", { trackId: track.id, mode: e.target.value })}
           >
             <option value="read">Read</option>
-            <option value="touch">Touch</option>
-            <option value="latch">Latch</option>
+            {/* G10 — Touch and Latch are ACCEPTED by set_track_automation_mode but are
+                inert in the engine (see the "touch/latch are accepted … but inert here in
+                v0" note beside cmdSetTrackAutomationMode). Offering them as live choices
+                meant picking one silently did nothing: the user arms Touch, moves a
+                fader, records nothing, and has no way to tell that from a bug. Disabled
+                and labelled until the engine implements them — an honest gap beats a
+                convincing no-op. */}
+            <option value="touch" disabled>Touch (not yet)</option>
+            <option value="latch" disabled>Latch (not yet)</option>
             <option value="write">Write</option>
           </select>
           <button className="btn" onClick={() => exec("clear_automation", target)} disabled={points.length === 0}>Clear</button>

@@ -452,6 +452,30 @@ test("the add-track menu reaches drum and instrument tracks, and they land playa
   await expect(page.locator(`.v2-lane[data-track-id="${newTrackId}"]`).getByTestId("v2-clip")).toHaveCount(1);
 });
 
+// TRK-RENAME — `rename_track` shipped with no user-facing call site in EITHER shell, so
+// naming a track was agent-only. It commits on blur, like the Clip tab's rename field.
+test("a track can be renamed from the Inspector", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  const name = page.getByTestId("v2-track-name");
+  await expect(name).toBeVisible();
+  await name.fill("Rhodes");
+  await name.blur();
+  // the header and the inspector title both follow the backend's new name
+  await expect(page.getByTestId("v2-track-header").first()).toContainText("Rhodes");
+  await expect(page.getByTestId("v2-inspector")).toContainText("Rhodes");
+});
+
+test("an emptied track-name field snaps back instead of clearing the name", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-track-header").first().click();
+  const before = await page.getByTestId("v2-track-name").inputValue();
+  await page.getByTestId("v2-track-name").fill("   ");
+  await page.getByTestId("v2-track-name").blur();
+  await expect(page.getByTestId("v2-track-name")).toHaveValue(before);
+  await expect(page.getByTestId("v2-track-header").first()).toContainText(before);
+});
+
 test("the add-track menu closes on Escape without creating anything", async ({ page }) => {
   await bootV2(page);
   const before = await page.getByTestId("v2-track-header").count();

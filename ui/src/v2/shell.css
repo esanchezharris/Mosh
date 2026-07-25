@@ -1247,13 +1247,30 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+  /* AUD-SCAN — the controls group grew by the Audio Units opt-in, and with `min-width: 0`
+     on the copy the title/subtitle collapsed to a ~10-character column in the narrow left
+     drawer. Let the row wrap and give the copy a real flex basis so the controls drop to
+     their own line instead of crushing it. */
+  flex-wrap: wrap;
 }
 .v2-pdock-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1 1 200px;
 }
+/* AUD-SCAN — the AudioUnit opt-in that sits beside Rescan. Quiet by default (this is a
+   set-once preference, not a primary control) and it brightens once ticked. */
+.v2-pdock-au {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  color: var(--v2-faint); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.v2-pdock-au:hover { color: var(--v2-dim); }
+.v2-pdock-au:has(input:checked) { color: var(--v2-accent); }
+.v2-pdock-au input { accent-color: var(--v2-accent); cursor: pointer; margin: 0; }
+.v2-pdock-au:has(input:disabled) { opacity: 0.5; cursor: default; }
+
 .v2-pdock-selected {
   flex: 0 0 auto;
   padding: 4px 8px;

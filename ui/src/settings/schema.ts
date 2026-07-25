@@ -206,6 +206,22 @@ export const SETTINGS: SettingDef[] = [
     },
   },
   ...interactionSettings(),
+  {
+    // AUD-SCAN — opt-in AudioUnit cataloging. Off by default because an AU sweep is the
+    // slow/risky path (a hung component is killed by the ~25 s stall watchdog, a crashed
+    // one is quarantined by the dead-man's pedal), so first launch stays fast and safe.
+    // Until this existed the ONLY way in was the MOSH_SCAN_AU env var, set in exactly one
+    // place in the tree (Main.cpp, for --scan-plugins-deep) — so the shipped app could
+    // never catalog an AudioUnit at all. Last in the schema on purpose: this is
+    // maintenance, not a preference, so it sits at the bottom of the settings panel.
+    id: "scanAudioUnits",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Plugins",
+    label: "Scan Audio Units",
+    help: "Include AudioUnit (AU) plugins when re-scanning. Slower than VST3, and a badly-behaved component can stall the scan — hung plugins are killed and quarantined automatically. Turn this on if your instruments are AU-only.",
+  },
 ];
 
 // ── Interaction settings (Phase: DAW-faithful controls). The gesture-table + keymap

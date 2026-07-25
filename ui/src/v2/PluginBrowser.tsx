@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 import {
   builtinEntry, installedEntry, visibleRange,
   loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
@@ -160,10 +161,17 @@ export function PluginDock() {
   const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
   // FIT-003 — v2 previously had ZERO rescan control and no progress UI at all (the
   // classic modal already had both). This brings the default shell to parity: a
-  // compact Rescan button (VST3-only — always safe; AU stays an opt-in env var, same
-  // posture as the classic modal) + a live indeterminate progress line while scanning.
+  // compact Rescan button + a live indeterminate progress line while scanning.
+  //
+  // AUD-SCAN — that Rescan was VST3-only and AU was reachable ONLY via the MOSH_SCAN_AU
+  // env var, which nothing in the shipped app ever sets. So on a Mac, where plenty of
+  // instruments ship AU-only, the browser could never show them and gave no hint why.
+  // The checkbox is the opt-in (persisted, off by default so first scan stays fast);
+  // ticking it widens the sweep to "all" and passes the backend's `allowAU` gate.
   const rescan = useStore((s) => s.rescanPlugins);
   const scanProgress = useStore((s) => s.scanProgress);
+  const scanAU = useSettings((s) => s.get("scanAudioUnits")) as boolean;
+  const setSetting = useSettings((s) => s.set);
   const collectionSections = useMemo(
     () =>
       collectionGroupOrder
@@ -180,12 +188,24 @@ export function PluginDock() {
           <span className="v2-pdock-subtitle">Search collections and load onto the selected track.</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+          <label className="v2-pdock-au" title="Include AudioUnit plugins in the scan. Slower than VST3; a hung component is killed and quarantined automatically.">
+            <input
+              type="checkbox"
+              data-testid="v2-pb-scan-au"
+              checked={scanAU}
+              disabled={!!scanProgress}
+              onChange={(e) => setSetting("scanAudioUnits", e.target.checked)}
+            />
+            <span>Audio Units</span>
+          </label>
           <button
             className="btn"
             data-testid="v2-pb-rescan"
             disabled={!!scanProgress}
-            title="Re-scan installed VST3 plugins (out-of-process; hung plugins are quarantined)"
-            onClick={() => void rescan("vst3")}
+            title={scanAU
+              ? "Re-scan installed VST3 and AudioUnit plugins (out-of-process; hung plugins are quarantined)"
+              : "Re-scan installed VST3 plugins (out-of-process; hung plugins are quarantined)"}
+            onClick={() => void rescan(scanAU ? "all" : "vst3", scanAU)}
           >
             {scanProgress ? "Scanning…" : "Rescan"}
           </button>

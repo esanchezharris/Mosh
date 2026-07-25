@@ -78,6 +78,27 @@ function MixTab({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   return (
     <div className="v2-mix">
+      {/* TRK-RENAME — `rename_track` shipped with NO user-facing call site in either
+          shell: the only references in ui/src were the agent catalog, a brain test
+          fixture and the small-model allowlist, so the command was agent-only and a
+          mouse-only user could never name a track. Same commit-on-blur idiom as the
+          Clip tab's rename_clip field below; `key` re-syncs the uncontrolled input when
+          the backend changes the name under us (agent rename, undo, project reload). */}
+      <label className="v2-field">
+        <span>Name</span>
+        <input
+          type="text"
+          defaultValue={track.name}
+          key={track.name}
+          data-testid="v2-track-name"
+          aria-label="Track name"
+          onBlur={(e) => {
+            const next = e.target.value.trim();
+            if (next && next !== track.name) void exec("rename_track", { trackId: track.id, name: next });
+            else e.target.value = track.name;   // empty/unchanged → snap back, never send a blank
+          }}
+        />
+      </label>
       <label className="v2-field">
         <span>Vol</span>
         <input type="range" min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}

@@ -50,8 +50,10 @@ describe("defaultSettings", () => {
 describe("settingsByCategory", () => {
   it("groups settings, categories in first-appearance order", () => {
     const groups = settingsByCategory();
+    // AUD-SCAN — "Plugins" is last by design: it is maintenance (opt-in AU scanning),
+    // not a preference, so it sits at the bottom of the settings panel.
     expect(groups.map((g) => g.category)).toEqual([
-      "Appearance", "Moshi", "Layout", "Interaction", "Feel", "Keys",
+      "Appearance", "Moshi", "Layout", "Interaction", "Feel", "Keys", "Plugins",
     ]);
   });
 

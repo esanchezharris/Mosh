@@ -1641,7 +1641,15 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // and treated as already-done — harmless for the real always-instant dev catalog,
     // but it meant vitest/e2e never exercised the real "scanning" branch of the store
     // action). Real: no dev-mock AU sweep, so this always completes synchronously.
-    case "rescan_plugins": return ok(command, { status: "done", count: VST3S.length });
+    // AUD-SCAN — mirror the native `allowAU` gate: an explicit format:"au" without the
+    // opt-in is an ERROR, not a silent VST3-only success. (The old native code answered
+    // "done" there, which is precisely how "Mosh can't see my AUs" stayed invisible.)
+    // The dev catalog holds no AUs, so an ALLOWED sweep still just reports the VST3s.
+    case "rescan_plugins": {
+      const fmt = str(args.format, "all");
+      if (fmt === "au" && !args.allowAU) return err(command, "Audio Unit scanning is off — pass allowAU:true (or set MOSH_SCAN_AU=1)");
+      return ok(command, { status: "done", count: VST3S.length });
+    }
     case "set_master_pan": { pushUndo(); if (snapshot.master) snapshot.master.pan = num(args.pan); invalidate(); return ok(command); }
     case "enable_all_meters": case "enable_track_meter": case "disable_track_meter": return ok(command);
     case "list_wave_inputs": return ok(command, { inputs: MOCK_WAVE_INPUTS, audioEnabled: true });

@@ -6278,8 +6278,27 @@ juce::var MoshOps::cmdRescanPlugins (const juce::var& args)
     // AU is the slow/risky path: only when requested AND opted in (so --selftest,
     // which never sets MOSH_SCAN_AU, performs no AU sweep). VST3-only rescans are
     // always allowed.
-    const bool auOptedIn = SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1";
+    //
+    // AUD-SCAN — `allowAU` is the per-call opt-in the UI passes when the user ticks
+    // "Include Audio Units". Before it existed, MOSH_SCAN_AU was the ONLY way in and it
+    // is set in exactly one place in the tree (Main.cpp, for --scan-plugins-deep), so a
+    // user running the shipped app could never catalog an AudioUnit: no button, setting,
+    // or command reached this branch. On a Mac — where a large share of instruments are
+    // AU-only — that reads as "Mosh can't see my plugins".
+    // Hermeticity is preserved by construction: --selftest passes format:"vst3"
+    // explicitly and never passes allowAU, so it still performs no AU sweep.
+    // Cold-start (PluginHost::initialise) stays env-only on purpose — first launch must
+    // remain fast and safe; the user opts in afterwards from the plugin browser.
+    const bool auOptedIn = (bool) args.getProperty ("allowAU", false)
+                        || SystemStats::getEnvironmentVariable ("MOSH_SCAN_AU", {}) == "1";
     const bool includeAU = (format == "au" || format == "all") && auOptedIn;
+
+    // Never answer an explicit AU request with a silent success. The old code fell into
+    // the VST3-only branch below and returned status:"done" with a count, so a caller
+    // that asked for AU was told it had scanned — the failure mode that hid this gap.
+    if (format == "au" && ! includeAU)
+        return errResult ("rescan_plugins",
+                          "Audio Unit scanning is off — pass allowAU:true (or set MOSH_SCAN_AU=1)");
 
     // wait:true forces a synchronous VST3 sweep (cheap + safe on the message thread).
     // AU cataloging ALWAYS runs on a background thread, even when wait:true, because
