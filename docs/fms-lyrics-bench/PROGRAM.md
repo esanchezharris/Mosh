@@ -67,7 +67,26 @@ numbers and hashes only.
 2. **Own catalog** (still open) — drop full song texts as `.txt` files into
    `~/Library/Mosh/lyrics-bench/inbox/` and run `bench_cli.py ingest own`
    (style_corpus.jsonl is nearly empty, so the inbox is the real lane).
-3. **Calibration sitting 1** (~45 min) — arrives with I2.
+3. **Calibration sitting 1** (~45 min) — **READY**. Two commands:
+
+   ```bash
+   python3 service/lyrics/bench/bench_cli.py calibrate serve
+   ```
+
+   Open the printed `http://127.0.0.1:8765/`, then judge with the keyboard:
+   **A** = top bar is better, **B** = bottom bar is better, **T** = too close to
+   call (← goes back). Each screen shows the bars around a gap and two ways of
+   filling it — one is the real recorded lyric, one is a machine's. You are not
+   told which, the order is randomized per pair, and a handful of pairs repeat
+   on purpose to measure your own consistency. Rate on instinct; there is no
+   wrong answer. When you're done:
+
+   ```bash
+   python3 service/lyrics/bench/bench_cli.py calibrate report
+   ```
+
+   That prints which automated metric (if any) actually tracks your ear, writes
+   `calibration/TRUSTED_METRICS.json`, and either lifts the HALT or keeps it.
 
 ## Decision ledger (append-only)
 

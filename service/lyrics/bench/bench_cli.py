@@ -242,18 +242,18 @@ def cmd_judge(args) -> int:
     if chat is None:
         print("! no brain provider — LLM panel skipped (emb/ppl still run)")
 
-    pairs = [(items[r["itemId"]], r["candidates"][0]) for r in todo
-             if r["itemId"] in items]
+    # Drop unresolvable rows FIRST: emb/ppl score lists are positional, so a row
+    # skipped later would shift every subsequent score onto the wrong item.
+    todo = [r for r in todo if r["itemId"] in items]
+    pairs = [(items[r["itemId"]], r["candidates"][0]) for r in todo]
     emb = torchjudge.score_pairs(pairs, kind="emb", cache=cache)
     ppl = torchjudge.score_pairs(pairs, kind="ppl", cache=cache)
-    print(f"emb: {emb['status']} {emb.get('error') or ''}")
-    print(f"ppl: {ppl['status']} {ppl.get('error') or ''}")
+    print(f"emb: {emb['status']} {emb.get('error') or ''}", flush=True)
+    print(f"ppl: {ppl['status']} {ppl.get('error') or ''}", flush=True)
 
     out_rows = []
     for n, r in enumerate(todo):
-        item = items.get(r["itemId"])
-        if item is None:
-            continue
+        item = items[r["itemId"]]
         cand = r["candidates"][0]
         verdict = (judge.judge_pair(item, cand, chat=chat, cache=cache)
                    if chat else {"win": None, "byLens": {}})
