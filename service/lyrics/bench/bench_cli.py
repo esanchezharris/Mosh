@@ -70,7 +70,8 @@ def _golden_spec() -> dict:
 
 def cmd_ingest(args) -> int:
     if args.what == "genius":
-        report = ingest.pull_genius(dataset=args.dataset, limit=args.limit)
+        report = ingest.pull_genius(dataset=args.dataset, limit=args.limit,
+                                    min_year=args.min_year)
     elif args.what == "own":
         report = ingest.pull_own()
     else:
@@ -435,6 +436,8 @@ def main(argv=None) -> int:
     p.add_argument("what", choices=["genius", "own"])
     p.add_argument("--dataset", default="cleaned", choices=["cleaned", "5m"])
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--min-year", type=int, default=0,
+                   help="floor the release era (2015 = the owner's taste era)")
     p.set_defaults(fn=cmd_ingest)
 
     p = sub.add_parser("build-eval")
