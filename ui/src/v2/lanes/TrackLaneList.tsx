@@ -4,11 +4,12 @@
 // still fire). Drag/trim/split arrive in the lanes-interaction slice; this is the
 // read + select surface that matches the demo.
 
-import { Fragment, useCallback, useEffect, useRef } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../store";
+import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { useShell, type SectionZoom } from "../shellState";
 import { beatSeconds, barSeconds } from "../../time";
-import type { Snapshot, Track } from "../../types";
+import type { CommandResult, Snapshot, Track } from "../../types";
 import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
 import { Playhead } from "../timeline/Playhead";
@@ -20,6 +21,22 @@ import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
 
 const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group: "Group" };
+
+// The kinds of track the add-track affordance can create. Both add-track sites used to be
+// hardcoded to `create_track {name:"Audio"}`, which made drum and instrument tracks
+// UNREACHABLE in the shipped (v2) shell — the backends were complete and Catch2-tested the
+// whole time (`cmdCreateTrack type:"drum"` stamps the type and loads sampler+kit;
+// `cmdAddMidiClip` auto-loads 4OSC on an instrument-less track), but nothing in v2 ever
+// asked for them, and `add_midi_clip` had no v2 call site at all. Only the classic shell's
+// Topbar did (`+ Drums` / `+ MIDI`), so programming a beat or a melody with the mouse was
+// impossible in the default UI. `ui/src/v2/lanes/trackKinds.test.ts` pins this.
+type TrackKind = "audio" | "drum" | "midi";
+
+export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
+  { kind: "audio", label: "Audio",      hint: "Record or drop a file" },
+  { kind: "drum",  label: "Drums",      hint: "Sampler + kit, ready to program" },
+  { kind: "midi",  label: "Instrument", hint: "Synth + an empty MIDI clip" },
+];
 
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -107,16 +124,8 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
       <>
         <div className="v2-nav" data-testid="v2-navigator" />
         <div className="v2-stage v2-stage-empty">
-          <div className="v2-empty" role="status" aria-live="polite" data-testid="v2-empty">No tracks yet — ask Mosh to start a beat.</div>
-          <button
-            className="v2-empty-add"
-            data-testid="v2-track-add"
-            title="Add a track (or drop an audio file here)"
-            onClick={() => void exec("create_track", { name: "Audio" })}
-          >
-            <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
-            <span className="v2-lname">Add track</span>
-          </button>
+          <div className="v2-empty" role="status" aria-live="polite" data-testid="v2-empty">No tracks yet — add one, or ask Mosh to start a beat.</div>
+          <AddTrackMenu variant="empty" />
         </div>
       </>
     );
@@ -159,15 +168,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             ))}
             {/* the "one more track" of room: a sticky-left add row — click the header to add
                 a track, or drop an audio file onto the blackspace (the global drop imports). */}
-            <button
-              className="v2-lhead v2-lhead-add"
-              data-testid="v2-track-add"
-              title="Add a track (or drop an audio file below)"
-              onClick={() => void exec("create_track", { name: "Audio" })}
-            >
-              <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
-              <span className="v2-lname">Add track</span>
-            </button>
+            <AddTrackMenu variant="row" />
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
             <Playhead />
           </div>
@@ -179,6 +180,102 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         )}
       </div>
     </>
+  );
+}
+
+// Create a track of the given kind. Pure of React so the reachability test can drive it
+// with a recording fake `exec` and assert the exact command sequence.
+export async function addTrackOfKind(
+  kind: TrackKind,
+  exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>,
+): Promise<void> {
+  if (kind === "audio") { await exec("create_track", { name: "Audio" }); return; }
+  if (kind === "drum") { await exec("create_track", { name: "Drums", type: "drum" }); return; }
+  // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
+  // instrument track IS an audio track carrying a synth plus MIDI clips. So: make the
+  // track, then put a clip on it. add_midi_clip loads 4OSC in its own transaction when the
+  // track has no instrument, so the clip lands audible and piano-roll-ready rather than
+  // silent. Two commands ⇒ two undo steps, which is deliberate: add_midi_clip DOES
+  // auto-create a track when trackId is absent (one step), but native creates a NEW track
+  // there while bridge.mock.ts falls back to tracks[0] — passing an explicit trackId keeps
+  // mock and native identical, and the mock would otherwise error in the empty state.
+  const res = await exec("create_track", { name: "Instrument" });
+  const trackId = (res.data as { trackId?: string } | undefined)?.trackId;
+  if (res.ok && trackId) await exec("add_midi_clip", { trackId });
+}
+
+// The add-track affordance: a menu, not a button. `variant` only picks the trigger's skin —
+// "empty" is the empty-state pill, "row" is the trailing sticky-left lane header.
+//
+// The panel is FIXED-positioned against the trigger's client rect rather than absolutely
+// positioned inside a `.v2-menu-wrap`. Two reasons, both load-bearing: the "row" trigger is
+// a grid child of `.v2-tl` inside the `.v2-tl-scroll` overflow container, so an absolute
+// panel would be clipped and would scroll away from its trigger; and it lets the wrapper be
+// `display: contents`, so the button stays the real grid/flex child and NEITHER layout
+// shifts. (`.v2-lhead` is `position: sticky` — wrapping it in a positioned div would break
+// the sticky-left column.)
+function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useEscapeToClose(open, close);
+  const exec = useStore((s) => s.exec);
+
+  const toggle = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setAt({ top: r.bottom + 8, left: r.left });
+    setOpen((o) => !o);
+  }, []);
+
+  const pick = useCallback((kind: TrackKind) => {
+    setOpen(false);
+    void addTrackOfKind(kind, exec);
+  }, [exec]);
+
+  return (
+    <div className="v2-addtrack">
+      <button
+        ref={btnRef}
+        className={variant === "empty" ? "v2-empty-add" : "v2-lhead v2-lhead-add"}
+        data-testid="v2-track-add"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Add a track (or drop an audio file here)"
+        onClick={toggle}
+      >
+        <span className="v2-licon" aria-hidden="true"><IconPlus size={16} /></span>
+        <span className="v2-lname">Add track</span>
+      </button>
+      {open && at && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={close} />
+          <div className="v2-menu-panel v2-menu-panel-fixed" style={{ top: at.top, left: at.left }}>
+            <div className="v2-menu v2-menu-rich" role="menu" aria-label="Add track">
+              {TRACK_KINDS.map(({ kind, label, hint }) => (
+                <button
+                  key={kind}
+                  role="menuitem"
+                  // Explicit: the icon is aria-hidden and the visible text is split across
+                  // two spans, so screen readers were announcing these rows unnamed.
+                  aria-label={`${label} track — ${hint}`}
+                  data-testid={`v2-track-add-${kind}`}
+                  onClick={() => pick(kind)}
+                >
+                  <span className="v2-licon" aria-hidden="true">
+                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind} />
+                  </span>
+                  <span className="v2-menu-text">
+                    <span className="v2-menu-label">{label}</span>
+                    <span className="v2-menu-hint">{hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

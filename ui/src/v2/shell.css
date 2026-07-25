@@ -385,6 +385,23 @@
 .v2-menu .v2-menu-sep { height: 1px; background: var(--v2-line); margin: 5px 4px; }
 .v2-menu kbd { color: var(--v2-faint); font-family: var(--font-mono); font-size: 11px; }
 
+/* Fixed-position variant: the panel is placed against the trigger's client rect (see
+   AddTrackMenu) so it escapes the timeline's overflow clipping. `right: auto` undoes the
+   base panel's right-anchoring; `top`/`left` come from the inline style. */
+.v2-menu-panel-fixed { position: fixed; right: auto; }
+
+/* Rich menu rows: an icon plus a label over a hint, rather than a single label line. */
+.v2-menu-rich button { justify-content: flex-start; gap: 10px; padding: 8px; }
+.v2-menu-rich .v2-licon { width: 30px; height: 30px; border-radius: 9px; }
+.v2-menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v2-menu-label { font-size: 13px; color: var(--v2-text); }
+.v2-menu-hint { font-size: 11px; color: var(--v2-faint); }
+
+/* The add-track wrapper must not generate a box: the "row" trigger is a sticky-left grid
+   child of .v2-tl and the "empty" trigger is a flex child of .v2-stage-empty — in both
+   cases an intervening div would take over the layout slot. */
+.v2-addtrack { display: contents; }
+
 /* ─────────────────────────────── BODY ────────────────────────────────────── */
 .v2-body {
   display: grid;

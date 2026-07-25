@@ -416,12 +416,50 @@ test("the arrangement shrink-wraps to its tracks; the add-track row creates a tr
   const bb = await page.locator(".v2-body").boundingBox();
   if (!sb || !bb) throw new Error("no bounds");
   expect(sb.height).toBeLessThan(bb.height - 100);
-  // the trailing "+ New track" row adds a track (and the panel grows by a lane)
+  // the trailing "+ New track" row opens the kind menu; picking Audio adds a track
+  // (and the panel grows by a lane)
   const before = await page.getByTestId("v2-track-header").count();
   const h0 = sb.height;
   await page.getByTestId("v2-track-add").click();
+  await page.getByTestId("v2-track-add-audio").click();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
   await expect.poll(async () => (await page.locator(".v2-stage").boundingBox())?.height ?? 0).toBeGreaterThan(h0);
+});
+
+// TRK-KIND — the v2 shell shipped able to create ONLY audio tracks, so a mouse-only user
+// could never program a beat or a melody. Prove both newly-reachable kinds land a track
+// that is actually playable: an instrument in the rack (else it is silent), and for the
+// instrument kind a MIDI clip to open in the piano roll.
+test("the add-track menu reaches drum and instrument tracks, and they land playable", async ({ page }) => {
+  await bootV2(page);
+  const before = await page.getByTestId("v2-track-header").count();
+
+  await page.getByTestId("v2-track-add").click();
+  await page.getByTestId("v2-track-add-drum").click();
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
+  // the drum track carries the sampler+kit — the header shows the instrument as its preset
+  await expect(page.getByTestId("v2-track-header").last().locator(".v2-lpreset")).not.toHaveText("Audio");
+
+  await page.getByTestId("v2-track-add").click();
+  await page.getByTestId("v2-track-add-midi").click();
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 2);
+  // …and the instrument track arrives with a clip already ON IT, so the piano roll —
+  // which only opens on an existing MIDI clip — is reachable at last. Scoped to the new
+  // track's own lane: the clip must not land on tracks[0], which is where an omitted
+  // trackId would put it in the mock.
+  const newTrackId = await page.getByTestId("v2-track-header").last().getAttribute("data-track-id");
+  expect(newTrackId).toBeTruthy();
+  await expect(page.locator(`.v2-lane[data-track-id="${newTrackId}"]`).getByTestId("v2-clip")).toHaveCount(1);
+});
+
+test("the add-track menu closes on Escape without creating anything", async ({ page }) => {
+  await bootV2(page);
+  const before = await page.getByTestId("v2-track-header").count();
+  await page.getByTestId("v2-track-add").click();
+  await expect(page.getByTestId("v2-track-add-drum")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("v2-track-add-drum")).toHaveCount(0);
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before);
 });
 
 test("the agent toast appears on a command and self-dismisses", async ({ page }) => {

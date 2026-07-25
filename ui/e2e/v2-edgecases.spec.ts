@@ -184,7 +184,11 @@ test.describe("L4/L5/L10 · degenerate states", () => {
     await expect(page.getByText(/no tracks yet/i)).toBeVisible();
     const add = page.getByRole("button", { name: /add.*track/i });
     await expect(add).toBeVisible();
+    // TRK-KIND — the affordance now opens a kind menu rather than creating an audio track
+    // outright, so the empty state is also where drums/instrument first become reachable.
     await add.click();
+    await expect(page.getByTestId("v2-track-add-drum")).toBeVisible();
+    await page.getByTestId("v2-track-add-audio").click();
     await expect(page.locator('[data-track-id], .v2-lane').first()).toBeVisible();
   });
 
