@@ -19,7 +19,15 @@ fail() { printf '\n✗ %s\n' "$*" >&2; exit 1; }
 printf '— Mosh lyrics-bench setup (HF ingestion deps) —\n'
 
 REINSTALL=0
-[[ "${1:-}" == "--reinstall" ]] && REINSTALL=1
+WITH_TORCH=0
+for arg in "$@"; do
+  [[ "$arg" == "--reinstall" ]] && REINSTALL=1
+  # --torch adds the I2 judge deps (embedding sim + MLM pseudo-perplexity).
+  # Optional on purpose: torchjudge.resolve_python() will happily use any other
+  # venv that already carries torch+transformers, so a dev Mac needn't pay for
+  # a second ~1.5GB install.
+  [[ "$arg" == "--torch" ]] && WITH_TORCH=1
+done
 
 VENVS_ROOT="${MOSH_VENVS_DIR:-$HOME/Library/Mosh/venvs}"
 VENV="$VENVS_ROOT/lyrics-bench"
@@ -54,9 +62,24 @@ else
   say "venv ✓ installed at $VENV"
 fi
 
+TORCH_PY=""
+if [[ "$WITH_TORCH" == "1" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install --python "$PYBIN" -q torch transformers sentence-transformers
+  else
+    "$PYBIN" -m pip install -q torch transformers sentence-transformers
+  fi
+  "$PYBIN" -c "import torch, transformers" || fail "torch install did not validate"
+  TORCH_PY="$PYBIN"
+  say "torch judges ✓ (torch + transformers in the bench venv)"
+fi
+
 cat > "$HERE/.lyrics-bench.env" <<EOF
 # Written by setup-lyrics-bench.sh — single source of truth for the bench venv.
 export LYRICS_BENCH_PY="$PYBIN"
 EOF
+if [[ -n "$TORCH_PY" ]]; then
+  echo "export LYRICS_BENCH_TORCH_PY=\"$TORCH_PY\"" >> "$HERE/.lyrics-bench.env"
+fi
 say ".lyrics-bench.env ✓ (LYRICS_BENCH_PY=$PYBIN)"
 say "done."
