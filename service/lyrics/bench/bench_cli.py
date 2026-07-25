@@ -28,7 +28,7 @@ sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
                           ingest, judge, llm_cache, mask, metrics, paths,
-                          runner, scoreboard, torchjudge)
+                          runner, sampling, scoreboard, torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
 SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.md")
@@ -133,21 +133,8 @@ def cmd_run(args) -> int:
     if args.granularity != "all":
         keep = set(args.granularity.split(","))
         items = [i for i in items if i["granularity"] in keep]
-    items.sort(key=lambda i: i["itemId"])
-    if args.limit:
-        # Round-robin across granularities — a plain prefix of the itemId-sorted
-        # list would be all "line:" items (alphabetical bias).
-        by_gran = {}
-        for i in items:
-            by_gran.setdefault(i["granularity"], []).append(i)
-        grans = sorted(by_gran)
-        picked, n = [], 0
-        while len(picked) < args.limit and any(by_gran.values()):
-            g = grans[n % len(grans)]
-            if by_gran[g]:
-                picked.append(by_gran[g].pop(0))
-            n += 1
-        items = sorted(picked, key=lambda i: i["itemId"])
+    items = sampling.balanced(items, limit=args.limit,
+                              key=lambda i: i["granularity"])
 
     needs_api = args.arm in API_ARMS or (args.arm == "product-llm"
                                          and args.product_backend == "llm")
@@ -223,9 +210,8 @@ def cmd_judge(args) -> int:
     keep = set(args.granularity.split(",")) if args.granularity != "all" else \
         set(judge.JUDGED_GRANULARITIES)
     todo = [r for r in rows if r["granularity"] in keep and r.get("candidates")]
-    todo.sort(key=lambda r: r["itemId"])
-    if args.limit:
-        todo = todo[:args.limit]
+    todo = sampling.balanced(todo, limit=args.limit,
+                             key=lambda r: r["granularity"])
     if not todo:
         print("nothing to judge (no candidates in the judged granularities)")
         return 0
@@ -259,7 +245,7 @@ def cmd_judge(args) -> int:
                    if chat else {"win": None, "byLens": {}})
         out_rows.append({
             "itemId": r["itemId"], "granularity": r["granularity"],
-            "arm": os.path.basename(run_dir).split("-", 3)[-1].rsplit("-", 1)[0],
+            "arm": sampling.arm_of(run_dir),
             "run": os.path.basename(run_dir),
             "candidate": cand, "truth": item["target"]["text"],
             "context": {"before": item["context"]["before"],
