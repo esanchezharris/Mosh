@@ -28,7 +28,8 @@ sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
                           ingest, judge, llm_cache, mask, metrics, paths,
-                          runner, sampling, scoreboard, torchjudge)
+                          mixpairs, runner, sampling, scoreboard,
+                          torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
 SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.md")
@@ -310,9 +311,10 @@ def cmd_calibrate(args) -> int:
                             lookup[it["itemId"]] = it["context"]["maskedLine"]
             for r in missing:
                 r["maskedLine"] = lookup.get(r["itemId"])
-        pairs, key = calibrate.mint_pairs(calibrate.completed_pool(pool),
-                                          n=args.n, dupes=args.dupes,
-                                          seed=args.seed)
+        songs = {s["songId"]: s for s in _load_corpus()} if args.stanza else None
+        pairs, key = mixpairs.mint_mixed(pool, n=args.n, dupes=args.dupes,
+                                         seed=args.seed, arm_frac=args.arm_frac,
+                                         songs=songs)
         with open(pairs_path, "w", encoding="utf-8") as f:
             json.dump(pairs, f, ensure_ascii=False, indent=1)
         with open(key_path, "w", encoding="utf-8") as f:
@@ -359,25 +361,18 @@ def cmd_calibrate(args) -> int:
         print("no ratings yet — run `calibrate serve` and do the sitting",
               file=sys.stderr)
         return 2
-    owner = calibrate.owner_labels(ratings, key)
+    owner = mixpairs.owner_labels(ratings, key)
 
     by_gran = {}
     for gran in sorted({v["granularity"] for v in key.values()}):
         pids = [p for p, v in key.items() if v["granularity"] == gran]
         sub_owner = {p: owner.get(p) for p in pids}
+        sub_key = {p: key[p] for p in pids}
         columns = {}
         for col in ("judge_win", "emb", "ppl"):
-            vals = {}
-            for p in pids:
-                m = machine.get(key[p]["itemId"] + "|" + key[p]["arm"], {})
-                v = m.get(col)
-                if v is None:
-                    continue
-                # Continuous columns become a preference: does the metric rank
-                # the candidate above the truth? emb/ppl are measured AGAINST
-                # the truth, so their sign is the vote.
-                vals[p] = int(v) if col == "judge_win" else (
-                    1 if (v > 0.98 if col == "emb" else v < 0) else 0)
+            vals = {p: v for p, v in
+                    mixpairs.column_predictions(sub_key, machine, col).items()
+                    if v is not None}
             if vals:
                 columns[col] = vals
         by_gran[gran] = calibrate.elect(sub_owner, columns, bar=args.bar)
@@ -473,6 +468,10 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--bar", type=float, default=0.65)
     p.add_argument("--resume", action="store_true", default=True)
+    p.add_argument("--arm-frac", type=float, default=0.5,
+                   help="share of pairs that are arm-vs-arm (balanced labels)")
+    p.add_argument("--stanza", action="store_true", default=True,
+                   help="show the whole stanza around the gap (flow context)")
     p.set_defaults(fn=cmd_calibrate)
 
     p = sub.add_parser("scoreboard")
