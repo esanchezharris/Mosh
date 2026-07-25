@@ -17,6 +17,10 @@ from typing import Dict, Iterable, Optional
 
 from lyrics.bench import paths, segment
 
+# Acceptance rate for the hashed spread-sample (per mille of eligible rows).
+# ~1M eligible rap/en rows; 40 per mille ≈ 40k candidates for a 20k target.
+_ACCEPT_PER_MILLE = int(os.environ.get("LYRICS_BENCH_ACCEPT_PER_MILLE", "40"))
+
 _RAP_TAGS = {"rap", "hip-hop", "hip hop", "hiphop", "rb", "trap", "drill", "grime"}
 MIN_LINES, MAX_LINES = 8, 250
 
@@ -55,6 +59,11 @@ def row_to_song(row: Dict, *, source: str) -> Optional[dict]:
         license_tier="eval-only",
         raw_text=str(text),
     )
+    year = _first(row, "year", "release_year", default=None)
+    try:
+        song["year"] = int(year) if year else None
+    except (TypeError, ValueError):
+        song["year"] = None
     n_lines = sum(len(s["lines"]) for s in song["sections"])
     if not MIN_LINES <= n_lines <= MAX_LINES:
         return None
@@ -88,35 +97,68 @@ def write_shards(songs: Iterable[dict], out_dir: str, prefix: str,
     return counts
 
 
-def pull_genius(dataset: str = "cleaned", limit: int = 0) -> dict:
-    """Download + filter the HF Genius dataset into corpus shards. Runs under the
-    lyrics-bench venv (needs `datasets`). Column values are checked against the
-    REAL data, with a census of what got filtered."""
-    from datasets import load_dataset  # heavy import, venv-only
+def pull_genius(dataset: str = "cleaned", limit: int = 0,
+                min_year: int = 0) -> dict:
+    """Download + filter the HF Genius dataset into corpus shards.
+
+    Samples ACROSS the whole dataset, not the head of the stream. The first
+    version took a stream prefix and the dataset is roughly id-ordered, so the
+    corpus came out 7.4% post-2015 against the dataset's own 76.4% — i.e. a
+    1990s-2000s corpus, which the owner correctly diagnosed by ear as "dated,
+    mostly about murder". `min_year` additionally floors the release era.
+    """
+    import hashlib
+
+    import pyarrow.dataset as pds
+    from huggingface_hub import snapshot_download
 
     repo = ("Dr3dre/Genius-song-lyrics-cleaned" if dataset == "cleaned"
             else "sebastiandizon/genius-song-lyrics")
     source = "genius-cleaned" if dataset == "cleaned" else "genius-5m"
-    ds = load_dataset(repo, split="train", streaming=True)
+    local = snapshot_download(repo, repo_type="dataset")
+    files = [os.path.join(r, f) for r, _, fs in os.walk(local) for f in fs
+             if f.endswith(".parquet")]
 
-    census = {"seen": 0, "kept": 0}
+    census = {"seen": 0, "kept": 0, "tooOld": 0}
     tag_census: Dict[str, int] = {}
 
     def gen():
-        for row in ds:
-            census["seen"] += 1
-            tag = str(_first(row, "tag", "genre", default="?")).lower()
-            tag_census[tag] = tag_census.get(tag, 0) + 1
-            song = row_to_song(dict(row), source=source)
-            if song is not None:
+        # Deterministic reservoir-free sampling: keep a row when its hashed id
+        # falls under the acceptance rate, so the draw spans the WHOLE dataset
+        # and is reproducible without holding it in memory.
+        eligible = 0
+        for batch in pds.dataset(files, format="parquet").to_batches():
+            for row in batch.to_pylist():
+                census["seen"] += 1
+                tag = str(_first(row, "tag", "genre", default="?")).lower()
+                tag_census[tag] = tag_census.get(tag, 0) + 1
+                if min_year:
+                    y = _first(row, "year", default=None)
+                    try:
+                        if not y or int(y) < min_year:
+                            census["tooOld"] += 1
+                            continue
+                    except (TypeError, ValueError):
+                        census["tooOld"] += 1
+                        continue
+                song = row_to_song(dict(row), source=source)
+                if song is None:
+                    continue
+                eligible += 1
+                if limit:
+                    h = hashlib.blake2b(str(row.get("id")).encode(),
+                                        digest_size=8).digest()
+                    # ~2x headroom: accept a hashed slice, stop once full.
+                    if int.from_bytes(h, "big") % 1000 >= _ACCEPT_PER_MILLE:
+                        continue
                 census["kept"] += 1
                 yield song
-            if limit and census["kept"] >= limit:
-                return
+                if limit and census["kept"] >= limit:
+                    return
 
     out_dir = paths.subdir("corpus", "genius")
     counts = write_shards(gen(), out_dir, source)
-    report = {**counts, **census,
+    report = {**counts, **census, "minYear": min_year,
               "tagCensus": dict(sorted(tag_census.items(), key=lambda kv: -kv[1])[:15]),
               "repo": repo, "outDir": out_dir}
     with open(os.path.join(out_dir, "ingest_report.json"), "w", encoding="utf-8") as f:
