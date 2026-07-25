@@ -73,7 +73,9 @@ check("blind key is a SEPARATE structure naming the truth side",
       and all(v["truthSide"] in ("left", "right") for v in key.values()))
 check("both truth sides occur (not always left)",
       len({v["truthSide"] for v in key.values()}) == 2,
-      str({v["truthSide"] for v in key.values()}))
+      # sorted(): a printed set orders by hash seed, which would make this
+      # suite's 3x signature differ per process and hide real drift.
+      str(sorted({v["truthSide"] for v in key.values()})))
 check("key round-trips to the actual texts",
       all((sides[pid][0] if v["truthSide"] == "left" else sides[pid][1])
           == v["truthText"] for pid, v in key.items()))

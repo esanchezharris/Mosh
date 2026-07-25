@@ -71,7 +71,10 @@ with tempfile.TemporaryDirectory() as td:
                                         "choice": "tie"})
     rows = calibrate_page.load_ratings(path)
     check("ratings persist as JSONL in order", len(rows) == 2
-          and rows[0]["choice"] == "left" and rows[1]["choice"] == "tie", str(rows))
+          and rows[0]["choice"] == "left" and rows[1]["choice"] == "tie",
+          # ts stripped: a wall-clock value in the detail would make this
+          # suite's 3x signature differ by the second.
+          str([{k: v for k, v in r.items() if k != "ts"} for r in rows]))
     check("每 rating carries a timestamp for the ledger".replace("每", "each"),
           all("ts" in r for r in rows))
     # A re-rated pair appends (history preserved); the resolver takes the

@@ -102,6 +102,16 @@ numbers and hashes only.
   refuted, all fixed pre-PR. Blocker: product-llm fill extraction was dead code
   → first product word/rhyme/span baselines invalidated, runs sidelined to
   `runs/_invalid/`, dev re-measured on arm v2.
+- **2026-07-25** — I2 BUILT: blind A/B judge panel (3 lenses × order-swapped double
+  judging), torch-backed emb + PLL judges behind a subprocess seam, calibration
+  minting/stats/election, and the blind rating page. First judged dev numbers
+  (40 items/arm, span+line, LLM panel only — **zero owner validation yet**):
+  `llm-constrained` 25/40 separated, candidate beats the human bar **44–52%**;
+  `product-llm` 38/40 separated, **0%**. The sitting is minted and waiting
+  (64 pairs, 8 repeats, balanced 16 per arm×granularity cell).
+  Verified locally per owner's "no CI" call: 88 py suites green, I2 suites 5×
+  byte-identical, `grep SABOTAGE` clean. **Bars stay DRAFT until the sitting
+  freezes them.**
 - **2026-07-24** — GOLDEN SET LIVE: owner taste anchor = Ken Carson, Young Thug,
   Playboi Carti, Future, Drake (Drake replaced SLAYR — absent from the dump).
   Targeted full-dataset pull → 2,288 taste songs (93 credit variants; collab
