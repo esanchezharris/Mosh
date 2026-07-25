@@ -228,24 +228,45 @@ def cohens_kappa(a: Sequence[int], b: Sequence[int]) -> Optional[float]:
 
 # ── the election ────────────────────────────────────────────────────────────────
 
+MIN_KAPPA = 0.4  # "moderate" agreement — below this a column has no real skill
+
+
 def elect(owner: Dict[str, Optional[int]],
-          columns: Dict[str, Dict[str, Optional[int]]], *, bar: float) -> dict:
-    """Rank judge columns by owner agreement; the best one at/above `bar` earns
-    the right to be optimized. Nothing clears it ⇒ halt=True (the program
-    iterates on judges, never on arms)."""
+          columns: Dict[str, Dict[str, Optional[int]]], *, bar: float,
+          min_kappa: float = MIN_KAPPA) -> dict:
+    """Rank judge columns by CHANCE-CORRECTED agreement; the best one that clears
+    both floors earns the right to be optimized.
+
+    Raw accuracy alone is not enough and the program learned that the hard way:
+    when the owner preferred the human line 94% of the time, a column that says
+    "human" forever scored 0.96 and was elected — pure base rate, zero skill.
+    Cohen's κ is 0 for any constant column by construction, so ranking on κ (and
+    reporting the majority-class baseline next to accuracy) makes the inflation
+    both impossible to win on and visible on the page.
+    """
+    labels = [v for v in owner.values() if v is not None]
+    baseline = (max(labels.count(0), labels.count(1)) / len(labels)) if labels else None
     ranked = []
     for name, col in sorted(columns.items()):
         agr = pairwise_agreement(owner, col)
-        if agr["accuracy"] is not None:
-            ranked.append({"metric": name, **agr})
-    ranked.sort(key=lambda r: (-r["accuracy"], r["metric"]))
-    if not ranked or ranked[0]["accuracy"] < bar:
-        return {"metric": None, "agreement": None, "halt": True, "bar": bar,
-                "ranked": ranked, "runnerUp": ranked[1] if len(ranked) > 1 else None}
+        if agr["accuracy"] is None:
+            continue
+        paired = [(owner[p], col[p]) for p in owner
+                  if owner.get(p) is not None and col.get(p) is not None]
+        k = cohens_kappa([a for a, _ in paired], [b for _, b in paired])
+        ranked.append({"metric": name, **agr, "kappa": (0.0 if k is None else k),
+                       "constant": len({b for _, b in paired}) < 2})
+    ranked.sort(key=lambda r: (-r["kappa"], -r["accuracy"], r["metric"]))
+    head = {"bar": bar, "minKappa": min_kappa, "baseline": baseline,
+            "ranked": ranked, "runnerUp": ranked[1] if len(ranked) > 1 else None}
+    if (not ranked or ranked[0]["kappa"] < min_kappa
+            or ranked[0]["accuracy"] < bar
+            or (baseline is not None and ranked[0]["accuracy"] <= baseline)):
+        return {"metric": None, "agreement": None, "halt": True, **head}
     best = ranked[0]
     return {"metric": best["metric"], "agreement": best["accuracy"],
-            "ci": best["ci"], "n": best["n"], "halt": False, "bar": bar,
-            "ranked": ranked, "runnerUp": ranked[1] if len(ranked) > 1 else None}
+            "kappa": best["kappa"], "ci": best["ci"], "n": best["n"],
+            "halt": False, **head}
 
 
 def render_report(by_granularity: Dict[str, dict], meta: dict) -> str:
@@ -261,20 +282,29 @@ def render_report(by_granularity: Dict[str, dict], meta: dict) -> str:
     for gran, e in sorted(by_granularity.items()):
         lines.append(f"## {gran}")
         lines.append("")
+        base = e.get("baseline")
+        if base is not None:
+            lines.append(f"Majority-class baseline: **{base:.3f}** — any column at "
+                         f"or below this is riding the base rate, not reading taste.")
+            lines.append("")
         if e.get("halt"):
-            lines.append(f"HALT — best column below the {bar} bar.")
+            lines.append(f"HALT — no column clears both floors "
+                         f"(accuracy > baseline and ≥ {bar}, κ ≥ "
+                         f"{e.get('minKappa')}).")
         else:
             ci = e.get("ci") or (0, 0)
             lines.append(f"Trusted: **{e['metric']}** — agreement "
                          f"{e['agreement']:.3f} (95% CI {ci[0]:.2f}–{ci[1]:.2f}, "
-                         f"n={e.get('n')})")
+                         f"n={e.get('n')}), κ={e.get('kappa'):.3f}")
         lines.append("")
-        lines.append("| column | agreement | n | 95% CI |")
-        lines.append("|---|---|---|---|")
+        lines.append("| column | agreement | κ (chance-corrected) | n | 95% CI | |")
+        lines.append("|---|---|---|---|---|---|")
         for r in e.get("ranked", []):
             lo, hi = r["ci"]
-            lines.append(f"| {r['metric']} | {r['accuracy']:.3f} | {r['n']} | "
-                         f"{lo:.2f}–{hi:.2f} |")
+            flag = "constant — no skill" if r.get("constant") else (
+                "below baseline" if base is not None and r["accuracy"] <= base else "")
+            lines.append(f"| {r['metric']} | {r['accuracy']:.3f} | {r['kappa']:.3f} | "
+                         f"{r['n']} | {lo:.2f}–{hi:.2f} | {flag} |")
         lines.append("")
     lines.append("*Generated by `bench_cli.py calibrate report` — do not hand-edit.*")
     return "\n".join(lines) + "\n"

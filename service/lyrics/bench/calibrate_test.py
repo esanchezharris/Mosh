@@ -174,6 +174,27 @@ columns = {
     "emb": {"a": 1, "b": 0, "c": 1, "d": 0},            # 0.50
     "ppl": {"a": 0, "b": 0, "c": 1, "d": 1},            # 0.00
 }
+# The trap this program actually hit: when the owner answers one way 94% of the
+# time, a CONSTANT column "agrees" 94% without discriminating anything. Election
+# must be chance-corrected, or it hands the HALT key to a column that says one
+# word forever.
+skewed_owner = {f"p{i}": (0 if i < 47 else 1) for i in range(50)}
+constant_col = {f"p{i}": 0 for i in range(50)}          # always "truth"
+real_col = {f"p{i}": (0 if i < 47 else 1) for i in range(50)}  # actually tracks
+skew = calibrate.elect(skewed_owner, {"constant": constant_col}, bar=0.65)
+check("constant column cannot be elected despite 94% raw agreement",
+      skew["halt"] is True and skew["metric"] is None,
+      str({k: skew.get(k) for k in ('metric', 'halt')}))
+check("constant column's inflation is visible in the ranking",
+      skew["ranked"][0]["accuracy"] > 0.9 and skew["ranked"][0]["kappa"] == 0.0,
+      str(skew["ranked"][0]))
+skill = calibrate.elect(skewed_owner, {"real": real_col, "constant": constant_col},
+                        bar=0.65)
+check("a genuinely discriminating column still wins on skewed labels",
+      skill["metric"] == "real" and skill["halt"] is False, str(skill.get("metric")))
+check("baseline (majority-class) is reported so inflation is legible",
+      abs(skill["baseline"] - 0.94) < 1e-9, str(skill.get("baseline")))
+
 elected = calibrate.elect(owner, columns, bar=0.65)
 check("election: best column above the bar wins",
       elected["metric"] == "judge_win" and close(elected["agreement"], 0.75),

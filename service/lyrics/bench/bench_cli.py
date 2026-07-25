@@ -134,7 +134,8 @@ def cmd_run(args) -> int:
         keep = set(args.granularity.split(","))
         items = [i for i in items if i["granularity"] in keep]
     items = sampling.balanced(items, limit=args.limit,
-                              key=lambda i: i["granularity"])
+                              key=lambda i: i["granularity"],
+                              spread=lambda i: i["songId"])
 
     needs_api = args.arm in API_ARMS or (args.arm == "product-llm"
                                          and args.product_backend == "llm")
@@ -211,7 +212,8 @@ def cmd_judge(args) -> int:
         set(judge.JUDGED_GRANULARITIES)
     todo = [r for r in rows if r["granularity"] in keep and r.get("candidates")]
     todo = sampling.balanced(todo, limit=args.limit,
-                             key=lambda r: r["granularity"])
+                             key=lambda r: r["granularity"],
+                             spread=lambda r: r["itemId"].rsplit(":", 2)[0])
     if not todo:
         print("nothing to judge (no candidates in the judged granularities)")
         return 0

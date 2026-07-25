@@ -58,6 +58,33 @@ check("balanced: limit 0 means no cap",
       == len(ROWS))
 check("balanced: deterministic",
       sampling.balanced(ROWS, limit=12, key=lambda r: r["granularity"]) == got)
+
+# ---- song diversity: the bug that invalidated calibration sitting 1 ----------
+# itemIds embed the songId, so sorting by itemId and taking a prefix drew every
+# pair from ONE song (and, because Genius ids run roughly chronological, the
+# OLDEST one). Sampling must deal across songs, not slice one.
+MANY = [{"itemId": f"v1:line:gd:{song:04}:s0:l{i}", "granularity": "line",
+         "songId": f"gd:{song:04}"}
+        for song in range(30) for i in range(20)]
+spread = sampling.balanced(MANY, limit=20, key=lambda r: r["granularity"],
+                           spread=lambda r: r["songId"])
+songs = {r["songId"] for r in spread}
+check("balanced: 20 picks come from 20 distinct songs, not one",
+      len(songs) == 20, f"{len(songs)} distinct songs")
+check("balanced: no song contributes twice before every song contributed once",
+      max(sum(1 for r in spread if r["songId"] == s) for s in songs) == 1)
+wide = sampling.balanced(MANY, limit=60, key=lambda r: r["granularity"],
+                         spread=lambda r: r["songId"])
+per = [sum(1 for r in wide if r["songId"] == s) for s in {r["songId"] for r in wide}]
+check("balanced: past one round it stays even across songs",
+      max(per) - min(per) <= 1, str(sorted(per)[-4:]))
+check("balanced: song spreading is deterministic",
+      sampling.balanced(MANY, limit=20, key=lambda r: r["granularity"],
+                        spread=lambda r: r["songId"]) == spread)
+check("balanced: spread also avoids the oldest-id prefix (ids are chronological)",
+      len({r["songId"] for r in spread} & {f"gd:{s:04}" for s in range(20, 30)}) >= 4,
+      "recent-id songs represented: "
+      f"{sorted({r['songId'] for r in spread} & {f'gd:{s:04}' for s in range(20, 30)})}")
 check("balanced: output stays itemId-sorted for stable run manifests",
       [r["itemId"] for r in got] == sorted(r["itemId"] for r in got))
 
