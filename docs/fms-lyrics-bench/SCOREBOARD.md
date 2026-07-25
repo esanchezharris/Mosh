@@ -6,44 +6,44 @@
 
 | arm | slice | n | exact | topk | syl_fit | rhyme_fit | rhyme_perfect | constrained_fit | empty | run |
 |---|---|---|---|---|---|---|---|---|---|---|
-| freq-floor | dev | 2000 | 0.1 | 0.1 | 49.0 | — | — | 49.0 | 0 | 2026-07-25T01-16-50-freq-floor-dev |
-| llm-constrained | dev | 37 | 10.8 | 16.2 | 62.2 | — | — | 62.2 | 0 | 2026-07-25T01-49-03-llm-constrained-dev |
-| llm-zeroshot | dev | 37 | 5.4 | 16.2 | 32.4 | — | — | 32.4 | 0 | 2026-07-25T01-45-40-llm-zeroshot-dev |
-| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T01-16-42-oracle-dev |
-| product-llm | dev | 500 | 0.0 | 0.2 | 92.8 | — | — | 92.8 | 0 | 2026-07-25T02-17-21-product-llm-dev |
-| product-llm | dev | 15 | 6.7 | 6.7 | 40.0 | — | — | 40.0 | 0 | 2026-07-25T02-36-15-product-llm-dev |
+| freq-floor | dev | 2000 | 0.1 | 0.1 | 49.0 | — | — | 49.0 | 0 | 2026-07-25T03-23-40-freq-floor-dev |
+| llm-constrained | dev | 37 | 10.8 | 16.2 | 62.2 | — | — | 62.2 | 0 | 2026-07-25T03-31-54-llm-constrained-dev |
+| llm-zeroshot | dev | 37 | 5.4 | 16.2 | 32.4 | — | — | 32.4 | 0 | 2026-07-25T03-31-48-llm-zeroshot-dev |
+| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T03-23-31-oracle-dev |
+| product-llm | dev | 500 | 0.0 | 0.2 | 92.8 | — | — | 92.8 | 0 | 2026-07-25T03-31-41-product-llm-dev |
+| product-llm | dev | 15 | 6.7 | 6.7 | 40.0 | — | — | 40.0 | 0 | 2026-07-25T03-32-01-product-llm-dev |
 
 ## rhyme
 
 | arm | slice | n | exact | topk | syl_fit | rhyme_fit | rhyme_perfect | constrained_fit | empty | run |
 |---|---|---|---|---|---|---|---|---|---|---|
-| freq-floor | dev | 2000 | 0.0 | 0.0 | 73.5 | 8.2 | 0.0 | 6.1 | 0 | 2026-07-25T01-16-50-freq-floor-dev |
-| llm-constrained | dev | 38 | 47.4 | 55.3 | 92.1 | 91.7 | 50.0 | 84.2 | 0 | 2026-07-25T01-49-03-llm-constrained-dev |
-| llm-zeroshot | dev | 38 | 28.9 | 36.8 | 44.7 | 55.6 | 27.8 | 39.5 | 0 | 2026-07-25T01-45-40-llm-zeroshot-dev |
-| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | 100.0 | 40.1 | 100.0 | 0 | 2026-07-25T01-16-42-oracle-dev |
-| product-llm | dev | 500 | 1.0 | 1.8 | 90.8 | 99.8 | 71.8 | 90.6 | 0 | 2026-07-25T02-17-21-product-llm-dev |
-| product-llm | dev | 15 | 20.0 | 26.7 | 33.3 | 100.0 | 71.4 | 33.3 | 0 | 2026-07-25T02-36-15-product-llm-dev |
+| freq-floor | dev | 2000 | 0.0 | 0.0 | 73.5 | 8.2 | 0.0 | 6.1 | 0 | 2026-07-25T03-23-40-freq-floor-dev |
+| llm-constrained | dev | 38 | 47.4 | 55.3 | 92.1 | 91.7 | 50.0 | 84.2 | 0 | 2026-07-25T03-31-54-llm-constrained-dev |
+| llm-zeroshot | dev | 38 | 28.9 | 36.8 | 44.7 | 55.6 | 27.8 | 39.5 | 0 | 2026-07-25T03-31-48-llm-zeroshot-dev |
+| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | 100.0 | 40.1 | 100.0 | 0 | 2026-07-25T03-23-31-oracle-dev |
+| product-llm | dev | 500 | 1.0 | 1.8 | 90.8 | 99.8 | 71.8 | 90.6 | 0 | 2026-07-25T03-31-41-product-llm-dev |
+| product-llm | dev | 15 | 20.0 | 26.7 | 33.3 | 100.0 | 71.4 | 33.3 | 0 | 2026-07-25T03-32-01-product-llm-dev |
 
 ## span
 
 | arm | slice | n | exact | topk | syl_fit | rhyme_fit | rhyme_perfect | constrained_fit | empty | run |
 |---|---|---|---|---|---|---|---|---|---|---|
-| freq-floor | dev | 2000 | 0.0 | 0.0 | 83.2 | — | — | 83.2 | 0 | 2026-07-25T01-16-50-freq-floor-dev |
-| llm-constrained | dev | 37 | 2.7 | 2.7 | 89.2 | — | — | 89.2 | 0 | 2026-07-25T01-49-03-llm-constrained-dev |
-| llm-zeroshot | dev | 37 | 0.0 | 0.0 | 48.6 | — | — | 48.6 | 0 | 2026-07-25T01-45-40-llm-zeroshot-dev |
-| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T01-16-42-oracle-dev |
-| product-llm | dev | 500 | 0.0 | 0.0 | 96.8 | — | — | 96.8 | 0 | 2026-07-25T02-17-21-product-llm-dev |
-| product-llm | dev | 15 | 0.0 | 0.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T02-36-15-product-llm-dev |
+| freq-floor | dev | 2000 | 0.0 | 0.0 | 83.2 | — | — | 83.2 | 0 | 2026-07-25T03-23-40-freq-floor-dev |
+| llm-constrained | dev | 37 | 2.7 | 2.7 | 89.2 | — | — | 89.2 | 0 | 2026-07-25T03-31-54-llm-constrained-dev |
+| llm-zeroshot | dev | 37 | 0.0 | 0.0 | 48.6 | — | — | 48.6 | 0 | 2026-07-25T03-31-48-llm-zeroshot-dev |
+| oracle | dev | 2000 | 100.0 | 100.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T03-23-31-oracle-dev |
+| product-llm | dev | 500 | 0.0 | 0.0 | 96.8 | — | — | 96.8 | 0 | 2026-07-25T03-31-41-product-llm-dev |
+| product-llm | dev | 15 | 0.0 | 0.0 | 100.0 | — | — | 100.0 | 0 | 2026-07-25T03-32-01-product-llm-dev |
 
 ## line
 
 | arm | slice | n | exact | topk | syl_fit | rhyme_fit | rhyme_perfect | constrained_fit | empty | run |
 |---|---|---|---|---|---|---|---|---|---|---|
-| freq-floor | dev | 2000 | — | — | 39.8 | 56.2 | 40.0 | 30.3 | 0 | 2026-07-25T01-16-50-freq-floor-dev |
-| llm-constrained | dev | 38 | — | — | 68.4 | 95.7 | 47.8 | 65.8 | 0 | 2026-07-25T01-49-03-llm-constrained-dev |
-| llm-zeroshot | dev | 38 | — | — | 31.6 | 37.5 | 12.5 | 18.4 | 0 | 2026-07-25T01-45-40-llm-zeroshot-dev |
-| oracle | dev | 2000 | — | — | 100.0 | 100.0 | 42.1 | 100.0 | 0 | 2026-07-25T01-16-42-oracle-dev |
-| product-llm | dev | 500 | — | — | 100.0 | 100.0 | 64.1 | 100.0 | 0 | 2026-07-25T02-17-21-product-llm-dev |
-| product-llm | dev | 15 | — | — | 100.0 | 100.0 | 88.9 | 100.0 | 0 | 2026-07-25T02-36-15-product-llm-dev |
+| freq-floor | dev | 2000 | — | — | 39.8 | 56.2 | 40.0 | 30.3 | 0 | 2026-07-25T03-23-40-freq-floor-dev |
+| llm-constrained | dev | 38 | — | — | 68.4 | 95.7 | 47.8 | 65.8 | 0 | 2026-07-25T03-31-54-llm-constrained-dev |
+| llm-zeroshot | dev | 38 | — | — | 31.6 | 37.5 | 12.5 | 18.4 | 0 | 2026-07-25T03-31-48-llm-zeroshot-dev |
+| oracle | dev | 2000 | — | — | 100.0 | 100.0 | 42.1 | 100.0 | 0 | 2026-07-25T03-23-31-oracle-dev |
+| product-llm | dev | 500 | — | — | 100.0 | 100.0 | 64.1 | 100.0 | 0 | 2026-07-25T03-31-41-product-llm-dev |
+| product-llm | dev | 15 | — | — | 100.0 | 100.0 | 88.9 | 100.0 | 0 | 2026-07-25T03-32-01-product-llm-dev |
 
 *Values are percentages of items (multi_depth excluded from the table; see per-run summaries). Regenerated by `bench_cli.py scoreboard` — do not hand-edit.*

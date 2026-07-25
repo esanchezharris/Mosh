@@ -58,12 +58,13 @@ numbers and hashes only.
 
 ## Owner runbook (current asks)
 
-1. **Golden spec** — copy
-   `service/lyrics/bench/fixtures/golden_spec.example.json` to
-   `~/Library/Mosh/lyrics-bench/golden_spec.json`, list the artists/songs whose
-   pen defines "known-good" for you (plus own sources), then rerun
-   `python3 service/lyrics/bench/bench_cli.py build-eval`.
-2. **Own catalog** — drop full song texts as `.txt` files into
+1. ~~Golden spec~~ **DONE 2026-07-24** — owner declared the taste anchor in the
+   plan thread: **Ken Carson, Young Thug, Playboi Carti, Future, Drake** (Drake
+   swapped in for SLAYR, absent from the dump). Their songs stand in for "my
+   songs" until the real catalog lands. **Ken Carson has ZERO songs in the
+   2022-era Genius dump** — his anchor activates only via the inbox lane or a
+   newer corpus source.
+2. **Own catalog** (still open) — drop full song texts as `.txt` files into
    `~/Library/Mosh/lyrics-bench/inbox/` and run `bench_cli.py ingest own`
    (style_corpus.jsonl is nearly empty, so the inbox is the real lane).
 3. **Calibration sitting 1** (~45 min) — arrives with I2.
@@ -78,3 +79,18 @@ numbers and hashes only.
   4 masking policies + frozen item golden, dedup/salted splits with the
   golden-leak quarantine, deterministic metrics, replay-deterministic runner,
   bracket + baseline arms. First dev baselines on the scoreboard.
+- **2026-07-24** — Adversarial review (18-agent find→verify): 14 confirmed, 0
+  refuted, all fixed pre-PR. Blocker: product-llm fill extraction was dead code
+  → first product word/rhyme/span baselines invalidated, runs sidelined to
+  `runs/_invalid/`, dev re-measured on arm v2.
+- **2026-07-24** — GOLDEN SET LIVE: owner taste anchor = Ken Carson, Young Thug,
+  Playboi Carti, Future, Drake (Drake replaced SLAYR — absent from the dump).
+  Targeted full-dataset pull → 2,288 taste songs (93 credit variants; collab
+  matcher added so "Future & Young Thug"-style credits can never train). Split:
+  golden 2,286 songs / 301,876 items · train 17,947 · dev 1,939 · quarantined 7
+  · dropped 5; `ken carson` loudly unmatched (zero songs in the 2022 dump).
+  Pre-rebuild dev runs sidelined to `runs/_pre-golden/`; dev baselines
+  re-measured on the rebuilt split. NO golden reads before the I2 bar freeze.
+  Note for I3 (style-RAG): taste-artist songs are ALL golden, so "voice"
+  exemplars must come from golden songs excluded from the current item's song —
+  or the inbox catalog — never via retrieval over train (they aren't there).
