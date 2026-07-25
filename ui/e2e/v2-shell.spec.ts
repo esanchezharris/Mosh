@@ -598,3 +598,29 @@ test("the timeline zoom segmented control is grouped with an accessible name (a1
   // role=group pattern the lyric proposals panel already uses).
   await expect(page.getByRole("group", { name: "Timeline zoom" })).toBeVisible();
 });
+
+// TRK-KIND flip-up — the add-track row sits at the END of the lane list, so on a full
+// session it lands at the bottom of the window. The menu opened downward unconditionally,
+// which pushed "Instrument" off-screen entirely (found by driving the real app with 8
+// tracks — the 3-track browser fixture always had room below). The panel must flip above
+// the trigger when there is no room beneath it, and every item must stay on-screen.
+test("the add-track menu flips above the trigger when it would run off-screen", async ({ page }) => {
+  await bootV2(page);
+  // A short viewport puts the trailing add-track row hard against the bottom edge.
+  await page.setViewportSize({ width: 1280, height: 420 });
+  await page.getByTestId("v2-track-add").click();
+
+  const panel = page.locator(".v2-menu-panel-fixed");
+  await expect(panel).toBeVisible();
+  const box = await panel.boundingBox();
+  const vh = page.viewportSize()!.height;
+  if (!box) throw new Error("no panel bounds");
+
+  // The whole panel — not just its top — must be within the viewport.
+  expect(box.y, "panel top is above the viewport").toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height, "panel bottom runs off-screen").toBeLessThanOrEqual(vh);
+
+  // and the last item is genuinely clickable, which is what actually broke
+  await page.getByTestId("v2-track-add-midi").click();
+  await expect(page.getByTestId("v2-track-add-midi")).toHaveCount(0);
+});

@@ -387,8 +387,10 @@
 
 /* Fixed-position variant: the panel is placed against the trigger's client rect (see
    AddTrackMenu) so it escapes the timeline's overflow clipping. `right: auto` undoes the
-   base panel's right-anchoring; `top`/`left` come from the inline style. */
-.v2-menu-panel-fixed { position: fixed; right: auto; }
+   base panel's right-anchoring; `top: auto` is REQUIRED — the base rule sets
+   `top: calc(100% + 8px)`, which would otherwise win when the panel flips upward and
+   supplies `bottom` instead of `top`. Both come from the inline style. */
+.v2-menu-panel-fixed { position: fixed; right: auto; top: auto; }
 
 /* Rich menu rows: an icon plus a label over a hint, rather than a single label line. */
 .v2-menu-rich button { justify-content: flex-start; gap: 10px; padding: 8px; }

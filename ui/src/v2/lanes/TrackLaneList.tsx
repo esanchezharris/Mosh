@@ -216,7 +216,7 @@ export async function addTrackOfKind(
 // the sticky-left column.)
 function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useEscapeToClose(open, close);
@@ -224,7 +224,19 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
 
   const toggle = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setAt({ top: r.bottom + 8, left: r.left });
+    if (r) {
+      // Flip up when there isn't room below. The trailing add-track row sits at the END of
+      // the lane list, so on a full session it lands at the bottom of the window and a
+      // downward panel runs off-screen — with 8 tracks, "Instrument" was entirely
+      // unreachable. Anchoring the panel's BOTTOM above the trigger (rather than its top
+      // below it) makes the flip independent of the panel's own height, so the estimate
+      // below only picks a direction and never has to be exact.
+      const kEstimatedPanelH = 200;
+      const roomBelow = window.innerHeight - r.bottom;
+      setAt(roomBelow >= kEstimatedPanelH
+        ? { left: r.left, top: r.bottom + 8 }
+        : { left: r.left, bottom: window.innerHeight - r.top + 8 });
+    }
     setOpen((o) => !o);
   }, []);
 
@@ -250,7 +262,7 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
       {open && at && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={close} />
-          <div className="v2-menu-panel v2-menu-panel-fixed" style={{ top: at.top, left: at.left }}>
+          <div className="v2-menu-panel v2-menu-panel-fixed" style={{ top: at.top, bottom: at.bottom, left: at.left }}>
             <div className="v2-menu v2-menu-rich" role="menu" aria-label="Add track">
               {TRACK_KINDS.map(({ kind, label, hint }) => (
                 <button
