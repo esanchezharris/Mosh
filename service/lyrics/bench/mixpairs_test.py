@@ -129,6 +129,31 @@ check("unknown song degrades to empty context rather than raising",
       mixpairs.stanza_context("v1:line:gd:999:s0:l0", songs) == {"before": [],
                                                                  "after": []})
 
+# ---- disagreement weighting: the audit's efficiency finding --------------------
+# Measured on the real sitting: 54% of pairs had every metric agreeing, so the
+# label only re-confirmed the base rate. Pairs where the columns DISAGREE are
+# the ones that separate one judge from another.
+COLS = {"judge_win": {}, "emb": {}}
+for n, it in enumerate(sorted({r["itemId"] for r in POOL})):
+    COLS["judge_win"][it] = 1
+    COLS["emb"][it] = 1 if n % 4 == 0 else 0        # disagrees on 1 in 4
+ranked = mixpairs.rank_by_disagreement(sorted({r["itemId"] for r in POOL}), COLS)
+# judge_win is 1 everywhere, so the DISAGREEING items are the emb==0 ones.
+check("items where the metrics disagree rank first",
+      all(COLS["emb"][i] == 0 for i in ranked[:3])
+      and COLS["emb"][ranked[-1]] == 1, str(ranked[:3]))
+check("ranking is total and deterministic",
+      len(ranked) == len({r["itemId"] for r in POOL})
+      and ranked == mixpairs.rank_by_disagreement(
+          sorted({r["itemId"] for r in POOL}), COLS))
+picked, key_d = mixpairs.mint_mixed(POOL, n=6, dupes=0, seed=3, arm_frac=0.5,
+                                    columns=COLS, anchor_frac=0.34)
+kinds = [v.get("selection") for v in key_d.values()]
+check("a random ANCHOR stratum is kept so absolute accuracy stays unbiased",
+      "anchor" in kinds and "disagreement" in kinds, str(kinds))
+check("most of the budget goes to discriminating pairs",
+      kinds.count("disagreement") > kinds.count("anchor"), str(kinds))
+
 check("determinism: 3x identical mint",
       all(mixpairs.mint_mixed(POOL, n=12, dupes=0, seed=7, arm_frac=0.5)[0] == pairs
           for _ in range(3)))

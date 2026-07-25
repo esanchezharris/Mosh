@@ -332,9 +332,25 @@ def cmd_calibrate(args) -> int:
             for r in missing:
                 r["maskedLine"] = lookup.get(r["itemId"])
         songs = {s["songId"]: s for s in _load_corpus()} if args.stanza else None
+        # Disagreement weighting: most of the sitting buys discrimination, a
+        # random anchor stratum keeps absolute accuracy unbiased.
+        stamp0 = {r["itemId"] + "|" + r["arm"]: r["metrics"] for r in pool}
+        item_cols = {}
+        for col in ("judge_win", "emb", "ppl"):
+            vals = {}
+            for r in pool:
+                v = r["metrics"].get(col)
+                if v is None:
+                    continue
+                vals[r["itemId"]] = (int(v) if col == "judge_win"
+                                     else (1 if (v < 0 if col == "ppl"
+                                                 else v > 0.98) else 0))
+            if vals:
+                item_cols[col] = vals
         pairs, key = mixpairs.mint_mixed(pool, n=args.n, dupes=args.dupes,
                                          seed=args.seed, arm_frac=args.arm_frac,
-                                         songs=songs)
+                                         songs=songs, columns=item_cols or None,
+                                         anchor_frac=args.anchor_frac)
         with open(pairs_path, "w", encoding="utf-8") as f:
             json.dump(pairs, f, ensure_ascii=False, indent=1)
         with open(key_path, "w", encoding="utf-8") as f:
@@ -502,6 +518,8 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--bar", type=float, default=0.65)
     p.add_argument("--resume", action="store_true", default=True)
+    p.add_argument("--anchor-frac", type=float, default=0.25,
+                   help="share kept as a RANDOM anchor stratum (unbiased accuracy)")
     p.add_argument("--arm-frac", type=float, default=0.5,
                    help="share of pairs that are arm-vs-arm (balanced labels)")
     p.add_argument("--stanza", action="store_true", default=True,

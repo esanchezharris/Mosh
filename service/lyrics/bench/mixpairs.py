@@ -52,6 +52,29 @@ def stanza_context(item_id: str, songs: Dict[str, dict], radius: int = 99) -> di
             "after": lines[li + 1:li + 1 + radius]}
 
 
+def rank_by_disagreement(item_ids: Sequence[str],
+                         columns: Dict[str, Dict[str, Optional[int]]]) -> List[str]:
+    """Items ordered by how much the metric columns disagree about them.
+
+    Measured on sitting 2's mint: 54% of pairs had every column agreeing, so the
+    owner's label there only re-confirmed the base rate. A label is only worth a
+    rater's time if it can separate one judge from another — which requires the
+    judges to have said different things. Ties break on itemId for stability.
+    """
+    scored = []
+    for item in item_ids:
+        vals = [c.get(item) for c in columns.values()]
+        live = [v for v in vals if v is not None]
+        if len(live) < 2:
+            spread = 0.0
+        else:
+            ones = sum(1 for v in live if v)
+            spread = min(ones, len(live) - ones) / (len(live) / 2)
+        scored.append((-spread, item))
+    scored.sort()
+    return [i for _, i in scored]
+
+
 def _pair_id(seed: int, kind: str, item_id: str, tag: str) -> str:
     return hashlib.sha256(
         f"{seed}|{kind}|{item_id}|{tag}".encode("utf-8")).hexdigest()[:16]
@@ -60,7 +83,9 @@ def _pair_id(seed: int, kind: str, item_id: str, tag: str) -> str:
 def mint_mixed(pool: Sequence[dict], *, n: int, dupes: int = 0, seed: int = 0,
                arm_frac: float = 0.5,
                songs: Optional[Dict[str, dict]] = None,
-               radius: int = 99) -> Tuple[List[dict], Dict[str, dict]]:
+               radius: int = 99,
+               columns: Optional[Dict[str, Dict[str, Optional[int]]]] = None,
+               anchor_frac: float = 0.25) -> Tuple[List[dict], Dict[str, dict]]:
     """Mint `n` blind pairs, `arm_frac` of them arm-vs-arm.
 
     `pool` rows are per (item, arm) with `truth`, `candidate` and `metrics`.
@@ -76,6 +101,18 @@ def mint_mixed(pool: Sequence[dict], *, n: int, dupes: int = 0, seed: int = 0,
     # Deal across items in hashed order — never id order, which tracks era.
     items = sorted(by_item, key=lambda i: hashlib.blake2b(
         i.encode("utf-8"), digest_size=8).digest())
+    selection = {i: "random" for i in items}
+    if columns:
+        # Most of the budget buys discrimination; an ANCHOR stratum stays
+        # randomly drawn, because accuracy measured only on disagreement pairs
+        # is a biased estimate of accuracy on the population.
+        n_anchor = max(1, int(round(n * anchor_frac)))
+        anchors = items[:n_anchor]
+        rest = [i for i in items if i not in set(anchors)]
+        ordered = rank_by_disagreement(rest, columns)
+        items = anchors + ordered
+        selection = {**{i: "anchor" for i in anchors},
+                     **{i: "disagreement" for i in ordered}}
     multi = [i for i in items if len(by_item[i]) >= 2]
 
     want_arm = min(int(round(n * arm_frac)), len(multi))
@@ -114,7 +151,8 @@ def mint_mixed(pool: Sequence[dict], *, n: int, dupes: int = 0, seed: int = 0,
              {"kind": "vs_arm", "itemId": item_id, "granularity": a["granularity"],
               "armLeft": left_row["arm"], "armRight": right_row["arm"],
               "optionArm": min(a["arm"], b["arm"]),
-              "arms": [a["arm"], b["arm"]]})
+              "arms": [a["arm"], b["arm"]],
+              "selection": selection.get(item_id, "random")})
         used_arm.add(item_id)
 
     truth_slots = [i for i in items if i not in used_arm][:want_truth]
@@ -129,7 +167,8 @@ def mint_mixed(pool: Sequence[dict], *, n: int, dupes: int = 0, seed: int = 0,
              {"kind": "vs_truth", "itemId": item_id,
               "granularity": row["granularity"], "arm": row["arm"],
               "truthSide": "left" if truth_left else "right",
-              "truthText": truth_text})
+              "truthText": truth_text,
+              "selection": selection.get(item_id, "random")})
 
     if dupes and pairs:
         seen: Dict[str, dict] = {}
