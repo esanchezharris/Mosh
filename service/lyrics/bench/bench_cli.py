@@ -26,8 +26,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SERVICE)
 
-from lyrics.bench import (arms, build_eval, ingest, llm_cache, mask,  # noqa: E402
-                          paths, runner, scoreboard)
+from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
+                          ingest, judge, llm_cache, mask, metrics, paths,
+                          runner, scoreboard, torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
 SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.md")
@@ -186,6 +187,211 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _judge_rows_path(slice_: str) -> str:
+    return os.path.join(paths.subdir("judged"), f"judged-{slice_}.jsonl")
+
+
+def _load_run_rows(run_dir: str) -> list:
+    rows = []
+    for p in sorted(glob.glob(os.path.join(run_dir, "results-*.jsonl"))):
+        with open(p, encoding="utf-8") as f:
+            rows += [json.loads(ln) for ln in f if ln.strip()]
+    return rows
+
+
+def cmd_judge(args) -> int:
+    """Score one run's candidates against the held-out truth: LLM blind A/B panel
+    plus the torch-backed emb / ppl columns. Judged granularities only."""
+    items_path = os.path.join(paths.data_root(), "eval", f"items-{args.slice}.jsonl")
+    if not os.path.exists(items_path):
+        print(f"no {items_path} — run build-eval first", file=sys.stderr)
+        return 2
+    items = {}
+    with open(items_path, encoding="utf-8") as f:
+        for ln in f:
+            if ln.strip():
+                it = json.loads(ln)
+                items[it["itemId"]] = it
+
+    run_dir = args.run if os.path.isabs(args.run) else os.path.join(
+        paths.data_root(), "runs", args.run)
+    rows = _load_run_rows(run_dir)
+    if not rows:
+        print(f"no results in {run_dir}", file=sys.stderr)
+        return 2
+
+    keep = set(args.granularity.split(",")) if args.granularity != "all" else \
+        set(judge.JUDGED_GRANULARITIES)
+    todo = [r for r in rows if r["granularity"] in keep and r.get("candidates")]
+    todo.sort(key=lambda r: r["itemId"])
+    if args.limit:
+        todo = todo[:args.limit]
+    if not todo:
+        print("nothing to judge (no candidates in the judged granularities)")
+        return 0
+
+    if not args.yes and len(todo) > args.confirm_over:
+        print(f"refusing: judging {len(todo)} items x {len(judge.LENSES)} lenses x 2 "
+              f"orders = {len(todo) * len(judge.LENSES) * 2} calls — pass --limit "
+              f"or --yes", file=sys.stderr)
+        return 2
+
+    import brain_client
+    cache = llm_cache.Cache(paths.subdir("cache", "llm"))
+    chat = brain_client.chat_json if brain_client.available() else None
+    if chat is None:
+        print("! no brain provider — LLM panel skipped (emb/ppl still run)")
+
+    pairs = [(items[r["itemId"]], r["candidates"][0]) for r in todo
+             if r["itemId"] in items]
+    emb = torchjudge.score_pairs(pairs, kind="emb", cache=cache)
+    ppl = torchjudge.score_pairs(pairs, kind="ppl", cache=cache)
+    print(f"emb: {emb['status']} {emb.get('error') or ''}")
+    print(f"ppl: {ppl['status']} {ppl.get('error') or ''}")
+
+    out_rows = []
+    for n, r in enumerate(todo):
+        item = items.get(r["itemId"])
+        if item is None:
+            continue
+        cand = r["candidates"][0]
+        verdict = (judge.judge_pair(item, cand, chat=chat, cache=cache)
+                   if chat else {"win": None, "byLens": {}})
+        out_rows.append({
+            "itemId": r["itemId"], "granularity": r["granularity"],
+            "arm": os.path.basename(run_dir).split("-", 3)[-1].rsplit("-", 1)[0],
+            "run": os.path.basename(run_dir),
+            "candidate": cand, "truth": item["target"]["text"],
+            "context": {"before": item["context"]["before"],
+                        "after": item["context"]["after"]},
+            "metrics": {"judge_win": verdict["win"],
+                        "emb": emb["scores"][n] if emb["status"] == "ok" else None,
+                        "ppl": ppl["scores"][n] if ppl["status"] == "ok" else None,
+                        **{f"lens_{k}": (1 if v["verdict"] == "candidate" else
+                                         0 if v["verdict"] == "truth" else None)
+                           for k, v in verdict["byLens"].items()}},
+        })
+
+    path = _judge_rows_path(args.slice)
+    with open(path, "a", encoding="utf-8") as f:
+        for row in out_rows:
+            f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    wins = [r["metrics"]["judge_win"] for r in out_rows
+            if r["metrics"]["judge_win"] is not None]
+    print(json.dumps({"judged": len(out_rows), "separated": len(wins),
+                      "candidateWinRate": (sum(wins) / len(wins)) if wins else None,
+                      "out": path, "cache": dict(cache.stats)}, indent=1))
+    return 0
+
+
+def cmd_calibrate(args) -> int:
+    cal_dir = paths.subdir("calibration")
+    pairs_path = os.path.join(cal_dir, "pairs.json")
+    key_path = os.path.join(cal_dir, "blind-key.json")
+    ratings_path = os.path.join(cal_dir, "ratings.jsonl")
+
+    if args.action == "make":
+        rows = []
+        for slice_ in ("dev",):
+            p = _judge_rows_path(slice_)
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    rows += [json.loads(ln) for ln in f if ln.strip()]
+        if not rows:
+            print("no judged rows — run `judge` first", file=sys.stderr)
+            return 2
+        # Dedupe (itemId, arm): a re-judged row must not double its odds.
+        uniq = {}
+        for r in rows:
+            uniq[(r["itemId"], r["arm"])] = r
+        pool = sorted(uniq.values(), key=lambda r: (r["arm"], r["itemId"]))
+        pairs, key = calibrate.mint_pairs(pool, n=args.n, dupes=args.dupes,
+                                          seed=args.seed)
+        with open(pairs_path, "w", encoding="utf-8") as f:
+            json.dump(pairs, f, ensure_ascii=False, indent=1)
+        with open(key_path, "w", encoding="utf-8") as f:
+            json.dump(key, f, ensure_ascii=False, indent=1)
+        os.chmod(key_path, 0o600)
+        # The machine's opinion is stamped BEFORE the owner rates (prequential).
+        stamp = {r["itemId"] + "|" + r["arm"]: r["metrics"] for r in pool}
+        with open(os.path.join(cal_dir, "machine_scores.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(stamp, f, indent=1, sort_keys=True)
+        cells = {}
+        for p in pairs:
+            cells[f"{p['arm']}/{p['granularity']}"] = \
+                cells.get(f"{p['arm']}/{p['granularity']}", 0) + 1
+        print(json.dumps({"pairs": len(pairs), "distinct": len(key),
+                          "cells": cells, "pairsPath": pairs_path}, indent=1))
+        return 0
+
+    if args.action == "serve":
+        if not os.path.exists(pairs_path):
+            print("no pairs — run `calibrate make` first", file=sys.stderr)
+            return 2
+        with open(pairs_path, encoding="utf-8") as f:
+            pairs = json.load(f)
+        done = {r["pairId"] for r in calibrate_page.load_ratings(ratings_path)}
+        todo = [p for p in pairs if p["pairId"] not in done] if args.resume else pairs
+        if not todo:
+            print("every pair already rated — nothing to serve")
+            return 0
+        calibrate_page.serve(todo, ratings_path, port=args.port,
+                             title="Mosh — blind bar calibration")
+        return 0
+
+    # report
+    if not os.path.exists(key_path):
+        print("no blind key — run `calibrate make` first", file=sys.stderr)
+        return 2
+    with open(key_path, encoding="utf-8") as f:
+        key = json.load(f)
+    with open(os.path.join(cal_dir, "machine_scores.json"), encoding="utf-8") as f:
+        machine = json.load(f)
+    ratings = calibrate_page.load_ratings(ratings_path)
+    if not ratings:
+        print("no ratings yet — run `calibrate serve` and do the sitting",
+              file=sys.stderr)
+        return 2
+    owner = calibrate.owner_labels(ratings, key)
+
+    by_gran = {}
+    for gran in sorted({v["granularity"] for v in key.values()}):
+        pids = [p for p, v in key.items() if v["granularity"] == gran]
+        sub_owner = {p: owner.get(p) for p in pids}
+        columns = {}
+        for col in ("judge_win", "emb", "ppl"):
+            vals = {}
+            for p in pids:
+                m = machine.get(key[p]["itemId"] + "|" + key[p]["arm"], {})
+                v = m.get(col)
+                if v is None:
+                    continue
+                # Continuous columns become a preference: does the metric rank
+                # the candidate above the truth? emb/ppl are measured AGAINST
+                # the truth, so their sign is the vote.
+                vals[p] = int(v) if col == "judge_win" else (
+                    1 if (v > 0.98 if col == "emb" else v < 0) else 0)
+            if vals:
+                columns[col] = vals
+        by_gran[gran] = calibrate.elect(sub_owner, columns, bar=args.bar)
+
+    trusted = {g: {"metric": e["metric"], "agreement": e["agreement"]}
+               for g, e in by_gran.items() if not e["halt"]}
+    with open(os.path.join(cal_dir, "TRUSTED_METRICS.json"), "w",
+              encoding="utf-8") as f:
+        json.dump({"asOf": _dt.datetime.now(_dt.timezone.utc).date().isoformat(),
+                   "labels": len([v for v in owner.values() if v is not None]),
+                   "bar": args.bar, **trusted}, f, indent=1, sort_keys=True)
+    md = calibrate.render_report(by_gran, {
+        "labels": len([v for v in owner.values() if v is not None]),
+        "selfConsistency": calibrate.self_consistency(ratings), "bar": args.bar})
+    with open(os.path.join(cal_dir, "agreement.md"), "w", encoding="utf-8") as f:
+        f.write(md)
+    print(md)
+    return 0
+
+
 def cmd_scoreboard(_args) -> int:
     entries = []
     for summ_path in sorted(glob.glob(os.path.join(paths.data_root(), "runs", "*",
@@ -243,6 +449,25 @@ def main(argv=None) -> int:
     p.add_argument("--product-backend", default="llm", choices=["llm", "fake"])
     p.add_argument("--yes", action="store_true")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("judge")
+    p.add_argument("--run", required=True, help="run dir name under runs/")
+    p.add_argument("--slice", default="dev", choices=["dev", "golden", "train"])
+    p.add_argument("--granularity", default="all")
+    p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--confirm-over", type=int, default=120)
+    p.add_argument("--yes", action="store_true")
+    p.set_defaults(fn=cmd_judge)
+
+    p = sub.add_parser("calibrate")
+    p.add_argument("action", choices=["make", "serve", "report"])
+    p.add_argument("--n", type=int, default=64)
+    p.add_argument("--dupes", type=int, default=8)
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--bar", type=float, default=0.65)
+    p.add_argument("--resume", action="store_true", default=True)
+    p.set_defaults(fn=cmd_calibrate)
 
     p = sub.add_parser("scoreboard")
     p.set_defaults(fn=cmd_scoreboard)

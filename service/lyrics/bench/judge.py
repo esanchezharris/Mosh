@@ -44,6 +44,10 @@ LENSES: Dict[str, str] = {
               "generic line written by a machine?"),
 }
 
+# Single words and short spans are decided by exact-match + phonology, which are
+# free and exact; paying a panel to compare one word against another buys noise.
+JUDGED_GRANULARITIES = ("span", "line")
+
 _SYSTEM = ("You are judging two possible fills for a gap in a rap verse. "
            "Answer ONLY as JSON: {\"winner\": \"A\" | \"B\" | \"tie\", "
            "\"why\": \"<12 words>\"}. Explicit and slang language is normal "
