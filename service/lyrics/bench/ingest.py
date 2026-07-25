@@ -142,7 +142,9 @@ def pull_own() -> dict:
                     rec.get("text", ""))
         for src, lines in sorted(by_source.items()):
             raw = "\n".join(lines)
-            song = segment.make_song(song_id=f"own:{src}", source="own",
+            # "own:sc:" vs "own:inbox:" — a style_corpus source named like an
+            # inbox file stem must not mint two songs with one id.
+            song = segment.make_song(song_id=f"own:sc:{src}", source="own",
                                      artist="Owner", title=src, genre="rap",
                                      views=0, license_tier="train-ok", raw_text=raw)
             if sum(len(s["lines"]) for s in song["sections"]) >= 4:
@@ -155,7 +157,7 @@ def pull_own() -> dict:
             with open(os.path.join(inbox, name), encoding="utf-8") as f:
                 raw = f.read()
             stem = os.path.splitext(name)[0]
-            songs.append(segment.make_song(song_id=f"own:{stem}", source="own",
+            songs.append(segment.make_song(song_id=f"own:inbox:{stem}", source="own",
                                            artist="Owner", title=stem, genre="rap",
                                            views=0, license_tier="train-ok",
                                            raw_text=raw))

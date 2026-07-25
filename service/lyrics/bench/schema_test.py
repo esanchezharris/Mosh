@@ -71,11 +71,32 @@ def dropped(key):
     return m
 
 
-check("rejects: missing target", bool(schema.validate_item(dropped("target"))))
+# Mutation asserts name the SPECIFIC problem — bool(problems) alone would stay
+# green if the targeted validator were deleted but another check happened to
+# fire on the mutated item (review finding #10).
+check("rejects: missing target",
+      any("target" in p for p in schema.validate_item(dropped("target"))))
 check("rejects: unknown granularity",
-      bool(schema.validate_item(mutated(granularity="stanza"))))
-check("rejects: inverted tokenSpan", bool(schema.validate_item(
-    mutated(granularity="span", **{"target.tokenSpan": [3, 1]}))))
+      any("granularity" in p for p in
+          schema.validate_item(mutated(granularity="stanza"))))
+check("rejects: inverted tokenSpan",
+      any("tokenSpan" in p for p in schema.validate_item(
+          mutated(granularity="span", **{"target.tokenSpan": [3, 1]}))))
+
+# Substring matching would falsely reject 'old' visible inside 'hold' — the
+# visibility check must be token-based (review finding #5).
+tricky = copy.deepcopy(next(i for i in frozen if i["granularity"] == "word"))
+tricky["context"]["maskedLine"] = "hold the ____ down for the winter"
+tricky["target"] = {**tricky["target"], "text": "old", "tokenIndex": 2,
+                    "syllables": 1, "stress": "X",
+                    "phones": ["OW1", "L", "D"], "phonesSource": "lexicon"}
+check("accepts: target 'old' with 'hold' visible (token-based visibility)",
+      schema.validate_item(tricky) == [], str(schema.validate_item(tricky)))
+leak = copy.deepcopy(tricky)
+leak["context"]["maskedLine"] = "old habits ____ for the winter"
+check("rejects: target token actually visible in maskedLine",
+      any("visible" in p for p in schema.validate_item(leak)),
+      str(schema.validate_item(leak)))
 line_item = next(i for i in frozen if i["granularity"] == "line")
 check("rejects: line item with a maskedLine", bool(schema.validate_item(
     {**copy.deepcopy(line_item),

@@ -87,6 +87,17 @@ line_it = word_item(
 )
 check("apply_fill: line granularity returns the fill itself",
       metrics.apply_fill(line_it, "my candidate line") == "my candidate line")
+punct_span = word_item(
+    granularity="span",
+    context={"maskedLine": "kept the ____, ____ in the vault"},
+    target={"text": "cash counted", "tokenIndex": None, "tokenSpan": [2, 4],
+            "phones": None, "phonesSource": "none", "syllables": 3, "stress": ""},
+    constraints={"syllables": 3, "syllableTol": 1},
+)
+check("apply_fill: blank run spanning punctuation replaced as one region",
+      metrics.apply_fill(punct_span, "cash counted") ==
+      "kept the cash counted in the vault",
+      repr(metrics.apply_fill(punct_span, "cash counted")))
 
 # ---- syl_fit ----
 check("syl_fit: exact syllable target passes",

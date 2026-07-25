@@ -40,9 +40,16 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
     os.makedirs(out_dir, exist_ok=True)
     with open(results_path, "w", encoding="utf-8") as out:
         for item in items:
+            # Content hash in the key: an eval rebuild (bigger corpus, new salt)
+            # can re-mask the SAME itemId to a different target — itemId alone
+            # would replay stale candidates against the new truth.
+            content = json.dumps({k: item[k] for k in ("context", "target",
+                                                       "constraints")},
+                                 sort_keys=True, ensure_ascii=False)
             payload = {"armResult": arm_name, "version": version,
                        "itemId": item["itemId"], "k": ctx.k,
-                       "productBackend": ctx.product_backend}
+                       "productBackend": ctx.product_backend,
+                       "itemSha": hashlib.sha256(content.encode("utf-8")).hexdigest()}
             if ctx.cache is not None:
                 result = ctx.cache.cached_call(payload, lambda: arm(item, ctx))
             else:

@@ -66,8 +66,26 @@ def match_golden(songs: List[dict], spec: dict) -> Tuple[set, dict]:
 def assign_splits(songs: List[dict], golden_spec: dict, *, salt: str,
                   dev_frac: float = 0.1,
                   near_dup_threshold: float = NEAR_DUP_THRESHOLD) -> Tuple[Dict[str, str], dict]:
-    drops = dedup.exact_dup_drops(songs)
     golden_ids, unmatched = match_golden(songs, golden_spec)
+
+    # Goldenness UNIONS over exact-content groups BEFORE dedup: a re-scrape of a
+    # golden song under another id/artist string is the same lyrics, and letting
+    # the golden-blind lex-first keep-rule win routed verbatim golden content
+    # into train/dev while silently dropping the golden copy (review finding).
+    by_hash: Dict[str, List[str]] = {}
+    for s in songs:
+        by_hash.setdefault(s.get("hash", ""), []).append(s["songId"])
+    spec_matched = set(golden_ids)
+    for ids in by_hash.values():
+        if any(i in golden_ids for i in ids):
+            golden_ids.update(ids)
+    drops = set()
+    for ids in by_hash.values():
+        # Keep the spec-matched copy when the group is golden (interpretable
+        # golden set), else the lexicographically-first id — deterministic.
+        keep = sorted(ids, key=lambda i: (0 if i in spec_matched else 1, i))[0]
+        drops.update(i for i in ids if i != keep)
+
     golden_songs = [s for s in songs if s["songId"] in golden_ids
                     and s["songId"] not in drops]
     pool = dedup.build_pool_index(golden_songs)

@@ -66,14 +66,17 @@ with tempfile.TemporaryDirectory() as td:
           summ["arm"]["name"] == "oracle" and summ["arm"]["version"]
           and len(summ["itemsSha"]) == 64)
 
-    # determinism: 3x identical summaries — cache telemetry EXCLUDED on purpose
-    # (miss-vs-hit counts differing between first run and replay is the designed
-    # honesty signal, not nondeterminism)
+    # determinism: 3x identical summaries with a FRESH cache each run — a shared
+    # cache would let replay satisfy this even for a nondeterministic arm
+    # (review finding #9). Cache telemetry excluded (designed honesty signal).
     def scored(s):
         return {k: v for k, v in s.items() if k != "cache"}
-    s2 = runner.run_arm("oracle", DEV, ctx_with(cache_dir=td), out_dir=td)["summary"]
-    s3 = runner.run_arm("oracle", DEV, ctx_with(cache_dir=td), out_dir=td)["summary"]
-    check("oracle: 3x deterministic summary (ex cache telemetry)",
+    with tempfile.TemporaryDirectory() as td2, tempfile.TemporaryDirectory() as td3:
+        s2 = runner.run_arm("oracle", DEV, ctx_with(cache_dir=td2),
+                            out_dir=td2)["summary"]
+        s3 = runner.run_arm("oracle", DEV, ctx_with(cache_dir=td3),
+                            out_dir=td3)["summary"]
+    check("oracle: 3x deterministic summary (fresh cache per run)",
           scored(summ) == scored(s2) == scored(s3))
 
 # ---- bracket: floor below ceiling ----
@@ -133,16 +136,86 @@ with tempfile.TemporaryDirectory() as td:
               [t.lower() for t in mask.tokenize(SEEN[n])]
               for n, i in enumerate(rhyme_items)))
 
-# ---- product-llm arm drives the real shipped loop (fake backend, hermetic) ----
+# ---- cache must key on item CONTENT, not itemId alone: a corpus/salt rebuild
+# can re-mask the same itemId to a different target (review finding #3) ----
 with tempfile.TemporaryDirectory() as td:
-    pr = runner.run_arm("product-llm", DEV[:12], ctx_with(cache_dir=td), out_dir=td)
-    check("product-llm: shipped loop returns candidates for every item",
-          pr["summary"]["emptyCandidates"] == 0, str(pr["summary"]["emptyCandidates"]))
-    check("product-llm: backend recorded as fake in this hermetic run",
-          pr["summary"]["arm"]["productBackend"] == "fake")
-    pr2 = runner.run_arm("product-llm", DEV[:12], ctx_with(cache_dir=td), out_dir=td)
-    check("product-llm: deterministic under the fake backend",
-          pr["summary"]["metrics"] == pr2["summary"]["metrics"])
+    orig = [i for i in DEV if i["granularity"] == "word"][:1]
+    r_a = runner.run_arm("oracle", orig, ctx_with(cache_dir=td), out_dir=td)
+    changed = json.loads(json.dumps(orig))
+    changed[0]["target"]["text"] = "somethingelse"
+    r_b = runner.run_arm("oracle", changed, ctx_with(cache_dir=td), out_dir=td)
+    check("cache: changed item content under the same itemId is NOT replayed stale",
+          r_b["summary"]["metrics"]["word"]["exact"] == 1.0,
+          f"exact={r_b['summary']['metrics']['word']['exact']} (stale replay if 0)")
+
+# ---- fill extraction from full-line proposals (the review blocker: tokenize()
+# strips underscore tokens, so blank location must NOT go through tokenize) ----
+def mk_item(masked, gran="word"):
+    return {"granularity": gran,
+            "context": {"before": [], "maskedLine": masked, "after": []}}
+
+
+check("extract: single word mid-line",
+      arms._extract_fill(mk_item("flow so ____ it can go"),
+                         "flow so cold it can go") == "cold")
+check("extract: line-final blank",
+      arms._extract_fill(mk_item("and you know I love my ____", "rhyme"),
+                         "and you know I love my dream") == "dream")
+check("extract: blank glued to punctuation",
+      arms._extract_fill(mk_item("I kept it in my ____, no debate"),
+                         "I kept it in my safe, no debate") == "safe")
+check("extract: span run",
+      arms._extract_fill(mk_item("I was ____ ____ ____ rent", "span"),
+                         "I was counting up the rent") == "counting up the")
+check("extract: misaligned proposal falls back to full text",
+      arms._extract_fill(mk_item("flow so ____ it can go"),
+                         "a completely different bar") ==
+      "a completely different bar")
+
+# ---- product spec: glued blanks must normalize to bare gap tokens (core._tokens
+# splits on whitespace; '____,' would otherwise become a LOCKED word / end anchor)
+spec_item = {
+    "granularity": "rhyme", "songId": "t", "artist": "T", "si": 0, "li": 0,
+    "sectionKind": "verse", "licenseTier": "train-ok", "views": 0,
+    "maskPolicy": "rhyme-v1", "seed": 0,
+    "context": {"before": ["some prior bar"], "maskedLine": "I love my ____.",
+                "after": []},
+    "target": {"text": "chain", "tokenIndex": 3, "tokenSpan": None,
+               "phones": None, "phonesSource": "none", "syllables": 1,
+               "stress": ""},
+    "constraints": {"syllables": 1, "syllableTol": 0, "rhymeWith": "rain",
+                    "rhymeStrictness": "slant", "lineSyllableTarget": None},
+}
+pspec = arms._product_spec(spec_item, ctx_with())
+gap_line = pspec["lines"][pspec["_gapIndex"]]
+check("product spec: seedText carries a bare ____ gap token (no glued punctuation)",
+      "____" in gap_line["seedText"].split()
+      and not any("_" in t and t != "____" for t in gap_line["seedText"].split()),
+      repr(gap_line["seedText"]))
+
+# ---- product-llm arm drives the real shipped loop (fake backend, hermetic) ----
+# lyrics.core builds a module-level REAL Pronouncer (cmudict + lazy g2p_en — the
+# g2p path can even reach an nltk download). Pin it to the injected lexicon for
+# the duration of the lane so the test stays hermetic (review finding #12).
+from lyrics import core as _product_core  # noqa: E402
+_real_P = _product_core._P
+_product_core._P = PRON
+try:
+    with tempfile.TemporaryDirectory() as td:
+        pr = runner.run_arm("product-llm", DEV[:12], ctx_with(cache_dir=td),
+                            out_dir=td)
+        check("product-llm: shipped loop returns candidates for every item",
+              pr["summary"]["emptyCandidates"] == 0,
+              str(pr["summary"]["emptyCandidates"]))
+        check("product-llm: backend recorded as fake in this hermetic run",
+              pr["summary"]["arm"]["productBackend"] == "fake")
+        with tempfile.TemporaryDirectory() as td2:
+            pr2 = runner.run_arm("product-llm", DEV[:12], ctx_with(cache_dir=td2),
+                                 out_dir=td2)
+        check("product-llm: deterministic under the fake backend (fresh cache)",
+              pr["summary"]["metrics"] == pr2["summary"]["metrics"])
+finally:
+    _product_core._P = _real_P
 
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

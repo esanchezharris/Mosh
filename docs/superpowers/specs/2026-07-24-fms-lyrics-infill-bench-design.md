@@ -68,10 +68,14 @@ Eval item: itemId (embeds `POLICY_VERSION`), granularity, context (before/masked
 (text + phones/syllables/stress precomputed at build time; `phonesSource` flagged), constraints
 (only serve-time-observable facts), split, views, seed.
 
-**Splits** (`build_eval.py`): near-dup clusters (seeded MinHash over line shingles — covers,
-remixes, re-releases collapse) are the split unit; golden membership by salted hash (salt lives
-only in the data dir); golden-artist songs appear in **no** other split; manifest records the
-`golden_spec.json` sha and the leak-scan report.
+**Splits** (`build_eval.py`), as implemented (simplified from the original MinHash-cluster
+sketch): exact-content groups collapse via the normalized-content hash, with goldenness
+UNIONED over each group (a re-scrape of a golden song under another id/artist can never
+reach train/dev); near-dups of the GOLDEN pool specifically (covers, remixes, re-releases)
+are quarantined by shingle **containment** against a golden-pool inverted index — full
+corpus-wide MinHash clustering is deferred until a measured need appears. Golden membership
+by salted hash (salt lives only in the data dir); golden-artist songs appear in **no** other
+split; manifest records the `golden_spec.json` sha and the split report.
 
 **Metrics** (`metrics.py`): exact (normalized), top-k, `syl_fit`, `rhyme_fit`, `stress_fit`
 (reported, never gating), `multi_depth`; `constrained_fit` = AND of applicable fits. Judged

@@ -95,6 +95,10 @@ def cmd_build_eval(args) -> int:
     items, manifest = build_eval.build_items(songs, splits, Pronouncer(),
                                              golden_spec=spec, salt=salt, freq=freq)
     eval_dir = paths.subdir("eval")
+    # A vanished split (e.g. golden after a spec edit) must not leave a stale
+    # items file behind for `run` to silently serve.
+    for stale in glob.glob(os.path.join(eval_dir, "items-*.jsonl")):
+        os.remove(stale)
     handles = {}
     try:
         for item in items:

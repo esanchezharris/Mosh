@@ -52,8 +52,14 @@ check("renders one row per (arm, slice)", md.count("llm-zeroshot") >= 2
 check("uncalibrated banner when no trusted metrics", "UNCALIBRATED" in md)
 check("dev and golden reported separately", "golden" in md and "dev" in md)
 check("percentages formatted", "30.0" in md and "100.0" in md, md[:400])
-check("no corpus text can leak (only summaries are rendered)",
-      "basement" not in md.lower())
+# A decoy field proves the renderer surfaces only its whitelisted fields — the
+# old check ("basement" absent) could never fail because the input contained no
+# corpus text at all (review finding #11).
+decoy = [dict(ENTRIES[0])]
+decoy[0]["summary"] = {**decoy[0]["summary"],
+                       "leakedLyric": "counting up the basement rent decoy"}
+check("renderer never surfaces unknown fields (decoy lyric stays out)",
+      "basement" not in scoreboard.render(decoy, trusted=None).lower())
 check("deterministic render", all(scoreboard.render(ENTRIES, trusted=None) == md
                                   for _ in range(3)))
 md_cal = scoreboard.render(ENTRIES, trusted={"word": {"metric": "constrained_fit",

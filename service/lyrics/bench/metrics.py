@@ -26,7 +26,8 @@ from phonology.core import multisyllabic_depth, rhyme_grade
 
 from lyrics.bench.mask import tokenize
 
-_BLANK_RUN = re.compile(r"____(?: ____)*")
+# Punctuation-tolerant: "____", "____ ____", and "____, ____" are ONE region.
+_BLANK_RUN = re.compile(r"_{2,}(?:[^\w]+_{2,})*")
 _NORM_DROP = re.compile(r"[^a-z0-9 ]+")
 TOPK = 5
 

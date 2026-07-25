@@ -23,9 +23,9 @@ numbers and hashes only.
 
 | arm | kind | status |
 |---|---|---|
-| oracle | bracket (ceiling + judge-sanity probe) | I1 ✅ |
+| oracle | bracket (ceiling; doubles as the judge-sanity probe once judges exist — I2) | I1 ✅ |
 | freq-floor | bracket (floor) | I1 ✅ |
-| llm-zeroshot | baseline (frontier, naive) — memorization diagnostic via fame buckets | I1 ✅ |
+| llm-zeroshot | baseline (frontier, naive); `views` is on every item but the fame-bucket scoreboard stratification lands with I2 | I1 ✅ |
 | llm-constrained | baseline (constraints spelled out) | I1 ✅ |
 | product-llm | THE BAR — the shipped `fill_gap` loop as-is | I1 ✅ |
 | prompt-constrained / prompt-rag / prompt-nbest-rerank | I3 | pending |

@@ -8,6 +8,20 @@ from __future__ import annotations
 
 from typing import List
 
+import re as _re
+
+_WORD_RE = _re.compile(r"[A-Za-z']+")
+
+
+def _tokenize(text: str):
+    return _WORD_RE.findall(text or "")
+
+
+def _contains_seq(haystack, needle) -> bool:
+    n = len(needle)
+    return any(haystack[i:i + n] == needle for i in range(len(haystack) - n + 1))
+
+
 GRANULARITIES = ("word", "rhyme", "span", "line")
 LICENSE_TIERS = ("eval-only", "train-ok")
 _BLANK = "____"
@@ -62,7 +76,10 @@ def validate_item(item: dict) -> List[str]:
     else:
         if not isinstance(ctx["maskedLine"], str) or _BLANK not in ctx["maskedLine"]:
             problems.append("masked item must carry a blank in maskedLine")
-        if tgt["text"] in (ctx["maskedLine"] or ""):
+        # Token-based, not substring: 'old' inside 'hold' is NOT visible.
+        masked_tokens = [t.lower() for t in _tokenize(ctx["maskedLine"] or "")]
+        target_tokens = [t.lower() for t in _tokenize(tgt["text"])]
+        if target_tokens and _contains_seq(masked_tokens, target_tokens):
             problems.append("target text visible in maskedLine")
 
     if gran == "span":

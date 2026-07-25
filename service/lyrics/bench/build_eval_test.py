@@ -92,6 +92,20 @@ check("exact dup: identical content hash collapses (later id dropped)",
       and splits2.get("fx:basement") not in (None, "dropped"),
       f"copy={splits2.get('fx:zz-basement-copy')} orig={splits2.get('fx:basement')}")
 
+# ---- the golden-dup hole: an exact-content re-scrape of a golden song under a
+# lexicographically EARLIER id whose artist string the spec does NOT match must
+# not smuggle golden content into train/dev (review finding #2) ----
+rescrape = copy.deepcopy(next(s for s in SONGS if s["songId"] == "fx:golden1"))
+rescrape["songId"] = "aa:rescrape"                       # sorts before fx:golden1
+rescrape["artist"] = "Golden Fixture feat. Somebody"     # spec doesn't match this
+splits_rs, rep_rs = build_eval.assign_splits(SONGS + [rescrape], GOLDEN_SPEC,
+                                             salt=SALT, dev_frac=0.25)
+check("golden dup: exact twin of a golden song never lands in train/dev",
+      splits_rs.get("aa:rescrape") not in ("train", "dev"),
+      f"rescrape={splits_rs.get('aa:rescrape')}")
+check("golden dup: the golden song itself stays golden",
+      splits_rs.get("fx:golden1") == "golden", str(splits_rs.get("fx:golden1")))
+
 # ---- synthetic source never golden ----
 synth = copy.deepcopy(next(s for s in SONGS if s["songId"] == "fx:golden1"))
 synth["songId"], synth["source"], synth["hash"] = "syn:golden-clone", "synthetic", "sha1:synclone"

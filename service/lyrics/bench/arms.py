@@ -193,7 +193,12 @@ def _product_spec(item: dict, ctx: ArmContext) -> dict:
         visible = sum(ctx.pron.syllables(t)
                       for t in tokenize(item["context"]["maskedLine"]))
         target = visible + (con.get("syllables") or 0)
-        gap = {"index": idx, "seedText": item["context"]["maskedLine"],
+        # core._tokens splits on whitespace and only treats a PURE "_{2,}" token
+        # as a gap — strip glued punctuation ("____," would become a locked word,
+        # and at line end the group's fixed rhyme anchor).
+        seed = " ".join("____" if re.search(r"_{2,}", t) else t
+                        for t in item["context"]["maskedLine"].split())
+        gap = {"index": idx, "seedText": seed,
                "syllableTarget": target, "syllableTol": con["syllableTol"]}
     if partner:
         gap["rhymeGroup"] = "A"
@@ -218,32 +223,35 @@ def _product_spec(item: dict, ctx: ArmContext) -> dict:
             "lines": lines, "_gapIndex": gap_index}
 
 
+# The whole blank region, punctuation-tolerant: "____", "____ ____ ____", and
+# "____, ____" all match as ONE run. NEVER locate blanks via tokenize() — its
+# word regex ([A-Za-z']+) silently drops underscore tokens (review blocker).
+_BLANK_REGION = re.compile(r"_{2,}(?:[^\w]+_{2,})*")
+
+
 def _extract_fill(item: dict, proposal_text: str) -> str:
     """Pull the fill back out of a full-line proposal by aligning the visible
-    prefix/suffix tokens; fall back to the whole proposal when alignment fails."""
+    prefix/suffix tokens around the blank region; fall back to the whole
+    proposal when alignment fails (scored as-is — honestly, not charitably)."""
     if item["granularity"] == "line":
         return proposal_text
-    masked_tokens = tokenize(item["context"]["maskedLine"])
-    blanks = item["context"]["maskedLine"].count("____")
-    first_blank = None
-    for i, t in enumerate(masked_tokens):
-        if re.fullmatch(r"_{2,}", t):
-            first_blank = i
-            break
-    if first_blank is None:
+    masked = item["context"]["maskedLine"]
+    m = _BLANK_REGION.search(masked)
+    if not m:
         return proposal_text
+    prefix = [t.lower() for t in tokenize(masked[:m.start()])]
+    suffix = [t.lower() for t in tokenize(masked[m.end():])]
     prop = tokenize(proposal_text)
-    prefix = [t.lower() for t in masked_tokens[:first_blank]]
-    suffix = [t.lower() for t in masked_tokens[first_blank + blanks:]]
-    if ([t.lower() for t in prop[:len(prefix)]] == prefix
-            and (not suffix or [t.lower() for t in prop[len(prop) - len(suffix):]] == suffix)):
+    lowered = [t.lower() for t in prop]
+    if (lowered[:len(prefix)] == prefix
+            and (not suffix or lowered[len(lowered) - len(suffix):] == suffix)):
         mid = prop[len(prefix):len(prop) - len(suffix)] if suffix else prop[len(prefix):]
         if mid:
             return " ".join(mid)
     return proposal_text
 
 
-@register("product-llm", "v1")
+@register("product-llm", "v2")  # v2: blank-region extraction + seed normalization
 def arm_product(item: dict, ctx: ArmContext) -> dict:
     from lyrics import core as product_core
     spec = _product_spec(item, ctx)
