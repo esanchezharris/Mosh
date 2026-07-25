@@ -248,6 +248,9 @@ def cmd_judge(args) -> int:
             "arm": sampling.arm_of(run_dir),
             "run": os.path.basename(run_dir),
             "candidate": cand, "truth": item["target"]["text"],
+            # Kept so calibration can render the SAME completed lines the panel
+            # judged — a bare span fragment is not a judgeable thing.
+            "maskedLine": item["context"]["maskedLine"],
             "context": {"before": item["context"]["before"],
                         "after": item["context"]["after"]},
             "metrics": {"judge_win": verdict["win"],
@@ -291,7 +294,22 @@ def cmd_calibrate(args) -> int:
         for r in rows:
             uniq[(r["itemId"], r["arm"])] = r
         pool = sorted(uniq.values(), key=lambda r: (r["arm"], r["itemId"]))
-        pairs, key = calibrate.mint_pairs(pool, n=args.n, dupes=args.dupes,
+        # Rows judged before maskedLine was recorded: recover it from the items
+        # so an old judged file still mints judgeable pairs.
+        missing = [r for r in pool if "maskedLine" not in r]
+        if missing:
+            items_path = os.path.join(paths.data_root(), "eval", "items-dev.jsonl")
+            lookup = {}
+            if os.path.exists(items_path):
+                with open(items_path, encoding="utf-8") as f:
+                    for ln in f:
+                        if ln.strip():
+                            it = json.loads(ln)
+                            lookup[it["itemId"]] = it["context"]["maskedLine"]
+            for r in missing:
+                r["maskedLine"] = lookup.get(r["itemId"])
+        pairs, key = calibrate.mint_pairs(calibrate.completed_pool(pool),
+                                          n=args.n, dupes=args.dupes,
                                           seed=args.seed)
         with open(pairs_path, "w", encoding="utf-8") as f:
             json.dump(pairs, f, ensure_ascii=False, indent=1)

@@ -26,6 +26,30 @@ Z95 = 1.959963984540054
 
 # ── minting ─────────────────────────────────────────────────────────────────────
 
+def completed_pool(rows: Sequence[dict]) -> List[dict]:
+    """Replace bare fills with the LINES they complete.
+
+    The LLM panel judges completed lines (`judge._completed`). If the owner's
+    page showed bare span fragments — "real grim about my" vs "ugh and mug for" —
+    the two raters would be answering different questions and their agreement
+    would measure nothing. Rows carrying `maskedLine` are completed here; whole
+    -line rows pass through.
+    """
+    from lyrics.bench.metrics import apply_fill
+
+    out = []
+    for row in rows:
+        masked = row.get("maskedLine")
+        if not masked:
+            out.append(dict(row))
+            continue
+        stub = {"granularity": row.get("granularity", "span"),
+                "context": {"maskedLine": masked}}
+        out.append({**row,
+                    "truth": apply_fill(stub, row["truth"]),
+                    "candidate": apply_fill(stub, row["candidate"])})
+    return out
+
 def _cell(row: dict) -> Tuple[str, str]:
     return (row.get("arm", ""), row.get("granularity", ""))
 

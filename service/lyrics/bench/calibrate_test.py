@@ -82,6 +82,32 @@ check("mint: deterministic under the same seed",
 check("mint: a different seed changes the draw",
       calibrate.mint_pairs(POOL, n=24, dupes=4, seed=12)[0] != pairs)
 
+# ── the rater and the judge must be shown the SAME thing ───────────────────────
+# A span fill rendered bare ("real grim about my") is not judgeable; the LLM panel
+# scores COMPLETED lines, so the page must too, or agreement compares two
+# different tasks and means nothing.
+span_pool = [{"itemId": "v1:span:x", "granularity": "span", "arm": "a",
+              "truth": "counting up the", "candidate": "stacking all the",
+              "maskedLine": "I was ____ ____ ____ rent, no debate",
+              "context": {"before": ["prior"], "after": ["next"]}}]
+span_pairs, span_key = calibrate.mint_pairs(
+    calibrate.completed_pool(span_pool), n=1, dupes=0, seed=5)
+p = span_pairs[0]
+check("span pairs render the whole line, not the bare fill",
+      "rent, no debate" in p["left"] and "rent, no debate" in p["right"],
+      f"{p['left']!r} / {p['right']!r}")
+check("completed_pool keeps the fills distinguishable",
+      p["left"] != p["right"] and (
+          "counting up the" in p["left"] or "counting up the" in p["right"]),
+      f"{p['left']!r} / {p['right']!r}")
+line_pool = [{"itemId": "v1:line:y", "granularity": "line", "arm": "a",
+              "truth": "a whole human line", "candidate": "a whole machine line",
+              "maskedLine": None, "context": {"before": ["p"], "after": ["n"]}}]
+lp = calibrate.completed_pool(line_pool)[0]
+check("line items pass through untouched (they are already whole lines)",
+      lp["truth"] == "a whole human line"
+      and lp["candidate"] == "a whole machine line", str(lp))
+
 # ── owner-side scoring ─────────────────────────────────────────────────────────
 # Owner picked the truth in 3 of 4; 'tie' is recorded but not scored as a win.
 ratings = [
