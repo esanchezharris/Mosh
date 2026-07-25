@@ -80,12 +80,17 @@ def cmd_ingest(args) -> int:
             names += [a for a in scrape.rank_recent_artists(
                 _load_corpus(), top=args.top_artists, since=args.since)
                 if a not in names]
+        if args.charts:
+            cf = os.path.join(HERE, "fixtures", "chart_artists.json")
+            with open(cf, encoding="utf-8") as f:
+                names = [a for a in json.load(f)["artists"] if a not in names] + names
         if not names:
             names = list(_golden_spec().get("artists") or [])
         print(f"scraping {len(names)} artists (min_year={args.min_year}, "
               f"<= {args.max_per_artist} songs each)", flush=True)
         report = scrape.scrape_artists(names, max_per_artist=args.max_per_artist,
-                                       min_year=args.min_year)
+                                       min_year=args.min_year,
+                                       workers=args.workers, sleep=args.req_interval)
     elif args.what == "own":
         report = ingest.pull_own()
     else:
@@ -453,6 +458,11 @@ def main(argv=None) -> int:
     p.add_argument("--max-per-artist", type=int, default=200)
     p.add_argument("--top-artists", type=int, default=0,
                    help="also scrape the N most recently-active corpus artists")
+    p.add_argument("--charts", action="store_true",
+                   help="seed from the researched current-charts artist list")
+    p.add_argument("--workers", type=int, default=6)
+    p.add_argument("--req-interval", type=float, default=0.12,
+                   help="global seconds between requests (0.12 = ~8/s)")
     p.add_argument("--since", type=int, default=2020,
                    help="recency window used to rank those artists")
     p.add_argument("--dataset", default="cleaned", choices=["cleaned", "5m"])

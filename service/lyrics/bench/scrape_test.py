@@ -139,6 +139,7 @@ check("rate limiter spaces requests", clock.slept and abs(clock.slept[0] - 0.8) 
       str(clock.slept))
 
 import tempfile  # noqa: E402
+import time  # noqa: E402
 with tempfile.TemporaryDirectory() as td:
     calls = {"n": 0}
 
@@ -177,6 +178,31 @@ check("ranking is deterministic",
       scrape.rank_recent_artists(CORPUS, top=10, since=2020) == ranked)
 check("top caps the list", len(scrape.rank_recent_artists(CORPUS, top=1,
                                                           since=2020)) == 1)
+
+# ---- throughput: the limiter must stay correct under threads ----
+import threading  # noqa: E402
+shared = scrape.RateLimiter(min_interval=0.01)
+stamps = []
+lock = threading.Lock()
+
+
+def hammer():
+    for _ in range(10):
+        shared.wait()
+        with lock:
+            stamps.append(time.time())
+
+
+threads = [threading.Thread(target=hammer) for _ in range(6)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+stamps.sort()
+gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+check("rate limiter is thread-safe: no two requests share a slot",
+      len(stamps) == 60 and min(gaps) >= 0.008,
+      f"min gap {min(gaps):.4f}s over {len(stamps)} calls")
 
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

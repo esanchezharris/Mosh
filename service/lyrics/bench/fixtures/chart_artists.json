@@ -1,0 +1,27 @@
+{
+  "_comment": "Current-rap seed list for the scraper, researched from public year-end and weekly charts (Billboard Hot Rap Songs / Hot R&B-Hip-Hop) because the Genius charts endpoint is 403 for client tokens. Names only — no lyrics — so this is safe to commit. Edit freely: it is the knob for what 'current' means. Refresh by re-reading the year-end charts.",
+  "_sources": [
+    "https://en.wikipedia.org/wiki/List_of_Billboard_Hot_R&B/Hip-Hop_Songs_number_ones_of_2026",
+    "https://en.wikipedia.org/wiki/Billboard_Year-End_Hot_Rap_Songs_of_2025",
+    "https://en.wikipedia.org/wiki/Billboard_Year-End_Hot_Rap_Songs_of_2024"
+  ],
+  "_asOf": "2026-07",
+  "artists": [
+    "Kendrick Lamar", "Drake", "Playboi Carti", "Future", "Young Thug",
+    "Ken Carson", "Destroy Lonely", "Yeat", "Homixide Gang", "Osamason",
+    "Lucki", "Veeze", "Nettspend", "BigXthaPlug", "GloRilla", "Sexyy Red",
+    "Doechii", "Lil Tecca", "Don Toliver", "Travis Scott", "Gunna",
+    "Lil Baby", "Roddy Ricch", "Central Cee", "Latto", "Cardi B",
+    "Rod Wave", "NLE Choppa", "Lil Uzi Vert", "Tyler, The Creator",
+    "Chris Brown", "Bryson Tiller", "Kehlani", "Pooh Shiesty", "J. Cole",
+    "DaBaby", "Real Boston Richey", "G Herbo", "AzChike", "Dody6",
+    "Wallie the Sensei", "Siete7x", "Tommy Richman", "Teezo Touchdown",
+    "Lefty Gunplay", "Jordan Adetunji", "YKNiece", "LiAngelo Ball",
+    "Sleepy Hallow", "Cash Cobain", "42 Dugg", "EST Gee", "Babytron",
+    "Key Glock", "Moneybagg Yo", "Kodak Black", "YoungBoy Never Broke Again",
+    "Lil Durk", "Polo G", "Ice Spice", "Flo Milli", "Rico Nasty",
+    "JID", "Denzel Curry", "Vince Staples", "Freddie Gibbs", "Larry June",
+    "Rob49", "Skilla Baby", "Luh Tyler", "Karrahbooo", "Che",
+    "Summrs", "Autumn!", "Kankan", "Xaviersobased", "TiaCorine"
+  ]
+}
