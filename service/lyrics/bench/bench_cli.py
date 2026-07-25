@@ -29,7 +29,7 @@ sys.path.insert(0, SERVICE)
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
                           ingest, judge, llm_cache, mask, metrics, paths,
                           mixpairs, runner, sampling, scoreboard,
-                          torchjudge)
+                          scrape, torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
 SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.md")
@@ -72,6 +72,13 @@ def cmd_ingest(args) -> int:
     if args.what == "genius":
         report = ingest.pull_genius(dataset=args.dataset, limit=args.limit,
                                     min_year=args.min_year)
+    elif args.what == "scrape":
+        names = [a.strip() for a in (args.artists or "").split(",") if a.strip()]
+        if not names:
+            spec = _golden_spec()
+            names = list(spec.get("artists") or [])
+        report = scrape.scrape_artists(names, max_per_artist=args.max_per_artist,
+                                       min_year=args.min_year)
     elif args.what == "own":
         report = ingest.pull_own()
     else:
@@ -433,7 +440,10 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("ingest")
-    p.add_argument("what", choices=["genius", "own"])
+    p.add_argument("what", choices=["genius", "scrape", "own"])
+    p.add_argument("--artists", default="",
+                   help="comma-separated; defaults to golden_spec artists")
+    p.add_argument("--max-per-artist", type=int, default=200)
     p.add_argument("--dataset", default="cleaned", choices=["cleaned", "5m"])
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--min-year", type=int, default=0,
