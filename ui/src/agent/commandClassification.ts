@@ -24,6 +24,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
 
   // ── device / settings / scan admin — needs user acknowledgment ────────────────
   set_audio_device: "audio-device selection is session admin the producer must acknowledge",
+  retry_audio_device: "AUD-017 — the response to a device-failed-to-open banner; the producer fixes the hardware, then presses Retry",
   set_buffer_size: "buffer-size changes are session admin the producer must acknowledge",
   set_audio_threads: "thread-count tuning is session admin the producer must acknowledge",
   set_project_settings: "project-level settings dialog plumbing, not a musical move",

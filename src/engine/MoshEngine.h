@@ -34,6 +34,20 @@ public:
     bool        hasAudio() const { return audioOpen; }
     juce::String audioDeviceError() const { return audioError; }
 
+    /** AUD-017 — was audio REQUESTED for this session? True for the GUI and the live
+        audio harnesses, false for headless runs (and under MOSH_NO_AUDIO). hasAudio()
+        can be false while this is true: that is the DEGRADED state — the device did
+        not open within the bound — and it is the only state in which retryAudioDevice()
+        touches hardware. Headless runs therefore stay hermetic by construction. */
+    bool audioRequested() const { return audioWanted; }
+
+    /** AUD-017 — re-attempt the bounded device open after a failed start (the user
+        unplugged the offending interface, or restarted coreaudiod). Returns an empty
+        string on success — audio is live, the playback context is allocated — and the
+        failure reason otherwise. A no-op returning "" when audio is already up, and a
+        hardware-free error when this session never wanted audio. */
+    juce::String retryAudioDevice();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 
@@ -136,10 +150,12 @@ private:
     juce::File session;
     juce::File editPath;
     void applyRequestedAudioOutputDevice();
+    juce::String openAudioDeviceBounded();                     // AUD-017 — the one, bounded, device open
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
     void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
     bool       audioOpen = false;
+    bool       audioWanted = false;        // AUD-017 — audio was requested (see audioRequested())
     bool       dirty = false;              // unsaved-changes flag (gap 1)
     bool       uncleanAtStartup = false;   // A2 — the session.running sentinel existed at launch (prior crash)
     juce::String loadError;                // PRJ-FMT — non-empty ⇒ a refused (newer-format) load is live
