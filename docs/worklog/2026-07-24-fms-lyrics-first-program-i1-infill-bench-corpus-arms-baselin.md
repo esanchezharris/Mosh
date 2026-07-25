@@ -40,3 +40,20 @@
   sitting — the HALT gate; bars in PROGRAM.md stay DRAFT until then). NEXT: I2 judge stack
   (blind A/B panel, embedding sim, ppl) + calibration page + sitting 1; owner asks: golden_spec
   + inbox songs (see PROGRAM.md owner runbook).
+- **Adversarial review (18-agent find→verify): 14 confirmed, 0 refuted — all fixed pre-PR.** The
+  blocker: `product-llm`'s `_extract_fill` was DEAD CODE — blanks were located via `tokenize()`,
+  whose word regex silently drops underscore tokens, so the product arm was scored on FULL LINES
+  and its first committed word/rhyme/span baselines were invalid (exact signature: line rows
+  perfect, sub-line rows floored). Fixed via a punctuation-tolerant blank-region regex + seedText
+  gap normalization (`"____,"` would otherwise become a LOCKED word / rhyme anchor in
+  `core._tokens`); invalid run dirs sidelined to `runs/_invalid/`, dev re-measured (arm v2).
+  Corrected picture: the product loop is structurally competent (span cfit 100%, fake cfit
+  91–97%) but overshoots syllables on rhyme slots (syl 33%) and recovers the exact word far below
+  `llm-constrained` (word 6.7% vs 10.8%, rhyme 20% vs 47.4%). Other majors: goldenness now UNIONS
+  over exact-content hash groups (a lex-earlier re-scrape of a golden song could previously drop
+  the golden copy and route the twin into dev — repro'd, RED-proven); runner cache keys carry the
+  item-content sha (an eval rebuild can re-mask the same itemId); runner determinism checks use
+  FRESH caches (replay was satisfying them); the product-lane test pins `lyrics.core._P` to the
+  injected lexicon (the real Pronouncer could lazily reach g2p_en/nltk — network in a test).
+  **GOTCHA (bench):** never locate mask blanks through a word-regex tokenizer, and never trust an
+  arm-determinism check that runs against a warm cache.
