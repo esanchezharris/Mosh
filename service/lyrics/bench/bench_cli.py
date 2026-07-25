@@ -130,7 +130,19 @@ def cmd_run(args) -> int:
         items = [i for i in items if i["granularity"] in keep]
     items.sort(key=lambda i: i["itemId"])
     if args.limit:
-        items = items[:args.limit]
+        # Round-robin across granularities — a plain prefix of the itemId-sorted
+        # list would be all "line:" items (alphabetical bias).
+        by_gran = {}
+        for i in items:
+            by_gran.setdefault(i["granularity"], []).append(i)
+        grans = sorted(by_gran)
+        picked, n = [], 0
+        while len(picked) < args.limit and any(by_gran.values()):
+            g = grans[n % len(grans)]
+            if by_gran[g]:
+                picked.append(by_gran[g].pop(0))
+            n += 1
+        items = sorted(picked, key=lambda i: i["itemId"])
 
     needs_api = args.arm in API_ARMS or (args.arm == "product-llm"
                                          and args.product_backend == "llm")
