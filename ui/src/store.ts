@@ -57,6 +57,12 @@ type State = {
   // UI-local view state (NOT commands — the swappable-seam rule: zoom, tool,
   // snap, selection never cross the bridge).
   pxPerSec: number;
+  // Piano-roll horizontal zoom, in px per BEAT. Deliberately NOT pxPerSec: the
+  // arrangement drives that from a ResizeObserver on every window resize and
+  // section-zoom change, so sharing it would yank the MIDI editor's zoom whenever
+  // the window moved. Not persisted — a modal editor resetting per session is right.
+  pianoRollBeatPx: number;
+  setPianoRollBeatPx: (v: number) => void;
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
@@ -276,6 +282,10 @@ export const useStore = create<State>((set, get) => ({
   dismissRecovery: () => set({ recoveryDismissed: true }),
 
   pxPerSec: 80,
+  // 42 is load-bearing, not aesthetic: PianoRoll.dragAxes.test.ts and
+  // PianoRoll.scaleLock.test.ts both declare BEAT_PX = 42 and compute expected beat
+  // deltas from it. Changing the default is a deliberate change to those fixtures.
+  pianoRollBeatPx: 42,
   tool: "move",
   snap: true,
   snapDivision: "1/4",
@@ -632,6 +642,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
+  // 12px/beat ≈ a whole 8-bar loop in view; 160 puts 1/32 notes ~5px apart.
+  setPianoRollBeatPx: (v) => set({ pianoRollBeatPx: Math.max(12, Math.min(160, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d }),

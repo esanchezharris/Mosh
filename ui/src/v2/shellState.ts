@@ -19,6 +19,11 @@ interface ShellState {
   browserOpen: boolean;            // LEFT push-dock (sounds + plugins), pull-tab toggled
   browserTab: BrowserTab;
   rightOpen: boolean;              // RIGHT push-dock (agent · inspector · collaborators); default open
+  // Session picker, shown once per app LAUNCH. Module-scope zustand means this lives
+  // exactly as long as the React app does — deliberately NOT persisted to localStorage,
+  // because a remembered "don't show me again" would silently restore the very behaviour
+  // the picker exists to replace (reopening the last edit with no say in it).
+  sessionPickerDismissed: boolean;
 
   setSelectedClip: (id: string | null) => void;
   setInspectorTab: (t: InspectorTab) => void;
@@ -29,6 +34,7 @@ interface ShellState {
   toggleBrowser: () => void;
   openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
   setRightOpen: (b: boolean) => void;
+  dismissSessionPicker: () => void;
   toggleRight: () => void;
 }
 
@@ -41,6 +47,7 @@ export const useShell = create<ShellState>((set) => ({
   browserOpen: false,
   browserTab: "sounds",
   rightOpen: true,
+  sessionPickerDismissed: false,
 
   // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
   // pin/close it explicitly). Track selection is NOT here — route it through useStore.
@@ -54,4 +61,5 @@ export const useShell = create<ShellState>((set) => ({
   openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
   setRightOpen: (b) => set({ rightOpen: b }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
+  dismissSessionPicker: () => set({ sessionPickerDismissed: true }),
 }));

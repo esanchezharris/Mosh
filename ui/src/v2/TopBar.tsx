@@ -12,6 +12,10 @@ import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { pickFiles, pickSaveFile, brainChat } from "../bridge";
+import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
+import { RecentProjectList } from "../ui/RecentProjectList";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Snapshot } from "../types";
 import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
@@ -237,6 +241,8 @@ function OverflowMenu() {
               />
             </div>
             <div className="v2-menu" role="menu">
+              <ProjectMenuGroup onPick={close} />
+              <div className="v2-menu-sep" />
               {item("Undo", () => void exec("undo"), "⌘Z")}
               {item("Redo", () => void exec("redo"), "⇧⌘Z")}
               <div className="v2-menu-sep" />
@@ -250,5 +256,61 @@ function OverflowMenu() {
         </>
       )}
     </div>
+  );
+}
+
+// ── Project actions in the overflow menu ─────────────────────────────────────────
+// These commands were never UNREACHABLE — FileOptions has rendered FILE_MENU under the
+// composer's "+" all along. They were undiscoverable: nobody looking for "start a new
+// song" looks at an unlabelled plus glyph next to Moshi's face, tooltipped
+// "File · options · export". So this is placement, not plumbing — the same FILE_MENU,
+// the same runAction dispatcher, in the menu people actually open.
+//
+// Exported so its [data-action] sequence can be asserted without mounting the whole
+// TopBar, and so projectActionsUnification.test.ts can cover it as a fourth surface.
+export function ProjectMenuGroup({ onPick }: { onPick: () => void }) {
+  const snapshot = useStore((s) => s.snapshot);
+  const [pendingNew, setPendingNew] = useState(false);
+
+  const ctx = () => ({ store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat });
+  const run = (id: ActionId, opts?: { index: number }) => { void runAction(id, ctx(), opts); };
+
+  // A track count using the ARRANGEMENT's filter, so the confirm names what the user sees.
+  const trackCount = snapshot ? snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn).length : 0;
+
+  const choose = (id: ActionId) => {
+    // Gate the one action that discards the current arrangement. Nothing is LOST —
+    // MoshEngine::newProject calls save() unconditionally before the swap — so the
+    // dialog is about surprise, not data, and the copy says so rather than implying loss.
+    // A choice made at the launch picker is NOT gated; only a mid-session one is.
+    if (id === "new_project" && trackCount > 0) { setPendingNew(true); return; }
+    onPick();
+    run(id);
+  };
+
+  return (
+    <>
+      {PROJECT_MENU.map((m) => (
+        <button key={m.id} role="menuitem" data-action={m.id} onClick={() => choose(m.id as ActionId)}>
+          {m.label}{m.accel && <kbd>{m.accel}</kbd>}
+        </button>
+      ))}
+      <RecentProjectList snapshot={snapshot} variant="menu" onPick={(index) => { onPick(); run("open_recent", { index }); }} />
+      {pendingNew && (
+        <ConfirmDialog
+          title="Start a new project?"
+          body={
+            <>
+              <strong>{snapshot ? projectName(snapshot.session.editFile ?? "") : "This project"}</strong> is saved
+              and stays in Recent — you can reopen it any time. The new project starts empty.
+            </>
+          }
+          confirmLabel="New project"
+          testId="v2-new-project-confirm"
+          onConfirm={() => { setPendingNew(false); onPick(); run("new_project"); }}
+          onCancel={() => setPendingNew(false)}
+        />
+      )}
+    </>
   );
 }

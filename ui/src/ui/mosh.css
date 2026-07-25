@@ -25,6 +25,50 @@
   --pr-offkey: rgba(255, 255, 255, 0.07);
   --bone-dim: rgba(246, 242, 235, 0.55);
 
+  /* ── piano roll (--pr-*) ───────────────────────────────────────────────────
+     The MIDI editor is mounted by BOTH shells, so it can't read either palette
+     directly. Everything it paints goes through this family: defined here for the
+     classic shell (values that must invert are re-declared in the light block
+     below), and re-pinned wholesale under `.v2-shell` in v2/shell.css, where the
+     panel stays DARK in both themes.
+
+     Values written as var(--ink…)/var(--bone…) flip for free with the classic
+     light block. Values written as literals here MUST have a light-block twin —
+     `pianoRollCss.test.ts` enforces exactly that, because the bug this family
+     exists to kill was `.pr-key.white { background: #171715 }`: a hardcoded
+     near-black paired with `--bone-dim` text, which flips to DARK in light theme
+     and made every key label invisible on the shipped default. */
+  /* geometry — theme-invariant, so no light twin and no v2 re-pin is required. */
+  --pr-w: min(1120px, 94vw);
+  --pr-h: min(660px, 86vh);
+  --pr-keys-w: 46px;
+  --pr-ruler-h: 24px;
+  --pr-vel-h: 84px;
+
+  --pr-panel: var(--ink-raise);
+  --pr-text: var(--bone);
+  --pr-text-dim: var(--bone-dim);
+  --pr-grid-bg: var(--ink);
+  --pr-line: var(--ink-line-soft);
+  --pr-line-bar: var(--ink-line);
+  --pr-row-alt: rgba(255, 255, 255, 0.045);
+  --pr-key-white-bg: #1a1a18;
+  --pr-key-black-bg: #0a0a09;
+  --pr-key-text: var(--bone-dim);
+  --pr-key-line: rgba(255, 255, 255, 0.10);
+  --pr-note: var(--lime);
+  --pr-note-edge: #97c01a;
+  --pr-note-sel: var(--lime-glow);
+  --pr-note-ring: var(--bone);
+  --pr-lasso: var(--lime-faint);
+  --pr-lasso-edge: var(--lime-dim);
+  --pr-playhead: var(--lime);
+  --pr-ruler-bg: var(--ink-deep);
+  --pr-ruler-text: var(--bone-dim);
+  --pr-vel-bg: var(--ink-deep);
+  --pr-vel-bar: var(--lime-dim);
+  --pr-vel-bar-sel: var(--lime);
+
   /* semantic accents — tokenized so the light theme can remap them in one place */
   --rec: #ff3b5c;          /* recording / strong error */
   --warn: #ff9b3b;         /* ASTD over-driveable / rendering */
@@ -34,6 +78,15 @@
   --danger-line: #5a1f28;  /* error-bar edge */
   /* text/glyphs that sit ON a bright accent fill — stays dark in BOTH themes */
   --on-accent: #0b0b0b;
+
+  /* Per-theme values that used to live as `[data-theme="light"] .foo { … }` element
+     rules. An element rule cannot be re-pinned at a nested scope, so inside the v2 shell
+     — which keeps DARK panels on a cream page — it kept applying the light-ground value
+     to a dark-ground surface. As tokens they follow the same re-pin as everything else.
+     themeTokens.test.ts fails the build if a per-element theme rule reappears. */
+  --lime-text: var(--lime);      /* lime used as TEXT (unreadable on a light ground) */
+  --auto-line: var(--lime);      /* automation curve stroke */
+  --focus-ring: var(--lime);     /* keyboard focus ring */
 
   --font-display: "NanumSquareRound", "Archivo Black", "Helvetica Neue", "Arial Black", sans-serif;
   --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
@@ -63,12 +116,28 @@
   --pr-offkey: rgba(0, 0, 0, 0.42);
   --danger-deep: #ffe1e6;
   --danger-line: #f1b6bf;
+  /* piano roll — the twin of every literal in the :root --pr-* block. A literal
+     without a twin here is the exact shape of the invisible-key-label bug, so
+     pianoRollCss.test.ts fails the build if one is added without one. */
+  --pr-row-alt: rgba(20, 20, 15, 0.055);
+  --pr-key-white-bg: #fdfcf7;
+  --pr-key-black-bg: #3a382f;
+  --pr-key-line: rgba(0, 0, 0, 0.10);
+  --pr-note-edge: #7c9c14;
+  /* Former element rules, now tokens (see the :root block's note). --danger in
+     particular was NEVER remapped: #ff8a9c on --danger-deep (#ffe1e6) computes to
+     ~1.83:1, so the recovery / missing-media banner text and its relink button were
+     both below any legibility floor on the shipped default theme. */
+  --danger: #a01228;
+  --lime-text: #5f7a0a;
+  --auto-line: #7c9a10;
+  --focus-ring: var(--bone);
 }
-[data-theme="light"] .gen-qa,
-[data-theme="light"] .cmdlog-dot.ok,
-[data-theme="light"] .remote-code { color: #5f7a0a; }
-[data-theme="light"] .auto-line { stroke: #7c9a10; }
-[data-theme="light"] .error-bar { color: #a01228; }
+/* (The per-element light overrides that used to sit here — .gen-qa/.cmdlog-dot.ok/
+   .remote-code, .auto-line, .error-bar — are now the --lime-text / --auto-line /
+   --danger tokens above. Every one of those surfaces renders INSIDE a v2 panel, and an
+   element rule cannot be re-pinned per subtree, so they were applying light-ground
+   values on a dark ground.) */
 
 /* ── token SKINS ──────────────────────────────────────────────────────────────
    Skin is an axis INDEPENDENT of light/dark. The 'mosh' skin IS the :root baseline
@@ -886,7 +955,7 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .cmdlog-badge { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; }
 
 /* AGT-MEM (M3) — the memory panel (TopbarTools.tsx MemoryTool/MemoryBody). Reuses the
-   shared pop-*/cmdlog-* tokens verbatim (same "classic+v2 shared chrome" posture as
+   shared `pop-` / `cmdlog-` tokens verbatim (same "classic+v2 shared chrome" posture as
    CommandLogBody and Meter.tsx — no v2-only tokens needed; the tokens below already
    carry [data-theme="light"] overrides, so both themes fall out of the existing system). */
 .mem-tier { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid var(--ink-line-soft); }
@@ -907,20 +976,48 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .cb-import { flex: 0 0 auto; }
 
 /* ── piano roll (MIDI editor) ────────────────────────────────────────────────*/
-.pr { width: min(880px, 92vw); height: min(560px, 84vh); display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
-.pr-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line); }
-.pr-head .pr-meta { color: var(--bone-dim); font-size: 11px; }
-.pr-vel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--bone-dim); }
-.pr-vel input { accent-color: var(--lime); }
-.pr-body { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
-.pr-keys { flex: 0 0 46px; background: var(--ink); border-right: 1px solid var(--ink-line); overflow: hidden; }
-.pr-key { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; font-size: 8px; color: var(--bone-dim); border-bottom: 1px solid rgba(0,0,0,0.4); }
-.pr-key.black { background: var(--ink-deep); }
-.pr-key.white { background: #171715; }
+/* `color` is NOT optional here. Inside the v2 shell the inherited colour is v2's
+   DARK-PANEL text (near-white), and this panel's own background flips to white in
+   the light theme — so an unset colour renders the title invisible on the shipped
+   default. Same fix, same reason as `.modal` (#44) and `.pop` (AGT-MEM/M3) above. */
+.pr { width: var(--pr-w); height: var(--pr-h); display: flex; flex-direction: column; background: var(--pr-panel); color: var(--pr-text); border: 1px solid var(--pr-line-bar); border-radius: 12px; overflow: hidden; }
+.pr-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--pr-line-bar); }
+.pr-head .pr-meta { color: var(--pr-text-dim); font-size: 11px; }
+.pr-vel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--pr-text-dim); }
+.pr-vel input { accent-color: var(--pr-note); }
+/* 2x3 grid: [corner | ruler] / [keys | scroll] / [vel gutter | vel lane].
+   Exactly ONE element owns overflow (.pr-scroll). Its siblings are overflow:hidden
+   viewports whose scroll offsets are written from .pr-scroll's onScroll — the same
+   mechanism the keys column already used. A grid (rather than nested flex) is what
+   makes ruler↔grid and keys↔gutter alignment structural instead of three duplicated
+   widths that drift. */
+.pr-body {
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  display: grid;
+  grid-template-columns: var(--pr-keys-w) minmax(0, 1fr);
+  grid-template-rows: var(--pr-ruler-h) minmax(0, 1fr) var(--pr-vel-h);
+}
+.pr-corner { background: var(--pr-ruler-bg); border-right: 1px solid var(--pr-line-bar); border-bottom: 1px solid var(--pr-line-bar); }
+.pr-ruler-vp { overflow: hidden; background: var(--pr-ruler-bg); border-bottom: 1px solid var(--pr-line-bar); }
+.pr-ruler { position: relative; height: 100%; min-width: 100%; cursor: pointer; }
+.pr-rtick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--pr-line-bar); }
+.pr-rtick span {
+  position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  font-size: 9px; font-family: var(--font-mono); color: var(--pr-ruler-text);
+  user-select: none; pointer-events: none;
+}
+.pr-keys-vp { overflow: hidden; background: var(--pr-grid-bg); border-right: 1px solid var(--pr-line-bar); }
+.pr-keys { background: var(--pr-grid-bg); }
+.pr-key { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; font-size: 8px; color: var(--pr-key-text); border-bottom: 1px solid var(--pr-key-line); }
+.pr-key.black { background: var(--pr-key-black-bg); }
+.pr-key.white { background: var(--pr-key-white-bg); }
 .pr-scroll { flex: 1 1 auto; overflow: auto; }
-.pr-grid { position: relative; background: var(--ink); }
+/* min-width covers the FIRST paint, before the ResizeObserver has measured the viewport
+   (and jsdom, which has none). The JS `gridBeatsFor` extends the rows and gridlines to
+   match; without both, either the background stops short or the grid lines do. */
+.pr-grid { position: relative; background: var(--pr-grid-bg); min-width: 100%; }
 .pr-row { position: absolute; left: 0; right: 0; }
-.pr-row.black { background: rgba(0,0,0,0.28); }
+.pr-row.black { background: var(--pr-row-alt); }
 /* Scale lock — dim the rows outside the song key and mark the root. Applied only
    while the lock is on, so the default roll keeps its original two-tone look. */
 .pr-row.off-key { background: var(--pr-offkey); }
@@ -928,13 +1025,48 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
    than as just another black row. A tint, not a hairline: the row spans the
    whole scrollable grid, so an edge marker would scroll out of sight. */
 .pr-row.root { background: var(--lime-faint); }
-.pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-line-soft); }
-.pr-gl.bar { background: var(--ink-line); }
-.pr-note { position: absolute; background: var(--lime); border: 1px solid #97c01a; border-radius: 3px; cursor: grab; box-sizing: border-box; }
-.pr-note.sel { background: var(--lime-glow); box-shadow: 0 0 0 1px #fff inset; }
+.pr-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--pr-line); }
+.pr-gl.bar { background: var(--pr-line-bar); }
+.pr-note { position: absolute; background: var(--pr-note); border: 1px solid var(--pr-note-edge); border-radius: 3px; cursor: grab; box-sizing: border-box; }
+.pr-note.sel { background: var(--pr-note-sel); box-shadow: 0 0 0 1px var(--pr-note-ring) inset; }
 .pr-note-grip { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
-.pr-lasso { position: absolute; background: var(--lime-faint); border: 1px solid var(--lime-dim); pointer-events: none; }
-.pr-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }
+.pr-lasso { position: absolute; background: var(--pr-lasso); border: 1px solid var(--pr-lasso-edge); pointer-events: none; }
+.pr-foot { padding: 7px 14px; border-top: 1px solid var(--pr-line-bar); font-size: 10px; color: var(--pr-text-dim); }
+.pr-zoom .btn { min-width: 26px; font-family: var(--font-mono); }
+
+/* Playhead. Position comes from ONE custom property written by a rAF loop (never React
+   state — the transport rail is 30Hz and would re-render the whole note tree). Parked
+   off-canvas by the fallback until the first frame; hidden unless the transport is
+   actually over this clip. */
+.pr-playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  left: var(--pr-play-x, -20px);
+  background: var(--pr-playhead); pointer-events: none; z-index: 4;
+}
+.pr-body:not(.pr-playing) .pr-playhead { display: none; }
+.pr-playhead-head { z-index: 2; }
+
+/* Velocity lane — one bar per note, bottom-anchored, mirroring the drum sequencer's
+   velocity graph so the two editors read as one family. */
+.pr-vel-gutter {
+  background: var(--pr-vel-bg); border-right: 1px solid var(--pr-line-bar); border-top: 1px solid var(--pr-line-bar);
+  display: flex; align-items: flex-start; justify-content: flex-end; padding: 3px 4px 0 0;
+  font-size: 8px; color: var(--pr-text-dim); text-transform: uppercase; letter-spacing: 0.08em;
+}
+.pr-vel-vp { overflow: hidden; background: var(--pr-vel-bg); border-top: 1px solid var(--pr-line-bar); }
+.pr-vel-lane { position: relative; height: 100%; min-width: 100%; cursor: ns-resize; }
+/* A narrow STEM at the note's start, not a block spanning the note's length. Notes
+   overlap in time constantly (chords, sustained parts under a melody), and full-width
+   bars stack on top of each other — the note underneath becomes literally unclickable.
+   Every DAW draws velocity as a stem for this reason. 5px is a usable pointer target
+   without merging visually at 1/16 spacing. */
+.pr-vel-bar {
+  position: absolute; bottom: 0; width: 5px; margin-left: -1px;
+  background: var(--pr-vel-bar); border: 1px solid var(--pr-vel-bg); border-radius: 2px 2px 0 0;
+  box-sizing: border-box; min-height: 3px;
+}
+.pr-vel-bar:hover { background: var(--pr-vel-bar-sel); }
+.pr-vel-bar.sel { background: var(--pr-vel-bar-sel); }
 
 /* drum step sequencer (a projection of a MIDI clip, inside the piano-roll modal) */
 .dr { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
@@ -969,7 +1101,8 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .dr-bar-fill { width: 100%; background: var(--lime); border-radius: 0 0 3px 3px; pointer-events: none; }
 
 /* Phase 6 — floating window (FL drum machine) */
-.floatwin { position: fixed; z-index: 70; display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); overflow: hidden; }
+/* Same missing-colour bug as .auto-panel/.pr above — the DrumWindow title was invisible. */
+.floatwin { position: fixed; z-index: 70; display: flex; flex-direction: column; background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); overflow: hidden; }
 .floatwin-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--ink-line); cursor: move; touch-action: none; background: var(--ink); }
 .floatwin-title { flex: 1 1 auto; font-size: 13px; }
 .floatwin-body { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
@@ -1019,7 +1152,10 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .rack-auto:hover { border-color: var(--lime-dim); color: var(--lime); }
 
 /* ── automation editor (modal) ───────────────────────────────────────────────*/
-.auto-panel { width: min(860px, 92vw); display: flex; flex-direction: column; background: var(--ink-raise); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
+/* `color` is load-bearing: inside v2 the inherited colour is v2 DARK-PANEL text, while
+   this panel's own background flips WHITE in the light theme — an unset colour renders the
+   title invisible. Same fix, same reason as .modal (#44) and .pop (AGT-MEM/M3). */
+.auto-panel { width: min(860px, 92vw); display: flex; flex-direction: column; background: var(--ink-raise); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 12px; overflow: hidden; }
 .auto-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--ink-line); }
 .auto-scroll { overflow: auto; background: var(--ink); }
 .auto-canvas { display: block; }
@@ -1033,14 +1169,10 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 /* ── focus visibility (keyboard nav) ─────────────────────────────────────────
    A consistent lime ring on every focusable control; a soft double-ring for
    round controls. Light mode swaps to an ink ring (lime on bone is low-contrast). */
-:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .pdot:focus-visible, .moshi-mount:focus-visible, .msx:focus-visible {
-  outline: none; box-shadow: 0 0 0 2px var(--ink-raise), 0 0 0 4px var(--lime);
+  outline: none; box-shadow: 0 0 0 2px var(--ink-raise), 0 0 0 4px var(--focus-ring);
 }
-[data-theme="light"] :focus-visible { outline-color: var(--bone); }
-[data-theme="light"] .pdot:focus-visible,
-[data-theme="light"] .moshi-mount:focus-visible,
-[data-theme="light"] .msx:focus-visible { box-shadow: 0 0 0 2px var(--ink-raise), 0 0 0 4px var(--bone); }
 
 /* ── reduced motion ──────────────────────────────────────────────────────────
    Honour the OS setting: near-instant transitions/animations. Must guard every

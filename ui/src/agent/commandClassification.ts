@@ -191,17 +191,10 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // ── annotations ──────────────────────────────────────────────────────────────
   move_annotation: "annotations can be created and edited on the timeline but not dragged to a new beat",
 
-  // ── song sections — the component EXISTS but is not mounted ──────────────────
-  // v2/timeline/SectionRibbon.tsx is complete (append, inline rename, drag to move/resize
-  // snapped to the bar, remove) and dispatches all four commands — but NOTHING imports it.
-  // TrackLaneList's grid comment reads "ruler row (now the top row)", so the ribbon row
-  // looks to have been dropped from the layout with the component left behind. Re-mounting
-  // it is a layout decision, not a bug fix, which is why these are logged rather than
-  // silently restored. Cheap to fix once that call is made — all four go at once.
-  create_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  rename_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  move_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  remove_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+  // (create_section / rename_section / move_section / remove_section were declared here.
+  // SectionRibbon is now mounted as the timeline's top row in TrackLaneList — inside the
+  // grid, above the ruler, NOT in the nav strip that PR #183 removed it from. All four
+  // are reachable with the mouse, so their entries are gone and the ratchet dropped 21→17.)
 
   // ── classic-only leftovers ───────────────────────────────────────────────────
   add_test_tone_clip: "a test-tone generator button exists only in the classic Topbar; v2 never carried one over",

@@ -18,6 +18,7 @@ import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { FeltWrongDialog } from "../ui/FeltWrongDialog";
+import { SessionPicker } from "./SessionPicker";
 import { MissingMediaBanner } from "../ui/MissingMediaBanner";
 import { AutomationPanel } from "../ui/AutomationPanel";
 import { DrumWindow } from "../ui/DrumWindow";
@@ -57,6 +58,9 @@ export function AppV2() {
       <RecoveryNotice />
       <MissingMediaBanner />
       <FeltWrongDialog />
+      {/* Renders null unless we're inside the real JUCE WebView (or ?picker=1 in dev), so
+          it is structurally absent from every vitest and Playwright run. */}
+      <SessionPicker />
 
       {/* symmetric push-docks frame a SMALL, CENTERED work area. Both flanks are collapsible
           pull-tab docks that occupy their OWN gutter — opening one fills its side and pushes,

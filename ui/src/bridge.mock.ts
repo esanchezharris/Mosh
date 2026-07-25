@@ -131,6 +131,10 @@ function seedSnapshot(): Snapshot {
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
+      // gap 2 — the Recent list the native snapshot carries (newest-first). Seeded so the
+      // session picker and every Open-Recent surface have something real to render in dev
+      // and e2e; kept in lockstep with `recentPaths` by syncRecents().
+      recentProjects: [],
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
@@ -163,7 +167,25 @@ function emptySession(): Snapshot {
   return s;
 }
 
+// Project lifecycle. The native side persists a Recent list in <session>/last-project.json
+// and swaps the whole edit on open; the mock kept `open_project`/`open_recent` as bare
+// `ok(command)` no-ops, so any Recent UI was invisible in dev and untestable in e2e.
+// Stashing snapshots by path means reopening a project actually restores its content,
+// which is what makes "Start empty, then go back" provable.
+const mockProjects = new Map<string, Snapshot>();
+let recentPaths: string[] = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+const projectName = (p: string): string => (p.split("/").pop() ?? p).replace(/\.[^.]+$/, "");
+function syncRecents(): void {
+  snapshot.session.recentProjects = recentPaths.map((path) => ({ path, name: projectName(path) }));
+}
+/** Move `path` to the front of the Recent list (dedup'd), mirroring native rememberProject. */
+function rememberProject(path: string): void {
+  if (!path) return;
+  recentPaths = [path, ...recentPaths.filter((p) => p !== path)].slice(0, 10);
+}
+
 let snapshot: Snapshot = seedSnapshot();
+syncRecents();
 let mockCorpusLines = 0; // §7 — simulates the cross-song style corpus growing on accept
 
 // AGT-MEM (Phase-B memory lane, M1) — the agent-memory store, mirrored in-memory.
@@ -1729,11 +1751,46 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
-    case "set_project_settings": case "open_project": case "open_recent": case "save_as": return ok(command);
+    case "set_project_settings": case "save_as": return ok(command);
+
+    // Open an existing project — by path, or by index into the live Recent list. The
+    // index form mirrors native `open_recent`, including its out-of-range error, because
+    // an index is resolved against a list the UI read one snapshot ago.
+    case "open_project": case "open_recent": {
+      let target: string;
+      if (command === "open_recent") {
+        const i = num(args.index, -1);
+        if (!Number.isInteger(i) || i < 0 || i >= recentPaths.length) return err(command, `no recent project at index ${i}`);
+        target = recentPaths[i];
+      } else {
+        target = str(args.file);
+        if (!target) return err(command, "open_project needs a file");
+      }
+      mockProjects.set(snapshot.session.editFile, snapshot);   // keep what we're leaving
+      rememberProject(snapshot.session.editFile);              // …and keep it reachable
+      const restored = mockProjects.get(target);
+      snapshot = restored ?? emptySession();
+      snapshot.session.editFile = target;
+      rememberProject(target);
+      syncRecents();
+      history.length = 0; future.length = 0;
+      stopPlayback();
+      invalidate();
+      return ok(command);
+    }
+
     // New project = a fresh empty edit (createEmptyEdit on the native side). Resets to a
     // blank session and clears undo history — you can't undo across a New, same as a DAW.
     case "new_project": {
+      const leaving = snapshot.session.editFile;
+      mockProjects.set(leaving, snapshot);
       snapshot = emptySession();
+      snapshot.session.editFile = `/mock/untitled-${mockProjects.size}.mosh`;
+      // The project you LEFT stays in Recent, so "Start empty" is reversible. This
+      // mirrors the native rememberProject(editPath) added to MoshEngine::newProject.
+      rememberProject(leaving);
+      rememberProject(snapshot.session.editFile);
+      syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
       invalidate();

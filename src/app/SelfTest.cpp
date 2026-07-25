@@ -3100,7 +3100,41 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // earlier sections in this run have staged.
     section ("Export range + tail policy (G1)");
     {
+        // gap 2 — the project you LEAVE must stay reachable from Recent.
+        //
+        // This rides the harness's FIRST project operation on purpose: rememberProject
+        // was only ever called for the INCOMING file, so a project that entered editPath
+        // WITHOUT being opened never made it into last-project.json at all. In-process the
+        // only such project is the cold-start edit — which is exactly the one a producer
+        // is looking at when the launch picker offers "Start empty". Anywhere later in the
+        // harness the outgoing project has already been remembered as some earlier
+        // command's incoming file, so the check would pass with or without the fix.
+        const auto coldStartEdit = eng.editFile();
+        {
+            auto before = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            bool listedBefore = false;
+            for (int i = 0; i < before.size(); ++i)
+                if (before[i].getProperty ("path", var()).toString() == coldStartEdit.getFullPathName())
+                    listedBefore = true;
+            // Anti-vacuity: if the cold-start edit were ALREADY in Recent, the assertion
+            // below would pass for the wrong reason. Runs isolated (the default), so this
+            // holds; a reused MOSH_SELFTEST_SESSION would trip it, which is the honest
+            // signal that the run is not clean.
+            check (! listedBefore, "cold-start edit is not yet in Recent (precondition)");
+        }
+
         check (ok (cmd (ops, "new_project", args1 ("name", "g1-export-selftest"))), "new_project (G1 export isolation) ok");
+
+        {
+            auto after = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            bool listedAfter = false;
+            for (int i = 0; i < after.size(); ++i)
+                if (after[i].getProperty ("path", var()).toString() == coldStartEdit.getFullPathName())
+                    listedAfter = true;
+            check (listedAfter, "new_project keeps the OUTGOING (cold-start) project in Recent");
+            check (after.size() > 0 && after[0].getProperty ("path", var()).toString() == eng.editFile().getFullPathName(),
+                   "the newly-created project is still Recent[0] (newest-first preserved)");
+        }
 
         auto gt = cmd (ops, "create_track", args1 ("name", "G1 Tone"))["data"].getProperty ("trackId", var()).toString();
         // freq 337 is unique to this section: add_test_tone_clip caches the generated
@@ -4815,6 +4849,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             if (pruned[i].getProperty ("path", var()).toString() == editB.getFullPathName())
                 ghostListed = true;
         check (! ghostListed, "a deleted project is dropped from recentProjects (no ghost index)");
+
+        // (e) leaving a project and coming straight back by index. The "outgoing project
+        //     stays in Recent" invariant itself is pinned at the harness's FIRST project
+        //     op (see the G1 export section) — by this point every project here has
+        //     already been remembered as some earlier command's INCOMING file, so a check
+        //     placed here would pass with or without that fix. What this adds is the
+        //     round trip: leave, then reopen the one you left, by position.
+        {
+            const auto leaving = eng.editFile();
+            check (ok (cmd (ops, "new_project", args1 ("name", "recent-C"))), "new_project recent-C ok");
+            auto rc = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            check (rc.size() > 1 && rc[1].getProperty ("path", var()).toString() == leaving.getFullPathName(),
+                   "the project we left sits directly behind the new one in Recent");
+            check (ok (cmd (ops, "open_recent", args1 ("index", 1))), "open_recent index 1 reopens the project we left");
+            check (eng.editFile() == leaving, "the left-behind project reopened by index");
+        }
 
         // teardown: restore the harness session edit for later sections.
         check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (AL-007 teardown)");

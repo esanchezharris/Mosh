@@ -35,6 +35,13 @@ export const isNative = (): boolean => realNative() || MOCK_ENABLED;
  *  the menu) but keeps handling everything in Vite dev (no native menu). */
 export const nativeMenuPresent = (): boolean => realNative();
 
+/** True ONLY inside the real JUCE WebView — i.e. "this is the packaged app, opening a
+ *  real project on disk", as distinct from `isNative()`, which is also true for the dev
+ *  mock. The session picker gates on this so it is structurally absent from every vitest
+ *  and Playwright run rather than relying on a settings flag each spec would have to
+ *  remember to seed. */
+export const isRealNative = (): boolean => realNative();
+
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();
 function native(name: string) {

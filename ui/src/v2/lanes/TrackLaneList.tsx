@@ -12,6 +12,7 @@ import { beatSeconds, barSeconds } from "../../time";
 import type { CommandResult, Snapshot, Track } from "../../types";
 import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
+import { SectionRibbon } from "../timeline/SectionRibbon";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
@@ -20,7 +21,10 @@ import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
 
-const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group: "Group" };
+// (The uppercase AUDIO/DRUM pill that used to live in the header was removed: it
+// duplicated `TrackTypeIcon`, which already encodes the track type, and being
+// unshrinkable it won the fight for a 28px name column and truncated every name to
+// "Ser…". The icon carries the type; the name gets the space.)
 
 // The kinds of track the add-track affordance can create. Both add-track sites used to be
 // hardcoded to `create_track {name:"Audio"}`, which made drum and instrument tracks
@@ -148,11 +152,19 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           height it caps there and scrolls internally (the prompt bar stays put). */}
       <div
         className="v2-stage"
-        style={{ "--v2-stage-h": `calc(var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
-            {/* ruler row (now the top row) */}
+            {/* Song-structure ribbon — the timeline's top row, above the ruler.
+                NOT the nav strip: PR #183 removed it from there because a ribbon sitting
+                beside the whole-song navigator "was misread as section editing", and
+                SongNav replaced it with plain bar numbers. Inside the timeline it reads as
+                what it is — a structure lane over the same x-axis as the clips. SongNav is
+                untouched. */}
+            <div className="v2-corner v2-corner-ribbon" />
+            <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
+            {/* ruler row */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
             {/* lanes */}
@@ -306,9 +318,10 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const instrument = track.plugins?.find((p) => p.isInstrument)?.name;
-  const preset = instrument ?? (track.type === "drum" ? "Drums" : "Audio");
-  const typeLabel = TYPE_LABEL[track.type] ?? "Track";
+  // Only show the preset line when it actually says something. It used to fall back to
+  // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
+  // it cost the name column a line of vertical space to say nothing.
+  const preset = track.plugins?.find((p) => p.isInstrument)?.name;
   const sel = selectedTrackId === track.id;
 
   return (
@@ -328,10 +341,9 @@ function TrackLaneHeader({ track }: { track: Track }) {
       <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
       <span className="v2-lmeta">
         <span className="v2-lrow">
-          <span className="v2-lname">{track.name}</span>
-          <span className="v2-ltype">{typeLabel}</span>
+          <span className="v2-lname" title={track.name}>{track.name}</span>
         </span>
-        <span className="v2-lpreset">{preset}</span>
+        {preset && <span className="v2-lpreset">{preset}</span>}
       </span>
       <TrackMeterBar trackId={track.id} />
       <span className="v2-ms">

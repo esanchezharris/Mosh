@@ -145,6 +145,9 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
   // THE RATCHET. This number may only ever go DOWN. Raising it means shipping another
   // feature the user cannot reach — which is the exact failure this test was written for.
   it("the gap list does not grow", () => {
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(21);
+    // 21 → 17: mounting SectionRibbon closed create/rename/move/remove_section at once.
+    // Tightening it is the point — leaving the ceiling at 21 would bank four gaps' worth
+    // of slack and let the next four regressions land without the test noticing.
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(17);
   });
 });
