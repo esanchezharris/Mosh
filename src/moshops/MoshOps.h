@@ -358,6 +358,7 @@ private:
     void invalidateCommandLogCache();
     void refreshCommandLogCacheIfNeeded (const juce::File& file);
     juce::var cmdSetAudioDevice   (const juce::var& args);   // machine preference (undoable:false)
+    juce::var cmdRetryAudioDevice (const juce::var& args);   // AUD-017 recovery (undoable:false)
     juce::var cmdSetBufferSize    (const juce::var& args);   // thin wrapper over set_audio_device
     juce::var cmdSetAudioThreads  (const juce::var& args);   // PRF-001 multicore pref (undoable:false)
     juce::var cmdListDirectory    (const juce::var& args);   // BRW-001 read-only file browse (no log/transaction)

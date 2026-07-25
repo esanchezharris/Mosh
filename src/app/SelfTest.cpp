@@ -4602,6 +4602,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sb = cmd (ops, "set_buffer_size", args1 ("bufferSize", 512));
         check (! ok (sb), "set_buffer_size returns graceful error with no device");
 
+        // AUD-017 — retry_audio_device is the recovery half of the bounded startup open.
+        // In a headless run audio was never REQUESTED, so it must refuse without going
+        // anywhere near the HAL: that guard is what keeps --selftest hermetic (a retry
+        // that opened a device here would make the harness depend on this machine's
+        // audio hardware, and could hang exactly the way the ticket describes).
+        check (! eng.audioRequested(), "headless selftest never requests audio (hermeticity precondition)");
+        check (! eng.hasAudio(), "headless selftest has no open audio device");
+        auto rad = cmd (ops, "retry_audio_device");
+        check (! ok (rad), "retry_audio_device refuses when the session never wanted audio");
+        check (rad.getProperty ("error", var()).toString().contains ("no audio device"),
+               "retry_audio_device error mentions no audio device");
+        check (eng.audioDeviceError().isEmpty(),
+               "a refused retry leaves no phantom device error behind");
+
         // Project lifecycle — run entirely on TEMP files so the persistent session
         // the prior checks rely on is never corrupted. Restore it at the end.
         const auto sessionEdit = eng.editFile();

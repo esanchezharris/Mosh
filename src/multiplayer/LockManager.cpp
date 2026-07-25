@@ -33,7 +33,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
-        "enable_all_meters", "set_audio_device", "set_buffer_size", "set_audio_threads",
+        "enable_all_meters", "set_audio_device", "retry_audio_device", "set_buffer_size", "set_audio_threads",
         "set_project_settings", "set_key", "rescan_plugins", "get_plugin_blocklist",
         "clear_plugin_blocklist", "block_plugin", "open_plugin_editor",
         // Master-bus plugins — popping a native editor window is viewer-local (no state
