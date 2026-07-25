@@ -74,9 +74,16 @@ def cmd_ingest(args) -> int:
                                     min_year=args.min_year)
     elif args.what == "scrape":
         names = [a.strip() for a in (args.artists or "").split(",") if a.strip()]
+        if args.top_artists:
+            # Discovery: the dump knows who was active up to its 2022 cutoff;
+            # Genius has their 2023+ material, which is where current slang is.
+            names += [a for a in scrape.rank_recent_artists(
+                _load_corpus(), top=args.top_artists, since=args.since)
+                if a not in names]
         if not names:
-            spec = _golden_spec()
-            names = list(spec.get("artists") or [])
+            names = list(_golden_spec().get("artists") or [])
+        print(f"scraping {len(names)} artists (min_year={args.min_year}, "
+              f"<= {args.max_per_artist} songs each)", flush=True)
         report = scrape.scrape_artists(names, max_per_artist=args.max_per_artist,
                                        min_year=args.min_year)
     elif args.what == "own":
@@ -444,6 +451,10 @@ def main(argv=None) -> int:
     p.add_argument("--artists", default="",
                    help="comma-separated; defaults to golden_spec artists")
     p.add_argument("--max-per-artist", type=int, default=200)
+    p.add_argument("--top-artists", type=int, default=0,
+                   help="also scrape the N most recently-active corpus artists")
+    p.add_argument("--since", type=int, default=2020,
+                   help="recency window used to rank those artists")
     p.add_argument("--dataset", default="cleaned", choices=["cleaned", "5m"])
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--min-year", type=int, default=0,

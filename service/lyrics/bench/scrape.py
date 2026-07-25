@@ -111,6 +111,39 @@ def to_song(meta: dict, page: str) -> Optional[dict]:
     return rec
 
 
+_META_ACCOUNT = re.compile(r"genius|translat|übersetzung|traduc|lyricfind", re.I)
+
+
+def rank_recent_artists(songs: List[dict], *, top: int = 100,
+                        since: int = 2020, min_median_views: int = 5000) -> List[str]:
+    """Who is CURRENT, derived from the corpus rather than guessed.
+
+    The dump knows which artists were active up to its 2022 cutoff; Genius has
+    their 2023-2025 material. Ranking on recent song count (not all-time volume,
+    which crowns whoever has the longest career) turns the dump into a discovery
+    index for the scraper. Ties break alphabetically so the list is stable.
+    """
+    views: Dict[str, List[int]] = {}
+    for s in songs:
+        year = s.get("year")
+        name = (s.get("artist") or "").strip()
+        # "Genius English Translations" and friends are upload accounts, not
+        # writers — they top a raw song count and would waste the whole scrape.
+        if not name or not year or _META_ACCOUNT.search(name):
+            continue
+        try:
+            if int(year) < since:
+                continue
+        except (TypeError, ValueError):
+            continue
+        views.setdefault(name, []).append(int(s.get("views") or 0))
+    import statistics
+    counts = {a: len(v) for a, v in views.items()
+              if statistics.median(v) >= min_median_views}
+    ordered = sorted(counts, key=lambda a: (-counts[a], a))
+    return ordered[:top]
+
+
 class RateLimiter:
     """One request per `min_interval` seconds — politeness, not performance."""
 

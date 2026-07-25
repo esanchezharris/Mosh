@@ -154,5 +154,29 @@ with tempfile.TemporaryDirectory() as td:
     check("page cache: a different url does fetch",
           c.get("https://genius.com/b", fetch) and calls["n"] == 2)
 
+# ---- who to scrape: derived from the corpus, not guessed ----
+CORPUS = ([{"artist": "Current One", "year": 2022, "views": 9000}] * 5
+          + [{"artist": "Current One", "year": 2021, "views": 9000}] * 5
+          + [{"artist": "Faded Legend", "year": 1998, "views": 99999}] * 20
+          + [{"artist": "Rising Two", "year": 2022, "views": 8000}] * 3
+          + [{"artist": "Genius English Translations", "year": 2022,
+              "views": 50000}] * 40
+          + [{"artist": "Bedroom Hobbyist", "year": 2022, "views": 12}] * 30
+          + [{"artist": "", "year": 2022, "views": 10}] * 9)
+ranked = scrape.rank_recent_artists(CORPUS, top=10, since=2020)
+check("Genius upload/translation accounts are excluded outright",
+      not any("Genius" in a for a in ranked), str(ranked))
+check("a prolific but unlistened uploader is filtered by the views floor",
+      "Bedroom Hobbyist" not in ranked, str(ranked))
+check("ranks by RECENT activity, not all-time volume",
+      ranked and ranked[0] == "Current One" and "Faded Legend" not in ranked,
+      str(ranked))
+check("thin-but-current artists still make the list", "Rising Two" in ranked)
+check("blank artist names are dropped", "" not in ranked)
+check("ranking is deterministic",
+      scrape.rank_recent_artists(CORPUS, top=10, since=2020) == ranked)
+check("top caps the list", len(scrape.rank_recent_artists(CORPUS, top=1,
+                                                          since=2020)) == 1)
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
