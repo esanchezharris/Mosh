@@ -13,6 +13,15 @@ import {
   DRUM_LANES, STEPS, STEP_OPTIONS, stepBeats, stepStartBeats,
   buildGrid, cycleVelocity, velocityFromFraction,
 } from "./drumGrid";
+import { parseDrumPattern, serializeDrumPattern, drumPatternFromNotes } from "./drumPatternUtil";
+
+// A few starting points for the pattern field. Short lanes TILE when they divide the
+// bar (parseDrumPattern's own rule), which is why "x." is a valid 8th-note hat line.
+const PATTERN_PRESETS: { label: string; pattern: string }[] = [
+  { label: "Four on the floor", pattern: "kick: x...x...x...x...; snare: ....x.......x...; hat: x." },
+  { label: "Boom bap", pattern: "kick: x.....x...x.....; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x." },
+  { label: "Trap", pattern: "kick: x.....x.....x...; snare: ........x.......; hat: xxx" },
+];
 
 export function DrumSequencer({ clip }: { clip: Clip }) {
   const snapshot = useStore((s) => s.snapshot);
@@ -23,6 +32,9 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
   const [swing, setSwing] = useState(0);
   const [view, setView] = useState<"roll" | "graph">("roll");
   const [lane, setLane] = useState(0); // which lane the velocity graph edits
+  // DRM-002 pattern field. `null` = closed; opening seeds it from the LIVE clip so the
+  // field starts as an editable picture of what's on the grid rather than blank.
+  const [patternDraft, setPatternDraft] = useState<string | null>(null);
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
   const sb = stepBeats(m.num, steps);
@@ -74,6 +86,26 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
     void exec("set_transport", { action: "toggle" });
   };
 
+  // ── DRM-002: lay a whole grid in one undoable step ──────────────────────────
+  // add_drum_pattern shipped agent-only — the backend, the parser and the goldens were
+  // all complete, but nothing in the UI ever called it, so a mouse-only user could only
+  // build a beat one cell at a time (and got one undo step per cell).
+  //
+  // Passing clipId gives PER-LANE REPLACE: only the lanes named in the text are cleared,
+  // so editing the hats leaves the kick alone. That is also why the field seeds from the
+  // live clip — the text you see is the grid you have, so Apply is an edit, not a wipe.
+  const openPattern = () => setPatternDraft(
+    serializeDrumPattern(drumPatternFromNotes(clip.notes ?? [], m.num, steps)),
+  );
+  // Validate with the SAME parser the backend uses (twin implementations kept in
+  // lockstep by mirrored golden vectors), so the error text here is the error text there.
+  const patternParse = patternDraft == null ? null : parseDrumPattern(patternDraft, steps);
+  const applyPattern = async () => {
+    if (!patternDraft || !patternParse?.ok) return;
+    await exec("add_drum_pattern", { clipId: clip.id, pattern: patternDraft, stepsPerBar: steps });
+    setPatternDraft(null);
+  };
+
   return (
     <div className="dr" data-testid="drum-sequencer">
       <div className="dr-toolbar">
@@ -81,6 +113,12 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
           {playing ? "⏸ Stop" : "▶ Play"}
         </button>
         <button className="btn" onClick={() => void clearAll()}>Clear</button>
+        <button className="btn" data-testid="dr-pattern-toggle" aria-pressed={patternDraft != null}
+          aria-expanded={patternDraft != null}
+          title="Write the whole grid as text — one undoable step"
+          onClick={() => (patternDraft == null ? openPattern() : setPatternDraft(null))}>
+          Pattern
+        </button>
         {track && !isDrumTrack && (
           <button className="btn" data-testid="make-drum-track" title="Load a sampler + drum kit so these notes make sound"
             onClick={() => void exec("set_track_type", { trackId: track.id, type: "drum" })}>
@@ -103,6 +141,37 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
           <button className="btn" aria-pressed={view === "graph"} onClick={() => setView("graph")}>Graph</button>
         </div>
       </div>
+
+      {patternDraft != null && (
+        <div className="dr-pattern" data-testid="dr-pattern-panel">
+          <div className="dr-pattern-presets">
+            {PATTERN_PRESETS.map((p) => (
+              <button key={p.label} className="btn" data-testid="dr-pattern-preset"
+                onClick={() => setPatternDraft(p.pattern)}>{p.label}</button>
+            ))}
+          </div>
+          <textarea
+            className="dr-pattern-input" data-testid="dr-pattern-input" rows={4} spellCheck={false}
+            aria-label="Drum pattern"
+            aria-invalid={patternParse != null && !patternParse.ok}
+            value={patternDraft}
+            onChange={(e) => setPatternDraft(e.target.value)}
+          />
+          <div className="dr-pattern-foot">
+            {/* The parser's own message, not a paraphrase — the backend rejects with the
+                identical string, so a producer never sees two different explanations. */}
+            <span className={patternParse?.ok ? "dr-hint" : "dr-pattern-err"} data-testid="dr-pattern-status" role="status">
+              {patternParse?.ok
+                ? `${patternParse.lanePitches.length} lanes · ${patternParse.totalSteps} steps · ${patternParse.steps.length} hits`
+                : patternParse?.error}
+            </span>
+            <span className="spacer" />
+            <span className="dr-hint">x hit · X accent · . rest · | bar</span>
+            <button className="btn" data-testid="dr-pattern-apply" disabled={!patternParse?.ok}
+              onClick={() => void applyPattern()}>Apply</button>
+          </div>
+        </div>
+      )}
 
       {view === "roll" ? (
         <div className="dr-grid" role="grid" aria-label="Drum step sequencer">

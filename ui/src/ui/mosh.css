@@ -1085,6 +1085,20 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dr-cell:hover { border-color: var(--lime-dim); }
 .dr-cell.on { background: var(--lime); border-color: #97c01a; }
 
+/* DRM-002 — the pattern field: write the whole grid as text, one undoable step. */
+.dr-pattern { display: flex; flex-direction: column; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--ink-line); }
+.dr-pattern-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.dr-pattern-input {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line);
+  border-radius: 6px; padding: 6px 8px;
+}
+.dr-pattern-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.dr-pattern-input[aria-invalid="true"] { border-color: var(--danger); }
+.dr-pattern-foot { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+.dr-pattern-err { color: var(--danger); font-size: 10px; }
+
 /* Phase 6 — FL sequencer controls + velocity graph */
 button.tbadge { font: inherit; cursor: pointer; }
 button.tbadge:hover { border-color: var(--lime); color: var(--lime); }

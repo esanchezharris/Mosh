@@ -162,7 +162,9 @@ export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
  */
 export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // ── arrangement / editing ────────────────────────────────────────────────────
-  add_drum_pattern: "DRM-002 lays a whole drum grid in one undoable step — wants a pattern control in the drum/MIDI editor",
+  // (add_drum_pattern was declared here. DrumSequencer now has a Pattern field — seeded
+  // from the live clip, validated by the same parser the backend uses — so a mouse-only
+  // user can lay or edit a whole grid in one undoable step. Ratchet 17 → 16.)
   delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
   load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
   sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
