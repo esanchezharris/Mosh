@@ -92,6 +92,31 @@ check("exact dup: identical content hash collapses (later id dropped)",
       and splits2.get("fx:basement") not in (None, "dropped"),
       f"copy={splits2.get('fx:zz-basement-copy')} orig={splits2.get('fx:basement')}")
 
+# ---- collab credits: "A & B" carries the golden artist's verses and must be
+# golden; substring lookalikes ("Nick Drake" vs "Drake") must NOT match ----
+def named(artist, sid, content_src="fx:basement"):
+    s = copy.deepcopy(next(x for x in SONGS if x["songId"] == content_src))
+    s["songId"], s["artist"] = sid, artist
+    s["hash"] = "sha1:" + sid
+    return s
+
+
+# The lookalike gets DISTINCT content (fx:noscheme) so this isolates the artist
+# matcher — same-content lookalikes are (correctly) caught by containment anyway.
+collab_songs = SONGS + [named("Future Fixture & Golden Fixture", "cb:duo"),
+                        named("Golden Fixture feat. Somebody Else", "cb:feat"),
+                        named("Nick Golden Fixtureman", "cb:lookalike",
+                              content_src="fx:noscheme")]
+splits_cb, _ = build_eval.assign_splits(collab_songs, GOLDEN_SPEC, salt=SALT,
+                                        dev_frac=0.25)
+check("collab: 'A & golden-artist' credit is golden",
+      splits_cb.get("cb:duo") == "golden", str(splits_cb.get("cb:duo")))
+check("collab: 'golden-artist feat. X' credit is golden",
+      splits_cb.get("cb:feat") == "golden", str(splits_cb.get("cb:feat")))
+check("collab: substring lookalike artist is NOT golden",
+      splits_cb.get("cb:lookalike") in ("train", "dev"),
+      str(splits_cb.get("cb:lookalike")))
+
 # ---- the golden-dup hole: an exact-content re-scrape of a golden song under a
 # lexicographically EARLIER id whose artist string the spec does NOT match must
 # not smuggle golden content into train/dev (review finding #2) ----
@@ -103,8 +128,12 @@ splits_rs, rep_rs = build_eval.assign_splits(SONGS + [rescrape], GOLDEN_SPEC,
 check("golden dup: exact twin of a golden song never lands in train/dev",
       splits_rs.get("aa:rescrape") not in ("train", "dev"),
       f"rescrape={splits_rs.get('aa:rescrape')}")
-check("golden dup: the golden song itself stays golden",
-      splits_rs.get("fx:golden1") == "golden", str(splits_rs.get("fx:golden1")))
+# With the collab matcher, "feat." credits ALSO spec-match, so either copy may
+# be the kept one — the invariant is: exactly one survives, as golden, and the
+# other is a dropped dup.
+kept_pair = sorted([splits_rs.get("fx:golden1"), splits_rs.get("aa:rescrape")])
+check("golden dup: one copy kept as golden, the other dropped",
+      kept_pair == ["dropped", "golden"], str(kept_pair))
 
 # ---- synthetic source never golden ----
 synth = copy.deepcopy(next(s for s in SONGS if s["songId"] == "fx:golden1"))

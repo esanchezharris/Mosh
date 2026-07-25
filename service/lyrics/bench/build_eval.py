@@ -31,6 +31,20 @@ def _norm(s: str) -> str:
     return _NORM_RE.sub("", (s or "").lower()).strip()
 
 
+# Genius collab credits: "Future & Young Thug", "Drake, 21 Savage",
+# "Artist feat. Other". Split BEFORE normalization (punctuation carries the
+# structure); components are matched exactly, so "Nick Drake" never matches
+# "Drake" — but "A & Drake" does. A collab song carries the golden artist's
+# verses and must never reach train/dev.
+_COLLAB_SPLIT = re.compile(r"\s*(?:&|,|\+|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bx\b)\s*",
+                           re.IGNORECASE)
+
+
+def _artist_components(artist: str) -> List[str]:
+    parts = [_norm(p) for p in _COLLAB_SPLIT.split(artist or "")]
+    return [p for p in parts if p]
+
+
 def _hash_frac(salt: str, song_id: str) -> float:
     h = hashlib.sha256(f"{salt}|{song_id}".encode("utf-8")).digest()
     return int.from_bytes(h[:8], "big") / 2 ** 64
@@ -46,9 +60,10 @@ def match_golden(songs: List[dict], spec: dict) -> Tuple[set, dict]:
         a, t = _norm(s.get("artist", "")), _norm(s.get("title", ""))
         if s.get("source") == "synthetic":
             continue
-        if a in artists:
+        matched = artists & ({a} | set(_artist_components(s.get("artist", ""))))
+        if matched:
             golden.add(s["songId"])
-            seen_artists.add(a)
+            seen_artists.update(matched)
         if (a, t) in pairs:
             golden.add(s["songId"])
             seen_pairs.add((a, t))
