@@ -126,3 +126,83 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   // ── hardware-controller telemetry ─────────────────────────────────────────────
   mark_take: "fire-and-forget controller telemetry (logs + re-emits an event) — no session mutation to verify",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The MIRROR of UI_ONLY_COMMANDS. That map answers "the agent can't reach this,
+// and here's why". These two answer the question nobody was asking: "can the
+// USER reach this?"
+//
+// Why this exists. The v2 shell — the DEFAULT shell — shipped unable to create a
+// drum track or a MIDI clip. `create_track` was hardcoded to audio at both call
+// sites and `add_midi_clip` had no v2 call site at all, so the piano roll (which
+// only opens on an existing MIDI clip) was unreachable by construction too, and
+// `rename_track` had no call site in either shell. You could finish a track in
+// Mosh only if it was made of audio you recorded or imported.
+//
+// None of that was caught, because nothing measured it. 1,792 native selftest
+// checks and 1,746 vitest tests all assert that COMMANDS work; the DAW-parity
+// scoreboard defines a pass as "capability proven headless". Every one of those
+// was green the whole time. Reachability was simply not a thing anyone checked.
+//
+// `uiReachability.test.ts` enforces the partition: every agent-catalog command is
+// reachable from the shipped shell, OR listed below with a reason. New commands
+// cannot join UI_REACH_GAPS silently — the list is a ratchet that may only shrink.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Deliberately not a UI control — the shape has no sensible direct affordance. */
+export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
+  write_automation_curve: "writes a whole curve in one call — the UI's story is drawing points on the automation canvas, which is a different (and better) gesture",
+};
+
+/**
+ * KNOWN GAPS — the backend works and the agent can call it, but a mouse-only user
+ * cannot. This is a backlog, not a design: each entry is a control someone still
+ * has to build. The test asserts every entry is STILL unreachable, so wiring one
+ * up forces its removal here and the list can only shrink.
+ */
+export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
+  // ── arrangement / editing ────────────────────────────────────────────────────
+  add_drum_pattern: "DRM-002 lays a whole drum grid in one undoable step — wants a pattern control in the drum/MIDI editor",
+  delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
+  load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
+  sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
+
+  // ── takes / comping (G12) ────────────────────────────────────────────────────
+  list_takes: "comping UI is unbuilt; keep_take/set_current_take are wired but take ENUMERATION has no surface",
+
+  // ── export (G7) ──────────────────────────────────────────────────────────────
+  export_stems: "per-track stem export has a backend + Catch2 coverage but no tab in ExportControls",
+
+  // ── mixer / routing — asymmetric with what IS reachable ──────────────────────
+  rename_bus: "create_bus is in the Inspector; rename is not — an unintended asymmetry",
+  remove_bus: "create_bus is in the Inspector; remove is not — an unintended asymmetry",
+  set_master_plugin_param: "the master rack can load/bypass/reorder plugins in RightRail but exposes no param control",
+  set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
+
+  // ── generative render layers ─────────────────────────────────────────────────
+  bypass_layer: "render-layer A/B — wants a bypass toggle on the layer in GenDrawer",
+  freeze_layer: "freezing a render to save CPU — wants a control in GenDrawer",
+  bounce_layer_to_clip: "committing a render layer down to a plain clip — wants a control in GenDrawer",
+
+  // ── tempo map ────────────────────────────────────────────────────────────────
+  insert_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
+  remove_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
+
+  // ── annotations ──────────────────────────────────────────────────────────────
+  move_annotation: "annotations can be created and edited on the timeline but not dragged to a new beat",
+
+  // ── song sections — the component EXISTS but is not mounted ──────────────────
+  // v2/timeline/SectionRibbon.tsx is complete (append, inline rename, drag to move/resize
+  // snapped to the bar, remove) and dispatches all four commands — but NOTHING imports it.
+  // TrackLaneList's grid comment reads "ruler row (now the top row)", so the ribbon row
+  // looks to have been dropped from the layout with the component left behind. Re-mounting
+  // it is a layout decision, not a bug fix, which is why these are logged rather than
+  // silently restored. Cheap to fix once that call is made — all four go at once.
+  create_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+  rename_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+  move_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+  remove_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+
+  // ── classic-only leftovers ───────────────────────────────────────────────────
+  add_test_tone_clip: "a test-tone generator button exists only in the classic Topbar; v2 never carried one over",
+};
