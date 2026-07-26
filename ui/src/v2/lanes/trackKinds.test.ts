@@ -78,6 +78,27 @@ describe("v2 add-track — every offered kind is reachable and lands playable (T
     expect(t.clips[0].type).toBe("midi");
   });
 
+  it("test tone → an audio track with a tone clip already on it", async () => {
+    // add_test_tone_clip existed only in the classic Topbar, targeting the selected track.
+    // v2 has no "add a clip to this track" affordance to hang it off, so it arrives the way
+    // an Instrument track does: make the track, then put the clip on it.
+    await addTrackOfKind("tone", exec);
+    await settle();
+    expect(calls.map((c) => c.command)).toEqual(["create_track", "add_test_tone_clip"]);
+    const t = newest();
+    expect(calls[1].args).toEqual({ trackId: t.id });
+    expect(t.clips.length).toBe(1);
+  });
+
+  it("never orphans a tone clip when create_track fails", async () => {
+    const seen: string[] = [];
+    await addTrackOfKind("tone", async (command) => {
+      seen.push(command);
+      return { ok: false, command, error: "boom" };
+    });
+    expect(seen).toEqual(["create_track"]);
+  });
+
   it("never orphans a MIDI clip onto the wrong track when create_track fails", async () => {
     const seen: string[] = [];
     await addTrackOfKind("midi", async (command) => {

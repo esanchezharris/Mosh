@@ -152,9 +152,12 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // → 14 (GenDrawer's A/B toggle: bypass_layer — its two siblings stay, with reasons
     // rewritten to say what investigation found rather than what was assumed)
     // → 13 (ExportControls' stems mode: export_stems)
-    // → 11 (the timeline's tempo lane: insert_tempo_change + remove_tempo_change).
+    // → 11 (the timeline's tempo lane: insert_tempo_change + remove_tempo_change)
+    // → 7  (the asymmetries: rename_bus, remove_bus, set_master_plugin_param, and the
+    //       classic-only add_test_tone_clip — each a control missing from a panel that
+    //       already shipped its siblings).
     // Tightening on each close is the point — leaving slack banks gaps and lets the next
     // regression land unnoticed.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(7);
   });
 });

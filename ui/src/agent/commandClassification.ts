@@ -186,10 +186,13 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // it is N full renders INLINE on the message thread with no progress and no cancel, so an
   // accidental click is unrecoverable. Ratchet 14 → 13.)
 
-  // ── mixer / routing — asymmetric with what IS reachable ──────────────────────
-  rename_bus: "create_bus is in the Inspector; rename is not — an unintended asymmetry",
-  remove_bus: "create_bus is in the Inspector; remove is not — an unintended asymmetry",
-  set_master_plugin_param: "the master rack can load/bypass/reorder plugins in RightRail but exposes no param control",
+  // ── mixer / routing ──────────────────────────────────────────────────────────
+  // (rename_bus / remove_bus were declared here as "an unintended asymmetry" with create_bus,
+  // and that is exactly what they were: the Sends section now renames on double-click and
+  // deletes behind a confirm — cmdRemoveBus drops the return track AND sweeps the send off
+  // every track in the project, which re-adding the bus does not restore.
+  // set_master_plugin_param was declared here too; the master rack's rows now expand to the
+  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.)
   set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
 
   // ── generative render layers ─────────────────────────────────────────────────
@@ -218,6 +221,8 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // grid, above the ruler, NOT in the nav strip that PR #183 removed it from. All four
   // are reachable with the mouse, so their entries are gone and the ratchet dropped 21→17.)
 
-  // ── classic-only leftovers ───────────────────────────────────────────────────
-  add_test_tone_clip: "a test-tone generator button exists only in the classic Topbar; v2 never carried one over",
+  // (add_test_tone_clip was declared here as a classic-only leftover. v2's add-track menu
+  // now offers "Test tone", which makes an audio track and puts a reference tone on it —
+  // the same create-then-populate shape the Instrument entry uses, because v2 has no
+  // "add a clip to this track" affordance for a tone to hang off.)
 };

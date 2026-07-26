@@ -36,12 +36,13 @@ import { Meter as AudioLevelMeter } from "../../ui/Meter";
 // asked for them, and `add_midi_clip` had no v2 call site at all. Only the classic shell's
 // Topbar did (`+ Drums` / `+ MIDI`), so programming a beat or a melody with the mouse was
 // impossible in the default UI. `ui/src/v2/lanes/trackKinds.test.ts` pins this.
-type TrackKind = "audio" | "drum" | "midi";
+type TrackKind = "audio" | "drum" | "midi" | "tone";
 
 export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
   { kind: "audio", label: "Audio",      hint: "Record or drop a file" },
   { kind: "drum",  label: "Drums",      hint: "Sampler + kit, ready to program" },
   { kind: "midi",  label: "Instrument", hint: "Synth + an empty MIDI clip" },
+  { kind: "tone",  label: "Test tone",  hint: "A reference tone — check you can hear anything" },
 ];
 
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
@@ -218,6 +219,17 @@ export async function addTrackOfKind(
 ): Promise<void> {
   if (kind === "audio") { await exec("create_track", { name: "Audio" }); return; }
   if (kind === "drum") { await exec("create_track", { name: "Drums", type: "drum" }); return; }
+  // A reference tone, for hearing whether the output path works at all. Classic had this in
+  // its Topbar targeting the SELECTED track; v2 has no "add a clip to this track" affordance
+  // to hang it off, so it arrives the same way an Instrument track does — make the track,
+  // then put the clip on it — which is also the shape you want when the question is "is
+  // anything reaching my speakers", i.e. before you trust any existing track.
+  if (kind === "tone") {
+    const toneRes = await exec("create_track", { name: "Tone" });
+    const toneTrackId = (toneRes.data as { trackId?: string } | undefined)?.trackId;
+    if (toneRes.ok && toneTrackId) await exec("add_test_tone_clip", { trackId: toneTrackId });
+    return;
+  }
   // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
   // instrument track IS an audio track carrying a synth plus MIDI clips. So: make the
   // track, then put a clip on it. add_midi_clip loads 4OSC in its own transaction when the
@@ -302,7 +314,10 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
                   onClick={() => pick(kind)}
                 >
                   <span className="v2-licon" aria-hidden="true">
-                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind} />
+                    {/* "tone" is not a track type — it makes an AUDIO track with a tone on
+                        it — so it borrows the waveform icon rather than falling through to
+                        TrackTypeIcon's unknown-type default. */}
+                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
                   </span>
                   <span className="v2-menu-text">
                     <span className="v2-menu-label">{label}</span>

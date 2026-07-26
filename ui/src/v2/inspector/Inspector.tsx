@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
@@ -152,6 +153,21 @@ function SendsSection({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const buses = useStore((s) => s.snapshot?.buses) ?? [];
   const sends = track.sends ?? [];
+  // create_bus lived here with no rename or remove beside it — an asymmetry, not a design.
+  // Both are bus-GLOBAL while this panel is per-track, so they sit tight against the bus
+  // name (its identity) rather than among the send controls to its right, and the delete
+  // confirms: cmdRemoveBus deletes the return track AND sweeps the matching send off every
+  // track in the project, which is not recoverable by re-adding the bus.
+  const [renaming, setRenaming] = useState<{ bus: number; name: string } | null>(null);
+  const [confirmBus, setConfirmBus] = useState<{ bus: number; name: string } | null>(null);
+
+  const commitRename = async () => {
+    const r = renaming;
+    setRenaming(null);
+    if (!r) return;
+    const name = r.name.trim();
+    if (name) await exec("rename_bus", { bus: r.bus, name });
+  };
   return (
     <div className="v2-sends" data-testid="v2-sends">
       <div className="v2-sends-head">
@@ -166,7 +182,24 @@ function SendsSection({ track }: { track: Track }) {
         const send = sends.find((s) => s.bus === b.bus);
         return (
           <div key={b.bus} className="v2-send-row" data-testid={`v2-send-${b.bus}`}>
-            <span className="v2-send-name" title={b.name}>{b.name}</span>
+            {renaming?.bus === b.bus ? (
+              <input
+                className="v2-bus-rename" data-testid={`v2-bus-rename-${b.bus}`} autoFocus
+                aria-label={`Rename ${b.name} bus`} value={renaming.name}
+                onChange={(e) => setRenaming({ bus: b.bus, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+                  else if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
+                }}
+                onBlur={() => void commitRename()}
+              />
+            ) : (
+              <span className="v2-send-name" data-testid={`v2-bus-name-${b.bus}`} title={`${b.name} — double-click to rename`}
+                onDoubleClick={() => setRenaming({ bus: b.bus, name: b.name })}>{b.name}</span>
+            )}
+            <button className="v2-btn icon v2-bus-rm" data-testid={`v2-bus-remove-${b.bus}`}
+              title={`Delete the ${b.name} bus`} aria-label={`Delete the ${b.name} bus`}
+              onClick={() => setConfirmBus({ bus: b.bus, name: b.name })}>🗑</button>
             {send ? (
               <>
                 <input type="range" min={-60} max={6} step={0.5} value={send.db}
@@ -183,6 +216,15 @@ function SendsSection({ track }: { track: Track }) {
           </div>
         );
       })}
+      {confirmBus && (
+        <ConfirmDialog
+          title={`Delete the ${confirmBus.name} bus?`} testId="v2-bus-remove-confirm" danger
+          confirmLabel="Delete bus"
+          body={<>This removes the return track and takes the {confirmBus.name} send off <strong>every</strong> track in the project, not just this one. Adding the bus back won't restore those sends.</>}
+          onConfirm={() => { const b = confirmBus.bus; setConfirmBus(null); void exec("remove_bus", { bus: b }); }}
+          onCancel={() => setConfirmBus(null)}
+        />
+      )}
     </div>
   );
 }
