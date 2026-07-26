@@ -217,6 +217,17 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //      bar-snapped via the piecewise tempo map, never geom.ts's flat one — rendered
     //      as a cross-lane band with Delete and Delete-close-gap as two separately
     //      labelled actions, not a shared button plus a ripple modifier).
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(6);
+    // → 5 (remove_track: TrackLaneHeader's hover-revealed × beside Mute/Solo, confirm-
+    //      gated — cmdRemoveTrack takes every clip on the track with it in one undo
+    //      transaction).
+    // → 4 (set_input_monitor: an off/automatic/on select in the Inspector Mix tab —
+    //      device-level and non-undoable, both said so in its title/reason rather
+    //      than pretending otherwise; applied:false surfaces inline).
+    // → 3 (load_drum_kit: DrumSequencer's "Reset kit" button, whose OLD reason —
+    //      "wants a kit picker" — was itself wrong. There is exactly one bundled kit,
+    //      no enumeration command, no kit name in the snapshot, so a picker is not
+    //      buildable today; reloading the bundled default onto every pad, undoing any
+    //      per-lane sample swaps, is the real action).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(3);
   });
 });

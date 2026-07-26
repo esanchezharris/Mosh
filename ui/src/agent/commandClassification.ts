@@ -177,8 +177,17 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // Delete and Delete-close-gap — rather than one button plus a ripple modifier, because
   // ripple silently reflows every downstream clip and that should never be one missed
   // keypress away from a plain delete. Ratchet 11 → 10.)
-  load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
   sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
+
+  // (load_drum_kit was declared here as "wants a kit picker" — that description was WRONG,
+  // not just incomplete: a picker is impossible today. There is exactly ONE bundled kit
+  // (mosh-kit, 8 hardcoded pads), no list_drum_kits enumeration anywhere, and no kit name
+  // in the snapshot to pick FROM. What the command actually does — (re)load the one
+  // bundled kit onto a track's sampler — is a real, meaningful action once a producer has
+  // used the per-lane "⋯" swap (assign_sample) on DrumSequencer: "Reset kit" restores the
+  // defaults. That shipped in the toolbar next to Clear/Pattern, gated on isDrumTrack. A
+  // genuine picker is still backend work first: list_drum_kits + a kit arg on
+  // load_drum_kit, neither of which exists.)
 
   // (list_takes was declared here, on the premise that "take ENUMERATION has no surface".
   // That premise was FALSE by the time anyone checked: the snapshot emits numTakes /
@@ -202,8 +211,14 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // deletes behind a confirm — cmdRemoveBus drops the return track AND sweeps the send off
   // every track in the project, which re-adding the bus does not restore.
   // set_master_plugin_param was declared here too; the master rack's rows now expand to the
-  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.)
-  set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
+  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.
+  // set_input_monitor was declared here too — an off/automatic/on select now sits in the
+  // Inspector's Mix tab beside MidiInputField/OutputField. Its title says what its reason
+  // used to only note privately: cmdSetInputMonitor is DEVICE-level (every track fed by the
+  // same physical input shares one monitor mode) and NOT undoable (a global engine/device
+  // preference, not an Edit-tree write). `applied:false` — no input device instance
+  // currently targets this track — surfaces inline rather than silently doing nothing,
+  // since that is `ok:true` and would not trip the store's normal lastError banner.)
 
   // ── generative render layers ─────────────────────────────────────────────────
   // (bypass_layer was declared here. GenDrawer now has an A/B toggle on both the wave
@@ -234,7 +249,14 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // SectionRibbon uses and which is only correct while the tempo never changes. Ratchet 11 → 7.)
 
   // ── track lifecycle ──────────────────────────────────────────────────────────
-  remove_track: "a mouse-only v2 user CANNOT DELETE A TRACK — the sole call site in the codebase is the × on classic's track header (Arrange.tsx:416), which v2 never renders. Hidden until the probe stopped searching classic-only modules. v2 has track headers already; this wants a delete affordance on one, confirm-gated (it takes the clips with it)",
+  // (remove_track was declared here — a mouse-only v2 user could not delete a track at
+  // all; the sole call site in the codebase was the × on classic's track header
+  // (Arrange.tsx:416), which v2 never renders, hidden until the probe stopped searching
+  // classic-only modules. TrackLaneHeader (v2/lanes/TrackLaneList.tsx) now has a hover-
+  // revealed × beside Mute/Solo, confirm-gated — cmdRemoveTrack takes every clip on the
+  // track with it in one undo transaction, so the dialog says so, and also says Undo
+  // brings it back, since — unlike remove_bus's cross-track side effects — this IS a
+  // plain undoable Edit mutation.)
 
   // (create_section / rename_section / move_section / remove_section were declared here.
   // SectionRibbon is now mounted as the timeline's top row in TrackLaneList — inside the

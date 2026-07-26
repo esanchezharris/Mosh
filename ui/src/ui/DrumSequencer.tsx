@@ -125,6 +125,18 @@ export function DrumSequencer({ clip }: { clip: Clip }) {
             🥁 Make drum track
           </button>
         )}
+        {/* UI-REACH — load_drum_kit shipped agent-only. A real picker is impossible
+            today (exactly one bundled kit, "mosh-kit" — no enumeration command, no kit
+            name in the snapshot), so this is what's actually buildable: reloading the
+            bundled default onto every pad, undoing whatever "⋯" per-lane swaps did
+            (assign_sample below). Undoable, same as everything else in this toolbar. */}
+        {isDrumTrack && (
+          <button className="btn" data-testid="dr-reset-kit"
+            title="Reload the bundled kit onto every pad — undoes any per-lane sample swaps"
+            onClick={() => track && void exec("load_drum_kit", { trackId: track.id })}>
+            Reset kit
+          </button>
+        )}
         <span className="spacer" />
         <label className="dr-ctl tc">Steps
           <select aria-label="Pattern length (steps)" value={steps} onChange={(e) => setSteps(Number(e.target.value))}>
