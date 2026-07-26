@@ -43,6 +43,29 @@ ITEMS, _m = build_eval.build_items(SONGS, splits, PRON, golden_spec=SPEC,
 DEV = [i for i in ITEMS if i["split"] == "dev"]
 check("setup: fixture dev slice non-trivial", len(DEV) >= 30, str(len(DEV)))
 
+# ---- the cache key must move when an arm's BEHAVIOUR moves -------------------
+# A real cost: `rhyme-floor` was fixed to exclude stopwords, re-run, and came
+# back byte-identical — the runner keys its cache on (arm, version, item), so
+# without a version bump the old candidates replayed and the "fixed" run was a
+# ghost. Anything that changes what an arm answers must change its version.
+_ARM_BEHAVIOUR_VERSIONS = {
+    # arm -> version at the time its current behaviour was pinned. Bump here in
+    # the same commit that changes the arm, or the sweep silently re-serves the
+    # previous behaviour.
+    "oracle": "v1", "freq-floor": "v1", "llm-zeroshot": "v1",
+    "llm-constrained": "v1", "product-llm": "v2",
+    "rhyme-floor": "v2", "prompt-rhyme-menu": "v1", "nbest-rerank": "v1",
+}
+check("every registered arm is version-pinned in the test",
+      set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),
+      f"registry={sorted(arms.ARMS)} pinned={sorted(_ARM_BEHAVIOUR_VERSIONS)}")
+check("no arm changed behaviour without bumping its version",
+      all(arms.ARM_VERSIONS[a] == v for a, v in _ARM_BEHAVIOUR_VERSIONS.items()
+          if a in arms.ARM_VERSIONS),
+      str({a: (arms.ARM_VERSIONS.get(a), v)
+           for a, v in _ARM_BEHAVIOUR_VERSIONS.items()
+           if arms.ARM_VERSIONS.get(a) != v}))
+
 
 def ctx_with(chat_fn=None, cache_dir=None):
     return arms.ArmContext(chat=chat_fn, pron=PRON, freq=FREQ, k=5,

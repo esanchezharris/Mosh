@@ -2,7 +2,7 @@
 """Golden tests for the eval-item schema + the FROZEN item golden (FMS lyrics-bench I1).
 
 Two load-bearing layers:
-  1. expected_items_v1.jsonl is the frozen output of mask over the fixture corpus —
+  1. expected_items_v2.jsonl is the frozen output of mask over the fixture corpus —
      regenerating must be byte-identical. ANY drift in the masking policy (stopword
      set, seed derivation, window rules) reds this golden, which is the point.
   2. schema.validate_item accepts every golden item and rejects targeted mutations.
@@ -37,7 +37,7 @@ PRON = make_pron()
 FREQ = mask.build_freq_table(SONGS)
 regen = [i for s in SONGS for i in mask.items_for_song(s, PRON, FREQ)]
 
-golden_path = os.path.join(HERE, "fixtures", "expected_items_v1.jsonl")
+golden_path = os.path.join(HERE, "fixtures", "expected_items_v2.jsonl")
 with open(golden_path, encoding="utf-8") as f:
     frozen = [json.loads(ln) for ln in f if ln.strip()]
 

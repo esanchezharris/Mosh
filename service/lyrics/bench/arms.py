@@ -76,7 +76,12 @@ def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
                                      syllables=syllables)
     except Exception:  # noqa: BLE001 — a lexicon miss is an empty menu, not a crash
         menu = []
-    out = [w for w in menu if w]
+    # Function words dominate any corpus frequency table and many of them
+    # technically slant-rhyme, so an unfiltered menu ranked by frequency answers
+    # 'been', 'an', 'a', 'they', 'but' — found by reading 400 real floor picks.
+    # No writer ends a bar there, and a floor that weak flatters every arm it is
+    # compared against. `freq-floor` has always applied this filter.
+    out = [w for w in menu if w and len(w) >= 3 and w.lower() not in STOP_AND_FILLER]
     _MENU_MEMO[key] = out
     return out
 
@@ -120,7 +125,12 @@ def arm_freq_floor(item: dict, ctx: ArmContext) -> dict:
     return {"candidates": [{"text": text}], "meta": {"word": word}}
 
 
-@register("rhyme-floor", "v1")
+# v2: stopwords excluded from the menu (v1 answered "been"/"an"/"a" —
+# frequent function words that technically slant-rhyme) and PERFECT
+# rhymes ranked above slant ones. A behaviour change without a version
+# bump is invisible: the runner keys its cache on (arm, version, item),
+# so v1 results replayed and the first "fixed" run was byte-identical.
+@register("rhyme-floor", "v2")
 def arm_rhyme_floor(item: dict, ctx: ArmContext) -> dict:
     """The HONEST floor for rhyme items: real rhymes of the partner, commonest
     first. Zero API.

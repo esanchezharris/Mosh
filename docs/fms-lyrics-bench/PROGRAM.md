@@ -213,11 +213,36 @@ numbers and hashes only.
   flatters every arm measured against it; (3) `multi_depth` is promoted to a
   scoreboard column as the anti-blandness axis — an arm that raises `exact`
   while dropping depth is drifting toward generic, and that is now visible.
-- **2026-07-26 — `rhyme-floor` measured, n=400 dev rhyme items:** exact **4.0%**,
-  topk 16.8%, rhyme_fit **100%** (by construction), rhyme_perfect 15.5%,
-  multi_depth 0.515. Two honest notes: the low/high split is 387/13 on this draw,
-  so the memorization diagnostic is thin at rhyme granularity until more famous
-  items are drawn; and a grade-ordering fix to the floor (perfect rhymes before
-  slant, rather than pure frequency order) **changed 0 of 400 top-1 picks** — it
-  is correct in principle and unit-proven, but had no measurable effect here and
-  is not claimed as an improvement.
+- **2026-07-26 — `rhyme-floor` measured, and a CORRECTION.** First reading
+  (v1 arm): exact 4.0%, rhyme_perfect 15.5%, multi_depth 0.515. I recorded that a
+  grade-ordering fix "changed 0 of 400 top-1 picks" and declined to claim it as
+  an improvement. **That reading was wrong, and the reason matters:** the runner
+  keys its result cache on `(arm, version, itemSha)`, so changing the arm's
+  behaviour without bumping its version replayed the old candidates — the
+  "fixed" run was a ghost of the unfixed one. With `rhyme-floor` bumped to v2 the
+  real effect is large: exact **4.0% → 9.5%**, rhyme_perfect **15.5% → 94.5%**,
+  multi_depth **0.52 → 1.10**. `runner_test` now pins every arm's version so a
+  behaviour change without a bump fails the suite instead of silently
+  no-op-ing. (Also thin: the low/high fame split is 387/13 on this draw, so the
+  memorization diagnostic has little high-fame sample at rhyme granularity yet.)
+- **2026-07-26 — BENCHMARK DEFECT found by reading real output: a third of the
+  rhyme items were not rhyme items.** Spot-checking arm disagreements showed
+  partners like `'a'`, `'D'`, `'huh'`, and pairs like `loaves`/`smoke` and
+  `education`/`today`. Measured across the whole dev split: **32.2%** of rhyme
+  items had a stopword or sub-3-char token at one end, and the most-tested
+  "rhyme words" were *me, yeah, you, it, up*. Those items ask "can you guess the
+  word 'me'" — function-word completion, not rhyme craft.
+  - **They actively invert the ranking.** An arm that OBEYS a nonsense partner
+    scores worse than one that ignores it: given `partner='huh'`,
+    `prompt-rhyme-menu` answered *'Maharaja'* while `llm-constrained` ignored the
+    constraint and answered *'motherfucker'*, which is what the artist wrote. So
+    the first menu-vs-constrained comparison was measuring obedience to junk.
+  - **Fixed at the policy** (`mask.POLICY_VERSION` v1 → **v2**): a rhyme item
+    refuses a stopword / sub-3-char token at EITHER end. Dev rhyme items
+    59,333 → 43,006, junk **32.2% → 0.00%**; the tested words are now *shit,
+    time, back, life, mind, way*. The frozen item golden was regenerated as
+    `expected_items_v2.jsonl`, and because the version is part of every itemId,
+    no v1 run can mix with v2 items.
+  - **All arm numbers taken before this fix are void** and are being re-measured
+    on the clean benchmark. This is why the pre-fix menu-vs-constrained result is
+    NOT recorded as a verdict.

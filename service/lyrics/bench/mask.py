@@ -16,7 +16,11 @@ import random
 import re
 from typing import Dict, List, Optional
 
-POLICY_VERSION = "v1"
+# v2 (2026-07-26): rhyme items refuse a stopword / sub-3-char token at EITHER
+# end. v1 minted 32.2% such items on the real dev split, so a third of the
+# rhyme benchmark was function-word completion rather than rhyme craft.
+# The version is part of every itemId, so v1 runs can never mix with v2 items.
+POLICY_VERSION = "v2"
 
 _WORD_RE = re.compile(r"[A-Za-z']+")
 _BLANK = "____"
@@ -114,6 +118,8 @@ def _best_rhyme_partner(pron, target: str, partners: List[tuple]) -> Optional[st
     for dist, word in partners:
         if word.lower() == target.lower():
             continue
+        if _is_junk_rhyme_end(word):
+            continue
         pp = pron.phones(word)
         if not pp:
             continue
@@ -195,11 +201,28 @@ def _word_item(song, si, li, line, tokens, lines, pron, freq) -> Optional[dict]:
     return item
 
 
+def _is_junk_rhyme_end(word: str) -> bool:
+    """A rhyme item only tests RHYME if both ends are real words.
+
+    Measured on the real dev split before this filter existed: 32.2% of rhyme
+    items had a stopword or sub-3-char token at one end, and the most-tested
+    "rhyme words" were me / yeah / you / it / up. Those items ask "can you guess
+    the word 'me'" — function-word completion, not rhyme craft — and they were
+    a third of the benchmark the program is about to optimize against. They also
+    actively mislead: an arm that OBEYS a nonsense partner ('huh', 'D', 'a')
+    scores worse than one that ignores it.
+    """
+    w = (word or "").lower()
+    return len(w) < 3 or w in STOP_AND_FILLER
+
+
 def _rhyme_item(song, si, li, line, tokens, lines, pron) -> Optional[dict]:
     if not tokens:
         return None
     idx = len(tokens) - 1
     target = tokens[idx]
+    if _is_junk_rhyme_end(target):
+        return None
     partners = []
     for lj in range(max(0, li - 3), min(len(lines), li + 4)):
         if lj == li:

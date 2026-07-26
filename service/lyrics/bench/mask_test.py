@@ -84,6 +84,62 @@ g_rhymes = items_of("fx:golden1", "rhyme")
 check("rhyme: clean AAAA stanza yields rhyme items", len(g_rhymes) >= 2, str(len(g_rhymes)))
 check("rhyme: partner recorded in constraints.rhymeWith",
       all(i["constraints"]["rhymeWith"] for i in g_rhymes))
+
+# A rhyme item is only a test of RHYME if both ends are real words. Measured on
+# the real dev split: 32.2% of rhyme items had a stopword or sub-3-char token at
+# one end — the most-tested "rhyme words" were me / yeah / you / it / up. Those
+# items ask "can you guess the word 'me'", which is function-word completion, and
+# they were silently setting a third of the benchmark the program is about to
+# optimize against.
+from lyrics.bench.mask import STOP_AND_FILLER  # noqa: E402
+
+
+def _junk(word):
+    w = (word or "").lower()
+    return len(w) < 3 or w in STOP_AND_FILLER
+
+
+# An INLINE stanza, because the hand-authored fixture has no junk endings and
+# would pass this check no matter what the policy did. Every line here ends in a
+# stopword, and they all rhyme with each other, so a policy that does not filter
+# will happily mint rhyme items from it.
+JUNK_SONG = {
+    "songId": "fx:junkends", "source": "test", "artist": "T", "title": "J",
+    "genre": "rap", "views": 1, "licenseTier": "train-ok", "hash": "sha1:junk",
+    "sections": [{"kind": "verse", "label": "Verse 1", "lines": [
+        "everybody in the room look at me",
+        "tell me what you really wanna be",
+        "counting up the paper so casually",
+        "nothing that they say could bother me",
+    ]}],
+}
+# The stopwords need PHONES, or they are dropped as unpronounceable and the
+# check passes for the wrong reason. (The shared fixture lexicon is frozen by the
+# item golden, so this Pronouncer is local to the check.)
+from phonology.core import Pronouncer  # noqa: E402
+from lyrics.bench._testlex import LEX  # noqa: E402
+
+JUNK_PRON = Pronouncer(lexicon={**LEX, "me": [["M", "IY1"]], "be": [["B", "IY1"]],
+                                "casually": [["K", "AE1", "ZH", "AH0", "W", "AH0",
+                                              "L", "IY0"]]},
+                       g2p=lambda w: None)
+JUNK_ITEMS = [i for i in mask.items_for_song(JUNK_SONG, JUNK_PRON, FREQ)
+              if i["granularity"] == "rhyme"]
+check("rhyme: a stanza whose lines all END in stopwords mints NO rhyme items",
+      JUNK_ITEMS == [],
+      str([(i["target"]["text"], i["constraints"]["rhymeWith"])
+           for i in JUNK_ITEMS]))
+
+ALL_RHYME = [i for i in ALL if i["granularity"] == "rhyme"]
+check("rhyme: the masked TARGET is never a stopword or a 1-2 char token",
+      not any(_junk(i["target"]["text"]) for i in ALL_RHYME),
+      str([i["target"]["text"] for i in ALL_RHYME if _junk(i["target"]["text"])]))
+check("rhyme: the PARTNER is never a stopword or a 1-2 char token",
+      not any(_junk(i["constraints"]["rhymeWith"]) for i in ALL_RHYME),
+      str([i["constraints"]["rhymeWith"] for i in ALL_RHYME
+           if _junk(i["constraints"]["rhymeWith"])]))
+check("rhyme: filtering junk ends does not empty the policy",
+      len(ALL_RHYME) >= 2, str(len(ALL_RHYME)))
 check("rhyme: target is the line-final token",
       all(i["target"]["tokenIndex"] == len(line_tokens(i)) - 1 for i in g_rhymes))
 check("rhyme: partner is a different word from the target",

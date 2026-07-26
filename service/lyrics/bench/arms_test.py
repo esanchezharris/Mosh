@@ -108,6 +108,33 @@ check("rhyme-floor: frequency orders within a grade, commonest first",
       and _slant == sorted(_slant, key=lambda w: (-FREQ.get(w, 0), w)),
       str([(c, FREQ.get(c, 0)) for c in cands]))
 check("rhyme-floor: caps at k", len(cands) <= 5, str(len(cands)))
+
+# Spot-checking 400 real items showed the floor answering 'been', 'an', 'a',
+# 'they', 'but', 'at' — function words that technically slant-rhyme and dominate
+# any corpus frequency table. `freq-floor` has always filtered these; the rhyme
+# floor did not, which made it weak for a silly reason and therefore flattering
+# to every arm measured against it.
+# A LOCAL lexicon: the shared fixture is frozen by the mask/schema goldens and
+# must not be edited. 'they' is a real stopword that really rhymes with 'rain',
+# which is precisely the case that was reaching the top of the real floor.
+from phonology.core import Pronouncer  # noqa: E402
+from lyrics.bench._testlex import LEX  # noqa: E402
+
+STOP_PRON = Pronouncer(lexicon={**LEX, "they": [["DH", "EY1"]],
+                                "way": [["W", "EY1"]]}, g2p=lambda w: None)
+STOPWORD_FREQ = {"they": 9000, "way": 20, "train": 90, "chain": 70}
+stop_ctx = arms.ArmContext(chat=None, pron=STOP_PRON, freq=STOPWORD_FREQ, k=5,
+                           cache=None, product_backend="fake")
+stop_cands = [c["text"] for c in
+              arms.ARMS["rhyme-floor"](RHYME_ITEM, stop_ctx)["candidates"]]
+check("rhyme-floor: never answers with a stopword, however frequent",
+      not any(w in ("and", "but", "a", "an", "the", "they", "as", "at", "been")
+              for w in stop_cands), str(stop_cands))
+check("rhyme-floor: still answers something real once stopwords are excluded",
+      bool(stop_cands)
+      and all(rhyme_grade(STOP_PRON.phones(w), STOP_PRON.phones("rain"))
+              in ("perfect", "slant") for w in stop_cands),
+      str(stop_cands))
 check("rhyme-floor: deterministic",
       [c["text"] for c in arms.ARMS["rhyme-floor"](RHYME_ITEM, ctx())["candidates"]]
       == cands)

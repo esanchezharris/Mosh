@@ -34,7 +34,12 @@ from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: 
 
 REPO_ROOT = os.path.dirname(SERVICE)
 SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.md")
-API_ARMS = ("llm-zeroshot", "llm-constrained")
+# Arms that call a paid API. Membership does two things: it wires up the chat
+# client, and it arms the budget guard (refuse a full slice without --limit/--yes).
+# An arm missing from here fails with a bare "'NoneType' object is not callable"
+# AND silently escapes the spend check — both of which happened to
+# prompt-rhyme-menu on its first run.
+API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu", "nbest-rerank")
 
 
 def _load_corpus() -> list:
