@@ -351,6 +351,23 @@ def cmd_calibrate(args) -> int:
         if not rows:
             print("no judged rows — run `judge` first", file=sys.stderr)
             return 2
+        if args.runs:
+            # judged-*.jsonl ACCUMULATES across sessions, so an unfiltered pool
+            # silently mixes item sets from different eras of the bench — a
+            # re-drawn sitting quietly re-inherited the pre-fix long-tail songs
+            # it was minted to replace. Naming the runs makes the pool explicit.
+            want = {r.strip() for r in args.runs.split(",") if r.strip()}
+            before = len(rows)
+            rows = [r for r in rows if r.get("run") in want]
+            print(f"pool filtered to runs {sorted(want)}: {before} → {len(rows)} rows")
+            if not rows:
+                print("no judged rows from those runs", file=sys.stderr)
+                return 2
+        else:
+            runs_seen = sorted({r.get("run") for r in rows})
+            if len(runs_seen) > 2:
+                print(f"! pool spans {len(runs_seen)} runs {runs_seen} — pass "
+                      f"--runs to pin the sitting to one draw")
         # Dedupe (itemId, arm): a re-judged row must not double its odds.
         uniq = {}
         for r in rows:
@@ -442,7 +459,7 @@ def cmd_calibrate(args) -> int:
             print("every pair already rated — nothing to serve")
             return 0
         calibrate_page.serve(todo, ratings_path, port=args.port,
-                             title="Mosh — blind bar calibration")
+                             title="Mosh — bar calibration")
         return 0
 
     # report
@@ -605,6 +622,10 @@ def main(argv=None) -> int:
                    help="share of pairs that are arm-vs-arm (balanced labels)")
     p.add_argument("--blind-frac", type=float, default=0.25,
                    help="share whose SONG stays hidden — the un-blinding control")
+    p.add_argument("--runs", default="",
+                   help="comma-separated run dirs to draw the pool from; the "
+                        "judged file accumulates, so this pins the sitting to "
+                        "one draw instead of every era of the bench")
     p.add_argument("--stanza", action="store_true", default=True,
                    help="show the whole stanza around the gap (flow context)")
     p.set_defaults(fn=cmd_calibrate)
