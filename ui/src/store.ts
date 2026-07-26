@@ -57,6 +57,12 @@ type State = {
   // UI-local view state (NOT commands — the swappable-seam rule: zoom, tool,
   // snap, selection never cross the bridge).
   pxPerSec: number;
+  // Piano-roll horizontal zoom, in px per BEAT. Deliberately NOT pxPerSec: the
+  // arrangement drives that from a ResizeObserver on every window resize and
+  // section-zoom change, so sharing it would yank the MIDI editor's zoom whenever
+  // the window moved. Not persisted — a modal editor resetting per session is right.
+  pianoRollBeatPx: number;
+  setPianoRollBeatPx: (v: number) => void;
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
@@ -86,6 +92,10 @@ type State = {
   transcribing: Record<string, boolean>;  // source clipId → audio→MIDI in flight (Basic Pitch)
   buildingLyrics: Record<string, boolean>; // source clipId → mumble-take lyric build in flight
   buildingSkeleton: Record<string, boolean>; // source clipId → "Build flow from this take" in flight
+  // Sketch Phase 0 — keyed by the SOURCE FILE PATH, not a clipId: sketch_beatbox lands a
+  // brand-new drum track+clip, so there is no existing clip to key the in-flight state
+  // against (unlike transcribing/buildingLyrics/buildingSkeleton above).
+  sketchingBeatbox: Record<string, boolean>;
   availableColors: AvailableColor[];       // SA3 colour rack (from list_colors)
   // Whether THIS Mac's generative service is actually running the real Stable Audio 3
   // model, straight from /colors' `sa3` field (server.py's SA3_ENABLED). undefined means
@@ -276,6 +286,10 @@ export const useStore = create<State>((set, get) => ({
   dismissRecovery: () => set({ recoveryDismissed: true }),
 
   pxPerSec: 80,
+  // 42 is load-bearing, not aesthetic: PianoRoll.dragAxes.test.ts and
+  // PianoRoll.scaleLock.test.ts both declare BEAT_PX = 42 and compute expected beat
+  // deltas from it. Changing the default is a deliberate change to those fixtures.
+  pianoRollBeatPx: 42,
   tool: "move",
   snap: true,
   snapDivision: "1/4",
@@ -294,6 +308,7 @@ export const useStore = create<State>((set, get) => ({
   transcribing: {},
   buildingLyrics: {},
   buildingSkeleton: {},
+  sketchingBeatbox: {},
   availableColors: [],
   sa3Available: undefined,
   availableTransformTargets: [],
@@ -455,6 +470,23 @@ export const useStore = create<State>((set, get) => ({
           return { buildingSkeleton: next };
         });
         if (p.state === "error") set({ lastError: p.error ?? "could not build a flow from the take" });
+      } else if (ev.type === "sketch_status") {
+        // Sketch Phase 0 (beatbox → drum) status for a SOURCE FILE PATH: working | done |
+        // error. Keyed by file, not clipId — sketch_beatbox lands a brand-new track+clip,
+        // so there is no existing clip to key against (mirrors transcribe_status/
+        // skeleton_status otherwise). The command is install-gated and does NOT degrade
+        // gracefully (service/server.py's /sketch returns a 503 "sketch_unavailable (run
+        // service/sketch/setup-sketch.sh)" when the venv is absent) — surface that exact,
+        // honest message rather than swallowing it or leaving the UI hung. On done the
+        // backend's snapshot_invalidated (from add_midi_clip) reveals the new drum track.
+        const p = ev.payload as { file: string; state: string; error?: string };
+        set((s) => {
+          const next = { ...s.sketchingBeatbox };
+          if (p.state === "working") next[p.file] = true;
+          else delete next[p.file];
+          return { sketchingBeatbox: next };
+        });
+        if (p.state === "error") set({ lastError: p.error ?? "could not sketch a beat from that take" });
       } else if (ev.type === "layer_render_progress") {
         const p = ev.payload as { clipId: string; progress: number };
         set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
@@ -632,6 +664,8 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setPxPerSec: (v) => set({ pxPerSec: Math.max(20, Math.min(400, v)) }),
+  // 12px/beat ≈ a whole 8-bar loop in view; 160 puts 1/32 notes ~5px apart.
+  setPianoRollBeatPx: (v) => set({ pianoRollBeatPx: Math.max(12, Math.min(160, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d }),

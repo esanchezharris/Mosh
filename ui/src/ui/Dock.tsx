@@ -8,7 +8,7 @@ import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
-import { pickGenClip } from "./genClip";
+import { pickGenClip, isSectionScoped } from "./genClip";
 import { isTransformPreview } from "../capabilities";
 import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
@@ -282,6 +282,52 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
   );
 }
 
+/** A/B the render against what it replaced.
+ *
+ *  This is the only one of the three "commit" commands on a render layer that does real
+ *  audio work rather than writing a status label: bypass_layer repoints a wave clip's own
+ *  source back to `originalSourceRef`, and for the MIDI/drum beneath-model it un-mutes the
+ *  source MIDI while muting the hidden render — so exactly one of the two is audible.
+ *
+ *  `bypassed` is server truth (it comes back on rl.status), so the pressed state is read,
+ *  never held locally — same discipline as the Live button next to it. The label says what
+ *  you are HEARING rather than what the button will do, because "is this the render or the
+ *  original?" is the question you actually have while A/Bing, and the status pill alone
+ *  answers it too slowly to be useful mid-listen. */
+function BypassToggle({ clipId, bypassed, originalLabel }: { clipId: string; bypassed: boolean; originalLabel: string }) {
+  const exec = useStore((s) => s.exec);
+  return (
+    <button className={`btn${bypassed ? " on" : ""}`} data-testid="gen-bypass" aria-pressed={bypassed}
+      title={bypassed ? `Bypassed — you're hearing ${originalLabel}. Click to hear the re-imagine again.`
+                      : `A/B — click to hear ${originalLabel} instead of the re-imagine.`}
+      onClick={() => void exec("bypass_layer", { clipId, bypassed: !bypassed })}>
+      {bypassed ? `◉ ${originalLabel}` : "A/B"}
+    </button>
+  );
+}
+
+/** Freeze / thaw the reactive loop.
+ *
+ *  With a render live, every edit to the source (a note, a trim, a plugin knob) silently
+ *  re-runs the model. That is the feature — until you are past re-imagining and just want to
+ *  arrange, at which point it is a queue of renders you will never listen to. Freeze keeps the
+ *  audio you have and stops re-rendering; thawing re-arms it.
+ *
+ *  The pressed state reads `rl.reactive`, NOT `rl.status`. Both carry the freeze, but a param
+ *  edit overwrites status with "dirty" while the layer stays frozen — a status-driven badge
+ *  would blink off at the first knob turn and claim the layer had thawed itself. */
+function FreezeToggle({ clipId, frozen }: { clipId: string; frozen: boolean }) {
+  const exec = useStore((s) => s.exec);
+  return (
+    <button className={`btn${frozen ? " on" : ""}`} data-testid="gen-freeze" aria-pressed={frozen}
+      title={frozen ? "Frozen — edits no longer re-render this clip. Click to thaw and re-imagine on every edit again."
+                    : "Freeze — keep this render and stop re-rendering it every time you edit the clip."}
+      onClick={() => void exec(frozen ? "unfreeze_layer" : "freeze_layer", { clipId })}>
+      {frozen ? "◉ Frozen" : "Freeze"}
+    </button>
+  );
+}
+
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   // Per-render truth: the drawer header badge says what THIS Mac's service would render
@@ -415,6 +461,23 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
             <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
             <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
           </>
+        ) : isSectionScoped(clip) ? (
+          // A SECTION render — scoped to part of the clip by the timeline's range selection.
+          // It cannot apply in place (repointing the source would replace the whole clip), so
+          // MoshOps::applyRenderInPlace bails and the result waits on the legacy landing. That
+          // makes this the one and only shape where Bounce does real work: everywhere else
+          // cmdAcceptRender takes a no-op branch and bounce_layer_to_clip just writes a label,
+          // which is why no other branch here offers it.
+          //
+          // No Live, no A/B, no Reset: all three are about a render that IS the clip's audio.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine section</button>
+            <button className="btn" data-testid="gen-bounce" disabled={!rl.hasArtifact}
+              title={rl.hasArtifact
+                ? "Bounce this section down to its own clip on the Neural Renders lane"
+                : "Render the section first — there is nothing to bounce yet"}
+              onClick={() => void exec("bounce_layer_to_clip", { clipId: clip.id })}>Bounce to clip</button>
+          </>
         ) : clip.type === "wave" ? (
           // Wave clips auto-apply in place — the waveform swaps to the result instantly.
           // No accept/reject; Reset restores the original. "Live" arms render-ahead: as you play,
@@ -425,6 +488,11 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
             <button className={`btn${rl.liveArmed ? " on" : ""}`} data-testid="gen-live" aria-pressed={!!rl.liveArmed}
               title="Live — render the re-imagine ahead of the playhead as you play; turn a knob and hear it fill in ahead of you"
               onClick={() => void exec("render_ahead_arm", { clipId: clip.id, armed: !rl.liveArmed })}>{rl.liveArmed ? "◉ Live" : "Live"}</button>
+            {/* Only once the render IS the clip's audio — before that there is nothing to A/B against. */}
+            {rl.appliedInPlace && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="original" />}
+            {/* Same gate reactiveTouch itself uses (a render is LIVE) — a dormant layer has no
+                loop to freeze, so offering the button would be theatre. */}
+            {rl.appliedInPlace && <FreezeToggle clipId={clip.id} frozen={rl.reactive === false} />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         ) : (
@@ -433,6 +501,10 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           // the hidden audio.
           <>
             <button className="btn" data-testid="gen-render" onClick={() => { void exec("render_layer", { clipId: clip.id }); if (!rl.reimagineActive) bumpCelebrate(); }}>Re-imagine</button>
+            {/* Bypass here swaps which of the two SOUNDS: the live instrument, or the hidden
+                render beneath it. Reset next to it is the destructive one — it drops the render. */}
+            {rl.reimagineActive && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="MIDI" />}
+            {rl.reimagineActive && <FreezeToggle clipId={clip.id} frozen={rl.reactive === false} />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.reimagineActive} title="Un-mute the MIDI and drop the hidden re-imagined audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         )}

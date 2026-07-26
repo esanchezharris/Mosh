@@ -322,6 +322,7 @@ private:
     juce::var cmdResetRenderLayer (const juce::var& args);   // wave clips: restore the pre-render source (undo the in-place apply)
     juce::var cmdBypassLayer      (const juce::var& args);
     juce::var cmdFreezeLayer      (const juce::var& args);
+    juce::var cmdUnfreezeLayer    (const juce::var& args);
     juce::var cmdBounceLayerToClip(const juce::var& args);
     juce::var cmdRemoveRenderLayer(const juce::var& args);
     juce::var cmdListColors       (const juce::var& args);

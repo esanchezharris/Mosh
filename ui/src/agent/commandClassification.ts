@@ -153,6 +153,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
 /** Deliberately not a UI control — the shape has no sensible direct affordance. */
 export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   write_automation_curve: "writes a whole curve in one call — the UI's story is drawing points on the automation canvas, which is a different (and better) gesture",
+  list_takes: "a read-only re-read of data every wave clip ALREADY carries in the snapshot — cmdListTakes and clipToVar run the identical getTakeDescriptions()/getCurrentTake() pair into the identical shape, so the Inspector's Takes tab enumerates and switches takes with no command call at all",
 };
 
 /**
@@ -163,47 +164,145 @@ export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
  */
 export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // ── arrangement / editing ────────────────────────────────────────────────────
-  add_drum_pattern: "DRM-002 lays a whole drum grid in one undoable step — wants a pattern control in the drum/MIDI editor",
-  delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
-  load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
-  sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
+  // (add_drum_pattern was declared here. DrumSequencer now has a Pattern field — seeded
+  // from the live clip, validated by the same parser the backend uses — so a mouse-only
+  // user can lay or edit a whole grid in one undoable step. Ratchet 17 → 16.)
+  //
+  // (delete_time_range was declared here as "wants a time-range action in the timeline's
+  // range tool" — true of every shell, classic included: Arrange.tsx's own range tool
+  // painted a UI-local band and never wired an actual delete to it (its comment said
+  // "delete_time_range on demand" and then never implemented the demand). v2 had no
+  // time-span selection of any kind before this. Shift-drag on BarRuler now draws a
+  // bar-snapped span (piecewise tempo map, not geom.ts's flat one — see BarRuler.test.ts)
+  // rendered as a cross-lane band (TimeRangeBand) with two SEPARATELY labelled actions —
+  // Delete and Delete-close-gap — rather than one button plus a ripple modifier, because
+  // ripple silently reflows every downstream clip and that should never be one missed
+  // keypress away from a plain delete. Ratchet 11 → 10.)
 
-  // ── takes / comping (G12) ────────────────────────────────────────────────────
-  list_takes: "comping UI is unbuilt; keep_take/set_current_take are wired but take ENUMERATION has no surface",
+  // (sketch_beatbox was declared here as "wants an entry point in the record/import flow".
+  // cmdSketchBeatbox takes an ABSOLUTE PATH, not a clipId, so the clipId-based clip menu
+  // (transcribe_clip/build_skeleton_from_clip's home) was never a fit — a real path only
+  // exists at a file-chooser. SampleBrowser's directory listing (list_directory) already
+  // IS that file-chooser and, unlike pickFiles' native dialog, is answered identically by
+  // the real backend, the dev mock, AND Playwright — so a file row's new "Beatbox → beat"
+  // button (SketchBeatboxDialog.tsx) needed no pickFiles round-trip at all: the path was
+  // already sitting right there. The dialog validates bpm (20–300) and bars (1–2)
+  // client-side against the exact bounds cmdSketchBeatbox enforces, and dispatches with
+  // wait:false (wait:true blocks the message thread — execute_command is synchronous).
+  // Ratchet 11 → 10.)
 
-  // ── export (G7) ──────────────────────────────────────────────────────────────
-  export_stems: "per-track stem export has a backend + Catch2 coverage but no tab in ExportControls",
+  // (load_drum_kit was declared here as "wants a kit picker" — that description was WRONG,
+  // not just incomplete: a picker is impossible today. There is exactly ONE bundled kit
+  // (mosh-kit, 8 hardcoded pads), no list_drum_kits enumeration anywhere, and no kit name
+  // in the snapshot to pick FROM. What the command actually does — (re)load the one
+  // bundled kit onto a track's sampler — is a real, meaningful action once a producer has
+  // used the per-lane "⋯" swap (assign_sample) on DrumSequencer: "Reset kit" restores the
+  // defaults. That shipped in the toolbar next to Clear/Pattern, gated on isDrumTrack. A
+  // genuine picker is still backend work first: list_drum_kits + a kit arg on
+  // load_drum_kit, neither of which exists.)
 
-  // ── mixer / routing — asymmetric with what IS reachable ──────────────────────
-  rename_bus: "create_bus is in the Inspector; rename is not — an unintended asymmetry",
-  remove_bus: "create_bus is in the Inspector; remove is not — an unintended asymmetry",
-  set_master_plugin_param: "the master rack can load/bypass/reorder plugins in RightRail but exposes no param control",
-  set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
+  // (list_takes was declared here, on the premise that "take ENUMERATION has no surface".
+  // That premise was FALSE by the time anyone checked: the snapshot emits numTakes /
+  // currentTakeIndex / takes per wave clip, and the v2 Inspector's Takes tab renders one
+  // button per take off exactly that data. It moved to AGENT_ONLY_COMMANDS rather than
+  // being closed by building something, because there was nothing left to build.
+  // Still genuinely missing, and NOT this command's gap: v2's arrangement draws no inline
+  // take lanes the way classic's Arrange.tsx does, so choosing a take means opening the
+  // Inspector. That is a presentation gap with no unreachable command behind it.)
+
+  // (export_stems was declared here. ExportControls now has a What: mixdown | stems mode —
+  // one panel, because format and bit depth mean the same thing in both and this file exists
+  // to be the single export entry-point definition. Range/Tail are hidden in stems mode
+  // (export_stems has no such args and would ignore them), and the run is confirm-gated:
+  // it is N full renders INLINE on the message thread with no progress and no cancel, so an
+  // accidental click is unrecoverable. Ratchet 14 → 13.)
+
+  // ── mixer / routing ──────────────────────────────────────────────────────────
+  // (rename_bus / remove_bus were declared here as "an unintended asymmetry" with create_bus,
+  // and that is exactly what they were: the Sends section now renames on double-click and
+  // deletes behind a confirm — cmdRemoveBus drops the return track AND sweeps the send off
+  // every track in the project, which re-adding the bus does not restore.
+  // set_master_plugin_param was declared here too; the master rack's rows now expand to the
+  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.
+  // set_input_monitor was declared here too — an off/automatic/on select now sits in the
+  // Inspector's Mix tab beside MidiInputField/OutputField. Its title says what its reason
+  // used to only note privately: cmdSetInputMonitor is DEVICE-level (every track fed by the
+  // same physical input shares one monitor mode) and NOT undoable (a global engine/device
+  // preference, not an Edit-tree write). `applied:false` — no input device instance
+  // currently targets this track — surfaces inline rather than silently doing nothing,
+  // since that is `ok:true` and would not trip the store's normal lastError banner.)
 
   // ── generative render layers ─────────────────────────────────────────────────
-  bypass_layer: "render-layer A/B — wants a bypass toggle on the layer in GenDrawer",
-  freeze_layer: "freezing a render to save CPU — wants a control in GenDrawer",
-  bounce_layer_to_clip: "committing a render layer down to a plain clip — wants a control in GenDrawer",
+  // (bypass_layer was declared here. GenDrawer now has an A/B toggle on both the wave
+  // in-place branch and the MIDI/drum beneath branch — it was the only one of this trio
+  // that moves real audio rather than writing a label, so it was the only one worth a
+  // control. Ratchet 15 → 14.)
+  //
+  // The other two are STILL gaps, but for sharper reasons than "wants a control" — both
+  // were investigated and neither should be wired as its entry originally described:
+  // (freeze_layer was declared here as inert — it wrote status='frozen' and nothing read it,
+  // so a "frozen" layer kept auto-re-rendering on the next edit. Closed by fixing the ENGINE,
+  // not by adding a control: cmdFreezeLayer now also writes ids::reactive=false, the flag
+  // reactiveTouch actually gates on; cmdUnfreezeLayer is the thaw that did not exist, so a
+  // freeze is no longer permanent; and snapshot carries `reactive` so the drawer's
+  // Freeze/Frozen toggle reads server truth. It must read `reactive`, NOT `status`: a later
+  // param edit overwrites status with "dirty" while the layer stays frozen. The saving is
+  // proven in verify.py's check_freeze_stops_rerender — --selftest cannot see it, because
+  // reactiveTouch returns on !hasAudio() long before it reads the flag.)
 
-  // ── tempo map ────────────────────────────────────────────────────────────────
-  insert_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
-  remove_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
+  // (bounce_layer_to_clip was the last entry here. It was NOT just a missing button: the
+  // command is a pure relabel on every path a manual control could reach — for whole-clip
+  // wave (appliedInPlace) and MIDI/drum (beneath) renders cmdAcceptRender takes a no-op
+  // branch, so bounce wrote status='bounced' and changed no audio. It does real work only
+  // for a SECTION-scoped render, and no shell could create one: create_render_layer has
+  // accepted regionStart/regionEnd all along, but nothing ever sent them.
+  //
+  // Closed by building the missing surface rather than wiring the button where it lies. The
+  // timeline's range selection now offers "Re-imagine section" (sectionRender.ts resolves the
+  // span to a clip, declining spans that cover a whole clip — the engine would apply those in
+  // place — and clips that already carry a layer), and the drawer grows a section branch whose
+  // Bounce is gated on isSectionScoped. Live / A-B / Reset are withheld there: all three
+  // describe a render that IS the clip's audio, which a section render never becomes.
+  //
+  // Its undo bug is also fixed: the status was written with nullptr instead of
+  // &undoManager(), so 'bounced' outlived an undo that deleted the clip it described (#454,
+  // with selftest coverage for both shapes). Mock parity for the whole sub-region branch —
+  // which did not exist, making the shape untestable — is in bridge.mock.subregion.test.ts.)
 
-  // ── annotations ──────────────────────────────────────────────────────────────
-  move_annotation: "annotations can be created and edited on the timeline but not dragged to a new beat",
+  // (insert_tempo_change / remove_tempo_change were declared here. The timeline now has a
+  // tempo lane — its own row between the section ribbon and the bar ruler, built on time.ts's
+  // PIECEWISE map rather than geom.ts's single session.tempo, which is only correct while the
+  // tempo never changes. Create + remove only, and every point is a STEP change: there is no
+  // command to edit a point in place, so a drag or retype gesture would be a non-atomic
+  // remove+insert. set_tempo_curve stays separately deferred. Ratchet 13 → 11.)
 
-  // ── song sections — the component EXISTS but is not mounted ──────────────────
-  // v2/timeline/SectionRibbon.tsx is complete (append, inline rename, drag to move/resize
-  // snapped to the bar, remove) and dispatches all four commands — but NOTHING imports it.
-  // TrackLaneList's grid comment reads "ruler row (now the top row)", so the ribbon row
-  // looks to have been dropped from the layout with the component left behind. Re-mounting
-  // it is a layout decision, not a bug fix, which is why these are logged rather than
-  // silently restored. Cheap to fix once that call is made — all four go at once.
-  create_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  rename_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  move_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
-  remove_section: "SectionRibbon is built and dispatches this, but no v2 module imports it — the ribbon row is not mounted",
+  // (create_annotation / edit_annotation / move_annotation / remove_annotation were declared
+  // here as "the whole surface is missing from v2, not just the drag". v2's timeline now has
+  // a real annotation lane — its own row between the bar ruler and the lanes, in
+  // TrackLaneList, built the same way the tempo lane was: click empty space → inline text
+  // input → create_annotation; double-click a pin → inline edit → edit_annotation; drag a pin
+  // → move_annotation; hover ✕ → remove_annotation. Positions convert beat↔seconds through
+  // time.ts's PIECEWISE map (new beatAt/secAtBeat, mirroring the private barPosAt/barPosToSec
+  // this file already had for bars) — NOT geom.ts's flat beatToSec/secToBeat, which
+  // SectionRibbon uses and which is only correct while the tempo never changes. Ratchet 11 → 7.)
 
-  // ── classic-only leftovers ───────────────────────────────────────────────────
-  add_test_tone_clip: "a test-tone generator button exists only in the classic Topbar; v2 never carried one over",
+  // ── track lifecycle ──────────────────────────────────────────────────────────
+  // (remove_track was declared here — a mouse-only v2 user could not delete a track at
+  // all; the sole call site in the codebase was the × on classic's track header
+  // (Arrange.tsx:416), which v2 never renders, hidden until the probe stopped searching
+  // classic-only modules. TrackLaneHeader (v2/lanes/TrackLaneList.tsx) now has a hover-
+  // revealed × beside Mute/Solo, confirm-gated — cmdRemoveTrack takes every clip on the
+  // track with it in one undo transaction, so the dialog says so, and also says Undo
+  // brings it back, since — unlike remove_bus's cross-track side effects — this IS a
+  // plain undoable Edit mutation.)
+
+  // (create_section / rename_section / move_section / remove_section were declared here.
+  // SectionRibbon is now mounted as the timeline's top row in TrackLaneList — inside the
+  // grid, above the ruler, NOT in the nav strip that PR #183 removed it from. All four
+  // are reachable with the mouse, so their entries are gone and the ratchet dropped 21→17.)
+
+  // (add_test_tone_clip was declared here as a classic-only leftover. v2's add-track menu
+  // now offers "Test tone", which makes an audio track and puts a reference tone on it —
+  // the same create-then-populate shape the Instrument entry uses, because v2 has no
+  // "add a clip to this track" affordance for a tone to hang off.)
 };

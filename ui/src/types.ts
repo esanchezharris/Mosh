@@ -27,6 +27,9 @@ export type RenderLayer = {
   coverage?: "auto" | "loop" | "stitch";  // whole-clip: how a clip longer than the model window is covered
   reimagineActive?: boolean; // MIDI/drum clips: a hidden audio render plays beneath the muted MIDI → Reset is available
   liveArmed?: boolean;       // Lane A: "Live" render-ahead is armed — playback lays the re-imagine ahead of the playhead
+  reactive?: boolean;        // false ⇒ FROZEN: edits no longer auto-re-render this layer (freeze_layer / unfreeze_layer).
+                             // Absent ⇒ true. This, not `status`, is the freeze: a param edit overwrites status with "dirty"
+                             // while the layer stays frozen, so a status-driven badge would lose it.
 };
 
 // LYR-001 — Finish-My-Song lyric sheet (per-track), from MoshOps.lyricSheetToVar().

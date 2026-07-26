@@ -298,3 +298,9 @@ export const FILE_MENU: MenuItemMeta[] = [
   { id: "save_as", label: "Save As…", accel: "⇧⌘S" },
   { id: "export_audio", label: "Export Audio…", accel: "⌘E" },
 ];
+
+/** FILE_MENU minus Export — the project-lifecycle actions on their own. Three surfaces
+ *  had grown their own local `FILE_MENU.filter(m => m.id !== "export_audio")` (Export
+ *  lives in its own panel wherever these appear); naming it once keeps a new surface from
+ *  inventing a fourth ordering. */
+export const PROJECT_MENU: MenuItemMeta[] = FILE_MENU.filter((m) => m.id !== "export_audio");

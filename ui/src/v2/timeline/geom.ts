@@ -7,7 +7,7 @@ import type { Snapshot } from "../../types";
 
 // Fallback for headW() when the stylesheet isn't in play (jsdom tests, or a render
 // before .v2-shell is in the DOM). Matches --v2-head-w in shell.css.
-const HEAD_W_FALLBACK = 168;
+const HEAD_W_FALLBACK = 200;
 
 let cachedHeadW = 0;
 

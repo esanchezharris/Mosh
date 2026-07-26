@@ -9,6 +9,8 @@ import type { ExportFormat } from "../types";
 import { copyText } from "../clipboard";
 import { parentDir } from "../exportPath";
 import { resolveSectionExportRange } from "../exportSection";
+import { stemCount } from "../exportStems";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const FORMATS: { value: ExportFormat; depths: number[] }[] = [
   { value: "wav", depths: [16, 24, 32] }, { value: "aiff", depths: [16, 24, 32] }, { value: "flac", depths: [16, 24] },
@@ -16,6 +18,10 @@ const FORMATS: { value: ExportFormat; depths: number[] }[] = [
 
 type RangeChoice = "full" | "loop" | "custom" | "section";
 type TailChoice = "cut" | "include";
+// G7 — one mixdown, or one file per track. A mode select rather than a second panel:
+// format and bit depth mean the same thing in both, and this file exists specifically to
+// be the ONE export entry point definition (see the header), so forking it would undo that.
+type ModeChoice = "mixdown" | "stems";
 
 export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const exec = useStore((s) => s.exec);
@@ -44,6 +50,14 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   const effectiveSectionId = sections.some((s) => s.id === sectionId) ? sectionId : (sections[0]?.id ?? "");
   const [tail, setTail] = useState<TailChoice>("cut");
   const [tailSeconds, setTailSeconds] = useState(2);
+  const [mode, setMode] = useState<ModeChoice>("mixdown");
+  const [includeEmpty, setIncludeEmpty] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  // How many files the last stems run actually produced — the engine's count, not the
+  // pre-flight estimate, so the done-block reports what happened rather than what we guessed.
+  const [doneCount, setDoneCount] = useState(0);
+  const tracks = useStore((s) => s.snapshot?.tracks ?? []);
+  const planned = stemCount(tracks, includeEmpty);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
   // "Copied" flash — there's no native "Reveal in Finder" bridge command (JUCE's
@@ -51,8 +65,31 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
   // their export is: see the full path, copy it, then Cmd+Shift+G it into Finder.
   const [copied, setCopied] = useState<"file" | "folder" | null>(null);
   const depths = FORMATS.find((f) => f.value === format)!.depths;
+  const runStems = async () => {
+    setConfirming(false);
+    setBusy(true); setDone(""); setCopied(null); setDoneCount(0);
+    // No `dir`: the backend picks <session>/exports/stems-<ms>/, exactly as the mixdown
+    // path leaves `file` unset. There is no directory picker anywhere in this app (the
+    // native FileChooser flags are files-only), so inventing an unvalidated free-text
+    // destination here would be strictly worse than the default that already works.
+    const args: Record<string, unknown> = { format, bitDepth };
+    if (includeEmpty) args.includeEmpty = true;
+    const r = await exec("export_stems", args);
+    setBusy(false);
+    if (r.ok) {
+      const d = r.data as { dir?: string; count?: number } | undefined;
+      setDone(d?.dir ?? "exported");
+      setDoneCount(d?.count ?? 0);
+    }
+  };
   const onExport = async () => {
-    setBusy(true); setDone(""); setCopied(null);
+    // Stems gets a confirm gate; the mixdown does not. Not ceremony: export_stems runs N
+    // full renders inline on the message thread (execute_command is not threaded the way
+    // brain_chat is), with no progress and no cancel — and if any hosted plugin forces
+    // real-time rendering, EVERY stem renders in real time. An accidental click is
+    // therefore unrecoverable, which is exactly the case a confirm exists for.
+    if (mode === "stems") { setConfirming(true); return; }
+    setBusy(true); setDone(""); setCopied(null); setDoneCount(0);
     const args: Record<string, unknown> = { format, bitDepth };
     if (range === "custom") {
       args.range = "custom"; args.start = start; args.end = end;
@@ -76,6 +113,12 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
     <>
       <div className="pop-head">Export</div>
       <div className="pop-group">
+        <label className="pop-row"><span>What</span>
+          <select data-testid="export-mode" value={mode} onChange={(e) => { setMode(e.target.value as ModeChoice); setDone(""); }}>
+            <option value="mixdown">Mixdown (one file)</option>
+            <option value="stems">Stems (one file per track)</option>
+          </select>
+        </label>
         <label className="pop-row"><span>Format</span>
           <select value={format} onChange={(e) => { const f = e.target.value as ExportFormat; setFormat(f); const d = FORMATS.find((x) => x.value === f)!.depths; if (!d.includes(bitDepth)) setBitDepth(d.includes(24) ? 24 : d[0]); }}>
             {FORMATS.map((f) => <option key={f.value} value={f.value}>{f.value.toUpperCase()}</option>)}
@@ -84,6 +127,22 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
         <label className="pop-row"><span>Bit depth</span>
           <select value={String(bitDepth)} onChange={(e) => setBitDepth(Number(e.target.value))}>{depths.map((d) => <option key={d} value={d}>{d}-bit</option>)}</select>
         </label>
+        {/* Range and Tail are MIXDOWN-only. export_stems has no such args — it always renders
+            the full edit length from a common zero point so the stems re-import aligned — so
+            showing them here would be controls that visibly do nothing. */}
+        {mode === "stems" ? (
+          <>
+            <label className="pop-row"><span>Empty tracks</span>
+              <input data-testid="export-include-empty" type="checkbox" checked={includeEmpty}
+                onChange={(e) => setIncludeEmpty(e.target.checked)} />
+            </label>
+            <div className="pop-note" data-testid="export-stem-plan">
+              {planned === 0
+                ? "No tracks to export — every track is empty."
+                : `${planned} file${planned === 1 ? "" : "s"}, one per track, into a new folder in this session's exports.`}
+            </div>
+          </>
+        ) : (<>
         <label className="pop-row"><span>Range</span>
           <select data-testid="export-range" value={range} onChange={(e) => setRange(e.target.value as RangeChoice)}>
             <option value="full">Full mix</option>
@@ -118,17 +177,38 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
             <input data-testid="export-tail-seconds" type="number" min={0.05} max={30} step={0.5} value={tailSeconds} onChange={(e) => setTailSeconds(Number(e.target.value))} />
           </label>
         )}
+        </>)}
       </div>
       <div className="pop-actions">
-        <button className="btn" data-testid="export-run" disabled={busy || !audioEnabled} onClick={onExport}>{busy ? "Exporting…" : "Export"}</button>
+        {/* Nothing to render is prevented, not surfaced: native answers this with
+            "no renderable tracks (all empty or hidden)", which is a worse way to learn it. */}
+        <button className="btn" data-testid="export-run" disabled={busy || !audioEnabled || (mode === "stems" && planned === 0)} onClick={onExport}>{busy ? "Exporting…" : "Export"}</button>
       </div>
+      {confirming && (
+        <ConfirmDialog
+          title="Export stems?"
+          testId="export-stems-confirm"
+          confirmLabel={`Export ${planned} file${planned === 1 ? "" : "s"}`}
+          body={<>
+            <div>{planned} file{planned === 1 ? "" : "s"} — one per track — into a new folder in this session's exports. You'll get the full path when it finishes.</div>
+            <div><strong>Mosh won't respond until it's done.</strong> Each track is rendered in turn and there's no way to cancel once it starts. A short project takes seconds; a long one with plugins that need real-time rendering can take considerably longer.</div>
+          </>}
+          onConfirm={() => void runStems()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       {done && (
         <div className="pop-note export-done" data-testid="export-done">
-          <div>Exported to:</div>
+          <div>{doneCount > 0 ? `Exported ${doneCount} stem${doneCount === 1 ? "" : "s"} to:` : "Exported to:"}</div>
           <div className="tc export-path" title={done}>{done}</div>
           <div className="pop-actions">
-            <button className="btn" data-testid="export-copy-path" onClick={() => void copy("file")}>{copied === "file" ? "Copied ✓" : "Copy path"}</button>
-            <button className="btn" data-testid="export-copy-folder" onClick={() => void copy("folder")}>{copied === "folder" ? "Copied ✓" : "Copy folder"}</button>
+            {/* For stems the result IS a folder, so "Copy path" already copies what you want
+                and a second button pointing at its parent would only be a way to paste the
+                wrong thing. The mixdown keeps both. */}
+            <button className="btn" data-testid="export-copy-path" onClick={() => void copy("file")}>{copied === "file" ? "Copied ✓" : doneCount > 0 ? "Copy folder" : "Copy path"}</button>
+            {doneCount === 0 && (
+              <button className="btn" data-testid="export-copy-folder" onClick={() => void copy("folder")}>{copied === "folder" ? "Copied ✓" : "Copy folder"}</button>
+            )}
           </div>
           <div className="pop-note">Folder hidden by default — in Finder press ⌘⇧G (Go to Folder) and paste it.</div>
         </div>

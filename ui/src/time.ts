@@ -217,6 +217,45 @@ export function snapTimeMap(map: TempoMap, t: number, division: SnapDiv): number
   return Math.max(0, barPosToSec(map, snapped));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ANN-001 — continuous BEAT position (denominator-note count from t=0), the analog of
+// barPosAt/barPosToSec above but in beats rather than bars. Used to place beat-anchored
+// entities (timeline annotations) so they hold their musical spot across a tempo change:
+// the beat is authored once, and re-resolving it through a NEW map (after a tempo change
+// lands before it) must still land on the same musical position, at whatever new second
+// that now is. Unlike barPosAt, this does NOT round up to the next integer at an explicit
+// boundary — that convention exists only so bar NUMBERS stay whole when a change lands
+// mid-bar; a beat position has no such display convention and is a plain continuous
+// integral of 1/beatSec(meterAt(t)) over time, segment by segment.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Continuous beat position at a time. Inverse of secAtBeat. */
+export function beatAt(map: TempoMap, sec: number): number {
+  let beats = 0;
+  for (let i = 0; i < map.length; i++) {
+    const seg = map[i];
+    const segEndSec = i + 1 < map.length ? map[i + 1].startSec : Infinity;
+    if (sec <= seg.startSec) break;
+    beats += (Math.min(sec, segEndSec) - seg.startSec) / seg.beatSec;
+    if (sec <= segEndSec) break;
+  }
+  return beats;
+}
+
+/** The time (seconds) at a continuous beat position. Inverse of beatAt. */
+export function secAtBeat(map: TempoMap, beat: number): number {
+  let acc = 0;
+  for (let i = 0; i < map.length; i++) {
+    const seg = map[i];
+    const segEndSec = i + 1 < map.length ? map[i + 1].startSec : Infinity;
+    const segBeats = segEndSec === Infinity ? Infinity : (segEndSec - seg.startSec) / seg.beatSec;
+    if (beat <= acc + segBeats || segEndSec === Infinity)
+      return seg.startSec + (beat - acc) * seg.beatSec;
+    acc += segBeats;
+  }
+  return 0;
+}
+
 /** Bars.beats.sixteenths over the map (1-based; bars flow through ramps). */
 export function secondsToBBSMap(map: TempoMap, sec: number): string {
   const seg = segAt(map, Math.max(0, sec));

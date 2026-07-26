@@ -28,6 +28,10 @@ export const MOCK_ENABLED: boolean =
 const SR = 48000;
 let clipSeq = 100;
 let trackSeq = 10;
+// Layers whose render has already been landed on the "Neural Renders" lane, so a second
+// accept/bounce does not duplicate the clip (native guards the same way, via its internal
+// landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
+const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
 let sectionSeq = 3; // seed uses sec-1..3
@@ -131,6 +135,10 @@ function seedSnapshot(): Snapshot {
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
+      // gap 2 — the Recent list the native snapshot carries (newest-first). Seeded so the
+      // session picker and every Open-Recent surface have something real to render in dev
+      // and e2e; kept in lockstep with `recentPaths` by syncRecents().
+      recentProjects: [],
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
@@ -163,7 +171,25 @@ function emptySession(): Snapshot {
   return s;
 }
 
+// Project lifecycle. The native side persists a Recent list in <session>/last-project.json
+// and swaps the whole edit on open; the mock kept `open_project`/`open_recent` as bare
+// `ok(command)` no-ops, so any Recent UI was invisible in dev and untestable in e2e.
+// Stashing snapshots by path means reopening a project actually restores its content,
+// which is what makes "Start empty, then go back" provable.
+const mockProjects = new Map<string, Snapshot>();
+let recentPaths: string[] = ["/mock/session.mosh", "/mock/late-night.mosh", "/mock/demo-2.mosh"];
+const projectName = (p: string): string => (p.split("/").pop() ?? p).replace(/\.[^.]+$/, "");
+function syncRecents(): void {
+  snapshot.session.recentProjects = recentPaths.map((path) => ({ path, name: projectName(path) }));
+}
+/** Move `path` to the front of the Recent list (dedup'd), mirroring native rememberProject. */
+function rememberProject(path: string): void {
+  if (!path) return;
+  recentPaths = [path, ...recentPaths.filter((p) => p !== path)].slice(0, 10);
+}
+
 let snapshot: Snapshot = seedSnapshot();
+syncRecents();
 let mockCorpusLines = 0; // §7 — simulates the cross-song style corpus growing on accept
 
 // AGT-MEM (Phase-B memory lane, M1) — the agent-memory store, mirrored in-memory.
@@ -472,6 +498,36 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
 }
+// Is this clip's render layer scoped to PART of the clip? Mirrors the ±1e-3 comparison in
+// MoshOps::applyRenderInPlace, which is what decides in-place apply vs the lane landing.
+function isSubRegion(clip: Clip): boolean {
+  const rl = clip.renderLayer;
+  if (!rl || rl.regionStart === undefined || rl.regionEnd === undefined) return false;
+  const cs = clip.start, ce = clip.start + clip.length;
+  return rl.regionStart > cs + 1e-3 || rl.regionEnd < ce - 1e-3;
+}
+// accept_render's landing for a render that did NOT auto-apply: a plain wave clip on a shared
+// "Neural Renders" lane, spanning the rendered region. Mirrors MoshOps::cmdAcceptRender —
+// including that the lane is found-or-created once and reused.
+function landOnNeuralLane(src: Clip): Clip {
+  let lane = snapshot.tracks.find((t) => t.name === "Neural Renders");
+  if (!lane) {
+    lane = {
+      id: nextTrackId(), index: snapshot.tracks.length, name: "Neural Renders", type: "audio",
+      volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+    };
+    snapshot.tracks.push(lane);
+  }
+  const rl = src.renderLayer!;
+  const start = rl.regionStart ?? src.start;
+  const end = rl.regionEnd ?? src.start + src.length;
+  const landed: Clip = {
+    id: nextClipId(), name: `${src.name} (re-imagined)`, type: "wave",
+    start, length: Math.max(0.001, end - start), offset: 0, hasRenderLayer: false,
+  } as unknown as Clip;
+  lane.clips.push(landed);
+  return landed;
+}
 // DRM-001 — mirror the native default-instrument policy: a track that needs an
 // instrument gets the sane default (drum → sampler, melodic → 4OSC) unless it
 // already hosts one. Keeps UI tests honest about the auto-load behaviour.
@@ -749,7 +805,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       ensureInstrument(t, true);
       invalidate();
-      return ok(command, { trackId: t.id, pads: 8 });
+      // Mirrors the native result shape (MoshOps.cpp cmdLoadDrumKit): {trackId, index,
+      // pads} — `index` (this used to be dropped) is the sampler's position in the
+      // track's plugin rack, same field the UI's plugin-rack views key off of elsewhere.
+      const index = (t.plugins ?? []).findIndex((p) => p.type === "sampler" && p.isInstrument);
+      return ok(command, { trackId: t.id, index, pads: 8 });
     }
     case "assign_sample": {
       const t = findTrack(str(args.trackId));
@@ -870,14 +930,38 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { bus });
     }
     case "export_stems": {
-      // G7: one file per visible, non-empty audio track (return/bus tracks excluded).
+      // G7: one file per non-empty audio track. Mirrors cmdExportStems (MoshOps.cpp ~:10035)
+      // deliberately closely, because a mock that is merely plausible makes every test
+      // written against it vacuous:
+      //   • the old filter was `t.type === "audio"`, which silently dropped DRUM tracks —
+      //     native has no type filter at all (trackType is a ValueTree property; a drum
+      //     track is the same te::AudioTrack underneath), so a beat never got a stem here;
+      //   • the old filter also excluded isReturn, which native does not — returns simply
+      //     hold no clips, so they drop out on their own unless includeEmpty is set;
+      //   • the old return shape was `files: string[]`; native returns `stems: [{trackId,
+      //     name, index, file, bytes}]`, so UI code reading data.stems saw undefined;
+      //   • the index is assigned BEFORE the empty-track skip natively, so a default export
+      //     over a project with an empty track in the middle leaves GAPS (00, 02, 03).
       const fmt = str(args.format, "wav");
-      const stems = snapshot.tracks.filter((t) => t.type === "audio" && !t.isReturn && (args.includeEmpty ? true : (t.clips?.length ?? 0) > 0));
+      const ext = fmt === "aif" ? "aif" : fmt;
+      const dir = str(args.dir) || "/mock/exports/stems-0";
+      const includeEmpty = Boolean(args.includeEmpty);
+      const stems = snapshot.tracks
+        .filter((t) => !t.isGroup)                       // folder tracks are not AudioTracks
+        .map((t, index) => ({ t, index }))               // index counts every audio track…
+        .filter(({ t }) => includeEmpty || (t.clips?.length ?? 0) > 0)   // …then empties drop
+        .map(({ t, index }) => ({
+          trackId: t.id,
+          logicalId: t.id,
+          name: t.name,
+          index,
+          file: `${dir}/${String(index).padStart(2, "0")}-${t.name.replace(/[?*:"<>|/\\]/g, "").trim() || "unnamed"}.${ext}`,
+          bytes: 1024 * (1 + index),
+        }));
+      if (stems.length === 0) return err(command, "no renderable tracks (all empty or hidden)");
       return ok(command, {
-        dir: str(args.dir) || "/mock/stems",
-        format: fmt,
-        count: stems.length,
-        files: stems.map((t, i) => `${String(i).padStart(2, "0")}_${t.name}.${fmt}`),
+        dir, format: fmt, bitDepth: num(args.bitDepth, 24),
+        sampleRate: 48000, seconds: snapshot.session.length, count: stems.length, stems,
       });
     }
 
@@ -1489,7 +1573,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const mode = str(args.mode, "automatic");
       t.monitor = mode === "off" || mode === "on" ? mode : "automatic";
-      invalidate(); return ok(command, { monitor: t.monitor });
+      invalidate();
+      // Mirrors the NATIVE result shape (MoshOps.cpp cmdSetInputMonitor): {trackId, mode,
+      // applied, reason?} — not the {monitor} this used to return before anything called
+      // it from the UI. `applied` is always true here (the dev mock always simulates a
+      // connected input, see mockAudioSel); the real applied:false/reason path (no input
+      // device instance targets this track) is exercised in the UI test via a direct
+      // exec override, not through this mock.
+      return ok(command, { trackId: t.id, mode: t.monitor, applied: true });
     }
     case "stop_recording": {
       stopPlayback();
@@ -1736,11 +1827,46 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       invalidate();
       return ok(command);
     }
-    case "set_project_settings": case "open_project": case "open_recent": case "save_as": return ok(command);
+    case "set_project_settings": case "save_as": return ok(command);
+
+    // Open an existing project — by path, or by index into the live Recent list. The
+    // index form mirrors native `open_recent`, including its out-of-range error, because
+    // an index is resolved against a list the UI read one snapshot ago.
+    case "open_project": case "open_recent": {
+      let target: string;
+      if (command === "open_recent") {
+        const i = num(args.index, -1);
+        if (!Number.isInteger(i) || i < 0 || i >= recentPaths.length) return err(command, `no recent project at index ${i}`);
+        target = recentPaths[i];
+      } else {
+        target = str(args.file);
+        if (!target) return err(command, "open_project needs a file");
+      }
+      mockProjects.set(snapshot.session.editFile, snapshot);   // keep what we're leaving
+      rememberProject(snapshot.session.editFile);              // …and keep it reachable
+      const restored = mockProjects.get(target);
+      snapshot = restored ?? emptySession();
+      snapshot.session.editFile = target;
+      rememberProject(target);
+      syncRecents();
+      history.length = 0; future.length = 0;
+      stopPlayback();
+      invalidate();
+      return ok(command);
+    }
+
     // New project = a fresh empty edit (createEmptyEdit on the native side). Resets to a
     // blank session and clears undo history — you can't undo across a New, same as a DAW.
     case "new_project": {
+      const leaving = snapshot.session.editFile;
+      mockProjects.set(leaving, snapshot);
       snapshot = emptySession();
+      snapshot.session.editFile = `/mock/untitled-${mockProjects.size}.mosh`;
+      // The project you LEFT stays in Recent, so "Start empty" is reversible. This
+      // mirrors the native rememberProject(editPath) added to MoshEngine::newProject.
+      rememberProject(leaving);
+      rememberProject(snapshot.session.editFile);
+      syncRecents();
       history.length = 0; future.length = 0;
       stopPlayback();
       invalidate();
@@ -1968,7 +2094,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.hasRenderLayer = true;
       const mode = str(args.mode, "reimagine");
+      // Section-scoped render: an explicit sub-region bounds the layer to part of the clip
+      // (cmdCreateRenderLayer clamps it to the clip and ignores a degenerate range, falling
+      // back to the whole clip). The snapshot always carries a region — whole-clip layers
+      // report the clip's own span — so the UI can tell the two apart by comparison.
+      const cs = f.clip.start, ce = f.clip.start + f.clip.length;
+      let rs = cs, re = ce;
+      if (args.regionStart !== undefined && args.regionEnd !== undefined) {
+        const qs = Math.min(Math.max(num(args.regionStart, cs), cs), ce);
+        const qe = Math.min(Math.max(num(args.regionEnd, ce), cs), ce);
+        if (Math.abs(qe - qs) > 1e-3) { rs = Math.min(qs, qe); re = Math.max(qs, qe); }
+      }
       f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [], loras: [],
+        regionStart: rs, regionEnd: re,
         ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
@@ -1997,6 +2135,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
       // auditionable artifact for the legacy accept/reject flow — it must not replace the take.
       if (f.clip.renderLayer.mode === "sing") { /* ready + hasArtifact only */ }
+      // A SUB-REGION render never auto-applies either: in-place apply replaces the clip's WHOLE
+      // source, which a section-scoped render cannot do, so MoshOps::applyRenderInPlace returns
+      // false for it and the render falls through to the legacy "Neural Renders" lane landing
+      // (accept_render / bounce_layer_to_clip). This is the ONLY shape where those two commands
+      // do real work rather than relabelling a no-op.
+      else if (f.clip.type === "wave" && isSubRegion(f.clip)) { /* ready + hasArtifact only */ }
       // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
       else if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
       else {
@@ -2024,6 +2168,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.renderLayer.userKept = true;
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
+      // Freeze is the reactive opt-out, not just the label — mirrors cmdFreezeLayer.
+      if (command === "freeze_layer") f.clip.renderLayer.reactive = false;
+      // accept_render (and bounce, which delegates to it) LANDS a clip only where the render
+      // did not already auto-apply — a section-scoped render, or sing. On the whole-clip wave
+      // and MIDI-beneath paths the native command takes a no-op branch, which is precisely why
+      // bounce_layer_to_clip is a pure relabel there and why no UI offers it.
+      else if (f.clip.renderLayer.hasArtifact
+               && !f.clip.renderLayer.appliedInPlace && !f.clip.renderLayer.reimagineActive
+               && !landedLayers.has(f.clip.renderLayer.id)) {
+        // Kept OUT of the snapshot on purpose: native tracks the landed clip on an internal
+        // `landedClipId` property that snapshot() does not emit, so a mock field would be its
+        // own kind of drift — a shape no real backend ever sends.
+        landedLayers.add(f.clip.renderLayer.id);
+        landOnNeuralLane(f.clip);
+      }
+      invalidate(); return ok(command);
+    }
+    case "unfreeze_layer": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.reactive !== false) return err(command, "layer is not frozen");
+      pushUndo();
+      f.clip.renderLayer.reactive = true;
+      // "dirty", not "ready" — edits made while frozen skipped their re-render, so the artifact
+      // may not match its source and nothing here can tell (mirrors cmdUnfreezeLayer).
+      f.clip.renderLayer.status = "dirty";
       invalidate(); return ok(command);
     }
     case "render_ahead_arm": {
@@ -2238,6 +2407,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!file) return err(command, "no audio file");
       const bpm = num(args.bpm, 120);
       const bars = num(args.bars, 1) >= 2 ? 2 : 1;
+      // Mirrors native cmdSketchBeatbox exactly: the TRACK stays plain "Sketch", but the
+      // CLIP carries the source filename (sans extension) so a producer with several
+      // sketched takes can tell them apart — `wav.getFileNameWithoutExtension()` there,
+      // this here. (Was drifted to a bare "Sketch" clip name pre-fix — every existing
+      // test happened not to assert the clip name, so the drift was invisible.)
+      const srcName = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
       emit("sketch_status", { file, state: "working", bpm, bars });
       scheduleMock(() => {
         pushUndo();
@@ -2257,7 +2432,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         };
         ensureInstrument(t, true);
         t.clips.push({
-          id: nextClipId(), name: "Sketch", type: "midi",
+          id: nextClipId(), name: "Sketch • " + srcName, type: "midi",
           // Loop length mirrors the native cmdSketchBeatbox exactly: bars*4 beats * 60/bpm, no floor.
           start: 0, length: bars * 4 * 60 / Math.max(20, bpm), offset: 0, hasRenderLayer: false,
           notes: hits.map((h, k) => ({ i: k, pitch: PITCH[h.role], start: h.step / 4, length: 0.25, velocity: h.velocity })),
@@ -2531,6 +2706,7 @@ export function __resetMockForTests(): void {
   clipSeq = 100;
   trackSeq = 10;
   snapshot = seedSnapshot();
+  landedLayers.clear();
   mockCorpusLines = 0;
   mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
   mockAgentMemoryProject = [];

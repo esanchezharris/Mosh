@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
@@ -113,12 +114,61 @@ function MixTab({ track }: { track: Track }) {
       </label>
       <OutputField track={track} />
       {track.isInstrument && <MidiInputField track={track} />}
+      <InputMonitorField track={track} />
       <div className="v2-mix-btns">
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
       <SendsSection track={track} />
     </div>
+  );
+}
+
+// UI-REACH — set_input_monitor (off/automatic/on) had no control anywhere: the
+// snapshot already carried track.monitor (types.ts) and the command was agent-only.
+// TWO things make this NOT a plain per-track toggle, both worth being honest about:
+//  1. cmdSetInputMonitor (MoshOps.cpp) is NOT undoable — it calls setMonitorMode on the
+//     shared te::InputDevice and saveProps(), a global engine/device preference, not an
+//     Edit-tree write, so there is no undo transaction to ride (same posture as
+//     set_metronome). The select's value can therefore drift from what the button last
+//     asked for if something else changes the device's mode — it always reflects the
+//     snapshot, never local state.
+//  2. It is DEVICE-level: two tracks fed by the same physical input SHARE one monitor
+//     mode, so choosing "On" here silently changes it for every other track on that
+//     input too. The title says so rather than implying a per-track independent setting.
+// `applied` comes back false when no input device instance currently targets this track
+// (headless, or no interface) — a normal `!ok` failure would already surface via the
+// store's global lastError banner, but this is `ok:true` with nothing actually applied,
+// which that banner does not catch. Silently doing nothing would be worse than saying so.
+function InputMonitorField({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const [warn, setWarn] = useState<string | null>(null);
+  const mode = track.monitor ?? "automatic";
+  const choose = async (next: string) => {
+    setWarn(null);
+    const r = await exec("set_input_monitor", { trackId: track.id, mode: next });
+    const data = r.data as { applied?: boolean; reason?: string } | undefined;
+    if (r.ok && data?.applied === false) setWarn(data.reason ?? "no matching input device");
+  };
+  return (
+    <>
+      <label className="v2-field">
+        <span>Monitor</span>
+        <select
+          className="btn ghost"
+          data-testid="v2-input-monitor"
+          aria-label={`Input monitoring for ${track.name}`}
+          title="Device-level: every track fed by the same input shares this setting, not just this one"
+          value={mode}
+          onChange={(e) => void choose(e.target.value)}
+        >
+          <option value="off">Off</option>
+          <option value="automatic">Auto</option>
+          <option value="on">On</option>
+        </select>
+      </label>
+      {warn && <div className="v2-field-warn" data-testid="v2-input-monitor-warn" role="status">Not applied — {warn}</div>}
+    </>
   );
 }
 
@@ -152,6 +202,21 @@ function SendsSection({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const buses = useStore((s) => s.snapshot?.buses) ?? [];
   const sends = track.sends ?? [];
+  // create_bus lived here with no rename or remove beside it — an asymmetry, not a design.
+  // Both are bus-GLOBAL while this panel is per-track, so they sit tight against the bus
+  // name (its identity) rather than among the send controls to its right, and the delete
+  // confirms: cmdRemoveBus deletes the return track AND sweeps the matching send off every
+  // track in the project, which is not recoverable by re-adding the bus.
+  const [renaming, setRenaming] = useState<{ bus: number; name: string } | null>(null);
+  const [confirmBus, setConfirmBus] = useState<{ bus: number; name: string } | null>(null);
+
+  const commitRename = async () => {
+    const r = renaming;
+    setRenaming(null);
+    if (!r) return;
+    const name = r.name.trim();
+    if (name) await exec("rename_bus", { bus: r.bus, name });
+  };
   return (
     <div className="v2-sends" data-testid="v2-sends">
       <div className="v2-sends-head">
@@ -166,7 +231,24 @@ function SendsSection({ track }: { track: Track }) {
         const send = sends.find((s) => s.bus === b.bus);
         return (
           <div key={b.bus} className="v2-send-row" data-testid={`v2-send-${b.bus}`}>
-            <span className="v2-send-name" title={b.name}>{b.name}</span>
+            {renaming?.bus === b.bus ? (
+              <input
+                className="v2-bus-rename" data-testid={`v2-bus-rename-${b.bus}`} autoFocus
+                aria-label={`Rename ${b.name} bus`} value={renaming.name}
+                onChange={(e) => setRenaming({ bus: b.bus, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+                  else if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
+                }}
+                onBlur={() => void commitRename()}
+              />
+            ) : (
+              <span className="v2-send-name" data-testid={`v2-bus-name-${b.bus}`} title={`${b.name} — double-click to rename`}
+                onDoubleClick={() => setRenaming({ bus: b.bus, name: b.name })}>{b.name}</span>
+            )}
+            <button className="v2-btn icon v2-bus-rm" data-testid={`v2-bus-remove-${b.bus}`}
+              title={`Delete the ${b.name} bus`} aria-label={`Delete the ${b.name} bus`}
+              onClick={() => setConfirmBus({ bus: b.bus, name: b.name })}>🗑</button>
             {send ? (
               <>
                 <input type="range" min={-60} max={6} step={0.5} value={send.db}
@@ -183,6 +265,15 @@ function SendsSection({ track }: { track: Track }) {
           </div>
         );
       })}
+      {confirmBus && (
+        <ConfirmDialog
+          title={`Delete the ${confirmBus.name} bus?`} testId="v2-bus-remove-confirm" danger
+          confirmLabel="Delete bus"
+          body={<>This removes the return track and takes the {confirmBus.name} send off <strong>every</strong> track in the project, not just this one. Adding the bus back won't restore those sends.</>}
+          onConfirm={() => { const b = confirmBus.bus; setConfirmBus(null); void exec("remove_bus", { bus: b }); }}
+          onCancel={() => setConfirmBus(null)}
+        />
+      )}
     </div>
   );
 }

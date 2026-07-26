@@ -11,6 +11,7 @@ import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import type { Snapshot } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
+import { RecentProjectList } from "./RecentProjectList";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { ExportControls } from "./ExportControls";
 import { IconChevronLeft, IconFolder, IconPlus, IconSettings } from "./icons";
@@ -76,14 +77,8 @@ export function FileOptions({ snapshot }: { snapshot: Snapshot }) {
                 ))}
                 {recents.length > 0 && (
                   <div className="menu-sub" data-testid="fo-recent">
-                    <div className="menu-sub-head">Open Recent</div>
-                    {recents.map((p, i) => (
-                      <button key={p.path} className="menu-item sub" role="menuitem" title={p.path}
-                        disabled={p.path === s.editFile}
-                        onClick={() => { run("open_recent", { index: i }); close(); }}>
-                        <span className="menu-label">{p.path === s.editFile ? "● " : ""}{p.name}</span>
-                      </button>
-                    ))}
+                    <RecentProjectList snapshot={snapshot} variant="sub"
+                      onPick={(i) => { run("open_recent", { index: i }); close(); }} />
                   </div>
                 )}
               </div>

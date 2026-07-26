@@ -154,7 +154,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "reject_render", desc: "Reject a render", args: [S("clipId")] },
   { command: "reset_render_layer", desc: "Restore a wave clip's ORIGINAL audio (undo the in-place re-imagine; the layer stays so you can re-render)", args: [S("clipId")] },
   { command: "bypass_layer", desc: "Bypass/enable a clip's render layer", args: [S("clipId"), B("bypassed")] },
-  { command: "freeze_layer", desc: "Freeze a clip's render layer (commit the rendered audio)", args: [S("clipId")] },
+  { command: "freeze_layer", desc: "Freeze a clip's render layer: keep the rendered audio and stop re-rendering it on every edit", args: [S("clipId")] },
+  { command: "unfreeze_layer", desc: "Thaw a frozen render layer so edits auto-re-render it again", args: [S("clipId")] },
   { command: "bounce_layer_to_clip", desc: "Bounce a render layer down to a plain clip", args: [S("clipId")] },
   { command: "remove_render_layer", desc: "Remove a clip's render layer", args: [S("clipId")] },
 
@@ -304,6 +305,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "reject_render": return `Rejected a render`;
     case "bypass_layer": return a.bypassed ? `Bypassed a render layer` : `Enabled a render layer`;
     case "freeze_layer": return `Froze a render layer`;
+    case "unfreeze_layer": return `Thawed a render layer`;
     case "bounce_layer_to_clip": return `Bounced a layer to a clip`;
     case "remove_render_layer": return `Removed a render layer`;
     default: return command.replace(/_/g, " ");

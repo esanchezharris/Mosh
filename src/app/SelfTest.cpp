@@ -2568,6 +2568,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "freeze_layer ok (artifact present)");
         check (layerStatus (gcid) == "frozen", "freeze_layer -> status frozen");
 
+        section ("freeze_layer actually freezes (+ unfreeze_layer, the way back)");
+        // ── Freeze actually freezes (it used to be a label and nothing else) ──
+        // The reactive auto-re-render loop gates on ids::reactive; Ids.h declared it as the
+        // per-layer opt-out from the start but NO command wrote it, so a "frozen" layer went
+        // right on re-rendering. These pin the flag itself, not the word.
+        auto layerReactive = [&] (const String& cid) { return (bool) layerOf (cid).getProperty ("reactive", true); };
+        check (! layerReactive (gcid), "freeze_layer disarms the reactive loop (ids::reactive=false)");
+
+        // Why the snapshot must carry `reactive` and the UI must not read `status` for this:
+        // a param edit overwrites the "frozen" LABEL with "dirty" while the layer is still
+        // frozen. Both facts are true at once, and only `reactive` still tells the truth.
+        check (ok (cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 4242 }}))),
+               "set_render_param on a frozen layer ok");
+        check (layerStatus (gcid) == "dirty", "a param edit moves the frozen layer's status to dirty");
+        check (! layerReactive (gcid), "...and the layer is STILL frozen (status alone would have lost it)");
+
+        // The way back. There was none: no command moved status off "frozen", and nothing
+        // could re-arm ids::reactive, so a freeze was permanent for the life of the project.
+        check (ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))), "unfreeze_layer ok");
+        check (layerReactive (gcid), "unfreeze_layer re-arms the reactive loop");
+        check (layerStatus (gcid) == "dirty",
+               "unfreeze reports dirty, not ready (edits made while frozen skipped their re-render)");
+        check (! ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))),
+               "unfreeze_layer on a layer that is not frozen errors");
+
+        // One command = one undo step, for both directions.
+        check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "re-freeze ok");
+        check (! layerReactive (gcid), "re-freeze disarmed it again");
+        check (ok (cmd (ops, "undo")), "freeze: undo ok");
+        check (layerReactive (gcid), "undoing a freeze re-arms the reactive loop (not just the label)");
+        check (ok (cmd (ops, "redo")), "freeze: redo ok");
+        check (! layerReactive (gcid), "redoing a freeze disarms it again");
+        check (layerStatus (gcid) == "frozen", "redo restored the frozen label with the flag");
+
+        // Persistence: a freeze that evaporates on reload is the same lie in slower motion.
+        check (ok (cmd (ops, "save")), "freeze: save ok");
+        check (ok (cmd (ops, "reload")), "freeze: reload ok");
+        check (! layerReactive (gcid), "the freeze survives save/reload");
+        check (ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))), "unfreeze after reload ok");
+
         // freeze on a layer with NO artifact errors (gate the button on hasArtifact).
         auto gt2 = cmd (ops, "create_track", args1 ("name", "Gen2"))["data"].getProperty ("trackId", var()).toString();
         auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt2 }, { "seconds", 1.0 }, { "freq", 210.0 }}));
@@ -3191,7 +3231,41 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // earlier sections in this run have staged.
     section ("Export range + tail policy (G1)");
     {
+        // gap 2 — the project you LEAVE must stay reachable from Recent.
+        //
+        // This rides the harness's FIRST project operation on purpose: rememberProject
+        // was only ever called for the INCOMING file, so a project that entered editPath
+        // WITHOUT being opened never made it into last-project.json at all. In-process the
+        // only such project is the cold-start edit — which is exactly the one a producer
+        // is looking at when the launch picker offers "Start empty". Anywhere later in the
+        // harness the outgoing project has already been remembered as some earlier
+        // command's incoming file, so the check would pass with or without the fix.
+        const auto coldStartEdit = eng.editFile();
+        {
+            auto before = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            bool listedBefore = false;
+            for (int i = 0; i < before.size(); ++i)
+                if (before[i].getProperty ("path", var()).toString() == coldStartEdit.getFullPathName())
+                    listedBefore = true;
+            // Anti-vacuity: if the cold-start edit were ALREADY in Recent, the assertion
+            // below would pass for the wrong reason. Runs isolated (the default), so this
+            // holds; a reused MOSH_SELFTEST_SESSION would trip it, which is the honest
+            // signal that the run is not clean.
+            check (! listedBefore, "cold-start edit is not yet in Recent (precondition)");
+        }
+
         check (ok (cmd (ops, "new_project", args1 ("name", "g1-export-selftest"))), "new_project (G1 export isolation) ok");
+
+        {
+            auto after = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            bool listedAfter = false;
+            for (int i = 0; i < after.size(); ++i)
+                if (after[i].getProperty ("path", var()).toString() == coldStartEdit.getFullPathName())
+                    listedAfter = true;
+            check (listedAfter, "new_project keeps the OUTGOING (cold-start) project in Recent");
+            check (after.size() > 0 && after[0].getProperty ("path", var()).toString() == eng.editFile().getFullPathName(),
+                   "the newly-created project is still Recent[0] (newest-first preserved)");
+        }
 
         auto gt = cmd (ops, "create_track", args1 ("name", "G1 Tone"))["data"].getProperty ("trackId", var()).toString();
         // freq 337 is unique to this section: add_test_tone_clip caches the generated
@@ -4920,6 +4994,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             if (pruned[i].getProperty ("path", var()).toString() == editB.getFullPathName())
                 ghostListed = true;
         check (! ghostListed, "a deleted project is dropped from recentProjects (no ghost index)");
+
+        // (e) leaving a project and coming straight back by index. The "outgoing project
+        //     stays in Recent" invariant itself is pinned at the harness's FIRST project
+        //     op (see the G1 export section) — by this point every project here has
+        //     already been remembered as some earlier command's INCOMING file, so a check
+        //     placed here would pass with or without that fix. What this adds is the
+        //     round trip: leave, then reopen the one you left, by position.
+        {
+            const auto leaving = eng.editFile();
+            check (ok (cmd (ops, "new_project", args1 ("name", "recent-C"))), "new_project recent-C ok");
+            auto rc = ops.snapshot().getProperty ("session", var()).getProperty ("recentProjects", var());
+            check (rc.size() > 1 && rc[1].getProperty ("path", var()).toString() == leaving.getFullPathName(),
+                   "the project we left sits directly behind the new one in Recent");
+            check (ok (cmd (ops, "open_recent", args1 ("index", 1))), "open_recent index 1 reopens the project we left");
+            check (eng.editFile() == leaving, "the left-behind project reopened by index");
+        }
 
         // teardown: restore the harness session edit for later sections.
         check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))), "restored the session edit (AL-007 teardown)");

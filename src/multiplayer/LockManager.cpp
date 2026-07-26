@@ -93,7 +93,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
         "accept_render", "reject_render", "reset_render_layer", "bypass_layer",
-        "freeze_layer", "bounce_layer_to_clip", "remove_render_layer",
+        "freeze_layer", "unfreeze_layer", "bounce_layer_to_clip", "remove_render_layer",
         "render_ahead_arm",   // Lane A — arms/disarms Live on one clip (mutates its render layer)
         "build_lyrics_from_clip",   // LYR Phase 3 — mumble take (lands a sheet on the clip's track)
         "build_skeleton_from_clip", // LYR Phase 2 — gibberish skeleton (lands a sheet on the clip's track)

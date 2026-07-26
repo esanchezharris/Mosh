@@ -5,6 +5,7 @@
 // read + select surface that matches the demo.
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { useShell, type SectionZoom } from "../shellState";
@@ -12,15 +13,24 @@ import { beatSeconds, barSeconds } from "../../time";
 import type { CommandResult, Snapshot, Track } from "../../types";
 import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
+import { SectionRibbon } from "../timeline/SectionRibbon";
+import { TempoRibbon } from "../timeline/TempoRibbon";
+import { AnnotationLane } from "../timeline/AnnotationLane";
+import { LaneGrid, hasTempoChanges } from "../timeline/LaneGrid";
 import { Playhead } from "../timeline/Playhead";
+import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 
-const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group: "Group" };
+// (The uppercase AUDIO/DRUM pill that used to live in the header was removed: it
+// duplicated `TrackTypeIcon`, which already encodes the track type, and being
+// unshrinkable it won the fight for a 28px name column and truncated every name to
+// "Ser…". The icon carries the type; the name gets the space.)
 
 // The kinds of track the add-track affordance can create. Both add-track sites used to be
 // hardcoded to `create_track {name:"Audio"}`, which made drum and instrument tracks
@@ -30,12 +40,13 @@ const TYPE_LABEL: Record<string, string> = { drum: "Drum", audio: "Audio", group
 // asked for them, and `add_midi_clip` had no v2 call site at all. Only the classic shell's
 // Topbar did (`+ Drums` / `+ MIDI`), so programming a beat or a melody with the mouse was
 // impossible in the default UI. `ui/src/v2/lanes/trackKinds.test.ts` pins this.
-type TrackKind = "audio" | "drum" | "midi";
+type TrackKind = "audio" | "drum" | "midi" | "tone";
 
 export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
   { kind: "audio", label: "Audio",      hint: "Record or drop a file" },
   { kind: "drum",  label: "Drums",      hint: "Sampler + kit, ready to program" },
   { kind: "midi",  label: "Instrument", hint: "Synth + an empty MIDI clip" },
+  { kind: "tone",  label: "Test tone",  hint: "A reference tone — check you can hear anything" },
 ];
 
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
@@ -62,7 +73,10 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   // create_bus and doesn't yet exclude them — a separate, pre-existing gap).
   const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
   const contentW = contentSeconds(snapshot) * pxPerSec;
+  // beatPx is the CONSTANT-tempo beat width feeding the lane's gradient. It is only
+  // meaningful while the tempo never changes — see LaneGrid for what happens when it does.
   const beatPx = beatSeconds(meterOf(snapshot)) * pxPerSec;
+  const varTempo = hasTempoChanges(snapshot.session);
   const barLen = barSeconds(meterOf(snapshot));
   const totalBars = Math.max(1, Math.ceil(contentSeconds(snapshot) / barLen));
 
@@ -148,18 +162,42 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           height it caps there and scrolls internally (the prompt bar stays put). */}
       <div
         className="v2-stage"
-        style={{ "--v2-stage-h": `calc(var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
-            {/* ruler row (now the top row) */}
+            {/* Song-structure ribbon — the timeline's top row, above the ruler.
+                NOT the nav strip: PR #183 removed it from there because a ribbon sitting
+                beside the whole-song navigator "was misread as section editing", and
+                SongNav replaced it with plain bar numbers. Inside the timeline it reads as
+                what it is — a structure lane over the same x-axis as the clips. SongNav is
+                untouched. */}
+            <div className="v2-corner v2-corner-ribbon" />
+            <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
+            {/* tempo row — sits between structure and bars, because it is what maps one to
+                the other. Its own row rather than markers in the ruler: the ruler's plain
+                click already means "seek", and click-to-add-a-tempo-change on the same
+                element would have to fight it. */}
+            <div className="v2-corner v2-corner-tempo"><span className="v2-corner-label">BPM</span></div>
+            <div className="v2-tempo-cell"><TempoRibbon snapshot={snapshot} width={contentW} /></div>
+            {/* ruler row */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
+            {/* annotation lane — authored comment pins, beat-anchored (time.ts's piecewise
+                map, not geom.ts's flat one) so a note holds its musical spot across a tempo
+                change. Its own row after the ruler: a pin marks a POINT in time, same axis
+                as the clips just below it. */}
+            <div className="v2-corner v2-corner-ann"><span className="v2-corner-label">NOTE</span></div>
+            <div className="v2-ann-cell"><AnnotationLane snapshot={snapshot} width={contentW} /></div>
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
-                <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                  {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
+                      gets real positioned lines, because a repeating gradient cannot express
+                      an uneven grid and would drift from the ruler above. */}
+                  {varTempo && <LaneGrid snapshot={snapshot} pxPerSec={pxPerSec} />}
                   {t.clips.filter((c) => !c.hidden).map((c) => (
                     <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
                   ))}
@@ -170,6 +208,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
                 a track, or drop an audio file onto the blackspace (the global drop imports). */}
             <AddTrackMenu variant="row" />
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
+            <TimeRangeBand />
             <Playhead />
           </div>
         </div>
@@ -191,6 +230,17 @@ export async function addTrackOfKind(
 ): Promise<void> {
   if (kind === "audio") { await exec("create_track", { name: "Audio" }); return; }
   if (kind === "drum") { await exec("create_track", { name: "Drums", type: "drum" }); return; }
+  // A reference tone, for hearing whether the output path works at all. Classic had this in
+  // its Topbar targeting the SELECTED track; v2 has no "add a clip to this track" affordance
+  // to hang it off, so it arrives the same way an Instrument track does — make the track,
+  // then put the clip on it — which is also the shape you want when the question is "is
+  // anything reaching my speakers", i.e. before you trust any existing track.
+  if (kind === "tone") {
+    const toneRes = await exec("create_track", { name: "Tone" });
+    const toneTrackId = (toneRes.data as { trackId?: string } | undefined)?.trackId;
+    if (toneRes.ok && toneTrackId) await exec("add_test_tone_clip", { trackId: toneTrackId });
+    return;
+  }
   // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
   // instrument track IS an audio track carrying a synth plus MIDI clips. So: make the
   // track, then put a clip on it. add_midi_clip loads 4OSC in its own transaction when the
@@ -275,7 +325,10 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
                   onClick={() => pick(kind)}
                 >
                   <span className="v2-licon" aria-hidden="true">
-                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind} />
+                    {/* "tone" is not a track type — it makes an AUDIO track with a tone on
+                        it — so it borrows the waveform icon rather than falling through to
+                        TrackTypeIcon's unknown-type default. */}
+                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
                   </span>
                   <span className="v2-menu-text">
                     <span className="v2-menu-label">{label}</span>
@@ -306,10 +359,20 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const instrument = track.plugins?.find((p) => p.isInstrument)?.name;
-  const preset = instrument ?? (track.type === "drum" ? "Drums" : "Audio");
-  const typeLabel = TYPE_LABEL[track.type] ?? "Track";
+  // Only show the preset line when it actually says something. It used to fall back to
+  // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
+  // it cost the name column a line of vertical space to say nothing.
+  const preset = track.plugins?.find((p) => p.isInstrument)?.name;
   const sel = selectedTrackId === track.id;
+
+  // UI-REACH — remove_track's sole call site in the whole codebase was classic's ×
+  // (ui/Arrange.tsx:416), which v2 never renders, so a mouse-only v2 user could not
+  // delete a track at all. cmdRemoveTrack (MoshOps.cpp) is `eng.edit().deleteTrack(track)`
+  // inside one undo transaction — it takes every clip on the track with it, so this is
+  // confirm-gated (mirrors the bus-removal confirm in Inspector.tsx's SendsSection),
+  // though unlike a bus deletion it IS a plain undoable Edit mutation — the dialog says so.
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const clipCount = track.clips.length;
 
   return (
     <div
@@ -328,10 +391,9 @@ function TrackLaneHeader({ track }: { track: Track }) {
       <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
       <span className="v2-lmeta">
         <span className="v2-lrow">
-          <span className="v2-lname">{track.name}</span>
-          <span className="v2-ltype">{typeLabel}</span>
+          <span className="v2-lname" title={track.name}>{track.name}</span>
         </span>
-        <span className="v2-lpreset">{preset}</span>
+        {preset && <span className="v2-lpreset">{preset}</span>}
       </span>
       <TrackMeterBar trackId={track.id} />
       <span className="v2-ms">
@@ -348,6 +410,30 @@ function TrackLaneHeader({ track }: { track: Track }) {
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
       </span>
+      <button
+        className="v2-lhead-rm"
+        data-testid="v2-track-remove"
+        title={`Delete ${track.name}`}
+        aria-label={`Delete ${track.name}`}
+        onClick={(e) => { e.stopPropagation(); setConfirmRemove(true); }}
+      >×</button>
+      {confirmRemove && createPortal(
+        <ConfirmDialog
+          title={`Delete "${track.name}"?`}
+          testId="v2-track-remove-confirm"
+          danger
+          confirmLabel="Delete track"
+          body={
+            <>
+              This removes the track and {clipCount === 0 ? "everything on it" : clipCount === 1 ? "the 1 clip on it" : `all ${clipCount} clips on it`}.
+              Undo (⌘Z) brings it back right after, same as any other edit.
+            </>
+          }
+          onConfirm={() => { setConfirmRemove(false); void exec("remove_track", { trackId: track.id }); }}
+          onCancel={() => setConfirmRemove(false)}
+        />,
+        document.body,
+      )}
     </div>
   );
 }

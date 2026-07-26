@@ -10,6 +10,7 @@ import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
+import { RecentProjectList } from "./RecentProjectList";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
@@ -161,7 +162,6 @@ export function TopbarTools({ snapshot }: { snapshot: Snapshot }) {
 // in here (with Open Recent from session.recentProjects).
 export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
   const s = snapshot.session;
-  const recents = (s.recentProjects ?? []).slice(0, 8);
   const run = (id: ActionId, opts?: { file?: string; index?: number }) =>
     void runAction(id, { store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat }, opts);
   return (
@@ -177,16 +177,8 @@ export function FileMenu({ snapshot }: { snapshot: Snapshot }) {
               </button>
               {m.id === "open_project" && (
                 <div className="menu-sub" data-testid="recent-projects">
-                  <div className="menu-sub-head">Open Recent</div>
-                  {recents.length === 0
-                    ? <div className="rack-empty">no recent projects</div>
-                    : recents.map((p, i) => (
-                        <button key={p.path} className="menu-item sub" role="menuitem" title={p.path}
-                                disabled={p.path === s.editFile}
-                                onClick={() => { run("open_recent", { index: i }); close(); }}>
-                          <span className="menu-label">{p.path === s.editFile ? "● " : ""}{p.name}</span>
-                        </button>
-                      ))}
+                  <RecentProjectList snapshot={snapshot} variant="sub" emptyLabel="no recent projects"
+                    onPick={(i) => { run("open_recent", { index: i }); close(); }} />
                 </div>
               )}
             </Fragment>

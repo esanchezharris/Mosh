@@ -133,8 +133,16 @@ test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async
   // announces zero operable items (matches the ClipView clip menu precedent).
   await expect(page.getByRole("menuitem")).toHaveCount(0); // closed → nothing mounted
   await page.getByTestId("v2-overflow").click();
-  // Undo/Redo + Mute-Moshi + Hands-free + theme + Switch-to-Classic = at least 6 items.
-  await expect(page.getByRole("menuitem")).toHaveCount(6);
+
+  // Assert the INVARIANT rather than a magic number: every operable child of the
+  // role="menu" container must carry role="menuitem", or the menu announces fewer items
+  // than it has. An exact count was a proxy for that, and it broke as soon as the menu
+  // legitimately grew (the project actions). The floor keeps it non-vacuous.
+  const menu = page.locator('.v2-menu[role="menu"]');
+  const buttons = await menu.locator("button").count();
+  const items = await menu.getByRole("menuitem").count();
+  expect(buttons, "overflow menu rendered no buttons at all").toBeGreaterThanOrEqual(6);
+  expect(items, "some menu buttons are missing role=menuitem").toBe(buttons);
 });
 
 test("top-right primary controls stay visible and secondary tools move into overflow", async ({ page }) => {
@@ -241,6 +249,79 @@ test("sample browser keeps import actions keyboard reachable", async ({ page }) 
   await importButton.focus();
   await expect(importButton).toBeFocused();
   await expect.poll(() => importButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+});
+
+// UI-REACH — sketch_beatbox had NO entry point in either shell: cmdSketchBeatbox takes an
+// absolute file path (not a clipId), so the clipId-based clip-menu AI actions
+// (transcribe_clip/build_skeleton_from_clip) are not a fit. The sample browser's directory
+// listing is: a real absolute path already exists there (list_directory), in the native
+// app, the dev mock, AND here under Playwright — unlike pickFiles' native file dialog,
+// which only ever resolves in the packaged app and would hang forever under the mock (no
+// backend answers its promise). This drives the REAL mouse gesture end to end: a genuine
+// pointerdown→mousedown→mouseup→click sequence Playwright issues, which is exactly the
+// class of interaction jsdom's synthetic click() cannot reproduce (see
+// SketchBeatboxDialog.test.ts's unit coverage for what jsdom CAN prove, and why it isn't
+// enough on its own).
+test("beatbox -> beat: the sample browser is the entry point, and it lands a playable drum clip", async ({ page }) => {
+  await bootV2(page);
+  const before = await page.getByTestId("v2-track-header").count();
+
+  await page.getByTestId("v2-browser-pull").click();
+  const row = page.getByTestId("sample-row").first();
+  await expect(row).toBeVisible();
+  const sketchButton = row.getByTestId("sample-sketch-beatbox");
+  await sketchButton.click();
+
+  const dialog = page.getByTestId("sketch-beatbox-dialog");
+  await expect(dialog).toBeVisible();
+  // Defaults to the PROJECT's own tempo (the mock's seed session is 120 BPM) — never a
+  // hardcoded guess, since a wrong default here silently mis-times every hit.
+  await expect(dialog.getByTestId("sketch-bpm-input")).toHaveValue("120");
+
+  await dialog.getByTestId("sketch-bpm-input").fill("140");
+  await dialog.getByTestId("sketch-bars-2").click();
+  await dialog.getByTestId("sketch-beatbox-confirm").click();
+  await expect(dialog).toHaveCount(0); // closes immediately (optimistic — async work continues)
+
+  // The mock resolves the transduction ~400ms later, via the same sketch_status event
+  // path the real backend's async (wait:false) branch uses.
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
+  const last = page.getByTestId("v2-track-header").last();
+  await expect(last).toContainText("Sketch");
+  const trackId = await last.getAttribute("data-track-id");
+  await expect(page.locator(`.v2-lane[data-track-id="${trackId}"]`).getByTestId("v2-clip")).toHaveCount(1);
+});
+
+test("beatbox -> beat: an out-of-range bpm keeps the confirm button disabled — the engine's " +
+     "own 20..300 rejection never has to surface as an error toast", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("sample-row").first().getByTestId("sample-sketch-beatbox").click();
+  const dialog = page.getByTestId("sketch-beatbox-dialog");
+  const bpmInput = dialog.getByTestId("sketch-bpm-input");
+  const confirm = dialog.getByTestId("sketch-beatbox-confirm");
+
+  await bpmInput.fill("400");
+  await expect(confirm).toBeDisabled();
+  await expect(dialog.getByTestId("sketch-bpm-hint")).toBeVisible();
+
+  await bpmInput.fill("140");
+  await expect(confirm).toBeEnabled();
+  await expect(dialog.getByTestId("sketch-bpm-hint")).toHaveCount(0);
+
+  // Escape dismisses without dispatching anything (shared Escape-stack convention).
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("beatbox -> beat: the entry point is keyboard reachable, matching Import's affordance", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  const row = page.getByTestId("sample-row").first();
+  const sketchButton = row.getByTestId("sample-sketch-beatbox");
+  await sketchButton.focus();
+  await expect(sketchButton).toBeFocused();
+  await expect.poll(() => sketchButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 });
 
 test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
@@ -623,4 +704,86 @@ test("the add-track menu flips above the trigger when it would run off-screen", 
   // and the last item is genuinely clickable, which is what actually broke
   await page.getByTestId("v2-track-add-midi").click();
   await expect(page.getByTestId("v2-track-add-midi")).toHaveCount(0);
+});
+
+// METER-COLLIDE — the per-track peak meter shipped visually broken and nothing could see
+// it. `.v2-meter` was declared twice in shell.css (track meter + PresenceMeter), and the
+// second block's DESCENDANT rule `.v2-meter span` reached the `.mbar` spans inside
+// TrackMeterBar, pinning `width: 3px; transform: scaleY(0.18)` — properties mosh.css's
+// `.meter .mbar` never contests and Meter.tsx's rAF loop never writes (it only touches
+// `.mmask`). Result: frozen 3px x 0.54px slivers instead of level bars. The unit suites
+// run in jsdom with no real cascade, so only a browser can assert this.
+for (const theme of ["light", "dark"] as const) {
+  test(`per-track meter bars render full-size and correctly masked (${theme} theme)`, async ({ page }) => {
+    await page.addInitScript((t) => {
+      window.localStorage.clear();
+      window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: { theme: t }, keyOverrides: {} }));
+    }, theme);
+    await page.goto("/?shell=v2");
+    await expect(page.getByTestId("v2-shell")).toBeVisible();
+
+    const bar = page.locator('[data-testid="v2-track-meter"] .mbar').first();
+    await expect(bar).toBeAttached();
+
+    const geom = await bar.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { w: b.width, h: b.height, transform: getComputedStyle(el).transform };
+    });
+    // The exact failure was transform: scaleY(0.18).
+    expect(geom.transform, "a CSS transform is squashing the meter bar").toBe("none");
+    // This pair is what stops the test being vacuous: `transform: none` alone passes
+    // happily for a 3px-wide element.
+    expect(geom.w, "meter bar too narrow to read as a level bar").toBeGreaterThan(10);
+    expect(geom.h, "meter bar has no height").toBeGreaterThan(1);
+
+    // The unlit mask overlays the gradient, so it must be OPAQUE and match the v2 ink —
+    // not the classic --ink-deep, which is cream in the light theme.
+    const mask = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="v2-track-meter"] .mmask')!;
+      const probe = document.createElement("div");
+      probe.style.color = getComputedStyle(document.querySelector(".v2-shell")!)
+        .getPropertyValue("--v2-ink").trim();
+      document.body.appendChild(probe);
+      const expected = getComputedStyle(probe).color;
+      probe.remove();
+      return { actual: getComputedStyle(el).backgroundColor, expected };
+    });
+    expect(mask.actual, "unlit mask does not match --v2-ink").toBe(mask.expected);
+    expect(mask.actual, "unlit mask is translucent — the gradient will ghost through")
+      .not.toContain("rgba");
+  });
+}
+
+// HEAD-TRUNCATE — the track NAME had 28px in a 168px header once the icon (34), meter
+// (30), M/S column (22), three 10px gaps and 24px of padding were paid for; and the
+// uppercase AUDIO/DRUM pill inside the name column was `flex: 0 0 auto`, so it took its
+// ~45px first and the name absorbed the entire shortfall. Every name read "Ser…".
+// The pill duplicated the track-type icon beside it, so it went; the header widened to
+// 200px and the meter/gaps slimmed. Asserts the BUDGET, not any particular name.
+test("the track-name column is wide enough to read a name", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("mosh.settings", JSON.stringify({ version: 2, template: null, values: {}, keyOverrides: {} }));
+  });
+  await page.goto("/?shell=v2");
+  await expect(page.getByTestId("v2-shell")).toBeVisible();
+
+  // A name long enough that the column width is what decides legibility.
+  await page.evaluate(async () => {
+    const st = (window as any).__moshStore.getState();
+    await st.exec("rename_track", { trackId: st.snapshot.tracks[0].id, name: "Serum Lead Stack" });
+  });
+
+  const meta = page.locator(".v2-lmeta").first();
+  await expect(meta).toBeVisible();
+  const columnPx = await meta.evaluate((el) => el.clientWidth);
+  // 28px was the shipped value. 60 is a floor that fails loudly on any regression
+  // toward it while leaving room to re-tune the header.
+  expect(columnPx, "track-name column has collapsed again").toBeGreaterThan(60);
+
+  // And the pill that caused it must not come back inside the name column.
+  await expect(page.locator(".v2-ltype")).toHaveCount(0);
+
+  // The full name stays recoverable even when the column does truncate it.
+  await expect(page.locator(".v2-lname").first()).toHaveAttribute("title", "Serum Lead Stack");
 });

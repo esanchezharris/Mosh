@@ -141,7 +141,15 @@ function MasterPluginRack({ plugins }: { plugins: Plugin[] }) {
 
 function MasterPluginRow({ plugin }: { plugin: Plugin }) {
   const exec = useStore((s) => s.exec);
+  // Params are collapsed by default. The rack's job is the CHAIN — what's on the master and
+  // in what order — and eight sliders per row would bury that. Opening one is the moment you
+  // have stopped reading the chain and started adjusting a plugin.
+  const [openParams, setOpenParams] = useState(false);
+  // Same shape and cap as the per-track rack's ParamBody (Dock.tsx): the master list is
+  // serialized by the identical pluginToVar, so params[].value is 0..1 here too.
+  const params = (plugin.params ?? []).slice(0, 8);
   return (
+    <>
     <div className={`v2-master-plugin-row${plugin.enabled ? "" : " bypassed"}`} data-testid="v2-master-plugin-row" data-plugin-index={plugin.index}>
       <button className={`v2-master-plugin-dot${plugin.enabled ? " on" : ""}`} title={plugin.enabled ? "Bypass" : "Enable"}
         aria-pressed={!plugin.enabled}
@@ -153,9 +161,30 @@ function MasterPluginRow({ plugin }: { plugin: Plugin }) {
         onClick={() => void exec("reorder_master_plugin", { index: plugin.index, toIndex: plugin.index + 1 })}>›</button>
       <button className="v2-btn icon" title="Open plugin window" aria-label={`Open ${plugin.name}`}
         onClick={() => void exec("open_master_plugin_editor", { index: plugin.index })}>⤢</button>
+      {params.length > 0 && (
+        <button className="v2-btn icon" data-testid="v2-master-plugin-params-toggle"
+          title={openParams ? "Hide parameters" : "Show parameters"}
+          aria-expanded={openParams} aria-label={`${openParams ? "Hide" : "Show"} ${plugin.name} parameters`}
+          onClick={() => setOpenParams((v) => !v)}>{openParams ? "▾" : "▸"}</button>
+      )}
       <button className="v2-btn icon" title="Remove" aria-label={`Remove ${plugin.name}`}
         onClick={() => void exec("remove_master_plugin", { index: plugin.index })}>✕</button>
     </div>
+    {openParams && (
+      <div className="v2-master-params" data-testid="v2-master-params">
+        {params.map((p) => (
+          <label key={p.index} className="v2-master-param">
+            <span className="v2-master-param-name" title={p.name}>{p.name}</span>
+            <input type="range" min={0} max={1} step={0.01} value={p.value}
+              aria-label={`${plugin.name} ${p.name}`}
+              data-testid={`v2-master-param-${p.index}`}
+              onChange={(e) => void exec("set_master_plugin_param", { index: plugin.index, paramIndex: p.index, value: Number(e.target.value) })} />
+            <span className="v2-val">{Math.round(p.value * 100)}</span>
+          </label>
+        ))}
+      </div>
+    )}
+    </>
   );
 }
 

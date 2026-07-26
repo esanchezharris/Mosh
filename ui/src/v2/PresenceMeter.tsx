@@ -42,7 +42,7 @@ export function PresenceMeter({ stream }: { stream: MediaStream }) {
 
   if (!hasAudio) return null;
   return (
-    <div className="v2-meter" ref={ref} aria-hidden="true">
+    <div className="v2-pcard-level" ref={ref} aria-hidden="true">
       {Array.from({ length: BARS }, (_, i) => <span key={i} />)}
     </div>
   );

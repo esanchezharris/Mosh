@@ -1232,6 +1232,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "render_ahead_tick") return cmdRenderAheadTick (args);  // Lane A — explicit clock tick (run-script)
     if (name == "bypass_layer")      return cmdBypassLayer (args);
     if (name == "freeze_layer")      return cmdFreezeLayer (args);
+    if (name == "unfreeze_layer")    return cmdUnfreezeLayer (args);
     if (name == "bounce_layer_to_clip") return cmdBounceLayerToClip (args);
     if (name == "remove_render_layer") return cmdRemoveRenderLayer (args);
     if (name == "list_colors")       return cmdListColors (args);
@@ -9537,9 +9538,36 @@ juce::var MoshOps::cmdFreezeLayer (const juce::var& args)
         return errResult ("freeze_layer", "nothing rendered to freeze");
     beginTxn ("freeze_layer");
     node.setProperty (ids::status, "frozen", &undoManager());
+    // The part that makes the name true. `status` is a LABEL nothing gates on; the reactive
+    // auto-re-render loop gates on ids::reactive (reactiveTouch, below) — which Ids.h has
+    // declared as the per-layer opt-out since Phase 3 while NO command ever wrote it. Without
+    // this line a "frozen" layer still re-rendered on the next edit, spending exactly the
+    // service time the freeze promises to save. cmdUnfreezeLayer is the way back.
+    node.setProperty (ids::reactive, false, &undoManager());
     logLine ("freeze_layer", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("freeze_layer");
+}
+
+juce::var MoshOps::cmdUnfreezeLayer (const juce::var& args)
+{
+    // Thaw — re-arm the reactive loop a freeze switched off. Freeze had no way back at all
+    // before this: no command moved status off "frozen", and nothing could set ids::reactive.
+    auto node = findRenderLayer (args.getProperty ("clipId", var()).toString());
+    if (! node.isValid()) return errResult ("unfreeze_layer", "no render layer");
+    if ((bool) node.getProperty (ids::reactive, true))
+        return errResult ("unfreeze_layer", "layer is not frozen");
+
+    beginTxn ("unfreeze_layer");
+    node.setProperty (ids::reactive, true, &undoManager());
+    // "dirty", never "ready": edits made WHILE frozen deliberately did not fire a re-render, so
+    // the artifact may no longer match its source and nothing here can tell. "dirty" is this
+    // codebase's existing word for "re-imagine is available again" (cf. reset_render_layer) —
+    // it is the honest answer, where "ready" would claim a freshness we cannot verify.
+    node.setProperty (ids::status, "dirty", &undoManager());
+    logLine ("unfreeze_layer", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("unfreeze_layer");
 }
 
 juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
@@ -11448,6 +11476,11 @@ juce::var MoshOps::clipToVar (te::Clip& c)
             && findClip (rl[kLandedClipId].toString()) != nullptr);
         r->setProperty ("coverage", rl[ids::coverage].toString().isNotEmpty() ? rl[ids::coverage] : var ("auto"));   // whole-clip strategy
         r->setProperty ("liveArmed", (bool) rl[ids::liveArmed]);   // Lane A — "Live" render-ahead is armed on this layer
+        // The freeze state, and the ONLY honest source for it. `status` carries "frozen" as a
+        // label, but a later param edit overwrites it with "dirty" while the layer is still
+        // frozen — so a UI reading status alone would silently lose the badge. `reactive` is
+        // what reactiveTouch actually gates on; absent ⇒ true (layers predating the freeze fix).
+        r->setProperty ("reactive", (bool) rl.getProperty (ids::reactive, true));
         r->setProperty ("adapter", rl[ids::modelAdapter]);
         r->setProperty ("mode", rl[ids::mode]);
         r->setProperty ("seed", (int) rl[ids::seed]);

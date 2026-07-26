@@ -13,9 +13,11 @@ import { noteName, pitchClass, resolveKey, scaleMask, snapToScale, keyLabel } fr
 import { liveFeel } from "../interaction/config";
 import { DrumSequencer } from "./DrumSequencer";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
+import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx } from "./pianoRollGeom";
+import { velocityFromFraction } from "./drumGrid";
+import { useEscapeStack } from "../hooks/useEscapeToClose";
 
 const ROW_H = 15;
-const BEAT_PX = 42;
 const LOW = 36, HIGH = 96;
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
 
@@ -39,6 +41,12 @@ export function PianoRoll() {
   const [preview, setPreview] = useState<MidiNote | null>(null);
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [velocityDraft, setVelocityDraft] = useState<number | null>(null);
+  // In-flight velocity-lane edits, keyed by note index. The REF is authoritative and the
+  // state is only a mirror for rendering: pointerdown/move/up can arrive in one
+  // synchronous batch, and React would not have flushed a state update before the commit
+  // in pointerup read it back — so a whole drag could commit nothing.
+  const [velDrafts, setVelDrafts] = useState<Record<number, number>>({});
+  const velDragRef = useRef<{ active: boolean; startX: number; drafts: Map<number, number> }>({ active: false, startX: 0, drafts: new Map() });
   const dragRef = useRef<Drag | null>(null);
   const gridDragRef = useRef<GridDrag | null>(null);
   const previewRef = useRef<MidiNote | null>(null);
@@ -46,6 +54,11 @@ export function PianoRoll() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const keysRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const rulerRef = useRef<HTMLDivElement | null>(null);
+  const velRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const beatPx = useStore((s) => s.pianoRollBeatPx);
+  const setBeatPx = useStore((s) => s.setPianoRollBeatPx);
 
   useEffect(() => { if (editingClipId && !clip) close(); }, [editingClipId, clip, close]);
   useEffect(() => { setMode("piano"); }, [editingClipId]);
@@ -78,10 +91,18 @@ export function PianoRoll() {
   }, [clip?.notes]);
   useEffect(() => { setVelocityDraft(null); velocityDraftRef.current = null; }, [editingClipId, selectedNotes]);
 
+  // Escape goes through the shared stack (AL-001), not a private window listener.
+  // This component was the one holdout — every other overlay adopted the stack and
+  // cites *this* file as the pattern it mirrors, but the migration never reached it,
+  // so with the piano roll under another overlay a single Escape closed both. The
+  // stack listens in CAPTURE phase and stopPropagation()s, which is why the
+  // Delete/Backspace listener below (bubble phase) is unaffected.
+  useEscapeStack(Boolean(editingClipId && clip), close);
+
   // Keyboard while the piano roll is open: Delete/Backspace removes the SELECTED
   // NOTES (the arrangement's global handler bails when editingClipId is set, so the
-  // clip is never deleted here); Escape closes. Removing in descending index order
-  // keeps each noteIndex valid as the backend reindexes after every removal.
+  // clip is never deleted here). Removing in descending index order keeps each
+  // noteIndex valid as the backend reindexes after every removal.
   useEffect(() => {
     if (!editingClipId || !clip) return;
     const clipId = clip.id;
@@ -94,13 +115,51 @@ export function PianoRoll() {
         const idxs = [...selectedNotes].sort((a, b) => b - a);
         void (async () => { for (const i of idxs) await exec("remove_note", { clipId, noteIndex: i }); })();
         setSelectedNotes(new Set());
-      } else if (e.key === "Escape") {
-        e.preventDefault(); close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editingClipId, clip, selectedNotes, exec, close]);
+
+  // The grid's width came from the CLIP alone, so a short clip left the right third
+  // of the panel unpainted: the grid element simply ended before its container did,
+  // revealing the panel's own background beside it. Measure the viewport so the grid
+  // can be extended to cover it. `min-width: 100%` in CSS handles the first paint,
+  // before this has measured (and jsdom, which has no ResizeObserver).
+  const [viewportW, setViewportW] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setViewportW(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setViewportW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mode, editingClipId]);
+
+  // Playhead. Transport is a decimated 30Hz event feed kept deliberately OUT of the
+  // snapshot, and subscribing to it here would re-render the whole note tree 30 times a
+  // second. So: read it imperatively inside a rAF loop and write ONE CSS custom property
+  // — the same discipline as Meter.tsx and TrackLaneList's per-track level glow. Geometry
+  // travels through a ref (written during render, below) so the effect never re-subscribes.
+  const geomRef = useRef({ start: 0, beatSec: 0.5, beatPx: 42, len: 0 });
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const { position } = useStore.getState().transport;
+      const g = geomRef.current;
+      const el = bodyRef.current;
+      if (el && g.beatSec > 0) {
+        const x = ((position - g.start) / g.beatSec) * g.beatPx;
+        el.style.setProperty("--pr-play-x", `${x.toFixed(1)}px`);
+        // Only show it while the playhead is actually over this clip.
+        el.classList.toggle("pr-playing", position >= g.start && position <= g.start + g.len);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   if (!editingClipId || !clip) return null;
 
@@ -108,9 +167,15 @@ export function PianoRoll() {
   const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
   const snapBeat = (b: number) => (stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k);
-  const clipBeats = Math.max(8, clip.length / beatSeconds(m));
-  const gridBeats = Math.ceil(clipBeats) + 4;
-  const gridW = gridBeats * BEAT_PX;
+  const gridBeats = gridBeatsFor({
+    clipBeats: clip.length / beatSeconds(m),
+    beatsPerBar: m.num,
+    beatPx,
+    viewportW,
+  });
+  const gridW = gridBeats * beatPx;
+  // Feed the playhead loop this render's geometry (see the rAF effect above).
+  geomRef.current = { start: clip.start, beatSec: beatSeconds(m), beatPx, len: clip.length };
   const yOf = (pitch: number) => (HIGH - pitch) * ROW_H;
   const pitchAt = (y: number) => HIGH - Math.floor(y / ROW_H);
   // Scale lock (invariant 88) — an INPUT AID, exactly like snap-to-grid above:
@@ -120,10 +185,14 @@ export function PianoRoll() {
   const songKey = resolveKey(snapshot?.session.key);
   const keyMask = scaleMask(songKey);
   const lockPitch = (pitch: number) => (scaleLock ? snapToScale(pitch, keyMask) : pitch);
-  const noteBox = (n: MidiNote) => ({ x: n.start * BEAT_PX, y: yOf(n.pitch) + 1, w: Math.max(6, n.length * BEAT_PX - 1), h: ROW_H - 2 });
+  const noteBox = (n: MidiNote) => ({ x: n.start * beatPx, y: yOf(n.pitch) + 1, w: Math.max(6, n.length * beatPx - 1), h: ROW_H - 2 });
   const setPreviewNote = (n: MidiNote | null) => { previewRef.current = n; setPreview(n); };
 
-  const notes: MidiNote[] = (clip.notes ?? []).map((n) => (preview && preview.i === n.i ? preview : n));
+  const notes: MidiNote[] = (clip.notes ?? []).map((n) => {
+    const base = preview && preview.i === n.i ? preview : n;
+    const v = velDrafts[n.i];
+    return v == null ? base : { ...base, velocity: v };
+  });
 
   const onGridDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest(".pr-note")) return;
@@ -143,7 +212,7 @@ export function PianoRoll() {
     const d = dragRef.current;
     if (d) {
       const dxPx = e.clientX - d.startX;
-      const db = dxPx / BEAT_PX;
+      const db = dxPx / beatPx;
       // The two axes are guarded symmetrically: an axis you did not move is never
       // rewritten. Pitch gets its deadzone for free from rounding to whole rows
       // (dp === 0 below covers half a row either way); TIME is continuous, so it
@@ -197,7 +266,7 @@ export function PianoRoll() {
     const wasMoved = gd.moved || Math.hypot(x - gd.x0, y - gd.y0) > 4;
     setLasso(null);
     if (!wasMoved) {
-      const start = Math.max(0, snapBeat(x / BEAT_PX)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
+      const start = Math.max(0, snapBeat(x / beatPx)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
       return;
     }
@@ -206,6 +275,68 @@ export function PianoRoll() {
     setSelectedNotes(new Set(hit));
   };
   const onGridCancel = () => { dragRef.current = null; gridDragRef.current = null; setPreviewNote(null); setLasso(null); };
+
+  // ── velocity lane ──────────────────────────────────────────────────────────
+  // Which notes a single drag has touched, and the velocity it last painted on each.
+  // The whole gesture commits on release: one set_note per touched note, so an
+  // eight-note sweep is one undo step, not eight. (Committing on pointermove would
+  // also flood the JSONL command log at frame rate.)
+  const velFromEvent = (e: React.PointerEvent<HTMLDivElement>): number => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const frac = rect.height > 0 ? 1 - (e.clientY - rect.top) / rect.height : 0;
+    return velocityFromFraction(Math.max(0, Math.min(1, frac)));
+  };
+  const paintVelocity = (e: React.PointerEvent<HTMLDivElement>, indices: number[]) => {
+    if (indices.length === 0) return;
+    const v = velFromEvent(e);
+    for (const i of indices) velDragRef.current.drafts.set(i, v);
+    setVelDrafts(Object.fromEntries(velDragRef.current.drafts));
+  };
+  const noteIndexAt = (target: EventTarget | null): number | null => {
+    const bar = (target as HTMLElement | null)?.closest?.(".pr-vel-bar") as HTMLElement | null;
+    const raw = bar?.dataset.noteIndex;
+    return raw == null ? null : Number(raw);
+  };
+  const onVelDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const i = noteIndexAt(e.target);
+    if (i == null) return;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    velDragRef.current = { active: true, startX: e.clientX, drafts: new Map() };
+    // Dragging a bar that is part of the current multi-selection edits the whole
+    // selection; otherwise it selects and edits just that note.
+    const targets = selectedNotes.has(i) && selectedNotes.size > 1 ? [...selectedNotes] : [i];
+    if (targets.length === 1) setSelectedNotes(new Set(targets));
+    paintVelocity(e, targets);
+  };
+  const onVelMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!velDragRef.current.active || e.buttons === 0) return;
+    const touched = [...velDragRef.current.drafts.keys()];
+    // Sweep-paint picks up bars the pointer travels ACROSS — so it is gated on horizontal
+    // movement. Notes can overlap in time, which means several bars can stack at one x;
+    // without this gate a purely vertical drag (the common "set this one note's velocity"
+    // gesture) re-samples elementFromPoint at each new height and silently grabs whichever
+    // neighbour happened to be on top, editing notes the producer never touched.
+    const swept = Math.abs(e.clientX - velDragRef.current.startX) > 2;
+    const under = swept ? noteIndexAt(document.elementFromPoint(e.clientX, e.clientY)) : null;
+    paintVelocity(e, under != null && !touched.includes(under) ? [...touched, under] : touched);
+  };
+  const onVelUp = () => {
+    const { active, drafts } = velDragRef.current;
+    velDragRef.current = { active: false, startX: 0, drafts: new Map() };
+    setVelDrafts({});
+    if (!active) return;
+    const byIndex = new Map((clip.notes ?? []).map((n) => [n.i, n.velocity]));
+    // set_note does NOT reindex (unlike remove_note, which is why THAT one goes in
+    // descending order), so ascending is safe here. One command per touched note, all
+    // on release: the whole gesture is a single undo step.
+    void (async () => {
+      for (const i of [...drafts.keys()].sort((a, b) => a - b)) {
+        const v = drafts.get(i);
+        if (v != null && v !== byIndex.get(i)) await exec("set_note", { clipId: clip.id, noteIndex: i, velocity: v });
+      }
+    })();
+  };
+  const onVelCancel = () => { velDragRef.current = { active: false, startX: 0, drafts: new Map() }; setVelDrafts({}); };
 
   const selectedIndex = selectedNotes.values().next().value as number | undefined;
   const selNote = selectedIndex != null ? (clip.notes ?? []).find((n) => n.i === selectedIndex) : undefined;
@@ -249,18 +380,73 @@ export function PianoRoll() {
             </button>
           )}
           {mode === "piano" && (
+            <span className="seg pr-zoom" role="group" aria-label="Zoom">
+              <button className="btn" data-testid="pr-zoom-out" aria-label="Zoom out"
+                onClick={() => setBeatPx(clampBeatPx(beatPx / 1.25))}>−</button>
+              <button className="btn" data-testid="pr-zoom-in" aria-label="Zoom in"
+                onClick={() => setBeatPx(clampBeatPx(beatPx * 1.25))}>+</button>
+            </span>
+          )}
+          {mode === "piano" && (
             <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
         {mode === "drums" ? <DrumSequencer clip={clip} /> : (
-        <><div className="pr-body">
-          <div className="pr-keys" ref={keysRef}>
-            {pitches.map((p) => (
-              <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
-            ))}
+        <><div className="pr-body" ref={bodyRef}>
+          {/* Ruler. Bar numbers are CLIP-LOCAL (bar 1 = the clip's start), because note
+              positions are clip-local beats — session-absolute numbering would disagree
+              with the coordinates every other affordance here uses. */}
+          <div className="pr-corner" />
+          <div className="pr-ruler-vp">
+            <div className="pr-ruler" ref={rulerRef} style={{ width: gridW }} role="group" aria-label="Bars"
+              onPointerDown={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const beat = Math.max(0, (e.clientX - rect.left) / beatPx);
+                void exec("set_transport", { position: clip.start + beat * beatSeconds(m) });
+              }}>
+              {Array.from({ length: Math.floor(gridBeats / m.num) + 1 }, (_, bar) => (
+                <div key={`b${bar}`} className="pr-rtick" style={{ left: bar * m.num * beatPx }}>
+                  {bar % rulerStride(m.num * beatPx) === 0 && <span>{bar + 1}</span>}
+                </div>
+              ))}
+              <div className="pr-playhead pr-playhead-head" aria-hidden />
+            </div>
           </div>
-          <div className="pr-scroll" ref={scrollRef} onScroll={(e) => { if (keysRef.current) keysRef.current.scrollTop = e.currentTarget.scrollTop; }}>
+
+          <div className="pr-keys-vp" ref={keysRef}>
+            <div className="pr-keys">
+              {pitches.map((p) => (
+                <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
+              ))}
+            </div>
+          </div>
+          <div className="pr-scroll" ref={scrollRef} onScroll={(e) => {
+            const { scrollTop, scrollLeft } = e.currentTarget;
+            // VERTICAL: assign scrollTop, because centerScrollTopForNotes drives the same
+            // property on open (pianoRollScroll.ts) and both must agree.
+            if (keysRef.current) keysRef.current.scrollTop = scrollTop;
+            // HORIZONTAL: translate the content rather than assigning scrollLeft. Each
+            // viewport clamps scrollLeft to ITS own max, and .pr-scroll is the only one
+            // with a vertical scrollbar — so its client width is narrower and the lanes
+            // drift apart at the right-hand end. That is 1px with macOS overlay
+            // scrollbars and ~15px with classic Windows ones. A transform cannot clamp.
+            const x = `translateX(${-scrollLeft}px)`;
+            if (rulerRef.current) rulerRef.current.style.transform = x;
+            if (velRef.current) velRef.current.style.transform = x;
+          }}
+            onWheel={(e) => {
+              // Cmd/Ctrl+wheel zooms about the pointer so the note under the cursor
+              // stays put; a plain wheel keeps native scrolling.
+              if (!e.ctrlKey && !e.metaKey) return;
+              e.preventDefault();
+              const el = e.currentTarget;
+              const anchorX = e.clientX - el.getBoundingClientRect().left;
+              const factor = Math.exp(-e.deltaY * 0.0015 * liveFeel().zoomSensitivity);
+              const next = zoomAnchored({ beatPx, factor, scrollLeft: el.scrollLeft, anchorX });
+              setBeatPx(next.beatPx);
+              el.scrollLeft = next.scrollLeft;
+            }}>
             <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: pitches.length * ROW_H }}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
               {pitches.map((p) => {
@@ -270,7 +456,7 @@ export function PianoRoll() {
                 const root = scaleLock && pitchClass(p) === songKey.tonic;
                 return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
               })}
-              {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * BEAT_PX }} />)}
+              {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * beatPx }} />)}
               {notes.map((n) => {
                 const b = noteBox(n);
                 return (
@@ -285,10 +471,29 @@ export function PianoRoll() {
                 );
               })}
               {lasso && <div className="pr-lasso" style={{ left: Math.min(lasso.x0, lasso.x1), top: Math.min(lasso.y0, lasso.y1), width: Math.abs(lasso.x1 - lasso.x0), height: Math.abs(lasso.y1 - lasso.y0) }} />}
+              <div className="pr-playhead" data-testid="pr-playhead" aria-hidden />
+            </div>
+          </div>
+
+          {/* Velocity lane. One bar per note, bottom-anchored, same grammar as the drum
+              sequencer's velocity graph so the two editors read as one family. Dragging
+              updates PREVIEW state only; exactly one set_note per touched note is sent on
+              release, so a gesture is one undo step instead of a flood. */}
+          <div className="pr-vel-gutter"><span>vel</span></div>
+          <div className="pr-vel-vp">
+            <div className="pr-vel-lane" ref={velRef} style={{ width: gridW }} data-testid="pr-vel-lane"
+              onPointerDown={onVelDown} onPointerMove={onVelMove} onPointerUp={onVelUp}
+              onPointerCancel={onVelCancel} onLostPointerCapture={onVelCancel}>
+              {notes.map((n) => (
+                <div key={n.i} className={`pr-vel-bar ${selectedNotes.has(n.i) ? "sel" : ""}`}
+                  data-testid="pr-vel-bar" data-note-index={n.i}
+                  title={`${noteName(n.pitch)} · vel ${n.velocity}`}
+                  style={{ left: n.start * beatPx, height: `${(n.velocity / 127) * 100}%` }} />
+              ))}
             </div>
           </div>
         </div>
-        <div className="pr-foot">click empty space to add · drag to move · drag right edge to resize · double-click or Delete to remove · Esc to close</div></>
+        <div className="pr-foot">click to add · drag to move · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
         )}
       </div>
     </div>

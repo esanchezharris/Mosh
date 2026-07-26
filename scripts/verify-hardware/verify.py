@@ -836,6 +836,72 @@ def check_reactive_rerender(ctx):
                {"layer_audio_files": len(files), "state_after_edit": st, "failed_commands": fails})
 
 
+def check_freeze_stops_rerender(ctx):
+    """The inverse of check_reactive_rerender, and the only place the freeze can be PROVEN.
+    Same setup — a live beneath-render on a MIDI clip — but freeze_layer runs before the edit.
+    Asserts the edit fires NO second render (still exactly one durable audio file for the layer)
+    while the beneath model stays live, then that unfreeze_layer re-arms the loop for real: a
+    second edit after thawing DOES write a new file.
+
+    Selftest can pin ids::reactive, but not this: reactiveTouch bails on !hasAudio() long before
+    it reads the flag, so a headless run cannot tell a working freeze from a broken one. Freeze
+    was shipped inert for exactly that long. This check is the guard against it going inert again."""
+    SESSION = "verify-freeze"
+    notes = [{"pitch": 60, "start": 0.0, "length": 0.5, "velocity": 100},
+             {"pitch": 64, "start": 0.5, "length": 0.5, "velocity": 100}]
+    cmds = [
+        {"command": "create_track", "args": {"name": "Frozen"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "length": 2.0, "notes": notes}, "capture": {"C": "clipId"}},
+        {"command": "create_render_layer", "args": {"clipId": "${C}", "adapter": "transform", "mode": "transform"}, "capture": {"L": "layerId"}},
+        {"command": "render_layer", "args": {"clipId": "${C}", "wait": True}},
+        {"command": "freeze_layer", "args": {"clipId": "${C}"}},
+        {"command": "add_note", "args": {"clipId": "${C}", "pitch": 67, "start": 1.0, "length": 0.5, "velocity": 110}},
+        {"command": "__wait", "args": {"ms": 4000}},            # same window the reactive check needs to land a render
+        {"command": "__snapshot", "args": {"label": "while_frozen"}},
+        {"command": "unfreeze_layer", "args": {"clipId": "${C}"}},
+        {"command": "add_note", "args": {"clipId": "${C}", "pitch": 71, "start": 1.5, "length": 0.5, "velocity": 110}},
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "__snapshot", "args": {"label": "after_thaw"}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION,
+                               extra_env={"MOSH_SERVICE_PORT": _service_port(8802), "MOSH_ENABLE_TRANSFORM": "0",
+                                          "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
+    fails = failed_commands(results)
+    layer_id = _data_field(results, "create_render_layer", "layerId")
+    audio_dir = _mosh_session_base() / SESSION / "audio"
+
+    def layer_files():
+        return sorted(glob.glob(str(audio_dir / f"{layer_id}-*.wav"))) if layer_id else []
+
+    # One total, read at the end, pins BOTH phases: each edit's debounce window has fully
+    # elapsed by then, so 1 file = the thaw never re-armed, 3 = the freeze never held, and only
+    # 2 means the frozen edit rendered nothing and the thawed edit rendered once.
+    def layer_state(label):
+        snap = _snap_for(results, label)
+        for t in snap.get("tracks", []):
+            for c in t.get("clips", []):
+                if c.get("type") == "midi":
+                    rl = c.get("renderLayer") or {}
+                    return {"reactive": rl.get("reactive"), "status": rl.get("status"),
+                            "reimagineActive": bool(rl.get("reimagineActive")),
+                            "notes": len(c.get("notes", []))}
+        return {}
+
+    frozen, thawed = layer_state("while_frozen"), layer_state("after_thaw")
+    total = len(layer_files())
+    # One file from the initial manual render; the frozen edit adds none. The thawed edit adds
+    # one — that second file is what proves unfreeze restored a loop that actually runs, rather
+    # than just flipping a flag the renderer ignores.
+    ok = (not fails and layer_id is not None
+          and total == 2
+          and frozen.get("reactive") is False and frozen.get("reimagineActive") is True
+          and frozen.get("notes") == 3
+          and thawed.get("reactive") is True and thawed.get("notes") == 4)
+    return row("Freeze stops the reactive re-render (and unfreeze restores it)", ok,
+               {"layer_audio_files_total": total, "while_frozen": frozen, "after_thaw": thawed,
+                "failed_commands": fails})
+
+
 def check_crash_recovery(ctx):
     """A3: full JSONL-replay crash recovery. Run 1 saves a track (Alpha), then makes UNSAVED
     edits (track Beta + a clip on Beta) and __crash-es. Run 2 (same kept session) detects the
@@ -937,7 +1003,8 @@ def check_stem_export(ctx):
 
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
-                  check_midi_reimagine_beneath, check_reactive_rerender, check_full_loop,
+                  check_midi_reimagine_beneath, check_reactive_rerender,
+                  check_freeze_stops_rerender, check_full_loop,
                   check_relative_ref_export, check_export_range_tail, check_bypass_layer,
                   check_render_artifact_portability, check_crash_recovery, check_stem_export]
 

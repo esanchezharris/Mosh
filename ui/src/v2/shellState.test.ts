@@ -62,3 +62,34 @@ describe("v2 shellState — right dock (agent rail)", () => {
     expect(useShell.getState().rightOpen).toBe(true);
   });
 });
+
+// UIREACH-TIMERANGE — the ruler-drawn time-range span. UI-local like every other
+// selection concept here: it never reaches the backend on its own, only via an
+// explicit action (delete_time_range / ripple / loop) that reads it.
+describe("v2 shellState — time-range span", () => {
+  beforeEach(() => {
+    useShell.setState({ timeRange: null, timeRangeDragging: false });
+  });
+
+  it("defaults to no selection, not dragging", () => {
+    expect(useShell.getState().timeRange).toBeNull();
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+  });
+
+  it("setTimeRange sets and clears the span", () => {
+    useShell.getState().setTimeRange({ start: 4, end: 8 });
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 8 });
+    useShell.getState().setTimeRange(null);
+    expect(useShell.getState().timeRange).toBeNull();
+  });
+
+  it("setTimeRangeDragging flips independently of the span itself", () => {
+    useShell.getState().setTimeRange({ start: 1, end: 2 });
+    useShell.getState().setTimeRangeDragging(true);
+    expect(useShell.getState().timeRangeDragging).toBe(true);
+    expect(useShell.getState().timeRange).toEqual({ start: 1, end: 2 });
+    useShell.getState().setTimeRangeDragging(false);
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 1, end: 2 });
+  });
+});

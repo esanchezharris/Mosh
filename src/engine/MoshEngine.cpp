@@ -826,6 +826,16 @@ void MoshEngine::newProject (const juce::File& file)
     // (a live playback context bound to the old Edit asserts on destruction —
     // mirrors the export render-exclusivity dance).
     save();
+    // gap 2 — remember the project we are LEAVING, not just the one we're opening.
+    // rememberProject was only ever called for the incoming file, so the outgoing one
+    // silently fell out of last-project.json — including the default session, which
+    // nothing ever "opens" and which therefore never entered Recent at all. The launch
+    // picker makes that load-bearing: it offers "Start empty" while showing the current
+    // session's track count, so that session has to stay reachable afterwards.
+    // Ordering is deliberate: outgoing first, then the incoming rememberProject below,
+    // so the incoming project still ends up newest. save() above guarantees editPath
+    // exists on disk, which is what recentProjects()'s existsAsFile() filter requires.
+    rememberProject (editPath);
     editPtr->getTransport().stop (false, false);
     editPtr->getTransport().freePlaybackContext();
     editPtr.reset();
@@ -854,6 +864,11 @@ void MoshEngine::newProject (const juce::File& file)
 juce::String MoshEngine::openProject (const juce::File& file)
 {
     save();
+    // gap 2 — same as newProject: keep the project we're leaving reachable from Recent.
+    // Placed after save() (so the file exists) but BEFORE the format gate below, which is
+    // correct either way: on refusal we keep the current project loaded, and it having
+    // been (re)remembered is accurate — it is still the open project.
+    rememberProject (editPath);
     // PRJ-FMT — temp-load → gate → swap-on-success. On refusal (newer-format file) keep the
     // CURRENT project loaded + playing and RETURN the error; the open_project command turns
     // that into an error envelope the UI shows. The current project stays saveable.

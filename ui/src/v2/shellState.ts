@@ -10,6 +10,12 @@ export type InspectorTab = "mix" | "fx" | "gen" | "lyrics" | "midi" | "takes" | 
 export type SectionZoom = "8b" | "16b" | "full";
 export type BrowserTab = "sounds" | "plugins";
 
+// UIREACH-TIMERANGE — a time-span selection, drawn by shift-dragging the bar ruler.
+// UI-local like every other selection concept in this codebase (never mirrored to the
+// backend): the span only becomes a command when the producer picks an explicit action
+// off it (delete_time_range, ripple delete, or loop-this-range). null = no span drawn.
+export type TimeRangeSel = { start: number; end: number };
+
 interface ShellState {
   selectedClipId: string | null;   // clip-level selection for the contextual Inspector
   inspectorTab: InspectorTab;
@@ -19,6 +25,17 @@ interface ShellState {
   browserOpen: boolean;            // LEFT push-dock (sounds + plugins), pull-tab toggled
   browserTab: BrowserTab;
   rightOpen: boolean;              // RIGHT push-dock (agent · inspector · collaborators); default open
+  // Session picker, shown once per app LAUNCH. Module-scope zustand means this lives
+  // exactly as long as the React app does — deliberately NOT persisted to localStorage,
+  // because a remembered "don't show me again" would silently restore the very behaviour
+  // the picker exists to replace (reopening the last edit with no say in it).
+  sessionPickerDismissed: boolean;
+  // The ruler-drawn time-range span (UIREACH-TIMERANGE) + whether it is still being
+  // dragged. Dragging is tracked separately so the action toolbar (TimeRangeBand) can
+  // withhold itself while the span is still moving under the pointer, rather than
+  // jittering across the screen mid-gesture.
+  timeRange: TimeRangeSel | null;
+  timeRangeDragging: boolean;
 
   setSelectedClip: (id: string | null) => void;
   setInspectorTab: (t: InspectorTab) => void;
@@ -29,7 +46,10 @@ interface ShellState {
   toggleBrowser: () => void;
   openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
   setRightOpen: (b: boolean) => void;
+  dismissSessionPicker: () => void;
   toggleRight: () => void;
+  setTimeRange: (r: TimeRangeSel | null) => void;
+  setTimeRangeDragging: (b: boolean) => void;
 }
 
 export const useShell = create<ShellState>((set) => ({
@@ -41,6 +61,9 @@ export const useShell = create<ShellState>((set) => ({
   browserOpen: false,
   browserTab: "sounds",
   rightOpen: true,
+  sessionPickerDismissed: false,
+  timeRange: null,
+  timeRangeDragging: false,
 
   // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
   // pin/close it explicitly). Track selection is NOT here — route it through useStore.
@@ -54,4 +77,7 @@ export const useShell = create<ShellState>((set) => ({
   openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
   setRightOpen: (b) => set({ rightOpen: b }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
+  dismissSessionPicker: () => set({ sessionPickerDismissed: true }),
+  setTimeRange: (r) => set({ timeRange: r }),
+  setTimeRangeDragging: (b) => set({ timeRangeDragging: b }),
 }));
