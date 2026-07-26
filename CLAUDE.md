@@ -14,6 +14,7 @@
 - [x] **One undo system:** Tracktion's `UndoManager` is the undo *implementation* under MoshOps. No second UndoManager, no shadow model.
 - [x] **Swappable seam:** the frontend couples to the backend **only** via `execute_command(...)` + the **snapshot+events** feed. No Tracktion/audio concepts in the frontend. Pure view state (drawers, zoom, scroll, selection) is UI-local and **not** a command. (Stage 2 swappability proof: rebuilt bundle, byte-identical backend.)
 - [x] **Tier wall:** the generative model runs **only** as a **job via the adapter/service** (Tier B) — never on the audio thread. *(The synthetic Tier-A in-process insert was removed 2026-06-21. **Correction:** this directive used to read "no real-time sidecar" full stop, which the code contradicts — `RaveInsertPlugin` (Route C.2) IS a real-time neural insert, running a RAVE model live via anira+LibTorch. It is legitimate because it is **build-gated OFF by default** (`MOSH_ENABLE_ANIRA`), so the default binary is byte-unaffected and the tier wall holds for every shipped build. The rule is "no real-time model in the default build", not "no real-time model exists".)*
+- [x] **Everything is reachable by mouse:** every command in the agent catalog has a control a mouse-only producer can reach from the **shipped v2 shell** — no keyboard-only, agent-only, or classic-only affordances. Enforced by `ui/src/agent/uiReachability.test.ts`, which walks the module graph from `AppV2.tsx` and now asserts `UI_REACH_GAPS` is **exactly 0** (16 → 0 on 2026-07-26). Two consequences worth knowing before you add a command: the probe is a string search, so a module v2 imports for *helpers* but never renders must be declared in `CLASSIC_ONLY_MODULES` or it makes its whole subtree look reachable (that false positive hid the fact that a v2 user could not delete a track); and an exception with a written reason is still an exception — several long-standing entries turned out to describe an assumption rather than the code. [Close-out](docs/worklog/2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md).
 - [x] **Threading:** model + bridge on the message thread; audio in `applyToBuffer` on RT threads (no alloc); service-I/O on background (`std::thread` + `callAsync`); **audio thread never blocks**; telemetry decimated 30 Hz.
 - [x] **ASTD everywhere, defeatable:** every over-driveable generative param is a 0–100 UI control clamped below quality-collapse; **Lab mode** unlocks the raw range. Implemented in the Tier-B service (`service/colors/runtime.py`). *(The C++ `mosh::astd` impl was removed with the Tier-A insert, 2026-06-21.)*
 - [x] **Cache by full fingerprint:** Tier-B reuse keyed by the complete fingerprint (`05 §5`), never just source+params. (Harness: HIT/MISS verified.)
@@ -59,7 +60,7 @@
 ### Stage 5 — Generative layer (`05`) — Fake first, then SA3 ✅ FAKE GATE PASSED (2026-06-08)
 - [x] `GenerativeModelAdapter` shape + **`FakeAdapter`** (Python `service/adapters/fake_adapter.py`) — deterministic, recognizably-altered audio (seeded gain + one-pole LP + saturation), stdlib `wave` only.
 - [x] Job service (`service/server.py`): submit/status/progress/cancel + capabilities/health; audio over files+manifests (`input.wav`/`output.wav`/`output_manifest.json`). Native `GenerativeJobManager` (`src/generative/`): HTTP via `juce::URL`, spawns/detects the service (`juce::ChildProcess`), health handshake, cancel-on-close.
-- [x] RenderLayer flow + full cache fingerprint (MD5 upstream hash · route · variant · seed · params · safetyMappingVersion · service build); commands `create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`bounce_layer_to_clip`. Landing = new-clip-on-"Neural Renders"-lane (the documented guaranteed fallback). UI: generative drawer (grit/nl ASTD sliders, status, render/accept/reject/seed).
+- [x] RenderLayer flow + full cache fingerprint (MD5 upstream hash · route · variant · seed · params · safetyMappingVersion · service build); commands `create_render_layer`/`set_render_param`/`render_layer`/`cancel_render`/`accept_render`/`reject_render`/`bypass_layer`/`freeze_layer`/`unfreeze_layer`/`bounce_layer_to_clip`. Landing = new-clip-on-"Neural Renders"-lane (the documented guaranteed fallback) — still the path for a **section-scoped** render, which cannot apply in place; whole-clip wave and MIDI renders auto-apply (PR #185), which is why `bounce_layer_to_clip` is a pure relabel everywhere except a section. UI: generative drawer (grit/nl ASTD sliders, status, render/accept/reject/seed).
 - [x] **`StableAudio3Adapter`** ✅ — the REAL model, carved into `service/sa3/engine.py` (in-process MLX SA3-medium, ~1.7s load, ~1.5s/render), `service/adapters/stable_audio3_adapter.py`, `service/sa3/init_cache.py` (VAE init-latent cache), `service/sa3/qa.py`+`_pq_worker.py` (Audiobox `pq` via the judges venv). Colours: `service/colors/build_colorrack.py` → `COLORRACK_DATA` (9 validated colours: brightness/epic/distortion/futuristic/tension + grit + air[cap 0.08] + heroes drum_aggression/grid_tightness), `colors/runtime.py` (0–100→α ASTD clamp, Lab unlock, ≤3 compose w/ 0.25/0.20 backoff, no-stack rejection). `server.py` dispatches adapters via a single serialized priority worker (MLX isn't concurrent); `/colors` endpoint; `run.sh` runs under the MLX venv when `MOSH_ENABLE_SA3=1`. Two hardcoded paths → env (`SA3_MLX_DIR`, `COLORRACK_DATA`). Graceful downgrade → FakeAdapter when SA3 absent.
 - [x] **GATE (Fake):** full loop via commands — render → audition (cached artifact) → accept/reject; **cache HIT/MISS vs full fingerprint**; param change → dirty → re-render (MISS); JSONL logs accept/reject as **taste labels**; async/background render (no playback stall). Proven by `Mosh --selftest` (81/81) + `Mosh --demo5` generative-drawer screenshot.
 - [x] **GATE (SA3):** ✅ PASSED (2026-06-08) — real **re-imagine** with a `grit` colour commits as an auditionable render with a quality readout; `/colors` drives the ASTD-clamped rack (air shows "CAPPED"); Lab unlocks; **init-latent cache hits on identical re-render**; full-fingerprint cache HIT/MISS (incl. SA3 service build). Proven by `Mosh --selftest` **98/98** (SA3-gated path) + standalone HTTP smoke (pq 5.10/pq_base 5.66 → `quality_degraded`) + `Mosh --demo5` SA3 colour-rack screenshot. FakeAdapter-only still green (graceful degradation). *(98/98 and 89/89 are the original 2026-06-08 gate counts; the harness has since grown — the default `--selftest` is now **≈1032 checks**, gate-dependent.)*
@@ -115,9 +116,14 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   ([SLF-CONC-001](docs/worklog/2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md))
 - **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`. There is no
   sandbox; isolate via `MOSH_SELFTEST_SESSION` or unit-test the pure helper instead.
-- **Branch protection vs the loops:** `main` requires the `cheap gate` status check and
-  `enforce_admins` is on, so **`gh pr merge --admin` cannot bypass it**. `merge-one.sh` waits for
-  the check and merges without `--admin`. Don't reintroduce `--admin` — it will just fail.
+- **Branch protection vs the loops:** `enforce_admins` is on, so **`gh pr merge --admin` cannot
+  bypass a required check**; `merge-one.sh` waits for the check and merges without `--admin`.
+  Don't reintroduce `--admin` — it will just fail.
+  **Since 2026-07-24 the required `cheap gate` context is REMOVED** (GitHub Actions billing is
+  dead — every check fails in 1–3s, which is the tell), so merges go through on the local gate.
+  Verify with `gh api repos/zeke431/Mosh/branches/main/protection`; restore the context when
+  billing recovers. A 1-second "failure" is an outage, not a red test — but read the durations
+  before believing that.
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.
@@ -126,6 +132,27 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   isn't stubbed. `grep SABOTAGE` before landing anything that involved a RED-proof.
   One worktree = one agent — #424 shipped `return 0; // SABOTAGE` stubs because two agents shared one.
 - **Never verify a native change with a pre-existing binary.** Build from committed source.
+- **`--selftest` cannot see the reactive lane.** `reactiveTouch` returns on `!hasAudio() &&
+  !MOSH_REACTIVE_DEBOUNCE_MS` **before** reading any state it gates on, so a headless run cannot
+  tell a working reactive feature from a dead one. `freeze_layer` shipped as a label-only
+  command from Stage 5, and outright wrong from the moment the reactive loop landed (Phase 3,
+  2026-06-30) — the whole time with a passing selftest check asserting the label was written. Prove reactive behaviour in `verify.py` (live service, files counted on
+  disk) — selftest can pin the flag, only verify.py proves the effect.
+  **Run `verify.py` from the repo ROOT**: `GenerativeJobManager` resolves `service/server.py`
+  CWD-relative, so running it from `scripts/verify-hardware/` fails every service-dependent check
+  with "generative service unavailable" — including pre-existing ones, which reads as if your
+  change broke nine things.
+  ([UI-REACH close-out](docs/worklog/2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md))
+- **A new MoshOps command needs THREE registrations, not one.** Dispatch alone builds and passes
+  `--selftest`; the drift guards live elsewhere. `test_multiplayer_lock_manager.cpp` (AL-011)
+  fails if it has no lock scope — unclassified means **unguarded** in a session — and
+  `commands.contract.test.ts` fails if it is in neither the agent catalog nor
+  `commandClassification.ts`. Both are Catch2/vitest, so a native-only gate run will miss them.
+- **A written reason is a claim about the code, and it ages.** Nine of the sixteen `UI_REACH_GAPS`
+  entries turned out to describe an assumption, not the tree — a "missing drag gesture" whose whole
+  surface was absent, a "kit picker" with one kit and no enumeration, two commands that did nothing
+  at all. Re-read the source before building what a stale reason asks for; the same applies to
+  `UI_ONLY_COMMANDS` reasons and to the comments in this file.
 - **`if (auto* p = someVarReturningFn().getArray())`** — the `juce::var` temporary dies at the end
   of the if-condition. Bind to a named local first. This has caused a real use-after-free.
 - **Plugins created for `pluginList` must come from `edit.getPluginCache().createNewPlugin(...)`**,
