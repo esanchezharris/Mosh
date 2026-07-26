@@ -6,10 +6,6 @@ to load every session. **Nothing was edited** — each note is verbatim, one fil
 CLAUDE.md keeps the standing rules (prime directives, stage gates, and the gotchas that still bite).
 This is the history: *why* a thing is the way it is, and what it cost to learn.
 
-49 notes, 2026-06-18 → 2026-07-26.
-
-| date | note |
-|---|---|
 50 notes, 2026-06-18 → 2026-07-26.
 
 | date | note |
