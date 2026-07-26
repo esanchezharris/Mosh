@@ -2312,6 +2312,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!file) return err(command, "no audio file");
       const bpm = num(args.bpm, 120);
       const bars = num(args.bars, 1) >= 2 ? 2 : 1;
+      // Mirrors native cmdSketchBeatbox exactly: the TRACK stays plain "Sketch", but the
+      // CLIP carries the source filename (sans extension) so a producer with several
+      // sketched takes can tell them apart — `wav.getFileNameWithoutExtension()` there,
+      // this here. (Was drifted to a bare "Sketch" clip name pre-fix — every existing
+      // test happened not to assert the clip name, so the drift was invisible.)
+      const srcName = (file.split("/").pop() ?? file).replace(/\.[^./]+$/, "");
       emit("sketch_status", { file, state: "working", bpm, bars });
       scheduleMock(() => {
         pushUndo();
@@ -2331,7 +2337,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         };
         ensureInstrument(t, true);
         t.clips.push({
-          id: nextClipId(), name: "Sketch", type: "midi",
+          id: nextClipId(), name: "Sketch • " + srcName, type: "midi",
           // Loop length mirrors the native cmdSketchBeatbox exactly: bars*4 beats * 60/bpm, no floor.
           start: 0, length: bars * 4 * 60 / Math.max(20, bpm), offset: 0, hasRenderLayer: false,
           notes: hits.map((h, k) => ({ i: k, pitch: PITCH[h.role], start: h.step / 4, length: 0.25, velocity: h.velocity })),

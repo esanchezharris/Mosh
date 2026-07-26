@@ -251,6 +251,79 @@ test("sample browser keeps import actions keyboard reachable", async ({ page }) 
   await expect.poll(() => importButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 });
 
+// UI-REACH — sketch_beatbox had NO entry point in either shell: cmdSketchBeatbox takes an
+// absolute file path (not a clipId), so the clipId-based clip-menu AI actions
+// (transcribe_clip/build_skeleton_from_clip) are not a fit. The sample browser's directory
+// listing is: a real absolute path already exists there (list_directory), in the native
+// app, the dev mock, AND here under Playwright — unlike pickFiles' native file dialog,
+// which only ever resolves in the packaged app and would hang forever under the mock (no
+// backend answers its promise). This drives the REAL mouse gesture end to end: a genuine
+// pointerdown→mousedown→mouseup→click sequence Playwright issues, which is exactly the
+// class of interaction jsdom's synthetic click() cannot reproduce (see
+// SketchBeatboxDialog.test.ts's unit coverage for what jsdom CAN prove, and why it isn't
+// enough on its own).
+test("beatbox -> beat: the sample browser is the entry point, and it lands a playable drum clip", async ({ page }) => {
+  await bootV2(page);
+  const before = await page.getByTestId("v2-track-header").count();
+
+  await page.getByTestId("v2-browser-pull").click();
+  const row = page.getByTestId("sample-row").first();
+  await expect(row).toBeVisible();
+  const sketchButton = row.getByTestId("sample-sketch-beatbox");
+  await sketchButton.click();
+
+  const dialog = page.getByTestId("sketch-beatbox-dialog");
+  await expect(dialog).toBeVisible();
+  // Defaults to the PROJECT's own tempo (the mock's seed session is 120 BPM) — never a
+  // hardcoded guess, since a wrong default here silently mis-times every hit.
+  await expect(dialog.getByTestId("sketch-bpm-input")).toHaveValue("120");
+
+  await dialog.getByTestId("sketch-bpm-input").fill("140");
+  await dialog.getByTestId("sketch-bars-2").click();
+  await dialog.getByTestId("sketch-beatbox-confirm").click();
+  await expect(dialog).toHaveCount(0); // closes immediately (optimistic — async work continues)
+
+  // The mock resolves the transduction ~400ms later, via the same sketch_status event
+  // path the real backend's async (wait:false) branch uses.
+  await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
+  const last = page.getByTestId("v2-track-header").last();
+  await expect(last).toContainText("Sketch");
+  const trackId = await last.getAttribute("data-track-id");
+  await expect(page.locator(`.v2-lane[data-track-id="${trackId}"]`).getByTestId("v2-clip")).toHaveCount(1);
+});
+
+test("beatbox -> beat: an out-of-range bpm keeps the confirm button disabled — the engine's " +
+     "own 20..300 rejection never has to surface as an error toast", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  await page.getByTestId("sample-row").first().getByTestId("sample-sketch-beatbox").click();
+  const dialog = page.getByTestId("sketch-beatbox-dialog");
+  const bpmInput = dialog.getByTestId("sketch-bpm-input");
+  const confirm = dialog.getByTestId("sketch-beatbox-confirm");
+
+  await bpmInput.fill("400");
+  await expect(confirm).toBeDisabled();
+  await expect(dialog.getByTestId("sketch-bpm-hint")).toBeVisible();
+
+  await bpmInput.fill("140");
+  await expect(confirm).toBeEnabled();
+  await expect(dialog.getByTestId("sketch-bpm-hint")).toHaveCount(0);
+
+  // Escape dismisses without dispatching anything (shared Escape-stack convention).
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("beatbox -> beat: the entry point is keyboard reachable, matching Import's affordance", async ({ page }) => {
+  await bootV2(page);
+  await page.getByTestId("v2-browser-pull").click();
+  const row = page.getByTestId("sample-row").first();
+  const sketchButton = row.getByTestId("sample-sketch-beatbox");
+  await sketchButton.focus();
+  await expect(sketchButton).toBeFocused();
+  await expect.poll(() => sketchButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+});
+
 test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
   await bootV2(page);
   const head = page.getByTestId("v2-track-header").first();

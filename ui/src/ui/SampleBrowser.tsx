@@ -8,7 +8,8 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { DirListing } from "../types";
 import { filterEntries, loadRecents, addRecentSample, SAMPLE_DND_MIME } from "./sampleBrowserUtil";
-import { IconArrowUp, IconFolder, IconWaveform } from "./icons";
+import { IconArrowUp, IconDrum, IconFolder, IconWaveform } from "./icons";
+import { SketchBeatboxDialog } from "./SketchBeatboxDialog";
 
 const baseName = (p: string) => p.split("/").pop() ?? p;
 
@@ -44,10 +45,16 @@ export function SampleBrowser() {
   const exec = useStore((s) => s.exec);
   const refresh = useStore((s) => s.refresh);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const sketching = useStore((s) => s.sketchingBeatbox);
   const [listing, setListing] = useState<DirListing | null>(null);
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(() => loadRecents());
   const [auditioning, setAuditioning] = useState<string | null>(null);
+  // UI-REACH (sketch_beatbox) — cmdSketchBeatbox takes an absolute path, not a clipId, so
+  // this file browser (where a real path already exists, from list_directory) is the entry
+  // point rather than the clipId-based clip menu. Holds the target path while the bpm/bars
+  // dialog is open; null when closed.
+  const [sketchTarget, setSketchTarget] = useState<string | null>(null);
 
   const navigate = async (path?: string) => {
     const r = await exec("list_directory", path ? { path } : {});
@@ -85,6 +92,27 @@ export function SampleBrowser() {
       <span className="sb-audition-label">{auditioning === path ? "Stop" : "Cue"}</span>
     </button>
   );
+  // The sketch_beatbox entry point (UI-REACH): a real absolute path already exists on this
+  // row (list_directory gave it to us), so there is no pickFiles round-trip to make —
+  // opening the dialog is all that is left to do. While a transduction for THIS path is in
+  // flight, swap the button for a status pill so a second click can't double-dispatch.
+  const sketchBtn = (path: string) =>
+    sketching[path] ? (
+      <span className="sb-row-status" role="status" aria-live="polite" data-testid="sample-sketching">
+        sketching…
+      </span>
+    ) : (
+      <button
+        type="button"
+        className="btn cb-sketch"
+        data-testid="sample-sketch-beatbox"
+        title="Turn this beatbox recording into an editable drum clip"
+        aria-label={`Turn ${baseName(path)} into a drum clip`}
+        onClick={() => setSketchTarget(path)}
+      >
+        <IconDrum size={12} />
+      </button>
+    );
 
   const entries = filterEntries(listing?.entries ?? [], query);
   const dirs = entries.filter((e) => e.isDir);
@@ -133,6 +161,7 @@ export function SampleBrowser() {
                 <span className="sb-row-title">{baseName(p)}</span>
                 <span className="sb-row-meta">{p}</span>
               </div>
+              {sketchBtn(p)}
               <button className="btn cb-import" onClick={() => void onImport(p)}>Import</button>
             </div>
           ))}
@@ -178,6 +207,7 @@ export function SampleBrowser() {
                   <span className="sb-row-title">{f.name}</span>
                   <span className="sb-row-meta">{f.path}</span>
                 </div>
+                {sketchBtn(f.path)}
                 <button className="btn cb-import" onClick={() => void onImport(f.path)}>Import</button>
               </div>
             ))}
@@ -187,6 +217,9 @@ export function SampleBrowser() {
           <div className="rack-empty">{query ? "No sounds match this search." : "This folder is empty."}</div>
         )}
       </div>
+      {sketchTarget && (
+        <SketchBeatboxDialog file={sketchTarget} onClose={() => setSketchTarget(null)} />
+      )}
     </div>
   );
 }

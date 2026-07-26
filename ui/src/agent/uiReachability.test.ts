@@ -210,6 +210,9 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // could reach and that this test had been reporting green. Nothing got worse; the number
     // got honest. A probe change is the ONLY reason this line may go up — if it rises for any
     // other reason, a feature shipped that the user cannot get to.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
+    // → 10 (the sample browser's "Beatbox → beat" entry point: sketch_beatbox — the
+    //       clipId-based clip menu was never a fit, since cmdSketchBeatbox takes an
+    //       absolute path; SampleBrowser's directory listing already had one).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(10);
   });
 });

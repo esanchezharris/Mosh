@@ -168,7 +168,18 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // user can lay or edit a whole grid in one undoable step. Ratchet 17 → 16.)
   delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
   load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
-  sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
+
+  // (sketch_beatbox was declared here as "wants an entry point in the record/import flow".
+  // cmdSketchBeatbox takes an ABSOLUTE PATH, not a clipId, so the clipId-based clip menu
+  // (transcribe_clip/build_skeleton_from_clip's home) was never a fit — a real path only
+  // exists at a file-chooser. SampleBrowser's directory listing (list_directory) already
+  // IS that file-chooser and, unlike pickFiles' native dialog, is answered identically by
+  // the real backend, the dev mock, AND Playwright — so a file row's new "Beatbox → beat"
+  // button (SketchBeatboxDialog.tsx) needed no pickFiles round-trip at all: the path was
+  // already sitting right there. The dialog validates bpm (20–300) and bars (1–2)
+  // client-side against the exact bounds cmdSketchBeatbox enforces, and dispatches with
+  // wait:false (wait:true blocks the message thread — execute_command is synchronous).
+  // Ratchet 11 → 10.)
 
   // (list_takes was declared here, on the premise that "take ENUMERATION has no surface".
   // That premise was FALSE by the time anyone checked: the snapshot emits numTakes /
