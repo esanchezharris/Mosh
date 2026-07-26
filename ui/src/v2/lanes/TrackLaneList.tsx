@@ -16,6 +16,7 @@ import { SectionRibbon } from "../timeline/SectionRibbon";
 import { TempoRibbon } from "../timeline/TempoRibbon";
 import { LaneGrid, hasTempoChanges } from "../timeline/LaneGrid";
 import { Playhead } from "../timeline/Playhead";
+import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
@@ -198,6 +199,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
                 a track, or drop an audio file onto the blackspace (the global drop imports). */}
             <AddTrackMenu variant="row" />
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
+            <TimeRangeBand />
             <Playhead />
           </div>
         </div>

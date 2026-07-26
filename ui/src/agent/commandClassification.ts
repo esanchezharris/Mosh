@@ -166,7 +166,17 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // (add_drum_pattern was declared here. DrumSequencer now has a Pattern field — seeded
   // from the live clip, validated by the same parser the backend uses — so a mouse-only
   // user can lay or edit a whole grid in one undoable step. Ratchet 17 → 16.)
-  delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
+  //
+  // (delete_time_range was declared here as "wants a time-range action in the timeline's
+  // range tool" — true of every shell, classic included: Arrange.tsx's own range tool
+  // painted a UI-local band and never wired an actual delete to it (its comment said
+  // "delete_time_range on demand" and then never implemented the demand). v2 had no
+  // time-span selection of any kind before this. Shift-drag on BarRuler now draws a
+  // bar-snapped span (piecewise tempo map, not geom.ts's flat one — see BarRuler.test.ts)
+  // rendered as a cross-lane band (TimeRangeBand) with two SEPARATELY labelled actions —
+  // Delete and Delete-close-gap — rather than one button plus a ripple modifier, because
+  // ripple silently reflows every downstream clip and that should never be one missed
+  // keypress away from a plain delete. Ratchet 11 → 10.)
   load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
   sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
 
