@@ -10,6 +10,13 @@
 // close the gap, and that is not something a producer should be able to trigger by
 // missing a held key. Whichever one runs, the (now-stale) selection clears itself —
 // the clips it described just moved or split.
+//
+// The same span also drives Loop — set_transport {loop:true, loopStart, loopEnd} — which
+// v2 otherwise cannot reach at all: TopBar.tsx has read-only loop-state DISPLAY (the
+// "loop"/bars readout) but no control ever calls set_transport with a loop arg in this
+// shell. Loop does not invalidate the selection (delete does — the clips it described
+// just moved or split), so it stays put after toggling; clicking it again while it is
+// already looping exactly this span turns looping off instead of re-arming it.
 
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
@@ -17,9 +24,12 @@ import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { headW } from "./geom";
 import { IconClose } from "../../ui/icons";
 
+const EPS = 1e-6;
+
 export function TimeRangeBand() {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const exec = useStore((s) => s.exec);
+  const transport = useStore((s) => s.transport);
   const range = useShell((s) => s.timeRange);
   const dragging = useShell((s) => s.timeRangeDragging);
   const setRange = useShell((s) => s.setTimeRange);
@@ -36,6 +46,14 @@ export function TimeRangeBand() {
     await exec("delete_time_range", ripple ? { start, end, ripple: true } : { start, end });
   };
 
+  const loopingThis = transport.looping
+    && Math.abs(transport.loopStart - r.start) < EPS
+    && Math.abs(transport.loopEnd - r.end) < EPS;
+  const toggleLoop = async () => {
+    if (loopingThis) await exec("set_transport", { loop: false });
+    else await exec("set_transport", { loop: true, loopStart: r.start, loopEnd: r.end });
+  };
+
   const left = headW() + r.start * pxPerSec;
   const width = (r.end - r.start) * pxPerSec;
 
@@ -45,6 +63,14 @@ export function TimeRangeBand() {
           the pointer instead of settling once, on release, like TempoRibbon's field. */}
       {!dragging && (
         <div className="v2-timerange-toolbar" data-testid="v2-timerange-toolbar">
+          <button
+            type="button" data-testid="v2-timerange-loop"
+            aria-pressed={loopingThis}
+            title={loopingThis ? "Stop looping this range" : "Loop this range"}
+            onClick={() => void toggleLoop()}
+          >
+            {loopingThis ? "Looping" : "Loop"}
+          </button>
           <button
             type="button" data-testid="v2-timerange-delete"
             title="Remove this range on every track, leaving a hole"

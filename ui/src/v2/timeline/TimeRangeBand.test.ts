@@ -34,7 +34,10 @@ describe("TimeRangeBand", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     exec = vi.fn(async () => ({ ok: true }));
-    useStore.setState({ exec, pxPerSec: 100 } as never);
+    useStore.setState({
+      exec, pxPerSec: 100,
+      transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    } as never);
     useShell.setState({ timeRange: null, timeRangeDragging: false });
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); });
@@ -107,5 +110,71 @@ describe("TimeRangeBand", () => {
     render();
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(useShell.getState().timeRange).toBeNull();
+  });
+});
+
+// UIREACH-TIMERANGE (second commit) — the same span drives Loop, which v2 otherwise
+// cannot reach at all: TopBar.tsx displays loop state but no control in v2 ever calls
+// set_transport with a loop arg.
+describe("TimeRangeBand — Loop", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  let exec: ReturnType<typeof vi.fn>;
+
+  const render = () => act(() => root.render(React.createElement(TimeRangeBand)));
+  const loopBtn = () => host.querySelector('[data-testid="v2-timerange-loop"]') as HTMLButtonElement | null;
+  const del = () => host.querySelector('[data-testid="v2-timerange-delete"]') as HTMLButtonElement | null;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    exec = vi.fn(async () => ({ ok: true }));
+    useStore.setState({
+      exec, pxPerSec: 100,
+      transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    } as never);
+    useShell.setState({ timeRange: { start: 4, end: 6 }, timeRangeDragging: false });
+  });
+  afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+  it("sends the exact span as the loop region", async () => {
+    render();
+    expect(loopBtn(), "Loop must sit alongside Delete, not replace it").toBeTruthy();
+    await act(async () => { loopBtn()!.click(); });
+    expect(exec).toHaveBeenCalledWith("set_transport", { loop: true, loopStart: 4, loopEnd: 6 });
+  });
+
+  it("does NOT clear the selection — unlike delete, looping leaves the span intact", async () => {
+    render();
+    await act(async () => { loopBtn()!.click(); });
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
+    // Contrast with the sibling delete action, which does clear it (paired positive case).
+    await act(async () => { del()!.click(); });
+    expect(useShell.getState().timeRange).toBeNull();
+  });
+
+  it("reads as pressed once the transport is actually looping this exact span, not some other one", () => {
+    render();
+    expect(loopBtn()!.getAttribute("aria-pressed")).toBe("false");
+
+    act(() => {
+      useStore.setState({ transport: { playing: false, recording: false, position: 0, looping: true, loopStart: 0, loopEnd: 2 } } as never);
+    });
+    expect(loopBtn()!.getAttribute("aria-pressed"), "looping a DIFFERENT range must not read as this one active").toBe("false");
+
+    act(() => {
+      useStore.setState({ transport: { playing: false, recording: false, position: 0, looping: true, loopStart: 4, loopEnd: 6 } } as never);
+    });
+    expect(loopBtn()!.getAttribute("aria-pressed"), "looping exactly this span must read as active").toBe("true");
+  });
+
+  it("clicking again while looping exactly this span turns looping off instead of re-arming it", async () => {
+    useStore.setState({ transport: { playing: false, recording: false, position: 0, looping: true, loopStart: 4, loopEnd: 6 } } as never);
+    render();
+    await act(async () => { loopBtn()!.click(); });
+    expect(exec).toHaveBeenCalledWith("set_transport", { loop: false });
+    expect(exec.mock.calls[0][1]).not.toHaveProperty("loopStart");
   });
 });

@@ -879,6 +879,9 @@
   white-space: nowrap;
 }
 .v2-timerange-toolbar button:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-timerange-toolbar button[data-testid="v2-timerange-loop"][aria-pressed="true"] {
+  background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
+}
 /* the ripple action gets a distinct warn tint — it is the one that reflows the whole
    project downstream, and the two buttons must not read as visually interchangeable. */
 .v2-timerange-toolbar button[data-testid="v2-timerange-delete-ripple"] {
