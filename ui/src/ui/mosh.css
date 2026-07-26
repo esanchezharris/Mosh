@@ -806,6 +806,10 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .gen-badge.st-ready { color: var(--on-accent); background: var(--lime); border-color: var(--lime); }
 .gen-badge.st-rendering, .gen-badge.st-queued { color: var(--on-accent); background: var(--warn); border-color: var(--warn); }
 .gen-badge.st-error { color: #fff; background: var(--rec); }
+/* Bypassed is not an error and not a success — the render is parked, on purpose, and the
+   pre-render audio is what you hear. Dashed so it reads as "temporarily out of circuit"
+   rather than borrowing st-ready's lime (which would claim the render is playing). */
+.gen-badge.st-bypassed { color: var(--bone-dim); background: var(--ink); border-style: dashed; }
 .gen-error { font-size: 10px; color: var(--rec); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gen-seed { font-size: 10px; color: var(--bone-dim); }
 .gen-qa { font-size: 11px; color: var(--lime); display: flex; flex-direction: column; gap: 3px; }

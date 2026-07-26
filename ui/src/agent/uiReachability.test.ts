@@ -146,8 +146,13 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
   // feature the user cannot reach — which is the exact failure this test was written for.
   it("the gap list does not grow", () => {
     // 21 → 17 (SectionRibbon mounted: create/rename/move/remove_section) → 16
-    // (DrumSequencer's Pattern field: add_drum_pattern). Tightening on each close is the
-    // point — leaving slack banks gaps and lets the next regression land unnoticed.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(16);
+    // (DrumSequencer's Pattern field: add_drum_pattern) → 15 (list_takes, which was never
+    // a gap: it re-reads take data the snapshot already carries, so it moved to
+    // AGENT_ONLY_COMMANDS instead of being closed by building a duplicate control)
+    // → 14 (GenDrawer's A/B toggle: bypass_layer — its two siblings stay, with reasons
+    // rewritten to say what investigation found rather than what was assumed).
+    // Tightening on each close is the point — leaving slack banks gaps and lets the next
+    // regression land unnoticed.
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(14);
   });
 });

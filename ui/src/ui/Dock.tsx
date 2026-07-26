@@ -282,6 +282,30 @@ function CompileBox({ clipId, trackId }: { clipId: string; trackId: string }) {
   );
 }
 
+/** A/B the render against what it replaced.
+ *
+ *  This is the only one of the three "commit" commands on a render layer that does real
+ *  audio work rather than writing a status label: bypass_layer repoints a wave clip's own
+ *  source back to `originalSourceRef`, and for the MIDI/drum beneath-model it un-mutes the
+ *  source MIDI while muting the hidden render — so exactly one of the two is audible.
+ *
+ *  `bypassed` is server truth (it comes back on rl.status), so the pressed state is read,
+ *  never held locally — same discipline as the Live button next to it. The label says what
+ *  you are HEARING rather than what the button will do, because "is this the render or the
+ *  original?" is the question you actually have while A/Bing, and the status pill alone
+ *  answers it too slowly to be useful mid-listen. */
+function BypassToggle({ clipId, bypassed, originalLabel }: { clipId: string; bypassed: boolean; originalLabel: string }) {
+  const exec = useStore((s) => s.exec);
+  return (
+    <button className={`btn${bypassed ? " on" : ""}`} data-testid="gen-bypass" aria-pressed={bypassed}
+      title={bypassed ? `Bypassed — you're hearing ${originalLabel}. Click to hear the re-imagine again.`
+                      : `A/B — click to hear ${originalLabel} instead of the re-imagine.`}
+      onClick={() => void exec("bypass_layer", { clipId, bypassed: !bypassed })}>
+      {bypassed ? `◉ ${originalLabel}` : "A/B"}
+    </button>
+  );
+}
+
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   // Per-render truth: the drawer header badge says what THIS Mac's service would render
@@ -425,6 +449,8 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
             <button className={`btn${rl.liveArmed ? " on" : ""}`} data-testid="gen-live" aria-pressed={!!rl.liveArmed}
               title="Live — render the re-imagine ahead of the playhead as you play; turn a knob and hear it fill in ahead of you"
               onClick={() => void exec("render_ahead_arm", { clipId: clip.id, armed: !rl.liveArmed })}>{rl.liveArmed ? "◉ Live" : "Live"}</button>
+            {/* Only once the render IS the clip's audio — before that there is nothing to A/B against. */}
+            {rl.appliedInPlace && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="original" />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         ) : (
@@ -433,6 +459,9 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
           // the hidden audio.
           <>
             <button className="btn" data-testid="gen-render" onClick={() => { void exec("render_layer", { clipId: clip.id }); if (!rl.reimagineActive) bumpCelebrate(); }}>Re-imagine</button>
+            {/* Bypass here swaps which of the two SOUNDS: the live instrument, or the hidden
+                render beneath it. Reset next to it is the destructive one — it drops the render. */}
+            {rl.reimagineActive && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="MIDI" />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.reimagineActive} title="Un-mute the MIDI and drop the hidden re-imagined audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         )}

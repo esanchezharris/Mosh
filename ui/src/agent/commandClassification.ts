@@ -152,6 +152,7 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
 /** Deliberately not a UI control — the shape has no sensible direct affordance. */
 export const AGENT_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   write_automation_curve: "writes a whole curve in one call — the UI's story is drawing points on the automation canvas, which is a different (and better) gesture",
+  list_takes: "a read-only re-read of data every wave clip ALREADY carries in the snapshot — cmdListTakes and clipToVar run the identical getTakeDescriptions()/getCurrentTake() pair into the identical shape, so the Inspector's Takes tab enumerates and switches takes with no command call at all",
 };
 
 /**
@@ -169,8 +170,14 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
   sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
 
-  // ── takes / comping (G12) ────────────────────────────────────────────────────
-  list_takes: "comping UI is unbuilt; keep_take/set_current_take are wired but take ENUMERATION has no surface",
+  // (list_takes was declared here, on the premise that "take ENUMERATION has no surface".
+  // That premise was FALSE by the time anyone checked: the snapshot emits numTakes /
+  // currentTakeIndex / takes per wave clip, and the v2 Inspector's Takes tab renders one
+  // button per take off exactly that data. It moved to AGENT_ONLY_COMMANDS rather than
+  // being closed by building something, because there was nothing left to build.
+  // Still genuinely missing, and NOT this command's gap: v2's arrangement draws no inline
+  // take lanes the way classic's Arrange.tsx does, so choosing a take means opening the
+  // Inspector. That is a presentation gap with no unreachable command behind it.)
 
   // ── export (G7) ──────────────────────────────────────────────────────────────
   export_stems: "per-track stem export has a backend + Catch2 coverage but no tab in ExportControls",
@@ -182,9 +189,15 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
 
   // ── generative render layers ─────────────────────────────────────────────────
-  bypass_layer: "render-layer A/B — wants a bypass toggle on the layer in GenDrawer",
-  freeze_layer: "freezing a render to save CPU — wants a control in GenDrawer",
-  bounce_layer_to_clip: "committing a render layer down to a plain clip — wants a control in GenDrawer",
+  // (bypass_layer was declared here. GenDrawer now has an A/B toggle on both the wave
+  // in-place branch and the MIDI/drum beneath branch — it was the only one of this trio
+  // that moves real audio rather than writing a label, so it was the only one worth a
+  // control. Ratchet 15 → 14.)
+  //
+  // The other two are STILL gaps, but for sharper reasons than "wants a control" — both
+  // were investigated and neither should be wired as its entry originally described:
+  freeze_layer: "NOT just a missing control — the command is inert. It writes status='frozen' and nothing anywhere reads that value (the only mention in the tree is SelfTest.cpp's own assertion that the label was written). reactiveTouch (MoshOps.cpp:8800) gates on ids::reactive, which Ids.h:215 declares as the per-layer opt-out but NO command ever writes — so a 'frozen' layer still auto-re-renders on the next param edit, spending exactly the CPU the name promises to save. A button today would be a lie. Needs freeze_layer to set ids::reactive=false plus a way back (there is no unfreeze_layer) before any UI is honest.",
+  bounce_layer_to_clip: "redundant on the path a producer is actually on: for whole-clip wave (appliedInPlace) and MIDI/drum (beneath) renders, cmdAcceptRender takes a no-op branch, so bounce only relabels status='bounced' with zero audio effect — and it does not detach reactivity either, since reactiveTouch ignores status. It does real work ONLY for a section-scoped render, which today no manual control can even create (regionStart/regionEnd are agent-only). Wire it together with a sub-region create control, not before. Also fix MoshOps.cpp:9552 first — it writes the status with nullptr instead of &undoManager(), so 'bounced' survives an undo that deletes the clip it describes.",
 
   // ── tempo map ────────────────────────────────────────────────────────────────
   insert_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
