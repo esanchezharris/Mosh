@@ -2997,6 +2997,97 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (landedAtLive, "moved whole-clip render lands at the clip's LIVE position (3.0 s), not the stale create spot");
     }
 
+    // ─── bounce_layer_to_clip: the "bounced" relabel rides the undo history ───
+    // BUG (found wiring UI reachability): cmdBounceLayerToClip wrote status="bounced" with a
+    // nullptr UndoManager, while the accept_render it wraps — and cmdFreezeLayer four lines
+    // above it — write THROUGH the undo manager. The label therefore desynced from the clip it
+    // describes: on the lane path a redo re-landed the clip but lost the "bounced" mark, and on
+    // the no-op relabel paths (whole-clip wave / MIDI-beneath, where accept returns early and
+    // opens no transaction at all) the mark was untracked entirely and stuck forever. A UI gate
+    // keyed on status != "bounced" would then hide its own button permanently, so this is a
+    // prerequisite for ever wiring that control (UI_REACH_GAPS).
+    section ("bounce_layer_to_clip is undo-tracked");
+    {
+        auto statusOf = [&] (const String& trackId, const String& clipId) -> String {
+            auto trk = trackById (trackId);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == clipId)
+                        return c.getProperty ("renderLayer", var()).getProperty ("status", var()).toString();
+            return {};
+        };
+        auto nameOf = [&] (const String& trackId, const String& clipId) -> String {
+            auto trk = trackById (trackId);
+            if (auto* arr = trk.getProperty ("clips", var()).getArray())
+                for (auto& c : *arr)
+                    if (c.getProperty ("id", var()).toString() == clipId)
+                        return c.getProperty ("name", var()).toString();
+            return {};
+        };
+        auto neuralClipCount = [&] () -> int {
+            int n = 0;
+            auto snap = ops.snapshot();
+            if (auto* arr = snap["tracks"].getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("name", var()).toString() == "Neural Renders")
+                        if (auto* cs = t.getProperty ("clips", var()).getArray())
+                            n += cs->size();
+            return n;
+        };
+
+        // (a) LANE path — a sub-region render is not applied in place, so the accept wrapped by
+        // bounce genuinely lands a clip. One command must be one undo step: undo takes the clip
+        // AND the label, redo brings both back.
+        auto bt = cmd (ops, "create_track", args1 ("name", "Bounce"))["data"].getProperty ("trackId", var()).toString();
+        auto btone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", bt }, { "seconds", 2.0 }, { "freq", 205.0 }}));
+        const auto bcid = btone["data"].getProperty ("clipId", var()).toString();
+        check (ok (cmd (ops, "create_render_layer", objN ({{ "clipId", bcid }, { "adapter", "fake" },
+                                                           { "regionStart", 0.5 }, { "regionEnd", 1.0 }}))),
+               "bounce: create_render_layer (sub-region) ok");
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", bcid }, { "wait", true }}))),
+               "bounce: render_layer ok");
+
+        const int beforeBounce = neuralClipCount();
+        check (ok (cmd (ops, "bounce_layer_to_clip", args1 ("clipId", bcid))), "bounce_layer_to_clip ok");
+        check (statusOf (bt, bcid) == "bounced", "bounce marked the layer status \"bounced\"");
+        check (neuralClipCount() == beforeBounce + 1, "bounce landed the render as a clip on the neural lane");
+
+        check (ok (cmd (ops, "undo")), "bounce: undo ok");
+        check (neuralClipCount() == beforeBounce, "undo removed the landed clip");
+        check (statusOf (bt, bcid) != "bounced",
+               "undo left no \"bounced\" label on a layer whose clip is gone");
+        // RED before the fix: the relabel was never recorded, so replaying the transaction
+        // restored the clip but not the mark — a bounced layer reading back as merely "ready".
+        check (ok (cmd (ops, "redo")), "bounce: redo ok");
+        check (neuralClipCount() == beforeBounce + 1, "redo re-landed the bounced clip");
+        check (statusOf (bt, bcid) == "bounced", "redo restored the \"bounced\" label with its clip");
+
+        // (b) NO-OP relabel path — a whole-clip wave render auto-applies in place, so the
+        // wrapped accept returns early without opening a transaction. The relabel must still be
+        // its own undo step: neither stuck forever (untracked) nor folded into whatever command
+        // happened to run before it (which undo would then destroy along with the label).
+        auto wt = cmd (ops, "create_track", args1 ("name", "BounceWhole"))["data"].getProperty ("trackId", var()).toString();
+        auto wtone = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wt }, { "seconds", 1.0 }, { "freq", 195.0 }}));
+        const auto wcid2 = wtone["data"].getProperty ("clipId", var()).toString();
+        cmd (ops, "create_render_layer", objN ({{ "clipId", wcid2 }, { "adapter", "fake" }}));
+        check (ok (cmd (ops, "render_layer", objN ({{ "clipId", wcid2 }, { "wait", true }}))),
+               "bounce (whole clip): render_layer ok");
+
+        const int beforeNoop = neuralClipCount();
+        check (ok (cmd (ops, "rename_clip", objN ({{ "clipId", wcid2 }, { "name", "sentinel" }}))),
+               "bounce (whole clip): sentinel edit before the bounce ok");
+        check (ok (cmd (ops, "bounce_layer_to_clip", args1 ("clipId", wcid2))),
+               "bounce_layer_to_clip (whole clip, no-op relabel) ok");
+        check (statusOf (wt, wcid2) == "bounced", "whole-clip bounce marked the layer \"bounced\"");
+        check (neuralClipCount() == beforeNoop, "whole-clip bounce landed no lane clip (applied in place)");
+
+        check (ok (cmd (ops, "undo")), "bounce (whole clip): undo ok");
+        check (statusOf (wt, wcid2) != "bounced",
+               "undo cleared the \"bounced\" label (not stuck forever behind a null UndoManager)");
+        check (nameOf (wt, wcid2) == "sentinel",
+               "undoing the relabel did NOT also revert the preceding edit");
+    }
+
     // --- Stage 6: full producer loop -> export, undo/redo correct throughout ---
     section ("Stage 6: full producer loop + export");
     {
