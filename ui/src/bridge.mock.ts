@@ -1767,6 +1767,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (typeof args.type === "string") mockAudioSel.type = args.type;
       return ok(command);
     }
+    case "retry_audio_device": {
+      // AUD-017 — the mock has no HAL, so a retry always "succeeds": clear the error so
+      // the banner's dismissal path is exercisable in the browser fixture and e2e.
+      if (snapshot.session) snapshot.session.audioDeviceError = "";
+      invalidate();
+      return ok(command);
+    }
     case "set_track_input": {
       // RTG-001 — a routing preference (undoable:false). Stamp the track's input
       // field so the picker reflects the choice. Empty deviceID clears the input.

@@ -17,6 +17,7 @@ import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
 import { PianoRoll } from "../ui/PianoRoll";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
+import { AudioDeviceNotice } from "../ui/AudioDeviceNotice";
 import { FeltWrongDialog } from "../ui/FeltWrongDialog";
 import { SessionPicker } from "./SessionPicker";
 import { MissingMediaBanner } from "../ui/MissingMediaBanner";
@@ -56,6 +57,7 @@ export function AppV2() {
       {snapshot && <TopBar snapshot={snapshot} />}
       {displayError && <div className="v2-errbar" role="alert" data-testid="v2-error">⚠ {displayError}</div>}
       <RecoveryNotice />
+      <AudioDeviceNotice />
       <MissingMediaBanner />
       <FeltWrongDialog />
       {/* Renders null unless we're inside the real JUCE WebView (or ?picker=1 in dev), so

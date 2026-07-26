@@ -1250,6 +1250,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_midi_inputs")  return cmdListMidiInputs (args);
     if (name == "get_command_log")   return cmdGetCommandLog (args);
     if (name == "set_audio_device")  return cmdSetAudioDevice (args);
+    if (name == "retry_audio_device")return cmdRetryAudioDevice (args);
     if (name == "set_buffer_size")   return cmdSetBufferSize (args);
     if (name == "set_audio_threads") return cmdSetAudioThreads (args);
     if (name == "list_directory")    return cmdListDirectory (args);
@@ -9546,10 +9547,18 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
     eng.saveIfDirty();   // A2 — pre-risky-op save (bounce commits the render to a clip)
     // Bounce = accept_render then mark the layer bounced (the render becomes a
     // plain clip on the neural lane; lineage stays in the RenderLayer link).
+    // The relabel is undo-tracked, like cmdFreezeLayer's — it must not outlive the accept it
+    // describes. Opening the transaction HERE (not around the setProperty) keeps one command =
+    // one undo step on both shapes: on the landing path cmdAcceptRender immediately re-names
+    // this same still-empty transaction, so the landed clip and the label undo together; on the
+    // no-op relabel paths (whole-clip wave / MIDI-beneath, where accept returns early without
+    // opening one) the label gets its own step instead of being appended to whatever command
+    // ran before it — which undo would then destroy along with the label.
+    beginTxn ("bounce_layer_to_clip");
     auto r = cmdAcceptRender (args);
     if (! (bool) r.getProperty ("ok", false)) return r;
     if (auto node = findRenderLayer (args.getProperty ("clipId", var()).toString()); node.isValid())
-        node.setProperty (ids::status, "bounced", nullptr);
+        node.setProperty (ids::status, "bounced", &undoManager());
     logLine ("bounce_layer_to_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bounce_layer_to_clip");
@@ -10484,6 +10493,35 @@ juce::var MoshOps::cmdSetAudioDevice (const juce::var& args)
     logLine ("set_audio_device", args, true, {}, false);   // machine preference — not undoable
     emitSnapshotInvalidated();
     return okResult ("set_audio_device", currentAudioSelection());
+}
+
+juce::var MoshOps::cmdRetryAudioDevice (const juce::var& args)
+{
+    // AUD-017 — the recovery half of the bounded device open. When startup could not
+    // open the device inside its timeout the app runs WITHOUT audio and says so
+    // (snapshot.session.audioDeviceError); this lets the user fix the hardware and get
+    // audio back without relaunching. NOT undoable (a machine/device action, like
+    // set_audio_device) and NOT agent-callable — it is a response to an error banner.
+    //
+    // Hermetic by construction: audioRequested() is false in every headless run, so
+    // this returns an error WITHOUT touching the HAL. The one hardware-touching branch
+    // is unreachable from --selftest.
+    if (! eng.audioRequested())
+    {
+        logLine ("retry_audio_device", args, false, "no audio device in this session", false);
+        return errResult ("retry_audio_device", "no audio device in this session");
+    }
+
+    if (auto err = eng.retryAudioDevice(); err.isNotEmpty())
+    {
+        logLine ("retry_audio_device", args, false, err, false);
+        emitSnapshotInvalidated();   // the error text itself changed — let the UI re-read
+        return errResult ("retry_audio_device", err);
+    }
+
+    logLine ("retry_audio_device", args, true, {}, false);
+    emitSnapshotInvalidated();
+    return okResult ("retry_audio_device", currentAudioSelection());
 }
 
 juce::var MoshOps::cmdSetBufferSize (const juce::var& args)

@@ -17,6 +17,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { Topbar, Toolbar } from "./ui/Topbar";
 import { RecoveryNotice } from "./ui/RecoveryNotice";
+import { AudioDeviceNotice } from "./ui/AudioDeviceNotice";
 import { FeltWrongDialog } from "./ui/FeltWrongDialog";
 import { MissingMediaBanner } from "./ui/MissingMediaBanner";
 import { Arrange } from "./ui/Arrange";
@@ -102,6 +103,7 @@ export function AppLegacy() {
       )}
       {displayError && <div className="error-bar" data-testid="error" role="alert">⚠ {displayError}</div>}
       <RecoveryNotice />
+      <AudioDeviceNotice />
       <MissingMediaBanner />
       <FeltWrongDialog />
 
