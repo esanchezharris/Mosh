@@ -1,10 +1,11 @@
 // The A/B toggle on a render layer (bypass_layer).
 //
-// Of the three "commit" commands on a render layer, this is the only one that moves real
-// audio: bypass_layer repoints a wave clip's own source back to originalSourceRef, and for
-// the MIDI/drum beneath-model it un-mutes the source MIDI while muting the hidden render, so
-// exactly one of the two is audible. Its siblings (freeze_layer, bounce_layer_to_clip) write
-// status labels that nothing downstream reads — see their reasons in commandClassification.
+// bypass_layer moves real audio: it repoints a wave clip's own source back to
+// originalSourceRef, and for the MIDI/drum beneath-model it un-mutes the source MIDI while
+// muting the hidden render, so exactly one of the two is audible. (freeze_layer used to be
+// listed here as a sibling that "writes a status label nothing reads" — true when this was
+// written, no longer: it now disarms the reactive loop. See GenDrawer.freeze.test.ts.
+// bounce_layer_to_clip is still a relabel on the whole-clip paths.)
 //
 // What matters here is that the button is a VIEW of server state, not a local boolean. The
 // engine decides what is audible; if this widget held its own `bypassed` flag it would drift

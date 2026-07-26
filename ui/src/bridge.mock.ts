@@ -2116,6 +2116,18 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.renderLayer.userKept = true;
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
+      // Freeze is the reactive opt-out, not just the label — mirrors cmdFreezeLayer.
+      if (command === "freeze_layer") f.clip.renderLayer.reactive = false;
+      invalidate(); return ok(command);
+    }
+    case "unfreeze_layer": {
+      const f = findClip(str(args.clipId)); if (!f?.clip.renderLayer) return err(command, "no render layer");
+      if (f.clip.renderLayer.reactive !== false) return err(command, "layer is not frozen");
+      pushUndo();
+      f.clip.renderLayer.reactive = true;
+      // "dirty", not "ready" — edits made while frozen skipped their re-render, so the artifact
+      // may not match its source and nothing here can tell (mirrors cmdUnfreezeLayer).
+      f.clip.renderLayer.status = "dirty";
       invalidate(); return ok(command);
     }
     case "render_ahead_arm": {

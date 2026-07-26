@@ -232,9 +232,18 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //      clipId-based clip menu was never a fit, since cmdSketchBeatbox takes an
     //      absolute path; SampleBrowser's directory listing already had one).
     //
-    // What is left is exactly the two that are NOT UI work: freeze_layer is inert until
-    // ids::reactive is actually written, and bounce_layer_to_clip needs a sub-region
-    // create control plus the MoshOps.cpp:9552 undo fix. Both are backend, both say so.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(2);
+    // → 1 (freeze_layer — the one entry that was closed by fixing the ENGINE rather than by
+    //      adding a control. It wrote status="frozen" and nothing read it, so the reactive
+    //      loop kept re-rendering a "frozen" layer; cmdFreezeLayer now writes ids::reactive
+    //      =false, cmdUnfreezeLayer is the thaw that never existed, and the drawer's
+    //      Freeze/Frozen toggle reads the flag. Proven where it can be: verify.py's
+    //      check_freeze_stops_rerender counts rendered files with a live service —
+    //      --selftest cannot, because reactiveTouch bails on !hasAudio() first.)
+    //
+    // What is left is bounce_layer_to_clip. Its undo bug is fixed (#454, on main), but it is
+    // still a no-op relabel on every path a manual control can reach: it does real work only
+    // for a section-scoped render, and no UI can create one — regionStart/regionEnd remain
+    // agent-only. Wiring a button before that surface exists would just re-label a no-op.
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(1);
   });
 });

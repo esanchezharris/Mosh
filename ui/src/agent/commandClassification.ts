@@ -240,8 +240,17 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   //
   // The other two are STILL gaps, but for sharper reasons than "wants a control" — both
   // were investigated and neither should be wired as its entry originally described:
-  freeze_layer: "NOT just a missing control — the command is inert. It writes status='frozen' and nothing anywhere reads that value (the only mention in the tree is SelfTest.cpp's own assertion that the label was written). reactiveTouch (MoshOps.cpp:8800) gates on ids::reactive, which Ids.h:215 declares as the per-layer opt-out but NO command ever writes — so a 'frozen' layer still auto-re-renders on the next param edit, spending exactly the CPU the name promises to save. A button today would be a lie. Needs freeze_layer to set ids::reactive=false plus a way back (there is no unfreeze_layer) before any UI is honest.",
-  bounce_layer_to_clip: "redundant on the path a producer is actually on: for whole-clip wave (appliedInPlace) and MIDI/drum (beneath) renders, cmdAcceptRender takes a no-op branch, so bounce only relabels status='bounced' with zero audio effect — and it does not detach reactivity either, since reactiveTouch ignores status. It does real work ONLY for a section-scoped render, which today no manual control can even create (regionStart/regionEnd are agent-only). Wire it together with a sub-region create control, not before. Also fix MoshOps.cpp:9552 first — it writes the status with nullptr instead of &undoManager(), so 'bounced' survives an undo that deletes the clip it describes.",
+  // (freeze_layer was declared here as inert — it wrote status='frozen' and nothing read it,
+  // so a "frozen" layer kept auto-re-rendering on the next edit. Closed by fixing the ENGINE,
+  // not by adding a control: cmdFreezeLayer now also writes ids::reactive=false, the flag
+  // reactiveTouch actually gates on; cmdUnfreezeLayer is the thaw that did not exist, so a
+  // freeze is no longer permanent; and snapshot carries `reactive` so the drawer's
+  // Freeze/Frozen toggle reads server truth. It must read `reactive`, NOT `status`: a later
+  // param edit overwrites status with "dirty" while the layer stays frozen. The saving is
+  // proven in verify.py's check_freeze_stops_rerender — --selftest cannot see it, because
+  // reactiveTouch returns on !hasAudio() long before it reads the flag.)
+
+  bounce_layer_to_clip: "still a no-op relabel on every path a manual control can reach. For whole-clip wave (appliedInPlace) and MIDI/drum (beneath) renders, cmdAcceptRender takes a no-op branch, so bounce only writes status='bounced' with zero audio effect. It does real work ONLY for a section-scoped render, and no UI can create one — regionStart/regionEnd on create_render_layer are agent-only, so the sub-region surface has to come first; a button before that would relabel a no-op. (The undo bug this entry used to name is FIXED: MoshOps.cpp wrote the status with nullptr instead of &undoManager(), so 'bounced' outlived an undo that deleted the clip it described — repaired in #454, with selftest coverage for both shapes.)",
 
   // (insert_tempo_change / remove_tempo_change were declared here. The timeline now has a
   // tempo lane — its own row between the section ribbon and the bar ruler, built on time.ts's

@@ -41,6 +41,8 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `undo` / `redo` | `{}` | ✗ (drives the manager) | `bool` | `snapshot_invalidated` |
 | `save` / `reload` | `{}` | ✗ | — | `reload`→`snapshot_invalidated` |
 | `add_render_layer` | `{clipId, adapter?}` | ✓ | `{layerId}` | `snapshot_invalidated` |
+| `freeze_layer` | `{clipId}` | ✓ | — | `snapshot_invalidated` |
+| `unfreeze_layer` | `{clipId}` | ✓ | — | `snapshot_invalidated` |
 | `add_drum_pattern` | `{pattern, trackId?, clipId?, stepsPerBar?, bars?, velocity?, start?, name?}` | ✓ | `{clipId, trackId, noteCount, steps, bars}` | `snapshot_invalidated` |
 | `set_clip_warp` | `{clipId, autoTempo, mode?, sourceBpm?, detect?}` | ✓ | `{clipId, autoTempo, stretchMode}` | `snapshot_invalidated` |
 | `stretch_clip` | `{clipId, length? \| bars?}` | ✓ | `{clipId, sourceBpm, length}` | `snapshot_invalidated` |
@@ -115,5 +117,7 @@ One line per executed command — the semantic audit trail / taste-signal flywhe
 { "ts": 1719…, "seq": 7, "command": "import_clip", "args": {…}, "ok": true, "undoable": true }
 ```
 Stage 5 adds `accept_render` / `reject_render` lines as explicit **taste labels**.
+
+*`freeze_layer` / `unfreeze_layer` (2026-07-26): freeze keeps the rendered audio and DISARMS the Phase-3 reactive loop — it sets `ids::reactive=false`, the flag `reactiveTouch` gates on, so edits stop re-rendering the layer. It also writes `status="frozen"`, but that is only a label: a later `set_render_param` overwrites it with `"dirty"` while the layer stays frozen, so the snapshot's `renderLayer.reactive` is the ONLY reliable read of the freeze (a UI keying on `status` loses the badge at the first knob turn). `unfreeze_layer` re-arms the loop and reports `"dirty"` rather than `"ready"` — edits made while frozen deliberately skipped their re-render, so freshness cannot be claimed. Both are undoable, one transaction each. Until this landed, freeze wrote the label and nothing else: nothing read it, no thaw existed, and a "frozen" layer re-rendered on the very next edit.*
 
 *TASTE-002 (2026-07-19): the in-place overhaul (PR #185) removed accept/reject from the wave loop, so the flywheel stalled. The restored spigot: `reset_render_layer` logs as the workflow's explicit **negative** label, and a successful `save` / `export_audio` sweeps every still-applied (`appliedInPlace`, not bypassed) layer and logs one `render_kept` line — a **soft positive**, deduped on layerId per process. `render_kept` is a log-line type, NOT an executable command. All three carry `{clipId, layerId, cacheKey, adapter}` so each label joins to its render artifact. Consumer: `service/taste/census.py` (branch `claude/taste-loop-week1`) — explicit labels supersede a same-segment `render_kept`.*

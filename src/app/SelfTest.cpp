@@ -2568,6 +2568,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "freeze_layer ok (artifact present)");
         check (layerStatus (gcid) == "frozen", "freeze_layer -> status frozen");
 
+        section ("freeze_layer actually freezes (+ unfreeze_layer, the way back)");
+        // ── Freeze actually freezes (it used to be a label and nothing else) ──
+        // The reactive auto-re-render loop gates on ids::reactive; Ids.h declared it as the
+        // per-layer opt-out from the start but NO command wrote it, so a "frozen" layer went
+        // right on re-rendering. These pin the flag itself, not the word.
+        auto layerReactive = [&] (const String& cid) { return (bool) layerOf (cid).getProperty ("reactive", true); };
+        check (! layerReactive (gcid), "freeze_layer disarms the reactive loop (ids::reactive=false)");
+
+        // Why the snapshot must carry `reactive` and the UI must not read `status` for this:
+        // a param edit overwrites the "frozen" LABEL with "dirty" while the layer is still
+        // frozen. Both facts are true at once, and only `reactive` still tells the truth.
+        check (ok (cmd (ops, "set_render_param", objN ({{ "clipId", gcid }, { "seed", 4242 }}))),
+               "set_render_param on a frozen layer ok");
+        check (layerStatus (gcid) == "dirty", "a param edit moves the frozen layer's status to dirty");
+        check (! layerReactive (gcid), "...and the layer is STILL frozen (status alone would have lost it)");
+
+        // The way back. There was none: no command moved status off "frozen", and nothing
+        // could re-arm ids::reactive, so a freeze was permanent for the life of the project.
+        check (ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))), "unfreeze_layer ok");
+        check (layerReactive (gcid), "unfreeze_layer re-arms the reactive loop");
+        check (layerStatus (gcid) == "dirty",
+               "unfreeze reports dirty, not ready (edits made while frozen skipped their re-render)");
+        check (! ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))),
+               "unfreeze_layer on a layer that is not frozen errors");
+
+        // One command = one undo step, for both directions.
+        check (ok (cmd (ops, "freeze_layer", args1 ("clipId", gcid))), "re-freeze ok");
+        check (! layerReactive (gcid), "re-freeze disarmed it again");
+        check (ok (cmd (ops, "undo")), "freeze: undo ok");
+        check (layerReactive (gcid), "undoing a freeze re-arms the reactive loop (not just the label)");
+        check (ok (cmd (ops, "redo")), "freeze: redo ok");
+        check (! layerReactive (gcid), "redoing a freeze disarms it again");
+        check (layerStatus (gcid) == "frozen", "redo restored the frozen label with the flag");
+
+        // Persistence: a freeze that evaporates on reload is the same lie in slower motion.
+        check (ok (cmd (ops, "save")), "freeze: save ok");
+        check (ok (cmd (ops, "reload")), "freeze: reload ok");
+        check (! layerReactive (gcid), "the freeze survives save/reload");
+        check (ok (cmd (ops, "unfreeze_layer", args1 ("clipId", gcid))), "unfreeze after reload ok");
+
         // freeze on a layer with NO artifact errors (gate the button on hasArtifact).
         auto gt2 = cmd (ops, "create_track", args1 ("name", "Gen2"))["data"].getProperty ("trackId", var()).toString();
         auto tone2 = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", gt2 }, { "seconds", 1.0 }, { "freq", 210.0 }}));

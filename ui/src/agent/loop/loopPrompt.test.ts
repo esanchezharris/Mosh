@@ -137,7 +137,13 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    expect(hash).toBe("a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c");
+    // Moved 2026-07-26, consciously: `unfreeze_layer` was added to the agent catalog (the
+    // thaw for freeze_layer, which had none), and freeze_layer's own description was
+    // corrected — it used to say "commit the rendered audio", which described a label it
+    // wrote rather than what it does. The catalog is rendered into this prompt, so both
+    // edits move the hash. Nothing about the prompt's SHAPE changed.
+    // Previous pin: a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c
+    expect(hash).toBe("70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

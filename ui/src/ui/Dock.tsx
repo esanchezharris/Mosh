@@ -306,6 +306,28 @@ function BypassToggle({ clipId, bypassed, originalLabel }: { clipId: string; byp
   );
 }
 
+/** Freeze / thaw the reactive loop.
+ *
+ *  With a render live, every edit to the source (a note, a trim, a plugin knob) silently
+ *  re-runs the model. That is the feature — until you are past re-imagining and just want to
+ *  arrange, at which point it is a queue of renders you will never listen to. Freeze keeps the
+ *  audio you have and stops re-rendering; thawing re-arms it.
+ *
+ *  The pressed state reads `rl.reactive`, NOT `rl.status`. Both carry the freeze, but a param
+ *  edit overwrites status with "dirty" while the layer stays frozen — a status-driven badge
+ *  would blink off at the first knob turn and claim the layer had thawed itself. */
+function FreezeToggle({ clipId, frozen }: { clipId: string; frozen: boolean }) {
+  const exec = useStore((s) => s.exec);
+  return (
+    <button className={`btn${frozen ? " on" : ""}`} data-testid="gen-freeze" aria-pressed={frozen}
+      title={frozen ? "Frozen — edits no longer re-render this clip. Click to thaw and re-imagine on every edit again."
+                    : "Freeze — keep this render and stop re-rendering it every time you edit the clip."}
+      onClick={() => void exec(frozen ? "unfreeze_layer" : "freeze_layer", { clipId })}>
+      {frozen ? "◉ Frozen" : "Freeze"}
+    </button>
+  );
+}
+
 function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA }) {
   const qaView = qaReadoutView(qa);
   // Per-render truth: the drawer header badge says what THIS Mac's service would render
@@ -451,6 +473,9 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
               onClick={() => void exec("render_ahead_arm", { clipId: clip.id, armed: !rl.liveArmed })}>{rl.liveArmed ? "◉ Live" : "Live"}</button>
             {/* Only once the render IS the clip's audio — before that there is nothing to A/B against. */}
             {rl.appliedInPlace && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="original" />}
+            {/* Same gate reactiveTouch itself uses (a render is LIVE) — a dormant layer has no
+                loop to freeze, so offering the button would be theatre. */}
+            {rl.appliedInPlace && <FreezeToggle clipId={clip.id} frozen={rl.reactive === false} />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.hasOriginal} title="Restore the original audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         ) : (
@@ -462,6 +487,7 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
             {/* Bypass here swaps which of the two SOUNDS: the live instrument, or the hidden
                 render beneath it. Reset next to it is the destructive one — it drops the render. */}
             {rl.reimagineActive && <BypassToggle clipId={clip.id} bypassed={rl.status === "bypassed"} originalLabel="MIDI" />}
+            {rl.reimagineActive && <FreezeToggle clipId={clip.id} frozen={rl.reactive === false} />}
             <button className="btn" data-testid="gen-reset" disabled={!rl.reimagineActive} title="Un-mute the MIDI and drop the hidden re-imagined audio" onClick={() => void exec("reset_render_layer", { clipId: clip.id })}>Reset</button>
           </>
         )}
