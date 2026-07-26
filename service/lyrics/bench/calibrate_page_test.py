@@ -56,13 +56,80 @@ check("page shows both sides for each pair",
       all(p["left"] in html and p["right"] in html for p in pairs))
 check("page exposes no arm attribution to the rater",
       "llm-constrained" not in html and "product-llm" not in html)
-check("page offers left / right / tie",
-      all(x in html.lower() for x in ("left", "right", "tie")))
+check("page offers the three-point acceptability scale",
+      all(x in html.lower() for x in ("keep", "passable")))
 check("page posts to the persistence endpoint", "/rate" in html)
 check("render is deterministic",
       calibrate_page.render(pairs, title="calibration sitting 1") == html)
 
+# ---- I2c: song identity is shown, provenance still is not --------------------
+# The owner has to hear the track to judge flow. Showing WHICH song is what makes
+# that possible; showing which fill is the human's would contaminate every pair
+# he did not actually play.
+IDENT = [{"pairId": "p-shown", "left": "machine bar one", "right": "human bar one",
+          "before": ["prior"], "after": ["next"], "granularity": "line",
+          "arm": "arm-a", "artist": "Ken Carson", "title": "Jennifer's Body",
+          "year": 2023, "section": "Verse 1",
+          "listenUrl": "https://www.youtube.com/results?search_query=Ken+Carson"},
+         # A control pair that DOES carry identity — the flag is what must
+         # suppress it. A fixture with the fields simply absent would pass even
+         # if render ignored the flag entirely.
+         {"pairId": "p-hidden", "left": "machine bar two", "right": "human bar two",
+          "before": ["prior"], "after": ["next"], "granularity": "line",
+          "arm": "arm-a", "identityHidden": True, "artist": "Playboi Carti",
+          "title": "Rockstar Made", "year": 2020, "section": "Verse 1",
+          "listenUrl": "https://www.youtube.com/results?search_query=Carti"}]
+ihtml = calibrate_page.render(IDENT, title="sitting")
+check("a shown pair names the artist, the title and the section",
+      all(s in ihtml for s in ("Ken Carson", "Jennifer's Body", "Verse 1")))
+check("a shown pair carries its listen link",
+      "youtube.com/results?search_query=Ken+Carson" in ihtml)
+_payload = json.loads(re.search(r"const PAIRS = (\[.*?\]);\n", ihtml, re.S).group(1))
+_hidden_row = next(r for r in _payload if r["pairId"] == "p-hidden")
+check("a hidden CONTROL pair still shows its bars",
+      "machine bar two" in ihtml and _hidden_row["left"] == "machine bar two")
+check("a hidden CONTROL pair carries no identity key in the payload",
+      not any(k in _hidden_row for k in ("artist", "title", "year", "section",
+                                         "listenUrl"))
+      and _hidden_row["identityHidden"] is True, str(sorted(_hidden_row)))
+check("the control pair's artist appears NOWHERE in the rendered page",
+      "Playboi Carti" not in ihtml and "Rockstar Made" not in ihtml)
+check("the payload is a whitelist — an unexpected pair field cannot leak",
+      not any(k in r for r in _payload for k in ("arm", "granularity", "metrics")),
+      str(sorted(_payload[0])))
+check("the page still never says which fill is the human's",
+      not any(k in ihtml for k in ("truthSide", "truthText", "identityHidden\":true"
+                                   .replace('"', ''))) and "isTruth" not in ihtml)
+check("the page asks whether the track was actually played",
+      "heard" in ihtml.lower())
+
 # ---- persistence ----
+with tempfile.TemporaryDirectory() as td:
+    path = os.path.join(td, "v2.jsonl")
+    ok = calibrate_page.append_rating(path, {"pairId": "p-shown", "side": "left",
+                                             "rating": "keep", "heard": True})
+    calibrate_page.append_rating(path, {"pairId": "p-shown", "side": "right",
+                                        "rating": "passable", "heard": True})
+    rows = calibrate_page.load_ratings(path)
+    check("per-fill ratings persist with side, rating and heard", ok
+          and [r["side"] for r in rows] == ["left", "right"]
+          and [r["rating"] for r in rows] == ["keep", "passable"]
+          and rows[0]["heard"] is True,
+          str([{k: v for k, v in r.items() if k != "ts"} for r in rows]))
+    check("rating rows are stamped with the instrument version",
+          all(r.get("ratingsVersion") == 2 for r in rows))
+    check("an out-of-scale rating is refused rather than written",
+          calibrate_page.append_rating(path, {"pairId": "p-shown", "side": "left",
+                                              "rating": "amazing"}) is False
+          and len(calibrate_page.load_ratings(path)) == 2)
+    check("a rating with no side is refused",
+          calibrate_page.append_rating(path, {"pairId": "p-shown",
+                                              "rating": "keep"}) is False)
+    check("a deliberate correction is written as a flagged revision",
+          calibrate_page.append_rating(path, {"pairId": "p-shown", "side": "left",
+                                              "rating": "no", "revision": True})
+          and calibrate_page.load_ratings(path)[-1]["revision"] is True)
+
 with tempfile.TemporaryDirectory() as td:
     path = os.path.join(td, "ratings.jsonl")
     calibrate_page.append_rating(path, {"pairId": pairs[0]["pairId"],

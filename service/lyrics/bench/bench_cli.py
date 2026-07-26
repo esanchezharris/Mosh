@@ -27,6 +27,7 @@ SERVICE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
+                          preflight,
                           ingest, judge, llm_cache, mask, metrics, paths,
                           mixpairs, panel, runner, sampling, scoreboard,
                           scrape, torchjudge)
@@ -154,9 +155,31 @@ def cmd_run(args) -> int:
     if args.granularity != "all":
         keep = set(args.granularity.split(","))
         items = [i for i in items if i["granularity"] in keep]
+    if args.min_views:
+        # For a CALIBRATION sitting the owner has to be able to play the track —
+        # a bar's rhythm only exists against the beat. The corpus is ~88%
+        # long-tail, so an unfiltered draw is 22 songs nobody can find, which is
+        # what the first un-blinded mint produced. Genius views are the fame
+        # proxy already in the record.
+        #
+        # This is deliberately NOT the default: fame is the memorization
+        # confound, so ARM evaluation keeps the low-fame bucket as its headline
+        # (PROGRAM.md I3). Findable-first applies to calibration only.
+        views = {s["songId"]: (s.get("views") or 0) for s in _load_corpus()}
+        before = len(items)
+        items = [i for i in items if views.get(i["songId"], 0) >= args.min_views]
+        print(f"min-views {args.min_views:,}: {before:,} → {len(items):,} items "
+              f"across {len({i['songId'] for i in items})} songs")
+        if not items:
+            print("no items clear that views floor", file=sys.stderr)
+            return 2
     items = sampling.balanced(items, limit=args.limit,
                               key=lambda i: i["granularity"],
-                              spread=lambda i: i["songId"])
+                              spread=lambda i: i["songId"],
+                              max_per_spread=args.max_per_song)
+    if args.limit:
+        print(f"drew {len(items)} items across "
+              f"{len({i['songId'] for i in items})} songs")
 
     needs_api = args.arm in API_ARMS or (args.arm == "product-llm"
                                          and args.product_backend == "llm")
@@ -312,7 +335,11 @@ def cmd_calibrate(args) -> int:
     cal_dir = paths.subdir("calibration")
     pairs_path = os.path.join(cal_dir, "pairs.json")
     key_path = os.path.join(cal_dir, "blind-key.json")
-    ratings_path = os.path.join(cal_dir, "ratings.jsonl")
+    # I2c changed the instrument from forced choice to per-fill acceptability.
+    # The two live in SEPARATE files: reconciling them would silently average two
+    # different questions, and the archived forced-choice sittings are voided
+    # anyway (sitting 1 for song collapse, sitting 3 abandoned mid-way).
+    ratings_path = os.path.join(cal_dir, "ratings-v2.jsonl")
 
     if args.action == "make":
         rows = []
@@ -362,7 +389,8 @@ def cmd_calibrate(args) -> int:
         pairs, key = mixpairs.mint_mixed(pool, n=args.n, dupes=args.dupes,
                                          seed=args.seed, arm_frac=args.arm_frac,
                                          songs=songs, columns=item_cols or None,
-                                         anchor_frac=args.anchor_frac)
+                                         anchor_frac=args.anchor_frac,
+                                         blind_frac=args.blind_frac)
         with open(pairs_path, "w", encoding="utf-8") as f:
             json.dump(pairs, f, ensure_ascii=False, indent=1)
         with open(key_path, "w", encoding="utf-8") as f:
@@ -377,9 +405,22 @@ def cmd_calibrate(args) -> int:
         for p in pairs:
             cells[f"{p['arm']}/{p['granularity']}"] = \
                 cells.get(f"{p['arm']}/{p['granularity']}", 0) + 1
+        # Preflight reads PAIR-level predictions. `item_cols` is keyed by itemId
+        # and would silently score every pair as None — a false "nothing
+        # discriminates" blocker — so re-derive the columns the way the report
+        # will.
+        pair_cols = {}
+        for col in ("judge_win", "emb", "ppl"):
+            vals = {p: v for p, v in
+                    mixpairs.column_predictions(key, stamp, col).items()
+                    if v is not None}
+            if vals:
+                pair_cols[col] = vals
+        report = preflight.check_sitting(pairs, key, pair_cols or None)
+        print(preflight.render(report))
         print(json.dumps({"pairs": len(pairs), "distinct": len(key),
                           "cells": cells, "pairsPath": pairs_path}, indent=1))
-        return 0
+        return 1 if report["blockers"] else 0
 
     if args.action == "serve":
         if not os.path.exists(pairs_path):
@@ -387,7 +428,15 @@ def cmd_calibrate(args) -> int:
             return 2
         with open(pairs_path, encoding="utf-8") as f:
             pairs = json.load(f)
-        done = {r["pairId"] for r in calibrate_page.load_ratings(ratings_path)}
+        # A pair is finished only when BOTH bars are rated — resuming on "the
+        # pairId appears" would drop every pair abandoned mid-way, losing the
+        # second rating silently.
+        with open(key_path, encoding="utf-8") as f:
+            resume_key = json.load(f)
+        rated = mixpairs.owner_ratings(
+            calibrate_page.load_ratings(ratings_path), resume_key)
+        done = {pid for pid, row in rated.items()
+                if row.get("left") is not None and row.get("right") is not None}
         todo = [p for p in pairs if p["pairId"] not in done] if args.resume else pairs
         if not todo:
             print("every pair already rated — nothing to serve")
@@ -409,7 +458,17 @@ def cmd_calibrate(args) -> int:
         print("no ratings yet — run `calibrate serve` and do the sitting",
               file=sys.stderr)
         return 2
+    # Two instruments answer two different questions; averaging them would be a
+    # silent category error, so a mixed file is refused rather than reconciled.
+    versions = {r.get("ratingsVersion", 1) for r in ratings}
+    if len(versions) > 1:
+        print(f"refusing: {ratings_path} mixes rating instruments {sorted(versions)} "
+              f"— forced choice and per-fill acceptability are not the same "
+              f"label. Split the file by version and report each separately.",
+              file=sys.stderr)
+        return 2
     owner = mixpairs.owner_labels(ratings, key)
+    rated = mixpairs.owner_ratings(ratings, key)
 
     by_gran = {}
     for gran in sorted({v["granularity"] for v in key.values()}):
@@ -434,7 +493,10 @@ def cmd_calibrate(args) -> int:
                    "bar": args.bar, **trusted}, f, indent=1, sort_keys=True)
     md = calibrate.render_report(by_gran, {
         "labels": len([v for v in owner.values() if v is not None]),
-        "selfConsistency": calibrate.self_consistency(ratings), "bar": args.bar})
+        "selfConsistency": calibrate.self_consistency(ratings), "bar": args.bar,
+        "acceptability": calibrate.acceptability(rated, key),
+        "ceiling": calibrate.ceiling(rated, key),
+        "conditions": calibrate.by_condition(rated, key)})
     with open(os.path.join(cal_dir, "agreement.md"), "w", encoding="utf-8") as f:
         f.write(md)
     print(md)
@@ -510,6 +572,13 @@ def main(argv=None) -> int:
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--product-backend", default="llm", choices=["llm", "fake"])
+    p.add_argument("--max-per-song", type=int, default=0,
+                   help="cap items drawn from any one song (0 = uncapped) — the "
+                        "spread lever for calibration draws")
+    p.add_argument("--min-views", type=int, default=0,
+                   help="only items from songs at/above this Genius view count "
+                        "— for calibration sittings, where the rater must be "
+                        "able to play the track (never for arm evaluation)")
     p.add_argument("--yes", action="store_true")
     p.set_defaults(fn=cmd_run)
 
@@ -534,6 +603,8 @@ def main(argv=None) -> int:
                    help="share kept as a RANDOM anchor stratum (unbiased accuracy)")
     p.add_argument("--arm-frac", type=float, default=0.5,
                    help="share of pairs that are arm-vs-arm (balanced labels)")
+    p.add_argument("--blind-frac", type=float, default=0.25,
+                   help="share whose SONG stays hidden — the un-blinding control")
     p.add_argument("--stanza", action="store_true", default=True,
                    help="show the whole stanza around the gap (flow context)")
     p.set_defaults(fn=cmd_calibrate)

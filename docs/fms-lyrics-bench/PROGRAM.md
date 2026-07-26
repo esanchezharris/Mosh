@@ -123,3 +123,51 @@ numbers and hashes only.
   Note for I3 (style-RAG): taste-artist songs are ALL golden, so "voice"
   exemplars must come from golden songs excluded from the current item's song —
   or the inbox catalog — never via retrieval over train (they aren't there).
+- **2026-07-26** — **INSTRUMENT AMENDMENT (I2c): forced choice → per-fill
+  acceptability, and the sitting is un-blinded.** Owner's call, on two grounds
+  he raised mid-sitting: (1) flow cannot be judged on a page — syllable counts
+  are not cadence — so he has to be able to play the track; (2) real-vs-generated
+  is not a head-to-head, the product question is whether the generated bar
+  *works*. A third argument settled it: blinding is unenforceable anyway once he
+  presses play, so the choice was between honest un-blinding and a silent mix of
+  blinded and accidentally-un-blinded labels.
+  - **What changed.** Each bar is now rated on its own — `keep` / `passable` /
+    `no` — instead of one being picked over the other. Song, artist, section and
+    a listen link are shown. Which fill is the human's is still never in the DOM,
+    and `heard` is recorded per pair.
+  - **What did NOT change.** The **pre-registered HALT bar is untouched**: the
+    pairwise label is *derived* from the two ratings (better-rated side wins,
+    equal is a tie), so `elect()`, κ, the baseline check and the 0.65 bar all
+    apply exactly as frozen. Acceptability rates are the **product** read, not a
+    gate. The LLM panel keeps judging blind pairwise, or judge columns stop being
+    comparable across sittings.
+  - **Legitimacy.** No results have been read under the new instrument; the
+    forced-choice sittings were already void (sitting 1 song-collapsed, sitting 3
+    abandoned mid-way). Rating files are version-stamped and the report refuses
+    to mix instruments.
+  - **Controls.** ~25% of pairs keep their song hidden, so a later low agreement
+    number can be attributed to the judges rather than to the ruler having moved.
+    The ceiling ("how often does the real bar itself read as working?") is
+    computed from the **anchor stratum only** — under per-fill rating the human
+    bar is rated on every vs_truth pair for free, but the disagreement-selected
+    ones are a deliberately unusual subset and would buy a tighter interval
+    around the wrong number.
+- **2026-07-26** — Three bugs the un-blinding exposed the moment real identity
+  was rendered, none of which any unit test could have caught:
+  1. **Unplayable sitting.** 22 of 22 songs were long-tail artists the owner has
+     never heard of — "listen to the flow" was impossible on every pair. The
+     corpus is ~88% long-tail, and nothing had ever selected against it. Fixed
+     with `run --min-views` (Genius views, the fame proxy already in the record).
+     **Scope: calibration only.** Fame is the memorization confound, so arm
+     evaluation keeps the low-fame bucket as its headline (I3) — findable-first
+     buys rater validity and would buy a biased arm number.
+  2. **Zero anchor human bars.** `mint_mixed` allocated arm-vs-arm pairs from the
+     front of the ordered item list, which is exactly where the anchor stratum
+     sits: it consumed every anchor, leaving the ceiling with a sample size of 0.
+     Kinds are now split *within* each stratum.
+  3. **Song spread capped at ~11.** Every granularity group walked the songs in
+     the same hashed order, so each re-picked the same leading songs — a 40-item
+     draw over 99 eligible songs hit 11. `sampling.balanced(max_per_spread=)`
+     caps per-song contribution globally; the same draw now reaches 20 songs at
+     no extra API cost. (Same class as the earlier limit-bias bug, and fixed in
+     `sampling` rather than at the call site for the same reason.)

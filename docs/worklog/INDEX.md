@@ -10,7 +10,12 @@ This is the history: *why* a thing is the way it is, and what it cost to learn.
 
 | date | note |
 |---|---|
+49 notes, 2026-06-18 → 2026-07-26.
+
+| date | note |
+|---|---|
 | 2026-07-26 | [UI-REACH closed — 16 → 0, and two commands that were never about a button (2026-07-26)](2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md) |
+| 2026-07-26 | [I2c — the calibration sitting stops being a competition (un-blinded, per-fill acceptability) (2026-07-26).](2026-07-26-i2c-un-blinded-acceptability-sitting-replaces-forced-choice.md) |
 | 2026-07-25 | [FMS lyrics-bench — I2: judge stack + owner blind calibration (the HALT gate) (2026-07-25).](2026-07-25-fms-lyrics-bench-i2-judge-stack-calibration-halt-gate.md) |
 | 2026-07-24 | [FMS lyrics-first program — I1: infill bench (corpus + masks + metrics + arms + baselines) (2026-07-24).](2026-07-24-fms-lyrics-first-program-i1-infill-bench-corpus-arms-baselin.md) |
 | 2026-07-19 | [TASTE-002 — taste-label spigot restored for the in-place workflow (2026-07-19).](2026-07-19-taste-002-taste-label-spigot-restored-for-the-in-place-workf.md) |

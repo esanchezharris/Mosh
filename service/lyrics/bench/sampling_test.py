@@ -88,6 +88,42 @@ check("balanced: spread also avoids the oldest-id prefix (ids are chronological)
 check("balanced: output stays itemId-sorted for stable run manifests",
       [r["itemId"] for r in got] == sorted(r["itemId"] for r in got))
 
+# ---- per-song cap: spread ACROSS songs, not just within a granularity --------
+# Each granularity group interleaves songs in the same hashed order, so every
+# group re-picks the same leading songs: a 40-item draw over 99 eligible songs
+# landed on 11 of them. For a calibration sitting that is close to the
+# single-song collapse that voided sitting 1.
+WIDE = [{"itemId": f"v1:{g}:sng:{s:03}:s0:l{n}", "granularity": g,
+         "songId": f"sng:{s:03}"}
+        for g in ("word", "rhyme", "span", "line")
+        for s in range(40) for n in range(6)]
+capped = sampling.balanced(WIDE, limit=40, key=lambda r: r["granularity"],
+                           spread=lambda r: r["songId"], max_per_spread=2)
+songs_hit = {r["songId"] for r in capped}
+check("max_per_spread: no song contributes more than the cap",
+      max(sum(1 for r in capped if r["songId"] == s) for s in songs_hit) <= 2,
+      str(sorted((sum(1 for r in capped if r["songId"] == s)) for s in songs_hit)))
+check("max_per_spread: the draw therefore reaches many more songs",
+      len(songs_hit) >= 20, f"{len(songs_hit)} songs")
+check("max_per_spread: still fills the whole limit when material allows",
+      len(capped) == 40, str(len(capped)))
+_per_gran = [sum(1 for r in capped if r["granularity"] == g)
+             for g in ("word", "rhyme", "span", "line")]
+check("max_per_spread: granularities stay balanced",
+      max(_per_gran) - min(_per_gran) <= 1, str(_per_gran))
+check("max_per_spread: deterministic",
+      [r["itemId"] for r in sampling.balanced(
+          WIDE, limit=40, key=lambda r: r["granularity"],
+          spread=lambda r: r["songId"], max_per_spread=2)]
+      == [r["itemId"] for r in capped])
+check("no cap given → behaviour is unchanged",
+      [r["itemId"] for r in sampling.balanced(
+          WIDE, limit=40, key=lambda r: r["granularity"],
+          spread=lambda r: r["songId"])]
+      == [r["itemId"] for r in sampling.balanced(
+          WIDE, limit=40, key=lambda r: r["granularity"],
+          spread=lambda r: r["songId"], max_per_spread=0)])
+
 # ---- run identity comes from the summary, never from parsing the dir name ----
 with tempfile.TemporaryDirectory() as td:
     run = os.path.join(td, "2026-07-25T03-31-54-llm-constrained-dev")

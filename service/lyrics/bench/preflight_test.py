@@ -33,9 +33,18 @@ def check(name, ok, detail=""):
 
 
 def pair(i, song, ctx=12):
-    return {"pairId": f"p{i}", "granularity": "line" if i % 2 else "span",
-            "arm": "arm-a", "left": "l", "right": "r",
-            "before": ["b"] * ctx, "after": ["a"] * 2}
+    # Named songs are the I2c default: a sitting where the rater cannot play a
+    # single track is itself a blocker now, so the healthy fixture carries
+    # identity on all but a control slice.
+    p = {"pairId": f"p{i}", "granularity": "line" if i % 2 else "span",
+         "arm": "arm-a", "left": "l", "right": "r",
+         "before": ["b"] * ctx, "after": ["a"] * 2}
+    if i % 5 == 0:
+        p["identityHidden"] = True
+    else:
+        p.update({"artist": f"Artist {i}", "title": f"Song {i}",
+                  "section": "Verse 1", "listenUrl": "https://example.test/x"})
+    return p
 
 
 def key_of(pairs, songs, kinds=None):
@@ -114,6 +123,67 @@ check("estimates the minutes being asked of the owner",
 check("render is deterministic and mentions blockers",
       preflight.render(rep1) == preflight.render(rep1)
       and "BLOCK" in preflight.render(rep1).upper())
+
+# ---- I2c: the checks that would have caught the first un-blinded mint --------
+# That mint passed every existing check and was still unusable: 22 songs the
+# owner had never heard of (so he could not play any of them), and zero
+# anchor-stratum vs_truth pairs (so the ceiling had a sample size of nothing).
+
+
+def ident_pairs(n_shown, n_hidden, anchor_truth=4):
+    ps, k = [], {}
+    for i in range(n_shown + n_hidden):
+        pid = f"p{i}"
+        hidden = i >= n_shown
+        kind = "vs_truth" if i < anchor_truth else "vs_arm"
+        p = {"pairId": pid, "granularity": "line", "arm": "arm-a",
+             "left": "l", "right": "r", "before": ["b"] * 8, "after": ["a"] * 8}
+        if hidden:
+            p["identityHidden"] = True
+        else:
+            p.update({"artist": "A", "title": "T", "section": "Verse 1",
+                      "listenUrl": "https://example.test/x"})
+        ps.append(p)
+        k[pid] = {"kind": kind, "itemId": f"v1:line:gs:{i:03}:s0:l2",
+                  "granularity": "line", "arm": "arm-a", "truthSide": "left",
+                  "identityHidden": hidden,
+                  "selection": "anchor" if i < anchor_truth else "disagreement"}
+    return ps, k
+
+
+ok_p, ok_k = ident_pairs(24, 8)
+r_ok = preflight.check_sitting(ok_p, ok_k)
+check("a healthy un-blinded sitting still passes", not r_ok["blockers"],
+      str(r_ok["blockers"]))
+check("preflight reports the shown/hidden split",
+      r_ok["stats"]["identityShown"] == 24
+      and r_ok["stats"]["identityHidden"] == 8, str(r_ok["stats"]))
+
+blind_p, blind_k = ident_pairs(0, 32)
+check("BLOCKER when no pair names its song — the owner can play nothing",
+      any("play" in b or "identity" in b
+          for b in preflight.check_sitting(blind_p, blind_k)["blockers"]),
+      str(preflight.check_sitting(blind_p, blind_k)["blockers"]))
+
+most_p, most_k = ident_pairs(12, 20)
+check("BLOCKER when the control stratum has eaten most of the sitting",
+      preflight.check_sitting(most_p, most_k)["blockers"],
+      str(preflight.check_sitting(most_p, most_k)["blockers"]))
+
+thin_p, thin_k = ident_pairs(30, 2, anchor_truth=0)
+r_thin = preflight.check_sitting(thin_p, thin_k)
+check("warns when the anchor stratum holds too few human bars to fix a ceiling",
+      any("ceiling" in w for w in r_thin["warnings"]), str(r_thin["warnings"]))
+check("reports the anchor vs_truth count that the ceiling rests on",
+      r_thin["stats"]["anchorTruthPairs"] == 0
+      and r_ok["stats"]["anchorTruthPairs"] == 4, str(r_ok["stats"]))
+
+check("the time estimate separates clicking from playing the tracks",
+      r_ok["stats"]["estMinutes"] > 0
+      and r_ok["stats"]["estMinutesIfPlayed"] > r_ok["stats"]["estMinutes"],
+      str(r_ok["stats"]))
+check("render surfaces the listening cost so it is not a surprise",
+      "play" in preflight.render(r_ok).lower(), preflight.render(r_ok))
 
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

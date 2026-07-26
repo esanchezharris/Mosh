@@ -47,11 +47,19 @@ def _interleave(rows: List[dict], spread: Callable[[dict], str]) -> List[dict]:
 
 def balanced(rows: Sequence[dict], *, limit: int,
              key: Callable[[dict], str],
-             spread: Optional[Callable[[dict], str]] = None) -> List[dict]:
+             spread: Optional[Callable[[dict], str]] = None,
+             max_per_spread: int = 0) -> List[dict]:
     """Up to `limit` rows spread evenly over the groups `key` produces, and —
     when `spread` is given — dealt across those buckets (songs) rather than
     sliced out of one. limit <= 0 means no cap. Deterministic; output is
-    itemId-sorted."""
+    itemId-sorted.
+
+    `max_per_spread` caps how many rows any one bucket may contribute ACROSS all
+    groups. Interleaving alone is not enough: every group walks the buckets in
+    the same hashed order, so each one re-picks the same leading songs — a
+    40-item draw over 99 eligible songs landed on 11 of them, near enough to the
+    single-song collapse that voided calibration sitting 1. 0 = uncapped.
+    """
     if limit <= 0 or limit >= len(rows):
         return sorted(rows, key=lambda r: r["itemId"])
     groups: dict = {}
@@ -62,13 +70,26 @@ def balanced(rows: Sequence[dict], *, limit: int,
     names = sorted(groups)
     picked: List[dict] = []
     cursor = {n: 0 for n in names}
+    used: dict = {}
     while len(picked) < limit and any(cursor[n] < len(groups[n]) for n in names):
+        progressed = False
         for n in names:
             if len(picked) >= limit:
                 break
-            if cursor[n] < len(groups[n]):
-                picked.append(groups[n][cursor[n]])
+            # Walk past rows whose bucket is already at its cap.
+            while cursor[n] < len(groups[n]):
+                row = groups[n][cursor[n]]
                 cursor[n] += 1
+                bucket = spread(row) if (spread and max_per_spread) else None
+                if bucket is not None and used.get(bucket, 0) >= max_per_spread:
+                    continue
+                if bucket is not None:
+                    used[bucket] = used.get(bucket, 0) + 1
+                picked.append(row)
+                progressed = True
+                break
+        if not progressed:
+            break
     return sorted(picked, key=lambda r: r["itemId"])
 
 

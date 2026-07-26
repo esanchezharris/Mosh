@@ -144,12 +144,26 @@ def owner_labels(ratings: Sequence[dict], key: Dict[str, dict]) -> Dict[str, Opt
 
 
 def self_consistency(ratings: Sequence[dict]) -> Optional[float]:
-    """Share of repeated pairs the rater answered the same way. None = no repeats.
-    A low number caps how much any agreement statistic can mean."""
-    by_pair: Dict[str, List[str]] = {}
+    """Share of repeated answers the rater gave the same way. None = no repeats.
+    A low number caps how much any agreement statistic can mean.
+
+    Keyed on (pairId, side) so it works under BOTH instruments. Grouping on
+    pairId alone and comparing a `choice` field — the v1 shape — scored every
+    per-fill repeat as identical (`"" == ""`) and reported a flat 1.0.
+    """
+    by_slot: Dict[Tuple[str, str], List[str]] = {}
     for r in ratings:
-        by_pair.setdefault(r.get("pairId"), []).append(str(r.get("choice", "")).lower())
-    repeats = [v for v in by_pair.values() if len(v) > 1]
+        pid = r.get("pairId")
+        if not pid:
+            continue
+        if r.get("rating") is not None:
+            slot = (pid, str(r.get("side", "")).lower())
+            answer = str(r.get("rating", "")).lower()
+        else:
+            slot = (pid, "choice")
+            answer = str(r.get("choice", "")).lower()
+        by_slot.setdefault(slot, []).append(answer)
+    repeats = [v for v in by_slot.values() if len(v) > 1]
     if not repeats:
         return None
     return sum(1 for v in repeats if len(set(v)) == 1) / len(repeats)
@@ -226,6 +240,125 @@ def cohens_kappa(a: Sequence[int], b: Sequence[int]) -> Optional[float]:
     return 1.0 if abs(1 - pe) < 1e-12 else (po - pe) / (1 - pe)
 
 
+# ── absolute acceptability (I2c) ────────────────────────────────────────────────
+#
+# The election answers "which automated column tracks the owner's taste". It does
+# NOT answer the owner's actual question, which is absolute: does the generated
+# bar work? Forced choice could not answer it — the winner of two bad bars still
+# wins. Per-fill ratings can, and the honest form of the answer is a rate against
+# the rate the REAL bar achieves on the same scale.
+
+WORKS = ("keep", "passable")
+
+
+def _machine_side(entry: dict) -> Optional[str]:
+    """Which side of a pair is the arm's fill. Both sides on vs_arm; on vs_truth
+    it is whichever side the truth is not."""
+    if entry.get("kind") == "vs_truth":
+        return "left" if entry.get("truthSide") == "right" else "right"
+    return None                              # vs_arm: both sides are machine
+
+
+def _rate(vals: Sequence[str]) -> dict:
+    n = len(vals)
+    works = sum(1 for v in vals if v in WORKS)
+    keeps = sum(1 for v in vals if v == "keep")
+    return {"n": n,
+            "worksRate": (works / n) if n else None,
+            "keepRate": (keeps / n) if n else None,
+            "worksCi": wilson_ci(works, n), "keepCi": wilson_ci(keeps, n),
+            "works": works, "keeps": keeps}
+
+
+def acceptability(rated: Dict[str, dict], key: Dict[str, dict]) -> dict:
+    """Per-arm rates at which the MACHINE fills were judged to work.
+
+    `rated` is `mixpairs.owner_ratings` output. On vs_arm pairs both sides are
+    machine fills and each is credited to its own arm; on vs_truth only the
+    non-truth side counts, or the human bar would inflate the arm's rate.
+    """
+    by_arm: Dict[str, List[str]] = {}
+    for pid, row in rated.items():
+        entry = key.get(pid)
+        if not entry:
+            continue
+        if entry.get("kind") == "vs_arm":
+            for side, arm in (("left", entry.get("armLeft")),
+                              ("right", entry.get("armRight"))):
+                if row.get(side) and arm:
+                    by_arm.setdefault(arm, []).append(row[side])
+            continue
+        side = _machine_side(entry)
+        if row.get(side):
+            by_arm.setdefault(entry.get("arm", "?"), []).append(row[side])
+    return {"arms": {arm: _rate(vals) for arm, vals in sorted(by_arm.items())}}
+
+
+def ceiling(rated: Dict[str, dict], key: Dict[str, dict]) -> dict:
+    """How often the REAL bar itself reads as working — the reference the arms
+    are measured against.
+
+    Read from the ANCHOR stratum only. Disagreement pairs were selected because
+    the metrics split on them, so any absolute rate computed over them is a rate
+    for a deliberately unusual subset. Under per-fill rating the human bar gets
+    rated on every vs_truth pair for free, which makes it tempting to use them
+    all; that would buy a tighter interval around the wrong number.
+    """
+    vals: List[str] = []
+    for pid, row in rated.items():
+        entry = key.get(pid)
+        if not entry or entry.get("kind") != "vs_truth":
+            continue
+        if entry.get("selection") != "anchor":
+            continue
+        side = entry.get("truthSide")
+        if row.get(side):
+            vals.append(row[side])
+    return {**_rate(vals), "stratum": "anchor"}
+
+
+def diff_ci(k1: int, n1: int, k2: int, n2: int, z: float = Z95) -> dict:
+    """Difference of two proportions with a Newcombe interval.
+
+    Newcombe composes the two Wilson intervals rather than assuming normality,
+    so it stays sane at the small counts a one-sitting stratum actually
+    produces — which is where a textbook normal interval would run past 0 or 1
+    and quietly imply more confidence than the data holds.
+    """
+    p1 = (k1 / n1) if n1 else 0.0
+    p2 = (k2 / n2) if n2 else 0.0
+    l1, u1 = wilson_ci(k1, n1, z)
+    l2, u2 = wilson_ci(k2, n2, z)
+    lo = (p1 - p2) - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
+    hi = (p1 - p2) + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+    return {"diff": p1 - p2, "ci": (max(-1.0, lo), min(1.0, hi)),
+            "n1": n1, "n2": n2}
+
+
+def by_condition(rated: Dict[str, dict], key: Dict[str, dict]) -> dict:
+    """The control read: machine-fill acceptability split by whether the song was
+    named, and by whether the owner actually played it.
+
+    If un-blinding moved the ratings, it shows up here — which is what lets a
+    later low agreement number be attributed to the judges rather than to the
+    instrument having changed underneath them.
+    """
+    buckets: Dict[str, List[str]] = {"shown": [], "hidden": [],
+                                     "heard": [], "notHeard": []}
+    for pid, row in rated.items():
+        entry = key.get(pid)
+        if not entry:
+            continue
+        sides = (["left", "right"] if entry.get("kind") == "vs_arm"
+                 else [_machine_side(entry)])
+        vals = [row[s] for s in sides if row.get(s)]
+        if not vals:
+            continue
+        buckets["hidden" if entry.get("identityHidden") else "shown"] += vals
+        buckets["heard" if row.get("heard") else "notHeard"] += vals
+    return {name: _rate(vals) for name, vals in buckets.items()}
+
+
 # ── the election ────────────────────────────────────────────────────────────────
 
 MIN_KAPPA = 0.4  # "moderate" agreement — below this a column has no real skill
@@ -269,11 +402,60 @@ def elect(owner: Dict[str, Optional[int]],
             "halt": False, **head}
 
 
+def _pct(x: Optional[float]) -> str:
+    return "—" if x is None else f"{100 * x:.0f}%"
+
+
+def _acceptability_section(meta: dict) -> List[str]:
+    """The headline: does the generated bar work, against the rate the real bar
+    works. This is the PRODUCT read; the election below is the instrument read,
+    and the pre-registered gate stays on the election."""
+    acc, ceil_ = meta.get("acceptability"), meta.get("ceiling")
+    if not acc:
+        return []
+    out = ["## Does the bar work?", ""]
+    c_n = (ceil_ or {}).get("n") or 0
+    if c_n:
+        out.append(f"The real bar itself reads as working **{_pct(ceil_['worksRate'])}** "
+                   f"of the time (keep: {_pct(ceil_['keepRate'])}), over {c_n} "
+                   f"anchor-stratum bars. That is the ceiling — not 100%.")
+    else:
+        out.append("**No anchor-stratum human bars were rated**, so there is no "
+                   "measured ceiling to compare against; treat the rates below "
+                   "as uncalibrated.")
+    out += ["", "| arm | works (keep+passable) | keep | n | vs the real bar |",
+            "|---|---|---|---|---|"]
+    for arm, r in sorted(acc.get("arms", {}).items()):
+        lo, hi = r["worksCi"]
+        gapstr = "—"
+        if c_n:
+            g = diff_ci(r["works"], r["n"], ceil_["works"], ceil_["n"])
+            glo, ghi = g["ci"]
+            verdict = ("as good as" if glo <= 0 <= ghi
+                       else ("BETTER" if g["diff"] > 0 else "worse"))
+            gapstr = f"{g['diff']:+.0%} ({glo:+.0%}…{ghi:+.0%}) — {verdict}"
+        out.append(f"| {arm} | {_pct(r['worksRate'])} "
+                   f"({lo:.0%}–{hi:.0%}) | {_pct(r['keepRate'])} | {r['n']} | "
+                   f"{gapstr} |")
+    cond = meta.get("conditions") or {}
+    if cond:
+        out += ["", "Control read — did naming the song change the ratings?", "",
+                "| condition | works | n |", "|---|---|---|"]
+        for name in ("shown", "hidden", "heard", "notHeard"):
+            r = cond.get(name) or {}
+            out.append(f"| {name} | {_pct(r.get('worksRate'))} | {r.get('n', 0)} |")
+        out.append("")
+        out.append("*A large shown-vs-hidden gap means the instrument moved, not "
+                   "the arms — read the election below with that in mind.*")
+    return out + [""]
+
+
 def render_report(by_granularity: Dict[str, dict], meta: dict) -> str:
     bar = meta.get("bar")
     lines = ["# Judge calibration — owner agreement", "",
              f"Labels: **{meta.get('labels')}** · owner self-consistency: "
              f"**{meta.get('selfConsistency')}** · trust bar: **{bar}**", ""]
+    lines += _acceptability_section(meta)
     halted = [g for g, e in sorted(by_granularity.items()) if e.get("halt")]
     if halted:
         lines += [f"**HALT** — no column reaches the bar for: {', '.join(halted)}. "

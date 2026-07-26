@@ -219,5 +219,114 @@ check("report is deterministic", md == calibrate.render_report(
                                               bar=0.65)},
     {"selfConsistency": 0.9, "labels": 24, "bar": 0.65}))
 
+# ── I2c: self-consistency under the per-fill instrument ────────────────────────
+# The v1 implementation compared a `choice` field. Per-fill rows have no such
+# field, so every repeat would have compared "" to "" and reported PERFECT
+# self-consistency — a number that caps how much any agreement statistic can
+# mean, silently set to 1.0.
+V2_CONSISTENT = [{"pairId": "x", "side": "left", "rating": "keep"},
+                 {"pairId": "x", "side": "right", "rating": "no"},
+                 {"pairId": "x", "side": "left", "rating": "keep"},
+                 {"pairId": "x", "side": "right", "rating": "no"}]
+V2_FLIPPED = [{"pairId": "y", "side": "left", "rating": "keep"},
+              {"pairId": "y", "side": "left", "rating": "no"}]
+check("self-consistency: a repeated pair rated the same way scores 1.0",
+      close(calibrate.self_consistency(V2_CONSISTENT), 1.0),
+      str(calibrate.self_consistency(V2_CONSISTENT)))
+check("self-consistency: a flipped repeat is NOT reported as consistent",
+      close(calibrate.self_consistency(V2_FLIPPED), 0.0),
+      str(calibrate.self_consistency(V2_FLIPPED)))
+check("self-consistency: mixed repeats score in between",
+      close(calibrate.self_consistency(V2_CONSISTENT + V2_FLIPPED), 2 / 3),
+      str(calibrate.self_consistency(V2_CONSISTENT + V2_FLIPPED)))
+check("self-consistency: no repeats → None, not a fabricated 1.0",
+      calibrate.self_consistency(
+          [{"pairId": "z", "side": "left", "rating": "keep"}]) is None)
+check("self-consistency: the old forced-choice rows still measure",
+      close(calibrate.self_consistency(
+          [{"pairId": "q", "choice": "left"},
+           {"pairId": "q", "choice": "right"}]), 0.0))
+
+# ── I2c: absolute acceptability ────────────────────────────────────────────────
+# The owner's framing: real-vs-generated is not a head-to-head, so what matters
+# is whether the generated bar WORKS — reported against the rate at which the
+# real bar itself works. Both are rates, so the answer is a difference with an
+# interval, not an assertion.
+KEY_C = {
+    # anchor stratum: the RANDOM sample, so the ceiling estimated here is
+    # unbiased. Disagreement pairs are selected precisely because the metrics
+    # split on them, which is not a fair sample of anything absolute.
+    "a1": {"kind": "vs_truth", "arm": "arm-a", "truthSide": "right",
+           "granularity": "line", "selection": "anchor", "identityHidden": False},
+    "a2": {"kind": "vs_truth", "arm": "arm-a", "truthSide": "left",
+           "granularity": "line", "selection": "anchor", "identityHidden": False},
+    "d1": {"kind": "vs_truth", "arm": "arm-a", "truthSide": "right",
+           "granularity": "line", "selection": "disagreement",
+           "identityHidden": False},
+    "d2": {"kind": "vs_truth", "arm": "arm-a", "truthSide": "right",
+           "granularity": "line", "selection": "disagreement",
+           "identityHidden": True},
+}
+# anchors: real bar keeps twice; disagreement pairs: real bar never keeps.
+RATED = {"a1": {"left": "keep", "right": "keep", "heard": True},
+         "a2": {"left": "keep", "right": "passable", "heard": True},
+         "d1": {"left": "no", "right": "no", "heard": False},
+         "d2": {"left": "passable", "right": "no", "heard": False}}
+
+acc = calibrate.acceptability(RATED, KEY_C)
+check("acceptability: per-arm rate of the machine fill working",
+      close(acc["arms"]["arm-a"]["keepRate"], 0.25)
+      and close(acc["arms"]["arm-a"]["worksRate"], 0.75), str(acc["arms"]))
+check("acceptability: reports how many fills it is based on",
+      acc["arms"]["arm-a"]["n"] == 4, str(acc["arms"]))
+check("acceptability: carries a Wilson interval, not a bare point estimate",
+      len(acc["arms"]["arm-a"]["worksCi"]) == 2
+      and acc["arms"]["arm-a"]["worksCi"][0] < 0.75 < acc["arms"]["arm-a"]["worksCi"][1])
+
+ceil_ = calibrate.ceiling(RATED, KEY_C)
+check("ceiling: the real bar's own rate, from the ANCHOR stratum only",
+      ceil_["n"] == 2 and close(ceil_["worksRate"], 1.0), str(ceil_))
+# RED-proof for the stratum rule: make the disagreement pairs wildly different.
+# If the ceiling moved, it would be reading a biased sample.
+SKEWED = {**RATED, "d1": {"left": "no", "right": "no", "heard": False},
+          "d3": {"left": "no", "right": "no", "heard": False}}
+KEY_SKEW = {**KEY_C, "d3": {"kind": "vs_truth", "arm": "arm-a",
+                            "truthSide": "right", "granularity": "line",
+                            "selection": "disagreement", "identityHidden": False}}
+check("ceiling: ignores the disagreement stratum entirely",
+      close(calibrate.ceiling(SKEWED, KEY_SKEW)["worksRate"], 1.0)
+      and calibrate.ceiling(SKEWED, KEY_SKEW)["n"] == 2,
+      str(calibrate.ceiling(SKEWED, KEY_SKEW)))
+check("ceiling: no anchor pairs → None, never a silent zero",
+      calibrate.ceiling(RATED, {"d1": KEY_C["d1"]})["worksRate"] is None)
+
+gap = calibrate.diff_ci(3, 4, 2, 2)
+check("diff_ci: a negative gap when the machine trails the human",
+      gap["diff"] < 0 and gap["ci"][0] < gap["diff"] < gap["ci"][1], str(gap))
+check("diff_ci: an interval spanning zero is honestly inconclusive",
+      calibrate.diff_ci(2, 4, 2, 4)["ci"][0] < 0
+      < calibrate.diff_ci(2, 4, 2, 4)["ci"][1])
+
+split = calibrate.by_condition(RATED, KEY_C)
+check("control read: shown vs hidden reported separately",
+      split["shown"]["n"] == 3 and split["hidden"]["n"] == 1, str(split))
+check("control read: heard vs not-heard reported separately",
+      split["heard"]["n"] == 2 and split["notHeard"]["n"] == 2, str(split))
+
+md2 = calibrate.render_report({"line": elected}, {
+    "selfConsistency": 0.9, "labels": 24, "bar": 0.65,
+    "acceptability": acc, "ceiling": ceil_, "conditions": split})
+check("report leads with the product answer, not the election",
+      md2.lower().index("does the bar work") < md2.lower().index("| column |"),
+      md2[:120])
+check("report states the ceiling the arms are measured against",
+      "ceiling" in md2.lower() and "real bar" in md2.lower())
+check("report names the control read so a moved ruler is visible",
+      "hidden" in md2.lower() and "shown" in md2.lower())
+check("report is still deterministic with the new sections",
+      md2 == calibrate.render_report({"line": elected}, {
+          "selfConsistency": 0.9, "labels": 24, "bar": 0.65,
+          "acceptability": acc, "ceiling": ceil_, "conditions": split}))
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

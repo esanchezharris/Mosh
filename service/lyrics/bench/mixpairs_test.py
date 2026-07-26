@@ -72,7 +72,10 @@ check("vs_truth entries still name the truth side",
       all(v["truthSide"] in ("left", "right") for v in truth_keys))
 check("both orders occur across the sitting",
       len({v.get("truthSide") for v in truth_keys}) == 2
-      or len(truth_keys) < 3, str({v.get("truthSide") for v in truth_keys}))
+      or len(truth_keys) < 3,
+      # sorted: a bare set's repr order follows PYTHONHASHSEED, which makes the
+      # suite's 3x-determinism signature differ run to run for no real reason.
+      str(sorted({v.get("truthSide") for v in truth_keys})))
 
 # ---- labels: one binary convention for both kinds -----------------------------
 sample_arm = next(p for p in key.items() if p[1]["kind"] == "vs_arm")
@@ -157,6 +160,144 @@ check("most of the budget goes to discriminating pairs",
 check("determinism: 3x identical mint",
       all(mixpairs.mint_mixed(POOL, n=12, dupes=0, seed=7, arm_frac=0.5)[0] == pairs
           for _ in range(3)))
+
+# The anchor stratum is what makes the CEILING ("how often does the real bar
+# itself read as keep?") an unbiased estimate — so it has to contain vs_truth
+# pairs. The first cut allocated arm-vs-arm pairs from the front of the ordered
+# item list, which is exactly where the anchors sit: it consumed every anchor and
+# left the ceiling with a sample size of zero.
+_, key_s = mixpairs.mint_mixed(POOL, n=8, dupes=0, seed=4, arm_frac=0.5,
+                               columns=COLS, anchor_frac=0.5)
+strata = {}
+for v in key_s.values():
+    strata.setdefault(v.get("selection"), set()).add(v["kind"])
+check("the ANCHOR stratum spans both pair kinds (the ceiling needs vs_truth)",
+      strata.get("anchor", set()) == {"vs_arm", "vs_truth"}, str(strata))
+check("the disagreement stratum still spans both kinds too",
+      strata.get("disagreement", set()) == {"vs_arm", "vs_truth"}, str(strata))
+
+# ---- I2c: un-blinded song identity -------------------------------------------
+# The owner stopped sitting 3 because flow is unjudgeable on the page: syllable
+# counts are not cadence. He has to be able to pull the track up. Blinding is
+# unenforceable anyway once he presses play — so identity is shown and RECORDED,
+# never left to leak silently.
+SONGS = {f"gd:{n:03}": {"songId": f"gd:{n:03}", "artist": f"Artist {n}",
+                        "title": f"Song {n}", "year": 2020 + (n % 6),
+                        "sections": [{"kind": "verse", "label": "Verse 2",
+                                      "lines": [f"stanza line {i}"
+                                                for i in range(9)]}]}
+         for n in range(12)}
+ip, ik = mixpairs.mint_mixed(POOL, n=12, dupes=0, seed=11, arm_frac=0.5,
+                             songs=SONGS, blind_frac=0.25)
+shown = [p for p in ip if not p.get("identityHidden")]
+hidden = [p for p in ip if p.get("identityHidden")]
+check("shown pairs carry artist / title / year / section",
+      shown and all(set(p) >= {"artist", "title", "year", "section"}
+                    for p in shown), str(sorted(shown[0].keys())) if shown else "")
+check("identity is read from the song record, not invented",
+      all(p["artist"] == SONGS[ik[p["pairId"]]["itemId"].split(":")[2] + ":"
+                               + ik[p["pairId"]]["itemId"].split(":")[3]]["artist"]
+          for p in shown))
+check("shown pairs carry a listen link to that track",
+      all(p.get("listenUrl", "").startswith("http") for p in shown)
+      and "Artist" in shown[0]["listenUrl"])
+check("the section label comes from the section the gap is in",
+      all(p["section"] == "Verse 2" for p in shown))
+
+# The control stratum: identity WITHHELD, so we can tell "the judges are bad"
+# apart from "we moved the ruler" when the report is read.
+check("a control stratum keeps its identity hidden",
+      2 <= len(hidden) <= 5, f"{len(hidden)} hidden of {len(ip)}")
+check("hidden pairs carry NO identity fields at all (not merely a flag)",
+      all(not any(k in p for k in ("artist", "title", "listenUrl", "section"))
+          for p in hidden), str(sorted(hidden[0].keys())) if hidden else "")
+check("the hidden subset is stratified across pair kinds",
+      len({ik[p["pairId"]]["kind"] for p in hidden}) == 2
+      or len(hidden) < 2, str([ik[p["pairId"]]["kind"] for p in hidden]))
+check("the hidden subset is deterministic",
+      [p["pairId"] for p in mixpairs.mint_mixed(
+          POOL, n=12, dupes=0, seed=11, arm_frac=0.5, songs=SONGS,
+          blind_frac=0.25)[0] if p.get("identityHidden")]
+      == [p["pairId"] for p in hidden])
+check("identity still never reveals WHICH fill is the human's",
+      not any(k in p for p in ip
+              for k in ("truthSide", "truthText", "kind", "armLeft")),
+      str(sorted(ip[0].keys())))
+check("the key records identity for the report even when the page hides it",
+      all(set(ik[p["pairId"]]) >= {"artist", "title", "identityHidden"}
+          for p in ip))
+
+# ---- I2c: per-fill acceptability ratings --------------------------------------
+# The instrument changed from "pick the better bar" to "rate each bar" — the
+# owner's point being that real-vs-generated is not a head-to-head. Rating BOTH
+# sides keeps the pairwise label derivable, so elect()/kappa still work.
+pid_a = next(p for p, v in ik.items() if v["kind"] == "vs_arm")
+pid_t2 = next(p for p, v in ik.items() if v["kind"] == "vs_truth")
+opt2 = "left" if ik[pid_a]["armLeft"] == ik[pid_a]["optionArm"] else "right"
+oth2 = "right" if opt2 == "left" else "left"
+
+
+def rate(pid, left, right, **kw):
+    return [{"pairId": pid, "side": "left", "rating": left, **kw},
+            {"pairId": pid, "side": "right", "rating": right, **kw}]
+
+
+rr = mixpairs.owner_ratings(rate(pid_a, "keep", "no"), ik)
+check("owner_ratings returns the per-side rating for a pair",
+      rr[pid_a]["left"] == "keep" and rr[pid_a]["right"] == "no", str(rr))
+check("vs_arm: the better-rated arm decides the binary label",
+      mixpairs.owner_labels(
+          rate(pid_a, *(("keep", "no") if opt2 == "left" else ("no", "keep"))),
+          ik)[pid_a] == 1)
+check("vs_arm: the other arm rated higher labels 0",
+      mixpairs.owner_labels(
+          rate(pid_a, *(("no", "keep") if opt2 == "left" else ("keep", "no"))),
+          ik)[pid_a] == 0)
+check("passable still ranks below keep and above no",
+      mixpairs.owner_labels(rate(pid_a, "keep", "passable"), ik)[pid_a]
+      == (1 if opt2 == "left" else 0))
+tside = ik[pid_t2]["truthSide"]
+check("vs_truth: the machine fill rated higher labels 1",
+      mixpairs.owner_labels(
+          rate(pid_t2, *(("no", "keep") if tside == "left" else ("keep", "no"))),
+          ik)[pid_t2] == 1)
+check("vs_truth: the human bar rated higher labels 0",
+      mixpairs.owner_labels(
+          rate(pid_t2, *(("keep", "no") if tside == "left" else ("no", "keep"))),
+          ik)[pid_t2] == 0)
+check("EQUAL ratings are a genuine tie, not a coin flip",
+      mixpairs.owner_labels(rate(pid_a, "keep", "keep"), ik)[pid_a] is None
+      and mixpairs.owner_labels(rate(pid_t2, "no", "no"), ik)[pid_t2] is None)
+check("a half-rated pair yields no label",
+      mixpairs.owner_labels([{"pairId": pid_a, "side": "left",
+                              "rating": "keep"}], ik).get(pid_a) is None)
+check("whether the owner PLAYED the track is recorded per pair",
+      mixpairs.owner_ratings(rate(pid_a, "keep", "no", heard=True),
+                             ik)[pid_a]["heard"] is True
+      and mixpairs.owner_ratings(rate(pid_a, "keep", "no"),
+                                 ik)[pid_a]["heard"] is False)
+# A dupe rated differently is the self-consistency probe and must stay ambiguous;
+# a deliberate correction after arrowing back is flagged and the latest wins.
+check("an UNFLAGGED contradictory repeat resolves to None (dupe probe intact)",
+      mixpairs.owner_ratings(rate(pid_a, "keep", "no")
+                             + rate(pid_a, "no", "keep"), ik)[pid_a]["left"]
+      is None)
+check("a FLAGGED revision takes the latest, so arrowing back is not punished",
+      mixpairs.owner_ratings(rate(pid_a, "keep", "no")
+                             + rate(pid_a, "no", "keep", revision=True),
+                             ik)[pid_a]["left"] == "no")
+check("junk ratings are ignored rather than scored",
+      mixpairs.owner_ratings([{"pairId": pid_a, "side": "left",
+                               "rating": "amazing"}], ik).get(pid_a, {})
+      .get("left") is None)
+check("the old forced-choice rows still resolve (no silent reinterpretation)",
+      mixpairs.owner_labels([{"pairId": pid_a, "choice": opt2}], ik)[pid_a] == 1
+      and mixpairs.owner_labels([{"pairId": pid_a, "choice": oth2}],
+                                ik)[pid_a] == 0)
+check("mixing the two instruments on ONE pair refuses to produce a label",
+      mixpairs.owner_labels(rate(pid_a, "keep", "no")
+                            + [{"pairId": pid_a, "choice": oth2}],
+                            ik)[pid_a] is None)
 
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
