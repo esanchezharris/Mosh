@@ -213,6 +213,9 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // → 10 (remove_track: TrackLaneHeader's hover-revealed × beside Mute/Solo, confirm-
     //       gated — cmdRemoveTrack takes every clip on the track with it in one undo
     //       transaction).
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(10);
+    // → 9  (set_input_monitor: an off/automatic/on select in the Inspector Mix tab —
+    //       device-level and non-undoable, both said so in its title/reason rather
+    //       than pretending otherwise; applied:false surfaces inline).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(9);
   });
 });

@@ -1535,7 +1535,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       const mode = str(args.mode, "automatic");
       t.monitor = mode === "off" || mode === "on" ? mode : "automatic";
-      invalidate(); return ok(command, { monitor: t.monitor });
+      invalidate();
+      // Mirrors the NATIVE result shape (MoshOps.cpp cmdSetInputMonitor): {trackId, mode,
+      // applied, reason?} — not the {monitor} this used to return before anything called
+      // it from the UI. `applied` is always true here (the dev mock always simulates a
+      // connected input, see mockAudioSel); the real applied:false/reason path (no input
+      // device instance targets this track) is exercised in the UI test via a direct
+      // exec override, not through this mock.
+      return ok(command, { trackId: t.id, mode: t.monitor, applied: true });
     }
     case "stop_recording": {
       stopPlayback();

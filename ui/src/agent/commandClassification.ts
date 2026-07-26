@@ -192,8 +192,14 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // deletes behind a confirm — cmdRemoveBus drops the return track AND sweeps the send off
   // every track in the project, which re-adding the bus does not restore.
   // set_master_plugin_param was declared here too; the master rack's rows now expand to the
-  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.)
-  set_input_monitor: "input monitoring mode (in/off/auto) matters while tracking but has no control",
+  // same 0..1 sliders the per-track rack has always had, off the same pluginToVar params.
+  // set_input_monitor was declared here too — an off/automatic/on select now sits in the
+  // Inspector's Mix tab beside MidiInputField/OutputField. Its title says what its reason
+  // used to only note privately: cmdSetInputMonitor is DEVICE-level (every track fed by the
+  // same physical input shares one monitor mode) and NOT undoable (a global engine/device
+  // preference, not an Edit-tree write). `applied:false` — no input device instance
+  // currently targets this track — surfaces inline rather than silently doing nothing,
+  // since that is `ok:true` and would not trip the store's normal lastError banner.)
 
   // ── generative render layers ─────────────────────────────────────────────────
   // (bypass_layer was declared here. GenDrawer now has an A/B toggle on both the wave

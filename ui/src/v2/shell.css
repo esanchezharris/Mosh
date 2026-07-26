@@ -964,6 +964,10 @@
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 6px; padding: 5px 8px;
 }
 .v2-val { flex: 0 0 40px; text-align: right; color: var(--v2-text); font-family: var(--font-mono); font-size: var(--v2-fs-sm); }
+/* set_input_monitor's applied:false readout — an `ok:true` result that did nothing
+   (no input device matches this track), which the global lastError banner does not
+   catch since the command itself did not fail. */
+.v2-field-warn { font-size: var(--v2-fs-xs); color: var(--status-danger-text); margin: -4px 0 2px 38px; }
 .v2-mix-btns { display: flex; gap: 8px; }
 .v2-mix-btns button {
   flex: 1 1 auto; padding: 7px; border-radius: var(--v2-radius-md); font: inherit; font-size: 12px;
