@@ -346,6 +346,92 @@ def cmd_calibrate(args) -> int:
     # anyway (sitting 1 for song collapse, sitting 3 abandoned mid-way).
     ratings_path = os.path.join(cal_dir, "ratings-v2.jsonl")
 
+    if args.action == "make" and args.from_run_results:
+        # Arm-vs-arm by ear, with no judge in the loop: the LLM panel exists to
+        # produce columns, and "which of these two reads better" does not need
+        # one. Pool comes straight from the named runs.
+        items_path = os.path.join(paths.data_root(), "eval", "items-dev.jsonl")
+        with open(items_path, encoding="utf-8") as f:
+            items = {}
+            for ln in f:
+                if ln.strip():
+                    it = json.loads(ln)
+                    items[it["itemId"]] = it
+        rows_by_arm = {}
+        for name in [r.strip() for r in args.from_run_results.split(",") if r.strip()]:
+            run_dir = os.path.join(paths.data_root(), "runs", name)
+            res = glob.glob(os.path.join(run_dir, "results-*.jsonl"))
+            if not res:
+                print(f"no results in {name}", file=sys.stderr)
+                return 2
+            arm = sampling.arm_of(run_dir)
+            with open(res[0], encoding="utf-8") as f:
+                rows_by_arm[arm] = [json.loads(ln) for ln in f if ln.strip()]
+        pool = mixpairs.pool_from_runs(rows_by_arm, items)
+        shared = {r["itemId"] for r in pool if
+                  sum(1 for x in pool if x["itemId"] == r["itemId"]) >= 2}
+        print(f"pool: {len(pool)} rows from {sorted(rows_by_arm)} · "
+              f"{len(shared)} items answered by every arm")
+        songs = {s["songId"]: s for s in _load_corpus()}
+        if args.tradeoff_only:
+            # Keep only the items where the two arms' STRENGTHS actually split:
+            # one wrote the artist's real word, the other wrote a perfect rhyme
+            # that was not it. Items where both did well — or both badly —
+            # cannot settle "which reads better", so spending a rater's minutes
+            # on them buys nothing.
+            #
+            # NOT done via rank_by_disagreement: that ranks items where COLUMNS
+            # split, and on a tradeoff item both columns read 1 (each arm wins
+            # its own axis), so it would rank exactly the wrong items first.
+            by_item = {}
+            for arm, rws in rows_by_arm.items():
+                for r in rws:
+                    by_item.setdefault(r["itemId"], {})[arm] = r
+            keep = set()
+            for iid, per_arm in by_item.items():
+                if len(per_arm) < 2:
+                    continue
+                fills = {(r.get("candidates") or [""])[0].lower()
+                         for r in per_arm.values()}
+                if len(fills) < 2:
+                    continue                     # identical answers: nothing to rate
+                matched = any(r.get("exact") for r in per_arm.values())
+                perfect = any(r.get("rhyme_perfect") for r in per_arm.values())
+                imperfect = any(not r.get("rhyme_perfect") for r in per_arm.values())
+                if matched and perfect and imperfect:
+                    keep.add(iid)
+            before = len(pool)
+            pool = [r for r in pool if r["itemId"] in keep]
+            print(f"tradeoff filter: {before} → {len(pool)} rows "
+                  f"({len(keep)} items where the arms' strengths split)")
+        pairs, key = mixpairs.mint_mixed(
+            pool, n=args.n, dupes=args.dupes, seed=args.seed,
+            arm_frac=args.arm_frac, songs=songs, columns=None,
+            anchor_frac=args.anchor_frac, blind_frac=args.blind_frac)
+        stamp = {r["itemId"] + "|" + r["arm"]: r["metrics"] for r in pool}
+        with open(pairs_path, "w", encoding="utf-8") as f:
+            json.dump(pairs, f, ensure_ascii=False, indent=1)
+        with open(key_path, "w", encoding="utf-8") as f:
+            json.dump(key, f, ensure_ascii=False, indent=1)
+        os.chmod(key_path, 0o600)
+        with open(os.path.join(cal_dir, "machine_scores.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(stamp, f, indent=1, sort_keys=True)
+        # Pair-level columns must be the REAL metrics, one lookup each. Passing
+        # the same metric under several names makes every column identical, so
+        # they can never disagree and preflight reports "0 pairs separate the
+        # metrics" — a self-inflicted blocker.
+        pair_cols = {}
+        for col in ("exact", "rhyme_perfect", "multi_depth"):
+            vals = {p: v for p, v in
+                    mixpairs.column_predictions(key, stamp, col).items()
+                    if v is not None}
+            if vals:
+                pair_cols[col] = vals
+        report = preflight.check_sitting(pairs, key, pair_cols or None)
+        print(preflight.render(report))
+        return 1 if report["blockers"] else 0
+
     if args.action == "make":
         rows = []
         for slice_ in ("dev",):
@@ -631,6 +717,14 @@ def main(argv=None) -> int:
                    help="comma-separated run dirs to draw the pool from; the "
                         "judged file accumulates, so this pins the sitting to "
                         "one draw instead of every era of the bench")
+    p.add_argument("--tradeoff-only", action="store_true",
+                   help="keep only items where the arms' strengths split (one "
+                        "matched the artist, the other rhymed perfectly) — the "
+                        "only items that can settle 'which reads better'")
+    p.add_argument("--from-run-results", default="",
+                   help="build the pool from these run dirs' RAW results "
+                        "instead of the judged file — arm-vs-arm by ear, no "
+                        "LLM panel needed and none paid for")
     p.add_argument("--stanza", action="store_true", default=True,
                    help="show the whole stanza around the gap (flow context)")
     p.set_defaults(fn=cmd_calibrate)

@@ -299,5 +299,64 @@ check("mixing the two instruments on ONE pair refuses to produce a label",
                             + [{"pairId": pid_a, "choice": oth2}],
                             ik)[pid_a] is None)
 
+# ---- pool straight from arm runs, with no judge in the loop -------------------
+# The judged-file path exists to carry LLM-panel columns. When the question is
+# "which of these two arms reads better", the panel is not needed and paying for
+# it would be waste — so a pool can be built from the runs' own results.
+RUN_ROWS = {
+    "rhyme-floor": [
+        {"itemId": "v2:rhyme:gd:001:s0:l4", "granularity": "rhyme",
+         "candidates": ["flame", "frame"], "exact": 0, "rhyme_perfect": 1,
+         "multi_depth": 2, "views": 10},
+        {"itemId": "v2:rhyme:gd:002:s0:l4", "granularity": "rhyme",
+         "candidates": [], "exact": 0, "rhyme_perfect": 0, "multi_depth": 0,
+         "views": 10},
+    ],
+    "llm-constrained": [
+        {"itemId": "v2:rhyme:gd:001:s0:l4", "granularity": "rhyme",
+         "candidates": ["name"], "exact": 1, "rhyme_perfect": 0,
+         "multi_depth": 1, "views": 10},
+        {"itemId": "v2:rhyme:gd:002:s0:l4", "granularity": "rhyme",
+         "candidates": ["blame"], "exact": 0, "rhyme_perfect": 1,
+         "multi_depth": 1, "views": 10},
+    ],
+}
+RUN_ITEMS = {
+    "v2:rhyme:gd:001:s0:l4": {
+        "itemId": "v2:rhyme:gd:001:s0:l4", "granularity": "rhyme",
+        "target": {"text": "game"},
+        "context": {"before": ["b1"], "maskedLine": "put it on the ____",
+                    "after": ["a1"]}},
+    "v2:rhyme:gd:002:s0:l4": {
+        "itemId": "v2:rhyme:gd:002:s0:l4", "granularity": "rhyme",
+        "target": {"text": "same"},
+        "context": {"before": ["b2"], "maskedLine": "never been the ____",
+                    "after": ["a2"]}},
+}
+pool = mixpairs.pool_from_runs(RUN_ROWS, RUN_ITEMS)
+check("pool_from_runs: one row per (arm, item) that produced a candidate",
+      len(pool) == 3, str([(r["arm"], r["itemId"]) for r in pool]))
+check("pool_from_runs: an arm that returned NO candidate is skipped, not blanked",
+      not any(r["arm"] == "rhyme-floor" and r["itemId"].endswith("002:s0:l4")
+              for r in pool), str([(r["arm"], r["candidate"]) for r in pool]))
+one = next(r for r in pool if r["arm"] == "llm-constrained"
+           and r["itemId"].endswith("001:s0:l4"))
+check("pool_from_runs: carries the arm's TOP-1 fill as the candidate",
+      one["candidate"] == "name", str(one))
+check("pool_from_runs: carries the held-out truth for vs_truth pairs",
+      one["truth"] == "game", str(one))
+check("pool_from_runs: carries maskedLine so bare words become whole bars",
+      one["maskedLine"] == "put it on the ____", str(one))
+check("pool_from_runs: carries the metrics the selection ranks on",
+      one["metrics"]["exact"] == 1 and one["metrics"]["rhyme_perfect"] == 0,
+      str(one.get("metrics")))
+check("pool_from_runs: an item both arms answered is eligible for a vs_arm pair",
+      len([r for r in pool if r["itemId"].endswith("001:s0:l4")]) == 2)
+check("pool_from_runs: deterministic",
+      mixpairs.pool_from_runs(RUN_ROWS, RUN_ITEMS) == pool)
+check("pool_from_runs: an unknown item is dropped rather than half-built",
+      mixpairs.pool_from_runs({"a": [{"itemId": "nope", "granularity": "rhyme",
+                                      "candidates": ["x"]}]}, RUN_ITEMS) == [])
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

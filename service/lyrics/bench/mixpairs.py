@@ -101,6 +101,45 @@ def stanza_context(item_id: str, songs: Dict[str, dict], radius: int = 99) -> di
             "after": lines[li + 1:li + 1 + radius]}
 
 
+_POOL_METRICS = ("exact", "topk", "rhyme_fit", "rhyme_perfect", "multi_depth",
+                 "syl_fit", "constrained_fit")
+
+
+def pool_from_runs(rows_by_arm: Dict[str, Sequence[dict]],
+                   items: Dict[str, dict]) -> List[dict]:
+    """A calibration pool built straight from arm run results.
+
+    The judged-file path exists to carry LLM-panel columns. When the question is
+    "which of these two arms reads better", the panel adds nothing and paying for
+    it would be waste — so the pool comes from the runs themselves, joined to the
+    eval items for the truth and the masked line.
+
+    An arm that produced no candidate for an item is skipped rather than entered
+    with a blank: a pair rendered against an empty fill would ask the rater to
+    judge nothing.
+    """
+    out: List[dict] = []
+    for arm in sorted(rows_by_arm):
+        for row in rows_by_arm[arm]:
+            item = items.get(row.get("itemId"))
+            cands = row.get("candidates") or []
+            if not item or not cands or not cands[0]:
+                continue
+            ctx = item.get("context") or {}
+            out.append({
+                "itemId": row["itemId"], "arm": arm,
+                "granularity": row.get("granularity") or item.get("granularity"),
+                "truth": (item.get("target") or {}).get("text", ""),
+                "candidate": cands[0],
+                "maskedLine": ctx.get("maskedLine"),
+                "context": {"before": list(ctx.get("before") or []),
+                            "after": list(ctx.get("after") or [])},
+                "views": row.get("views", item.get("views", 0)),
+                "metrics": {k: row.get(k) for k in _POOL_METRICS if k in row},
+            })
+    return out
+
+
 def rank_by_disagreement(item_ids: Sequence[str],
                          columns: Dict[str, Dict[str, Optional[int]]]) -> List[str]:
     """Items ordered by how much the metric columns disagree about them.
