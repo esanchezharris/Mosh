@@ -216,6 +216,11 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // → 9  (set_input_monitor: an off/automatic/on select in the Inspector Mix tab —
     //       device-level and non-undoable, both said so in its title/reason rather
     //       than pretending otherwise; applied:false surfaces inline).
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(9);
+    // → 8  (load_drum_kit: DrumSequencer's "Reset kit" button, whose OLD reason —
+    //       "wants a kit picker" — was itself wrong. There is exactly one bundled kit,
+    //       no enumeration command, no kit name in the snapshot, so a picker is not
+    //       buildable today; reloading the bundled default onto every pad, undoing any
+    //       per-lane sample swaps, is the real action).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(8);
   });
 });

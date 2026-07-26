@@ -771,7 +771,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       ensureInstrument(t, true);
       invalidate();
-      return ok(command, { trackId: t.id, pads: 8 });
+      // Mirrors the native result shape (MoshOps.cpp cmdLoadDrumKit): {trackId, index,
+      // pads} — `index` (this used to be dropped) is the sampler's position in the
+      // track's plugin rack, same field the UI's plugin-rack views key off of elsewhere.
+      const index = (t.plugins ?? []).findIndex((p) => p.type === "sampler" && p.isInstrument);
+      return ok(command, { trackId: t.id, index, pads: 8 });
     }
     case "assign_sample": {
       const t = findTrack(str(args.trackId));

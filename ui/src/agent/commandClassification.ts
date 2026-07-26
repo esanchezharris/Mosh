@@ -167,8 +167,17 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // from the live clip, validated by the same parser the backend uses — so a mouse-only
   // user can lay or edit a whole grid in one undoable step. Ratchet 17 → 16.)
   delete_time_range: "ripple delete across all tracks — wants a time-range action in the timeline's range tool",
-  load_drum_kit: "drum tracks auto-load a kit; swapping it needs a kit picker on the drum track",
   sketch_beatbox: "beatbox-to-beat inference — wants an entry point in the record/import flow",
+
+  // (load_drum_kit was declared here as "wants a kit picker" — that description was WRONG,
+  // not just incomplete: a picker is impossible today. There is exactly ONE bundled kit
+  // (mosh-kit, 8 hardcoded pads), no list_drum_kits enumeration anywhere, and no kit name
+  // in the snapshot to pick FROM. What the command actually does — (re)load the one
+  // bundled kit onto a track's sampler — is a real, meaningful action once a producer has
+  // used the per-lane "⋯" swap (assign_sample) on DrumSequencer: "Reset kit" restores the
+  // defaults. That shipped in the toolbar next to Clear/Pattern, gated on isDrumTrack. A
+  // genuine picker is still backend work first: list_drum_kits + a kit arg on
+  // load_drum_kit, neither of which exists.)
 
   // (list_takes was declared here, on the premise that "take ENUMERATION has no surface".
   // That premise was FALSE by the time anyone checked: the snapshot emits numTakes /
