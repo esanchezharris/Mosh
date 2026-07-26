@@ -392,6 +392,13 @@ def elect(owner: Dict[str, Optional[int]],
     ranked.sort(key=lambda r: (-r["kappa"], -r["accuracy"], r["metric"]))
     head = {"bar": bar, "minKappa": min_kappa, "baseline": baseline,
             "ranked": ranked, "runnerUp": ranked[1] if len(ranked) > 1 else None}
+    if not columns:
+        # "Nothing was measured" is a different state from "everything measured
+        # failed". An arm-vs-arm taste sitting carries no judge columns at all,
+        # and reporting that as HALT would send someone off to fix judges that
+        # were never run.
+        return {"metric": None, "agreement": None, "halt": True,
+                "noColumns": True, **head}
     if (not ranked or ranked[0]["kappa"] < min_kappa
             or ranked[0]["accuracy"] < bar
             or (baseline is not None and ranked[0]["accuracy"] <= baseline)):
@@ -456,7 +463,14 @@ def render_report(by_granularity: Dict[str, dict], meta: dict) -> str:
              f"Labels: **{meta.get('labels')}** · owner self-consistency: "
              f"**{meta.get('selfConsistency')}** · trust bar: **{bar}**", ""]
     lines += _acceptability_section(meta)
-    halted = [g for g, e in sorted(by_granularity.items()) if e.get("halt")]
+    no_cols = [g for g, e in sorted(by_granularity.items()) if e.get("noColumns")]
+    if no_cols:
+        lines += [f"*No automated column was available for: {', '.join(no_cols)} — "
+                  f"nothing to elect. This is what an arm-vs-arm taste sitting "
+                  f"looks like; the election path belongs to judge calibration.*",
+                  ""]
+    halted = [g for g, e in sorted(by_granularity.items())
+              if e.get("halt") and not e.get("noColumns")]
     if halted:
         lines += [f"**HALT** — no column reaches the bar for: {', '.join(halted)}. "
                   f"Arm optimization stays blocked there; iterate on judges or "
@@ -469,7 +483,10 @@ def render_report(by_granularity: Dict[str, dict], meta: dict) -> str:
             lines.append(f"Majority-class baseline: **{base:.3f}** — any column at "
                          f"or below this is riding the base rate, not reading taste.")
             lines.append("")
-        if e.get("halt"):
+        if e.get("noColumns"):
+            lines.append("No automated column was scored for this granularity, "
+                         "so there was nothing to elect.")
+        elif e.get("halt"):
             lines.append(f"HALT — no column clears both floors "
                          f"(accuracy > baseline and ≥ {bar}, κ ≥ "
                          f"{e.get('minKappa')}).")

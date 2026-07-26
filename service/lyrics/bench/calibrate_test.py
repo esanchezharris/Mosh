@@ -328,5 +328,22 @@ check("report is still deterministic with the new sections",
           "selfConsistency": 0.9, "labels": 24, "bar": 0.65,
           "acceptability": acc, "ceiling": ceil_, "conditions": split}))
 
+# ── "no columns" is not the same failure as "no column cleared the bar" ────────
+# An arm-vs-arm taste sitting carries no judge columns at all. Reporting that as
+# HALT reads as "the judges were measured and failed", when nothing was measured
+# — which would send someone off to fix judges that were never run.
+empty = calibrate.elect({"p1": 1, "p2": 0}, {}, bar=0.65)
+check("elect: no columns at all is flagged distinctly, not as a failed election",
+      empty.get("noColumns") is True and empty["halt"] is True, str(empty))
+check("elect: a column that exists but loses is NOT flagged noColumns",
+      calibrate.elect({"p1": 1, "p2": 0}, {"emb": {"p1": 0, "p2": 1}},
+                      bar=0.65).get("noColumns") is not True)
+md_nc = calibrate.render_report({"rhyme": empty}, {"labels": 14, "bar": 0.65,
+                                                   "selfConsistency": 0.67})
+check("report says nothing was elected, rather than that judging failed",
+      "no automated column" in md_nc.lower(), md_nc)
+check("report does not claim HALT when there was nothing to halt on",
+      "HALT" not in md_nc.upper(), md_nc)
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

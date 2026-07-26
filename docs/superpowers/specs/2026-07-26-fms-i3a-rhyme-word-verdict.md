@@ -68,6 +68,30 @@ Two honest options, owner's call:
    `llm-constrained` graduates today and `prompt-rhyme-menu` becomes the
    craft-leaning alternative.
 
+## ANSWERED (sitting 5, 2026-07-26)
+
+The owner rated 14 arm-vs-arm pairs. Every pair carried his artist's real word
+as one blind option against free phonology's perfect-rhyme alternative.
+
+| option | works | keep |
+|---|---|---|
+| the artist's real word | **86%** (60–96%) | **86%** |
+| perfect rhyme, not the real word | **29%** (12–55%) | 14% |
+
+**+57 pts** on works (CI +21…+77), **+71 pts** on keep (CI +35…+86), **12/14**
+pairwise, zero ties.
+
+**Option 2 above is the right call.** The depth clause was demanding that a
+writing arm match a floor whose output the owner rejects 71% of the time — it
+was the wrong comparison, and re-scoping it to "no regression vs the previous
+best ARM" lets `llm-constrained` graduate on evidence already collected.
+`exact` is validated as the optimization target at the rhyme word;
+`rhyme_perfect` and `multi_depth` remain diagnostics, not objectives.
+
+Caveats: n=14, owner self-consistency 0.67 on 3 repeats, no tracks played. Large
+enough to act on, thin enough that a n≈30 confirmation with findable songs is
+cheap insurance before any training run.
+
 ## The question a metric cannot settle
 
 The floor writes formally excellent rhymes and matches the artist 10.7% of the
@@ -76,8 +100,8 @@ rhyme. **Which reads better in the bar?** No automated column can answer that,
 and it is precisely the ~15-pair sitting the pivot was meant to earn: items where
 the floor and the LLM disagree, rated on the I2c per-fill scale.
 
-That answer decides whether the program optimizes `exact` or craft — which is
-the single highest-leverage unknown left in I3a.
+**Answered above: `exact`.** This was the single highest-leverage unknown in
+I3a and it is now closed.
 
 ## Caveats on these numbers
 

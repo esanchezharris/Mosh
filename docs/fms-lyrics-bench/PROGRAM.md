@@ -273,3 +273,40 @@ numbers and hashes only.
     benchmark defect surfaced, rather than pay for items about to be voided. It
     is the one planned arm still without a number. Stage-2 confirmation at n=400
     was also not reached (arms are at n=150, ±8 pts).
+- **2026-07-26 — OWNER EAR VERDICT (sitting 5): semantics beat formal rhyme,
+  decisively.** 14 arm-vs-arm pairs, ~8 min, no LLM panel paid for. Every pair
+  carried the artist's real word as one blind option (`llm-constrained` matched
+  it on all of them) against free phonology's technically-perfect rhyme.
+
+  | option | works (keep+passable) | keep |
+  |---|---|---|
+  | the artist's real word (`llm-constrained`) | **86%** (60–96%) | **86%** |
+  | perfect rhyme, not the real word (`rhyme-floor`) | **29%** (12–55%) | 14% |
+
+  Difference **+57 pts** (95% CI +21…+77) on works, **+71 pts** (CI +35…+86) on
+  keep. Derived pairwise: **12/14** to the real word, zero ties. Separated by a
+  wide margin on a small sample.
+
+  - **This resolves the open depth-clause question.** The frozen bar failed both
+    arms for regressing `multi_depth` against a floor that maximizes it by
+    construction. The owner's ear says that floor's output does not work: a
+    perfect rhyme that ignores meaning reads as wrong 71% of the time. So
+    **`multi_depth`-vs-floor was the wrong clause** — it was demanding the arms
+    match something the owner rejects. Re-scope it to "no regression vs the
+    previous best ARM" (the anti-blandness intent) and `llm-constrained`
+    graduates on the exact evidence already collected.
+  - **`exact` is validated as the optimization target** at the rhyme word, which
+    was the open validity question behind the whole pivot. Matching the artist's
+    actual word tracks the owner's taste; formal rhyme quality on its own does
+    not. `rhyme_perfect` and `multi_depth` stay as reported diagnostics, not
+    objectives.
+  - **Caveats, stated:** n=14 pairs; owner self-consistency 0.67 on 3 repeats
+    (low, and it caps how much any one number here can mean); zero tracks were
+    played (`heard` 0/28), so this is a page judgment; shown-vs-hidden 55% vs 67%
+    on 22/6 observations is too thin to read as an un-blinding effect. The
+    finding is large enough to survive these, but a confirmation pass at n≈30
+    with findable songs would be cheap insurance before anything is trained on it.
+  - **Reporting fix found by running it:** an arm-vs-arm sitting has no judge
+    columns, and the report rendered that as "HALT — no column clears both
+    floors", which reads as "the judges were measured and failed" when nothing
+    was measured. `elect()` now returns a distinct `noColumns` state.
