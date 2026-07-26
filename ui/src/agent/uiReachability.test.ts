@@ -240,10 +240,16 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //      check_freeze_stops_rerender counts rendered files with a live service —
     //      --selftest cannot, because reactiveTouch bails on !hasAudio() first.)
     //
-    // What is left is bounce_layer_to_clip. Its undo bug is fixed (#454, on main), but it is
-    // still a no-op relabel on every path a manual control can reach: it does real work only
-    // for a section-scoped render, and no UI can create one — regionStart/regionEnd remain
-    // agent-only. Wiring a button before that surface exists would just re-label a no-op.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(1);
+    // → 0 (bounce_layer_to_clip — closed by building the surface it was waiting on rather
+    //      than by wiring the button where the command does nothing. create_render_layer has
+    //      accepted regionStart/regionEnd since it was written and no shell ever sent them,
+    //      which is what kept bounce a relabel; the timeline's range selection now creates a
+    //      section-scoped render, and the drawer's Bounce is gated on that shape alone.)
+    //
+    // Zero. Every command in the agent catalog is now reachable by a mouse-only producer from
+    // the shipped v2 shell. This assertion stays — the value of the ratchet from here on is
+    // that the NEXT command to ship without a control fails the build instead of quietly
+    // joining a list nobody re-reads.
+    expect(Object.keys(UI_REACH_GAPS).length).toBe(0);
   });
 });

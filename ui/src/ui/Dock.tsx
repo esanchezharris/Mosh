@@ -8,7 +8,7 @@ import { useSettings } from "../settings/store";
 import type { Snapshot, Plugin, Track, Clip, RenderColor, RenderLora, RenderQA } from "../types";
 import { Moshi } from "./Moshi";
 import { qaReadoutView } from "./qaReadout";
-import { pickGenClip } from "./genClip";
+import { pickGenClip, isSectionScoped } from "./genClip";
 import { isTransformPreview } from "../capabilities";
 import { resolveSa3Available, engineBadgeView, renderedByLabel } from "./engineBadge";
 import { amountToNl, nlToAmount } from "./reimagineAmount";
@@ -460,6 +460,23 @@ function GenBody({ clip, track, qa }: { clip: Clip; track: Track; qa?: RenderQA 
               onClick={() => void exec("render_layer", { clipId: clip.id })}>{rl.hasArtifact ? "Re-render" : "Render"}</button>
             <button className="btn" disabled={!rl.hasArtifact} data-testid="gen-accept" onClick={async () => { const r = await exec("accept_render", { clipId: clip.id }); if (r.ok) bumpCelebrate(); }}>Accept</button>
             <button className="btn" disabled={!rl.hasArtifact} onClick={() => void exec("reject_render", { clipId: clip.id })}>Reject</button>
+          </>
+        ) : isSectionScoped(clip) ? (
+          // A SECTION render — scoped to part of the clip by the timeline's range selection.
+          // It cannot apply in place (repointing the source would replace the whole clip), so
+          // MoshOps::applyRenderInPlace bails and the result waits on the legacy landing. That
+          // makes this the one and only shape where Bounce does real work: everywhere else
+          // cmdAcceptRender takes a no-op branch and bounce_layer_to_clip just writes a label,
+          // which is why no other branch here offers it.
+          //
+          // No Live, no A/B, no Reset: all three are about a render that IS the clip's audio.
+          <>
+            <button className="btn" data-testid="gen-render" onClick={() => void exec("render_layer", { clipId: clip.id })}>Re-imagine section</button>
+            <button className="btn" data-testid="gen-bounce" disabled={!rl.hasArtifact}
+              title={rl.hasArtifact
+                ? "Bounce this section down to its own clip on the Neural Renders lane"
+                : "Render the section first — there is nothing to bounce yet"}
+              onClick={() => void exec("bounce_layer_to_clip", { clipId: clip.id })}>Bounce to clip</button>
           </>
         ) : clip.type === "wave" ? (
           // Wave clips auto-apply in place — the waveform swaps to the result instantly.

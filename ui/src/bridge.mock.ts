@@ -28,6 +28,10 @@ export const MOCK_ENABLED: boolean =
 const SR = 48000;
 let clipSeq = 100;
 let trackSeq = 10;
+// Layers whose render has already been landed on the "Neural Renders" lane, so a second
+// accept/bounce does not duplicate the clip (native guards the same way, via its internal
+// landedClipId). Module-local rather than a snapshot field — see the accept_render branch.
+const landedLayers = new Set<string>();
 const nextClipId = () => String(++clipSeq);
 const nextTrackId = () => String(++trackSeq);
 let sectionSeq = 3; // seed uses sec-1..3
@@ -493,6 +497,36 @@ function findClip(clipId: string): { track: Track; clip: Clip } | null {
 }
 function findTrack(trackId: string): Track | null {
   return snapshot.tracks.find((t) => t.id === trackId) ?? null;
+}
+// Is this clip's render layer scoped to PART of the clip? Mirrors the ±1e-3 comparison in
+// MoshOps::applyRenderInPlace, which is what decides in-place apply vs the lane landing.
+function isSubRegion(clip: Clip): boolean {
+  const rl = clip.renderLayer;
+  if (!rl || rl.regionStart === undefined || rl.regionEnd === undefined) return false;
+  const cs = clip.start, ce = clip.start + clip.length;
+  return rl.regionStart > cs + 1e-3 || rl.regionEnd < ce - 1e-3;
+}
+// accept_render's landing for a render that did NOT auto-apply: a plain wave clip on a shared
+// "Neural Renders" lane, spanning the rendered region. Mirrors MoshOps::cmdAcceptRender —
+// including that the lane is found-or-created once and reused.
+function landOnNeuralLane(src: Clip): Clip {
+  let lane = snapshot.tracks.find((t) => t.name === "Neural Renders");
+  if (!lane) {
+    lane = {
+      id: nextTrackId(), index: snapshot.tracks.length, name: "Neural Renders", type: "audio",
+      volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [],
+    };
+    snapshot.tracks.push(lane);
+  }
+  const rl = src.renderLayer!;
+  const start = rl.regionStart ?? src.start;
+  const end = rl.regionEnd ?? src.start + src.length;
+  const landed: Clip = {
+    id: nextClipId(), name: `${src.name} (re-imagined)`, type: "wave",
+    start, length: Math.max(0.001, end - start), offset: 0, hasRenderLayer: false,
+  } as unknown as Clip;
+  lane.clips.push(landed);
+  return landed;
 }
 // DRM-001 — mirror the native default-instrument policy: a track that needs an
 // instrument gets the sane default (drum → sampler, melodic → 4OSC) unless it
@@ -2060,7 +2094,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo();
       f.clip.hasRenderLayer = true;
       const mode = str(args.mode, "reimagine");
+      // Section-scoped render: an explicit sub-region bounds the layer to part of the clip
+      // (cmdCreateRenderLayer clamps it to the clip and ignores a degenerate range, falling
+      // back to the whole clip). The snapshot always carries a region — whole-clip layers
+      // report the clip's own span — so the UI can tell the two apart by comparison.
+      const cs = f.clip.start, ce = f.clip.start + f.clip.length;
+      let rs = cs, re = ce;
+      if (args.regionStart !== undefined && args.regionEnd !== undefined) {
+        const qs = Math.min(Math.max(num(args.regionStart, cs), cs), ce);
+        const qe = Math.min(Math.max(num(args.regionEnd, ce), cs), ce);
+        if (Math.abs(qe - qs) > 1e-3) { rs = Math.min(qs, qe); re = Math.max(qs, qe); }
+      }
       f.clip.renderLayer = { id: "rl-" + f.clip.id, status: "dirty", adapter: str(args.adapter, "fake"), mode, seed: 1, userKept: false, hasArtifact: false, nl: 0.45, colors: [], loras: [],
+        regionStart: rs, regionEnd: re,
         ...(mode === "transform" ? { target: "", strength: 65 } : {}) };
       invalidate(); return ok(command);
     }
@@ -2089,6 +2135,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // SING never auto-applies (mirrors MoshOps::finalizeRender): the guide vocal lands as an
       // auditionable artifact for the legacy accept/reject flow — it must not replace the take.
       if (f.clip.renderLayer.mode === "sing") { /* ready + hasArtifact only */ }
+      // A SUB-REGION render never auto-applies either: in-place apply replaces the clip's WHOLE
+      // source, which a section-scoped render cannot do, so MoshOps::applyRenderInPlace returns
+      // false for it and the render falls through to the legacy "Neural Renders" lane landing
+      // (accept_render / bounce_layer_to_clip). This is the ONLY shape where those two commands
+      // do real work rather than relabelling a no-op.
+      else if (f.clip.type === "wave" && isSubRegion(f.clip)) { /* ready + hasArtifact only */ }
       // Wave clips auto-apply in place: the render becomes the clip's audio + Reset becomes available.
       else if (f.clip.type === "wave") { f.clip.renderLayer.appliedInPlace = true; f.clip.renderLayer.hasOriginal = true; }
       else {
@@ -2118,6 +2170,19 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       f.clip.renderLayer.status = command === "freeze_layer" ? "frozen" : command === "bounce_layer_to_clip" ? "bounced" : "ready";
       // Freeze is the reactive opt-out, not just the label — mirrors cmdFreezeLayer.
       if (command === "freeze_layer") f.clip.renderLayer.reactive = false;
+      // accept_render (and bounce, which delegates to it) LANDS a clip only where the render
+      // did not already auto-apply — a section-scoped render, or sing. On the whole-clip wave
+      // and MIDI-beneath paths the native command takes a no-op branch, which is precisely why
+      // bounce_layer_to_clip is a pure relabel there and why no UI offers it.
+      else if (f.clip.renderLayer.hasArtifact
+               && !f.clip.renderLayer.appliedInPlace && !f.clip.renderLayer.reimagineActive
+               && !landedLayers.has(f.clip.renderLayer.id)) {
+        // Kept OUT of the snapshot on purpose: native tracks the landed clip on an internal
+        // `landedClipId` property that snapshot() does not emit, so a mock field would be its
+        // own kind of drift — a shape no real backend ever sends.
+        landedLayers.add(f.clip.renderLayer.id);
+        landOnNeuralLane(f.clip);
+      }
       invalidate(); return ok(command);
     }
     case "unfreeze_layer": {
@@ -2641,6 +2706,7 @@ export function __resetMockForTests(): void {
   clipSeq = 100;
   trackSeq = 10;
   snapshot = seedSnapshot();
+  landedLayers.clear();
   mockCorpusLines = 0;
   mockAgentMemoryGlobal = { preference: [], drum_pattern: [], lyric_framework: [] };
   mockAgentMemoryProject = [];

@@ -22,9 +22,13 @@ import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { headW } from "./geom";
+import { sectionTargetFor } from "./sectionRender";
 import { IconClose } from "../../ui/icons";
 
 const EPS = 1e-6;
+// Stable identity so the tracks selector never returns a fresh array (which would re-render
+// this component on every store change).
+const EMPTY_TRACKS: never[] = [];
 
 export function TimeRangeBand() {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -33,6 +37,8 @@ export function TimeRangeBand() {
   const range = useShell((s) => s.timeRange);
   const dragging = useShell((s) => s.timeRangeDragging);
   const setRange = useShell((s) => s.setTimeRange);
+  const tracks = useStore((s) => s.snapshot?.tracks ?? EMPTY_TRACKS);
+  const selectedTrackId = useStore((s) => s.selectedTrackId);
 
   const active = !!range && range.end > range.start;
   useEscapeToClose(active, () => setRange(null));
@@ -54,6 +60,19 @@ export function TimeRangeBand() {
     else await exec("set_transport", { loop: true, loopStart: r.start, loopEnd: r.end });
   };
 
+  // The section-render target: the clip on the SELECTED track that this span cuts into.
+  // Null (and the button hidden) when the span covers a whole clip, misses every clip, or
+  // lands on one that already carries a layer — see sectionRender.ts for why each case is
+  // excluded rather than surfaced as an error.
+  const section = sectionTargetFor(tracks, selectedTrackId, r);
+  const reimagineSection = async () => {
+    if (!section) return;
+    await exec("create_render_layer", section);
+    // The span has done its job — the region now lives on the layer, and leaving the band up
+    // would invite a second create on a clip that already has one.
+    setRange(null);
+  };
+
   const left = headW() + r.start * pxPerSec;
   const width = (r.end - r.start) * pxPerSec;
 
@@ -71,6 +90,15 @@ export function TimeRangeBand() {
           >
             {loopingThis ? "Looping" : "Loop"}
           </button>
+          {section && (
+            <button
+              type="button" data-testid="v2-timerange-reimagine"
+              title="Re-imagine just this section of the clip — it lands as its own clip on the Neural Renders lane"
+              onClick={() => void reimagineSection()}
+            >
+              Re-imagine section
+            </button>
+          )}
           <button
             type="button" data-testid="v2-timerange-delete"
             title="Remove this range on every track, leaving a hole"

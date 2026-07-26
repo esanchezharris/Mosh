@@ -250,7 +250,24 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // proven in verify.py's check_freeze_stops_rerender — --selftest cannot see it, because
   // reactiveTouch returns on !hasAudio() long before it reads the flag.)
 
-  bounce_layer_to_clip: "still a no-op relabel on every path a manual control can reach. For whole-clip wave (appliedInPlace) and MIDI/drum (beneath) renders, cmdAcceptRender takes a no-op branch, so bounce only writes status='bounced' with zero audio effect. It does real work ONLY for a section-scoped render, and no UI can create one — regionStart/regionEnd on create_render_layer are agent-only, so the sub-region surface has to come first; a button before that would relabel a no-op. (The undo bug this entry used to name is FIXED: MoshOps.cpp wrote the status with nullptr instead of &undoManager(), so 'bounced' outlived an undo that deleted the clip it described — repaired in #454, with selftest coverage for both shapes.)",
+  // (bounce_layer_to_clip was the last entry here. It was NOT just a missing button: the
+  // command is a pure relabel on every path a manual control could reach — for whole-clip
+  // wave (appliedInPlace) and MIDI/drum (beneath) renders cmdAcceptRender takes a no-op
+  // branch, so bounce wrote status='bounced' and changed no audio. It does real work only
+  // for a SECTION-scoped render, and no shell could create one: create_render_layer has
+  // accepted regionStart/regionEnd all along, but nothing ever sent them.
+  //
+  // Closed by building the missing surface rather than wiring the button where it lies. The
+  // timeline's range selection now offers "Re-imagine section" (sectionRender.ts resolves the
+  // span to a clip, declining spans that cover a whole clip — the engine would apply those in
+  // place — and clips that already carry a layer), and the drawer grows a section branch whose
+  // Bounce is gated on isSectionScoped. Live / A-B / Reset are withheld there: all three
+  // describe a render that IS the clip's audio, which a section render never becomes.
+  //
+  // Its undo bug is also fixed: the status was written with nullptr instead of
+  // &undoManager(), so 'bounced' outlived an undo that deleted the clip it described (#454,
+  // with selftest coverage for both shapes). Mock parity for the whole sub-region branch —
+  // which did not exist, making the shape untestable — is in bridge.mock.subregion.test.ts.)
 
   // (insert_tempo_change / remove_tempo_change were declared here. The timeline now has a
   // tempo lane — its own row between the section ribbon and the bar ruler, built on time.ts's
