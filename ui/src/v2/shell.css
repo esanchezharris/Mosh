@@ -896,6 +896,45 @@
   border-top-color: var(--v2-playhead); border-bottom: none;
 }
 
+/* time-range band (UIREACH-TIMERANGE) — a shift-drag on the ruler draws this cross-lane
+   span; delete_time_range's only shipped-UI home. Sits below the playhead (z 7) so a
+   moving playhead still reads clearly over a drawn span, above lane content so the
+   highlight is visible over clips. pointer-events:none on the band itself so clicking a
+   clip underneath still works — only the floating toolbar re-enables them. */
+.v2-timerange-band {
+  position: absolute; top: 0; bottom: 0; z-index: 6; pointer-events: none;
+  background: color-mix(in srgb, var(--v2-accent) 10%, transparent);
+  border-left: 1px solid var(--v2-accent); border-right: 1px solid var(--v2-accent);
+}
+.v2-timerange-toolbar {
+  position: absolute; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + 6px);
+  left: 0; z-index: 8; display: flex; align-items: center; gap: 4px; padding: 4px;
+  white-space: nowrap; pointer-events: auto;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: var(--v2-radius-sm);
+  box-shadow: var(--v2-shadow);
+}
+.v2-timerange-toolbar button {
+  font: inherit; font-size: var(--v2-fs-xs); padding: 5px 9px; border-radius: var(--v2-radius-xs); line-height: 1;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+  white-space: nowrap;
+}
+.v2-timerange-toolbar button:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-timerange-toolbar button[data-testid="v2-timerange-loop"][aria-pressed="true"] {
+  background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
+}
+/* the ripple action gets a distinct warn tint — it is the one that reflows the whole
+   project downstream, and the two buttons must not read as visually interchangeable. */
+.v2-timerange-toolbar button[data-testid="v2-timerange-delete-ripple"] {
+  color: var(--status-danger-text); border-color: color-mix(in srgb, var(--status-danger) 40%, var(--v2-line));
+}
+.v2-timerange-toolbar button[data-testid="v2-timerange-delete-ripple"]:hover {
+  background: color-mix(in srgb, var(--status-danger) 16%, transparent);
+}
+.v2-timerange-toolbar .v2-timerange-clear {
+  padding: 5px; display: grid; place-items: center; color: var(--v2-faint);
+}
+.v2-timerange-toolbar .v2-timerange-clear:hover { color: var(--v2-text); }
+
 .v2-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--v2-faint); font-size: var(--v2-fs-base); }
 
 /* #47 — zero-track empty state keeps a REAL add-track affordance (the footer row it

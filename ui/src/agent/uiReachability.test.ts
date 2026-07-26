@@ -213,6 +213,10 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // → 7 (the timeline's annotation lane: create_annotation, edit_annotation,
     //      move_annotation, remove_annotation — all four of the asymmetry the probe fix
     //      surfaced, closed together by one real lane rather than one control at a time).
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(7);
+    // → 6 (delete_time_range: BarRuler grows a shift-drag time-range selection —
+    //      bar-snapped via the piecewise tempo map, never geom.ts's flat one — rendered
+    //      as a cross-lane band with Delete and Delete-close-gap as two separately
+    //      labelled actions, not a shared button plus a ripple modifier).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(6);
   });
 });
