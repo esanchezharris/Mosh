@@ -919,7 +919,13 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pop-inline input[type="number"] { width: 60px; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-row > input[type="number"] { width: 60px; background: var(--ink); color: var(--bone); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
 .pop-actions { display: flex; flex-wrap: wrap; gap: 5px; }
-.pop-note { font-size: 10px; color: var(--bone-dim); word-break: break-all; }
+/* `anywhere`, not `break-all`. break-all breaks at ANY character, so a .pop-note carrying a
+   sentence wrapped as "and ther / e's no way" — it was chosen for the one case that needs it
+   (an unbroken filesystem path, which .export-path still asks for explicitly below), and then
+   applied to every note in the app. `anywhere` keeps word boundaries and only splits a token
+   that genuinely cannot fit, which serves both. The .training-pop override further down was
+   an earlier local patch for this same bug. */
+.pop-note { font-size: 10px; color: var(--bone-dim); overflow-wrap: anywhere; }
 /* Post-export "where did my file go" block — no native Reveal-in-Finder command exists,
    so the full path stays prominent + copyable (file and folder) instead. */
 .export-done { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--bone-dim); }

@@ -892,14 +892,38 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { bus });
     }
     case "export_stems": {
-      // G7: one file per visible, non-empty audio track (return/bus tracks excluded).
+      // G7: one file per non-empty audio track. Mirrors cmdExportStems (MoshOps.cpp ~:10035)
+      // deliberately closely, because a mock that is merely plausible makes every test
+      // written against it vacuous:
+      //   • the old filter was `t.type === "audio"`, which silently dropped DRUM tracks —
+      //     native has no type filter at all (trackType is a ValueTree property; a drum
+      //     track is the same te::AudioTrack underneath), so a beat never got a stem here;
+      //   • the old filter also excluded isReturn, which native does not — returns simply
+      //     hold no clips, so they drop out on their own unless includeEmpty is set;
+      //   • the old return shape was `files: string[]`; native returns `stems: [{trackId,
+      //     name, index, file, bytes}]`, so UI code reading data.stems saw undefined;
+      //   • the index is assigned BEFORE the empty-track skip natively, so a default export
+      //     over a project with an empty track in the middle leaves GAPS (00, 02, 03).
       const fmt = str(args.format, "wav");
-      const stems = snapshot.tracks.filter((t) => t.type === "audio" && !t.isReturn && (args.includeEmpty ? true : (t.clips?.length ?? 0) > 0));
+      const ext = fmt === "aif" ? "aif" : fmt;
+      const dir = str(args.dir) || "/mock/exports/stems-0";
+      const includeEmpty = Boolean(args.includeEmpty);
+      const stems = snapshot.tracks
+        .filter((t) => !t.isGroup)                       // folder tracks are not AudioTracks
+        .map((t, index) => ({ t, index }))               // index counts every audio track…
+        .filter(({ t }) => includeEmpty || (t.clips?.length ?? 0) > 0)   // …then empties drop
+        .map(({ t, index }) => ({
+          trackId: t.id,
+          logicalId: t.id,
+          name: t.name,
+          index,
+          file: `${dir}/${String(index).padStart(2, "0")}-${t.name.replace(/[?*:"<>|/\\]/g, "").trim() || "unnamed"}.${ext}`,
+          bytes: 1024 * (1 + index),
+        }));
+      if (stems.length === 0) return err(command, "no renderable tracks (all empty or hidden)");
       return ok(command, {
-        dir: str(args.dir) || "/mock/stems",
-        format: fmt,
-        count: stems.length,
-        files: stems.map((t, i) => `${String(i).padStart(2, "0")}_${t.name}.${fmt}`),
+        dir, format: fmt, bitDepth: num(args.bitDepth, 24),
+        sampleRate: 48000, seconds: snapshot.session.length, count: stems.length, stems,
       });
     }
 

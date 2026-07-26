@@ -179,8 +179,12 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // take lanes the way classic's Arrange.tsx does, so choosing a take means opening the
   // Inspector. That is a presentation gap with no unreachable command behind it.)
 
-  // ── export (G7) ──────────────────────────────────────────────────────────────
-  export_stems: "per-track stem export has a backend + Catch2 coverage but no tab in ExportControls",
+  // (export_stems was declared here. ExportControls now has a What: mixdown | stems mode —
+  // one panel, because format and bit depth mean the same thing in both and this file exists
+  // to be the single export entry-point definition. Range/Tail are hidden in stems mode
+  // (export_stems has no such args and would ignore them), and the run is confirm-gated:
+  // it is N full renders INLINE on the message thread with no progress and no cancel, so an
+  // accidental click is unrecoverable. Ratchet 14 → 13.)
 
   // ── mixer / routing — asymmetric with what IS reachable ──────────────────────
   rename_bus: "create_bus is in the Inspector; rename is not — an unintended asymmetry",
