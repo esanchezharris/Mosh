@@ -210,6 +210,9 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // could reach and that this test had been reporting green. Nothing got worse; the number
     // got honest. A probe change is the ONLY reason this line may go up — if it rises for any
     // other reason, a feature shipped that the user cannot get to.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
+    // → 10 (remove_track: TrackLaneHeader's hover-revealed × beside Mute/Solo, confirm-
+    //       gated — cmdRemoveTrack takes every clip on the track with it in one undo
+    //       transaction).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(10);
   });
 });

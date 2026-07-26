@@ -5,6 +5,7 @@
 // read + select surface that matches the demo.
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { useShell, type SectionZoom } from "../shellState";
@@ -22,6 +23,7 @@ import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 
 // (The uppercase AUDIO/DRUM pill that used to live in the header was removed: it
 // duplicated `TrackTypeIcon`, which already encodes the track type, and being
@@ -354,6 +356,15 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const preset = track.plugins?.find((p) => p.isInstrument)?.name;
   const sel = selectedTrackId === track.id;
 
+  // UI-REACH — remove_track's sole call site in the whole codebase was classic's ×
+  // (ui/Arrange.tsx:416), which v2 never renders, so a mouse-only v2 user could not
+  // delete a track at all. cmdRemoveTrack (MoshOps.cpp) is `eng.edit().deleteTrack(track)`
+  // inside one undo transaction — it takes every clip on the track with it, so this is
+  // confirm-gated (mirrors the bus-removal confirm in Inspector.tsx's SendsSection),
+  // though unlike a bus deletion it IS a plain undoable Edit mutation — the dialog says so.
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const clipCount = track.clips.length;
+
   return (
     <div
       className={`v2-lhead${sel ? " sel" : ""}`}
@@ -390,6 +401,30 @@ function TrackLaneHeader({ track }: { track: Track }) {
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
       </span>
+      <button
+        className="v2-lhead-rm"
+        data-testid="v2-track-remove"
+        title={`Delete ${track.name}`}
+        aria-label={`Delete ${track.name}`}
+        onClick={(e) => { e.stopPropagation(); setConfirmRemove(true); }}
+      >×</button>
+      {confirmRemove && createPortal(
+        <ConfirmDialog
+          title={`Delete "${track.name}"?`}
+          testId="v2-track-remove-confirm"
+          danger
+          confirmLabel="Delete track"
+          body={
+            <>
+              This removes the track and {clipCount === 0 ? "everything on it" : clipCount === 1 ? "the 1 clip on it" : `all ${clipCount} clips on it`}.
+              Undo (⌘Z) brings it back right after, same as any other edit.
+            </>
+          }
+          onConfirm={() => { setConfirmRemove(false); void exec("remove_track", { trackId: track.id }); }}
+          onCancel={() => setConfirmRemove(false)}
+        />,
+        document.body,
+      )}
     </div>
   );
 }

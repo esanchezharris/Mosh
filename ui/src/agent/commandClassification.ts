@@ -228,7 +228,14 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   move_annotation: "no annotation surface in v2 to drag on; needs the lane built first, then a drag gesture (the beat is the anchor, so it converts through the piecewise tempo map)",
 
   // ── track lifecycle ──────────────────────────────────────────────────────────
-  remove_track: "a mouse-only v2 user CANNOT DELETE A TRACK — the sole call site in the codebase is the × on classic's track header (Arrange.tsx:416), which v2 never renders. Hidden until the probe stopped searching classic-only modules. v2 has track headers already; this wants a delete affordance on one, confirm-gated (it takes the clips with it)",
+  // (remove_track was declared here — a mouse-only v2 user could not delete a track at
+  // all; the sole call site in the codebase was the × on classic's track header
+  // (Arrange.tsx:416), which v2 never renders, hidden until the probe stopped searching
+  // classic-only modules. TrackLaneHeader (v2/lanes/TrackLaneList.tsx) now has a hover-
+  // revealed × beside Mute/Solo, confirm-gated — cmdRemoveTrack takes every clip on the
+  // track with it in one undo transaction, so the dialog says so, and also says Undo
+  // brings it back, since — unlike remove_bus's cross-track side effects — this IS a
+  // plain undoable Edit mutation.)
 
   // (create_section / rename_section / move_section / remove_section were declared here.
   // SectionRibbon is now mounted as the timeline's top row in TrackLaneList — inside the
