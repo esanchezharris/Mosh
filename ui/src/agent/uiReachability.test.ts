@@ -151,9 +151,10 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // AGENT_ONLY_COMMANDS instead of being closed by building a duplicate control)
     // → 14 (GenDrawer's A/B toggle: bypass_layer — its two siblings stay, with reasons
     // rewritten to say what investigation found rather than what was assumed)
-    // → 13 (ExportControls' stems mode: export_stems).
+    // → 13 (ExportControls' stems mode: export_stems)
+    // → 11 (the timeline's tempo lane: insert_tempo_change + remove_tempo_change).
     // Tightening on each close is the point — leaving slack banks gaps and lets the next
     // regression land unnoticed.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(13);
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
   });
 });

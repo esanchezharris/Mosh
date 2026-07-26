@@ -13,6 +13,8 @@ import type { CommandResult, Snapshot, Track } from "../../types";
 import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
 import { SectionRibbon } from "../timeline/SectionRibbon";
+import { TempoRibbon } from "../timeline/TempoRibbon";
+import { LaneGrid, hasTempoChanges } from "../timeline/LaneGrid";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
@@ -66,7 +68,10 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   // create_bus and doesn't yet exclude them — a separate, pre-existing gap).
   const tracks = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
   const contentW = contentSeconds(snapshot) * pxPerSec;
+  // beatPx is the CONSTANT-tempo beat width feeding the lane's gradient. It is only
+  // meaningful while the tempo never changes — see LaneGrid for what happens when it does.
   const beatPx = beatSeconds(meterOf(snapshot)) * pxPerSec;
+  const varTempo = hasTempoChanges(snapshot.session);
   const barLen = barSeconds(meterOf(snapshot));
   const totalBars = Math.max(1, Math.ceil(contentSeconds(snapshot) / barLen));
 
@@ -152,7 +157,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           height it caps there and scrolls internally (the prompt bar stays put). */}
       <div
         className="v2-stage"
-        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
@@ -164,6 +169,12 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
                 untouched. */}
             <div className="v2-corner v2-corner-ribbon" />
             <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
+            {/* tempo row — sits between structure and bars, because it is what maps one to
+                the other. Its own row rather than markers in the ruler: the ruler's plain
+                click already means "seek", and click-to-add-a-tempo-change on the same
+                element would have to fight it. */}
+            <div className="v2-corner v2-corner-tempo"><span className="v2-corner-label">BPM</span></div>
+            <div className="v2-tempo-cell"><TempoRibbon snapshot={snapshot} width={contentW} /></div>
             {/* ruler row */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
@@ -171,7 +182,11 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {tracks.map((t) => (
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
-                <div className="v2-lane" data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                  {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
+                      gets real positioned lines, because a repeating gradient cannot express
+                      an uneven grid and would drift from the ruler above. */}
+                  {varTempo && <LaneGrid snapshot={snapshot} pxPerSec={pxPerSec} />}
                   {t.clips.filter((c) => !c.hidden).map((c) => (
                     <ClipView key={c.id} clip={c} trackType={t.type} snapshot={snapshot} />
                   ))}

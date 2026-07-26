@@ -203,9 +203,12 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   freeze_layer: "NOT just a missing control — the command is inert. It writes status='frozen' and nothing anywhere reads that value (the only mention in the tree is SelfTest.cpp's own assertion that the label was written). reactiveTouch (MoshOps.cpp:8800) gates on ids::reactive, which Ids.h:215 declares as the per-layer opt-out but NO command ever writes — so a 'frozen' layer still auto-re-renders on the next param edit, spending exactly the CPU the name promises to save. A button today would be a lie. Needs freeze_layer to set ids::reactive=false plus a way back (there is no unfreeze_layer) before any UI is honest.",
   bounce_layer_to_clip: "redundant on the path a producer is actually on: for whole-clip wave (appliedInPlace) and MIDI/drum (beneath) renders, cmdAcceptRender takes a no-op branch, so bounce only relabels status='bounced' with zero audio effect — and it does not detach reactivity either, since reactiveTouch ignores status. It does real work ONLY for a section-scoped render, which today no manual control can even create (regionStart/regionEnd are agent-only). Wire it together with a sub-region create control, not before. Also fix MoshOps.cpp:9552 first — it writes the status with nullptr instead of &undoManager(), so 'bounced' survives an undo that deletes the clip it describes.",
 
-  // ── tempo map ────────────────────────────────────────────────────────────────
-  insert_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
-  remove_tempo_change: "tempo-map editing (ramps/changes mid-song) has no timeline surface",
+  // (insert_tempo_change / remove_tempo_change were declared here. The timeline now has a
+  // tempo lane — its own row between the section ribbon and the bar ruler, built on time.ts's
+  // PIECEWISE map rather than geom.ts's single session.tempo, which is only correct while the
+  // tempo never changes. Create + remove only, and every point is a STEP change: there is no
+  // command to edit a point in place, so a drag or retype gesture would be a non-atomic
+  // remove+insert. set_tempo_curve stays separately deferred. Ratchet 13 → 11.)
 
   // ── annotations ──────────────────────────────────────────────────────────────
   move_annotation: "annotations can be created and edited on the timeline but not dragged to a new beat",

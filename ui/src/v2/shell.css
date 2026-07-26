@@ -16,6 +16,7 @@
   --v2-head-w: 200px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
   --v2-lane-h: 64px;
   --v2-ribbon-h: 40px;
+  --v2-tempo-h: 22px;
   --v2-ruler-h: 24px;
   --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
   --v2-radius: 16px;
@@ -577,7 +578,7 @@
      clamped by max-height caps + top-aligns, so sparse sessions reveal cream below and the
      panel grows lane-by-lane until it hits the available height, then scrolls internally.
      Fallback height covers the loading/empty placeholder. */
-  max-height: var(--v2-stage-h, calc(var(--v2-ribbon-h) + var(--v2-ruler-h) + 4 * var(--v2-lane-h)));
+  max-height: var(--v2-stage-h, calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + 4 * var(--v2-lane-h)));
 }
 
 /* ── section navigator — its OWN panel above the arrangement (concept-style separation,
@@ -629,10 +630,13 @@
 .v2-zoom button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
 /* The ruler sits BELOW the ribbon, so both sticky rows must not pin at the same offset —
    otherwise they overlap on scroll. (PR #183 flattened these to 0 when the ribbon left.) */
-.v2-corner-ruler { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-ruler-h); }
+.v2-corner-tempo { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-tempo-h); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+.v2-corner-label { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); letter-spacing: 0.1em; }
+.v2-corner-ruler { top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 7; height: var(--v2-ruler-h); }
 /* content header cells stick to the top only (scroll horizontally with the lanes) */
 .v2-ribbon-cell { position: sticky; top: 0; z-index: 4; }
-.v2-ruler-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
+.v2-tempo-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
+.v2-ruler-cell { position: sticky; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 4; }
 
 /* section ribbon */
 .v2-ribbon {
@@ -670,6 +674,35 @@
   color: var(--v2-faint); font-size: var(--v2-fs-lg); line-height: 1; cursor: pointer; transition: color 90ms linear, background 90ms linear;
 }
 .v2-seg-add:hover { color: var(--v2-accent); background: var(--v2-surface-sunken); }
+
+/* tempo lane — thin, quiet, and empty most of the time. It reads as a rail rather than a
+   panel so a constant-tempo project (every project until someone adds a change) costs the
+   arrangement almost no vertical room. */
+.v2-tempolane {
+  position: relative; height: var(--v2-tempo-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+  cursor: copy;
+}
+.v2-tempo-pt {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 3px;
+  padding-left: 4px; border-left: 2px solid var(--v2-accent); white-space: nowrap;
+}
+/* The base tempo is the engine's floor — removeTempo() no-ops on index 0 — so it is drawn
+   as an anchor, not an editable marker, and carries no remove control. */
+.v2-tempo-pt.base { border-left-color: var(--v2-line); }
+.v2-tempo-bpm { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-dim); }
+.v2-tempo-pt.base .v2-tempo-bpm { color: var(--v2-faint); }
+.v2-tempo-rm {
+  border: 0; background: none; padding: 0 3px; cursor: pointer; line-height: 1;
+  color: var(--v2-faint); font-size: var(--v2-fs-xs); opacity: 0; transition: opacity 90ms linear;
+}
+.v2-tempo-pt:hover .v2-tempo-rm, .v2-tempo-rm:focus-visible { opacity: 1; }
+.v2-tempo-rm:hover { color: var(--v2-danger, var(--v2-accent)); }
+.v2-tempo-input {
+  position: absolute; top: 1px; width: 58px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
 
 /* bar ruler */
 .v2-ruler {
@@ -752,6 +785,13 @@
   background:
     repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--v2-line) calc(var(--beat-px, 40px) - 1px), var(--v2-line) var(--beat-px, 40px));
 }
+/* Once a tempo map exists the gradient is wrong by construction (it can only repeat at one
+   interval), so it is switched off and LaneGrid draws the real lines instead. */
+.v2-lane.v2-lane-mapped { background: none; }
+.v2-lanegrid { position: absolute; inset: 0; pointer-events: none; }
+.v2-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--v2-line); }
+.v2-gl.bar { opacity: 1; }
+.v2-gl.beat { opacity: 0.45; }
 .v2-clip {
   position: absolute; top: 8px; bottom: 8px; border-radius: var(--v2-radius-md); overflow: hidden;
   background: var(--v2-clip-block); border: 1px solid rgba(255, 255, 255, 0.14);
