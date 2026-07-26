@@ -28,7 +28,7 @@ sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
                           ingest, judge, llm_cache, mask, metrics, paths,
-                          mixpairs, runner, sampling, scoreboard,
+                          mixpairs, panel, runner, sampling, scoreboard,
                           scrape, torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
@@ -245,11 +245,22 @@ def cmd_judge(args) -> int:
               f"or --yes", file=sys.stderr)
         return 2
 
-    import brain_client
     cache = llm_cache.Cache(paths.subdir("cache", "llm"))
-    chat = brain_client.chat_json if brain_client.available() else None
-    if chat is None:
-        print("! no brain provider — LLM panel skipped (emb/ppl still run)")
+    env = dict(os.environ)
+    brain_env = env.get("MOSH_BRAIN_ENV") or os.path.expanduser("~/Mosh/ui/.env.local")
+    if os.path.exists(brain_env):
+        import re as _re
+        with open(brain_env, encoding="utf-8") as f:
+            for ln in f:
+                m = _re.match(r'\s*(?:export\s+)?([A-Z_]+)\s*=\s*"?([^"\n]*)"?', ln)
+                if m:
+                    env.setdefault(m.group(1), m.group(2))
+    judges = panel.resolve_judges(env)
+    if not judges:
+        print("! no judge credentials — LLM panel skipped (emb/ppl still run)")
+    else:
+        print(f"panel: {len(judges)} models — "
+              + ", ".join(j["model"] for j in judges), flush=True)
 
     # Drop unresolvable rows FIRST: emb/ppl score lists are positional, so a row
     # skipped later would shift every subsequent score onto the wrong item.
@@ -264,8 +275,8 @@ def cmd_judge(args) -> int:
     for n, r in enumerate(todo):
         item = items[r["itemId"]]
         cand = r["candidates"][0]
-        verdict = (judge.judge_pair(item, cand, chat=chat, cache=cache)
-                   if chat else {"win": None, "byLens": {}})
+        verdict = (judge.judge_pair_panel(item, cand, judges=judges, cache=cache)
+                   if judges else {"win": None, "byJudge": {}})
         out_rows.append({
             "itemId": r["itemId"], "granularity": r["granularity"],
             "arm": sampling.arm_of(run_dir),
@@ -279,9 +290,10 @@ def cmd_judge(args) -> int:
             "metrics": {"judge_win": verdict["win"],
                         "emb": emb["scores"][n] if emb["status"] == "ok" else None,
                         "ppl": ppl["scores"][n] if ppl["status"] == "ok" else None,
-                        **{f"lens_{k}": (1 if v["verdict"] == "candidate" else
-                                         0 if v["verdict"] == "truth" else None)
-                           for k, v in verdict["byLens"].items()}},
+                        "panel_disagreement": verdict.get("disagreement"),
+                        **{f"judge_{k}": (1 if v["verdict"] == "candidate" else
+                                          0 if v["verdict"] == "truth" else None)
+                           for k, v in verdict.get("byJudge", {}).items()}},
         })
 
     path = _judge_rows_path(args.slice)

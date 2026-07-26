@@ -195,5 +195,38 @@ with tempfile.TemporaryDirectory() as td:
             for _ in range(3)]
     check("determinism: 3x identical verdicts", runs[0] == runs[1] == runs[2])
 
+# ---- multi-MODEL panel path (replaces 3 lenses on one model) ------------------
+JUDGES = [{"id": "a", "model": "m-a", "url": "u", "key": "k"},
+          {"id": "b", "model": "m-b", "url": "u", "key": "k"},
+          {"id": "c", "model": "m-c", "url": "u", "key": "k"}]
+SEEN2 = []
+
+
+def panel_post(judge, messages, **kw):
+    SEEN2.append((judge["id"], json.dumps(messages)))
+    text = json.dumps(messages)
+    a_blob = text[text.index("Fill A:"):text.index("Fill B:")]
+    cand_is_a = CANDIDATE[:18] in a_blob
+    # judge 'c' dissents; a and b prefer the candidate
+    prefers_cand = judge["id"] != "c"
+    winner = "A" if (cand_is_a == prefers_cand) else "B"
+    return {"ok": True, "content": json.dumps({"winner": winner}),
+            "provider": judge["id"], "model": judge["model"]}
+
+
+with tempfile.TemporaryDirectory() as td:
+    r = judge.judge_pair_panel(ITEM, CANDIDATE, judges=JUDGES,
+                               cache=llm_cache.Cache(td), post=panel_post)
+    check("panel asks every model, both orders", len(SEEN2) == 6, str(len(SEEN2)))
+    check("majority of MODELS decides the verdict", r["win"] == 1, str(r))
+    check("per-model verdicts are kept for calibration",
+          set(r["byJudge"]) == {"a", "b", "c"}
+          and r["byJudge"]["c"]["verdict"] == "truth", str(r.get("byJudge")))
+    check("panel disagreement is recorded", abs(r["disagreement"] - 1 / 3) < 1e-9,
+          str(r.get("disagreement")))
+    check("no model sees the answer key",
+          all("truthText" not in m and "ground truth" not in m.lower()
+              for _, m in SEEN2))
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

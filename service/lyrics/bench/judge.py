@@ -157,6 +157,59 @@ def judge_pair(item: dict, candidate_fill: str, *, chat: Callable, cache=None,
     return {"win": _majority(by_lens), "byLens": by_lens}
 
 
+# One question, asked of genuinely different models. Replaces the three-lens
+# construction, which measured 91-98% self-agreement — three prices for one
+# opinion. The lenses are folded into a single instruction so each MODEL judges
+# the same thing and their disagreement means something.
+PANEL_QUESTION = (
+    "Which fill is the better bar here — judged on sense in this verse, rhyme "
+    "and rhythm craft, and whether it sounds like a real recorded rap lyric "
+    "rather than a machine's polite guess?")
+
+
+def judge_pair_panel(item: dict, candidate_fill: str, *, judges,
+                     cache=None, post=None) -> dict:
+    """Blind A/B across MODELS, each asked in both orders.
+
+    Same debias as the single-model path: a model that follows the position
+    answers the same LETTER twice and scores `inconsistent`. The verdict is the
+    majority across models, and the panel's own disagreement is reported —
+    a unanimous panel is one opinion wearing hats.
+    """
+    from lyrics.bench import panel as _panel
+
+    truth_text = _completed(item, item["target"]["text"])
+    cand_text = _completed(item, candidate_fill)
+    poster = post or _panel.post
+
+    by_judge: Dict[str, dict] = {}
+    for j in judges:
+        sides = []
+        for cand_first in (True, False):
+            first, second = ((cand_text, truth_text) if cand_first
+                             else (truth_text, cand_text))
+            messages = _prompt(item, first, second, PANEL_QUESTION)
+            votes = _panel.collect_votes([j], messages, post=poster, cache=cache)
+            if not votes:
+                sides.append(None)
+                continue
+            w = votes[0]["winner"]
+            if w == "TIE":
+                sides.append("tie")
+            else:
+                sides.append("candidate" if ((w == "A") == cand_first) else "truth")
+        by_judge[j["id"]] = {"verdict": _lens_verdict(sides[0], sides[1]),
+                             "model": j["model"], "orders": [s or "none"
+                                                             for s in sides]}
+    verdicts = [v["verdict"] for v in by_judge.values()
+                if v["verdict"] in ("candidate", "truth")]
+    dis = 0.0
+    if verdicts:
+        top = max(verdicts.count("candidate"), verdicts.count("truth"))
+        dis = 1.0 - top / len(verdicts)
+    return {"win": _majority(by_judge), "byJudge": by_judge, "disagreement": dis}
+
+
 def win_rate(rows: List[dict]) -> Optional[float]:
     """Share of separated pairs the candidate won (ties/abstains excluded, and
     their count is reported alongside so a thin sample is visible)."""
