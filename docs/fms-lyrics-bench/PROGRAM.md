@@ -246,3 +246,30 @@ numbers and hashes only.
   - **All arm numbers taken before this fix are void** and are being re-measured
     on the clean benchmark. This is why the pre-fix menu-vs-constrained result is
     NOT recorded as a verdict.
+- **2026-07-26 — I3a stage-1 verdict on the CLEAN benchmark (policy v2).** Full
+  reasoning: [`docs/superpowers/specs/2026-07-26-fms-i3a-rhyme-word-verdict.md`](../superpowers/specs/2026-07-26-fms-i3a-rhyme-word-verdict.md).
+  `rhyme-floor` exact 10.7% / perfect 93.0% / depth 1.14 (n=400);
+  `llm-constrained` **37.3%** / 35.7% / 0.84; `prompt-rhyme-menu` 32.0% / 52.7% /
+  0.95 (n=150 each). Both arms beat the floor on `exact` with separated
+  intervals (+26.6 and +21.3 pts) and both **FAIL the frozen bar** on the
+  `multi_depth` clause. **The bar is not being reinterpreted to let them pass.**
+  - The headline finding: **a dictionary out-rhymes a language model.** Free
+    phonology hits a perfect rhyme 93% of the time; the LLM arms manage 36–53%.
+    The LLM's edge is semantic (it knows what the line is about, so it finds the
+    artist's actual word 3–3.5× more often); phonology's edge is formal. No arm
+    yet combines them — the rhyme menu was the first try and it bought +16.7 pts
+    of `rhyme_perfect` (separated) with no measurable `exact` movement.
+  - **Open owner decision:** the depth clause may be mis-specified. The floor
+    maximizes `multi_depth` by construction, with no regard for meaning, so
+    requiring a writing arm to match it may be requiring the wrong thing; the
+    clause was intended as an anti-blandness tripwire, which argues for
+    "no regression vs the previous best ARM" rather than vs the floor. Keeping
+    the bar means no prompt arm has graduated and the next move is an arm that
+    genuinely fuses the two strengths. Either way it is a recorded decision, not
+    an edit.
+  - **Runs hygiene:** all 17 pre-policy-v2 runs sidelined to `runs/_policy-v1/`;
+    the scoreboard now shows only comparable numbers.
+  - **Not measured:** `nbest-rerank` — its stage-1 run was killed once the
+    benchmark defect surfaced, rather than pay for items about to be voided. It
+    is the one planned arm still without a number. Stage-2 confirmation at n=400
+    was also not reached (arms are at n=150, ±8 pts).

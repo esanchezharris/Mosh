@@ -6,15 +6,16 @@ to load every session. **Nothing was edited** — each note is verbatim, one fil
 CLAUDE.md keeps the standing rules (prime directives, stage gates, and the gotchas that still bite).
 This is the history: *why* a thing is the way it is, and what it cost to learn.
 
-48 notes, 2026-06-18 → 2026-07-26.
-
-| date | note |
-|---|---|
 49 notes, 2026-06-18 → 2026-07-26.
 
 | date | note |
 |---|---|
+50 notes, 2026-06-18 → 2026-07-26.
+
+| date | note |
+|---|---|
 | 2026-07-26 | [UI-REACH closed — 16 → 0, and two commands that were never about a button (2026-07-26)](2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md) |
+| 2026-07-26 | [I3a — the pivot to the rhyme word, and a benchmark that was 32% junk (2026-07-26).](2026-07-26-i3a-pivot-to-the-rhyme-word-and-a-third-of-the-benchmark-was-junk.md) |
 | 2026-07-26 | [I2c — the calibration sitting stops being a competition (un-blinded, per-fill acceptability) (2026-07-26).](2026-07-26-i2c-un-blinded-acceptability-sitting-replaces-forced-choice.md) |
 | 2026-07-25 | [FMS lyrics-bench — I2: judge stack + owner blind calibration (the HALT gate) (2026-07-25).](2026-07-25-fms-lyrics-bench-i2-judge-stack-calibration-halt-gate.md) |
 | 2026-07-24 | [FMS lyrics-first program — I1: infill bench (corpus + masks + metrics + arms + baselines) (2026-07-24).](2026-07-24-fms-lyrics-first-program-i1-infill-bench-corpus-arms-baselin.md) |
