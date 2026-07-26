@@ -55,6 +55,7 @@ _ARM_BEHAVIOUR_VERSIONS = {
     "oracle": "v1", "freq-floor": "v1", "llm-zeroshot": "v1",
     "llm-constrained": "v1", "product-llm": "v2",
     "rhyme-floor": "v2", "prompt-rhyme-menu": "v1", "nbest-rerank": "v1",
+    "fusion-rerank": "v1",
 }
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),

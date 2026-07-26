@@ -39,7 +39,8 @@ SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.
 # An arm missing from here fails with a bare "'NoneType' object is not callable"
 # AND silently escapes the spend check — both of which happened to
 # prompt-rhyme-menu on its first run.
-API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu", "nbest-rerank")
+API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
+             "nbest-rerank", "fusion-rerank")
 
 
 def _load_corpus() -> list:

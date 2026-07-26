@@ -245,8 +245,106 @@ with tempfile.TemporaryDirectory() as td:
           r["candidates"] == [], str(r))
 
 
+# ── fusion-rerank: phonology proposes, the LLM disposes ─────────────────────────
+# Measured ceiling on 150 real items: the artist's word is in the LLM's own top-5
+# 48.0% of the time and in the phonology menu 40.0%, but in EITHER 64.7% — against
+# 37.3% actually picked. The two sources miss different words, so the union is
+# worth +27 pts if something can rank it. The owner's ear said that ranking must
+# be by MEANING: a perfect rhyme that ignores sense was rejected 71% of the time.
+FUSION_CALLS = []
+
+
+def fusion_chat(messages, **kw):
+    FUSION_CALLS.append(json.dumps(messages))
+    body = json.dumps(messages).lower()
+    if "rank" in body or "makes sense" in body or "meaning" in body:
+        # the rerank turn — put a menu word first to prove the union is used
+        return {"ok": True, "content": json.dumps({"fills": ["train", "pain"]})}
+    return {"ok": True, "content": json.dumps({"fills": ["pain", "chain"]})}
+
+
+with tempfile.TemporaryDirectory() as td:
+    r = arms.ARMS["fusion-rerank"](RHYME_ITEM, ctx(fusion_chat, td))
+    out = [c["text"] for c in r["candidates"]]
+    check("fusion: makes a generation call AND a rerank call",
+          len(FUSION_CALLS) == 2, f"{len(FUSION_CALLS)} calls")
+    check("fusion: the GENERATION call is byte-identical to llm-constrained's, "
+          "so it is a cache hit and costs nothing extra",
+          FUSION_CALLS[0] == json.dumps(
+              arms._llm_messages(RHYME_ITEM, ctx(fusion_chat, td), constrained=True)),
+          FUSION_CALLS[0][:120])
+    rerank = FUSION_CALLS[1]
+    check("fusion: the rerank prompt carries the LLM's own candidates",
+          "chain" in rerank, rerank[-260:])
+    check("fusion: the rerank prompt also carries phonology's candidates",
+          any(w in rerank for w in ("pane", "train")), rerank[-260:])
+    check("fusion: the rerank prompt asks for MEANING, and says rhyme is settled",
+          ("meaning" in rerank.lower() or "sense" in rerank.lower())
+          and "rhyme" in rerank.lower(), rerank[-300:])
+    check("fusion: returns the reranked order", out[:2] == ["train", "pain"], str(out))
+    check("fusion: reports what each source contributed",
+          isinstance(r["meta"].get("nSemantic"), int)
+          and isinstance(r["meta"].get("nMenu"), int)
+          and isinstance(r["meta"].get("nPool"), int), str(r.get("meta")))
+
+# The reranker must not invent: a word outside the pool is dropped and counted.
+with tempfile.TemporaryDirectory() as td:
+    def invents(messages, **kw):
+        body = json.dumps(messages).lower()
+        if "rank" in body or "meaning" in body:
+            return {"ok": True, "content": json.dumps(
+                {"fills": ["helicopter", "pain"]})}
+        return {"ok": True, "content": json.dumps({"fills": ["pain"]})}
+    r = arms.ARMS["fusion-rerank"](RHYME_ITEM, ctx(invents, td))
+    out = [c["text"] for c in r["candidates"]]
+    check("fusion: a reranked word that was never in the pool is dropped",
+          "helicopter" not in out, str(out))
+    check("fusion: invention is counted, not silently swallowed",
+          r["meta"].get("invented") == 1, str(r.get("meta")))
+
+# Degradation, both directions.
+with tempfile.TemporaryDirectory() as td:
+    def rerank_dies(messages, **kw):
+        body = json.dumps(messages).lower()
+        if "rank" in body or "meaning" in body:
+            return {"ok": False, "error": "boom"}
+        return {"ok": True, "content": json.dumps({"fills": ["pain", "chain"]})}
+    r = arms.ARMS["fusion-rerank"](RHYME_ITEM, ctx(rerank_dies, td))
+    check("fusion: rerank failure falls back to the generated order, not empty",
+          [c["text"] for c in r["candidates"]][:2] == ["pain", "chain"], str(r))
+    check("fusion: the fallback is recorded", r["meta"].get("reranked") is False,
+          str(r.get("meta")))
+
+with tempfile.TemporaryDirectory() as td:
+    def gen_dies(messages, **kw):
+        body = json.dumps(messages).lower()
+        if "rank" in body or "meaning" in body:
+            return {"ok": True, "content": json.dumps({"fills": ["train"]})}
+        return {"ok": False, "error": "boom"}
+    r = arms.ARMS["fusion-rerank"](RHYME_ITEM, ctx(gen_dies, td))
+    check("fusion: generation failure still yields phonology candidates",
+          [c["text"] for c in r["candidates"]][:1] == ["train"], str(r))
+
+# Same leak rule as the menu arm: the pool MAY contain the true word — finding it
+# is the skill — but it must not CHANGE when the hidden answer changes.
+with tempfile.TemporaryDirectory() as td:
+    other = {**RHYME_ITEM, "target": {**RHYME_ITEM["target"], "text": "chain"}}
+    p1 = arms.ARMS["fusion-rerank"](RHYME_ITEM, ctx(fusion_chat, td))["meta"]["pool"]
+    p2 = arms.ARMS["fusion-rerank"](other, ctx(fusion_chat, td))["meta"]["pool"]
+    check("fusion: the pool is IDENTICAL when the hidden answer changes",
+          p1 == p2, f"{p1} vs {p2}")
+
+with tempfile.TemporaryDirectory() as td:
+    a = [c["text"] for c in arms.ARMS["fusion-rerank"](
+        RHYME_ITEM, ctx(fusion_chat, td))["candidates"]]
+    b = [c["text"] for c in arms.ARMS["fusion-rerank"](
+        RHYME_ITEM, ctx(fusion_chat, td))["candidates"]]
+    check("fusion: deterministic under the cache", a == b, f"{a} vs {b}")
+
+
 # ── registry hygiene ────────────────────────────────────────────────────────────
-for name in ("rhyme-floor", "prompt-rhyme-menu", "nbest-rerank"):
+for name in ("rhyme-floor", "prompt-rhyme-menu", "nbest-rerank",
+             "fusion-rerank"):
     check(f"{name}: registered with a version",
           name in arms.ARMS and arms.ARM_VERSIONS.get(name),
           str(arms.ARM_VERSIONS.get(name)))

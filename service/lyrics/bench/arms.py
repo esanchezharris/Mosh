@@ -12,6 +12,7 @@ runner_test's spy-chat check.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -223,12 +224,19 @@ def _parse_fills(resp: dict) -> List[str]:
     return [f for f in fills if isinstance(f, str)] if isinstance(fills, list) else []
 
 
-def _llm_arm(item: dict, ctx: ArmContext, constrained: bool) -> dict:
+def _llm_messages(item: dict, ctx: ArmContext, constrained: bool) -> List[dict]:
+    """The generation turn, factored out so `fusion-rerank` can issue the exact
+    same call `llm-constrained` does — byte-identical messages mean the response
+    cache HITS and the fusion's generation half costs nothing extra."""
     prompt = _context_block(item)
     if constrained:
         prompt += "\n" + _constraint_block(item)
-    messages = [{"role": "system", "content": _SYSTEM % ctx.k},
-                {"role": "user", "content": prompt}]
+    return [{"role": "system", "content": _SYSTEM % ctx.k},
+            {"role": "user", "content": prompt}]
+
+
+def _llm_arm(item: dict, ctx: ArmContext, constrained: bool) -> dict:
+    messages = _llm_messages(item, ctx, constrained)
     resp = ctx.cached_chat(messages, max_tokens=300, temperature=0.9)
     fills = _parse_fills(resp)
     return {"candidates": _dedupe_cap(fills, ctx.k),
@@ -309,6 +317,84 @@ def arm_nbest_rerank(item: dict, ctx: ArmContext) -> dict:
     ranked = sorted(kept, key=lambda f: (-_depth_of(item, f, ctx), seen.index(f)))
     return {"candidates": _dedupe_cap(ranked, ctx.k),
             "meta": {"drawn": drawn, "kept": len(kept)}}
+
+
+_RERANK_SYSTEM = (
+    "You are a skilled rap lyricist choosing the best word to finish a bar. "
+    "Every option below ALREADY rhymes correctly — rhyme is settled, do not "
+    "judge on it. Choose purely on MEANING: which word actually makes sense in "
+    "this verse, sounds like something a real artist would say here, and lands "
+    "an idea. Reply ONLY as JSON: {\"fills\": [\"...\", ...]} — up to %d of the "
+    "given options, best first. Use ONLY words from the list. Slang and "
+    "explicit language are normal here.")
+
+
+@register("fusion-rerank", "v1")
+def arm_fusion_rerank(item: dict, ctx: ArmContext) -> dict:
+    """Phonology proposes, the LLM disposes — ranked on MEANING.
+
+    Measured ceiling on 150 real dev items: the artist's word sits in the LLM's
+    own top-5 48.0% of the time and in the phonology menu 40.0%, but in EITHER
+    **64.7%**, against 37.3% actually picked. The two sources miss *different*
+    words, so the union is worth +27 points if anything can rank it.
+
+    Ranking on MEANING rather than rhyme is not a guess: the owner's sitting
+    rated a perfect rhyme that ignores sense as not working 71% of the time,
+    while the artist's real word read as keepable 86% of the time. So the
+    reranker is told rhyme is already settled.
+
+    Why this is not `prompt-rhyme-menu` again: that arm put the menu in the
+    GENERATION prompt, which anchored the model onto dictionary rhymes and moved
+    `rhyme_perfect` +16.7 pts without moving `exact`. Here generation stays
+    unanchored — the identical call `llm-constrained` makes, so it is a cache
+    hit — and the menu only widens the pool that a second pass ranks.
+    """
+    gen = _llm_arm(item, ctx, constrained=True)
+    semantic = [c["text"] for c in gen.get("candidates", [])]
+
+    menu = _rhyme_menu(item, ctx, max_n=40)
+    ranked_menu = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:12]
+
+    # Order the pool by hash, not by source. Listing the model's own guesses
+    # first would invite it to simply re-pick them, which is the anchoring that
+    # sank the menu arm — in reverse.
+    pool: List[str] = []
+    seen = set()
+    for word in sorted(semantic + ranked_menu,
+                       key=lambda w: hashlib.blake2b(w.lower().encode("utf-8"),
+                                                     digest_size=8).digest()):
+        if word and word.lower() not in seen:
+            seen.add(word.lower())
+            pool.append(word)
+    meta = {"nSemantic": len(semantic), "nMenu": len(ranked_menu),
+            "nPool": len(pool), "pool": pool, "reranked": False, "invented": 0}
+    if not pool:
+        return {"candidates": [], "meta": meta}
+
+    body = (_context_block(item) + "\n" + _constraint_block(item)
+            + "\n\nOptions (all of these already rhyme): " + ", ".join(pool)
+            + "\nRank them by MEANING in this verse.")
+    messages = [{"role": "system", "content": _RERANK_SYSTEM % ctx.k},
+                {"role": "user", "content": body}]
+    resp = ctx.cached_chat(messages, max_tokens=200, temperature=0.0)
+    picks = _parse_fills(resp)
+
+    lowered = {w.lower(): w for w in pool}
+    kept, invented = [], 0
+    for p in picks:
+        key = (p or "").strip().lower()
+        if key in lowered:
+            kept.append(lowered[key])
+        elif key:
+            invented += 1          # a word that was never on offer: not a rerank
+    meta["invented"] = invented
+    if not kept:
+        # Reranker unusable — fall back to the generation order, which is what
+        # llm-constrained would have returned. Degrading to the pool's hash
+        # order would be worse than the arm we already have.
+        return {"candidates": _dedupe_cap(semantic or pool, ctx.k), "meta": meta}
+    meta["reranked"] = True
+    return {"candidates": _dedupe_cap(kept, ctx.k), "meta": meta}
 
 
 def _depth_of(item: dict, fill: str, ctx: ArmContext) -> int:
