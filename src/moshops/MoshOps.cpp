@@ -9547,10 +9547,18 @@ juce::var MoshOps::cmdBounceLayerToClip (const juce::var& args)
     eng.saveIfDirty();   // A2 — pre-risky-op save (bounce commits the render to a clip)
     // Bounce = accept_render then mark the layer bounced (the render becomes a
     // plain clip on the neural lane; lineage stays in the RenderLayer link).
+    // The relabel is undo-tracked, like cmdFreezeLayer's — it must not outlive the accept it
+    // describes. Opening the transaction HERE (not around the setProperty) keeps one command =
+    // one undo step on both shapes: on the landing path cmdAcceptRender immediately re-names
+    // this same still-empty transaction, so the landed clip and the label undo together; on the
+    // no-op relabel paths (whole-clip wave / MIDI-beneath, where accept returns early without
+    // opening one) the label gets its own step instead of being appended to whatever command
+    // ran before it — which undo would then destroy along with the label.
+    beginTxn ("bounce_layer_to_clip");
     auto r = cmdAcceptRender (args);
     if (! (bool) r.getProperty ("ok", false)) return r;
     if (auto node = findRenderLayer (args.getProperty ("clipId", var()).toString()); node.isValid())
-        node.setProperty (ids::status, "bounced", nullptr);
+        node.setProperty (ids::status, "bounced", &undoManager());
     logLine ("bounce_layer_to_clip", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("bounce_layer_to_clip");
