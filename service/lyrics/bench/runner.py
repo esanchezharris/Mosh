@@ -70,6 +70,10 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
         "itemsSha": _items_sha(items),
         "emptyCandidates": empty,
         "metrics": metrics.aggregate(rows),
+        # The memorization tripwire: a gain that exists only in the high-fame
+        # bucket is recall, not writing. Costs nothing — `views` is already on
+        # every scored row.
+        "metricsByFame": metrics.aggregate_by_fame(rows),
         "cache": dict(ctx.cache.stats) if ctx.cache is not None else None,
     }
     with open(os.path.join(out_dir, f"summary-{run_name or arm_name}.json"),

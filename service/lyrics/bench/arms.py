@@ -47,6 +47,43 @@ class ArmContext:
         return self.cache.cached_call(payload, lambda: self.chat(messages, **kw))
 
 
+def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
+    """Real rhymes of the item's PARTNER word at the required syllable count.
+
+    Derived from `constraints.rhymeWith` and nothing else — never from the held
+    -out target. The menu is allowed to CONTAIN the true word (it is one of the
+    partner's rhymes, and finding it there is the skill being measured); what
+    would be a leak is the menu changing when the hidden answer changes, which
+    `arms_test` pins directly.
+
+    Shared by the floor and the prompt arm so the two cannot drift apart — the
+    comparison between them is only meaningful if they see the same candidates.
+    """
+    con = item.get("constraints") or {}
+    partner = con.get("rhymeWith")
+    if not partner or ctx.pron is None:
+        return []
+    syllables = con.get("syllables") if item.get("granularity") in ("word", "rhyme") \
+        else None
+    strictness = con.get("rhymeStrictness", "slant")
+    # rhyme_search scans the whole lexicon, so it is the cost of a sweep, and
+    # the floor and the prompt arm ask for the SAME menus over the same items.
+    key = (id(ctx.pron), partner.lower(), strictness, syllables, max_n)
+    if key in _MENU_MEMO:
+        return _MENU_MEMO[key]
+    try:
+        menu = ctx.pron.rhyme_search(partner, strictness, max_n=max_n,
+                                     syllables=syllables)
+    except Exception:  # noqa: BLE001 — a lexicon miss is an empty menu, not a crash
+        menu = []
+    out = [w for w in menu if w]
+    _MENU_MEMO[key] = out
+    return out
+
+
+_MENU_MEMO: Dict[tuple, List[str]] = {}
+
+
 def _dedupe_cap(fills: List[str], k: int) -> List[dict]:
     seen, out = set(), []
     for f in fills:
@@ -81,6 +118,44 @@ def arm_freq_floor(item: dict, ctx: ArmContext) -> dict:
     else:
         text = word
     return {"candidates": [{"text": text}], "meta": {"word": word}}
+
+
+@register("rhyme-floor", "v1")
+def arm_rhyme_floor(item: dict, ctx: ArmContext) -> dict:
+    """The HONEST floor for rhyme items: real rhymes of the partner, commonest
+    first. Zero API.
+
+    `freq-floor` answers with a frequent word that usually does not rhyme at
+    all — it scores 0.0 on rhyme items, which silently flatters every LLM arm
+    compared against it. The question an arm actually has to answer is not "can
+    you rhyme" (phonology can, for free) but "can you pick a BETTER rhyme than
+    the obvious one", and that needs this baseline to be visible.
+    """
+    menu = _rhyme_menu(item, ctx, max_n=200)
+    if not menu:
+        return arm_freq_floor(item, ctx)          # no partner → the old floor
+    # `rhyme_search` already returns PERFECT rhymes before slant ones. Sorting
+    # the whole menu by frequency throws that ordering away — measured on 400
+    # real items it cost the floor 15.5% rhyme_perfect against llm-constrained's
+    # 50%, i.e. it quietly flattered the very arms this floor exists to test. A
+    # floor should be as strong as free phonology can make it.
+    order = {w: i for i, w in enumerate(menu)}
+    grade = _perfect_set(item, menu, ctx)
+    ranked = sorted(menu, key=lambda w: (0 if w in grade else 1,
+                                         -ctx.freq.get(w, 0), order[w]))
+    return {"candidates": _dedupe_cap(ranked, ctx.k),
+            "meta": {"menuSize": len(menu), "perfect": len(grade)}}
+
+
+def _perfect_set(item: dict, menu: List[str], ctx: ArmContext) -> set:
+    from phonology.core import rhyme_grade
+    partner = (item.get("constraints") or {}).get("rhymeWith") or ""
+    pp = ctx.pron.phones(partner) if partner else None
+    if not pp:
+        return set()
+    return {w for w in menu
+            if (ctx.pron.phones(w) and rhyme_grade(ctx.pron.phones(w), pp)
+                == "perfect")}
 
 
 # ── LLM prompt arms ──────────────────────────────────────────────────────────────
@@ -158,6 +233,80 @@ def arm_llm_zeroshot(item: dict, ctx: ArmContext) -> dict:
 @register("llm-constrained", "v1")
 def arm_llm_constrained(item: dict, ctx: ArmContext) -> dict:
     return _llm_arm(item, ctx, constrained=True)
+
+
+# ── I3a: the rhyme-word optimization arms ────────────────────────────────────────
+
+@register("prompt-rhyme-menu", "v1")
+def arm_prompt_rhyme_menu(item: dict, ctx: ArmContext) -> dict:
+    """`llm-constrained` plus the actual list of words that rhyme.
+
+    The bet: most of the arm's failure at the rhyme slot is RECALL, not taste —
+    the model cannot enumerate rhymes of an arbitrary word reliably, while the
+    phonology engine can do it exactly and for free. Handing over the menu
+    changes the model's job from remembering to choosing. The menu is capped and
+    frequency-ordered so it reads as a palette rather than a wall.
+    """
+    menu = _rhyme_menu(item, ctx, max_n=40)
+    prompt = _context_block(item) + "\n" + _constraint_block(item)
+    if menu:
+        ordered = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:24]
+        prompt += ("\nWords that genuinely rhyme here (you may use one, or any "
+                   "other word that rhymes as well): " + ", ".join(ordered))
+    messages = [{"role": "system", "content": _SYSTEM % ctx.k},
+                {"role": "user", "content": prompt}]
+    resp = ctx.cached_chat(messages, max_tokens=300, temperature=0.9)
+    return {"candidates": _dedupe_cap(_parse_fills(resp), ctx.k),
+            "meta": {"provider": resp.get("provider"), "model": resp.get("model"),
+                     "menu": menu}}
+
+
+NBEST_DRAWS = 5
+
+
+def _passes_constraints(item: dict, fill: str, ctx: ArmContext) -> bool:
+    """The same deterministic checks the scoreboard grades on — reused as a hard
+    gate so the arm cannot be rewarded for a candidate the metric will reject."""
+    from lyrics.bench.metrics import score_item
+    row = score_item(item, [fill], ctx.pron)
+    fits = [row[k] for k in ("syl_fit", "rhyme_fit") if row.get(k) is not None]
+    return bool(fits) and all(fits)
+
+
+@register("nbest-rerank", "v1")
+def arm_nbest_rerank(item: dict, ctx: ArmContext) -> dict:
+    """N independent draws, hard-gated by the validator, then ranked.
+
+    Reports `drawn` and `kept` so the gate's contribution is measured rather
+    than assumed: if kept ≈ drawn the validator is buying nothing here, and the
+    extra draws are the only thing working.
+    """
+    seen: List[str] = []
+    drawn = 0
+    for i in range(NBEST_DRAWS):
+        prompt = _context_block(item) + "\n" + _constraint_block(item)
+        messages = [{"role": "system", "content": _SYSTEM % ctx.k},
+                    {"role": "user", "content": prompt},
+                    # Vary the cache key per draw; without this every "independent"
+                    # draw would be one cached response wearing five hats.
+                    {"role": "system", "content": f"draw {i + 1}"}]
+        resp = ctx.cached_chat(messages, max_tokens=300, temperature=1.0)
+        for fill in _parse_fills(resp):
+            drawn += 1
+            if fill not in seen:
+                seen.append(fill)
+    kept = [f for f in seen if _passes_constraints(item, f, ctx)]
+    ranked = sorted(kept, key=lambda f: (-_depth_of(item, f, ctx), seen.index(f)))
+    return {"candidates": _dedupe_cap(ranked, ctx.k),
+            "meta": {"drawn": drawn, "kept": len(kept)}}
+
+
+def _depth_of(item: dict, fill: str, ctx: ArmContext) -> int:
+    """Multisyllabic rhyme depth — the tie-break that prefers a SKILLED rhyme
+    over the first merely-valid one, and the same axis the scoreboard watches to
+    catch an arm drifting toward blandness."""
+    from lyrics.bench.metrics import _rhyme_metrics
+    return _rhyme_metrics(item, fill, ctx.pron).get("multi_depth") or 0
 
 
 # ── the shipped product loop as an arm ───────────────────────────────────────────

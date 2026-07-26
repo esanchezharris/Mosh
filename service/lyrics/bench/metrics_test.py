@@ -157,5 +157,42 @@ check("aggregate: per-granularity means with None-skipping",
 check("'Cent,' and 'cent' score identically (fills tokenized before pronouncing), 3x",
       all(metrics.score_item(it, ["cent"], PRON) == row for _ in range(3)))
 
+# ---- I3a: the fame split is the memorization tripwire -------------------------
+# Exact-match against the real word is objective but not automatically VALID:
+# on a famous song a model can score by recall rather than skill. Every scored
+# row already carries `views`, so the split costs nothing — and the low-fame
+# bucket, where recall cannot help, is the headline.
+FAME_ROWS = [
+    {"granularity": "rhyme", "views": 5, "exact": 0, "multi_depth": 1},
+    {"granularity": "rhyme", "views": 900, "exact": 0, "multi_depth": 1},
+    {"granularity": "rhyme", "views": 2_000_000, "exact": 1, "multi_depth": 2},
+    {"granularity": "rhyme", "views": 80_000, "exact": 1, "multi_depth": 2},
+]
+split = metrics.aggregate_by_fame(FAME_ROWS)
+check("fame split: both buckets reported", set(split) == {"low", "high"}, str(split))
+check("fame split: low-fame bucket holds the un-memorizable items",
+      split["low"]["rhyme"]["n"] == 2 and split["low"]["rhyme"]["exact"] == 0.0,
+      str(split["low"]))
+check("fame split: high-fame bucket separated, not discarded",
+      split["high"]["rhyme"]["n"] == 2 and split["high"]["rhyme"]["exact"] == 1.0,
+      str(split["high"]))
+check("fame split: threshold is a named constant, not a magic number",
+      isinstance(metrics.FAME_THRESHOLD, int) and metrics.FAME_THRESHOLD > 0,
+      str(getattr(metrics, "FAME_THRESHOLD", None)))
+check("fame split: a memorization gap is computable from the two buckets",
+      split["high"]["rhyme"]["exact"] - split["low"]["rhyme"]["exact"] == 1.0)
+check("fame split: rows with no views land in low-fame (never silently dropped)",
+      metrics.aggregate_by_fame(
+          [{"granularity": "word", "exact": 1}])["low"]["word"]["n"] == 1)
+check("fame split: empty bucket is an empty dict, not a crash",
+      metrics.aggregate_by_fame([]) == {"low": {}, "high": {}})
+check("fame split: deterministic",
+      all(metrics.aggregate_by_fame(FAME_ROWS) == split for _ in range(3)))
+
+# multi_depth is the anti-blandness axis and must survive aggregation, since a
+# rise in `exact` paid for with a drop here is a regression toward generic.
+check("multi_depth is aggregated, not dropped",
+      split["high"]["rhyme"].get("multi_depth") == 2.0, str(split["high"]))
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

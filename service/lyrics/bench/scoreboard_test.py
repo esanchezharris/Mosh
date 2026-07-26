@@ -68,5 +68,28 @@ check("trusted metric named once calibrated",
       "UNCALIBRATED" not in md_cal and "constrained_fit" in md_cal
       and "0.78" in md_cal)
 
+# ---- I3a: multi_depth column + the low-fame headline --------------------------
+FAME_ENTRY = [{"slice": "dev", "runDir": "r1", "summary": {
+    "arm": {"name": "prompt-rhyme-menu"}, "emptyCandidates": 0,
+    "metrics": {"rhyme": {"n": 100, "exact": 0.50, "multi_depth": 1.8}},
+    "metricsByFame": {
+        "low": {"rhyme": {"n": 60, "exact": 0.30, "multi_depth": 1.9}},
+        "high": {"rhyme": {"n": 40, "exact": 0.80, "multi_depth": 1.6}}}}}]
+md_f = scoreboard.render(FAME_ENTRY, trusted=None)
+check("scoreboard: multi_depth is a column, not buried in the per-run json",
+      "multi_depth" in md_f, md_f[:300])
+check("scoreboard: multi_depth value shown as a depth, not a percentage",
+      "1.9" in md_f or "1.8" in md_f, md_f)
+check("scoreboard: the LOW-fame bucket is reported",
+      "low-fame" in md_f.lower(), md_f)
+check("scoreboard: the high-fame bucket is shown too, not hidden",
+      "high-fame" in md_f.lower())
+check("scoreboard: the memorization gap is stated, not left to the reader",
+      "memoriz" in md_f.lower(), md_f)
+check("scoreboard: an entry without a fame split still renders",
+      "rhyme" in scoreboard.render(ENTRIES, trusted=None))
+check("scoreboard: fame render deterministic",
+      all(scoreboard.render(FAME_ENTRY, trusted=None) == md_f for _ in range(3)))
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

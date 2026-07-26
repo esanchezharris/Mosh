@@ -171,3 +171,53 @@ numbers and hashes only.
      caps per-song contribution globally; the same draw now reaches 20 songs at
      no extra API cost. (Same class as the earlier limit-bias bug, and fixed in
      `sampling` rather than at the call site for the same reason.)
+- **2026-07-26 — PIVOT (I3a): optimize at the RHYME WORD; the line-level human
+  gate is suspended.** Owner's call, made mid-sitting: *"why are we starting with
+  blocking out whole bars instead of individual words? … I feel like I'm really
+  shooting in the dark."* The scoreboard agrees, and the argument is stronger
+  than the intuition:
+  - **At line level the deterministic instrument is pegged.** `exact` is not even
+    defined for a whole bar (there is no single correct line), and
+    `constrained_fit` reads **100.0** for the shipped product loop because it
+    always hits the syllable target and rhymes. Nothing can be distinguished, so
+    the human *is* the instrument — which is exactly what "shooting in the dark"
+    feels like from the inside.
+  - **At the rhyme word the metric has range and costs nothing**: exact runs
+    floor → 28.9 (zeroshot) → 47.4 (constrained) → 100 (oracle), with
+    `rhyme_perfect` and `multi_depth` as craft axes alongside. Sample sizes had
+    been lopsided — floor and oracle on 2000 items, the real LLM arms on 37–38
+    (±16% CIs). We had built a human gate on the weakest ground truth before
+    extracting the free signal from the strongest.
+  - **Sitting 4 stopped at 11 of 24 pairs.** Those labels are archived at
+    `calibration/archive/sitting4-partial-2026-07-26/`. Worth noting for the I2c
+    instrument: the ratings were **not** one-sided (11 passable / 7 no / 4 keep),
+    so per-fill acceptability did not reproduce sitting 1's collapse. The
+    instrument is sound; it was pointed at the wrong granularity.
+  - **The I2c page is retained, not discarded.** It is the right instrument for
+    when human judgement is genuinely required — which, after this pivot, is a
+    ~15-pair validity check ("does the cheap metric's winner match your ear?")
+    rather than a 24-pair measurement session.
+
+  **Frozen I3a bar (set BEFORE the sweep was read):** an arm graduates only if,
+  **on the low-fame bucket**, it beats `rhyme-floor` on `exact` with
+  non-overlapping 95% intervals, **and** does not regress `multi_depth`.
+  Prompt-side is declared plateaued after two consecutive arms fail to clear it;
+  that plateau, measured against the oracle ceiling, is the evidence that would
+  justify a training run — not before.
+
+  **Validity tripwires, because exact-match is objective but not automatically
+  valid:** (1) every result splits low/high fame (`metrics.FAME_THRESHOLD`,
+  50k Genius views) with **low-fame as the headline**, so a gain that is really
+  recall shows up as a high-fame-only gain; (2) `rhyme-floor` replaces the
+  non-rhyming `freq-floor` as the comparison, since a floor that scores 0.0
+  flatters every arm measured against it; (3) `multi_depth` is promoted to a
+  scoreboard column as the anti-blandness axis — an arm that raises `exact`
+  while dropping depth is drifting toward generic, and that is now visible.
+- **2026-07-26 — `rhyme-floor` measured, n=400 dev rhyme items:** exact **4.0%**,
+  topk 16.8%, rhyme_fit **100%** (by construction), rhyme_perfect 15.5%,
+  multi_depth 0.515. Two honest notes: the low/high split is 387/13 on this draw,
+  so the memorization diagnostic is thin at rhyme granularity until more famous
+  items are drawn; and a grade-ordering fix to the floor (perfect rhymes before
+  slant, rather than pure frequency order) **changed 0 of 400 top-1 picks** — it
+  is correct in principle and unit-proven, but had no measurable effect here and
+  is not claimed as an improvement.

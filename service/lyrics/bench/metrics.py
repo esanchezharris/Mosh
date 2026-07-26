@@ -126,6 +126,29 @@ _AGG_KEYS = ("exact", "topk", "syl_fit", "rhyme_fit", "rhyme_perfect",
              "multi_depth", "stress_fit", "constrained_fit")
 
 
+# Genius views. Below this a song is obscure enough that an LLM reproducing its
+# exact word is far more likely to be skill than recall — which is why the
+# low-fame bucket, not the pooled number, is the headline for any arm claim.
+FAME_THRESHOLD = 50_000
+
+
+def aggregate_by_fame(rows: List[dict]) -> dict:
+    """`aggregate` split into low/high fame buckets.
+
+    Exact-match is objective but not automatically VALID: on a famous song a
+    model can score by memorization rather than by writing well. Every scored
+    row already carries `views`, so this split costs nothing and turns that
+    threat into a visible number — a gain that appears only in the high bucket
+    is recall, and the difference between the buckets is the memorization gap.
+
+    Rows with no `views` count as LOW fame: unknown provenance must never be
+    quietly credited to the bucket where recall is possible.
+    """
+    low = [r for r in rows if (r.get("views") or 0) < FAME_THRESHOLD]
+    high = [r for r in rows if (r.get("views") or 0) >= FAME_THRESHOLD]
+    return {"low": aggregate(low), "high": aggregate(high)}
+
+
 def aggregate(rows: List[dict]) -> dict:
     out: dict = {}
     for gran in sorted({r["granularity"] for r in rows}):
