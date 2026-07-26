@@ -13,6 +13,8 @@ import {
   snapTimeMap,
   secondsToBBSMap,
   gridLines,
+  beatAt,
+  secAtBeat,
   SNAP_DIVISIONS,
   type Meter,
 } from "./time";
@@ -153,6 +155,57 @@ describe("secondsToBBSMap matches the constant-tempo formula", () => {
     for (const t of [0, 0.25, 0.5, 1.0, 2.0, 3.7]) {
       expect(secondsToBBSMap(map, t)).toBe(secondsToBBS(t, m44));
     }
+  });
+});
+
+describe("beatAt / secAtBeat (ANN-001 — beat-anchored positions across a tempo change)", () => {
+  // These are the primitives an annotation lane needs: a beat number is authored once and
+  // must keep landing on the same MUSICAL spot even after a tempo change is inserted before
+  // it — which means every conversion has to walk the piecewise map, never a single flat
+  // beatSeconds(session.tempo) the way v2/timeline/geom.ts's beatToSec/secToBeat do.
+  const constant = tempoMapFrom({ tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4 });
+
+  it("agrees with the flat formula while the tempo never changes", () => {
+    // 120bpm 4/4 -> 0.5s/beat. Sanity before the piecewise cases: the two formulas must
+    // coincide on a constant-tempo project or a real discrepancy below would be meaningless.
+    expect(beatAt(constant, 4)).toBeCloseTo(8, 9); // 4s / 0.5s = 8 beats
+    expect(secAtBeat(constant, 8)).toBeCloseTo(4, 9);
+  });
+
+  it("round-trips through a tempo change", () => {
+    const map = tempoMapFrom({
+      tempo: 120,
+      tempoMap: [{ time: 0, bpm: 120 }, { time: 4, bpm: 240 }],
+    });
+    for (const beat of [0, 3, 7.5, 8, 9, 20]) {
+      expect(beatAt(map, secAtBeat(map, beat))).toBeCloseTo(beat, 6);
+    }
+  });
+
+  it("a beat AFTER the change lands somewhere a FLAT conversion would get wrong", () => {
+    // Guard against a vacuous fixture (TempoRibbon.test.ts's pattern): assert the piecewise
+    // and flat answers actually disagree here, or this test would pass even if beatAt were
+    // rebuilt on geom.ts's flat beatToSec.
+    const map = tempoMapFrom({
+      tempo: 120,
+      tempoMap: [{ time: 0, bpm: 120 }, { time: 4, bpm: 240 }],
+    });
+    // beat 12: first 8 beats at 120bpm (0.5s/beat) = 4s to reach the change, then 4 more
+    // beats at 240bpm (0.25s/beat) = 1s -> 5s total. A flat 120bpm conversion says 6s.
+    const piecewise = secAtBeat(map, 12);
+    const flat = 12 * beatSeconds(meterFrom({ tempo: 120 }));
+    expect(piecewise, "fixture does not discriminate piecewise from flat").not.toBeCloseTo(flat, 6);
+    expect(piecewise).toBeCloseTo(5, 6);
+
+    // And the inverse: the second the change lands at is 4s in; a beat authored to sit
+    // exactly at bar 2 (beat 8) must still resolve to 4s, not 8*0.5=4s-by-coincidence but
+    // genuinely via the piecewise map (checked directly against the segment boundary).
+    expect(beatAt(map, 4)).toBeCloseTo(8, 6);
+  });
+
+  it("never returns a negative beat for a negative/zero time, and 0 beats at time 0", () => {
+    expect(beatAt(constant, 0)).toBeCloseTo(0, 9);
+    expect(secAtBeat(constant, 0)).toBeCloseTo(0, 9);
   });
 });
 

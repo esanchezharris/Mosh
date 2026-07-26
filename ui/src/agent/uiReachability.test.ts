@@ -210,6 +210,9 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // could reach and that this test had been reporting green. Nothing got worse; the number
     // got honest. A probe change is the ONLY reason this line may go up — if it rises for any
     // other reason, a feature shipped that the user cannot get to.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
+    // → 7 (the timeline's annotation lane: create_annotation, edit_annotation,
+    //      move_annotation, remove_annotation — all four of the asymmetry the probe fix
+    //      surfaced, closed together by one real lane rather than one control at a time).
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(7);
   });
 });

@@ -14,6 +14,7 @@ import { SongNav } from "../timeline/SongNav";
 import { BarRuler } from "../timeline/BarRuler";
 import { SectionRibbon } from "../timeline/SectionRibbon";
 import { TempoRibbon } from "../timeline/TempoRibbon";
+import { AnnotationLane } from "../timeline/AnnotationLane";
 import { LaneGrid, hasTempoChanges } from "../timeline/LaneGrid";
 import { Playhead } from "../timeline/Playhead";
 import { ClipView } from "./ClipView";
@@ -158,7 +159,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           height it caps there and scrolls internally (the prompt bar stays put). */}
       <div
         className="v2-stage"
-        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
@@ -179,6 +180,12 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {/* ruler row */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
+            {/* annotation lane — authored comment pins, beat-anchored (time.ts's piecewise
+                map, not geom.ts's flat one) so a note holds its musical spot across a tempo
+                change. Its own row after the ruler: a pin marks a POINT in time, same axis
+                as the clips just below it. */}
+            <div className="v2-corner v2-corner-ann"><span className="v2-corner-label">NOTE</span></div>
+            <div className="v2-ann-cell"><AnnotationLane snapshot={snapshot} width={contentW} /></div>
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>

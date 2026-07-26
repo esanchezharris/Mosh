@@ -18,6 +18,7 @@
   --v2-ribbon-h: 40px;
   --v2-tempo-h: 22px;
   --v2-ruler-h: 24px;
+  --v2-ann-h: 22px;
   --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
   --v2-radius: 16px;
   --v2-radius-sm: 10px;
@@ -578,7 +579,7 @@
      clamped by max-height caps + top-aligns, so sparse sessions reveal cream below and the
      panel grows lane-by-lane until it hits the available height, then scrolls internally.
      Fallback height covers the loading/empty placeholder. */
-  max-height: var(--v2-stage-h, calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + 4 * var(--v2-lane-h)));
+  max-height: var(--v2-stage-h, calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + 4 * var(--v2-lane-h)));
 }
 
 /* ── section navigator — its OWN panel above the arrangement (concept-style separation,
@@ -633,10 +634,14 @@
 .v2-corner-tempo { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-tempo-h); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
 .v2-corner-label { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); letter-spacing: 0.1em; }
 .v2-corner-ruler { top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 7; height: var(--v2-ruler-h); }
+/* The annotation row sits below ribbon+tempo+ruler — its own offset, or it pins on top of
+   the ruler on scroll (same class of bug PR #183 caused when the ribbon's offset flattened). */
+.v2-corner-ann { top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h)); z-index: 7; height: var(--v2-ann-h); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
 /* content header cells stick to the top only (scroll horizontally with the lanes) */
 .v2-ribbon-cell { position: sticky; top: 0; z-index: 4; }
 .v2-tempo-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
 .v2-ruler-cell { position: sticky; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 4; }
+.v2-ann-cell { position: sticky; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h)); z-index: 4; }
 
 /* section ribbon */
 .v2-ribbon {
@@ -700,6 +705,41 @@
 .v2-tempo-rm:hover { color: var(--v2-danger, var(--v2-accent)); }
 .v2-tempo-input {
   position: absolute; top: 1px; width: 58px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
+
+/* annotation lane — authored comment pins, beat-anchored (time.ts's piecewise map, not
+   geom.ts's flat one) so a note holds its musical spot across a tempo change. Thin like the
+   tempo lane: a marker only exists where someone left a note. */
+.v2-annlane {
+  position: relative; height: var(--v2-ann-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+  cursor: copy;
+}
+.v2-ann-pin {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 3px;
+  max-width: 220px; padding: 0 2px; white-space: nowrap; cursor: grab;
+}
+.v2-ann-pin.editing { cursor: text; }
+.v2-ann-flag { font-size: var(--v2-fs-sm); line-height: 1; }
+.v2-ann-text {
+  font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-dim);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.v2-ann-rm {
+  border: 0; background: none; padding: 0 3px; cursor: pointer; line-height: 1;
+  color: var(--v2-faint); font-size: var(--v2-fs-xs); opacity: 0; transition: opacity 90ms linear;
+}
+.v2-ann-pin:hover .v2-ann-rm, .v2-ann-rm:focus-visible { opacity: 1; }
+.v2-ann-rm:hover { color: var(--v2-danger, var(--v2-accent)); }
+.v2-ann-edit-input {
+  width: 160px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
+.v2-ann-draft-input {
+  position: absolute; top: 1px; width: 160px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
   background: var(--v2-surface-sunken); color: var(--v2-text);
   border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
 }

@@ -213,19 +213,15 @@ export const UI_REACH_GAPS: Readonly<Record<string, string>> = {
   // command to edit a point in place, so a drag or retype gesture would be a non-atomic
   // remove+insert. set_tempo_curve stays separately deferred. Ratchet 13 → 11.)
 
-  // ── annotations — the whole surface is missing from v2, not just the drag ────
-  // These four were NOT all declared before. move_annotation's old reason said "annotations
-  // can be created and edited on the timeline but not dragged to a new beat" — true of the
-  // CLASSIC shell, and false of the one that ships. v2 renders no annotation UI whatsoever;
-  // AnnotationRuler.tsx is imported only by classic's Arrange.tsx. Its three siblings read as
-  // reachable purely because v2 imports Arrange.tsx for four presentational clip renderers,
-  // which dragged the whole classic subtree into the probe's search set. Tightening the probe
-  // (CLASSIC_ONLY_MODULES in uiReachability.test.ts) is what surfaced them. All four close
-  // together when v2 gets a real annotation lane.
-  create_annotation: "v2 renders no annotation surface at all — the only call site is classic's AnnotationRuler.tsx, which v2 never mounts",
-  edit_annotation: "v2 renders no annotation surface at all — the only call site is classic's AnnotationRuler.tsx, which v2 never mounts",
-  remove_annotation: "v2 renders no annotation surface at all — the only call site is classic's AnnotationRuler.tsx, which v2 never mounts",
-  move_annotation: "no annotation surface in v2 to drag on; needs the lane built first, then a drag gesture (the beat is the anchor, so it converts through the piecewise tempo map)",
+  // (create_annotation / edit_annotation / move_annotation / remove_annotation were declared
+  // here as "the whole surface is missing from v2, not just the drag". v2's timeline now has
+  // a real annotation lane — its own row between the bar ruler and the lanes, in
+  // TrackLaneList, built the same way the tempo lane was: click empty space → inline text
+  // input → create_annotation; double-click a pin → inline edit → edit_annotation; drag a pin
+  // → move_annotation; hover ✕ → remove_annotation. Positions convert beat↔seconds through
+  // time.ts's PIECEWISE map (new beatAt/secAtBeat, mirroring the private barPosAt/barPosToSec
+  // this file already had for bars) — NOT geom.ts's flat beatToSec/secToBeat, which
+  // SectionRibbon uses and which is only correct while the tempo never changes. Ratchet 11 → 7.)
 
   // ── track lifecycle ──────────────────────────────────────────────────────────
   remove_track: "a mouse-only v2 user CANNOT DELETE A TRACK — the sole call site in the codebase is the × on classic's track header (Arrange.tsx:416), which v2 never renders. Hidden until the probe stopped searching classic-only modules. v2 has track headers already; this wants a delete affordance on one, confirm-gated (it takes the clips with it)",
