@@ -28,15 +28,19 @@
 // WHAT THIS DOES NOT CATCH, stated plainly so nobody trusts it further than it goes.
 // Module reachability is not user reachability. A command counts as reachable if its name
 // appears in ANY module the v2 graph imports — even in a code path that never renders.
-// Concretely: `ui/Arrange.tsx` is a classic-shell component pulled in transitively by
-// `v2/lanes/ClipView.tsx` for a helper, and it contains classic's "+ MIDI" button, so
-// `add_midi_clip` reads as reachable through it even if v2's own call site were deleted.
 // This test is therefore a FLOOR — it catches a command with no reference anywhere in the
-// shell graph (that is how it found all 22 below) and ratchets the gap list — but it is
-// not a substitute for a test of the specific gesture. High-value paths get their own:
+// shell graph (that is how it found all 22 originally) and ratchets the gap list — but it
+// is not a substitute for a test of the specific gesture. High-value paths get their own:
 // `v2/lanes/trackKinds.test.ts` pins the add-track wiring against the real mock backend.
-// The probe gets sharper once ui/src/ui is split into a real component library (the
-// classic-vs-shared boundary is what blurs it today).
+//
+// The worst instance of that floor leaking has now been closed, and it is worth recording
+// how it looked, because it looked like success. `v2/lanes/ClipView.tsx` imports four
+// PRESENTATIONAL exports from classic's `ui/Arrange.tsx`; the import drags the whole file
+// (and everything only IT imports) into the graph. So `remove_track`, whose sole call site
+// in the entire codebase is the × on classic's track header, and the three annotation
+// commands, whose only call site is `ui/AnnotationRuler.tsx` — a component v2 never mounts —
+// all read as REACHABLE. Four commands a mouse-only v2 user cannot get to, reported green.
+// CLASSIC_ONLY_MODULES below is the fix: a declared boundary the walk does not cross.
 
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -56,14 +60,39 @@ function resolveImport(fromDir: string, spec: string): string | null {
   return null;
 }
 
-/** Every module transitively reachable from an entry point, via relative imports. */
-function moduleGraph(entry: string): string[] {
+// Modules the v2 graph pulls in for a HELPER but never renders. One entry = one path = one
+// written reason, reviewed like UI_REACH_GAPS — not a convenience list.
+//
+// The walk STOPS at these rather than merely skipping them, because the leak is transitive:
+// skipping Arrange.tsx alone still leaves `ui/AnnotationRuler.tsx` in the graph (Arrange is
+// the only thing that imports it), and the annotation commands would keep reading as
+// reachable. Stopping at the boundary drops the whole classic-only subtree — measured, that
+// is Arrange.tsx plus RemotePlayheads.tsx, AnnotationRuler.tsx, TrackFxDrawer.tsx and
+// laneLayout.ts.
+//
+// Excluding a file v2 partly renders risks a FALSE NEGATIVE, which would be worse than the
+// leak. Checked before adding: the four exports v2 takes from Arrange.tsx (ClipWave,
+// ClipMidi, ClipDrumGrid, isDrumClip — Arrange.tsx:710-800) are canvas/SVG drawing with no
+// `exec(` and no store access at all, so they cannot be the only site of any command.
+const CLASSIC_ONLY_MODULES: Readonly<Record<string, string>> = {
+  "ui/Arrange.tsx":
+    "classic's whole arrangement view. v2 imports only ClipWave/ClipMidi/ClipDrumGrid/isDrumClip " +
+    "from it — presentational renderers that dispatch nothing — and mounts none of the file's own " +
+    "UI. Everything Arrange itself renders (its track headers, ruler, clip menu, and the " +
+    "AnnotationRuler + RemotePlayheads + TrackFxDrawer it pulls in) is unreachable in v2.",
+};
+
+/** Every module transitively reachable from an entry point, via relative imports.
+ *  The walk does not cross a `stopAt` boundary: such a module is recorded, but its own
+ *  imports are not followed, so a classic-only subtree does not enter the graph. */
+function moduleGraph(entry: string, stopAt: readonly string[] = []): string[] {
   const seen = new Set<string>();
   const stack = [entry];
   while (stack.length > 0) {
     const file = stack.pop()!;
     if (seen.has(file)) continue;
     seen.add(file);
+    if (stopAt.includes(file)) continue;
     const src = readFileSync(file, "utf8");
     // static `from "./x"`, bare side-effect `import "./x"`, and dynamic `import("./x")`
     for (const re of [/\bfrom\s+"(\.[^"]+)"/g, /\bimport\s+"(\.[^"]+)"/g, /\bimport\(\s*"(\.[^"]+)"\s*\)/g])
@@ -79,7 +108,8 @@ function moduleGraph(entry: string): string[] {
 // App.tsx mounts AppV2 for it — so this graph is what a shipped user actually touches.
 // bridge.mock is the dev BACKEND (it implements every command); it is not in this graph,
 // and including it would make everything look reachable — the exact mistake to avoid.
-const graph = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
+const classicOnly = Object.keys(CLASSIC_ONLY_MODULES).map((p) => join(SRC, p));
+const graph = moduleGraph(join(SRC, "v2", "AppV2.tsx"), classicOnly);
 
 // Two parts of the graph must be walked through but never SEARCHED, because each mentions
 // every command name and would make the whole test vacuous:
@@ -88,7 +118,8 @@ const graph = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
 //     the agent's reach, not the user's.
 //   • bridge.mock.ts — the dev BACKEND. It implements every command by definition; counting
 //     it as a call site would report 100% reachability forever.
-const EXCLUDED = (f: string) => f.startsWith(join(SRC, "agent")) || f.endsWith("bridge.mock.ts");
+const EXCLUDED = (f: string) =>
+  f.startsWith(join(SRC, "agent")) || f.endsWith("bridge.mock.ts") || classicOnly.includes(f);
 const files = graph.filter((f) => !EXCLUDED(f));
 const shell = files.map((f) => readFileSync(f, "utf8")).join("\n");
 
@@ -103,6 +134,20 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // and every assertion below is vacuous.
     for (const c of ["create_track", "add_midi_clip", "rename_track", "export_audio", "set_transport"])
       expect(isReachable(c), `probe broken: ${c} is wired but read as unreachable`).toBe(true);
+  });
+
+  it("every declared classic-only boundary is real and load-bearing", () => {
+    // A boundary that names a file which does not exist, or one the v2 graph never reached
+    // anyway, silently excludes nothing while looking like it tightened the probe. That is
+    // the same shape as the leak this whole mechanism exists to close, so it must fail.
+    const unstopped = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
+    for (const rel of Object.keys(CLASSIC_ONLY_MODULES)) {
+      const abs = join(SRC, rel);
+      expect(existsSync(abs), `${rel} does not exist`).toBe(true);
+      expect(unstopped.includes(abs), `${rel} is not in the v2 graph — excluding it does nothing`).toBe(true);
+    }
+    // And the exclusion must actually shrink the searched surface, or it is decoration.
+    expect(files.length).toBeLessThan(unstopped.filter((f) => !f.startsWith(join(SRC, "agent")) && !f.endsWith("bridge.mock.ts")).length);
   });
 
   it("every catalog command is reachable, or declared with a reason", () => {
@@ -158,6 +203,13 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //       already shipped its siblings).
     // Tightening on each close is the point — leaving slack banks gaps and lets the next
     // regression land unnoticed.
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(7);
+    //
+    // → 11. THE ONE LEGITIMATE RISE, and it is a correction rather than a regression: adding
+    // CLASSIC_ONLY_MODULES stopped the probe searching classic's Arrange.tsx subtree, which
+    // exposed four commands (remove_track + the three annotation ones) that a v2 user never
+    // could reach and that this test had been reporting green. Nothing got worse; the number
+    // got honest. A probe change is the ONLY reason this line may go up — if it rises for any
+    // other reason, a feature shipped that the user cannot get to.
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(11);
   });
 });
