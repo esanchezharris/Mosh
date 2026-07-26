@@ -228,6 +228,13 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     //      no enumeration command, no kit name in the snapshot, so a picker is not
     //      buildable today; reloading the bundled default onto every pad, undoing any
     //      per-lane sample swaps, is the real action).
-    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(3);
+    // → 2 (the sample browser's "Beatbox → beat" entry point: sketch_beatbox — the
+    //      clipId-based clip menu was never a fit, since cmdSketchBeatbox takes an
+    //      absolute path; SampleBrowser's directory listing already had one).
+    //
+    // What is left is exactly the two that are NOT UI work: freeze_layer is inert until
+    // ids::reactive is actually written, and bounce_layer_to_clip needs a sub-region
+    // create control plus the MoshOps.cpp:9552 undo fix. Both are backend, both say so.
+    expect(Object.keys(UI_REACH_GAPS).length).toBeLessThanOrEqual(2);
   });
 });

@@ -57,4 +57,20 @@ describe("sketch_beatbox (beatbox → drum MoshOps)", () => {
     const res = await mockExecute<Res>({ command: "sketch_beatbox", args: { bpm: 90 } as Record<string, unknown> });
     expect(res.ok).toBe(false);
   });
+
+  // Mock-fidelity guard: cmdSketchBeatbox (MoshOps.cpp) names the CLIP "Sketch • <source
+  // filename, no extension>" (wav.getFileNameWithoutExtension()) — the track itself stays
+  // plain "Sketch". A mock that drops the "• <file>" suffix is still "plausible" (every
+  // other assertion in this file passes either way), which is exactly the shape of the
+  // stem-export drift this repo has been bitten by before: a mock that LOOKS right makes
+  // every test on it vacuous. Pinned here so drift is caught the moment it (re)appears.
+  it("names the clip 'Sketch • <source file, no extension>' — matching cmdSketchBeatbox exactly", async () => {
+    await mockExecute<Res>({ command: "sketch_beatbox", args: { file: "/tmp/boombap.wav", bpm: 90, bars: 1 } });
+    await vi.advanceTimersByTimeAsync(500);
+    const after = await mockSnapshot<Snapshot>();
+    const track = after.tracks[after.tracks.length - 1];
+    expect(track.name).toBe("Sketch"); // the TRACK name carries no suffix
+    const clip = track.clips.find((c) => c.type === "midi")!;
+    expect(clip.name).toBe("Sketch • boombap"); // the CLIP name does
+  });
 });
