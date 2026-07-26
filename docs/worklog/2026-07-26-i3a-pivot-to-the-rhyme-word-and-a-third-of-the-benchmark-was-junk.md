@@ -100,3 +100,38 @@ re-scope it is an owner decision in the ledger.
 `nbest-rerank` is the one planned arm still without a number — its run was killed
 mid-flight once the benchmark defect surfaced, rather than pay for items about to
 be voided.
+
+
+## Addendum — the fusion arm is null, and that is the useful result
+
+`fusion-rerank` (phonology proposes the pool, the LLM ranks it on meaning) was
+built on a measured ceiling: the artist's word is in the LLM's own top-5 48.0%
+of the time and in the phonology menu 40.0%, but in **either 64.7%** — the two
+miss different words. Against 37.3% actually picked, that was +27 points on
+offer.
+
+It scored **37.3%**. Identical to `llm-constrained`, CI −10.8…+10.8.
+
+The mechanism is fully explained, which is what makes it worth keeping:
+
+| | v1 | v2 |
+|---|---|---|
+| truth in pool | 56.0% | 63.3% |
+| reranker picks it #1 | 64.3% | 58.9% |
+
+v1 under-built the pool (my defect — capped the menu at 12). v2 fixed it and
+gained +7.3 pts of coverage, while precision fell −5.4. They cancel exactly:
+63.3% × 58.9% = 37.3%. **Reranker precision degrades as fast as pool coverage
+improves** — more options means a better chance the word is there and a worse
+chance of choosing it. Widening further buys under a point. The model also tried
+to answer outside the offered list on 32% of items.
+
+That is two consecutive arms failing the frozen bar (`prompt-rhyme-menu`, then
+this), which is the pre-registered plateau condition. **Prompt-side is
+plateaued**, and a training run is justified by measurement rather than
+intuition — the first time in this program that claim has had evidence under it.
+
+The lesson worth carrying: measuring the ceiling *before* building told us the
+idea was worth trying, and diagnosing the null told us why it cannot work. A
+null with a mechanism is not a wasted increment; a null without one would have
+been.

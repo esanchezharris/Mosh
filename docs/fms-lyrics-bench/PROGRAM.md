@@ -310,3 +310,28 @@ numbers and hashes only.
     columns, and the report rendered that as "HALT — no column clears both
     floors", which reads as "the judges were measured and failed" when nothing
     was measured. `elect()` now returns a distinct `noColumns` state.
+- **2026-07-26 — `fusion-rerank` built, measured, NULL; prompt-side declared
+  PLATEAUED.** Full working: the [I3a verdict addendum](../superpowers/specs/2026-07-26-fms-i3a-rhyme-word-verdict.md).
+  Built on a measured ceiling rather than a hunch — the artist's word is in the
+  LLM's own top-5 48.0% of the time and in the phonology menu 40.0%, but in
+  **either 64.7%**, so the union was worth +27 pts to anything that could rank
+  it. Ranking on MEANING came from the owner's sitting, not from taste.
+  - **fusion v2 exact 37.3% vs `llm-constrained` 37.3% — +0.000 (CI −10.8…+10.8).**
+    Dead even.
+  - **Why, exactly:** v1 under-built the pool (a defect: capped the menu at its
+    top 12, truth-in-pool 56.0% against a 64.7% ceiling). v2 fixed it and
+    recovered +7.3 pts of coverage — but reranker precision fell −5.4 pts at the
+    same time (64.3% → 58.9%), and the two cancel: 63.3% × 58.9% = 37.3%, the
+    observed number to the decimal. **Reranker precision degrades as fast as pool
+    coverage improves.** More options = better chance the word is present, worse
+    chance of picking it. Not a tuning knob. The arm also tried to answer outside
+    the offered list 48 times (32% of items).
+  - **Two consecutive arms have now failed the frozen bar** — `prompt-rhyme-menu`
+    (32.0%, below baseline) and `fusion-rerank` (37.3%, null). That is the
+    pre-registered plateau condition, so **prompt-side is declared plateaued**
+    and a training run is now justified by measurement rather than intuition —
+    the first time in this program that claim has evidence under it.
+  - `llm-constrained` stands as the best prompt-side arm: 37.3%, against a
+    union-of-sources ceiling of 64.7% and an oracle of 100%.
+  - **Still unmeasured:** `nbest-rerank` — the one cheap prompt-side stone left
+    unturned before committing to training.

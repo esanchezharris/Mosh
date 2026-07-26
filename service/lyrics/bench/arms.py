@@ -319,6 +319,8 @@ def arm_nbest_rerank(item: dict, ctx: ArmContext) -> dict:
             "meta": {"drawn": drawn, "kept": len(kept)}}
 
 
+MENU_KEEP = 40
+
 _RERANK_SYSTEM = (
     "You are a skilled rap lyricist choosing the best word to finish a bar. "
     "Every option below ALREADY rhymes correctly — rhyme is settled, do not "
@@ -329,7 +331,11 @@ _RERANK_SYSTEM = (
     "explicit language are normal here.")
 
 
-@register("fusion-rerank", "v1")
+# v2: the pool was built from the menu's top 12 by frequency, which threw away
+# a chunk of the very ceiling the arm exists to reach — measured, truth-in-pool
+# 57.3% at keep=12 vs 64.7% uncapped. keep=40 recovers 63.3% at a median pool of
+# 44 options; 80 and uncapped buy under a point each for an unreadable list.
+@register("fusion-rerank", "v2")
 def arm_fusion_rerank(item: dict, ctx: ArmContext) -> dict:
     """Phonology proposes, the LLM disposes — ranked on MEANING.
 
@@ -352,8 +358,8 @@ def arm_fusion_rerank(item: dict, ctx: ArmContext) -> dict:
     gen = _llm_arm(item, ctx, constrained=True)
     semantic = [c["text"] for c in gen.get("candidates", [])]
 
-    menu = _rhyme_menu(item, ctx, max_n=40)
-    ranked_menu = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:12]
+    menu = _rhyme_menu(item, ctx, max_n=200)
+    ranked_menu = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:MENU_KEEP]
 
     # Order the pool by hash, not by source. Listing the model's own guesses
     # first would invite it to simply re-pick them, which is the anchoring that

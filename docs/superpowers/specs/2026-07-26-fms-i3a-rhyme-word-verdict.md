@@ -113,3 +113,62 @@ I3a and it is now closed.
   invalidated. It remains the one planned arm without a number.
 - Arms ran at n=150 (±8 pts), the floor at n=400. Stage-2 confirmation at n=400
   was not reached.
+
+
+---
+
+# Addendum — the fusion arm, and the prompt-side plateau (2026-07-26)
+
+`fusion-rerank` was built on a measured ceiling, not a hunch: the artist's word
+sits in the LLM's own top-5 48.0% of the time and in the phonology menu 40.0%,
+but in **either** 64.7%, against 37.3% picked. The two sources miss different
+words, so the union was worth +27 points to anything that could rank it.
+Ranking on MEANING (not rhyme) came straight from the owner's sitting.
+
+| arm | n | exact | topk | rhyme_perfect | multi_depth |
+|---|---|---|---|---|---|
+| `llm-constrained` | 150 | **37.3%** | 48.0% | 35.7% | 0.84 |
+| `fusion-rerank` v1 (pool capped at 12) | 150 | 36.0% | 50.7% | 41.1% | 0.82 |
+| `fusion-rerank` v2 (pool 40) | 150 | **37.3%** | 49.3% | 35.8% | 0.81 |
+
+**fusion v2 − llm-constrained on `exact`: +0.000** (95% CI −10.8…+10.8). Dead
+even. It beats `rhyme-floor` by +26.6 pts (separated), exactly as
+`llm-constrained` already did — so it clears nothing new.
+
+## Why it is null, precisely
+
+| | v1 | v2 |
+|---|---|---|
+| truth in the pool | 56.0% | **63.3%** (ceiling 64.7%) |
+| reranker put it #1 when present | 64.3% | **58.9%** |
+| top-1 drawn from phonology's half | 12.7% | 32.0% |
+| top-1 same as `llm-constrained` | 53.3% | 43.3% |
+| invented (dropped) | 33 | 48 |
+
+v1 under-built the pool — a defect, fixed in v2, which recovered +7.3 pts of
+coverage. But reranker precision fell **−5.4 pts** at the same time, and the two
+cancel: 63.3% × 58.9% = **37.3%**, the observed number to the decimal.
+
+**The reranker's precision degrades as fast as the pool's coverage improves.**
+More options means a better chance the right word is present and a worse chance
+of choosing it. That is a property of prompt-side reranking with this model, not
+a tuning knob — and widening further (80, or uncapped) buys under a point of
+coverage while making the list longer still. The arm is also visibly straining
+against the format: it tried to answer with a word that was never on offer 48
+times (32% of items).
+
+## PROMPT-SIDE IS PLATEAUED
+
+The bar froze this condition in advance: *"declared plateaued when two
+consecutive arms fail to clear it."* Two have:
+
+1. `prompt-rhyme-menu` — 32.0%, below `llm-constrained`, no `exact` gain.
+2. `fusion-rerank` — 37.3%, dead even, null with a fully explained mechanism.
+
+`llm-constrained` remains the best prompt-side arm at 37.3%, against an oracle
+of 100% and a union-of-sources ceiling of 64.7%. **The plateau is the
+pre-registered evidence that justifies a training run** — the first time in this
+program that claim rests on measurement rather than intuition.
+
+`nbest-rerank` is still unmeasured and remains the one cheap prompt-side stone
+left unturned before committing to training.
