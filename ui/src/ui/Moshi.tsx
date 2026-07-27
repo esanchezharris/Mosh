@@ -87,11 +87,11 @@ export function Moshi() {
     if (!host || typeof window.Moshi !== "function") return;
     let api: MoshiApi | null = null;
     try {
-      // resDiv:1 + the devicePixelRatio fix in moshi.js resize() => the GL buffer
-      // renders at the orb's TRUE physical pixel size (1:1 crisp at 52px on Retina).
-      // quality stays 'ps2' so the wobble/dither character is unchanged — only the
-      // chunky low-res pixelation is removed.
-      api = window.Moshi(host, { personality: "TAR", seed: 0.5, resDiv: 1 });
+      // Doctrine resolution policy lives INSIDE moshi.js now: buffer = CSS px /
+      // quality div on every display (never DPR-multiplied), nearest-pixelated
+      // upscale when stretched. The old de-crunching pair (resDiv:1 here +
+      // image-rendering:auto in mosh.css) is gone — the crunch is identity.
+      api = window.Moshi(host, { personality: "TAR", seed: 0.5 });
       api.setQuality("ps2");
       api.setAnatomy("A"); // baked anatomy pick (the lab's chosen 3D-vs-flat balance)
       apiRef.current = api;

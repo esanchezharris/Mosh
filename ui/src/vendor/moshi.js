@@ -41,8 +41,11 @@
 
 const FRAG = `
 precision highp float;
-uniform vec2  u_res;
-uniform float u_time, u_tq;            // smooth + 12fps-quantized time
+uniform vec3  u_ires;                  // 0.5*res (xy), 1/min(res) (z) — uploaded on resize
+uniform float u_tq;                    // 12fps-quantized time
+uniform vec4  u_pulse;                 // per-frame trig, hoisted off the GPU:
+                                       // ember flicker, eye breath, grin breath
+uniform vec2  u_mtiltCS;               // cos/sin of the grin attitude
 uniform float u_lph, u_bph, u_sph;     // INTEGRATED phases (rates lerp safely in JS)
 uniform vec4  u_rotM;                  // cos/sin yaw (xy), cos/sin pitch (zw)
 uniform float u_onset;                 // poke/slam envelope
@@ -50,9 +53,9 @@ uniform float u_energy, u_mood, u_heat;
 uniform vec2  u_gaze, u_sq;            // gaze (face-space); spring squash (x,y)
 uniform float u_blink, u_wide, u_lid;  // blink snap, startle, sleepy droop
 uniform float u_sd, u_sd2;             // seed-derived texture offsets
-uniform vec4  u_limb[5];               // limbs: angle, length, radius, z-tilt —
-                                       // CPU-computed per frame (pose blend + sway
-                                       // baked in; frame constants stay off the GPU)
+uniform vec4  u_limbA[5];              // limb capsule START (xyz) + radius (w) —
+uniform vec4  u_limbB[5];              // capsule END (xyz). CPU-bakes pose blend +
+                                       // sway + endpoint trig (was 20 sin/cos per map() call)
 uniform float u_zflat;                 // 3D blob at rest -> 2D sticker on emotes
 uniform vec2  u_lean;                  // the core leans into poses
 uniform float u_coreS;                 // ...and breathes with them
@@ -65,13 +68,17 @@ uniform float u_smink;                 // lobe goo (smin k)
 uniform vec3  u_palA, u_palB, u_palD;  // iq cosine palette (family material)
 uniform float u_irid, u_glint, u_veins;
 uniform float u_scale, u_room;
+uniform float u_boundR;                // analytic bounding-sphere radius (world)
+uniform float u_amb;                   // rest-luminance floor, in the family's own hue
+uniform float u_bands;                 // key-light band count (per-family material)
+uniform float u_facet;                 // crunch-normal facet density
+uniform vec3  u_keyTint, u_filTint;    // per-family light tints (the material IS its light)
 uniform float u_flow, u_flowPh;        // state channel: liquid bands (LIGHT only)
-uniform float u_mtilt, u_inkeye;       // grin attitude; ink-faced families
+uniform float u_inkeye;                // ink-faced families
 
 const vec3 LIME = vec3(0.800, 1.000, 0.137);
 const vec3 GLOW = vec3(0.851, 1.000, 0.298);
 
-mat2 r2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 float hash31(vec3 p) {
   p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
   p *= 17.0;
@@ -136,12 +143,8 @@ float map(vec3 p) {
   p.z *= u_zflat;
   vec3 lean = vec3(u_lean, 0.0);
   float d = length(p - lean * 0.5) - 0.30 * u_coreS;
-  for (int i = 0; i < 5; i++) {
-    vec4 L = u_limb[i];
-    float ct = cos(L.w);
-    vec3 dir = vec3(cos(L.x) * ct, sin(L.x) * ct, sin(L.w));
-    d = smin(d, sdCap(p, dir * 0.10 + lean, dir * L.y + lean, L.z), u_smink);
-  }
+  for (int i = 0; i < 5; i++)
+    d = smin(d, sdCap(p, u_limbA[i].xyz, u_limbB[i].xyz, u_limbA[i].w), u_smink);
   // BLOB-MIXER GRAMMAR (14islands, credited): two displacement layers with
   // face protection (its poleAmount) — near-field only; far steps and miss
   // rays skip the 16 hash calls (max displacement ~0.25, gate at 0.45)
@@ -166,21 +169,32 @@ vec3 normalAt(vec3 p) {
 void main() {
   gA = mat2(u_rotM.x, -u_rotM.y, u_rotM.y, u_rotM.x);
   gB = mat2(u_rotM.z, -u_rotM.w, u_rotM.w, u_rotM.z);
-  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  vec2 uv = (gl_FragCoord.xy - u_ires.xy) * u_ires.z;
   // the STYLE dial starves the dither: toon is clean-edged like the stickers
   float dth = bayer(gl_FragCoord.xy) * (1.0 - 0.92 * u_toon);
 
   vec3 ro = vec3(0.0, 0.0, 3.3);
   vec3 rd = normalize(vec3(uv, -1.55));
-  float t = 0.0; vec3 hp; bool hit = false;
+  // analytic bounding sphere (u_boundR from the CPU): a ray that misses the
+  // sphere never marches; a hit ray starts at sphere entry and bails at exit
+  // instead of the flat far plane — the empty-space tax only background rays paid
+  float t0m = 0.0, t1m = 5.0;
+  {
+    float bs = dot(ro, rd);
+    float cs = dot(ro, ro) - u_boundR * u_boundR;
+    float hs = bs * bs - cs;
+    if (hs > 0.0) { float sh = sqrt(hs); t0m = max(0.0, -bs - sh); t1m = -bs + sh; }
+    else t0m = 1e9;
+  }
+  float t = t0m; vec3 hp; bool hit = false;
   float dm = 1e9; vec3 bp = ro;
-  for (int i = 0; i < 96; i++) {
+  if (t0m < 1e8) for (int i = 0; i < 96; i++) {
     hp = ro + rd * t;
     float dl = map(hp);
     if (dl < dm) { dm = dl; bp = hp; }
     if (dl < 0.0025 + 0.0012 * t) { hit = true; break; }  // eps grows with t (LOD)
     t += dl * 0.85;                 // displaced field is not quite Lipschitz
-    if (t > 5.0) break;
+    if (t > t1m) break;
   }
   // step-starved grazing rays are SURFACE, not background — letting them fall
   // through paints the room's lime glow inside the body as a dither lattice
@@ -211,12 +225,12 @@ void main() {
     // u_mode eases 0->1 (SOLID -> BAKED) so the styles CROSSFADE like PS2<->TOON
     // FACETS for the crunch; toon + baked smooth them out
     float smoothN = max(u_toon, u_mode);
-    vec3 n = normalize(mix(normalize(floor(n0 * 2.5 + 0.5) / 2.5), n0, smoothN));
+    vec3 n = normalize(mix(normalize(floor(n0 * u_facet + 0.5) / u_facet), n0, smoothN));
     vec3 nd = normalize(hp);
     // BLOB-MIXER LIGHTING, banded: colored key + fill + hard rim + clearcoat.
     vec3 KEY = normalize(vec3(0.5, 0.8, 0.6));
     vec3 FIL = normalize(vec3(-0.7, -0.25, 0.45));
-    float nb = 3.0 - u_toon;                         // toon collapses to 2 bands
+    float nb = u_bands - u_toon;                     // family band count; toon drops one
     float bk = floor(min(max(dot(n, KEY), 0.0), 0.999) * nb + dth) / nb;
     float bf = floor(max(dot(n, FIL), 0.0) * 2.0 + dth) / 2.0 * (1.0 - u_toon);
     float fres = pow(1.0 - max(dot(n0, -rd), 0.0), 3.0);
@@ -224,9 +238,21 @@ void main() {
     float gt = 0.18 + 0.30 * (nd.y * 0.5 + 0.5) + 0.34 * bk
              + u_irid * 0.45 * fres * (1.0 - 0.7 * u_toon);
     vec3 body = pal3(gt);
+    // HUE TRAVEL: the band walks the family's own ramp — shade samples lower,
+    // lit samples higher, mixed by the floor()-hard band index (crunch intact).
+    // TAR's ramp is near-flat by design, so he stays obsidian; the curated
+    // ramps (MOLTEN gold→amber, DISCO's separated hues) show across the form.
+    // (lit leg kept short: fast-rotating ramps like GHOST's turn tan past ~0.05)
+    vec3 shade = pal3(gt - 0.10);
+    vec3 lit = pal3(gt + 0.035);
     // visible floor under the dither — band-promoted pixels must land ON a
     // body, never alone on black (alone they read as rain, not texture)
-    vec3 col = body * (mix(0.30, 0.60, u_toon) + mix(0.58, 0.40, u_toon) * bk) + body * 0.10 * bf;
+    vec3 col = shade * mix(0.30, 0.60, u_toon)
+             + lit * (mix(0.58, 0.40, u_toon) * bk) * u_keyTint
+             + shade * (0.10 * bf) * u_filTint;
+    // rest floor: a whisper of the family's own hue so he never dies on black
+    // (the renderer-side answer to the host's CSS idle halo; ≤0.12, never gray)
+    col += body * u_amb;
     col *= 1.0 - 3.2 * u_sw * (1.0 - gRidge) * (1.0 - u_toon);     // skin valleys
     col += pal3(gt + 0.12) * 4.5 * u_sw * step(0.75, gRidge) * bk * (1.0 - u_toon);
     // clearcoat — one hard wet-plastic glint (their clearcoat, our band)
@@ -293,14 +319,22 @@ void main() {
     vec3 bd = nd;
     bd.xz = gA * bd.xz;
     bd.yz = gB * bd.yz;
-    float sq = 1.0 - 0.10 * u_onset;
+    // U8: below ~72px of buffer the face decals grow (up to 1.5x) so the
+    // chevrons don't collapse to specks on the orb/lab/dock mounts
+    float szLod = clamp(72.0 * u_ires.z, 1.0, 1.5);
+    // U5: the face inherits the spring — onset squash AND the body spring,
+    // 60% so the glyphs stay legible (one organism, HS#16b/16d)
+    float sq = (1.0 - 0.10 * u_onset) * mix(1.0, u_sq.y, 0.6);
+    float sqx = mix(1.0, u_sq.x, 0.6), sqy = mix(1.0, u_sq.y, 0.6);
     float lidv = max(u_blink, u_lid * 0.82);
-    float eyeY = max(0.08, (1.0 + 0.05 * sin(u_time * 1.5 + 1.7)     // resting eye breath
+    float eyeY = max(0.08, (1.0 + 0.05 * u_pulse.y                     // resting eye breath
                         + 0.35 * smoothstep(0.4, 1.0, u_heat) + 0.20 * u_faceE)
                         * (1.0 - lidv * 0.92) * sq);
     vec3 eyeCol = mix(mix(vec3(0.90, 0.93, 0.87), vec3(0.05, 0.05, 0.06), u_inkeye),
                       LIME, smoothstep(0.45, 0.75, u_heat));
-    eyeCol *= 0.60 + 0.45 * bk;                      // facet-lit like the hide
+    // U3b: facet-lit like the hide, and the lid DIMS the eye — PAUSED/SLEEPING
+    // read as darkened squints, not just shorter chevrons
+    eyeCol *= (0.60 + 0.45 * bk) * (1.0 - 0.55 * lidv);
     // the face is BIG like the reference art, and it rides the body: the
     // pose lean carries the whole face, pose energy widens the eyes
     for (int e = 0; e < 2; e++) {
@@ -310,10 +344,17 @@ void main() {
       if (dot(bd, ed) < 0.55) continue;
       vec3 uu = normalize(cross(vec3(0.0, 1.0, 0.0), ed));
       vec3 vv = cross(ed, uu);
-      vec2 o = vec2(dot(bd - ed, uu), dot(bd - ed, vv)) * 2.7;
-      o.y /= eyeY;
+      vec2 o = vec2(dot(bd - ed, uu), dot(bd - ed, vv)) * (2.7 * szLod);
+      o.x /= sqx;                          // squash-and-stretch, 60% (U5)
+      o.y /= sqy * eyeY;                   // openness axis untouched — /eyeY as ever
       float ch = chevron(o * 1.6, -s);
-      col = mix(col, eyeCol, 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch));
+      float em = 1.0 - step(0.20 + (dth - 0.5) * 0.10, ch);
+      col = mix(col, eyeCol, em);
+      // U3a: the glint — a 1-2px spark high on the chevron. It rides the gaze,
+      // scales with openness, dies with the blink, and lives only ON the glyph
+      float gli = 1.0 - step(0.07, length(o - vec2(u_gaze.x * 0.08 - s * 0.06,
+                                                   0.16 + max(u_gaze.y, 0.0) * 0.05)));
+      col = mix(col, vec3(0.95), gli * em * min(1.0, eyeY) * 0.9);
     }
     {                                                // the grin dial — one scaler
       vec3 md = normalize(vec3(u_gaze.x * 0.32 + u_lean.x * 0.8,
@@ -321,11 +362,12 @@ void main() {
       if (dot(bd, md) > 0.55) {
         vec3 mu = normalize(cross(vec3(0.0, 1.0, 0.0), md));
         vec3 mv = cross(md, mu);
-        vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * 1.85;
-        mo = r2(u_mtilt) * mo;                       // attitude: the family lean
+        vec2 mo = vec2(dot(bd - md, mu), dot(bd - md, mv)) * (1.85 * szLod);
+        mo = mat2(u_mtiltCS.x, -u_mtiltCS.y, u_mtiltCS.y, u_mtiltCS.x) * mo;  // attitude: the family lean
         mo.y /= sq;
-        float o2 = clamp(0.10 + 0.42 * u_mood + 0.05 * sin(u_time * 1.5)   // resting grin breath
-                       + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35 + 0.18 * u_faceE, 0.0, 1.35);
+        float o2 = clamp(0.10 + 0.42 * u_mood + 0.05 * u_pulse.z             // resting grin breath
+                       + u_wide * 0.95 + u_onset * 0.18 + u_heat * 0.35 + 0.18 * u_faceE
+                       - 0.25 * u_blink, 0.0, 1.35);                            // blink purses the grin
         float r = 0.33 * (1.0 + 0.55 * o2);
         float lip = -0.07 + 0.30 * o2;
         float m = (1.0 - step(0.0, length(mo) - r + (dth - 0.5) * 0.05))
@@ -337,9 +379,13 @@ void main() {
       }
     }
     // the ember heart — heat only. Agent channel; the matter never splits.
-    // tight core: a wide falloff band-dithers the whole front into speckle
-    float ember = u_heat * exp(-4.2 * length(hp)) * (0.7 + 0.3 * sin(u_time * 7.0));
+    // tight core: a wide falloff band-dithers the whole front into speckle.
+    // U4: the flicker clock joined the 12fps texture clock (a smooth 7Hz sine
+    // was off-register; 3.5Hz at 12fps doesn't strobe) + a hotter inner band
+    // so the REC tell is unmissable at 120px.
+    float ember = u_heat * exp(-4.2 * length(hp)) * (0.7 + 0.3 * u_pulse.x);
     col += GLOW * (floor(ember * 3.0 + dth * 0.5) / 3.0) * 0.55;
+    col += LIME * (floor(ember * 6.0 + dth * 0.5) / 6.0) * step(0.55, u_heat) * 0.5;
     outc = vec4(col, 1.0);
   }
   gl_FragColor = outc;
@@ -355,47 +401,56 @@ const FAMILIES = {
     bw: 0.030, bf: 1.8, bsp: 0.45, sw: 0.045, sf: 5.5, ssp: 0.35, k: 0.17,
     palA: [0.100, 0.100, 0.100], palB: [0.042, 0.046, 0.040], palD: [0.00, 0.00, 0.00],
     irid: 0.15, glint: 0.40, veins: 1.00, scale: 1.00, tilt: 0.07, ink: 0, restless: 0.50,
-    blink: 1.0, sacc: 1.0, antic: 0.5, springK: 42, springD: 5.0, breathe: 0.012, spin: 0.05, tempo: 0.09 },
+    blink: 1.0, sacc: 1.0, antic: 0.5, springK: 42, springD: 5.0, breathe: 0.012, spin: 0.05, tempo: 0.09,
+    amb: 0.11, bands: 3.0, facet: 2.5, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
   DISCO:  { // their Discobrain — rainbow iridescence, fast shallow waves
     bw: 0.085, bf: 3.0, bsp: 1.45, sw: 0.016, sf: 7.0, ssp: 0.70, k: 0.20,
     palA: [0.50, 0.50, 0.50], palB: [0.42, 0.42, 0.42], palD: [0.00, 0.33, 0.67],
     irid: 0.90, glint: 0.80, veins: 0.45, scale: 0.98, tilt: 0.13, ink: 0, restless: 0.90,
-    blink: 1.3, sacc: 1.5, antic: 0.9, springK: 60, springD: 4.2, breathe: 0.010, spin: 0.11, tempo: 0.14 },
+    blink: 1.3, sacc: 1.5, antic: 0.9, springK: 60, springD: 4.2, breathe: 0.010, spin: 0.11, tempo: 0.14,
+    amb: 0.05, bands: 3.0, facet: 2.5, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
   MOLTEN: { // their Molten — heavy gold skin, slow and certain
     bw: 0.034, bf: 2.1, bsp: 0.22, sw: 0.050, sf: 4.0, ssp: 0.18, k: 0.14,
     palA: [0.46, 0.30, 0.10], palB: [0.40, 0.27, 0.12], palD: [0.02, 0.10, 0.26],
     irid: 0.35, glint: 0.95, veins: 0.65, scale: 1.04, tilt: 0.04, ink: 0, restless: 0.20,
-    blink: 0.7, sacc: 0.6, antic: 0.25, springK: 30, springD: 6.5, breathe: 0.016, spin: 0.03, tempo: 0.06 },
+    blink: 0.7, sacc: 0.6, antic: 0.25, springK: 30, springD: 6.5, breathe: 0.016, spin: 0.03, tempo: 0.06,
+    amb: 0.06, bands: 3.0, facet: 2.5, keyT: [1.08, 0.95, 0.78], filT: [1.00, 1.00, 1.00] },
   GHOST:  { // their Ghost — airy violet drift, big soft waves
     bw: 0.125, bf: 1.6, bsp: 0.75, sw: 0.011, sf: 6.0, ssp: 0.45, k: 0.24,
     palA: [0.38, 0.40, 0.54], palB: [0.24, 0.28, 0.38], palD: [0.55, 0.62, 0.78],
     irid: 0.70, glint: 0.30, veins: 0.40, scale: 1.00, tilt: 0.06, ink: 0, restless: 0.35,
-    blink: 0.8, sacc: 0.7, antic: 0.4, springK: 26, springD: 4.0, breathe: 0.020, spin: 0.07, tempo: 0.08 },
+    blink: 0.8, sacc: 0.7, antic: 0.4, springK: 26, springD: 4.0, breathe: 0.020, spin: 0.07, tempo: 0.08,
+    amb: 0.06, bands: 3.0, facet: 2.0, keyT: [1.00, 1.00, 1.00], filT: [0.90, 0.85, 1.15] },
   SILK:   { // their Silkworm — long pearl swells, barely any skin
     bw: 0.080, bf: 1.3, bsp: 0.42, sw: 0.008, sf: 3.5, ssp: 0.25, k: 0.26,
     palA: [0.60, 0.54, 0.52], palB: [0.22, 0.22, 0.26], palD: [0.90, 0.97, 0.06],
     irid: 0.50, glint: 0.55, veins: 0.35, scale: 1.00, tilt: 0.02, ink: 0, restless: 0.25,
-    blink: 0.85, sacc: 0.8, antic: 0.3, springK: 34, springD: 5.5, breathe: 0.015, spin: 0.04, tempo: 0.07 },
+    blink: 0.85, sacc: 0.8, antic: 0.3, springK: 34, springD: 5.5, breathe: 0.015, spin: 0.04, tempo: 0.07,
+    amb: 0.025, bands: 3.0, facet: 2.0, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
   BREAKS: { // ours — choppy hot amen-break energy, jagged and quick
     bw: 0.050, bf: 4.2, bsp: 1.85, sw: 0.038, sf: 8.5, ssp: 0.95, k: 0.13,
     palA: [0.45, 0.18, 0.10], palB: [0.40, 0.25, 0.15], palD: [0.00, 0.92, 0.85],
     irid: 0.25, glint: 0.50, veins: 1.00, scale: 0.97, tilt: 0.17, ink: 0, restless: 1.00,
-    blink: 1.5, sacc: 1.8, antic: 1.0, springK: 75, springD: 3.6, breathe: 0.008, spin: 0.13, tempo: 0.16 },
+    blink: 1.5, sacc: 1.8, antic: 1.0, springK: 75, springD: 3.6, breathe: 0.008, spin: 0.13, tempo: 0.16,
+    amb: 0.07, bands: 3.0, facet: 3.0, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
   CHROME: { // their T-1000 — cold mirror, dense fine ripple
     bw: 0.055, bf: 2.6, bsp: 1.05, sw: 0.028, sf: 9.0, ssp: 0.80, k: 0.16,
     palA: [0.44, 0.49, 0.54], palB: [0.34, 0.34, 0.38], palD: [0.58, 0.60, 0.65],
     irid: 0.60, glint: 1.00, veins: 0.50, scale: 0.99, tilt: 0.05, ink: 0, restless: 0.45,
-    blink: 0.9, sacc: 1.1, antic: 0.5, springK: 55, springD: 5.0, breathe: 0.010, spin: 0.08, tempo: 0.10 },
+    blink: 0.9, sacc: 1.1, antic: 0.5, springK: 55, springD: 5.0, breathe: 0.010, spin: 0.08, tempo: 0.10,
+    amb: 0.05, bands: 4.0, facet: 4.0, keyT: [0.85, 0.92, 1.10], filT: [0.90, 0.97, 1.08] },
   BUBBLE: { // their Slimebag — goopy aqua-green bounce
     bw: 0.090, bf: 1.9, bsp: 0.65, sw: 0.020, sf: 4.5, ssp: 0.40, k: 0.25,
     palA: [0.30, 0.48, 0.24], palB: [0.26, 0.38, 0.22], palD: [0.25, 0.35, 0.45],
     irid: 0.45, glint: 0.70, veins: 0.55, scale: 1.02, tilt: 0.10, ink: 0, restless: 0.75,
-    blink: 1.1, sacc: 1.2, antic: 0.8, springK: 38, springD: 3.2, breathe: 0.018, spin: 0.06, tempo: 0.11 },
+    blink: 1.1, sacc: 1.2, antic: 0.8, springK: 38, springD: 3.2, breathe: 0.018, spin: 0.06, tempo: 0.11,
+    amb: 0.05, bands: 3.0, facet: 2.5, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
   PORCELAIN: { // the paper look — bone body, ink eyes (their GHOST preset, inverted into our world)
     bw: 0.050, bf: 1.7, bsp: 0.50, sw: 0.016, sf: 5.0, ssp: 0.30, k: 0.22,
     palA: [0.74, 0.73, 0.70], palB: [0.16, 0.16, 0.15], palD: [0.02, 0.02, 0.02],
     irid: 0.12, glint: 0.55, veins: 0.50, scale: 1.00, tilt: 0.03, ink: 1, restless: 0.30,
-    blink: 0.9, sacc: 0.8, antic: 0.35, springK: 40, springD: 5.5, breathe: 0.012, spin: 0.05, tempo: 0.08 },
+    blink: 0.9, sacc: 0.8, antic: 0.35, springK: 40, springD: 5.5, breathe: 0.012, spin: 0.05, tempo: 0.08,
+    amb: 0.02, bands: 2.0, facet: 2.5, keyT: [1.00, 1.00, 1.00], filT: [1.00, 1.00, 1.00] },
 };
 const NAMES = Object.keys(FAMILIES);
 
@@ -430,24 +485,29 @@ function makeSpec(name, seed) {
     blink: F.blink, sacc: F.sacc, antic: F.antic,
     springK: F.springK, springD: F.springD, breathe: F.breathe,
     spin: F.spin, tempo: F.tempo,
+    // beauty fields — MORPH RULE: they crossfade like every other endpoint
+    amb: F.amb, bands: F.bands, facet: F.facet,
+    keyT: F.keyT.slice(), filT: F.filT.slice(),
   };
 }
 const NUMS = ['bw','bf','bsp','sw','sf','ssp','k','scale','sd','sd2',
   'irid','glint','veins','tilt','ink','restless',
-  'blink','sacc','antic','springK','springD','breathe','spin','tempo'];
+  'blink','sacc','antic','springK','springD','breathe','spin','tempo',
+  'amb','bands','facet'];
 function lerpSpec(a, b, w) {
   const o = { name: w < 0.5 ? a.name : b.name, seed: w < 0.5 ? a.seed : b.seed };
   for (const k of NUMS) o[k] = a[k] + (b[k] - a[k]) * w;
-  for (const k of ['palA','palB','palD','limbA','limbL','limbR','limbT'])
+  for (const k of ['palA','palB','palD','limbA','limbL','limbR','limbT','keyT','filT'])
     o[k] = a[k].map((v, i) => v + (b[k][i] - v) * w);
   return o;
 }
-const UNIFS = ['u_res','u_time','u_tq','u_lph','u_bph','u_sph','u_rotM',
+const UNIFS = ['u_ires','u_tq','u_pulse','u_mtiltCS','u_lph','u_bph','u_sph','u_rotM',
   'u_onset','u_energy','u_mood','u_heat','u_gaze','u_sq','u_blink','u_wide','u_lid',
-  'u_sd','u_sd2','u_limb[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon','u_mode',
+  'u_sd','u_sd2','u_limbA[0]','u_limbB[0]','u_zflat','u_lean','u_coreS','u_faceE','u_toon','u_mode',
   'u_bw','u_bf','u_sw','u_sf','u_smink',
-  'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room',
-  'u_flow','u_flowPh','u_mtilt','u_inkeye'];
+  'u_palA','u_palB','u_palD','u_irid','u_glint','u_veins','u_scale','u_room','u_boundR',
+  'u_amb','u_bands','u_facet','u_keyTint','u_filTint',
+  'u_flow','u_flowPh','u_inkeye'];
 
 // ── THE CONSOLE DIAL — PS1 swims, PS2 holds. Resolution up, wobble down:
 // vertex swim is the PS1 tell; the PS2 had subpixel-stable geometry.
@@ -554,6 +614,7 @@ function Moshi(host, opts = {}) {
     // Silicon — off unless a harness asks (opts.preserve) to sample pixels.
     gl = cv.getContext('webgl', {
       antialias: false, alpha: !O.room, premultipliedAlpha: false,
+      depth: false, stencil: false,                     // fullscreen-triangle raymarcher: no tile-memory tax
       preserveDrawingBuffer: !!O.preserve,
     });
     if (!gl) throw new Error('moshi: webgl unavailable');
@@ -577,6 +638,8 @@ function Moshi(host, opts = {}) {
     gl.vertexAttribPointer(al, 2, gl.FLOAT, false, 0, 0);
     U = {};
     for (const n of UNIFS) U[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1f(U.u_room, O.room ? 1 : 0);   // per-instance constant — upload once
+    specDirty = true;                          // re-push the static spec set
     resize();
   }
   cv.addEventListener('webglcontextlost', e => e.preventDefault());
@@ -591,11 +654,25 @@ function Moshi(host, opts = {}) {
     const Q = QUALITY[O.quality] || QUALITY['ps2'];
     const div = O.resDiv != null ? O.resDiv : Q.div;
     const r = host.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);   // render at physical px (retina-crisp), capped so huge-DPR hosts don't overshoot maxW
-    const W = Math.max(24, Math.min(O.maxW != null ? O.maxW : Q.maxW, Math.floor(r.width * dpr / div))),
-          H = Math.max(24, Math.min(O.maxH != null ? O.maxH : Q.maxH, Math.floor(r.height * dpr / div)));
+    // THE CRUNCH IS THE POLICY: the buffer renders at CSS px / div on EVERY
+    // display (never DPR-multiplied — a retina-smooth upscale smears the Bayer
+    // lattice, and burns DPR² the fragments for a look defined as low-res).
+    const W = Math.max(24, Math.min(O.maxW != null ? O.maxW : Q.maxW, Math.floor(r.width / div))),
+          H = Math.max(24, Math.min(O.maxH != null ? O.maxH : Q.maxH, Math.floor(r.height / div)));
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
-    gl && gl.viewport(0, 0, W, H);
+    // nearest upscale only when the buffer is genuinely being stretched
+    // (>=1.25x); at ~1:1 'auto' avoids non-integer nearest shimmer. pixelated
+    // where supported, crisp-edges as the Firefox fallback.
+    if (r.width / W >= 1.25) {
+      cv.style.imageRendering = 'crisp-edges';
+      cv.style.imageRendering = 'pixelated';
+    } else {
+      cv.style.imageRendering = 'auto';
+    }
+    if (gl) {
+      gl.viewport(0, 0, W, H);
+      gl.uniform3f(U.u_ires, W * 0.5, H * 0.5, 1 / Math.min(W, H));   // per-resize, not per-pixel
+    }
   }
   const rob = new ResizeObserver(resize);
   rob.observe(host);
@@ -605,6 +682,16 @@ function Moshi(host, opts = {}) {
   // ── state ──
   let from = makeSpec(O.personality, O.seed),
       to = from, mix = 1, cur = from;          // personality crossfade
+  let specDirty = true;                        // static spec uniforms need a push
+  // offscreen = invisible: scrolled out of view (long pages, labs) parks the
+  // rAF loop entirely; resumes on intersect. rAF itself handles hidden tabs.
+  let onScreen = true;
+  const io = ('IntersectionObserver' in window) ? new IntersectionObserver(es => {
+    const vis = es[0].isIntersecting;
+    if (vis && !onScreen) { onScreen = true; last = performance.now(); raf = requestAnimationFrame(frame); }
+    else if (!vis && onScreen) { onScreen = false; cancelAnimationFrame(raf); }
+  }) : null;
+  if (io) io.observe(cv);
   const drives = { energy: 0.35, mood: 0.55, heat: 0.0 };
   const dCur = Object.assign({}, drives);
   let lph = 0, bph = 0, sph = 0;               // integrated phases (MORPH RULE)
@@ -707,7 +794,9 @@ function Moshi(host, opts = {}) {
   function playSeq(steps) { seq = steps; seqI = 0; seqT = 0; applyPose(steps[0][0], 1e9, steps[0][2]); }
   function setPoseOne(n, hold, aimX) { seq = null; applyPose(n, hold, aimX); }   // single, clears any seq
   const basePose = () => (stName === 'SLEEPING' || annoyT > 0) ? 'DROOP' : 'NEUTRAL';
-  const limbArr = new Float32Array(20);      // upload scratch, allocated once
+  const limbA4 = new Float32Array(20);     // capsule starts + radii, baked per frame
+  const limbB4 = new Float32Array(20);     // capsule ends
+  const shiftV = [0, 0, 0, 0, 0], tuckV = [0, 0, 0, 0, 0];   // lobe-migration scratch (was two array allocs per frame)
   // the anatomy dial (see ANATOMY at module scope)
   let TUNE = Object.assign({}, ANATOMY.A);
 
@@ -789,8 +878,8 @@ function Moshi(host, opts = {}) {
   let modeT = MODE_OF[O.style] != null ? MODE_OF[O.style] : 0, modeA = modeT;  // eased -> crossfade
 
   // ── the loop ──
-  let raf = 0, t0 = performance.now(), last = t0;
-  function frame(now) {
+  let raf = 0, t0 = performance.now(), last = t0, lastGL = -1;
+  function frame(now, force) {
     if (dead) return;
     const t = (now - t0) / 1000, dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -801,6 +890,7 @@ function Moshi(host, opts = {}) {
       const w = mix * mix * (3 - 2 * mix);
       cur = lerpSpec(from, to, w);
       if (mix >= 1) { from = to; cur = to; }
+      specDirty = true;                    // blended values — re-push the static set
     }
     for (const k in drives) dCur[k] += (drives[k] - dCur[k]) * Math.min(1, dt * 6);
 
@@ -923,7 +1013,6 @@ function Moshi(host, opts = {}) {
       lobeMove(t);
       moveT = (7 + Math.random() * 12) / Math.max(0.15, cur.restless);
     }
-    const shiftV = [0, 0, 0, 0, 0], tuckV = [0, 0, 0, 0, 0];
     for (let i = 0; i < 5; i++) {
       const L = lmb[i];
       if (L.on) {
@@ -932,7 +1021,7 @@ function Moshi(host, opts = {}) {
         L.s = L.from + (L.tgt - L.from) * e;
         tuckV[i] = Math.sin(ph * Math.PI);
         if (ph >= 1) { L.s = L.tgt; L.on = false; }
-      }
+      } else tuckV[i] = 0;               // hoisted scratch must be re-zeroed
       shiftV[i] = L.s;
     }
 
@@ -998,20 +1087,37 @@ function Moshi(host, opts = {}) {
       tq = t;
     }
 
+    // render-rate governor: the sim above stays full-rate (a poke/drag/wake
+    // answers in one frame), but the GL block throttles down when nothing
+    // happens — SLEEPING at the 12fps wobble clock's own rate (he's asleep;
+    // the texture clock already ticks on twelves), PAUSED at 30.
+    const glGap = stName === 'SLEEPING' && !dragAt && !petting ? 1 / 12
+                : stName === 'PAUSED' ? 1 / 30 : 0;
+    if (!force && glGap && t - lastGL < glGap) { raf = requestAnimationFrame(frame); return; }
+    lastGL = t;
+
     // CPU-side frame constants (were recomputed per map() per step per pixel)
     const sd = cur.sd, sd2 = cur.sd2;
     const lA = rotA + wobA;
     const lB = rotB + wobB + (st.nod ? Math.sin(t * 2.1) * 0.02 : 0);
+    const scaleEff = cur.scale * breathe;
 
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform2f(U.u_res, cv.width, cv.height);
-    gl.uniform1f(U.u_time, t);
+    // room mode paints every pixel opaque (alpha:false context) — clearing is
+    // redundant there; embeds keep their transparent clear
+    if (!O.room) { gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
     gl.uniform1f(U.u_tq, tq);
     gl.uniform1f(U.u_lph, lph);
     gl.uniform1f(U.u_bph, bph);
     gl.uniform1f(U.u_sph, sph);
     gl.uniform4f(U.u_rotM, Math.cos(lA), Math.sin(lA), Math.cos(lB), Math.sin(lB));
+    // the hoisted per-frame trig the shader used to evaluate per hit-pixel:
+    // ember flicker (on the 12fps clock — U4) / eye breath / grin breath,
+    // and the grin attitude rotation
+    gl.uniform4f(U.u_pulse, Math.sin(tq * 3.5), Math.sin(t * 1.5 + 1.7), Math.sin(t * 1.5), 0);
+    {
+      const mt = cur.tilt * (0.5 + 0.5 * dCur.mood) - (annoyT > 0 ? 0.22 : 0);
+      gl.uniform2f(U.u_mtiltCS, Math.cos(mt), Math.sin(mt));
+    }
     gl.uniform1f(U.u_onset, onsetEnv);
     gl.uniform1f(U.u_energy, Math.min(1, dCur.energy + celebE));
     gl.uniform1f(U.u_mood, dCur.mood);
@@ -1028,43 +1134,66 @@ function Moshi(host, opts = {}) {
     gl.uniform1f(U.u_blink, Math.min(1, blink));
     gl.uniform1f(U.u_wide, Math.min(1, wide));
     gl.uniform1f(U.u_lid, lid);
-    gl.uniform1f(U.u_sd, sd);
-    gl.uniform1f(U.u_sd2, sd2);
-    // THE SPLAT's limbs: anatomy × pose × fidget × breath-drift, baked on CPU.
+    // THE SPLAT's limbs: anatomy × pose × fidget × breath-drift, baked on CPU
+    // right down to the capsule endpoints — the shader's map() does zero trig.
     // At rest limbs sit absorbed (TUNE.restLen) with fore/aft tilt — a 3D
     // blob; emoting extends them and flattens the tilt into the sticker plane.
     const restEase = TUNE.restLen + (1 - TUNE.restLen) * pose.flat;
     for (let i = 0; i < 5; i++) {
       const P = pose.L[i];
-      limbArr[i * 4]     = cur.limbA[i] + P[0] + shiftV[i] + Math.sin(lph * 0.9 + i * 2.1) * 0.05;
-      limbArr[i * 4 + 1] = cur.limbL[i] * P[1] * restEase * (1 - 0.18 * tuckV[i]) * (1 + Math.sin(lph * 0.7 + i * 1.7) * 0.04);
-      limbArr[i * 4 + 2] = cur.limbR[i] * P[2] * (1 + 0.12 * tuckV[i]);
-      limbArr[i * 4 + 3] = cur.limbT[i] * (1 - pose.flat * (1 - TUNE.tiltKeep));
+      const ang = cur.limbA[i] + P[0] + shiftV[i] + Math.sin(lph * 0.9 + i * 2.1) * 0.05;
+      const len = cur.limbL[i] * P[1] * restEase * (1 - 0.18 * tuckV[i]) * (1 + Math.sin(lph * 0.7 + i * 1.7) * 0.04);
+      const tlt = cur.limbT[i] * (1 - pose.flat * (1 - TUNE.tiltKeep));
+      const ct = Math.cos(tlt);
+      const dx = Math.cos(ang) * ct, dy = Math.sin(ang) * ct, dz = Math.sin(tlt);
+      limbA4[i * 4]     = dx * 0.10 + pose.lean[0];
+      limbA4[i * 4 + 1] = dy * 0.10 + pose.lean[1];
+      limbA4[i * 4 + 2] = dz * 0.10;
+      limbA4[i * 4 + 3] = cur.limbR[i] * P[2] * (1 + 0.12 * tuckV[i]);
+      limbB4[i * 4]     = dx * len + pose.lean[0];
+      limbB4[i * 4 + 1] = dy * len + pose.lean[1];
+      limbB4[i * 4 + 2] = dz * len;
+      limbB4[i * 4 + 3] = 0;
     }
-    gl.uniform4fv(U['u_limb[0]'], limbArr);
+    gl.uniform4fv(U['u_limbA[0]'], limbA4);
+    gl.uniform4fv(U['u_limbB[0]'], limbB4);
     gl.uniform1f(U.u_zflat, TUNE.restZ + (TUNE.emoteZ - TUNE.restZ) * pose.flat);
     gl.uniform2f(U.u_lean, pose.lean[0], pose.lean[1]);
     gl.uniform1f(U.u_coreS, pose.core);
     gl.uniform1f(U.u_faceE, faceE);
     gl.uniform1f(U.u_toon, toonA);
     gl.uniform1f(U.u_mode, modeA);
-    gl.uniform1f(U.u_bw, cur.bw);
-    gl.uniform1f(U.u_bf, cur.bf);
-    gl.uniform1f(U.u_sw, cur.sw);
-    gl.uniform1f(U.u_sf, cur.sf);
     gl.uniform1f(U.u_smink, cur.k * (1 + 0.30 * (1 - pose.flat)));   // gooier at rest
-    gl.uniform3f(U.u_palA, cur.palA[0], cur.palA[1], cur.palA[2]);
-    gl.uniform3f(U.u_palB, cur.palB[0], cur.palB[1], cur.palB[2]);
-    gl.uniform3f(U.u_palD, cur.palD[0], cur.palD[1], cur.palD[2]);
-    gl.uniform1f(U.u_irid, cur.irid);
-    gl.uniform1f(U.u_glint, cur.glint);
-    gl.uniform1f(U.u_veins, cur.veins);
-    gl.uniform1f(U.u_scale, cur.scale * breathe);
-    gl.uniform1f(U.u_room, O.room ? 1 : 0);
+    gl.uniform1f(U.u_scale, scaleEff);
+    // the body is bounded by the unit sphere in its own frame (map() clamps
+    // with length(p)-1.0); world extent scales by u_scale and the spring, +
+    // a small margin for the pose lean — conservative so nothing ever clips
+    gl.uniform1f(U.u_boundR, scaleEff * Math.max(sx, syF, 1) + 0.12);
+    // static spec set — changes only during a personality crossfade or a
+    // reroll (specDirty), so it stays off the wire on ordinary frames
+    if (specDirty) {
+      specDirty = false;
+      gl.uniform1f(U.u_sd, sd);
+      gl.uniform1f(U.u_sd2, sd2);
+      gl.uniform1f(U.u_bw, cur.bw);
+      gl.uniform1f(U.u_bf, cur.bf);
+      gl.uniform1f(U.u_sw, cur.sw);
+      gl.uniform1f(U.u_sf, cur.sf);
+      gl.uniform3f(U.u_palA, cur.palA[0], cur.palA[1], cur.palA[2]);
+      gl.uniform3f(U.u_palB, cur.palB[0], cur.palB[1], cur.palB[2]);
+      gl.uniform3f(U.u_palD, cur.palD[0], cur.palD[1], cur.palD[2]);
+      gl.uniform1f(U.u_irid, cur.irid);
+      gl.uniform1f(U.u_glint, cur.glint);
+      gl.uniform1f(U.u_veins, cur.veins);
+      gl.uniform1f(U.u_inkeye, cur.ink);
+      gl.uniform1f(U.u_amb, cur.amb);
+      gl.uniform1f(U.u_bands, cur.bands);
+      gl.uniform1f(U.u_facet, cur.facet);
+      gl.uniform3f(U.u_keyTint, cur.keyT[0], cur.keyT[1], cur.keyT[2]);
+      gl.uniform3f(U.u_filTint, cur.filT[0], cur.filT[1], cur.filT[2]);
+    }
     gl.uniform1f(U.u_flow, flowA);
     gl.uniform1f(U.u_flowPh, flowPh);
-    gl.uniform1f(U.u_mtilt, cur.tilt * (0.5 + 0.5 * dCur.mood) - (annoyT > 0 ? 0.22 : 0));
-    gl.uniform1f(U.u_inkeye, cur.ink);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     raf = requestAnimationFrame(frame);
   }
@@ -1085,6 +1214,7 @@ function Moshi(host, opts = {}) {
         from = cur === to ? to : lerpSpec(from, to, mix * mix * (3 - 2 * mix));
         to = makeSpec(nm, sd); mix = 0;
       }
+      specDirty = true;
       if (onChange) onChange(nm, sd);
       return api;
     },
@@ -1188,12 +1318,13 @@ function Moshi(host, opts = {}) {
     onPersonality(fn) { onChange = fn; return api; },
     _step() {                       // one synchronous frame — for harnesses
       cancelAnimationFrame(raf);    // whose rAF is throttled (tests, captures)
-      frame(performance.now());
+      frame(performance.now(), true);          // forced: ignores the governor
       return api;
     },
     destroy() {
       dead = true;
       cancelAnimationFrame(raf); clearTimeout(blinkTimer); rob.disconnect();
+      if (io) io.disconnect();
       removeEventListener('scroll', onScroll, { capture: true });
       if (O.interactive) {
         removeEventListener('pointermove', onMove);
