@@ -243,10 +243,36 @@ install_app() {                                 # $1 = source app, $2 = dest
   fi
 }
 
+# Seal a deployed bundle. Prefers the "Developer ID Application" identity when one is
+# installed, and only falls back to ad-hoc when there is none (CI, a fresh machine).
+#
+# WHY THE IDENTITY MATTERS FOR MORE THAN GATEKEEPER: macOS TCC pins a privacy grant
+# (Microphone, Speech Recognition, Camera, …) to the app's code-signing identity. An
+# AD-HOC signature carries no certificate, so TCC has nothing durable to key on and
+# falls back to the bundle's exact `cdhash` — which changes on EVERY rebuild. The old
+# grant is then orphaned and macOS re-prompts on the next launch, forever. Signing with
+# a real certificate makes the requirement cert-based
+# (`identifier "studio.mosh.app" and … certificate leaf[subject.OU] = "ZYT77F9B27"`),
+# which survives every subsequent rebuild — the same reason Ableton/Logic ask once.
+#
+# Deliberately NOT `--options runtime` / `--entitlements` here: a stable TCC identity is
+# all this needs, and leaving Hardened Runtime off keeps the everyday deploy behaviourally
+# identical to the ad-hoc build it replaces (no library-validation risk to third-party
+# VST3/AU hosting). `release` still applies the full distribution config.
+# (`dev_id_identity` is defined below; bash resolves it at call time, and every sign_app
+# call site runs after this file is fully sourced.)
 sign_app() {
-  local DEST="$1" LABEL="${2:-ad-hoc}"
+  local DEST="$1" LABEL="${2:-ad-hoc}" ID
+  ID="$(dev_id_identity)"
   xattr -cr "$DEST" 2>/dev/null || true
-  codesign --force --deep --sign - "$DEST"
+  if [ -n "$ID" ]; then
+    codesign --force --deep --sign "$ID" "$DEST"
+    LABEL="${LABEL/ad-hoc/Developer ID}"
+  else
+    echo "  note: no Developer ID Application identity found — signing ad-hoc." >&2
+    echo "        macOS will re-prompt for mic/speech access after every rebuild." >&2
+    codesign --force --deep --sign - "$DEST"
+  fi
   # macOS may attach protected provenance immediately after a copy/sign burst.
   # Give the metadata writer a moment, then strip again before final verification.
   sleep 1
