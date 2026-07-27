@@ -8851,6 +8851,29 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                     sess->removeProperty ("recoverableCount");
                 }
             }
+            // An AUTOMATED parameter's live `value` is DERIVED, not persisted: it is the
+            // curve evaluated at the playhead. The matrix sets param 0 to 0.7 and then adds
+            // a single automation point of 0.5 — one point means the curve is constant 0.5
+            // everywhere, so 0.7 is merely a stale live value that automation had not yet
+            // overwritten, and a reload correctly re-derives 0.5. Comparing it across
+            // save/reload compares a transient, exactly like `transport`/`dirty` above.
+            // The `points` array IS the persisted truth and stays in the comparison.
+            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues] (var& v)
+            {
+                if (auto* arr = v.getArray())
+                    for (auto& e : *arr) dropAutomatedValues (e);
+                else if (auto* o = v.getDynamicObject())
+                {
+                    if (o->hasProperty ("automated") && (bool) o->getProperty ("automated"))
+                        o->removeProperty ("value");
+                    for (auto& p : o->getProperties())
+                    {
+                        auto child = p.value;
+                        dropAutomatedValues (child);
+                    }
+                }
+            };
+            dropAutomatedValues (s);
             normNums (s);
             return JSON::toString (s, false);
         };
@@ -8891,10 +8914,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             { "set_clip_mute",        objN ({ { "clipId", mwc }, { "mute", true } }) },
             { "set_clip_fade",        objN ({ { "clipId", mwc }, { "fadeInSec", 0.3 }, { "fadeOutSec", 0.4 } }) },
             { "set_clip_crossfade",   objN ({ { "clipId", mwc }, { "enabled", true } }) },
+            // stretch_clip BEFORE set_clip_reverse, deliberately. Reversing installs an
+            // async proxy render; headless never pumps it, so the reversed clip's
+            // getAudioFile().getLength() stays 0 and stretch_clip fails its
+            // "source has no length" guard. Proven with --run-script: stretch→ok,
+            // reverse→ok, stretch→"source has no length". That is a headless artifact of
+            // the un-rendered proxy, not a persist bug — the undo matrix never saw it
+            // because it undoes each mutation before applying the next, so stretch_clip
+            // there always ran on an unreversed clip. (Whether stretch_clip should read
+            // the SOURCE length instead of the proxy's is a real product question —
+            // filed as G15 in docs/auto-loop/backlog.jsonl rather than changed here.)
+            { "stretch_clip",         objN ({ { "clipId", mwc }, { "bars", 1 } }) },
             { "set_clip_reverse",     objN ({ { "clipId", mwc }, { "reversed", true } }) },
             { "set_clip_loop",        objN ({ { "clipId", mwc }, { "enabled", true }, { "start", 0.0 }, { "length", 1.0 } }) },
             { "set_clip_warp",        objN ({ { "clipId", mwc }, { "autoTempo", true } }) },
-            { "stretch_clip",         objN ({ { "clipId", mwc }, { "bars", 1 } }) },
             { "normalize_clip",       objN ({ { "clipId", mwc }, { "targetDb", 0.0 } }) },
             { "duplicate_clip",       objN ({ { "clipId", mwc } }) },
             { "add_note",             objN ({ { "clipId", mmc }, { "pitch", 64 }, { "start", 1.0 }, { "length", 0.5 } }) },
@@ -8940,7 +8973,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto preSave = canon();
         check (ok (cmd (ops, "save")), "matrix save ok");
         check (ok (cmd (ops, "reload")), "matrix reload ok");
-        check (canon() == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
+        const auto postLoad = canon();
+        // A bare equality failure here is opaque — the same problem the golden-audio gate
+        // solved with a feature vector. Print the first divergence (with a little context)
+        // so a red run names the non-serialized field instead of just asserting inequality.
+        if (postLoad != preSave)
+        {
+            int i = 0;
+            const int n = juce::jmin (preSave.length(), postLoad.length());
+            while (i < n && preSave[i] == postLoad[i]) ++i;
+            const int from = juce::jmax (0, i - 90);
+            std::cerr << "  persist-diff @char " << i << "\n"
+                      << "    saved:  ..." << preSave.substring (from, i + 90) << "\n"
+                      << "    loaded: ..." << postLoad.substring (from, i + 90) << "\n";
+        }
+        check (postLoad == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
     }
 
     finishSection();
