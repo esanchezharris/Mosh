@@ -158,6 +158,14 @@ if (MOSH_BUILD_APP)
         src/brain/BrainProxy.cpp
         # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
         src/audio/RealtimeAudioGuard.cpp
+        # Opt-in, privacy-respecting crash reporting + telemetry (self-contained
+        # module; see docs/telemetry/PRIVACY.md). Installed from ONE line at the
+        # top of Main.cpp's initialise().
+        src/telemetry/Breadcrumbs.cpp
+        src/telemetry/CrashReportFormatter.cpp
+        src/telemetry/TelemetryConfig.cpp
+        src/telemetry/Telemetry.cpp
+        src/telemetry/CrashHandler.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp

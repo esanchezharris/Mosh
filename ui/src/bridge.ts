@@ -181,6 +181,17 @@ export async function getRemoteStatus(): Promise<RemoteResult<RemoteStatus>> {
   return (await native("remote_status")()) as RemoteResult<RemoteStatus>;
 }
 
+// Telemetry opt-in sync (privacy-first, default OFF — see docs/telemetry/PRIVACY.md
+// and settings/schema.ts's telemetryOptIn descriptor). Fire-and-forget notification
+// to the native crash/telemetry module, which persists the bit to a small flag file
+// (~/Library/Mosh/telemetry.optin) it reads directly — deliberately NOT a MoshOps
+// command. No-op outside the real WebView (dev/mock/tests never touch the
+// filesystem or a native function that isn't registered there), mirroring
+// archivePair()'s real-native-only posture above.
+export async function setTelemetryOptIn(optIn: boolean): Promise<void> {
+  if (realNative()) await native("set_telemetry_optin")({ optIn });
+}
+
 // Native file pickers (wave: settings). These are async message-thread dialogs, so
 // they are dedicated native functions (not commands) returning a Promise. The actual
 // import/open/save still happens via import_clip / open_project / save_as commands —
