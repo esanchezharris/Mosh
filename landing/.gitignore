@@ -1,0 +1,10 @@
+# Redundant with the repo root .gitignore (which already globs node_modules/,
+# dist/, and .env*.local at any depth) — listed here too so this directory
+# stays self-explanatory if it's ever copied out on its own.
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.local
+.DS_Store

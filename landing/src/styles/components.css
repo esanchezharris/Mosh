@@ -1,0 +1,293 @@
+/* Reusable components. */
+
+.container {
+  max-width: var(--container-max);
+  margin-inline: auto;
+  padding-inline: var(--container-pad);
+}
+
+/* ---------------------------------------------------------------- nav */
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  background: color-mix(in srgb, var(--color-bg) 78%, transparent);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.site-nav__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--space-4);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.brand__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent),
+    0 0 10px 1px var(--color-accent);
+  animation: pulse-dot 2.6s var(--ease-in-out) infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  color: var(--color-fg-muted);
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.theme-toggle:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.theme-toggle svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.theme-toggle .icon-sun {
+  display: none;
+}
+:root[data-theme='light'] .theme-toggle .icon-moon {
+  display: none;
+}
+:root[data-theme='light'] .theme-toggle .icon-sun {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0.85em 1.5em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn--primary {
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, var(--color-accent-ink) 30%, transparent) inset,
+    0 8px 24px -8px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+
+.btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, var(--color-accent-ink) 30%, transparent) inset,
+    0 12px 28px -6px color-mix(in srgb, var(--color-accent) 85%, transparent);
+}
+
+.btn--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-fg);
+  border: 1px solid var(--color-border-strong);
+}
+
+.btn--ghost:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.btn--sm {
+  padding: 0.6em 1.1em;
+  font-size: 0.7rem;
+}
+
+/* ---------------------------------------------------------------- badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3em 0.75em;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-fg-muted);
+}
+
+.badge--accent {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.badge--amber {
+  color: var(--color-amber);
+  border-color: color-mix(in srgb, var(--color-amber) 45%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--color-amber) 10%, transparent);
+}
+
+/* ---------------------------------------------------------------- eyebrow / labels */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-fg-faint);
+}
+
+.eyebrow--accent {
+  color: var(--color-accent);
+}
+
+/* ---------------------------------------------------------------- panels / cards */
+
+.panel {
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* ---------------------------------------------------------------- waitlist form */
+
+.waitlist-form {
+  width: 100%;
+}
+
+.waitlist-form__row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field__input {
+  width: 100%;
+  height: 100%;
+  padding: 0.95em 1.15em;
+  background: var(--color-bg-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+.field__input::placeholder {
+  color: var(--color-fg-faint);
+}
+
+.field__input:focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.field__input:user-invalid {
+  border-color: var(--color-danger);
+}
+
+/* Honeypot: hidden from sighted + AT users, but present in the DOM and
+   tabbable-excluded, so naive bots that fill every input still get caught. */
+.field--trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+}
+
+.waitlist-form__submit {
+  flex: 0 0 auto;
+}
+
+.waitlist-form__hint {
+  margin-top: var(--space-3);
+  font-size: var(--fs-small);
+  color: var(--color-fg-faint);
+}
+
+.waitlist-form__status {
+  margin-top: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  min-height: 1.4em;
+}
+
+.waitlist-form__status[data-state='success'] {
+  color: var(--color-accent);
+}
+
+.waitlist-form__status[data-state='error'] {
+  color: var(--color-danger);
+}
+
+@media (max-width: 560px) {
+  .waitlist-form__row {
+    flex-direction: column;
+  }
+}
