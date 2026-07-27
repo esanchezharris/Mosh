@@ -1,73 +1,87 @@
 #!/usr/bin/env python3
 """Generate docs/FEATURE_AUDIT.md — the present-tense DAW-parity scoreboard.
 
-Reads scripts/daw-conformance/report.json (produced by conformance.py against the current
-binary) and renders a trustworthy dashboard that SUPERSEDES the stale 2026-06-09 baseline
-audit. Re-runnable: `python3 scripts/daw-conformance/conformance.py && python3 scripts/daw-conformance/scoreboard.py`.
+Renders ONLY from committed inputs, so the scoreboard is regenerable (and checkable)
+without a binary:
 
-The curated parity backlog (G1–G14) below is the single source for both this scoreboard and
-the auto-loop backlog seed — each gap maps to a reality-pack invariant + an eval-suite area.
+  scripts/daw-conformance/verdicts.json        normalized outcome of the last conformance
+                                               run (conformance.py --write-verdicts; a
+                                               plain native-lane run FAILS if it disagrees)
+  docs/reality-pack/mosh_daw_eval_suite.csv    the scenario→row fan-out
+  docs/auto-loop/backlog.jsonl                 the parity backlog (single source of truth —
+                                               the old hardcoded BACKLOG list is gone)
+  coverage_check.compute()                     static command-surface coverage ledger
+
+`--check` regenerates in-memory and diffs against the committed file: a stale scoreboard
+fails the CHEAP gate lane. That closes the staleness class where FEATURE_AUDIT still
+showed Export=15 gaps three weeks after export range/tail shipped.
 """
+import argparse
+import csv
 import json
+import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-REPORT = REPO / "scripts" / "daw-conformance" / "report.json"
-OUT = REPO / "docs" / "FEATURE_AUDIT.md"
+import coverage_check
 
-# Curated conventional-parity backlog (conventional scope; superset of the conformance gaps
-# plus the "stranded backend" surface gaps found in the current-code audit). tier: must/should/nice.
-# klass: cheap (ui-only) | native (MoshOps/engine). status reflects current main.
-BACKLOG = [
-    ("G5",  "Sends / returns / bus UI + agent catalog", "should", "cheap",
-     "Backend real (create_bus/add_send/set_send_level in MoshOps); no UI, absent from agent catalog.", "inv 59"),
-    ("G6",  "Tempo / time-sig / metronome GUI controls", "should", "cheap",
-     "set_tempo/set_time_signature/set_metronome exist + in agent catalog; Topbar shows them read-only.", "inv 6,7"),
-    ("G8",  "Per-track output / multi-out routing UI", "should", "cheap",
-     "set_track_output/list_track_outputs real; loadRouting() orphaned in store; no picker.", "inv 19"),
-    ("G9",  "Audio warp / time-stretch GUI", "should", "cheap",
-     "set_clip_warp + autoTempo/stretchMode serialized; no control to engage it.", "inv 24(matrix)"),
-    ("G3",  "Audio device + per-track input picker UI", "must", "cheap",
-     "set_audio_device/set_track_input/list_wave_inputs exist; Settings exposes only buffer/threads.", "inv 16,41"),
-    ("G1",  "Export range/section + delay-tail policy", "must", "native",
-     "export_audio hardcodes {0,getLength()} over all tracks; no range arg, no tail policy.", "inv 78,81"),
-    ("G7",  "Stem export (per-track, common zero point)", "should", "native",
-     "All tracks render to one file; no per-track stem path.", "inv 84"),
-    ("G4",  "Clip inspector (gain/mute/rename) + clip fades", "must", "native",
-     "set_clip_gain/mute/rename agent-only; NO fade command exists; Inspector is track-only.", "inv 27,29,30"),
-    ("G2",  "Recording count-in / pre-roll + mic-permission UX", "must", "native",
-     "G2a (mic-permission/failure UX) landed via #254. G2b (count-in) landed: set_count_in "
-     "(project preference, same MOSH_PROJECT node/template as set_key) is wired into "
-     "tracktion_engine's own pre-roll (te::Edit::setCountInMode); snapshot.countInBars "
-     "exposes it. Re-run conformance.py against a built binary to flip fam_record_countin "
-     "from gap to hardware and regenerate this row.", "inv 5,41,45,49"),
-    ("G14", "set_track_volume / pan undo restores prior value", "must", "native",
-     "DISCOVERED: vp->setVolumeDb() bypasses the UndoManager → empty txn; undo does not revert (logs undoable:true).", "inv 97"),
-    ("G11", "MIDI-input picker + live-monitor surface", "nice", "cheap",
-     "list_midi_inputs unreferenced in UI.", "inv 47"),
-    ("G13", "Missing-media on-load banner", "nice", "cheap",
-     "clipToVar.sourceMissing emitted + relink exists; verify a clear load-time banner.", "inv 71,117"),
-    ("G10", "Automation depth (write/touch/latch modes)", "nice", "native",
-     "Point-draw only; no record-knob / mode / multi-target conflict policy.", "inv 63,64"),
-    ("G12", "Comping promote-to-main UX", "nice", "native",
-     "Take swap only; no visual comping / promote.", "inv (comping)"),
-]
+REPO = Path(__file__).resolve().parents[2]
+SELF = Path(__file__).resolve().parent
+EVAL_CSV = REPO / "docs" / "reality-pack" / "mosh_daw_eval_suite.csv"
+MATRIX_CSV = REPO / "docs" / "reality-pack" / "daw_capability_matrix.csv"
+VERDICTS = SELF / "verdicts.json"
+BACKLOG = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+OUT = REPO / "docs" / "FEATURE_AUDIT.md"
 
 STATUS_LABEL = {"pass": "✅ pass", "fail": "❌ FAIL", "gap": "🟡 gap",
                 "hardware": "🔌 hardware", "out-of-scope": "— out-of-scope"}
 
 
-def main():
-    rep = json.loads(REPORT.read_text())
-    s = rep["summary"]["by_status"]
-    total = rep["eval_total"]
-    in_scope = total - s.get("out-of-scope", 0)
+def load_inputs():
+    verdicts = json.loads(VERDICTS.read_text())
+    rows = list(csv.DictReader(EVAL_CSV.open()))
+    backlog = []
+    for line in BACKLOG.read_text().splitlines():
+        line = line.strip()
+        if line:
+            try:
+                backlog.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass  # model_lint.py owns backlog validity
+    return verdicts, rows, backlog
+
+
+def render():
+    verdicts, rows, backlog = load_inputs()
+    vmap = {(v["area"], v["action"]): v for v in verdicts}
+
+    # Fan the family verdicts back over the eval rows (the padded legacy CSV).
+    per_id = []
+    for r in rows:
+        v = vmap.get((r["area"], r["user_action"]))
+        per_id.append({"area": r["area"], "status": v["status"] if v else "fail"})
+    by_status = {}
+    by_area = {}
+    for it in per_id:
+        by_status[it["status"]] = by_status.get(it["status"], 0) + 1
+        by_area.setdefault(it["area"], {}).setdefault(it["status"], 0)
+        by_area[it["area"]][it["status"]] += 1
+    in_scope = len(per_id) - by_status.get("out-of-scope", 0)
+
+    csv_verdicts = [v for v in verdicts if v["area"] != "Post-pack"]
+    post_pack = [v for v in verdicts if v["area"] == "Post-pack"]
+    parity_items = [b for b in backlog if b.get("id", "").startswith("G")]
+    open_items = [b for b in parity_items if b.get("status") != "done"]
+    done_items = [b for b in parity_items if b.get("status") == "done"]
+    cov = coverage_check.compute()
+    n_cov = sum(1 for s in cov["commands"].values() if s)
 
     L = []
     L.append("# Mosh — DAW Parity Scoreboard")
     L.append("")
-    L.append(f"_Generated from a live conformance run against `{Path(rep['binary']).name}` "
-             f"by `scripts/daw-conformance/conformance.py` + `scoreboard.py`._")
+    L.append("_Generated by `scripts/daw-conformance/scoreboard.py` from the committed verdicts "
+             "of the last live conformance run (`conformance.py --write-verdicts`), the "
+             "reality-pack eval suite, and the parity backlog. `scoreboard.py --check` fails "
+             "the cheap gate lane when this file goes stale._")
     L.append("")
     L.append("> **This supersedes the 2026-06-09 baseline audit.** That audit's JSON "
              "(`167 missing / 24 shipped`) was a point-in-time snapshot; ~20 feature waves and "
@@ -78,64 +92,149 @@ def main():
     L.append("")
     L.append("## Headline")
     L.append("")
-    L.append(f"- **{s.get('pass',0)} / {in_scope} in-scope eval rows pass** "
-             f"(~{round(100*s.get('pass',0)/in_scope)}%), proven headless (state / audio / undo asserted).")
-    L.append(f"- **{s.get('gap',0)} gap** rows — real conventional-DAW gaps, tracked in the backlog below.")
-    L.append(f"- **{s.get('hardware',0)} hardware** row — needs a live device (Phase-1 hardware pass).")
-    L.append(f"- **{s.get('out-of-scope',0)} out-of-scope** rows — Monster / Arena / Collaboration "
-             "(outside the conventional-parity pass).")
-    L.append(f"- Scope: {rep['scope']}.")
+    n_families = len([v for v in csv_verdicts if v["status"] != "out-of-scope"])
+    L.append(f"- **{len([v for v in csv_verdicts if v['status'] == 'pass'])} / {n_families} "
+             f"in-scope scenario families pass** (plus {len(post_pack)} post-pack families), "
+             f"proven headless (state / audio / undo asserted).")
+    L.append(f"- Row view (the padded legacy CSV): {by_status.get('pass', 0)} / {in_scope} in-scope "
+             f"eval rows pass — the historical headline metric; each family fans out to ~8 "
+             f"near-duplicate rows, so the FAMILY count above is the honest one.")
+    L.append(f"- **{by_status.get('gap', 0)} gap** rows — tracked, attributed backlog items.")
+    L.append(f"- **{by_status.get('hardware', 0)} hardware** rows — need a live device "
+             f"(Phase-1 hardware pass).")
+    L.append(f"- **{by_status.get('out-of-scope', 0)} out-of-scope** rows — Monster / Arena / "
+             "Collaboration (outside the conventional-parity pass).")
+    L.append(f"- Command-surface coverage: **{n_cov} / {cov['total']}** dispatch commands "
+             f"exercised by ≥1 test surface; {len(cov['waived'])} waived (reasoned, expiring — "
+             f"see `scripts/daw-conformance/coverage_waivers.json`); "
+             f"{len(cov['uncovered'])} uncovered.")
     L.append("")
+
+    if MATRIX_CSV.exists():
+        mrows = list(csv.DictReader(MATRIX_CSV.open()))
+        L.append("## Capability parity by tier (the honest headline)")
+        L.append("")
+        L.append("_From `docs/reality-pack/daw_capability_matrix.csv` — the sourced enumeration of "
+                 "what Ableton Live 12 / FL Studio / Pro Tools / Reaper 7 can do (2-of-4 inclusion "
+                 "rule), each row code-dispositioned on TWO axes: does the engine surface exist, and "
+                 "can a mouse/keyboard user reach it. The conformance suite above proves what EXISTS "
+                 "works; this table shows how much of the full DAW surface exists. Tier assignments "
+                 "are a DRAFT pending owner review._")
+        L.append("")
+        L.append("| Tier | capabilities | engine shipped | UI reachable | SHIPPED | PARTIAL | MISSING |")
+        L.append("|---|---|---|---|---|---|---|")
+        tier_label = {"T0": "T0 — daily-driver core", "T1": "T1 — pro",
+                      "T2": "T2 — niche", "X": "X — rejected (owner-signed)"}
+        for tier in ("T0", "T1", "T2", "X"):
+            rows_t = [r for r in mrows if r.get("tier") == tier]
+            if not rows_t:
+                continue
+            n = len(rows_t)
+            eng = sum(1 for r in rows_t if r.get("mosh_engine") in ("shipped", "n/a"))
+            ui = sum(1 for r in rows_t if r.get("mosh_ui") in ("shipped", "n/a"))
+            d = {k: sum(1 for r in rows_t if r.get("disposition") == k)
+                 for k in ("SHIPPED", "PARTIAL", "MISSING")}
+            L.append(f"| {tier_label[tier]} | {n} | {eng} ({round(100 * eng / n)}%) | "
+                     f"{ui} ({round(100 * ui / n)}%) | {d['SHIPPED']} | {d['PARTIAL']} | {d['MISSING']} |")
+        L.append("")
 
     L.append("## Parity by area (eval suite)")
     L.append("")
     L.append("| Area | pass | gap | hardware | out-of-scope |")
     L.append("|---|---|---|---|---|")
-    for area, counts in rep["summary"]["by_area"].items():
-        L.append(f"| {area} | {counts.get('pass',0)} | {counts.get('gap',0)} | "
-                 f"{counts.get('hardware',0)} | {counts.get('out-of-scope',0)} |")
+    for area in sorted(by_area):
+        c = by_area[area]
+        L.append(f"| {area} | {c.get('pass', 0)} | {c.get('gap', 0)} | "
+                 f"{c.get('hardware', 0)} | {c.get('out-of-scope', 0)} |")
     L.append("")
 
     L.append("## Scenario verdicts")
     L.append("")
     L.append("| Area | Scenario | Status | Invariants | Notes |")
     L.append("|---|---|---|---|---|")
-    for f in rep["families"]:
-        det = f["detail"]
-        note = det.get("note") or det.get("gap") or det.get("reason") or ""
-        if "gap" in det and det.get("gap"):
-            note = f"**{det['gap']}** — {det.get('note','')}"
-        inv = ",".join(str(i) for i in f["invariants"]) or "—"
-        L.append(f"| {f['area']} | {f['action']} | {STATUS_LABEL.get(f['status'], f['status'])} "
+    for v in csv_verdicts:
+        note = v.get("note", "")
+        if v.get("backlog_ref"):
+            note = f"**{v['backlog_ref']}** — {note}"
+        inv = ",".join(str(i) for i in v.get("invariants", [])) or "—"
+        L.append(f"| {v['area']} | {v['action']} | {STATUS_LABEL.get(v['status'], v['status'])} "
                  f"| {inv} | {note} |")
     L.append("")
 
+    if post_pack:
+        L.append("## Post-pack families (capabilities shipped after the reality pack was gathered)")
+        L.append("")
+        L.append("| Family | Status | Invariants | Notes |")
+        L.append("|---|---|---|---|")
+        for v in post_pack:
+            inv = ",".join(str(i) for i in v.get("invariants", [])) or "—"
+            L.append(f"| {v['action']} | {STATUS_LABEL.get(v['status'], v['status'])} "
+                     f"| {inv} | {v.get('note', '')} |")
+        L.append("")
+
     L.append("## Conventional-parity backlog (drives the auto-loop)")
     L.append("")
-    L.append("Each item maps to a reality-pack invariant + eval-suite area. `cheap` = UI/agent "
-             "wiring (auto-mergeable); `native` = MoshOps/engine. Items touching "
-             "`src/engine/MoshEngine.*` or `src/state/**` land as `needs-human` PRs.")
+    L.append("Read live from `docs/auto-loop/backlog.jsonl` (the single source of truth — items "
+             "are G-prefixed). `cheap` = UI/agent wiring (auto-mergeable); `native` = "
+             "MoshOps/engine.")
     L.append("")
-    L.append("| id | tier | class | Gap | Evidence | Invariants |")
-    L.append("|---|---|---|---|---|---|")
-    order = {"must": 0, "should": 1, "nice": 2}
-    for gid, title, tier, klass, ev, inv in sorted(BACKLOG, key=lambda r: (order[r[2]], r[0])):
-        L.append(f"| {gid} | {tier} | {klass} | {title} | {ev} | {inv} |")
+    if open_items:
+        L.append("| id | status | class | size | Gap |")
+        L.append("|---|---|---|---|---|")
+        for b in sorted(open_items, key=lambda b: b.get("order", 0)):
+            L.append(f"| {b['id']} | {b.get('status', '')} | {b.get('class', '')} | "
+                     f"{b.get('size', '')} | {b.get('title', '')} |")
+    else:
+        L.append("_No open parity items._")
+    L.append("")
+    L.append(f"_{len(done_items)} parity items landed and reconciled "
+             f"({', '.join(b['id'] for b in sorted(done_items, key=lambda b: b.get('order', 0)))}) "
+             f"— evidence lives in their backlog notes._")
     L.append("")
 
     L.append("## How this stays honest")
     L.append("")
-    L.append("- `conformance.py` is wired into the native gate (`scripts/auto-loop/gate.sh`), so "
-             "every merged native PR keeps the proven rows green; a parity fix flips its gap → pass.")
-    L.append("- Audio/undo claims are asserted against real rendered WAVs and the real `snapshot()` "
-             "(via the `__snapshot` run-script directive) — not against command return codes.")
+    L.append("- `conformance.py` runs in the native gate and FAILS on any in-scope regression "
+             "**or any drift from the committed `verdicts.json`** — a behavior change must land "
+             "its verdict flip (and this regenerated scoreboard) in the same PR.")
+    L.append("- `scoreboard.py --check`, `model_lint.py`, and `coverage_check.py` run in the "
+             "cheap gate lane: a stale scoreboard, an unmapped eval scenario, a gap pointing at "
+             "a done backlog item, or an untested dispatch command each fail the gate on their "
+             "own — no binary needed.")
+    L.append("- Audio/undo claims are asserted against real rendered WAVs and the real "
+             "`snapshot()` (via the `__snapshot` run-script directive) — not against command "
+             "return codes.")
     L.append("- Hardware-only behavior (mic capture, live meters, MIDI input, multi-out, loop "
              "playback) is confirmed in the Phase-1 hardware pass — see `docs/VERIFICATION.md`.")
     L.append("")
+    return "\n".join(L) + "\n"
 
-    OUT.write_text("\n".join(L) + "\n")
-    print(f"wrote {OUT}  ({len(L)} lines)")
+
+def main():
+    ap = argparse.ArgumentParser(description="DAW-parity scoreboard generator")
+    ap.add_argument("--check", action="store_true",
+                    help="regenerate in-memory and fail if docs/FEATURE_AUDIT.md is stale")
+    args = ap.parse_args()
+
+    content = render()
+    if args.check:
+        committed = OUT.read_text() if OUT.exists() else ""
+        if committed != content:
+            print("scoreboard: STALE — docs/FEATURE_AUDIT.md does not match its committed inputs.")
+            print("  regenerate with: python3 scripts/daw-conformance/scoreboard.py  (and commit)")
+            import difflib
+            diff = list(difflib.unified_diff(committed.splitlines(), content.splitlines(),
+                                             "committed", "regenerated", lineterm="", n=0))
+            for line in diff[:40]:
+                print(f"  {line}")
+            return 1
+        print("scoreboard: fresh (matches committed inputs)")
+        return 0
+
+    OUT.write_text(content)
+    print(f"wrote {OUT}  ({len(content.splitlines())} lines)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

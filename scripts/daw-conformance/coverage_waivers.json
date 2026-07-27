@@ -1,0 +1,152 @@
+[
+  {
+    "command": "accept_lyric_proposal",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "activate_lora_adapter",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "analyze_lyrics",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "approve_training_source",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "build_lyrics_from_clip",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "build_skeleton_from_clip",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "build_training_corpus",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "cancel_lyric_job",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "cancel_render",
+    "reason": "Stage-5 render-loop tail command with NO current coverage on any surface (discovered by this ledger's first run \u2014 the 2026-06-08 gate coverage has since drifted). real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "cancel_training_job",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "complete_lyrics",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "discard_recovery",
+    "reason": "A2 crash-recovery affordance; RecoveryNotice vitest covers the mock only. real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "fill_lyric_gap",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "get_lyric_corpus_stats",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "get_rhymes",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "import_lora_adapter",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "import_training_source",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "list_lora_adapters",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "list_loras",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "list_training_sources",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "list_transform_targets",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "load_rave_model",
+    "reason": "anira-gated (MOSH_ENABLE_ANIRA off by default); add_rave_insert path is verify-covered but model hot-swap is not. real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "mp_claim_track",
+    "reason": "MP lane: native lock behavior covered by LockManager Catch2 units + vitest MP store tests; dispatch-level exercise is a P6 matrix:locks target.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "mp_send_signal",
+    "reason": "MP lane: covered by vitest MP store tests only; dispatch-level exercise is a P6 matrix:locks target.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "regenerate_lyric",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "reject_lyric_proposal",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "reject_render",
+    "reason": "Stage-5 render-loop tail command with NO current coverage on any surface (discovered by this ledger's first run \u2014 the 2026-06-08 gate coverage has since drifted). real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
+    "expires": "2026-08-15"
+  },
+  {
+    "command": "submit_training_job",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "suggest_next_line",
+    "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
+    "expires": "2026-09-01"
+  },
+  {
+    "command": "training_job_status",
+    "reason": "LoRA trainer scaffold (fake backend, WIP popover UI \u2014 deliberately post-v0). Exercised by training-state tests only; cover in selftest when the real backend lands.",
+    "expires": "2026-09-01"
+  }
+]

@@ -161,9 +161,21 @@ run_py_tests() {
   rm -f "$log"
 }
 
+# ── DAW-parity honesty checks (P1) ───────────────────────────────────────────────
+# Pure static text analysis — no binary, no build, <5s total — so they run in BOTH
+# lanes. Each fails on its own: an untested dispatch command (coverage ledger), an
+# unmapped eval scenario / a gap pointing at a done backlog item (model lint), or a
+# stale docs/FEATURE_AUDIT.md (scoreboard --check).
+run_parity_checks() {
+  run_step "parity_model_lint" bash -c 'python3 scripts/daw-conformance/model_lint.py'
+  run_step "parity_coverage"   bash -c 'python3 scripts/daw-conformance/coverage_check.py'
+  run_step "parity_scoreboard" bash -c 'python3 scripts/daw-conformance/scoreboard.py --check'
+}
+
 # ── cheap lane ───────────────────────────────────────────────────────────────────
 gate_cheap() {
   ensure_node_modules
+  run_parity_checks
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
   run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
@@ -175,8 +187,28 @@ gate_cheap() {
   emit_step "swappability" true '{"proof":"by-classification: no compiled paths touched"}'
 }
 
+# Advisory (never gates): when a change touches paths only the OWNER's hands-on lane can
+# verify, name the affected rows of the parity runbook (docs/VERIFICATION.md §"Parity
+# hands-on checklist") so the by-ear re-pass isn't forgotten. Pure notice — always ok:true.
+runbook_advisory() {
+  local changed rows=""
+  changed="$(cd "$WT" && git diff --name-only "$BASE"...HEAD 2>/dev/null)" || return 0
+  echo "$changed" | grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" && rows="$rows REC-mic,REC-latency,REC-monitor"
+  echo "$changed" | grep -qE "fade|crossfade|Crossfade|Fade" && rows="$rows EAR-fades"
+  echo "$changed" | grep -qiE "warp|stretch|autoTempo" && rows="$rows EAR-warp"
+  echo "$changed" | grep -qE "export_stems|Stem|Renderer|export_audio" && rows="$rows EAR-stems"
+  echo "$changed" | grep -qE "midi_input|MidiInput" && rows="$rows MIDI-in"
+  echo "$changed" | grep -qE "^relay/|multiplayer|LockManager" && rows="$rows MP-two-mac"
+  if [ -n "$rows" ]; then
+    emit_step "runbook_advisory" true "{\"note\":\"owner hands-on rows affected:$rows — docs/VERIFICATION.md parity checklist\"}"
+  fi
+  return 0
+}
+
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
+  run_parity_checks
+  runbook_advisory
   local cfgflags=()
   [ -n "${AL_CPM_CACHE:-}" ]   && cfgflags+=("-DCPM_SOURCE_CACHE=$AL_CPM_CACHE")
   [ -n "${AL_TRACTION_SRC:-}" ] && cfgflags+=("-DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$AL_TRACTION_SRC")
@@ -220,9 +252,11 @@ gate_native() {
   run_step "verify_py" bash -c "python3 scripts/verify-hardware/verify.py --gate --bin '$bin'"
 
   # DAW-conformance — the gathered reality-pack eval suite (docs/reality-pack/) replayed
-  # through the real command surface. Fails ONLY on an in-scope regression (known gaps are
-  # tracked in the report, not failed). Reuses the run-script + WAV harness, so it needs the
-  # same freshly-built binary + numpy. A parity fix that closes a gap flips its row to pass.
+  # through the real command surface. Fails on an in-scope regression (known gaps are
+  # tracked, not failed) AND on any drift from the committed verdicts.json — a behavior
+  # change must land its verdict flip (conformance.py --write-verdicts + scoreboard.py)
+  # in the same PR. Reuses the run-script + WAV harness, so it needs the same
+  # freshly-built binary + numpy.
   run_step "daw_conformance" bash -c "python3 scripts/daw-conformance/conformance.py --bin '$bin'"
 
   # …and assert the committed SCOREBOARD still matches that run. conformance.py only
@@ -250,6 +284,12 @@ gate_native() {
   # vitest too (a native PR may also move ui/).
   ensure_node_modules
   run_step "vitest" bash -c 'cd ui && npm test'
+
+  # DAW-parity P5 replay lane (ADVISORY for its first stable week — the `|| true` makes a
+  # replay failure visible in the step log without failing the gate; promote to blocking
+  # by dropping the `|| true`): replay the e2e-captured UI command traces through the
+  # freshly-built binary. No traces captured -> clean no-op.
+  run_step "replay_e2e" bash -c "python3 scripts/daw-conformance/replay_e2e_log.py '$bin' || true"
 }
 
 finish() {

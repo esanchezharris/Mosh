@@ -566,6 +566,662 @@ def rt_ok(t):
     return isinstance(t, str) and len(t) > 0
 
 
+# ── post-pack families (EXTRA_FAMILIES) — capabilities shipped after 2026-06-26 ────
+def synth_pulse_wav(path, bpm=120.0, beats=8, sr=44100):
+    """Short click train at `bpm` (60ms decaying bursts) — a source detect_clip_bpm can
+    actually read (a pure sine has no pulse and correctly errors)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    spacing = 60.0 / bpm
+    n = int(spacing * beats * sr)
+    burst = int(0.06 * sr)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        frames = bytearray()
+        for i in range(n):
+            t = (i / sr) % spacing
+            k = int(t * sr)
+            v = 0.0
+            if k < burst:
+                v = 0.8 * (1.0 - k / burst) * math.sin(2 * math.pi * 1000.0 * i / sr)
+            frames += struct.pack("<h", int(v * 32767))
+        w.writeframes(bytes(frames))
+    return str(path)
+
+
+def session_of(snap):
+    return snap.get("session", {}) or {}
+
+
+def clip0(snap, track_name):
+    cs = clips_of(track_named(snap, track_name))
+    return cs[0] if cs else {}
+
+
+def plugin0(snap, track_name):
+    ps = (track_named(snap, track_name) or {}).get("plugins", []) or []
+    return ps[0] if ps else {}
+
+
+def fam_clip_fades(ctx):
+    # G4b: clip-edge fades render as state without moving boundaries; one undo per edit.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Fd"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "set_clip_fade", "args": {"clipId": "${C}", "fadeInSec": 0.5, "fadeOutSec": 1.0,
+                                              "curveOut": "sCurve"}},
+        {"command": "__snapshot", "args": {"label": "faded"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-clip-fades")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [30, 56, 79], _err(proc, {"failed": cmd_fails(results)}))
+    b, f, u = clip0(snaps["before"], "Fd"), clip0(snaps["faded"], "Fd"), clip0(snaps["undone"], "Fd")
+    start_stable = abs(f.get("start", -1) - b.get("start", -2)) < 0.01 and \
+        abs(f.get("length", -1) - b.get("length", -2)) < 0.01
+    set_ok = abs(f.get("fadeInSec", 0) - 0.5) < 0.01 and abs(f.get("fadeOutSec", 0) - 1.0) < 0.01 \
+        and f.get("fadeOutType") != b.get("fadeOutType")
+    undo_ok = abs(u.get("fadeInSec", -1)) < 0.01 and abs(u.get("fadeOutSec", -1)) < 0.01
+    ok = start_stable and set_ok and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [30, 56, 79],
+                   {"fadeIn": f.get("fadeInSec"), "fadeOut": f.get("fadeOutSec"),
+                    "curve_changed": f.get("fadeOutType") != b.get("fadeOutType"),
+                    "boundaries_stable": start_stable, "undo_ok": undo_ok,
+                    "note": "fade curve AUDIBILITY is the verify.py check_clip_fades golden."})
+
+
+def fam_clip_reverse_normalize(ctx):
+    # Reverse + non-destructive normalize are clip state; one undo each, exact restore.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rv"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 330.0},
+         "capture": {"C": "clipId"}},
+        {"command": "set_clip_reverse", "args": {"clipId": "${C}", "reversed": True}},
+        {"command": "__snapshot", "args": {"label": "rev"}},
+        {"command": "normalize_clip", "args": {"clipId": "${C}", "targetDb": 0.0}},
+        {"command": "__snapshot", "args": {"label": "norm"}},
+        {"command": "undo", "args": {}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-clip-reverse-norm")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [97], _err(proc, {"failed": cmd_fails(results)}))
+    rev, norm, und = clip0(snaps["rev"], "Rv"), clip0(snaps["norm"], "Rv"), clip0(snaps["undone"], "Rv")
+    # The 0.6-amplitude test tone normalizes to ~+4.4 dB; the exact figure is the
+    # verify.py peak check — here we assert direction + exact undo restore.
+    rev_ok = rev.get("reversed") is True
+    norm_ok = norm.get("gainDb", 0.0) > 2.0
+    undo_ok = und.get("reversed") is False and abs(und.get("gainDb", -1.0)) < 0.01
+    ok = rev_ok and norm_ok and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [97],
+                   {"reversed": rev.get("reversed"), "gainDb_after_normalize": norm.get("gainDb"),
+                    "undo_ok": undo_ok})
+
+
+def fam_clip_crossfade_loop(ctx):
+    # Auto-crossfade flag + the clip loop region round-trip (enable → fields → disable).
+    cmds = [
+        {"command": "create_track", "args": {"name": "Xl"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "set_clip_crossfade", "args": {"clipId": "${C}", "enabled": True}},
+        {"command": "set_clip_loop", "args": {"clipId": "${C}", "enabled": True, "start": 0.0, "length": 1.0}},
+        {"command": "__snapshot", "args": {"label": "on"}},
+        {"command": "set_clip_loop", "args": {"clipId": "${C}", "enabled": False}},
+        {"command": "__snapshot", "args": {"label": "loopoff"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "loopback"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-clip-xfade-loop")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [], _err(proc, {"failed": cmd_fails(results)}))
+    on, off, back = clip0(snaps["on"], "Xl"), clip0(snaps["loopoff"], "Xl"), clip0(snaps["loopback"], "Xl")
+    on_ok = on.get("autoCrossfade") is True and on.get("loopEnabled") is True \
+        and abs(on.get("loopLength", 0) - 1.0) < 0.01
+    off_ok = off.get("loopEnabled") is False
+    undo_ok = back.get("loopEnabled") is True and abs(back.get("loopLength", 0) - 1.0) < 0.01
+    ok = on_ok and off_ok and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [],
+                   {"crossfade": on.get("autoCrossfade"), "loop_on": on.get("loopEnabled"),
+                    "loopLength": on.get("loopLength"), "loop_off_ok": off_ok, "undo_ok": undo_ok})
+
+
+def fam_ripple_delete(ctx):
+    # Ripple delete_time_range closes the gap downstream; ONE undo reverts remove+slide.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rip"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 330.0},
+         "capture": {"C2": "clipId"}},
+        {"command": "move_clip", "args": {"clipId": "${C2}", "start": 2.0}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 440.0},
+         "capture": {"C3": "clipId"}},
+        {"command": "move_clip", "args": {"clipId": "${C3}", "start": 4.0}},
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "delete_time_range", "args": {"start": 2.0, "end": 3.0, "trackIds": ["${T}"],
+                                                  "ripple": True}},
+        {"command": "__snapshot", "args": {"label": "rippled"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-ripple-delete")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [], _err(proc, {"failed": cmd_fails(results)}))
+
+    def starts(label):
+        return sorted(round(c.get("start", -1), 2) for c in clips_of(track_named(snaps[label], "Rip")))
+    removed = len(starts("rippled")) == 2
+    slid = starts("rippled") == [0.0, 3.0]
+    atomic = starts("undone") == starts("before") and len(starts("undone")) == 3
+    ok = removed and slid and atomic
+    return verdict(PASS if ok else FAIL, "state+undo", [],
+                   {"before": starts("before"), "rippled": starts("rippled"),
+                    "undone": starts("undone")})
+
+
+def fam_warp_stretch(ctx):
+    # Easy-warp: detect_clip_bpm reads a real pulse; stretch_clip{bars} derives sourceBpm
+    # and fills the span; set_clip_warp round-trips; one undo per edit.
+    pulse = synth_pulse_wav(ARTDIR / "pulse120.wav", bpm=120.0, beats=8)
+    cmds = [
+        {"command": "create_track", "args": {"name": "Wp"}, "capture": {"T": "trackId"}},
+        {"command": "import_clip", "args": {"trackId": "${T}", "file": pulse}, "capture": {"P": "clipId"}},
+        {"command": "detect_clip_bpm", "args": {"clipId": "${P}"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 2}},
+        {"command": "__snapshot", "args": {"label": "stretched"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-warp-stretch")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [24], _err(proc, {"failed": cmd_fails(results)}))
+    bpm = verify._data_field(results, "detect_clip_bpm", "bpm")
+    conf = verify._data_field(results, "detect_clip_bpm", "confidence")
+    tempo = session_of(snaps["before"]).get("tempo", 120.0)
+    beats_per_bar = session_of(snaps["before"]).get("timeSigNumerator", 4)
+    want_len = 2 * beats_per_bar * 60.0 / tempo   # 2 bars at the project tempo
+
+    def tone(label):
+        for c in clips_of(track_named(snaps[label], "Wp")):
+            if "tone" in (c.get("name") or ""):
+                return c
+        return {}
+    st, un = tone("stretched"), tone("undone")
+    detect_ok = bpm is not None and abs(bpm - 120.0) < 6.0 and (conf or 0) >= 0.1
+    stretch_ok = st.get("autoTempo") is True and abs(st.get("length", 0) - want_len) < 0.1
+    undo_ok = un.get("autoTempo") is not True and abs(un.get("length", 0) - 2.0) < 0.05
+    ok = detect_ok and stretch_ok and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [24],
+                   {"detected_bpm": bpm, "confidence": conf, "stretched_len": st.get("length"),
+                    "want_len": want_len, "sourceBpm": st.get("sourceBpm"), "undo_ok": undo_ok,
+                    "note": "pitch preservation at this ratio is the verify.py check_warp_stretch lane."})
+
+
+def fam_automation_write_record(ctx):
+    # G10 write mode: while armed, set_plugin_param captures a curve point at the
+    # transport position IN THE SAME TXN — one undo reverts value AND point.
+    etype = _find_builtin_type(ctx, "eq", "4band")
+    if not rt_ok(etype):
+        return verdict(FAIL, "state+undo", [63, 64], {"error": "no built-in EQ found"})
+    cmds = [
+        {"command": "create_track", "args": {"name": "Wr"}, "capture": {"T": "trackId"}},
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": etype}, "capture": {"I": "index"}},
+        {"command": "__snapshot", "args": {"label": "before"}},
+        {"command": "set_track_automation_mode", "args": {"trackId": "${T}", "mode": "write"}},
+        {"command": "set_transport", "args": {"position": 2.0}},
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 0,
+                                                 "value": 0.8}},
+        {"command": "__snapshot", "args": {"label": "written"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-automation-write")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [63, 64], _err(proc, {"failed": cmd_fails(results)}))
+
+    def param0(label):
+        return ((plugin0(snaps[label], "Wr") or {}).get("params", [{}]) or [{}])[0]
+    b, w, u = param0("before"), param0("written"), param0("undone")
+    mode_ok = (track_named(snaps["written"], "Wr") or {}).get("automationMode") == "write"
+    pts = w.get("points", []) or []
+    captured = w.get("automated") is True and any(abs(p.get("t", -1) - 2.0) < 0.05 and
+                                                 abs(p.get("v", -1) - 0.8) < 0.05 for p in pts)
+    undo_ok = (u.get("automated") is not True) and abs(u.get("value", -1) - b.get("value", -2)) < 0.01
+    ok = mode_ok and captured and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [63, 64],
+                   {"mode_ok": mode_ok, "point_captured": captured, "points": pts[:3],
+                    "one_undo_reverts_both": undo_ok})
+
+
+def fam_automation_curve_write(ctx):
+    # write_automation_curve: replace clears only the spanned window; merge adds.
+    etype = _find_builtin_type(ctx, "eq", "4band")
+    if not rt_ok(etype):
+        return verdict(FAIL, "state+undo", [63], {"error": "no built-in EQ found"})
+    cmds = [
+        {"command": "create_track", "args": {"name": "Cw"}, "capture": {"T": "trackId"}},
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": etype}, "capture": {"I": "index"}},
+        {"command": "write_automation_curve", "args": {"trackId": "${T}", "pluginIndex": "${I}",
+                                                       "paramIndex": 0, "apply": "replace",
+                                                       "points": [{"t": 0.0, "v": 0.0}, {"t": 2.0, "v": 1.0}]}},
+        {"command": "__snapshot", "args": {"label": "two"}},
+        {"command": "write_automation_curve", "args": {"trackId": "${T}", "pluginIndex": "${I}",
+                                                       "paramIndex": 0, "apply": "merge",
+                                                       "points": [{"t": 1.0, "v": 0.5}]}},
+        {"command": "__snapshot", "args": {"label": "three"}},
+        {"command": "write_automation_curve", "args": {"trackId": "${T}", "pluginIndex": "${I}",
+                                                       "paramIndex": 0, "apply": "replace",
+                                                       "points": [{"t": 0.5, "v": 0.2}, {"t": 1.5, "v": 0.8}]}},
+        {"command": "__snapshot", "args": {"label": "windowed"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "undone"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-automation-curve")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [63], _err(proc, {"failed": cmd_fails(results)}))
+
+    def times(label):
+        p = ((plugin0(snaps[label], "Cw") or {}).get("params", [{}]) or [{}])[0]
+        return sorted(round(pt.get("t", -1), 2) for pt in (p.get("points", []) or []))
+    two, three, windowed, undone = times("two"), times("three"), times("windowed"), times("undone")
+    ok = (two == [0.0, 2.0] and three == [0.0, 1.0, 2.0]
+          and windowed == [0.0, 0.5, 1.5, 2.0]     # replace cleared ONLY [0.5,1.5] → t=1 gone
+          and undone == three)
+    return verdict(PASS if ok else FAIL, "state+undo", [63],
+                   {"after_replace": two, "after_merge": three, "after_windowed_replace": windowed,
+                    "after_undo": undone})
+
+
+def fam_master_bus(ctx):
+    # Master-bus chain: builtin insert + fader + bypass are real state; undo restores.
+    rtype = _find_builtin_type(ctx, "reverb")
+    if not rt_ok(rtype):
+        return verdict(FAIL, "state+undo", [97], {"error": "no built-in reverb found"})
+    cmds = [
+        {"command": "load_master_builtin", "args": {"type": rtype}, "capture": {"I": "index"}},
+        {"command": "set_master_volume", "args": {"db": -6.0}},
+        {"command": "__snapshot", "args": {"label": "set"}},
+        {"command": "bypass_master_plugin", "args": {"index": "${I}", "bypassed": True}},
+        {"command": "__snapshot", "args": {"label": "bypassed"}},
+        {"command": "undo", "args": {}},
+        {"command": "__snapshot", "args": {"label": "unbypassed"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-master-bus")
+    if cmd_fails(results):
+        return verdict(FAIL, "state+undo", [97], _err(proc, {"failed": cmd_fails(results)}))
+
+    def master(label):
+        return snaps[label].get("master", {}) or {}
+    def mplug(label):
+        ps = master(label).get("plugins", []) or []
+        return ps[0] if ps else {}
+    vol_ok = abs(master("set").get("volumeDb", 0) - (-6.0)) < 0.5
+    ins_ok = rt_ok(mplug("set").get("name", "")) and mplug("set").get("enabled") is True
+    byp_ok = mplug("bypassed").get("enabled") is False
+    undo_ok = mplug("unbypassed").get("enabled") is True
+    ok = vol_ok and ins_ok and byp_ok and undo_ok
+    return verdict(PASS if ok else FAIL, "state+undo", [97],
+                   {"volumeDb": master("set").get("volumeDb"), "plugin": mplug("set").get("name"),
+                    "bypass_ok": byp_ok, "undo_ok": undo_ok,
+                    "note": "master audibility is the verify.py check_master_chain golden."})
+
+
+def fam_group_bus_routing(ctx):
+    # Sends/buses + group (submix) tracks are snapshot-visible routing state.
+    cmds = [
+        {"command": "create_bus", "args": {"name": "FXB"}, "capture": {"B": "busNumber"}},
+        {"command": "create_track", "args": {"name": "Src"}, "capture": {"T": "trackId"}},
+        {"command": "add_send", "args": {"trackId": "${T}", "bus": "${B}", "db": -3.0}},
+        {"command": "__snapshot", "args": {"label": "sent"}},
+        {"command": "set_send_level", "args": {"trackId": "${T}", "bus": "${B}", "db": -12.0}},
+        {"command": "__snapshot", "args": {"label": "lowered"}},
+        {"command": "remove_send", "args": {"trackId": "${T}", "bus": "${B}"}},
+        {"command": "__snapshot", "args": {"label": "removed"}},
+        {"command": "create_track", "args": {"name": "Ga"}, "capture": {"T1": "trackId"}},
+        {"command": "create_track", "args": {"name": "Gb"}, "capture": {"T2": "trackId"}},
+        {"command": "create_group_track", "args": {"trackIds": ["${T1}", "${T2}"], "name": "Grp"},
+         "capture": {"G": "groupId"}},
+        {"command": "__snapshot", "args": {"label": "grouped"}},
+        {"command": "ungroup_track", "args": {"trackId": "${G}"}},
+        {"command": "__snapshot", "args": {"label": "ungrouped"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-group-bus")
+    if cmd_fails(results):
+        return verdict(FAIL, "state", [59], _err(proc, {"failed": cmd_fails(results)}))
+
+    def sends(label):
+        return (track_named(snaps[label], "Src") or {}).get("sends", []) or []
+    bus_num = verify._data_field(results, "create_bus", "busNumber")
+    sent = sends("sent")
+    send_ok = len(sent) == 1 and abs(sent[0].get("db", 0) - (-3.0)) < 0.5
+    level_ok = abs((sends("lowered") or [{}])[0].get("db", 0) - (-12.0)) < 0.5
+    removed_ok = sends("removed") == []
+    buses_ok = any(b.get("name") == "FXB" for b in snaps["sent"].get("buses", []) or [])
+    ga = track_named(snaps["grouped"], "Ga") or {}
+    group_ok = bool(ga.get("parentId"))
+    ungroup_ok = not (track_named(snaps["ungrouped"], "Ga") or {}).get("parentId")
+    ok = send_ok and level_ok and removed_ok and buses_ok and group_ok and ungroup_ok
+    return verdict(PASS if ok else FAIL, "state", [59],
+                   {"bus": bus_num, "send_db": sent[0].get("db") if sent else None,
+                    "level_ok": level_ok, "removed_ok": removed_ok, "buses_ok": buses_ok,
+                    "group_ok": group_ok, "ungroup_ok": ungroup_ok,
+                    "note": "send-path audibility is the verify.py check_send_return lane."})
+
+
+def fam_scale_lock(ctx):
+    # Scale lock (inv 88) is an INPUT AID: set_key persists producer intent; existing
+    # notes are NEVER rewritten by a key change; invalid tonic is rejected.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Kt"}, "capture": {"KT": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${KT}", "name": "Keys", "length": 4.0}, "capture": {"C": "clipId"}},
+        {"command": "add_note", "args": {"clipId": "${C}", "pitch": 64, "start": 0.0, "length": 1.0}},
+        {"command": "set_key", "args": {"tonic": "C", "mode": "minor"}},
+        {"command": "__snapshot", "args": {"label": "keyed"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-scale-lock")
+    if cmd_fails(results):
+        return verdict(FAIL, "state", [88], _err(proc, {"failed": cmd_fails(results)}))
+    key = session_of(snaps["keyed"]).get("key", {}) or {}
+    key_ok = key.get("tonic") == "C" and key.get("mode") == "minor"
+    # E natural (64) is out of C minor — the key change must NOT rewrite it.
+    notes = []
+    for t in tracks_of(snaps["keyed"]):
+        for c in clips_of(t):
+            notes += c.get("notes", []) or []
+    note_ok = any(n.get("pitch") == 64 for n in notes)
+    # Invalid tonic must error (run separately so the main chain stays clean).
+    bad, _, _ = drive([{"command": "set_key", "args": {"tonic": "H", "mode": "minor"}}],
+                      "conf-scale-lock-bad")
+    rejected = len(cmd_fails(bad)) == 1
+    ok = key_ok and note_ok and rejected
+    return verdict(PASS if ok else FAIL, "state", [88],
+                   {"key": key, "out_of_scale_note_untouched": note_ok,
+                    "invalid_tonic_rejected": rejected,
+                    "note": "the pitch-resolving input aid itself is UI-side (piano roll shading) — e2e lane."})
+
+
+def fam_meter_midsession(ctx):
+    # METER-001: tracks created mid-session are metered; the toggle round-trips.
+    cmds = [
+        {"command": "create_track", "args": {"name": "M1"}, "capture": {"T": "trackId"}},
+        {"command": "__snapshot", "args": {"label": "created"}},
+        {"command": "disable_track_meter", "args": {"trackId": "${T}"}},
+        {"command": "__snapshot", "args": {"label": "off"}},
+        {"command": "enable_track_meter", "args": {"trackId": "${T}"}},
+        {"command": "__snapshot", "args": {"label": "on"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-meter-midsession")
+    if cmd_fails(results):
+        return verdict(FAIL, "state", [], _err(proc, {"failed": cmd_fails(results)}))
+    created = (track_named(snaps["created"], "M1") or {}).get("meterEnabled")
+    off = (track_named(snaps["off"], "M1") or {}).get("meterEnabled")
+    on = (track_named(snaps["on"], "M1") or {}).get("meterEnabled")
+    ok = created is True and off is False and on is True
+    return verdict(PASS if ok else FAIL, "state", [],
+                   {"created": created, "disabled": off, "reenabled": on,
+                    "note": "live level VALUES ride the 30 Hz levels event — hardware lane."})
+
+
+def fam_takes_recording_graceful(ctx):
+    # Recording surface headless: arm/monitor/takes are graceful no-ops that never
+    # fabricate state (inv 44/49 class). Live capture itself is the hardware lane.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rec"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "arm_track", "args": {"trackId": "${T}", "armed": True}},
+        {"command": "set_input_monitor", "args": {"trackId": "${T}", "mode": "on"}},
+        {"command": "list_takes", "args": {"clipId": "${C}"}},
+        {"command": "__snapshot", "args": {"label": "after"}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-takes-graceful")
+    if cmd_fails(results):
+        return verdict(FAIL, "state", [], _err(proc, {"failed": cmd_fails(results)}))
+    takes = verify._data_field(results, "list_takes", "takes")
+    clip = clip0(snaps["after"], "Rec")
+    no_fake = "takes" not in clip or not clip.get("takes")
+    n_clips = len(clips_of(track_named(snaps["after"], "Rec")))
+    ok = takes is not None and no_fake and n_clips == 1
+    return verdict(PASS if ok else FAIL, "state", [],
+                   {"takes": takes, "no_fabricated_takes": no_fake, "clips": n_clips,
+                    "note": "arm/monitor accept + no-op headless (no input device); live capture "
+                            "+ count-in audibility = the owner runbook REC rows."})
+
+
+# ── golden producer workflows (DAW-parity P7) ─────────────────────────────────────
+# Workflow-level parity: single features passing ≠ the workflow working. Each is one
+# composite family over the real command surface; a missing capability mid-chain is a
+# tracked GAP, a broken step is a FAIL.
+def _canon_snap(snap):
+    """Python twin of the selftest matrix canon(): strip volatile subtrees so equality
+    means state equality."""
+    import copy
+    s = copy.deepcopy(snap)
+    s.pop("transport", None)
+    s.pop("controller", None)
+    sess = s.get("session", {})
+    for k in ("dirty", "recentProjects", "recoveryAvailable", "recoverableCount"):
+        sess.pop(k, None)
+
+    def rnd(x):
+        # Same 1e-6 rounding as the C++ matrix canon(): the fader dB<->position curve and
+        # save/reload float32 carry round-trip with epsilon — that is restoration, not drift.
+        if isinstance(x, float):
+            return round(x, 6) + 0.0
+        if isinstance(x, dict):
+            return {k: rnd(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [rnd(v) for v in x]
+        return x
+    return json.dumps(rnd(s), sort_keys=True)
+
+
+def fam_workflow_beat(ctx):
+    # W1: drums (composite pattern) → melody → quantize → arrange → balance → export.
+    out = ARTDIR / "wf_beat.wav"
+    cmds = [
+        {"command": "add_drum_pattern",
+         "args": {"pattern": "kick: x...x...x...x...; snare: ....x.......x...; hat: x.x.x.x.x.x.x.x."}},
+        {"command": "create_track", "args": {"name": "Melody"}, "capture": {"MT": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${MT}", "start": 0.0, "length": 4.0},
+         "capture": {"MC": "clipId"}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 60, "start": 0.06, "length": 0.5}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 63, "start": 1.1, "length": 0.5}},
+        {"command": "add_note", "args": {"clipId": "${MC}", "pitch": 67, "start": 2.05, "length": 0.5}},
+        {"command": "quantize_notes", "args": {"clipId": "${MC}", "division": 0.25, "strength": 1.0}},
+        {"command": "duplicate_clip", "args": {"clipId": "${MC}"}},
+        {"command": "set_track_volume", "args": {"trackId": "${MT}", "db": -4.0}},
+        {"command": "__snapshot", "args": {"label": "arranged"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-beat")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    if not out.exists():
+        return verdict(FAIL, "workflow", [], {"error": "no export produced"})
+    st = verify.stats(out)
+    snap = snaps.get("arranged", {})
+    drums = track_named(snap, "Drums")
+    melody_clips = len(clips_of(track_named(snap, "Melody")))
+    audible = st["rms"] > 0.005 and st["peak"] > 0.02   # the silent-drums class, workflow level
+    ok = drums is not None and melody_clips == 2 and audible
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"drum_track": drums is not None, "melody_clips": melody_clips,
+                    "export_rms": st["rms"], "export_s": st["duration_s"]})
+
+
+def fam_workflow_record_comp(ctx):
+    # W2: arm → count-in → (live capture + comp = the hardware half). The state spine is
+    # proven headless; the mic take itself is the owner runbook's REC rows.
+    cmds = [
+        {"command": "create_track", "args": {"name": "Vox"}, "capture": {"T": "trackId"}},
+        {"command": "set_count_in", "args": {"bars": 1}},
+        {"command": "arm_track", "args": {"trackId": "${T}", "armed": True}},
+        {"command": "set_input_monitor", "args": {"trackId": "${T}", "mode": "automatic"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "list_takes", "args": {"clipId": "${C}"}},
+        {"command": "__snapshot", "args": {"label": "after"}},
+        {"command": "set_count_in", "args": {"bars": 0}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-record")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    countin = session_of(snaps.get("after", {})).get("countInBars")
+    takes = verify._data_field(results, "list_takes", "takes")
+    ok = countin == 1 and takes is not None
+    if not ok:
+        return verdict(FAIL, "workflow", [], {"countInBars": countin, "takes": takes})
+    return verdict(HARDWARE, "workflow", [],
+                   {"note": "arm/count-in/monitor/takes state proven headless; the live take + "
+                            "comp-by-ear is the owner runbook REC-mic row.",
+                    "countInBars": countin})
+
+
+def fam_workflow_mix_stems(ctx):
+    # W3: buses + sends + automation → stems; the stem sum NULLS against the mix at unity
+    # master (stems render pre-master — measured in verify.py's P4 pass).
+    stem_dir = ARTDIR / "wf_stems"
+    mix = ARTDIR / "wf_stems_mix.wav"
+    rtype = _find_builtin_type(ctx, "reverb")
+    etype = _find_builtin_type(ctx, "eq", "4band")
+    if not (rt_ok(rtype) and rt_ok(etype)):
+        return verdict(FAIL, "workflow", [], {"error": "builtins missing"})
+    cmds = [
+        {"command": "create_track", "args": {"name": "A"}, "capture": {"TA": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TA}", "seconds": 2.0, "freq": 220.0}},
+        {"command": "create_track", "args": {"name": "B"}, "capture": {"TB": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${TB}", "seconds": 2.0, "freq": 660.0}},
+        {"command": "create_bus", "args": {"name": "Verb"}, "capture": {"BN": "busNumber", "RT": "trackId"}},
+        {"command": "load_builtin", "args": {"trackId": "${RT}", "type": rtype}, "capture": {"RV": "index"}},
+        {"command": "add_send", "args": {"trackId": "${TA}", "bus": "${BN}", "db": -6.0}},
+        {"command": "load_builtin", "args": {"trackId": "${TA}", "type": etype}, "capture": {"EQ": "index"}},
+        {"command": "write_automation_curve", "args": {"trackId": "${TA}", "pluginIndex": "${EQ}",
+                                                       "paramIndex": 1, "apply": "replace",
+                                                       "points": [{"t": 0.0, "v": 0.5}, {"t": 2.0, "v": 0.3}]}},
+        {"command": "set_master_volume", "args": {"db": 0.0}},
+        {"command": "export_stems", "args": {"dir": str(stem_dir)}},
+        {"command": "export_audio", "args": {"file": str(mix)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-mixstems")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    stems_res = next((r for r in results if r.get("command") == "export_stems"), {})
+    stems = stems_res.get("data", {}).get("stems", [])
+    files = [Path(s["file"]) for s in stems]
+    if len(files) < 2 or not all(f.exists() for f in files) or not mix.exists():
+        return verdict(FAIL, "workflow", [], {"stems": [str(f) for f in files]})
+    import numpy as np
+    total = None
+    for f in files:
+        d, _, _ = verify.load_wav(f)
+        m = verify.mono(d)
+        total = m if total is None else total[:min(total.size, m.size)] + m[:min(total.size, m.size)]
+    mm, _, _ = verify.load_wav(mix)
+    mm = verify.mono(mm)
+    n = min(total.size, mm.size)
+    null_rms = float(np.sqrt(np.mean((total[:n] - mm[:n]) ** 2)))
+    ok = null_rms < 1e-3 and verify.stats(mix)["rms"] > 0.01
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"stems": len(files), "null_rms": round(null_rms, 6),
+                    "note": "sum(stems) nulls against the unity-master mix — alignment + "
+                            "completeness with sends + automation live."})
+
+
+def fam_workflow_remix(ctx):
+    # W4: import → retempo → stretch to the new grid → split/rearrange → render matches
+    # the NEW arrangement length.
+    src = synth_wav(ARTDIR / "wf_remix_src.wav", seconds=2.0, freq=220.0)
+    out = ARTDIR / "wf_remix.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rx"}, "capture": {"T": "trackId"}},
+        {"command": "import_clip", "args": {"trackId": "${T}", "file": src}, "capture": {"C": "clipId"}},
+        {"command": "set_tempo", "args": {"bpm": 140.0}},
+        {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 1}},
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "split_clip", "args": {"clipId": "${C}", "time": 0.85}, "capture": {"N": "newClipId"}},
+        {"command": "move_clip", "args": {"clipId": "${N}", "start": 4.0}},
+        # The split minted a NEW warped clip whose render proxy generates in the
+        # background — pump again or the export sees an unreadable source (the same
+        # proxy class the P4 checks found).
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "__snapshot", "args": {"label": "arranged"}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, snaps, proc = drive(cmds, "conf-wf-remix")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    if not out.exists():
+        return verdict(FAIL, "workflow", [], {"error": "no export produced"})
+    st = verify.stats(out)
+    snap = snaps.get("arranged", {})
+    clips = clips_of(track_named(snap, "Rx"))
+    arr_end = max((c.get("start", 0) + c.get("length", 0)) for c in clips) if clips else 0
+    ok = len(clips) == 2 and abs(st["duration_s"] - arr_end) < 0.1 and st["rms"] > 0.005
+    return verdict(PASS if ok else FAIL, "workflow+audio", [],
+                   {"clips": len(clips), "arrangement_end_s": round(arr_end, 3),
+                    "export_s": st["duration_s"], "export_rms": st["rms"]})
+
+
+def fam_workflow_torture(ctx):
+    # W5: a heavy edit chain → deep undo walk-back → redo walk-forward (exact canonical
+    # restore both ways) → save → reload → canonical equality.
+    edits = [
+        {"command": "create_track", "args": {"name": "T1"}, "capture": {"T1": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T1}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C1": "clipId"}},
+        {"command": "set_clip_fade", "args": {"clipId": "${C1}", "fadeInSec": 0.2}},
+        {"command": "set_clip_gain", "args": {"clipId": "${C1}", "gainDb": -4.0}},
+        {"command": "create_track", "args": {"name": "T2"}, "capture": {"T2": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T2}", "start": 0.0, "length": 4.0},
+         "capture": {"C2": "clipId"}},
+        {"command": "add_note", "args": {"clipId": "${C2}", "pitch": 62, "start": 0.3, "length": 0.5}},
+        {"command": "quantize_notes", "args": {"clipId": "${C2}", "division": 0.5, "strength": 1.0}},
+        {"command": "set_track_volume", "args": {"trackId": "${T2}", "db": -6.0}},
+        {"command": "set_master_volume", "args": {"db": -2.0}},
+        {"command": "set_tempo", "args": {"bpm": 96.0}},
+        {"command": "move_clip", "args": {"clipId": "${C1}", "start": 1.5}},
+    ]
+    n = len(edits)
+    # Prime the session with ONE save first: moshFormatVersion (PRJ-FMT) is stamped on
+    # the project node at save time, so a never-saved session's "final" snapshot would
+    # differ from the post-reload one by exactly that stamp (formatVersion 0 -> 1) —
+    # by-design behavior, not a persistence bug (found by this family's first run).
+    cmds = ([{"command": "save", "args": {}},
+             {"command": "__snapshot", "args": {"label": "start"}}]
+            + edits
+            + [{"command": "__snapshot", "args": {"label": "final"}}]
+            + [{"command": "undo", "args": {}} for _ in range(n)]
+            + [{"command": "__snapshot", "args": {"label": "unwound"}}]
+            + [{"command": "redo", "args": {}} for _ in range(n)]
+            + [{"command": "__snapshot", "args": {"label": "rewound"}}]
+            + [{"command": "save", "args": {}},
+               {"command": "reload", "args": {}},
+               {"command": "__snapshot", "args": {"label": "reloaded"}}])
+    results, snaps, proc = drive(cmds, "conf-wf-torture")
+    if cmd_fails(results):
+        return verdict(FAIL, "workflow", [], _err(proc, {"failed": cmd_fails(results)}))
+    start, final = _canon_snap(snaps["start"]), _canon_snap(snaps["final"])
+    unwound, rewound, reloaded = (_canon_snap(snaps[k]) for k in ("unwound", "rewound", "reloaded"))
+    mutated = final != start
+    undo_ok = unwound == start
+    redo_ok = rewound == final
+    reload_ok = reloaded == final
+    ok = mutated and undo_ok and redo_ok and reload_ok
+    return verdict(PASS if ok else FAIL, "workflow", [97],
+                   {"edits": n, "undo_walk_restores": undo_ok, "redo_walk_restores": redo_ok,
+                    "save_reload_equal": reload_ok})
+
+
 # ── registry: EXACT (area, user_action) → family ──────────────────────────────────
 FAMILIES = {
     ("Transport", "Press Play in a loaded session"): fam_transport_play,
@@ -586,13 +1242,88 @@ FAMILIES = {
     ("Browser", "Relink a missing asset to a replacement file"): fam_browser_relink,
     ("Export", "Submit 16-bar battle mix"): fam_export_mixdown,
     ("Export", "Render a loop range with delay tail enabled"): fam_export_range_tail,
+    # Golden producer workflows (P7) — 1:1 rows DAW-301..305, no fan-out padding.
+    ("Workflow", "Build a beat from scratch: drums, melody, arrange, balance, export"): fam_workflow_beat,
+    ("Workflow", "Record a vocal: arm, count-in, takes, comp (capture is hardware)"): fam_workflow_record_comp,
+    ("Workflow", "Mix to stems: buses, sends, automation — stems null against the mix"): fam_workflow_mix_stems,
+    ("Workflow", "Remix an import: retempo, stretch to grid, split, rearrange, render"): fam_workflow_remix,
+    ("Workflow", "Session torture: heavy edit chain, deep undo/redo walk, save/reload equality"): fam_workflow_torture,
 }
+
+# Families for capabilities shipped AFTER the reality pack was gathered (2026-06-26),
+# keyed by a stable family name instead of a CSV (area, user_action) pair — the padded
+# legacy CSV rows are frozen, so post-pack features register here. Same verdict contract,
+# same fail-closed wrapper, folded into the report with "ids": []. model_lint.py parses
+# this dict (by regex, dependency-free) so every entry must stay a simple
+#   "name": fam_function,
+# line.
+EXTRA_FAMILIES = {
+    "clip fades (in/out + curve) state+undo": fam_clip_fades,
+    "clip reverse + non-destructive normalize": fam_clip_reverse_normalize,
+    "clip auto-crossfade + loop region": fam_clip_crossfade_loop,
+    "ripple delete closes the gap, one undo": fam_ripple_delete,
+    "easy warp: detect BPM + stretch to bars": fam_warp_stretch,
+    "automation write-mode knob capture": fam_automation_write_record,
+    "automation bulk curve author (replace/merge windows)": fam_automation_curve_write,
+    "master-bus chain (insert + fader + bypass)": fam_master_bus,
+    "sends/buses + group (submix) routing": fam_group_bus_routing,
+    "musical key persists; scale lock never rewrites notes": fam_scale_lock,
+    "mid-session track metering (METER-001)": fam_meter_midsession,
+    "recording surface graceful headless (takes/arm/monitor)": fam_takes_recording_graceful,
+}
+
+# ── committed-verdict freshness contract ──────────────────────────────────────────
+# verdicts.json is the COMMITTED, normalized outcome of a conformance run: one entry per
+# family — {area, action, status, invariants, backlog_ref, note} — sorted, no measured
+# values, no timestamps, no paths, so it is byte-deterministic for a given behavior.
+# A normal run COMPARES fresh results against it and FAILS the gate on any difference:
+# the PR that changes behavior must carry the verdict flip (and the regenerated
+# FEATURE_AUDIT) as a reviewable diff. `--write-verdicts` updates it intentionally.
+# scoreboard.py renders docs/FEATURE_AUDIT.md from THIS file (+ the eval CSV + the
+# backlog), so the scoreboard is regenerable without a binary — which is what lets
+# `scoreboard.py --check` run in the cheap gate lane.
+VERDICTS = SELF / "verdicts.json"
+
+
+def normalize_verdicts(fam_results):
+    out = []
+    for (area, action), v in sorted(fam_results.items()):
+        det = v.get("detail", {}) or {}
+        note = det.get("note") or det.get("reason") or det.get("error") or ""
+        entry = {"area": area, "action": action, "status": v["status"],
+                 "invariants": list(v.get("invariants", []))}
+        if det.get("gap"):
+            entry["backlog_ref"] = det["gap"]
+        if note:
+            entry["note"] = note
+        out.append(entry)
+    return out
+
+
+def load_backlog():
+    """id -> item for docs/auto-loop/backlog.jsonl (tolerant: absent file -> {})."""
+    path = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+    items = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+                items[d.get("id")] = d
+            except json.JSONDecodeError:
+                pass  # model_lint.py owns backlog validity; don't double-report here
+    return items
 
 
 def main():
     ap = argparse.ArgumentParser(description="Mosh DAW-conformance harness (reality-pack eval suite → gate)")
     ap.add_argument("--bin", help="path to the Mosh binary (default: newest local build)")
     ap.add_argument("--json", help="write the machine report here (default: scripts/daw-conformance/report.json)")
+    ap.add_argument("--write-verdicts", action="store_true",
+                    help="update the committed verdicts.json from this run (the intentional-change path); "
+                         "without it, any difference vs the committed verdicts FAILS the gate")
     args = ap.parse_args()
 
     ARTDIR.mkdir(parents=True, exist_ok=True)
@@ -609,9 +1340,12 @@ def main():
     for r in rows:
         scenarios.setdefault((r["area"], r["user_action"]), []).append(r["id"])
 
+    backlog = load_backlog()
+
     fam_results = {}
     for key in sorted(scenarios):
         area, action = key
+        row0 = next(r for r in rows if (r["area"], r["user_action"]) == key)
         if key in FAMILIES:
             try:
                 v = FAMILIES[key](ctx)
@@ -620,11 +1354,38 @@ def main():
         elif area in OUT_OF_SCOPE_AREAS:
             v = verdict(OOS, "n/a", [], {"reason": f"{area} is outside the conventional-parity pass"})
         else:
-            v = verdict(FAIL, "unmapped", [], {"error": "no family for this in-scope scenario"})
+            # Unmapped in-scope scenario. A row that carries a LIVE backlog_ref is a
+            # tracked, attributed gap (an eval row authored ahead of implementation —
+            # the P3 expansion-wave path); anything else stays a hard FAIL so new rows
+            # can never land silently untested. A backlog_ref pointing at a DONE item
+            # also FAILS: the capability shipped, so the row must gain a family.
+            ref = (row0.get("backlog_ref") or "").strip()
+            item = backlog.get(ref)
+            if item is not None and item.get("status") != "done":
+                v = verdict(GAP, "unimplemented", [],
+                            {"gap": ref, "note": f"awaiting backlog item {ref} ({item.get('title', '')})"})
+            elif item is not None:
+                v = verdict(FAIL, "unmapped", [],
+                            {"error": f"backlog item {ref} is done — this row must gain a conformance family"})
+            else:
+                v = verdict(FAIL, "unmapped", [], {"error": "no family for this in-scope scenario"})
         v.update({"area": area, "action": action, "ids": scenarios[key]})
         fam_results[key] = v
         mark = v["status"].upper()
         print(f"  [{mark:12}] {area} / {action}")
+        print(f"               {json.dumps(v['detail'])}")
+
+    # Post-pack families: capabilities shipped after the reality pack was gathered.
+    # Keyed ("Post-pack", <family name>); no CSV ids to fan out to.
+    for name in sorted(EXTRA_FAMILIES):
+        key = ("Post-pack", name)
+        try:
+            v = EXTRA_FAMILIES[name](ctx)
+        except Exception as e:  # fail-closed, same as CSV families
+            v = verdict(FAIL, "harness", [], {"exception": repr(e)})
+        v.update({"area": key[0], "action": name, "ids": []})
+        fam_results[key] = v
+        print(f"  [{v['status'].upper():12}] {key[0]} / {name}")
         print(f"               {json.dumps(v['detail'])}")
 
     # Fan out to per-id results.
@@ -664,7 +1425,33 @@ def main():
     out = Path(args.json) if args.json else (SELF / "report.json")
     out.write_text(json.dumps(report, indent=2) + "\n")
 
-    n_fail = by_status.get(FAIL, 0)
+    # ── committed-verdict freshness gate ──────────────────────────────────────────
+    fresh = normalize_verdicts(fam_results)
+    verdicts_stale = False
+    if args.write_verdicts:
+        VERDICTS.write_text(json.dumps(fresh, indent=1) + "\n")
+        print(f"  verdicts: wrote {VERDICTS.name} ({len(fresh)} families)")
+    else:
+        committed = json.loads(VERDICTS.read_text()) if VERDICTS.exists() else None
+        if committed != fresh:
+            verdicts_stale = True
+            def _k(vs):
+                return {(v["area"], v["action"]): v for v in vs or []}
+            cf, ff = _k(committed), _k(fresh)
+            for key in sorted(set(cf) | set(ff)):
+                a, b = cf.get(key), ff.get(key)
+                if a != b:
+                    print(f"  verdict drift: {key[0]} / {key[1]}: "
+                          f"{(a or {}).get('status', '<absent>')} -> {(b or {}).get('status', '<absent>')}")
+            print(f"  VERDICTS STALE: this run disagrees with the committed {VERDICTS.name}. If the change "
+                  f"is intentional, run conformance.py --write-verdicts && scoreboard.py IN THIS PR so the "
+                  f"flip lands as a reviewable diff.")
+
+    # Post-pack families fan out to zero CSV rows, so their failures are invisible to
+    # the per-id tally — count them directly or an EXTRA_FAMILIES regression would
+    # never fail the gate.
+    extra_fails = [v["action"] for v in fam_results.values() if not v["ids"] and v["status"] == FAIL]
+    n_fail = by_status.get(FAIL, 0) + len(extra_fails)
     n_pass = by_status.get(PASS, 0)
     n_gap = by_status.get(GAP, 0)
     n_hw = by_status.get(HARDWARE, 0)
@@ -674,6 +1461,9 @@ def main():
     print(f"  report: {out}")
     if n_fail:
         print("  GATE: FAIL — an in-scope capability regressed.")
+        return 1
+    if verdicts_stale:
+        print("  GATE: FAIL — committed verdicts.json is stale (see above).")
         return 1
     print("  GATE: PASS — no in-scope regressions (gaps are tracked backlog items).")
     return 0

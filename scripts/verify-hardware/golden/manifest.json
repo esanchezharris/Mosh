@@ -45,6 +45,26 @@
         "rms": 0.17643,
         "centroid_hz": 275.1
       }
+    },
+    "clip_fades": {
+      "kind": "checksum",
+      "pcm_sha256": "65aa605e4c991da5e3a5bd0c9ee070801f96a187608d561d6f979a4f6b841f04",
+      "features": {
+        "frames": 88200,
+        "peak": 0.17699,
+        "rms": 0.10343,
+        "centroid_hz": 220.3
+      }
+    },
+    "master_gain": {
+      "kind": "checksum",
+      "pcm_sha256": "6e92ddcccc86e2a35f327e717ad256d779547448e3e28719f525ee85c3174133",
+      "features": {
+        "frames": 88200,
+        "peak": 0.1253,
+        "rms": 0.0883,
+        "centroid_hz": 220.2
+      }
     }
   }
 }

@@ -195,6 +195,10 @@ GOLDEN_SPEC = {
     "drums":          ART / "02_drums.wav",
     "transform_fake": ART / "03_transform.wav",
     "full_loop":      ART / "05_full_loop.wav",
+    # DAW-parity P4: goldens ONLY where silent drift evades property checks — the fade
+    # curve SHAPE and the master summing path. Budget-capped: prefer relational checks.
+    "clip_fades":     ART / "11_fades_faded.wav",
+    "master_gain":    ART / "12_master_gain.wav",
 }
 # Per-feature absolute tolerances for the diagnostic readout on a checksum miss.
 FEATURE_TOL = {"peak": 0.002, "rms": 0.002, "centroid_hz": 3.0, "frames": 0}
@@ -496,6 +500,7 @@ def check_export_range_tail(ctx):
     custom_out = ART / "10_export_custom.wav"
     cut_out = ART / "10_export_tail_cut.wav"
     include_out = ART / "10_export_tail_include.wav"
+    countin_out = ART / "10_export_countin.wav"
 
     cmds = [
         {"command": "create_track", "args": {"name": "RangeTail"}, "capture": {"T": "trackId"}},
@@ -515,21 +520,30 @@ def check_export_range_tail(ctx):
         {"command": "export_audio", "args": {"file": str(include_out),
                                              "range": "custom", "start": 0.0, "end": 1.0,
                                              "tail": "include", "tailSeconds": 2.0}},
+        # Count-in must NEVER leak into a render (the pre-roll is a monitoring aid, not
+        # song time): with 2 count-in bars set, the identical custom export is frame-
+        # identical to the one above.
+        {"command": "set_count_in", "args": {"bars": 2}},
+        {"command": "export_audio", "args": {"file": str(countin_out),
+                                             "range": "custom", "start": 1.0, "end": 3.0}},
     ]
     results, proc = run_script(ctx.bin, cmds, SESSION)
     fails = failed_commands(results)
-    outs = (full_out, custom_out, cut_out, include_out)
+    outs = (full_out, custom_out, cut_out, include_out, countin_out)
     if fails or not all(p.exists() for p in outs):
         return row("Export range + tail (G1)", False,
                    {"failed_commands": fails,
                     "exists": {p.name: p.exists() for p in outs},
                     "stderr": proc.stderr[-500:]})
 
-    full_st, custom_st, cut_st, include_st = (stats(p) for p in outs)
+    full_st, custom_st, cut_st, include_st, countin_st = (stats(p) for p in outs)
 
-    # invariant 78: the requested SPAN, not the whole edit, is what was actually rendered.
+    # invariant 78: the requested SPAN, not the whole edit, is what was actually rendered —
+    # EXACTLY, on the deterministic no-tail path: a [1,3] custom range is (3-1)*sr frames,
+    # not "about 2 seconds".
+    exact_frames = int(round(2.0 * custom_st["samplerate"]))
     range_ok = (3.5 < full_st["duration_s"] < 4.5
-                and 1.5 < custom_st["duration_s"] < 2.5
+                and custom_st["frames"] == exact_frames
                 and custom_st["frames"] < full_st["frames"])
 
     # invariant 81: tail:'include' must make the ACTUAL rendered WAV measurably longer
@@ -539,9 +553,14 @@ def check_export_range_tail(ctx):
                and include_st["duration_s"] > cut_st["duration_s"] + 0.5
                and include_st["frames"] > cut_st["frames"])
 
-    ok = range_ok and tail_ok
+    # invariant 5: count-in bars change NOTHING about an export.
+    countin_ok = countin_st["frames"] == custom_st["frames"]
+
+    ok = range_ok and tail_ok and countin_ok
     return row("Export range + tail (G1)", ok,
                {"full": full_st, "custom": custom_st, "tail_cut": cut_st, "tail_include": include_st,
+                "custom_frames_exact": custom_st["frames"] == exact_frames,
+                "countin_excluded": countin_ok,
                 "range_ok": range_ok, "tail_ok": tail_ok})
 
 
@@ -968,6 +987,10 @@ def check_stem_export(ctx):
         {"command": "add_test_tone_clip", "args": {"trackId": "${TA}", "seconds": 2.0, "freq": 220.0}},
         {"command": "create_track", "args": {"name": "B"}, "capture": {"TB": "trackId"}},
         {"command": "add_test_tone_clip", "args": {"trackId": "${TB}", "seconds": 2.0, "freq": 660.0}},
+        # Stems render PRE-master (by design); the mixdown includes the master, whose
+        # untouched default is -3 dB. Pin the master to unity so the null test below
+        # isolates zero-point alignment + completeness, not master policy.
+        {"command": "set_master_volume", "args": {"db": 0.0}},
         {"command": "export_stems", "args": {"dir": str(stem_dir)}},
         {"command": "export_audio", "args": {"file": str(fullmix)}},
     ]
@@ -977,8 +1000,8 @@ def check_stem_export(ctx):
         return row("Stem export (G7)", False, {"failed_commands": fails, "exists": fullmix.exists(),
                                                 "stderr": proc.stderr[-400:]})
 
-    # Command 5 (0-indexed 4) is export_stems — results are ordered 1:1 with cmds.
-    stems = results[4].get("data", {}).get("stems", [])
+    stems_res = next((r for r in results if r.get("command") == "export_stems"), {})
+    stems = stems_res.get("data", {}).get("stems", [])
     if len(stems) != 2:
         return row("Stem export (G7)", False, {"error": f"expected 2 stems, got {len(stems)}",
                                                 "stems": stems, "stderr": proc.stderr[-400:]})
@@ -993,12 +1016,274 @@ def check_stem_export(ctx):
     same_duration = abs(st[0]["duration_s"] - st[1]["duration_s"]) < 1e-3
     d_stems = diff_rms(files[0], files[1])
     d_mix = diff_rms(files[0], fullmix)
-    ok = non_silent and same_duration and d_stems > 0.05 and d_mix > 0.0
+
+    # NULL TEST (invariant 84's strong form): on a linear mix of deterministic tones,
+    # the SAMPLE-WISE SUM of the stems must reproduce the mixdown — proving zero-point
+    # alignment AND completeness in one assertion (any stem offset, missing clip, or
+    # per-stem processing difference breaks the null).
+    s0, sr0, _ = load_wav(files[0])
+    s1, _, _ = load_wav(files[1])
+    mx, _, _ = load_wav(fullmix)
+    m_sum, m_mix = mono(s0) + mono(s1), mono(mx)
+    n = min(m_sum.size, m_mix.size)
+    null_rms = float(np.sqrt(np.mean((m_sum[:n] - m_mix[:n]) ** 2))) if n else 1.0
+    null_ok = n > 0 and abs(m_sum.size - m_mix.size) <= 1 and null_rms < 1e-3
+
+    ok = non_silent and same_duration and d_stems > 0.05 and d_mix > 0.0 and null_ok
 
     return row("Stem export (G7)", ok, {
         "stems": [str(f) for f in files], "stats": st, "same_duration": same_duration,
         "diff_rms_stems": d_stems, "diff_rms_vs_mix": d_mix,
+        "null_rms_sum_vs_mix": round(null_rms, 6), "null_ok": null_ok,
     })
+
+
+def _synth_ramp_wav(path, seconds=1.0, freq=220.0, sr=44100):
+    """Mono 16-bit sine whose amplitude ramps 0→0.6 — an ASYMMETRIC deterministic source,
+    so a true reversal is distinguishable from the original at every sample."""
+    import math, struct, wave as wavemod
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    n = int(seconds * sr)
+    with wavemod.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        frames = bytearray()
+        for i in range(n):
+            amp = 0.6 * (i / max(1, n - 1))
+            frames += struct.pack("<h", int(amp * 32767 * math.sin(2 * math.pi * freq * i / sr)))
+        w.writeframes(bytes(frames))
+    return str(path)
+
+
+def check_clip_reverse(ctx):
+    """set_clip_reverse renders REAL reversed audio: export(reversed) must equal
+    np.flip(export(original)) sample-for-sample on an asymmetric ramp source — the
+    exact relational check no golden can beat. Plus normalize_clip: after
+    normalize{targetDb:0} the exported peak sits at ~1.0 (the 0.6-peak ramp gains
+    ~+4.4 dB), and it must work ON the reversed clip (the P3-found proxy bug)."""
+    src = _synth_ramp_wav(ART / "13_ramp_src.wav")
+    fwd = ART / "13_reverse_fwd.wav"
+    rev = ART / "13_reverse_rev.wav"
+    norm = ART / "13_reverse_norm.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Rev"}, "capture": {"T": "trackId"}},
+        {"command": "set_master_volume", "args": {"db": 0.0}},   # unity master (default is -3 dB)
+        {"command": "import_clip", "args": {"trackId": "${T}", "file": src}, "capture": {"C": "clipId"}},
+        {"command": "export_audio", "args": {"file": str(fwd)}},
+        {"command": "set_clip_reverse", "args": {"clipId": "${C}", "reversed": True}},
+        # A reversed clip renders via a background-generated reversed proxy; without a
+        # message-loop pump the export detects the missing source and errors ("render
+        # stalled") — found by this check's first run. The __wait mirrors what the GUI's
+        # live message loop does implicitly.
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "export_audio", "args": {"file": str(rev)}},
+        {"command": "normalize_clip", "args": {"clipId": "${C}", "targetDb": 0.0}},
+        {"command": "export_audio", "args": {"file": str(norm)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-clip-reverse")
+    fails = failed_commands(results)
+    if fails or not all(p.exists() for p in (fwd, rev, norm)):
+        return row("Clip reverse + normalize render", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    f, _, _ = load_wav(fwd)
+    r, _, _ = load_wav(rev)
+    fm, rm = mono(f), mono(r)
+    n = min(fm.size, rm.size)
+    fl = np.flip(rm[:n])
+    # The reversed proxy renders the EXACT flipped signal at a small constant sample
+    # offset (measured: 4 samples — an upstream proxy rounding quirk, ~0.09 ms,
+    # inaudible for reversal but real). Find the best lag in ±16 and require a true
+    # NULL there; report the lag so growth of the offset reds visibly.
+    best_lag, best_rms = 0, float("inf")
+    for lag in range(-16, 17):
+        if lag >= 0:
+            d = fl[lag:n] - fm[:n - lag]
+        else:
+            d = fl[:n + lag] - fm[-lag:n]
+        rms_l = float(np.sqrt(np.mean(d ** 2)))
+        if rms_l < best_rms:
+            best_lag, best_rms = lag, rms_l
+    reversed_ok = best_rms < 1e-3 and abs(best_lag) <= 8 and stats(rev)["rms"] > 0.01
+    norm_peak = stats(norm)["peak"]
+    norm_ok = 0.9 < norm_peak <= 1.001
+    ok = reversed_ok and norm_ok
+    return row("Clip reverse + normalize render", ok,
+               {"flip_null_rms": round(best_rms, 6), "flip_lag_samples": best_lag,
+                "reversed_ok": reversed_ok, "normalized_peak": norm_peak, "norm_ok": norm_ok})
+
+
+def check_clip_fades(ctx):
+    """Fades render REAL amplitude curves (the L2 half of G4b): the un-faded head is
+    sample-identical to the dry render, windowed RMS over the faded second decreases
+    monotonically to ~silence — and the whole render is GOLDEN-pinned, because a curve
+    SHAPE regression (sCurve→linear) slips straight past monotonic bounds."""
+    dry = ART / "11_fades_dry.wav"
+    wet = ART / "11_fades_faded.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Fd"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        {"command": "set_clip_fade", "args": {"clipId": "${C}", "fadeOutSec": 1.0, "curveOut": "sCurve"}},
+        {"command": "export_audio", "args": {"file": str(wet)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-clip-fades")
+    fails = failed_commands(results)
+    if fails or not (dry.exists() and wet.exists()):
+        return row("Clip fades render (G4b)", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    d, sr, _ = load_wav(dry)
+    w, _, _ = load_wav(wet)
+    dm, wm = mono(d), mono(w)
+    n = min(dm.size, wm.size)
+    half = n // 2
+    head_rms = float(np.sqrt(np.mean((dm[:half] - wm[:half]) ** 2)))
+    head_identical = head_rms < 1e-4
+    win = sr // 4
+    tail_rms = [float(np.sqrt(np.mean(wm[half + i * win: half + (i + 1) * win] ** 2)))
+                for i in range(4)]
+    monotone = all(tail_rms[i] > tail_rms[i + 1] for i in range(3))
+    ends_silent = tail_rms[-1] < 0.02
+    ok = head_identical and monotone and ends_silent
+    return row("Clip fades render (G4b)", ok,
+               {"wav": str(wet), "head_identical": head_identical,
+                "tail_rms_windows": [round(v, 4) for v in tail_rms], "ends_silent": ends_silent})
+
+
+def check_warp_stretch(ctx):
+    """stretch_clip performs a REAL time-stretch: a 2s 220 Hz tone stretched to 2 bars
+    (4s at the default 120 BPM) doubles in duration while its spectral centroid stays
+    at ~220 Hz — pitch preserved, so it is elastique-style stretch, not resampling
+    (a resample would land the centroid at ~110 Hz). Feature-vector only, NO golden:
+    time-stretch output is not guaranteed bit-stable across engine/library bumps."""
+    dry = ART / "14_warp_dry.wav"
+    wet = ART / "14_warp_stretched.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Wp"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0},
+         "capture": {"C": "clipId"}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        {"command": "stretch_clip", "args": {"clipId": "${C}", "bars": 2}},
+        # Warped (auto-tempo) clips render via a background-generated proxy too — same
+        # pump requirement as reverse (found by this check's first run).
+        {"command": "__wait", "args": {"ms": 4000}},
+        {"command": "export_audio", "args": {"file": str(wet)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-warp-stretch")
+    fails = failed_commands(results)
+    if fails or not (dry.exists() and wet.exists()):
+        return row("Warp/stretch render", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    dry_st, wet_st = stats(dry), stats(wet)
+    d, sr, _ = load_wav(wet)
+    cent = spectral_centroid(mono(d), sr)
+    duration_ok = abs(wet_st["duration_s"] - 2.0 * dry_st["duration_s"]) < 0.15
+    pitch_ok = abs(cent - 220.0) < 8.0
+    ok = duration_ok and pitch_ok and wet_st["rms"] > 0.01
+    return row("Warp/stretch render", ok,
+               {"dry_s": dry_st["duration_s"], "stretched_s": wet_st["duration_s"],
+                "centroid_hz": round(cent, 1), "duration_ok": duration_ok, "pitch_ok": pitch_ok})
+
+
+def check_automation_ramp(ctx):
+    """Automation is INCLUDED in the render (invariant 66's audible half): a low-shelf
+    gain curve 0.5→0 over a 220 Hz tone (shelf frequency raised so the tone sits under
+    it) makes the rendered level fall across the file and differ from the un-automated
+    render; windowed RMS ends well below where it starts."""
+    dry = ART / "15_autoramp_dry.wav"
+    wet = ART / "15_autoramp_wet.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Ar"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}},
+        {"command": "load_builtin", "args": {"trackId": "${T}", "type": "4bandEq"}, "capture": {"I": "index"}},
+        # Raise the low-shelf corner so 220 Hz is inside the shelf band.
+        {"command": "set_plugin_param", "args": {"trackId": "${T}", "index": "${I}", "paramIndex": 0, "value": 0.6}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        # Low-shelf GAIN (param 1, 0.5 = neutral) ramps to full cut across the tone.
+        {"command": "write_automation_curve", "args": {"trackId": "${T}", "pluginIndex": "${I}",
+                                                       "paramIndex": 1, "apply": "replace",
+                                                       "points": [{"t": 0.0, "v": 0.5}, {"t": 2.0, "v": 0.0}]}},
+        {"command": "export_audio", "args": {"file": str(wet)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-automation-ramp")
+    fails = failed_commands(results)
+    if fails or not (dry.exists() and wet.exists()):
+        return row("Automation ramp renders", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    d_ab = diff_rms(dry, wet)
+    w, sr, _ = load_wav(wet)
+    wm = mono(w)
+    win = sr // 2
+    rms = [float(np.sqrt(np.mean(wm[i * win: (i + 1) * win] ** 2))) for i in range(4)]
+    falls = rms[-1] < 0.5 * rms[0]
+    trend = all(rms[i + 1] <= rms[i] + 0.01 for i in range(3))
+    ok = d_ab > 0.005 and falls and trend
+    return row("Automation ramp renders", ok,
+               {"diff_vs_dry": round(d_ab, 5), "windowed_rms": [round(v, 4) for v in rms],
+                "ends_below_half": falls, "monotone_trend": trend})
+
+
+def check_send_return(ctx):
+    """The send/return wet path is REAL audio (invariant 59's audible half): a hot
+    reverb on the bus return makes the render differ from dry; pulling the send to
+    -100 dB collapses it back to ~the dry render."""
+    dry = ART / "16_send_dry.wav"
+    wet = ART / "16_send_wet.wav"
+    off = ART / "16_send_off.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Sr"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        {"command": "create_bus", "args": {"name": "Verb"}, "capture": {"B": "busNumber", "RT": "trackId"}},
+        {"command": "load_builtin", "args": {"trackId": "${RT}", "type": "reverb"}, "capture": {"RV": "index"}},
+        {"command": "set_plugin_param", "args": {"trackId": "${RT}", "index": "${RV}", "paramIndex": 0, "value": 0.95}},
+        {"command": "set_plugin_param", "args": {"trackId": "${RT}", "index": "${RV}", "paramIndex": 2, "value": 1.0}},
+        {"command": "add_send", "args": {"trackId": "${T}", "bus": "${B}", "db": 0.0}},
+        {"command": "export_audio", "args": {"file": str(wet)}},
+        {"command": "set_send_level", "args": {"trackId": "${T}", "bus": "${B}", "db": -100.0}},
+        {"command": "export_audio", "args": {"file": str(off)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-send-return")
+    fails = failed_commands(results)
+    if fails or not all(p.exists() for p in (dry, wet, off)):
+        return row("Send/return wet path", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    d_wet = diff_rms(dry, wet)
+    d_off = diff_rms(dry, off)
+    ok = d_wet > 0.01 and d_off < max(0.002, d_wet * 0.1)
+    return row("Send/return wet path", ok,
+               {"diff_dry_vs_wet": round(d_wet, 5), "diff_dry_vs_sendoff": round(d_off, 5)})
+
+
+def check_master_chain(ctx):
+    """The master bus is IN the render path: master −6 dB halves the rendered level
+    (RMS ratio ≈ 0.501 ± 2%), GOLDEN-pinned — pure gain math on a deterministic tone,
+    so any master-chain routing/summing change reds the checksum with a feature diff."""
+    dry = ART / "12_master_dry.wav"
+    out = ART / "12_master_gain.wav"
+    cmds = [
+        {"command": "create_track", "args": {"name": "Mg"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0}},
+        # The UNTOUCHED master defaults to -3 dB (Tracktion headroom, honestly reported
+        # as snapshot.master.volumeDb=-3.0 — measured by this check's first run), so the
+        # unity baseline must be set EXPLICITLY.
+        {"command": "set_master_volume", "args": {"db": 0.0}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        {"command": "set_master_volume", "args": {"db": -6.0}},
+        {"command": "export_audio", "args": {"file": str(out)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-master-chain")
+    fails = failed_commands(results)
+    if fails or not (dry.exists() and out.exists()):
+        return row("Master chain renders", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+    r_dry, r_out = stats(dry)["rms"], stats(out)["rms"]
+    ratio = r_out / r_dry if r_dry else 0.0
+    ok = abs(ratio - 0.501) < 0.02 and r_out > 0.01
+    return row("Master chain renders", ok,
+               {"rms_dry": r_dry, "rms_minus6": r_out, "ratio": round(ratio, 4)})
 
 
 OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
@@ -1006,7 +1291,9 @@ OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile
                   check_midi_reimagine_beneath, check_reactive_rerender,
                   check_freeze_stops_rerender, check_full_loop,
                   check_relative_ref_export, check_export_range_tail, check_bypass_layer,
-                  check_render_artifact_portability, check_crash_recovery, check_stem_export]
+                  check_render_artifact_portability, check_crash_recovery, check_stem_export,
+                  check_clip_fades, check_clip_reverse, check_warp_stretch,
+                  check_automation_ramp, check_send_return, check_master_chain]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

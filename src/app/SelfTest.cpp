@@ -8793,6 +8793,203 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ── DAW-parity P6: table-driven undo + persist matrices ──────────────────────
+    // The G14 bug class (a setter that applies but bypasses the UndoManager) has now
+    // recurred twice (set_track_volume, set_plugin_param) — exactly when hand-written
+    // per-command checks should become a TABLE. Every declared mutating command is run
+    // against a shared fixture and must (a) change the canonical snapshot, (b) restore
+    // it EXACTLY on one undo; then the whole mutated state must survive save/reload
+    // byte-for-byte (catches non-serialized CachedValues — fade/warp/loop-region fields
+    // are the fresh risk surface). NOT in the table (each deliberately): composite/async
+    // commands (add_drum_pattern, render_layer — own sections), service-spawning
+    // commands (lyrics/generative — hermeticity), non-undoable preferences
+    // (set_key/set_count_in/set_metronome — documented posture), read-only commands,
+    // and MP lock behavior (LockManager::classify fails CLOSED to SessionGlobal by
+    // design; per-command lock conduct is test_multiplayer_locks' lane).
+    {
+        section ("matrix: undo — every declared mutating command restores on ONE undo");
+
+        // Canonical snapshot: strip the volatile subtrees so string equality means
+        // STATE equality (transport rides its own rail; dirty flips on save/undo), and
+        // round every numeric leaf to 1e-6 — the fader's dB↔position curve round-trips
+        // with float epsilon (undo lands at -2.4e-07, not 0.0), which is restoration,
+        // not drift. (v == 0.0 assignment also normalizes negative zero.)
+        std::function<void (var&)> normNums = [&normNums] (var& v)
+        {
+            if (v.isDouble())
+            {
+                double d = std::round ((double) v * 1e6) / 1e6;
+                if (d == 0.0) d = 0.0;
+                v = d;
+            }
+            else if (v.isArray())
+            {
+                for (auto& e : *v.getArray()) normNums (e);
+            }
+            else if (auto* o = v.getDynamicObject())
+            {
+                for (auto& p : o->getProperties())
+                {
+                    var e = p.value;
+                    normNums (e);
+                    o->setProperty (p.name, e);
+                }
+            }
+        };
+        auto canon = [&]() -> String
+        {
+            auto s = ops.snapshot();
+            if (auto* o = s.getDynamicObject())
+            {
+                o->removeProperty ("transport");
+                o->removeProperty ("controller");
+                if (auto* sess = o->getProperty ("session").getDynamicObject())
+                {
+                    sess->removeProperty ("dirty");
+                    sess->removeProperty ("recentProjects");
+                    sess->removeProperty ("recoveryAvailable");
+                    sess->removeProperty ("recoverableCount");
+                }
+            }
+            // An AUTOMATED parameter's live `value` is DERIVED, not persisted: it is the
+            // curve evaluated at the playhead. The matrix sets param 0 to 0.7 and then adds
+            // a single automation point of 0.5 — one point means the curve is constant 0.5
+            // everywhere, so 0.7 is merely a stale live value that automation had not yet
+            // overwritten, and a reload correctly re-derives 0.5. Comparing it across
+            // save/reload compares a transient, exactly like `transport`/`dirty` above.
+            // The `points` array IS the persisted truth and stays in the comparison.
+            std::function<void (var&)> dropAutomatedValues = [&dropAutomatedValues] (var& v)
+            {
+                if (auto* arr = v.getArray())
+                    for (auto& e : *arr) dropAutomatedValues (e);
+                else if (auto* o = v.getDynamicObject())
+                {
+                    if (o->hasProperty ("automated") && (bool) o->getProperty ("automated"))
+                        o->removeProperty ("value");
+                    for (auto& p : o->getProperties())
+                    {
+                        auto child = p.value;
+                        dropAutomatedValues (child);
+                    }
+                }
+            };
+            dropAutomatedValues (s);
+            normNums (s);
+            return JSON::toString (s, false);
+        };
+        auto rid = [] (const var& r, const char* k) {
+            return r.getProperty ("data", var()).getProperty (k, var()).toString(); };
+
+        // Fixture: a wave track with an EQ, a MIDI track with one OFF-GRID note (so
+        // quantize genuinely mutates), a disposable track+clip for the remove cases,
+        // and a bus for add_send.
+        const auto mt   = rid (cmd (ops, "create_track", args1 ("name", "MxWave")), "trackId");
+        const auto mwc  = rid (cmd (ops, "add_test_tone_clip",
+                                    objN ({ { "trackId", mt }, { "seconds", 2.0 }, { "freq", 220.0 } })), "clipId");
+        const auto eqR  = cmd (ops, "load_builtin", objN ({ { "trackId", mt }, { "type", "4bandEq" } }));
+        const int  eqIx = (int) eqR.getProperty ("data", var()).getProperty ("index", -1);
+        const auto mmt  = rid (cmd (ops, "create_track", args1 ("name", "MxMidi")), "trackId");
+        const auto mmc  = rid (cmd (ops, "add_midi_clip",
+                                    objN ({ { "trackId", mmt }, { "start", 0.0 }, { "length", 4.0 } })), "clipId");
+        cmd (ops, "add_note", objN ({ { "clipId", mmc }, { "pitch", 60 }, { "start", 0.13 }, { "length", 0.5 } }));
+        const auto dt   = rid (cmd (ops, "create_track", args1 ("name", "MxDisposable")), "trackId");
+        const auto dc   = rid (cmd (ops, "add_test_tone_clip",
+                                    objN ({ { "trackId", dt }, { "seconds", 1.0 }, { "freq", 330.0 } })), "clipId");
+        const int  mbus = (int) cmd (ops, "create_bus", args1 ("name", "MxBus"))
+                              .getProperty ("data", var()).getProperty ("busNumber", -1);
+        check (mt.isNotEmpty() && mwc.isNotEmpty() && eqIx >= 0 && mmc.isNotEmpty()
+               && dc.isNotEmpty() && mbus >= 0, "matrix fixture built");
+
+        Array<var> rippleTracks; rippleTracks.add (var (mt));
+        struct MatrixCase { String name; var args; };
+        const MatrixCase table[] = {
+            { "rename_track",         objN ({ { "trackId", mt }, { "name", "MxRenamed" } }) },
+            { "set_track_volume",     objN ({ { "trackId", mt }, { "db", -7.0 } }) },
+            { "set_track_pan",        objN ({ { "trackId", mt }, { "pan", 0.4 } }) },
+            { "set_track_mute",       objN ({ { "trackId", mt }, { "mute", true } }) },
+            { "set_track_solo",       objN ({ { "trackId", mt }, { "solo", true } }) },
+            { "move_clip",            objN ({ { "clipId", mwc }, { "start", 5.0 } }) },
+            { "rename_clip",          objN ({ { "clipId", mwc }, { "name", "MxClip" } }) },
+            { "set_clip_gain",        objN ({ { "clipId", mwc }, { "gainDb", -5.0 } }) },
+            { "set_clip_mute",        objN ({ { "clipId", mwc }, { "mute", true } }) },
+            { "set_clip_fade",        objN ({ { "clipId", mwc }, { "fadeInSec", 0.3 }, { "fadeOutSec", 0.4 } }) },
+            { "set_clip_crossfade",   objN ({ { "clipId", mwc }, { "enabled", true } }) },
+            // stretch_clip BEFORE set_clip_reverse, deliberately. Reversing installs an
+            // async proxy render; headless never pumps it, so the reversed clip's
+            // getAudioFile().getLength() stays 0 and stretch_clip fails its
+            // "source has no length" guard. Proven with --run-script: stretch→ok,
+            // reverse→ok, stretch→"source has no length". That is a headless artifact of
+            // the un-rendered proxy, not a persist bug — the undo matrix never saw it
+            // because it undoes each mutation before applying the next, so stretch_clip
+            // there always ran on an unreversed clip. (Whether stretch_clip should read
+            // the SOURCE length instead of the proxy's is a real product question —
+            // filed as G15 in docs/auto-loop/backlog.jsonl rather than changed here.)
+            { "stretch_clip",         objN ({ { "clipId", mwc }, { "bars", 1 } }) },
+            { "set_clip_reverse",     objN ({ { "clipId", mwc }, { "reversed", true } }) },
+            { "set_clip_loop",        objN ({ { "clipId", mwc }, { "enabled", true }, { "start", 0.0 }, { "length", 1.0 } }) },
+            { "set_clip_warp",        objN ({ { "clipId", mwc }, { "autoTempo", true } }) },
+            { "normalize_clip",       objN ({ { "clipId", mwc }, { "targetDb", 0.0 } }) },
+            { "duplicate_clip",       objN ({ { "clipId", mwc } }) },
+            { "add_note",             objN ({ { "clipId", mmc }, { "pitch", 64 }, { "start", 1.0 }, { "length", 0.5 } }) },
+            { "set_note",             objN ({ { "clipId", mmc }, { "noteIndex", 0 }, { "velocity", 70 } }) },
+            { "quantize_notes",       objN ({ { "clipId", mmc }, { "division", 0.25 }, { "strength", 1.0 } }) },
+            { "remove_note",          objN ({ { "clipId", mmc }, { "noteIndex", 0 } }) },
+            { "load_builtin",         objN ({ { "trackId", mt }, { "type", "compressor" } }) },
+            { "bypass_plugin",        objN ({ { "trackId", mt }, { "index", eqIx }, { "bypassed", true } }) },
+            { "set_plugin_param",     objN ({ { "trackId", mt }, { "index", eqIx }, { "paramIndex", 0 }, { "value", 0.7 } }) },
+            { "add_automation_point", objN ({ { "trackId", mt }, { "pluginIndex", eqIx }, { "paramIndex", 0 },
+                                              { "time", 1.0 }, { "value", 0.5 } }) },
+            { "set_master_volume",    objN ({ { "db", -5.0 } }) },
+            { "set_master_pan",       objN ({ { "pan", -0.3 } }) },
+            { "load_master_builtin",  objN ({ { "type", "delay" } }) },
+            { "set_tempo",            objN ({ { "bpm", 100.0 } }) },
+            { "insert_tempo_change",  objN ({ { "time", 4.0 }, { "bpm", 140.0 } }) },
+            { "set_time_signature",   objN ({ { "numerator", 3 }, { "denominator", 4 } }) },
+            { "insert_time_sig_change", objN ({ { "time", 8.0 }, { "numerator", 6 }, { "denominator", 8 } }) },
+            { "create_track",         objN ({ { "name", "MxNew" } }) },
+            { "remove_clip",          objN ({ { "clipId", dc } }) },
+            { "remove_track",         objN ({ { "trackId", dt } }) },
+            { "create_bus",           objN ({ { "name", "MxBus2" } }) },
+            { "add_send",             objN ({ { "trackId", mt }, { "bus", mbus }, { "db", -3.0 } }) },
+            { "delete_time_range",    objN ({ { "start", 0.5 }, { "end", 1.0 },
+                                              { "trackIds", var (rippleTracks) }, { "ripple", true } }) },
+        };
+
+        for (const auto& mc : table)
+        {
+            const auto s0 = canon();
+            check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " ok").toRawUTF8());
+            const auto s1 = canon();
+            check (s1 != s0, (mc.name + " mutates the canonical snapshot").toRawUTF8());
+            check (ok (cmd (ops, "undo")), (mc.name + " undo ok").toRawUTF8());
+            check (canon() == s0, (mc.name + " ONE undo restores the canonical snapshot").toRawUTF8());
+        }
+
+        section ("matrix: persist — the fully-mutated state survives save/reload");
+        // Re-apply the whole table cumulatively (no undo), then save → reload and demand
+        // canonical equality: ANY non-serialized property among the mutated fields fails.
+        for (const auto& mc : table)
+            check (ok (cmd (ops, mc.name, mc.args)), (mc.name + " re-applied for persist").toRawUTF8());
+        const auto preSave = canon();
+        check (ok (cmd (ops, "save")), "matrix save ok");
+        check (ok (cmd (ops, "reload")), "matrix reload ok");
+        const auto postLoad = canon();
+        // A bare equality failure here is opaque — the same problem the golden-audio gate
+        // solved with a feature vector. Print the first divergence (with a little context)
+        // so a red run names the non-serialized field instead of just asserting inequality.
+        if (postLoad != preSave)
+        {
+            int i = 0;
+            const int n = juce::jmin (preSave.length(), postLoad.length());
+            while (i < n && preSave[i] == postLoad[i]) ++i;
+            const int from = juce::jmax (0, i - 90);
+            std::cerr << "  persist-diff @char " << i << "\n"
+                      << "    saved:  ..." << preSave.substring (from, i + 90) << "\n"
+                      << "    loaded: ..." << postLoad.substring (from, i + 90) << "\n";
+        }
+        check (postLoad == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
@@ -9229,9 +9426,13 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
     // Captured variables: a command may "capture":{"VAR":"dataField"} a field of its
     // result.data, and any later string arg of the exact form "${VAR}" is replaced with
     // the captured value. This keeps scripts self-contained and robust to engine-assigned
-    // ids (trackId/clipId/index) without hard-coding them.
+    // ids (trackId/clipId/index) without hard-coding them. Substitution RECURSES into
+    // arrays and nested objects — commands like create_group_track {trackIds:["${T1}"]}
+    // and delete_time_range {trackIds:[...]} take captured ids inside arrays, and the
+    // old top-level-only pass left them as literal "${T1}" strings, silently no-op'ing
+    // (found by the DAW-parity P3 families).
     HashMap<String, var> vars;
-    auto subst = [&vars] (const var& v) -> var
+    std::function<var (const var&)> subst = [&vars, &subst] (const var& v) -> var
     {
         if (v.isString())
         {
@@ -9241,6 +9442,21 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
                 const auto key = s.substring (2, s.length() - 1);
                 if (vars.contains (key)) return vars[key];
             }
+            return v;
+        }
+        if (v.isArray())
+        {
+            Array<var> out;
+            for (const auto& e : *v.getArray())
+                out.add (subst (e));
+            return var (out);
+        }
+        if (auto* o = v.getDynamicObject())
+        {
+            auto* no = new DynamicObject();
+            for (const auto& p : o->getProperties())
+                no->setProperty (p.name, subst (p.value));
+            return var (no);
         }
         return v;
     };
