@@ -13,3 +13,16 @@ export function isCharacterLab(): boolean {
     return false;
   }
 }
+
+// Dev-only entry for the Moshi REDESIGN lab — the side-by-side runtime bake-off
+// (SVG springs vs state-machine vs trimmed 2D shader) for the post-raymarcher Moshi.
+// Same DEV gate + zero-store doctrine as the character lab above.
+export function isMoshiLab(): boolean {
+  const dev = typeof import.meta !== "undefined" && (import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+  if (!dev) return false;
+  try {
+    return new URLSearchParams(window.location.search).get("view") === "moshi-lab";
+  } catch {
+    return false;
+  }
+}

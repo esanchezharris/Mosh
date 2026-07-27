@@ -1,0 +1,163 @@
+/* Moshi Redesign Lab — scoped under .moshilab. Cream ground (the sticker is designed to
+   sit on bone, like the topbar mark), ink type, lime accents — the brand tokens with
+   literal fallbacks, same doctrine as characterLab.css. */
+.moshilab {
+  --ml-lime: var(--lime, #ccff23);
+  --ml-bone: var(--bone, #f6f2eb);
+  --ml-ink: #151515;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ml-bone);
+  color: var(--ml-ink);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  overflow: hidden;
+}
+
+.ml-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(21, 21, 21, 0.14);
+}
+.ml-wordmark {
+  transform: skewX(-10deg);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: var(--ml-ink);
+  color: var(--ml-lime);
+  border-radius: 3px;
+  padding: 3px 13px 2px;
+}
+.ml-sub { font-size: 10px; letter-spacing: 0.14em; opacity: 0.55; text-transform: uppercase; }
+
+.ml-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+.ml-cards {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 14px;
+  padding: 16px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.ml-card {
+  flex: 1 1 0;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(21, 21, 21, 0.14);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.ml-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ml-card-name { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
+.ml-card-meta { font-size: 8.5px; letter-spacing: 0.06em; opacity: 0.55; font-variant-numeric: tabular-nums; text-align: right; }
+
+.ml-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(204, 255, 35, 0.10), transparent 62%),
+    rgba(21, 21, 21, 0.04);
+}
+.ml-orb {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(21, 21, 21, 0.2), 0 6px 18px rgba(21, 21, 21, 0.18);
+  background: var(--ml-bone);
+}
+.ml-note { font-size: 9.5px; line-height: 1.5; letter-spacing: 0.03em; opacity: 0.72; margin: 0; }
+.ml-note em { font-style: normal; background: rgba(204, 255, 35, 0.5); padding: 0 3px; border-radius: 2px; }
+
+/* candidate B extras */
+.ml-sm { display: flex; flex-direction: column; gap: 8px; }
+.ml-sm-bools { display: flex; gap: 4px; }
+.ml-sm-log {
+  height: 92px;
+  overflow-y: auto;
+  font-size: 8.5px;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  background: var(--ml-ink);
+  color: rgba(246, 242, 235, 0.85);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.ml-sm-dim { opacity: 0.4; }
+.ml-riv {
+  display: block;
+  cursor: pointer;
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  padding: 8px 9px;
+  border: 1px dashed rgba(21, 21, 21, 0.35);
+  border-radius: 8px;
+  opacity: 0.75;
+}
+.ml-riv:hover { border-color: var(--ml-ink); opacity: 1; }
+
+/* the shared rack */
+.ml-rack {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 16px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.6);
+  border-left: 1px solid rgba(21, 21, 21, 0.14);
+}
+.ml-slider, .ml-group { display: flex; flex-direction: column; gap: 5px; }
+.ml-lbl { display: flex; align-items: baseline; justify-content: space-between; }
+.ml-name { font-size: 10px; letter-spacing: 0.18em; color: #4a6200; }
+.ml-val { font-size: 10px; letter-spacing: 0.06em; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.ml-hint { font-size: 8.5px; letter-spacing: 0.08em; opacity: 0.45; }
+.ml-slider input[type="range"] { width: 100%; accent-color: #86a800; cursor: pointer; }
+
+.ml-states, .ml-seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.ml-seg-btn {
+  flex: 1 1 auto;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(21, 21, 21, 0.65);
+  background: rgba(21, 21, 21, 0.05);
+  border: 1px solid rgba(21, 21, 21, 0.18);
+  border-radius: 7px;
+  padding: 6px 4px;
+  transition: transform 0.08s, color 0.1s, border-color 0.1s, background 0.1s;
+}
+.ml-seg-btn:hover { transform: translateY(-1px); border-color: rgba(21, 21, 21, 0.5); }
+.ml-seg-btn.on {
+  background: var(--ml-ink);
+  color: var(--ml-lime);
+  border-color: var(--ml-ink);
+}
+
+.ml-judge {
+  margin-top: auto;
+  border-top: 1px solid rgba(21, 21, 21, 0.14);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ml-judge ul { margin: 0; padding-left: 16px; }
+.ml-judge li { font-size: 9px; line-height: 1.55; letter-spacing: 0.03em; opacity: 0.7; }

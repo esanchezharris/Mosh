@@ -8,7 +8,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { useStore } from "./store";
 import { useSettings } from "./settings/store";
 import { resolveShell } from "./v2/shellQuery";
-import { isCharacterLab } from "./lab/labQuery";
+import { isCharacterLab, isMoshiLab } from "./lab/labQuery";
 import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
 
@@ -21,6 +21,13 @@ const CharacterLab = import.meta.env.DEV
   ? lazy(() => import("./lab/CharacterLab").then((m) => ({ default: m.CharacterLab })))
   : null;
 
+// Dev-only Moshi REDESIGN lab (`?view=moshi-lab`) — the runtime bake-off for the new
+// flat-sticker Moshi. Same DEV-gate doctrine as the Character Lab: folds to null in the
+// production build, so the demo and its candidates never ship.
+const MoshiLab = import.meta.env.DEV
+  ? lazy(() => import("./lab/moshi-lab/MoshiLab").then((m) => ({ default: m.MoshiLab })))
+  : null;
+
 export function App() {
   const init = useStore((s) => s.init);
   const uiShell = useSettings((s) => s.get("uiShell"));
@@ -30,12 +37,18 @@ export function App() {
   // knob demo and never touches the store, so it has zero backend dependency and can't
   // perturb a session. Unreachable in the shipped bundle (import.meta.env.DEV === false).
   const charLab = isCharacterLab();
+  const moshiLab = isMoshiLab();
 
-  useEffect(() => { if (!charLab) init(); }, [init, charLab]);
+  useEffect(() => { if (!charLab && !moshiLab) init(); }, [init, charLab, moshiLab]);
 
   if (charLab && CharacterLab) return (
     <Suspense fallback={null}>
       <CharacterLab />
+    </Suspense>
+  );
+  if (moshiLab && MoshiLab) return (
+    <Suspense fallback={null}>
+      <MoshiLab />
     </Suspense>
   );
   return shell === "v2" ? <AppV2 /> : <AppLegacy />;
