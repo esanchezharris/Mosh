@@ -40,6 +40,8 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/telemetry/TelemetryConfig.cpp
     ${CMAKE_SOURCE_DIR}/src/telemetry/Telemetry.cpp
     ${CMAKE_SOURCE_DIR}/src/telemetry/CrashHandler.cpp
+    test_brain_proxy.cpp
+    ${CMAKE_SOURCE_DIR}/src/brain/BrainProxy.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp

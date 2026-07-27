@@ -40,11 +40,37 @@ struct BrainProxy
     /** Blocking chat round-trip. `messages` is a JSON array of {role,content}.
         Returns { ok:true, content, provider, model, ms } on success, or
         { ok:false, error } on any failure (no provider / network / upstream). Call
-        OFF the message thread. */
+        OFF the message thread.
+
+        Proxy-first: when proxyEnabled(), this POSTs to the server-side brain proxy
+        (supabase/functions/brain) instead of calling a provider directly with a
+        bundled key. Any proxy failure (unreachable / non-2xx / malformed reply) falls
+        through to the direct-provider path below it — additive, never a regression
+        from the pre-proxy behaviour (proxyEnabled()==false skips the branch entirely,
+        so an unset MOSH_BRAIN_PROXY_URL is byte-identical to before this existed). */
     static juce::var chat (const juce::var& messages, const juce::String& requested = {});
 
     /** Diagnostics for a future picker / the log: which providers are configured. */
     static juce::var providersInfo();
+
+    /** True when MOSH_BRAIN_PROXY_URL is set — the signal to prefer the server-side
+        proxy over reading a bundled/env provider key directly. See
+        docs/brain-proxy/RUNBOOK.md for the deploy + cutover story. */
+    static bool proxyEnabled();
+
+    /** The configured proxy endpoint (the supabase/functions/brain URL). Empty when
+        proxyEnabled() is false. */
+    static juce::String proxyUrl();
+
+    /** The per-install id sent to the proxy for its daily token-cap bookkeeping
+        (migrations/0003_brain_usage.sql) — an opaque bookkeeping key, never a secret.
+        Reused from "<session>/identity.json"'s "uuid" field under the same
+        ~/Library/Mosh app-data root MoshEngine uses (minted + persisted on first use
+        if the file/field is absent). Two test seams: MOSH_BRAIN_INSTALL_ID overrides
+        outright (no filesystem I/O at all); MOSH_SELFTEST_SESSION picks the session
+        leaf, mirroring MoshEngine's own hermeticity boundary, so a harness run never
+        touches the real ~/Library/Mosh/session/identity.json. */
+    static juce::String installId();
 };
 
 } // namespace mosh

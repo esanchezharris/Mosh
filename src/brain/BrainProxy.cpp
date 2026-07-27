@@ -80,6 +80,59 @@ namespace
         o->setProperty ("error", message);
         return var (o);
     }
+
+    // ── Brain proxy (supabase/functions/brain) — keeps provider keys off the client ──
+    //
+    // Sends { messages, provider?, install_id } and expects { ok:true, content } back
+    // (or { ok:false, error } on a clean upstream/cap-reached failure). Never sends or
+    // receives a provider key. See docs/brain-proxy/RUNBOOK.md for the deploy story.
+    var chatViaProxy (const String& proxyUrl, const var& messages, const String& requested)
+    {
+        auto* payload = new DynamicObject();
+        payload->setProperty ("messages", messages);
+        if (requested.isNotEmpty())
+            payload->setProperty ("provider", requested);
+        payload->setProperty ("install_id", BrainProxy::installId());
+
+        StringArray headerLines;
+        headerLines.add ("Content-Type: application/json");
+        if (const auto apikey = env ("MOSH_BRAIN_PROXY_APIKEY"); apikey.isNotEmpty())
+            headerLines.add ("apikey: " + apikey);
+
+        URL url = URL (proxyUrl).withPOSTData (JSON::toString (var (payload)));
+        int statusCode = 0;
+        auto opts = URL::InputStreamOptions (URL::ParameterHandling::inPostData)
+                        .withConnectionTimeoutMs (30000)
+                        .withExtraHeaders (headerLines.joinIntoString ("\r\n"))
+                        .withStatusCode (&statusCode);
+
+        auto stream = url.createInputStream (opts);
+        if (stream == nullptr)
+            return makeError ("brain proxy unreachable - " + proxyUrl);
+
+        const auto bodyStr = stream->readEntireStreamAsString();
+        const auto j = JSON::parse (bodyStr);
+
+        if (statusCode < 200 || statusCode >= 300 || ! (bool) j.getProperty ("ok", false))
+        {
+            const auto errVar = j.getProperty ("error", var());
+            const auto detail = errVar.isVoid() ? ("upstream HTTP " + String (statusCode))
+                                                : JSON::toString (errVar);
+            return makeError ("brain proxy error: " + detail);
+        }
+
+        // Normalize to the SAME shape the direct-provider path returns so callers
+        // (WebBridge's brain_chat, the --brain-smoke CLI) don't need to know which
+        // path served the request. The proxy deliberately never discloses which
+        // upstream provider it used (see functions/brain/index.ts), so this fills in
+        // a fixed "proxy" identity rather than echoing anything from the response.
+        auto* o = new DynamicObject();
+        o->setProperty ("ok", true);
+        o->setProperty ("content", j.getProperty ("content", var()).toString());
+        o->setProperty ("provider", "proxy");
+        o->setProperty ("label", "MOSH BRAIN PROXY");
+        return var (o);
+    }
 }
 
 Array<BrainProxy::Provider> BrainProxy::providers()
@@ -115,8 +168,69 @@ BrainProxy::Provider BrainProxy::resolve (const String& requested)
     return {};
 }
 
+bool BrainProxy::proxyEnabled()
+{
+    return env ("MOSH_BRAIN_PROXY_URL").isNotEmpty();
+}
+
+String BrainProxy::proxyUrl()
+{
+    return env ("MOSH_BRAIN_PROXY_URL");
+}
+
+String BrainProxy::installId()
+{
+    // Test/CI seam: skip the filesystem entirely so hermetic checks never depend on
+    // (or mutate) real machine state.
+    if (const auto ov = SystemStats::getEnvironmentVariable ("MOSH_BRAIN_INSTALL_ID", {}); ov.isNotEmpty())
+        return ov;
+
+    // Same app-data root MoshEngine::MoshEngine uses (src/engine/MoshEngine.cpp):
+    // ~/Library/<Mosh>/<leaf>. MOSH_SELFTEST_SESSION mirrors the engine's own leaf
+    // override so a harness run resolves to the isolated "session-selftest"-style dir
+    // instead of touching the real ~/Library/Mosh/session/identity.json.
+    const auto leaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+    const auto identityFile = File::getSpecialLocation (File::userApplicationDataDirectory)
+                                   .getChildFile ("Mosh")
+                                   .getChildFile (leaf.isNotEmpty() ? leaf : "session")
+                                   .getChildFile ("identity.json");
+
+    if (identityFile.existsAsFile())
+    {
+        const auto uuid = JSON::parse (identityFile.loadFileAsString()).getProperty ("uuid", var()).toString();
+        if (uuid.isNotEmpty())
+            return uuid;
+    }
+
+    // First use on this machine (or the file exists but predates a "uuid" field, e.g.
+    // a hand-seeded identity.json): mint one and persist it ONLY if there was no file
+    // at all, so we never clobber fields we don't understand on a malformed existing
+    // file — worst case that rare situation just re-mints a non-persisted id per call,
+    // never worse than not proxying.
+    const auto fresh = Uuid().toString();
+    if (! identityFile.existsAsFile())
+    {
+        identityFile.getParentDirectory().createDirectory();
+        auto* o = new DynamicObject();
+        o->setProperty ("uuid", fresh);
+        identityFile.replaceWithText (JSON::toString (var (o)));
+    }
+    return fresh;
+}
+
 var BrainProxy::chat (const var& messages, const String& requested)
 {
+    if (proxyEnabled())
+    {
+        auto result = chatViaProxy (proxyUrl(), messages, requested);
+        if ((bool) result.getProperty ("ok", false))
+            return result;
+        // Fall through to the direct-provider path below (dev-only in practice: a
+        // production build that relies on the proxy carries no bundled keys, so
+        // resolve() below will itself return "no provider configured" — the existing,
+        // already-handled degrade path the UI falls back to a mock brain from).
+    }
+
     const auto p = resolve (requested);
     if (! p.isComplete())
         return makeError ("no brain provider configured - set <PROVIDER>_API_KEY / _BASE_URL / _MODEL "
