@@ -1,0 +1,20 @@
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+@@ -976,6 +976,16 @@
+ 
+     {
+         const juce::ScopedLock sl (knownFilesLock);
++
++        // MOSH PATCH 0004: a host that pumps the message loop re-entrantly (or a
++        // duplicate drain racing the background proxy/render-job producers) can
++        // deliver this callback with filesToCheck already EMPTY — getUnchecked(-1)
++        // is then a heap-buffer-overflow READ (caught by ASan under Release +
++        // concurrent load). Guard the empty pop; DeviceManager::handleAsyncUpdate
++        // carries the equivalent reentrancy defense, AudioFileManager never did.
++        if (filesToCheck.isEmpty())
++            return;
++
+         fileToCheck = filesToCheck.getUnchecked (filesToCheck.size() - 1);
+         filesToCheck.removeLast();
+ 
