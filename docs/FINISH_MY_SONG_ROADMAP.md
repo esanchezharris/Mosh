@@ -83,6 +83,11 @@ Re-sing the finished sheet in the artist's voice. The voice research is decisive
 
 ---
 
+> **2026-07-24 — the lyrics-first threshold FIRED.** The owner pivoted the quality
+> push to lyric quality itself. The escalation lives as a registered program —
+> masked-word infill bench + calibrated judges + arm bake-off (prompt / FIM-LoRA /
+> ranker) — at [`docs/fms-lyrics-bench/PROGRAM.md`](fms-lyrics-bench/PROGRAM.md).
+
 ## 5. Thresholds that change the plan
 
 - Validator-loop latency/cost too high → **SNU-style trained control tokens** (`<SYL:n>`) for guaranteed counts.

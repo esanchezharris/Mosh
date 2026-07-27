@@ -64,6 +64,7 @@ service/transform/.transform.env
 # SFT lane: mlx-lm venv + machine-local SFT_PY + generated dataset/adapters (setup-sft.sh)
 service/sft/.venv/
 service/sft/.sft.env
+service/lyrics/bench/.lyrics-bench.env
 service/sft/.sft-data/
 service/sft/.adapters/
 service/sft/.fused/

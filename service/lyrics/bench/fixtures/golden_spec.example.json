@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "artists": ["Golden Fixture"],
+  "songs": [{"artist": "Arrange Fixture", "title": "A Specific Song Title"}],
+  "ownSources": ["used2-chorus"],
+  "notes": "EXAMPLE ONLY. Copy to ~/Library/Mosh/lyrics-bench/golden_spec.json and list the artists/songs whose pen defines 'known-good' for you, plus which of your own sheet sources to include. The real file is never committed."
+}

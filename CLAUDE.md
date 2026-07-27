@@ -131,6 +131,10 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   exactly like one that passes. RED-prove every new guard, count assertions, and check the fixture
   isn't stubbed. `grep SABOTAGE` before landing anything that involved a RED-proof.
   One worktree = one agent — #424 shipped `return 0; // SABOTAGE` stubs because two agents shared one.
+  **A guard that SUPPRESSES something needs a fixture that actually carries it.** "Hidden pairs leak
+  no artist name" passed a sabotage that deleted the hiding logic outright, because the fixture's
+  hidden pair had no artist name to leak. Sabotage with an absolute path and verify the restore —
+  a `cd x && cp backup` chain leaves the sabotage in the tree when the `cd` fails.
 - **Never verify a native change with a pre-existing binary.** Build from committed source.
 - **`--selftest` cannot see the reactive lane.** `reactiveTouch` returns on `!hasAudio() &&
   !MOSH_REACTIVE_DEBOUNCE_MS` **before** reading any state it gates on, so a headless run cannot
