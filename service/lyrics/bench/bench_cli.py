@@ -29,7 +29,7 @@ sys.path.insert(0, SERVICE)
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
                           preflight,
                           ingest, judge, llm_cache, mask, metrics, paths,
-                          mixpairs, panel, runner, sampling, scoreboard,
+                          mixpairs, panel, pilot, runner, sampling, scoreboard,
                           scrape, torchjudge)
 
 REPO_ROOT = os.path.dirname(SERVICE)
@@ -729,6 +729,13 @@ def main(argv=None) -> int:
     p.add_argument("--stanza", action="store_true", default=True,
                    help="show the whole stanza around the gap (flow context)")
     p.set_defaults(fn=cmd_calibrate)
+
+    # The taste instrument, not a measurement one: N whole verses from the SHIPPED
+    # config, written plain for reading aloud. Flags live in pilot.add_arguments so
+    # `pilot.py --help` and `bench_cli.py pilot --help` cannot drift apart.
+    p = sub.add_parser("pilot", help="N read-aloud verse candidates (owner sitting)")
+    pilot.add_arguments(p)
+    p.set_defaults(fn=pilot.run)
 
     p = sub.add_parser("scoreboard")
     p.set_defaults(fn=cmd_scoreboard)
