@@ -541,8 +541,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     // 1a. MOSH_SELFTEST_SESSION isolation: when set, the harness must run in its
     // own private session dir (so concurrent worktree runs don't clobber each other).
+    // MOSH_SELFTEST_SESSION may be a nested path (`_harness/<leaf>`) — harness runs nest
+    // so their leaves cannot pile up beside the owner's real data in ~/Library/Mosh.
+    // Compare LEAF to LEAF: `getFileName()` returns only the last component, so matching it
+    // against the raw env value would fail for any nested value. `fromLastOccurrenceOf`
+    // returns the whole string when there is no '/', so a flat value behaves exactly as before.
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
-        check (eng.sessionDir().getFileName() == s, "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
+        check (eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
+               "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
 
     // 1a'. ALWAYS: whichever route got us here, this run must own its session dir. A bare
     // shared leaf means a concurrent selftest is wiping our exports/save/log mid-run and
@@ -551,7 +557,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // MOSH_SELFTEST_SESSION is the caller's own private leaf.)
     {
         const auto leaf = eng.sessionDir().getFileName();
-        const auto explicitLeaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+        // Same leaf-vs-path point as 1a: an explicit MOSH_SELFTEST_SESSION may nest.
+        const auto explicitLeaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {})
+                                      .trim().fromLastOccurrenceOf ("/", false, false);
         check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf) || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
                "session dir is private to this run, not a shared fixed path (" + leaf + ")");
     }

@@ -90,10 +90,21 @@ kill_stray_services() {
 # ── unique session / port allocation ────────────────────────────────────────────
 # A unique, filesystem-safe session leaf for MOSH_SELFTEST_SESSION so parallel
 # worktrees never clobber ~/Library/Mosh/session-selftest (the PR #66 fix).
+#
+# NESTED under _harness/ on purpose. These leaves are never reaped: the 2026-07-26
+# consolidation found ~4,525 of the 4,592 top-level entries in ~/Library/Mosh were
+# harness sessions, still accumulating at ~35/day, with the real app data (session/,
+# loras/, venvs/, the git object store) buried among them. That made every cleanup a
+# hazard — `session*` also matches the owner's hand-made session-backup-* dirs, and
+# `lora*` also matches the real 10 GB adapter rack.
+#
+# MOSH_SELFTEST_SESSION is used verbatim as a path under ~/Library/Mosh, so a slash
+# just nests: no C++ change, no new env var, and one `rm -rf ~/Library/Mosh/_harness`
+# becomes a safe, complete sweep that cannot reach real data.
 unique_session() {
   local slug="${1:-al}"
   slug="$(printf '%s' "$slug" | tr -c 'A-Za-z0-9._-' '-')"
-  printf 'session-autoloop-%s-%s\n' "$slug" "$$"
+  printf '_harness/session-autoloop-%s-%s\n' "$slug" "$$"
 }
 
 # A free TCP port in the 8800–8899 band (away from the default 8770 the GUI uses).
