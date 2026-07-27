@@ -269,8 +269,22 @@ install_app() {                                 # $1 = source app, $2 = dest
 # all this needs, and leaving Hardened Runtime off keeps the everyday deploy behaviourally
 # identical to the ad-hoc build it replaces (no library-validation risk to third-party
 # VST3/AU hosting). `release` still applies the full distribution config.
-# (`dev_id_identity` is defined below; bash resolves it at call time, and every sign_app
-# call site runs after this file is fully sourced.)
+
+# Echo the SHA-1 of an installed "Developer ID Application" identity, or empty if none.
+# (An "Apple Development"/"Apple Distribution" cert is NOT accepted by notarization for
+# direct distribution — it must be a Developer ID Application cert.)
+#
+# KEEP THIS HERE even though scripts/release/sign-and-notarize.sh has its own richer
+# `resolve_identity`: that script is the RELEASE path and the everyday `deploy` path
+# never sources it. `sign_app` below calls this on every deploy, and run-mosh.sh runs
+# under `set -euo pipefail`, so removing this function does not degrade gracefully —
+# it aborts the deploy with "dev_id_identity: command not found" and silently reverts
+# the app to an unsigned state, which is exactly the TCC re-prompt bug #452 fixed.
+dev_id_identity() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | awk '/Developer ID Application/ { print $2; exit }'
+}
+
 sign_app() {
   local DEST="$1" LABEL="${2:-ad-hoc}" ID
   ID="$(dev_id_identity)"
