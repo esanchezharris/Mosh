@@ -286,16 +286,15 @@ export async function addTrackOfKind(
     return;
   }
   // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
-  // instrument track IS an audio track carrying a synth plus MIDI clips. So: make the
-  // track, then put a clip on it. add_midi_clip loads 4OSC in its own transaction when the
-  // track has no instrument, so the clip lands audible and piano-roll-ready rather than
-  // silent. Two commands ⇒ two undo steps, which is deliberate: add_midi_clip DOES
-  // auto-create a track when trackId is absent (one step), but native creates a NEW track
-  // there while bridge.mock.ts falls back to tracks[0] — passing an explicit trackId keeps
-  // mock and native identical, and the mock would otherwise error in the empty state.
-  const res = await exec("create_track", { name: "Instrument" });
-  const trackId = (res.data as { trackId?: string } | undefined)?.trackId;
-  if (res.ok && trackId) await exec("add_midi_clip", { trackId });
+  // instrument track IS an audio track carrying a synth plus MIDI clips.
+  //
+  // The track is created BARE, on purpose. This used to also run add_midi_clip, which
+  // trips the backend's DRM-001 default-instrument policy and silently loaded 4OSC — a
+  // synth the user never picked and had no prompt to change. The Inspector's instrument
+  // slot now asks instead, and double-clicking the empty lane offers the same choice.
+  // DRM-001 itself is untouched and still correct for every other caller: it exists
+  // because a MIDI clip on an instrument-less track is silent.
+  await exec("create_track", { name: "Instrument" });
 }
 
 // The add-track affordance: a menu, not a button. `variant` only picks the trigger's skin —

@@ -10,6 +10,11 @@
 // PLAYABLE (carrying the instrument that makes them audible), not merely that the right
 // command strings were emitted. A drum or MIDI track without an instrument is silent, which
 // is the failure mode that would otherwise pass a string-matching test.
+//
+// UPDATE (instrument affordance, 2026-07-27): the Instrument kind now creates a BARE
+// track. add_midi_clip's v2 call site moved to the empty-lane menu (v2/lanes/LaneMenu.tsx),
+// where the user asks for a clip explicitly. The "lands playable" claim below still holds
+// for drums and tone; for instrument it is now "lands with nothing it cannot play".
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { addTrackOfKind, TRACK_KINDS } from "./TrackLaneList";
@@ -65,17 +70,22 @@ describe("v2 add-track — every offered kind is reachable and lands playable (T
     expect(hasInstrument(t)).toBe(true);
   });
 
-  it("instrument → a synth-bearing track AND an empty MIDI clip to open in the piano roll", async () => {
+  it("instrument → a BARE track: no clip, no unpicked synth (the slot asks instead)", async () => {
+    const before = snap().tracks.length;
     await addTrackOfKind("midi", exec);
     await settle();
-    expect(calls.map((c) => c.command)).toEqual(["create_track", "add_midi_clip"]);
+    // One command now. This used to also run add_midi_clip, which trips the backend's
+    // DRM-001 default-instrument policy and silently loaded 4OSC — a synth the user never
+    // chose and had no prompt to change. The Inspector's instrument slot and the empty-lane
+    // double-click now ask. DRM-001 is untouched and still right for every other caller.
+    expect(calls.map((c) => c.command)).toEqual(["create_track"]);
+    expect(calls[0].args).toEqual({ name: "Instrument" });
+    expect(snap().tracks.length).toBe(before + 1);
     const t = newest();
-    // The clip must be addressed to the track we just made — not to tracks[0], which is
-    // what an omitted trackId resolves to in the mock (and to a brand-new track natively).
-    expect(calls[1].args).toEqual({ trackId: t.id });
-    expect(hasInstrument(t)).toBe(true); // 4OSC, via add_midi_clip's default-instrument policy
-    expect(t.clips.length).toBe(1);
-    expect(t.clips[0].type).toBe("midi");
+    // The invariant that still holds: never a clip the track cannot play. Before, that was
+    // bought by auto-loading a synth; now by not making the clip until one is picked.
+    expect(t.clips.length).toBe(0);
+    expect(hasInstrument(t)).toBe(false);
   });
 
   it("test tone → an audio track with a tone clip already on it", async () => {
