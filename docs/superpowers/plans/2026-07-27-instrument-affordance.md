@@ -413,8 +413,11 @@ import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import type { Track } from "../../types";
 
-export function LaneMenu({ x, y, track, barLen, onClose }: {
-  x: number; y: number; track: Track; barLen: number; onClose: () => void;
+export function LaneMenu({ x, y, track, start, barLen, onClose }: {
+  // `start` is the bar-snapped seconds under the pointer, computed by the caller with the
+  // same snappedSecAt the double-click path uses — so "Add MIDI clip" lands where you
+  // right-clicked, not at bar 1.
+  x: number; y: number; track: Track; start: number; barLen: number; onClose: () => void;
 }) {
   const exec = useStore((s) => s.exec);
   const openBrowserTab = useShell((s) => s.openBrowserTab);
@@ -439,7 +442,7 @@ export function LaneMenu({ x, y, track, barLen, onClose }: {
           backend's DRM-001 policy loads a default instrument in the same transaction so
           the clip lands audible rather than silent. */}
       <button role="menuitem" data-testid="lane-add-midi-clip"
-        onClick={() => run(() => void exec("add_midi_clip", { trackId: track.id, start: 0, length: barLen }))}>
+        onClick={() => run(() => void exec("add_midi_clip", { trackId: track.id, start, length: barLen }))}>
         Add MIDI clip
       </button>
     </div>,
@@ -495,7 +498,7 @@ describe("LaneMenu", () => {
   const mount = async (isInstrument: boolean) => {
     const track = { id: "t1", name: "Inst", type: "audio", clips: [], plugins: [], isInstrument } as never;
     await act(async () => {
-      root.render(React.createElement(LaneMenu, { x: 0, y: 0, track, barLen: 2, onClose: () => {} }));
+      root.render(React.createElement(LaneMenu, { x: 0, y: 0, track, start: 0, barLen: 2, onClose: () => {} }));
     });
   };
 
@@ -558,7 +561,7 @@ In the timeline component (the one that already computes `barLen` at line 80), a
   const exec = useStore((s) => s.exec);
   const tool = useStore((s) => s.tool);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
-  const [laneMenu, setLaneMenu] = useState<{ x: number; y: number; track: Track } | null>(null);
+  const [laneMenu, setLaneMenu] = useState<{ x: number; y: number; track: Track; start: number } | null>(null);
 
   // Empty-lane gestures. `.v2-lane` owns no drag (v2 has no marquee), so a native
   // dblclick is correct here — ClipView needs its manual timer only because it also
@@ -573,11 +576,13 @@ In the timeline component (the one that already computes `barLen` at line 80), a
     // LOAD-BEARING: the plugin picker and sample browser both load onto the SELECTED
     // track, so without this you could double-click lane 7 and load a synth onto lane 2.
     setSelectedTrack(track.id);
+    // Snap once, for BOTH paths: the menu's "Add MIDI clip" must land where the pointer
+    // is, exactly like the double-click path, not at bar 1.
+    const start = snappedSecAt(tempoMapFrom(snapshot.session), pxPerSec, e.clientX, e.currentTarget.getBoundingClientRect().left);
     if (action === EA.CONTEXT_MENU || resolveLaneNew(track).kind === "menu") {
-      setLaneMenu({ x: e.clientX, y: e.clientY, track });
+      setLaneMenu({ x: e.clientX, y: e.clientY, track, start });
       return;
     }
-    const start = snappedSecAt(tempoMapFrom(snapshot.session), pxPerSec, e.clientX, e.currentTarget.getBoundingClientRect().left);
     void exec("add_midi_clip", { trackId: track.id, start, length: barLen });
   }, [exec, tool, setSelectedTrack, snapshot, pxPerSec, barLen]);
 ```
@@ -595,7 +600,7 @@ Render the menu next to the existing `{dragging && ...}` block near the end of t
 
 ```tsx
         {laneMenu && (
-          <LaneMenu x={laneMenu.x} y={laneMenu.y} track={laneMenu.track} barLen={barLen}
+          <LaneMenu x={laneMenu.x} y={laneMenu.y} track={laneMenu.track} start={laneMenu.start} barLen={barLen}
             onClose={() => setLaneMenu(null)} />
         )}
 ```
