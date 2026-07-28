@@ -66,10 +66,65 @@ Needs a Mosh binary (`--bin`, or auto-discovered newest of the build trees /
 
 ## Reading results honestly
 
-- **compactSnapshot blind spots**: the brain's session rendering currently
-  omits buses, the master chain, the tempo map and the key — master/tempo-map
-  task failures can be VISIBILITY failures, not model failures. Call this out
-  when comparing models; the fix belongs to the Phase-B harness lane.
+- **Session-rendering blind spots** (half-closed, 2026-07-27): the LOOP path now
+  renders master/buses/tempo-map/key via `richSessionBlock`
+  (`ui/src/agent/loop/loopPrompt.ts`), and that alone took `master-trim` from
+  failing to 5/5 on the loop runner. The SINGLE-SHOT path still uses
+  `compactSnapshot` (`brainCore.ts`), which omits ALL of it — so on `--runner
+  single`, a master/tempo-map failure is still a VISIBILITY failure, not a model
+  failure. There are two renderers, deliberately: `compactSnapshot` is byte-frozen
+  for the SFT/GEPA consumers and is hand-mirrored in Python
+  (`service/sft/build_add_note_corrective.py::render_session`), so moving it costs
+  a corpus rebuild. Say which runner you ran before comparing models.
+- **A read-only discovery call teaches the model NOTHING in the loop.**
+  `StepCommandResult` is `{command, ok, error}` — no payload — so `list_builtins`
+  comes back to the model as the string `list_builtins → ok`. The signature is a
+  doubled `list_builtins, list_builtins` followed by a guessed argument. This is
+  what made `master-eq-before-comp` fail on *every* seat: the natural guess for an
+  EQ is `"eq"`, and the engine's type is `"4bandEq"`. Fixed on 2026-07-27 by
+  inlining the vocabulary into the catalog (`BUILTIN_TYPES` in
+  `ui/src/agent/commands.ts`), measured below. If you add another command whose
+  arguments come from a `list_*` call, it has the same defect by construction —
+  put the vocabulary in the description, or teach the loop to feed payloads back.
+
+### Measured: inlining the builtin vocabulary (2026-07-27)
+
+Seat `claude-sonnet-5` via `--claude-cli`, same binary, same task set; the ONLY
+difference between arms is `ui/src/agent/commands.ts`. Repeated runs, not one
+run — single-run deltas on a 3-task category are worthless (each task is 0 or 1,
+so one run can only land on 0/33/67/100%). Fisher exact, two-tailed:
+
+`--runner loop`, 5 reps/arm (15 task-instances/arm):
+
+| task | before | after | p |
+|---|---|---|---|
+| master-glue | 4/5 | 5/5 | 1.00 |
+| master-eq-before-comp | **0/5** | **5/5** | 0.008 |
+| master-trim | 5/5 | 5/5 | — |
+| **category** | **9/15 (60.0%)** | **15/15 (100%)** | **0.017** |
+
+`--runner single`, 10 reps/arm (30 task-instances/arm):
+
+| task | before | after | p |
+|---|---|---|---|
+| master-glue | 5/10 | 10/10 | 0.033 |
+| master-eq-before-comp | **0/10** | **8/10** | 0.0007 |
+| master-trim | **0/10** | **0/10** | 1.00 (unchanged — different cause, below) |
+| **category** | **5/30 (16.7%)** | **18/30 (60.0%)** | **0.0012** |
+
+The score is not the strongest evidence; the mechanism is. On the loop runner,
+`list_builtins` calls went **24 → 0** — the dead-end discovery call stopped
+happening entirely. On the single runner the before-arm was already emitting
+`load_master_builtin` directly and having it *rejected by the engine* for a
+guessed `type`; the after-arm emits the same command and it lands.
+
+`master-trim` is the honest exception: unchanged at 0/10 on the single runner
+while sitting at 5/5 on the loop runner. It is not a vocabulary failure — it is
+the `compactSnapshot` blind spot above. The master fader defaults to **−3 dB**
+and the single-shot prompt never renders it, so "pull the master down a couple
+dB" gets an absolute value chosen as if the fader were at 0. Closing it means
+moving `compactSnapshot`, which drags the byte pin, the SFT corpora and the
+Python hand-mirror with it — a deliberate, separate piece of work.
 - Mock-vs-real drift: if a task behaves differently across substrates, the real
   engine is the truth and the mock gets a parity fix (see the BUILTINS drift
   the bench caught on day one).

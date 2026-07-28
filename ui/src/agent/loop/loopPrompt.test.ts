@@ -137,13 +137,33 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-07-26, consciously: `unfreeze_layer` was added to the agent catalog (the
-    // thaw for freeze_layer, which had none), and freeze_layer's own description was
-    // corrected — it used to say "commit the rendered audio", which described a label it
-    // wrote rather than what it does. The catalog is rendered into this prompt, so both
-    // edits move the hash. Nothing about the prompt's SHAPE changed.
-    // Previous pin: a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c
-    expect(hash).toBe("70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e");
+    // Moved 2026-07-27, consciously: the builtin `type` VOCABULARY is now inline in the
+    // catalog, because the bench proved the model had no other way to learn it. The
+    // MoshAgentBench `master` category failed on every seat; the transcripts showed a
+    // doubled `list_builtins, list_builtins` followed by a guessed type that the engine
+    // rejected. The reason it is a dead end is structural, not a wording problem:
+    // StepCommandResult is {command, ok, error} with NO payload, so the agentic loop
+    // never shows the model what a read-only discovery call actually returned.
+    // The specific killer was "eq" — the natural guess — where the engine's type is
+    // "4bandEq" (the same drift bridge.mock.ts's header already records).
+    //
+    // Exactly three catalog lines moved; the prompt's SHAPE is unchanged (no new
+    // section, no reordering, session render untouched):
+    //   list_builtins       — no longer advertised as the route to `type` names
+    //   load_builtin        — + "type is EXACTLY one of: <13 names>" (the only real
+    //                         token cost, ~40 tokens; sourced from BUILTIN_TYPES)
+    //   load_master_builtin — + "same 'type' vocabulary as load_builtin", naming the
+    //                         two the master tasks need (compressor / 4bandEq)
+    //
+    // Consumers to be aware of, since this pin is what ties them together: the SFT
+    // corpora and GEPA baselines were built against the PREVIOUS catalog text. They are
+    // not invalidated (no command was added, removed or renamed — only three
+    // descriptions changed), but a corpus rebuilt after this commit will carry the new
+    // text. service/sft/build_add_note_corrective.py needs no edit: it PARSES
+    // AGENT_COMMANDS out of commands.ts rather than hand-copying it. Its one hand-mirror,
+    // render_session(), mirrors compactSnapshot — which this change does not touch.
+    // Previous pin: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
+    expect(hash).toBe("7285fcc3dd63f6f4c2b5a1dd48794d2e17b97a38b15f9ec9d1f1331e0f2e4a90");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved
