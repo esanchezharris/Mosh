@@ -72,8 +72,17 @@ if [ "${1:-}" = "--set-token" ]; then
   fi
   touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
   # Replace an existing line rather than appending a duplicate the shell would re-read.
+  #
+  # WRITE IN PLACE — never `mv` a temp file over $ENV_FILE. In a worktree, ui/.env.local
+  # is a SYMLINK to the main checkout's copy, and `mv` REPLACES the symlink with a regular
+  # file. That silently forks one env file into two: further writes went to the main
+  # checkout while Vite's loadEnv read the worktree copy, so the proxy config was invisible
+  # to the dev server and it fell back to the direct provider path — which looks identical
+  # to working, because tryProxy() falls through by design. Cost a real debugging detour on
+  # 2026-07-28. `> "$ENV_FILE"` truncates through the symlink and keeps it intact.
   if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
-    TMP="$(mktemp)"; grep -v "^${KEY}=" "$ENV_FILE" > "$TMP"; mv "$TMP" "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    TMP="$(mktemp)"; grep -v "^${KEY}=" "$ENV_FILE" > "$TMP"
+    cat "$TMP" > "$ENV_FILE"; rm -f "$TMP"
     echo "  (replaced the existing $KEY)" >&2
   fi
   printf '%s=%s\n' "$KEY" "$VALUE" >> "$ENV_FILE"
