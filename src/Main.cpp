@@ -5,6 +5,7 @@
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
 #include "engine/AudioDeviceStartup.h"
+#include "app/SparkleUpdater.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -479,6 +480,20 @@ public:
         // over the bridge event channel — the UI's runAction dispatcher turns each into
         // the matching MoshOps command (one definition of every command). The Recent
         // submenu reads the live session snapshot. (GUI only — never in headless runs.)
+        //
+        // FS-K2: the Sparkle updater is built here, BEFORE the menu, because the menu's
+        // "Check for Updates…" item is only added when an updater actually exists —
+        // isAvailable() is false unless Sparkle was compiled in AND a feed URL is
+        // configured. It is not a MoshOps command (it mutates nothing in the session);
+        // see src/app/SparkleUpdater.h.
+        updater = std::make_unique<SparkleUpdater>();
+        MenuController::UpdateAction onCheckForUpdates;
+        if (updater->isAvailable())
+        {
+            std::cerr << "updates: Sparkle feed " << updater->feedUrl().toStdString() << std::endl;
+            onCheckForUpdates = [this] { if (updater != nullptr) updater->checkForUpdates(); };
+        }
+
         auto* bridgePtr = &bridge;
         menuController = std::make_unique<MenuController> (
             [bridgePtr] (const juce::var& action) { bridgePtr->emitEvent (juce::Identifier ("mosh_menu"), action); },
@@ -487,7 +502,8 @@ public:
                 return moshOps != nullptr
                      ? moshOps->snapshot().getProperty ("session", juce::var()).getProperty ("recentProjects", juce::var())
                      : juce::var();
-            });
+            },
+            std::move (onCheckForUpdates));
 
         moshOps->setEventSink ([&bridge, this] (const juce::var& e)
                                {
@@ -593,6 +609,9 @@ private:
     std::unique_ptr<RemoteCompanionServer> remoteServer;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
+    // FS-K2. GUI-only, constructed before the menu so the menu knows whether an
+    // updater exists at all. Never built in a headless run.
+    std::unique_ptr<SparkleUpdater> updater;
     AutoSaveTimer autoSave;
 };
 

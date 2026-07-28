@@ -25,10 +25,17 @@ namespace
 
     constexpr int recentBaseID = 0x6e00; // Open Recent items: recentBaseID + index
     constexpr int maxRecentItems = 12;
+
+    // "Check for Updates…" lives in the APPLICATION menu (Mosh ▸), where macOS users
+    // look for it — not in File/Edit/Transport. JUCE reaches that menu only through
+    // setMacMainMenu's extraAppleMenuItems, and those items arrive at
+    // menuItemSelected() with topLevelMenuIndex == -1, never through perform(). Hence
+    // its own ID range rather than a CommandID.
+    constexpr int appCheckForUpdatesID = 0x6f01;
 }
 
-MenuController::MenuController (ActionSink s, RecentProvider r)
-    : sink (std::move (s)), recents (std::move (r))
+MenuController::MenuController (ActionSink s, RecentProvider r, UpdateAction u)
+    : sink (std::move (s)), recents (std::move (r)), checkForUpdates (std::move (u))
 {
     commands.target = this;                       // route invocations to perform()
     commands.registerAllCommandsForTarget (this); // register command info + key-equivalents
@@ -37,7 +44,22 @@ MenuController::MenuController (ActionSink s, RecentProvider r)
    #if JUCE_MAC
     // The single top-level menu bar across the whole app (macOS). JUCE supplies the
     // standard application menu (incl. Quit) from the app name automatically.
-    juce::MenuBarModel::setMacMainMenu (this);
+    //
+    // The updates item is added ONLY when an updater actually exists (Sparkle compiled
+    // in AND a feed URL configured). A permanently-dead "Check for Updates…" would be a
+    // worse answer than no item: it reads as "this app checks for updates" to a user
+    // who would then never get one.
+    if (checkForUpdates)
+    {
+        const auto ell = juce::String::charToString (static_cast<juce::juce_wchar> (0x2026));
+        juce::PopupMenu appMenuItems;
+        appMenuItems.addItem (appCheckForUpdatesID, "Check for Updates" + ell);
+        juce::MenuBarModel::setMacMainMenu (this, &appMenuItems);
+    }
+    else
+    {
+        juce::MenuBarModel::setMacMainMenu (this);
+    }
    #endif
 }
 
@@ -111,7 +133,15 @@ juce::PopupMenu MenuController::getMenuForIndex (int topLevelMenuIndex, const ju
 
 void MenuController::menuItemSelected (int menuItemID, int /*topLevelMenuIndex*/)
 {
-    // Only the dynamic Open-Recent items arrive here; command items go via perform().
+    // Only the dynamic Open-Recent items and the application-menu extras arrive here;
+    // command items go via perform().
+    if (menuItemID == appCheckForUpdatesID)
+    {
+        if (checkForUpdates)
+            checkForUpdates();
+        return;
+    }
+
     if (menuItemID >= recentBaseID && menuItemID < recentBaseID + maxRecentItems)
     {
         const int i = menuItemID - recentBaseID;
