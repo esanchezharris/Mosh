@@ -1834,3 +1834,17 @@
 .v2-agent-say { font-size: 12px; color: var(--v2-text); font-style: italic; }
 .v2-composer-face-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
 .v2-composer-face-btn:hover { outline: 2px solid var(--v2-accent-soft); }
+
+/* Empty-lane menu — same surface language as .v2-clipmenu, which it sits beside. Uses the
+   radius SCALE (not .v2-clipmenu's own off-scale 11px/7px literals) rather than adding two
+   more entries to shellTokens.test.ts's off-scale ratchet, which is shrink-only. */
+.v2-lanemenu {
+  position: fixed; z-index: 90; min-width: 180px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: var(--v2-radius-lg);
+  box-shadow: var(--v2-shadow); padding: 5px; backdrop-filter: blur(20px);
+}
+.v2-lanemenu button {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--v2-text); font: inherit; font-size: var(--v2-fs-base); padding: 8px 10px; border-radius: var(--v2-radius-md); cursor: pointer;
+}
+.v2-lanemenu button:hover { background: var(--v2-accent-soft); }

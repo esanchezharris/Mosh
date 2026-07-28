@@ -22,6 +22,13 @@ import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
+import { EditorAction as EA, type Mods } from "../../interaction/actions";
+import { resolveGesture } from "../../interaction/gestures";
+import { getGestureTable } from "../../interaction/gestureTables";
+import { tempoMapFrom } from "../../time";
+import { snappedSecAt } from "../timeline/BarRuler";
+import { resolveLaneNew } from "./laneNew";
+import { LaneMenu } from "./LaneMenu";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
@@ -49,10 +56,17 @@ export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
   { kind: "tone",  label: "Test tone",  hint: "A reference tone — check you can hear anything" },
 ];
 
+const TABLE = () => getGestureTable("mosh"); // v2 = single Mosh interaction model
+const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
+  ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!(e.metaKey || e.ctrlKey) });
+
 export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; dragging?: boolean }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
   const setPxPerSec = useStore((s) => s.setPxPerSec);
   const exec = useStore((s) => s.exec);
+  const tool = useStore((s) => s.tool);
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const [laneMenu, setLaneMenu] = useState<{ x: number; y: number; track: Track; start: number } | null>(null);
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -79,6 +93,29 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   const varTempo = hasTempoChanges(snapshot.session);
   const barLen = barSeconds(meterOf(snapshot));
   const totalBars = Math.max(1, Math.ceil(contentSeconds(snapshot) / barLen));
+
+  // Empty-lane gestures. `.v2-lane` owns no drag (v2 has no marquee), so a native
+  // dblclick is correct here — ClipView needs its manual timer only because it also
+  // owns drag.
+  const laneGesture = useCallback((e: React.MouseEvent<HTMLDivElement>, gesture: "dblclick" | "contextmenu", track: Track) => {
+    // A hit on a child ClipView is not "empty". Without this the lane would claim
+    // double-clicks meant for the piano roll.
+    if (e.target !== e.currentTarget) return;
+    const action = resolveGesture(TABLE(), { region: "empty", gesture, mods: modsOf(e), tool });
+    if (action !== EA.LANE_NEW && action !== EA.CONTEXT_MENU) return;
+    e.preventDefault();
+    // LOAD-BEARING: the plugin picker and sample browser both load onto the SELECTED
+    // track, so without this you could double-click lane 7 and load a synth onto lane 2.
+    setSelectedTrack(track.id);
+    // Snap once, for BOTH paths: the menu's "Add MIDI clip" must land where the pointer
+    // is, exactly like the double-click path, not at bar 1.
+    const start = snappedSecAt(tempoMapFrom(snapshot.session), pxPerSec, e.clientX, e.currentTarget.getBoundingClientRect().left);
+    if (action === EA.CONTEXT_MENU || resolveLaneNew(track).kind === "menu") {
+      setLaneMenu({ x: e.clientX, y: e.clientY, track, start });
+      return;
+    }
+    void exec("add_midi_clip", { trackId: track.id, start, length: barLen });
+  }, [exec, tool, setSelectedTrack, snapshot, pxPerSec, barLen]);
 
   // Fit the timeline so N bars span the visible content width (8b / 16b / Full).
   const fit = useCallback((zoom: SectionZoom) => {
@@ -193,7 +230,10 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {tracks.map((t) => (
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
-                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane"
+                  onDoubleClick={(e) => laneGesture(e, "dblclick", t)}
+                  onContextMenu={(e) => laneGesture(e, "contextmenu", t)}
+                  style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
                   {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
                       gets real positioned lines, because a repeating gradient cannot express
                       an uneven grid and would drift from the ruler above. */}
@@ -218,6 +258,10 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           </div>
         )}
       </div>
+      {laneMenu && (
+        <LaneMenu x={laneMenu.x} y={laneMenu.y} track={laneMenu.track} start={laneMenu.start} barLen={barLen}
+          onClose={() => setLaneMenu(null)} />
+      )}
     </>
   );
 }
