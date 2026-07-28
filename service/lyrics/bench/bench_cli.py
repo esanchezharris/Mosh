@@ -43,6 +43,7 @@ SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.
 API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
              "prompt-rhyme-menu-fp", "prompt-rhyme-menu-fp200",
              "prompt-rhyme-menu-fp100", "prompt-rhyme-menu-fp24",
+             "local-rerank-fp40",   # dual-wired: cached-chat replay + local scorer
              "nbest-rerank", "fusion-rerank")
 
 # Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
@@ -50,7 +51,7 @@ API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
 # is an interpreter check — without mlx-lm every item would return `unavailable`
 # and the run would complete looking like a slice of honest zeros.
 LOCAL_ARMS = ("local-unconstrained", "local-constrained-endword",
-              "local-constrained-endword-fp")
+              "local-constrained-endword-fp", "local-rerank-fp40")
 
 
 def _load_corpus() -> list:

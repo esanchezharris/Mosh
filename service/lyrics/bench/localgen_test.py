@@ -396,5 +396,110 @@ check("fp arm: declines non-rhyme granularity like its alpha twin",
 check("fp arm registered rhyme-only in ARM_GRANULARITIES",
       arms.ARM_GRANULARITIES.get("local-constrained-endword-fp") == ("rhyme",))
 
+# ── local-rerank-fp40: the M6 zero-training bracket ─────────────────────────────
+# The fixture must be able to show a REORDER, so the scoring worker prefers the
+# base arm's LAST candidate — pool-order echo (like FakeWorker) could pass a
+# sabotage that never reranks.
+
+
+class ScoringWorker(FakeWorker):
+    """Scores by a fixed preference map instead of pool order."""
+
+    def __init__(self, prefer):
+        super().__init__()
+        self.prefer = prefer          # word -> score, higher wins
+
+    def request(self, req, timeout=None):
+        self.calls.append(req)
+        if req["op"] != "generate_endword":
+            return super().request(req, timeout)
+        pool = req.get("pool") or []
+        ranked = sorted(pool, key=lambda w: -self.prefer.get(w, -99))
+        return {"ok": True, "status": "ok", "offMenu": 0, "resampleCount": 0,
+                "poolSize": len(pool), "scored": len(pool), "reachable": len(pool),
+                "unreachable": [], "triePaths": 2 * len(pool), "trieVersion": "v2",
+                "trieTop1": ranked[0] if ranked else None, "trieRankUnderExact": 0,
+                "candidates": [{"word": w, "tokens": [1],
+                                "logprobMean": self.prefer.get(w, -99.0)}
+                               for w in ranked]}
+
+
+def rerank_chat(messages, **kw):
+    return {"ok": True, "provider": "fake", "model": "spy",
+            "content": json.dumps({"fills": ["mine", "line", "shine"]})}
+
+
+def rerank_ctx(worker, cache_dir=None):
+    c = ctx_with(worker, cache_dir=cache_dir)
+    c.chat = rerank_chat
+    return c
+
+
+_rw = ScoringWorker({"shine": 0.0, "line": -1.0, "mine": -2.0})
+res_r = arms.ARMS["local-rerank-fp40"](rhyme_item(), rerank_ctx(_rw))
+_words = [c["text"] for c in res_r["candidates"]]
+check("rerank: the scorer's preference REORDERS the base candidates",
+      _words == ["shine", "line", "mine"]
+      and res_r["meta"]["movedTop1"] is True
+      and res_r["meta"]["baseTop1"] == "mine", str(_words))
+check("rerank: worker was handed exactly the base candidates as the pool",
+      _rw.calls[-1].get("pool") == ["mine", "line", "shine"],
+      str(_rw.calls[-1].get("pool")))
+
+
+class InventingWorker(ScoringWorker):
+    def request(self, req, timeout=None):
+        out = super().request(req, timeout)
+        if req["op"] == "generate_endword":
+            out["candidates"].insert(0, {"word": "zzzinvented", "tokens": [1],
+                                         "logprobMean": 9.9})
+        return out
+
+
+res_i = arms.ARMS["local-rerank-fp40"](rhyme_item(),
+                                       rerank_ctx(InventingWorker({"shine": 0.0})))
+check("rerank: output ⊆ input ENFORCED — an invented word is dropped and counted",
+      "zzzinvented" not in [c["text"] for c in res_i["candidates"]]
+      and res_i["meta"]["invented"] == 1,
+      str((res_i["meta"].get("invented"), [c["text"] for c in res_i["candidates"]])))
+
+res_d = arms.ARMS["local-rerank-fp40"](rhyme_item(),
+                                       rerank_ctx(FakeWorker(fail_with="dead")))
+check("rerank: dead scorer → unavailable, NEVER the base order laundered through",
+      res_d["candidates"] == [] and res_d["meta"]["status"] == "unavailable",
+      str(res_d))
+# The OTHER laundering route: no worker configured at all. Distinct code path
+# from a dead worker (the arm bails before localgen.generate) and it produced a
+# vacuous sabotage until this fixture existed.
+res_n = arms.ARMS["local-rerank-fp40"](rhyme_item(), rerank_ctx(None))
+check("rerank: NO scorer configured → unavailable with empty candidates too",
+      res_n["candidates"] == [] and res_n["meta"]["status"] == "unavailable",
+      str(res_n))
+check("rerank: declines non-rhyme granularity",
+      arms.ARMS["local-rerank-fp40"](word_item(), rerank_ctx(FakeWorker()))
+      ["meta"]["status"] == "declined")
+
+# The base fp replay is CACHED: a second run in the same cache dir makes zero
+# fresh chat calls — the paid responses carry the whole rerank lane for free.
+_chatcalls = {"n": 0}
+
+
+def counting_chat(messages, **kw):
+    _chatcalls["n"] += 1
+    return rerank_chat(messages, **kw)
+
+
+with tempfile.TemporaryDirectory() as td:
+    c1 = rerank_ctx(ScoringWorker({"shine": 0.0}), cache_dir=td)
+    c1.chat = counting_chat
+    arms.ARMS["local-rerank-fp40"](rhyme_item(), c1)
+    first = _chatcalls["n"]
+    c2 = rerank_ctx(ScoringWorker({"shine": 0.0}), cache_dir=td)
+    c2.chat = counting_chat
+    arms.ARMS["local-rerank-fp40"](rhyme_item(), c2)
+    check("rerank: second run replays the fp chat from cache (zero fresh calls)",
+          first > 0 and _chatcalls["n"] == first,
+          f"first={first} second={_chatcalls['n'] - first}")
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

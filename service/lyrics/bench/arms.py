@@ -699,6 +699,72 @@ def arm_local_constrained_endword_fp(item: dict, ctx: ArmContext) -> dict:
     return _local_constrained_endword(item, ctx, pool_rank="freq")
 
 
+@register("local-rerank-fp40", "v1")
+def arm_local_rerank_fp40(item: dict, ctx: ArmContext) -> dict:
+    """M6 increment 1 — the ZERO-training pointwise reranker bracket.
+
+    Takes `prompt-rhyme-menu-fp`'s own candidates (a cached-chat replay; the
+    paid responses already exist) and re-ranks them by the local model's
+    teacher-forced score of each word in the bar's real context. Pointwise by
+    construction: no list in any prompt, no position to be biased by, and the
+    output is a permutation of the input — invention is impossible, which
+    `localgen_test` pins as output ⊆ input.
+
+    Read against fp's exact .413 / acceptFit .75 with topk .513 as the ceiling
+    (the reranker can only surface what the candidates contain). A trained M6
+    cross-encoder has to beat THIS, not fp — if free teacher-forcing already
+    converts top-5 into top-1, cross-encoder training must earn its keep.
+    """
+    from lyrics.bench import endword_trie, localgen
+    if item.get("granularity") != "rhyme":
+        return _unavailable_arm(f"granularity {item.get('granularity')!r} has no "
+                                f"end-word slot", status="declined")
+    base = arm_prompt_rhyme_menu_fp(item, ctx)
+    cands = [c["text"] for c in base.get("candidates") or []]
+    if not cands:
+        return _unavailable_arm("base fp arm produced no candidates",
+                                status="no-candidates")
+    if ctx.local is None:
+        # NEVER fall through to the base order — that would launder fp's score
+        # into this arm's row while claiming a reranker ran.
+        return _unavailable_arm("no local backend configured")
+    cfg = ctx.local_cfg or getattr(ctx.local, "cfg", None) or localgen.LocalConfig()
+    instruction, prefill = _local_prompt(item)
+    seed = localgen.item_seed(item["itemId"], _seed_sha(item), cfg)
+    out = localgen.generate(
+        ctx.local, op="generate_endword", prompt=instruction, cfg=cfg, seed=seed,
+        cache=ctx.cache, extra_request={"prefill": prefill, "pool": cands},
+        extra_key={"constraint": {"kind": "rerank-fp40-candidates",
+                                  "trieVersion": endword_trie.TRIE_VERSION,
+                                  "poolSha": endword_trie.pool_sha(cands),
+                                  "poolSize": len(cands)}})
+    if out.get("status") != "ok":
+        return _unavailable_arm(out.get("error") or "local scoring failed")
+    ranked = [c["word"] for c in out.get("candidates") or []]
+    # The worker lower-cases through its tokenizer variants; restore the base
+    # arm's surface forms so casing survives the round trip.
+    surface = {w.lower(): w for w in reversed(cands)}
+    candset = {c.lower() for c in cands}
+    # Output ⊆ input is ENFORCED, not observed: a scorer cannot answer with
+    # something it was not given, so anything else in the response is dropped
+    # and counted. With the real worker pool==cands makes this unreachable;
+    # the guard exists for the day that stops being true.
+    invented = [w for w in ranked if w.lower() not in candset]
+    ranked = [surface.get(w.lower(), w) for w in ranked if w.lower() in candset]
+    moved = bool(ranked) and bool(cands) and ranked[0].lower() != cands[0].lower()
+    return {"candidates": _dedupe_cap(ranked, ctx.k),
+            "meta": {"status": "ok", "seed": seed,
+                     "baseTop1": cands[0], "rerankedTop1": ranked[0] if ranked else None,
+                     "movedTop1": moved, "nCandidates": len(cands),
+                     # Zero by construction; a number, never silence.
+                     "invented": len(invented),
+                     "logprobMean": (out.get("candidates") or [{}])[0].get("logprobMean"),
+                     "backend": out.get("backend")}}
+
+
+register_granularities("local-rerank-fp40", ("rhyme",))
+
+
 @register("rhyme-floor-fp", "v1")
 def arm_rhyme_floor_fp(item: dict, ctx: ArmContext) -> dict:
     """The no-model control for the freq pool: its top-k, verbatim.
