@@ -20,7 +20,7 @@
 #                               it self-contained (LibTorch bundled) to /Applications
 #   ./run-mosh.sh release   build Release → Developer-ID sign + Hardened Runtime +
 #                               entitlements → notarize (Apple) → staple → DMG + zip,
-#                               written to ~/Desktop/Mosh-share/. The shareable artifact
+#                               written to ~/Library/Mosh/release/. The shareable artifact
 #                               friends can open by DOUBLE-CLICKING — no right-click /
 #                               `xattr` dance. Requires a "Developer ID Application"
 #                               cert + a one-time notary creds profile (see below).
@@ -28,13 +28,18 @@
 # Env knobs: MOSH_BRAIN_ENV (override the dotenv path), MOSH_ENABLE_SA3 (default 1;
 #            set 0 to force FakeAdapter), MOSH_BRAIN_SMOKE_PROMPT (prompt for `smoke`),
 #            MOSH_NOTARY_PROFILE (notarytool keychain profile, default "mosh-notary"),
-#            MOSH_RELEASE_DIR (release output dir, default ~/Desktop/Mosh-share),
+#            MOSH_RELEASE_DIR (release output dir, default ~/Library/Mosh/release —
+#            NOT the Desktop: iCloud sync there breaks codesign; the release verb refuses
+#            a cloud-synced dir),
 #            MOSH_SIGN_IDENTITY (pin an exact codesign identity instead of
 #            auto-discovering the first "Developer ID Application" cert),
 #            MOSH_NOTARY_APPLE_ID/MOSH_NOTARY_TEAM_ID/MOSH_NOTARY_PASSWORD (notarize
 #            with an explicit Apple-ID/team/app-specific-password instead of a
 #            keychain profile — no keychain profile setup needed; this is the mode
-#            .github/workflows/release.yml uses in CI).
+#            .github/workflows/release.yml uses in CI),
+#            MOSH_SPARKLE_DOWNLOAD_PREFIX (the URL the update zips will be served from;
+#            SET IT and `release` also generates+signs a Sparkle appcast, UNSET and it
+#            does not — the app then embeds Sparkle but never offers an update).
 #
 # One-time setup for `release` (secrets stay in your keychain, never in the repo) —
 # full runbook incl. the CI path: docs/release/SIGNING_RUNBOOK.md. Short version:
@@ -219,6 +224,34 @@ bundle_service() {                              # $1 = installed app
 # reads Contents/Resources/brain.env as a fallback when the env var is missing. Keys come
 # from ui/.env.local (already loaded above); brain.env is gitignored and lives ONLY in the
 # bundle, never in git. (Security: anyone with the .app can read the key — don't share it.)
+# FS-K4 — the licence/packaging surface. Both halves live in
+# service/scripts/packaging_check.py: NOTICES.txt is GENERATED from
+# docs/DEPENDENCY_BOM.md §1 (single source of truth, so the shipped notices cannot
+# drift from the table), and the check then refuses a bundle that carries RAVE/anira
+# artifacts, is missing a required notice, or ships payload with no BOM row.
+stage_notices() {                               # $1 = installed app
+  local DEST="$1" NF="$1/Contents/Resources/NOTICES.txt"
+  mkdir -p "$(dirname "$NF")"
+  python3 "$ROOT/service/scripts/packaging_check.py" --emit-notices > "$NF" \
+    || { echo "FATAL: could not generate NOTICES.txt from docs/DEPENDENCY_BOM.md" >&2; return 1; }
+  echo "  NOTICES.txt: generated from the BOM ($(wc -l < "$NF" | tr -d ' ') lines)"
+}
+
+# Blocking on the DISTRIBUTABLE paths (deploy, release). Deliberately NOT on
+# deploy-anira: that build is private and non-distributable by design (SPEC §1.11 —
+# in-tree and undistributed creates no CC BY-NC obligation), so it runs warn-only
+# behind a loud banner instead of hard-failing on the anira artifacts it is SUPPOSED
+# to contain.
+packaging_check() {                             # $1 = installed app, $2 = "warn" (optional)
+  local DEST="$1"
+  if [ "${2:-}" = "warn" ]; then
+    echo "⚠️  NON-DISTRIBUTABLE BUILD (anira/RAVE present) — do NOT notarize or share this bundle."
+    python3 "$ROOT/service/scripts/packaging_check.py" --bundle "$DEST" --warn-only || true
+    return 0
+  fi
+  python3 "$ROOT/service/scripts/packaging_check.py" --bundle "$DEST"
+}
+
 bundle_brain_key() {                            # $1 = installed app
   local DEST="$1" BF="$1/Contents/Resources/brain.env" v
   : > "$BF"
@@ -404,6 +437,8 @@ case "$MODE" in
     install_app "$APP" "$DEST"
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
+    stage_notices "$DEST"            # BEFORE the seal — NOTICES.txt is bundle content
+    packaging_check "$DEST"          # fail-closed: no RAVE/anira, notices complete, payload mapped
     sign_app "$DEST" "ad-hoc"        # re-seal after service + brain-key edits (covers brain.env)
     finish_deployed_app "$DEST"
     echo "deployed one canonical /Applications/Mosh.app (default build; service bundled)."
@@ -421,6 +456,8 @@ case "$MODE" in
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
     selfcontain_anira "$DEST"
+    stage_notices "$DEST"
+    packaging_check "$DEST" warn     # warn-only: this build is non-distributable BY DESIGN
     finish_deployed_app "$DEST"
     echo "deployed anira /Applications/Mosh.app (real-time RAVE + service bundled; LibTorch self-contained)."
     echo "drop a real RAVE <target>.ts into ~/AI/rave-models — the '+ RAVE' rack button then hosts it live."
@@ -432,16 +469,55 @@ case "$MODE" in
     # scripts/release/sign-and-notarize.sh's own preflight/resolve_* functions.
     "$RELEASE_SIGN" --preflight-only
 
+    # Default OFF the Desktop: with iCloud "Desktop & Documents" syncing on (this Mac
+    # has it), anything staged there gets com.apple.FinderInfo +
+    # com.apple.fileprovider.fpfs#P applied by the file provider — and codesign refuses
+    # a bundle carrying Finder info:
+    #     Mosh.app: resource fork, Finder information, or similar detritus not allowed
+    # The script's own `xattr -cr` runs before signing, but the provider re-applies the
+    # attribute underneath it, so clearing does not stick. Same family as the iCloud
+    # eviction trap in CLAUDE.md — nothing a build reads or writes belongs in a synced
+    # folder. ~/Library is never synced.
+    OUTDIR="${MOSH_RELEASE_DIR:-$HOME/Library/Mosh/release}"
+    # Two detectors, because neither alone is sufficient. A FRESH directory under a
+    # synced Desktop has no fileprovider xattr yet — it acquires one later, i.e. exactly
+    # the case that then dies at sign time — so the PATH check is the reliable one; the
+    # xattr check catches other providers (Dropbox, OneDrive) in arbitrary locations.
+    mkdir -p "$OUTDIR" 2>/dev/null || true
+    RELEASE_DIR_REAL="$(cd "$OUTDIR" 2>/dev/null && pwd -P || echo "$OUTDIR")"
+    ICLOUD_SYNCED=0
+    if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Desktop" ]; then
+      case "$RELEASE_DIR_REAL" in "$HOME/Desktop"|"$HOME/Desktop"/*) ICLOUD_SYNCED=1 ;; esac
+    fi
+    if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Documents" ]; then
+      case "$RELEASE_DIR_REAL" in "$HOME/Documents"|"$HOME/Documents"/*) ICLOUD_SYNCED=1 ;; esac
+    fi
+    xattr "$RELEASE_DIR_REAL" 2>/dev/null | grep -q 'com.apple.fileprovider' && ICLOUD_SYNCED=1
+    if [ "$ICLOUD_SYNCED" = "1" ]; then
+      echo "release: REFUSING to stage into a cloud-synced folder: $RELEASE_DIR_REAL" >&2
+      echo "  codesign fails there — \"resource fork, Finder information, or similar" >&2
+      echo "  detritus not allowed\" — because the file provider re-applies FinderInfo" >&2
+      echo "  underneath the script's own \`xattr -cr\`, so clearing it does not stick." >&2
+      echo "  Use a non-synced path:" >&2
+      echo "    MOSH_RELEASE_DIR=\$HOME/Library/Mosh/release ./run-mosh.sh release" >&2
+      exit 1
+    fi
+
     # --- build Release, stage, bundle service + brain key, sign, notarize, DMG ---
     build_app macos-arm64-release macos-arm64-release-app
     APP="$(resolve_app)"
     [ -n "$APP" ] || { echo "no built app to release" >&2; exit 1; }
-    OUTDIR="${MOSH_RELEASE_DIR:-$HOME/Desktop/Mosh-share}"
     mkdir -p "$OUTDIR"
     STAGED="$OUTDIR/Mosh.app"
     install_app "$APP" "$STAGED"
     bundle_service "$STAGED"
     bundle_brain_key "$STAGED"            # the key is sealed INTO the notarized bundle (see note below)
+    stage_notices "$STAGED"
+    # BEFORE signing, not after: a licence failure caught post-notarization has already
+    # cost 10 minutes and uploaded a bundle we would not ship. Signing only adds
+    # _CodeSignature/CodeResources, which the check already accounts for, so running it
+    # here loses no coverage.
+    packaging_check "$STAGED"
     echo "signing + notarizing + stapling the app…"
     "$RELEASE_SIGN" "$STAGED"
     DMG="$OUTDIR/Mosh.dmg"
@@ -450,6 +526,57 @@ case "$MODE" in
     echo "signing + notarizing + stapling the DMG…"
     "$RELEASE_SIGN" "$DMG"
     ZIP="$OUTDIR/Mosh.zip"; rm -f "$ZIP"; ditto -c -k --keepParent "$STAGED" "$ZIP"
+
+    # --- FS-K2: the Sparkle appcast -------------------------------------------------
+    # Built from the ZIP, not the DMG: Sparkle's installer unpacks a zip and swaps the
+    # app in place, which is the path that ends in "relaunch on the new version". The
+    # DMG stays the human drag-to-Applications artifact.
+    #
+    # The zip fed to generate_appcast is the one made ABOVE — i.e. of the already
+    # signed, notarized and STAPLED bundle. That ordering is load-bearing: an update
+    # zipped before stapling installs an app that has to phone Apple on first launch,
+    # and fails Gatekeeper offline.
+    #
+    # Versioned filename so several releases can sit in one directory; generate_appcast
+    # reads each archive's CFBundleVersion itself and keeps the feed's history.
+    APPCAST_PREFIX="${MOSH_SPARKLE_DOWNLOAD_PREFIX:-}"
+    if [ -n "$APPCAST_PREFIX" ]; then
+      # Coherence check, and it has already earned its place: an earlier version of the
+      # plist-injection script treated "not told about Sparkle" the same as "told it is
+      # off", so install_app stripped SUFeedURL out of every staged bundle after the
+      # build had put it in. Nothing failed — the release just quietly produced an app
+      # that could never read the appcast being generated for it. Asking for an appcast
+      # and shipping an app with no feed is always a mistake; say so, here, loudly.
+      STAGED_FEED="$(/usr/bin/plutil -extract SUFeedURL raw "$STAGED/Contents/Info.plist" 2>/dev/null || echo "")"
+      if [ -z "$STAGED_FEED" ]; then
+        echo "release: MOSH_SPARKLE_DOWNLOAD_PREFIX is set, but the staged app has no SUFeedURL." >&2
+        echo "  It would never check the appcast this is about to generate. Configure the feed" >&2
+        echo "  at BUILD time and rebuild:" >&2
+        echo "    cmake --preset macos-arm64-release -DMOSH_SPARKLE_FEED_URL=${APPCAST_PREFIX}appcast.xml" >&2
+        exit 1
+      fi
+      APP_VERSION="$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$STAGED/Contents/Info.plist" 2>/dev/null || echo "")"
+      [ -n "$APP_VERSION" ] || { echo "release: could not read CFBundleShortVersionString from the staged app" >&2; exit 1; }
+      UPDATES="$OUTDIR/updates"
+      mkdir -p "$UPDATES"
+      cp "$ZIP" "$UPDATES/Mosh-$APP_VERSION.zip"
+      SPARKLE_BIN="$("$ROOT/scripts/release/sparkle-tools.sh" --print-bin)"
+      echo "generating the Sparkle appcast (prefix $APPCAST_PREFIX)…"
+      # No fallback if this fails: you asked for an appcast, and a release that
+      # silently ships without one is a release nobody can update from.
+      "$SPARKLE_BIN/generate_appcast" --download-url-prefix "$APPCAST_PREFIX" "$UPDATES"
+      echo "   appcast: $UPDATES/appcast.xml"
+      echo "   upload the CONTENTS of $UPDATES/ (appcast.xml + Mosh-$APP_VERSION.zip) to $APPCAST_PREFIX"
+    else
+      echo
+      echo "ℹ️  no appcast generated — MOSH_SPARKLE_DOWNLOAD_PREFIX is unset."
+      echo "   The app embeds Sparkle but has no feed, so it will never offer an update."
+      echo "   To publish one, set the URL the update zips will be served from, e.g."
+      echo "     MOSH_SPARKLE_DOWNLOAD_PREFIX=https://updates.example.com/ ./run-mosh.sh release"
+      echo "   and configure the matching feed at build time:"
+      echo "     cmake --preset macos-arm64-release -DMOSH_SPARKLE_FEED_URL=https://updates.example.com/appcast.xml"
+      echo "   See docs/release/SIGNING_RUNBOOK.md § Auto-update."
+    fi
     echo
     echo "✅ Notarized + stapled — friends can DOUBLE-CLICK to open (no right-click / xattr):"
     echo "   DMG (drag-to-Applications): $DMG"
