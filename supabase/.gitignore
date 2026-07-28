@@ -1,0 +1,6 @@
+# Supabase CLI scratch, created by `supabase link`. NEVER commit this:
+# .temp/pooler-url is a Postgres connection string and carries the database password.
+# The CLI writes this directory on first link, and this repo had no supabase/.gitignore
+# until 2026-07-28 — a `git add -A` in that window would have committed the credential.
+.branches
+.temp
