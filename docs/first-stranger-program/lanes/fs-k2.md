@@ -61,7 +61,37 @@ extended by this lane.
 5. **`generate_appcast`** in the release path, producing a signed `appcast.xml` next to the DMG.
 6. **Round-trip proof.**
 
-## The feed host is the one genuinely owner-gated piece
+## ✅ RESOLVED 2026-07-28 — the feed is live and public
+
+The section below was written while the host was undecided. The owner chose Cloudflare R2.
+`mosh-updates` is public at **`https://pub-25328030dce94187bbadce318949e6ff.r2.dev`** and
+**v0.1.0 is published there**: notarized, stapled, packaging-check green, appcast
+EdDSA-signed, both objects verified reachable over the public internet (`HTTP 200`,
+`Content-Length` matching the enclosure).
+
+**The published build carries no provider key.** FS-T1's proxy went live the same day and a
+keyless client was proven working, so the public release is built with
+`MOSH_BRAIN_ENV=~/Library/Mosh/release-brain.env` — `MOSH_BRAIN_PROXY_URL` +
+`MOSH_BRAIN_PROXY_APIKEY` (the publishable anon key) and **no `*_API_KEY` line**. Verified on
+the signed bundle: a scan for `sk-…`/`xai-…` shaped strings returns nothing. Moshi still
+works, through the proxy. That was free — not a hardening detour.
+
+Reproduce a public release:
+
+```bash
+cmake --preset macos-arm64-release -DMOSH_VERSION=<next> \
+      -DMOSH_SPARKLE_FEED_URL=https://pub-25328030dce94187bbadce318949e6ff.r2.dev/appcast.xml
+MOSH_BRAIN_ENV=~/Library/Mosh/release-brain.env \
+MOSH_SPARKLE_DOWNLOAD_PREFIX=https://pub-25328030dce94187bbadce318949e6ff.r2.dev/ \
+MOSH_RELEASE_DIR=~/Library/Mosh/release-public ./run-mosh.sh release
+wrangler r2 object put mosh-updates/Mosh-<next>.zip --file …/updates/Mosh-<next>.zip --content-type application/zip --remote
+wrangler r2 object put mosh-updates/appcast.xml    --file …/updates/appcast.xml    --content-type application/xml --remote
+```
+
+`generate_appcast` reuses an existing `appcast.xml` in the updates dir, so pull the live one
+down first if you want the feed to keep its history instead of starting over.
+
+## The feed host WAS the one genuinely owner-gated piece (kept for the record)
 
 The acceptance says "static appcast (GitHub Pages or S3/R2)". Both named options are unavailable
 to a session right now, for reasons worth recording rather than improvising around:

@@ -83,8 +83,18 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 
 ## Standing policy
 
-- **SECURITY HARDENING IS DEFERRED. It must not block work, and it must not be re-raised.
-  (Owner decision, 2026-07-27; restated and BROADENED 2026-07-28.)**
+- **DISTRIBUTION IS NOW REAL (owner, 2026-07-28), and the release is proxy-only.**
+  `mosh-updates` is a PUBLIC R2 bucket serving the Sparkle appcast at
+  `https://pub-25328030dce94187bbadce318949e6ff.r2.dev`, so shipped builds are downloadable
+  by anyone with the link. What changed is not the policy below — it is that **a bundled
+  provider key is no longer needed**: FS-T1's proxy is live and a keyless client was proven
+  to work. So `./run-mosh.sh release` for a PUBLIC build is run with
+  `MOSH_BRAIN_ENV=~/Library/Mosh/release-brain.env`, which carries `MOSH_BRAIN_PROXY_URL` +
+  `MOSH_BRAIN_PROXY_APIKEY` (the publishable anon key) and **no `*_API_KEY` line at all**.
+  Moshi still works; nothing is extractable. This is not hardening-as-a-blocker — it is
+  using the proxy we already built, at zero cost. A local/dev build may still bundle a key.
+- **SECURITY HARDENING IS OTHERWISE STILL DEFERRED. It must not block work, and it must not
+  be re-raised. (Owner decision, 2026-07-27; restated and BROADENED 2026-07-28.)**
   Mosh is not distributed to anyone outside the owner's own machines. Until the owner says
   strangers are getting a build, all of the following are **fine and are not to be flagged,
   guarded against, or worked around**:

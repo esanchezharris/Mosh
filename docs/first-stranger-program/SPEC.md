@@ -128,10 +128,20 @@ different design.*
   Restating its asks here would go stale the moment that lane moves, and then two documents
   would disagree about what is owed. (A bullet doing exactly that was written here and backed
   out the same day.)
-- **O4. Accounts & secrets:** Cloudflare account + R2 bucket; provider LLM key into Supabase
-  function secrets (**must be a commercial API key**, per BOM §3); rotate/revoke the
-  currently-bundled key once T1 lands; register Stable Audio commercial use at stability.ai
-  (free, minutes — required for the "Powered by Stability AI" compliance in K1).
+- **O4. Accounts & secrets — ✅ CLOSED 2026-07-28.**
+  - Supabase brain proxy **deployed and ACTIVE**; provider key set as a function secret.
+    Proven keyless end-to-end: the client answers via the proxy with `OPENAI_API_KEY`
+    commented *out* of its env. `FS-T1` → done.
+  - `0003_brain_usage.sql` applied via the SQL editor. **Not** `db push` — `migration list`
+    showed local `0001/0002/0003` unapplied remotely while the remote carried four
+    `20260620*` migrations from another route, so a push would have tried to recreate live
+    relay tables.
+  - Cloudflare R2: `mosh-takes` (FS-S1/S2 takes) and `mosh-updates` (the Sparkle appcast
+    host, public at `pub-25328030dce94187bbadce318949e6ff.r2.dev` by owner decision).
+  - Stable Audio commercial use **registered** — the "Powered by Stability AI" line
+    `packaging_check.py` enforces is now legally true, not merely present.
+  - Key rotation is deliberately NOT done: superseded, because public builds now ship
+    proxy-only and carry no provider key to extract (see §1.5 and CLAUDE.md).
 - **O5. Arena harvest hour** — *mostly done, and the "~38 candidates" figure is wrong.*
   `~/Library/Mosh/work/arena/.arena-verdicts.json` (dot-prefixed — an earlier probe missed it)
   holds **6** candidates, **4 already `promoted`** by the owner. Two remain unjudged:
