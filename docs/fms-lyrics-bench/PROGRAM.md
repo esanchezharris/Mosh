@@ -635,3 +635,13 @@ numbers and hashes only.
     the one uniform answer-shape fix, still parked for the next natural bump.
   - Judgement counts: 49 accepted / 37 rejected; labels live in the
     append-only accept log (last-verdict-wins), minted via the sit page.
+- **2026-07-28 — ROUTING BAR REGISTERED (owner: "yes to the bar").**
+  **exact ≥ .45 AND rhyme_perfect ≥ .60 on `prompt-rhyme-menu-fp`**, with the
+  armed Goodhart alarm as the keep-rate floor (acceptFit must not degrade from
+  .75). Verdict on the standing run, rendered at registration time so this is
+  a pre-registration and not a story: fp measures **.413 / .493 — FAIL on both
+  prongs → the program routes to the RERANKER LANE (M6)**, not the decoder-
+  constraint lane. The routing is coherent with the evidence: topk .513 means
+  the truth sits in the arm's own top-5 a full 10 points more often than at
+  top-1, the 86 taste labels just showed formal grade doesn't predict keeps,
+  and a reranker is the instrument that converts both facts into top-1.
