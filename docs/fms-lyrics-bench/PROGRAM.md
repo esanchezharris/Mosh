@@ -566,3 +566,23 @@ numbers and hashes only.
   had no committed regression guard — an alpha golden now pins filter-after-cap.
   Review also CONFIRMED the load-bearing equivalence: the shipped freq pipeline
   computes exactly the probe's 89.3% set. 17/17 sabotages RED.
+- **2026-07-28 — Palette-size frontier complete: the knee is AT 40.**
+  freq-palette exact: 24 → .387, **40 → .413**, 100 → .320, 200 → .267 (topk
+  .493/.513/.493/.473). An interior maximum, bracketed both sides —
+  `prompt-rhyme-menu-fp` (freq 40, shown in full) is the configuration of
+  record. Cache-contamination question CLOSED by measurement: **0 of 150 items
+  have set-equal alpha/freq pools** (every rime family exceeds the cap, and
+  cap→filter vs filter→cap diverge on every item), so the original runs were
+  key-distinct throughout; the review's shared-key hazard was latent, never
+  triggered — TRIE v2 + order-sensitive `pool_sha` protect the future (small
+  families, freq-table reorders), and the runner-level arm cache legitimately
+  replays unchanged arms. The 150/0-hit "re-runs" verified the runner layer,
+  not localgen; the set-equality proof is what retires the concern.
+- **2026-07-28 — Machine reference on the norming packet: local 14B scores
+  exact .200 / topk .240 (ex-giveaway .189), answering the EXACT blind packet a
+  human rater sees** (full-section context, same hints; parse quality clean —
+  0/200 degenerate answer lines). Context is not the local model's bottleneck:
+  full sections bought it +1.5 points over the bench's 2-bar items (.185→.200).
+  The owner's sitting now lands on an interpreted scale: well above .20 ⇒ human
+  headroom is real and the .413 arm is chasing something reachable; at or below
+  it ⇒ exact on this material mostly measures unguessability.
