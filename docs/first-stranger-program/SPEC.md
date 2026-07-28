@@ -102,20 +102,41 @@ different design.*
 ## §3. Owner-only critical path (not agent work — listed so lanes know their blockers)
 
 - **O1. Apple Developer enrollment** ($99, ~1–2 days to approve). Gates Lane K. Start immediately.
-- **O2. Demo script** (the specific session/song the party makes, beat by beat). Gates Lane B skills.
-  **Hero beat:** the FMS moment — a rough mumble becomes a finished hook in the singer's own voice
-  inside the shared session. **Model-independent fallback beat:** if O3 fails, the same beat is Moshi
-  comping/tuning/mixing the real take — still house-principle, still magic to a novice. The script
-  must survive an ACE fail. Obeys §1.10 and §1.12.
-- **O3. FMS verdict:** score each of the 8 seeds 1–5 on word intelligibility, melody adherence,
-  voice identity, artifact rate, and emotional plausibility. **PASS = ≥2/8 demo-worthy AND ≥4/8
-  directionally right.** Record scores + verdict in the spike worktree. Then FMS parks per §2
-  regardless of outcome.
+  **✅ CLOSED 2026-07-27** — enrolled; proven end-to-end by FS-K1 (notarized+stapled DMG,
+  `spctl` accepted) and FS-K2 (signed update round-trip). Lane K is no longer owner-blocked.
+- **O2. ~~Demo script~~ — WITHDRAWN 2026-07-28 (owner: "we're not doing a demo anymore").**
+  Not "closed"; the deliverable no longer exists, so nothing downstream may keep waiting on it.
+  Consequences, so no future session re-derives them:
+  - **Lane B is no longer O2-blocked.** FS-B3 (router) now waits only on FS-T1.
+  - **FS-B2's acceptance is unsourced.** "The first ~10 skills *from the demo beats*" has no
+    demo to come from. It is re-blocked on an owner decision about the replacement source, NOT
+    on a script. The obvious candidates, in the tree today: mine them from real session logs
+    (`service/skills/mine.py` already does this — script-independent by construction), promote
+    from the 36-entry mined `service/skills/library.jsonl`, or hand-pick from the shipped
+    9-skill `ui/src/agent/skills.ts`. That choice is §1-class and belongs to the owner.
+  - **§1.10 (demo/script guardrail) and §1.12 (demo integrity rules) are moot as written.**
+    Their *substance* is not: "the novice must visibly perform — Moshi removes software labor,
+    not musical labor" is a product principle that outlived the demo, and skill design should
+    still obey it. Treat §1.10 as a design rule, §1.12 as dormant until something is filmed.
+  - **O5's "pick what fits the script" wording is dead**; judge the arena on merit instead.
+  - **O3's framing dies with it** — it existed to decide the demo's hero beat vs fallback beat.
+    See O3 below.
+- **O3. ~~FMS seed verdict~~ — DEAD 2026-07-28**, because it was a demo gate ("PASS = ≥2/8
+  ***demo-worthy***") and O2 is withdrawn. FMS itself did not stop.
+  **This spec does not track FMS state and must not start.** That programme is owned by its
+  own lane — read `docs/fms-lyrics-bench/PROGRAM.md` for what the owner currently owes it.
+  Restating its asks here would go stale the moment that lane moves, and then two documents
+  would disagree about what is owed. (A bullet doing exactly that was written here and backed
+  out the same day.)
 - **O4. Accounts & secrets:** Cloudflare account + R2 bucket; provider LLM key into Supabase
   function secrets (**must be a commercial API key**, per BOM §3); rotate/revoke the
   currently-bundled key once T1 lands; register Stable Audio commercial use at stability.ai
   (free, minutes — required for the "Powered by Stability AI" compliance in K1).
-- **O5. Arena harvest hour** (judge existing ~38 candidates; pick what fits the script). Gates ST1.
+- **O5. Arena harvest hour** — *mostly done, and the "~38 candidates" figure is wrong.*
+  `~/Library/Mosh/work/arena/.arena-verdicts.json` (dot-prefixed — an earlier probe missed it)
+  holds **6** candidates, **4 already `promoted`** by the owner. Two remain unjudged:
+  `seed-shell-obsidian` and `kimi_l_55ko`. Judge on merit — the "fits the script" criterion died
+  with O2. Gates ST1.
 - **O6. Housekeeping** (½ day): fast-forward local `main`; commit/discard the uncommitted
   `service/lyrics/core.py` + untracked files; delete iCloud `… 2.*` dupes; prune stale worktree;
   tag + park the SA3 LoRA branch.

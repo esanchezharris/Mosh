@@ -4,6 +4,19 @@
 Backlog row: `{"id":"FS-B0","lane":"B","class":"cheap","size":"S","order":10,"ownerMerge":true,
 "files":["docs/bench/PROGRAM_STAGE1_2026-07.md"]}`.*
 
+
+> ## STATUS: GAP-CLOSED — merged 2026-07-12 as PR #366
+>
+> The memo this plan describes is live at
+> [`docs/bench/PROGRAM_STAGE1_2026-07.md` § "r5-freeze memo"](../../bench/PROGRAM_STAGE1_2026-07.md)
+> (`a8e32349`, *auto(FS-B0): First-Stranger r5 freeze memo*). It records all three acceptance
+> clauses — SFT r5 **CLOSED**, the r4 adapter retained as the interim brain, and the 12,994
+> `s2-mix-v5` rows retained as a parked workflow corpus. The backlog row nonetheless still read
+> `ready`; caught by a SPEC §0 gap-verify on 2026-07-27 and flipped to `gap-closed`.
+>
+> Residual owner action: the memo's own wording asks for owner sign-off, and the merge is the
+> only record that it happened. Nothing to build.
+
 ---
 
 ## Context

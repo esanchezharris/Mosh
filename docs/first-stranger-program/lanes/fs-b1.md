@@ -3,6 +3,40 @@
 **Lane:** B (Brain) · **Spec:** `docs/first-stranger-program/SPEC.md` §0,
 §1.9–§1.10, §7 B1 · **Backlog class:** `cheap` · **Route:** `safe`.
 
+> ## STATUS: GAP-CLOSED — this shipped, and the backlog row was stale
+>
+> Everything below is written in the present tense because it describes **merged code**,
+> not a plan. FS-B1 landed as **PR #324** ("FS-B1: add typed skill harness and command
+> contract") and has since been extended twice — **#371** (`AG-SK1`, workflow-DAG skills)
+> and **#419** (`AG-KB-AUTO`, KB + skill for the automation & clip-ops commands). The
+> backlog nonetheless still said `ready`, which is how a session gets sent to rebuild it.
+> Caught by SPEC §0's gap-verify on 2026-07-27; row flipped to `gap-closed`.
+>
+> Verified on the current tree, not inferred from file names — the lane's own required
+> battery:
+>
+> ```
+> skills.test.ts · skillHarness.test.ts · skillHarness.failure.test.ts
+> commands.contract.test.ts · executor.test.ts · executor.batch-boundary.test.ts
+>   → 6 files, 206 tests, all passing
+> ```
+>
+> `SKILL_CATALOG` now carries **9** skills (`set_track_level` — the reference skill this
+> doc describes — plus `arrange_beat`, `build_drum_pattern`, `add_vocal_with_lyrics`,
+> `reimagine_clip`, `host_plugin` and others), so the acceptance's "one reference skill
+> passes end-to-end" is comfortably exceeded.
+>
+> The `codex/stranger-fs-b1` branch (`31aa48b8`) is **superseded** — `main` is 734 lines
+> of `skills.ts` ahead of it. Delete it rather than merging it.
+>
+> **One thing this lane explicitly warned about has since happened.** See
+> "Files in scope" below: *"A future service consumer must establish a generated or
+> otherwise single-source boundary instead of creating a second hand-maintained
+> catalog."* `service/skills/` now exists — 3,561 lines with its own `schema.py`,
+> `moshops_catalog.py`, a mined `library.jsonl` of 36 skills and a deterministic
+> `router.py`. That is a second hand-maintained catalog. Reconciling the two is real,
+> currently-untracked work; it is not FS-B1 re-opened.
+
 ## Purpose
 
 FS-B1 provides the script-independent substrate for later Brain work:
