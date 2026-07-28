@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { buildLoopSystemPrompt, richSessionBlock, renderTaskContext, LOOP_RULES } from "./loopPrompt";
+import { buildLoopSystemPrompt, renderTaskContext, LOOP_RULES } from "./loopPrompt";
+import { renderSession } from "../sessionRender";
 import { systemPrompt } from "../brainCore";
 import type { Snapshot } from "../../types";
 
@@ -21,8 +22,8 @@ const SNAP: Snapshot = {
   buses: [{ bus: 1, name: "Reverb", trackId: "9" }],
 } as unknown as Snapshot;
 
-describe("richSessionBlock — the Phase-A visibility fix", () => {
-  const block = richSessionBlock(SNAP);
+describe("renderSession — the Phase-A visibility fix", () => {
+  const block = renderSession(SNAP);
 
   it("shows the master fader (the −3dB default nobody could see), pan and chain", () => {
     expect(block).toContain("master: -3dB pan 0 chain:[Compressor]");
