@@ -6,7 +6,7 @@
 import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
 import { createBrain, type Brain } from "../agent/brain";
-import { runAgentBatch } from "../agent/executor";
+import { runAgentBatch, logAgentTurn } from "../agent/executor";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
 import { writePreference } from "../agent/memory/writePreference";
@@ -45,12 +45,12 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
       },
       isBusy: () => useStore.getState().agentBusy,
       setBusy: (b) => useStore.getState().setAgentBusy(b),
-      dispatch: async (action) => {
+      dispatch: async (action, heard) => {
         const s = useStore.getState();
         await handleFast(action, {
-          // hands-free voice turn: the transcript isn't threaded here, so the
-          // utterance falls back to the action label; source is tagged "voice".
-          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { source: "voice" })); },
+          // FS-B2a (H2) — the matched transcript IS threaded now, so a hands-free turn's
+          // marker carries what was actually said instead of the action's own caption.
+          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: heard, source: "voice" })); },
           enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
           utter: (intent, say) => { s.pushAgentUtter(intent, say); },
           // AGT-MEM (M3) — same "remember" flow as the composer below, no local
@@ -155,6 +155,8 @@ export function AgentComposer() {
       const rework = resolveSectionRework(text, st.snapshot);
       if (rework) {
         if (rework.kind === "empty") {
+          // FS-B2a (H3) — an ask we could not serve is a missing-skill signal; record it.
+          await logAgentTurn(rework.reason, { utterance: text, source: "section_scope" });
           setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
           return;
         }
@@ -209,6 +211,11 @@ export function AgentComposer() {
       if (reply.commands && reply.commands.length > 0) {
         const cs = await runAgentBatch(reply.say || text, reply.commands, { utterance: text, source: "brain_chat" });
         setAgentChangeSet(cs);
+      } else {
+        // FS-B2a (H3) — the brain answered but planned nothing. Without this the ask
+        // leaves no trace, and "what people asked for that we couldn't do" is exactly
+        // what real-session skill mining needs most.
+        await logAgentTurn(reply.say || text, { utterance: text, source: "brain_chat" });
       }
     } catch {
       setSay("hmm — that broke");
