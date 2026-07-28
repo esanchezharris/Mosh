@@ -347,3 +347,54 @@ test.describe("L8 · overflow-menu containment", () => {
     expect(badge.y + badge.height).toBeLessThanOrEqual(800 + 1);
   });
 });
+
+test.describe("L9 · anchored-panel placement", () => {
+  // `.v2-shell` is `overflow-x: auto` with a 1120px min-width floor (#52), so below that
+  // width the topbar's right cluster — and anything anchored to it — sits outside the
+  // viewport. The panel is now `position: fixed` and clamped by placeAnchoredPanel().
+  test("the overflow panel stays inside a 1024px viewport WITHOUT scrolling the shell", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await bootV2(page);
+    // Deliberately NOT scrolling the shell first. Scrolling to scrollWidth (the reflex,
+    // and what v2-shell.spec does for its reachability check) drags the anchor back into
+    // view and makes the OLD absolute panel land on screen too — the test would pass
+    // against the bug. At scrollLeft 0 the pre-fix panel's right edge is ~1102 on a 1024
+    // viewport, so this only passes because of the clamp.
+    await page.evaluate(() => (document.querySelector('[data-testid="v2-overflow"]') as HTMLElement).click());
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    const box = await page.locator(".v2-menu-panel").boundingBox();
+    if (!box) throw new Error("missing panel bounds");
+    expect(box.x, "panel runs off the LEFT edge").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "panel runs off the RIGHT edge").toBeLessThanOrEqual(1024 + 1);
+  });
+
+  test("topbar controls stay clickable while the overflow menu is open", async ({ page }) => {
+    // The menu used to render a `position: fixed; inset: 0; z-index: 55` dismiss sheet.
+    // Nothing in the topbar establishes a stacking context, so that sheet covered every
+    // control in it: this click hit the overlay and only closed the menu.
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    await page.getByTestId("v2-share").click();
+    await expect(page.getByTestId("mp-launcher-modal"), "the Invite click never reached the button").toBeVisible();
+    await expect(page.getByTestId("v2-overflow-tools"), "the menu should have dismissed").toHaveCount(0);
+  });
+
+  test("scrolling the shell dismisses the overflow menu instead of orphaning it", async ({ page }) => {
+    // The panel is viewport-fixed but its trigger lives in the shell's scrolled content,
+    // so the two drift apart. Closing is cheaper than tracking every scroll frame.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await bootV2(page);
+    await page.evaluate(() => (document.querySelector('[data-testid="v2-overflow"]') as HTMLElement).click());
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    await page.evaluate(() => {
+      const shell = document.querySelector('[data-testid="v2-shell"]')!;
+      shell.scrollLeft += 60;
+      shell.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.getByTestId("v2-overflow-tools")).toHaveCount(0);
+  });
+});
