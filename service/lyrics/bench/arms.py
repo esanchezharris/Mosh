@@ -308,8 +308,8 @@ def arm_llm_constrained(item: dict, ctx: ArmContext) -> dict:
 
 # ── I3a: the rhyme-word optimization arms ────────────────────────────────────────
 
-@register("prompt-rhyme-menu", "v1")
-def arm_prompt_rhyme_menu(item: dict, ctx: ArmContext) -> dict:
+def _prompt_rhyme_menu(item: dict, ctx: ArmContext, *, rank: str,
+                       menu_n: int, show_n: int) -> dict:
     """`llm-constrained` plus the actual list of words that rhyme.
 
     The bet: most of the arm's failure at the rhyme slot is RECALL, not taste —
@@ -317,11 +317,22 @@ def arm_prompt_rhyme_menu(item: dict, ctx: ArmContext) -> dict:
     phonology engine can do it exactly and for free. Handing over the menu
     changes the model's job from remembering to choosing. The menu is capped and
     frequency-ordered so it reads as a palette rather than a wall.
+
+    The (rank, menu_n, show_n) triple is what the registered variants disagree
+    on, and the history matters: the original arm freq-sorts its palette but
+    draws it from the ALPHA-truncated 40 — an alphabetically-chosen sliver whose
+    truth-coverage is a fraction of the pool's. Its famous "+16.7 rhyme_perfect
+    with exact flat" result was measured against a palette that rarely contained
+    the answer. The fp variants hand the same prompt a palette that usually does.
     """
-    menu = _rhyme_menu(item, ctx, max_n=40)
+    menu = _rhyme_menu(item, ctx, max_n=menu_n, rank=rank)
     prompt = _context_block(item) + "\n" + _constraint_block(item)
     if menu:
-        ordered = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:24]
+        # For rank="freq" the menu is already frequency-ordered and this sort is
+        # a stable no-op; for the original arm it is the historical byte-exact
+        # palette construction. Do not "simplify" — the original's messages must
+        # keep replaying its paid cache verbatim.
+        ordered = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:show_n]
         prompt += ("\nWords that genuinely rhyme here (you may use one, or any "
                    "other word that rhymes as well): " + ", ".join(ordered))
     messages = [{"role": "system", "content": _SYSTEM % ctx.k},
@@ -330,6 +341,29 @@ def arm_prompt_rhyme_menu(item: dict, ctx: ArmContext) -> dict:
     return {"candidates": _dedupe_cap(_parse_fills(resp), ctx.k),
             "meta": {"provider": resp.get("provider"), "model": resp.get("model"),
                      "menu": menu}}
+
+
+@register("prompt-rhyme-menu", "v1")
+def arm_prompt_rhyme_menu(item: dict, ctx: ArmContext) -> dict:
+    """The historical arm, byte-identical: alpha-truncated 40, top-24 shown."""
+    return _prompt_rhyme_menu(item, ctx, rank="alpha", menu_n=40, show_n=24)
+
+
+@register("prompt-rhyme-menu-fp", "v1")
+def arm_prompt_rhyme_menu_fp(item: dict, ctx: ArmContext) -> dict:
+    """The controlled twin: same prompt shape, same 40-word budget, palette
+    drawn from the freq-ranked pool and shown in full. Isolates menu QUALITY
+    at (nearly) fixed menu size."""
+    return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=40, show_n=40)
+
+
+@register("prompt-rhyme-menu-fp200", "v1")
+def arm_prompt_rhyme_menu_fp200(item: dict, ctx: ArmContext) -> dict:
+    """The coverage play: the full 200-word freq pool in the prompt — the same
+    pool the local constrained arm scores, handed to the strongest available
+    ranker. Ceiling = the pool's 90.7% coverage times whatever precision the
+    model keeps at 200 options; the fp/fp200 pair traces that frontier."""
+    return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=200, show_n=200)
 
 
 NBEST_DRAWS = 5

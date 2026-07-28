@@ -64,6 +64,7 @@ _ARM_BEHAVIOUR_VERSIONS = {
     # counterparts, pool truncated by corpus frequency instead of the alphabet.
     # Separate arm IDS, not version bumps — the point is the side-by-side.
     "local-constrained-endword-fp": "v1", "rhyme-floor-fp": "v1",
+    "prompt-rhyme-menu-fp": "v1", "prompt-rhyme-menu-fp200": "v1",
 }
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),

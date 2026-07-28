@@ -419,6 +419,84 @@ try:
 except ValueError:
     check("freq menu: unknown rank raises", True)
 
+# prompt-rhyme-menu-fp / -fp200: same prompt shape as the historical arm, freq
+# palette. The fixture must show the DIFFERENCE, so assert order + size in the
+# actual prompt bytes the spy recorded — a sabotage routing fp through the alpha
+# menu, or re-imposing the historical [:24] cut, changes both.
+SEEN.clear()
+with tempfile.TemporaryDirectory() as td:
+    r_fp = arms.ARMS["prompt-rhyme-menu-fp"](_menu_item(), ctx(spy_chat, td))
+    fp_blob = SEEN[-1]
+    fp_menu = r_fp["meta"].get("menu") or []
+    check("prompt-menu-fp: menu is the freq-ranked pool (commonest first)",
+          fp_menu[:1] == ["train"] and sorted(fp_menu) == sorted(
+              arms._rhyme_menu(_menu_item(), _mctx, max_n=40, rank="freq")),
+          str(fp_menu[:5]))
+    check("prompt-menu-fp: the WHOLE menu reaches the prompt (no [:24] cut)",
+          all(f" {w}" in fp_blob or f'"{w}' in fp_blob or w in fp_blob
+              for w in fp_menu),
+          fp_blob[-200:])
+    check("prompt-menu-fp: prompt lists words in freq order",
+          fp_blob.find("train") < fp_blob.find("pane") or "train" not in fp_blob,
+          "train (freq 90) must precede pane (freq 40) in the palette")
+SEEN.clear()
+with tempfile.TemporaryDirectory() as td:
+    r_200 = arms.ARMS["prompt-rhyme-menu-fp200"](_menu_item(), ctx(spy_chat, td))
+    m200 = r_200["meta"].get("menu") or []
+    check("prompt-menu-fp200: draws from the 200 cap",
+          sorted(m200) == sorted(
+              arms._rhyme_menu(_menu_item(), _mctx, max_n=200, rank="freq")),
+          f"n={len(m200)}")
+
+# Fixture adequacy: the testlex rime family has ~11 words, so a re-imposed
+# historical [:24] palette cut — or fp200 quietly narrowing to the 40 pool —
+# would be INVISIBLE above. This synthetic 45-word family makes both cuts bite.
+_big_lex = {"rain": [["R", "EY1", "N"]]}
+_big_freq = {}
+for _i in range(45):
+    _w = f"zane{_i:02d}"
+    _big_lex[_w] = [["Z", "EY1", "N"]]
+    _big_freq[_w] = 1000 - _i          # strictly descending ⇒ deterministic order
+def _big_spy(messages, **kw):
+    SEEN.append(json.dumps(messages))
+    return {"ok": True, "provider": "fake", "model": "spy",
+            "content": json.dumps({"fills": ["zane00"]})}
+
+
+_big_ctx = arms.ArmContext(chat=_big_spy,
+                           pron=Pronouncer(lexicon=_big_lex, g2p=lambda w: None),
+                           freq=_big_freq, k=5)
+
+
+SEEN.clear()
+_r40 = arms._prompt_rhyme_menu(_menu_item(), _big_ctx, rank="freq",
+                               menu_n=40, show_n=40)
+check("prompt-menu-fp on a 45-word family: exactly 40 drawn, ALL 40 in prompt",
+      len(_r40["meta"]["menu"]) == 40
+      and all(w in SEEN[-1] for w in _r40["meta"]["menu"])
+      and "zane39" in SEEN[-1] and "zane40" not in SEEN[-1],
+      f"menu n={len(_r40['meta']['menu'])}")
+SEEN.clear()
+_r200 = arms._prompt_rhyme_menu(_menu_item(), _big_ctx, rank="freq",
+                                menu_n=200, show_n=200)
+check("prompt-menu-fp200 on a 45-word family: all 45 drawn and shown",
+      len(_r200["meta"]["menu"]) == 45 and "zane44" in SEEN[-1],
+      f"menu n={len(_r200['meta']['menu'])}")
+# Through the REGISTERED wrappers, asserting prompt CONTENT — the direct-helper
+# calls above cannot catch a wrapper that quietly changes show_n (the menu meta
+# stays 40 while the palette in the prompt shrinks).
+SEEN.clear()
+_w40 = arms.ARMS["prompt-rhyme-menu-fp"](_menu_item(), _big_ctx)
+check("fp wrapper on the big family: 40 drawn AND word #40 is in the prompt",
+      len(_w40["meta"]["menu"]) == 40 and "zane39" in SEEN[-1]
+      and "zane40" not in SEEN[-1],
+      f"menu n={len(_w40['meta']['menu'])}, zane39 in prompt: "
+      f"{'zane39' in SEEN[-1]}")
+SEEN.clear()
+_w200 = arms.ARMS["prompt-rhyme-menu-fp200"](_menu_item(), _big_ctx)
+check("fp200 wrapper on the big family: 45 drawn AND word #45 is in the prompt",
+      len(_w200["meta"]["menu"]) == 45 and "zane44" in SEEN[-1])
+
 # rhyme-floor-fp: the no-model control is the freq pool's head, verbatim.
 # The floor uses the arm-standard 200 cap, not the 10 cap the ordering checks
 # used above — compare against the menu it actually draws from.
