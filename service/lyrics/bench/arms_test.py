@@ -376,17 +376,18 @@ check("menu memo separates the two ranks (same ctx, same partner, same cap)",
 # call (same partner ⇒ same key ⇒ memo hit), so the two lists compare equal
 # with a live leak in the code. Proven by sabotage: promote the target one slot
 # pre-memo — with the memo warm this check passed; cleared, it goes red.
-arms._MENU_MEMO.clear()
+_mctx.menu_memo.clear()
 _leak_a = arms._rhyme_menu(_menu_item(target="pain"), _mctx, max_n=10, rank="freq")
-arms._MENU_MEMO.clear()
+_mctx.menu_memo.clear()
 _leak_b = arms._rhyme_menu(_menu_item(target="pane"), _mctx, max_n=10, rank="freq")
-arms._MENU_MEMO.clear()
+_mctx.menu_memo.clear()
 _leak_c = arms._rhyme_menu(_menu_item(target="zzznotaword"), _mctx, max_n=10,
                            rank="freq")
 check("freq menu: NO LEAK — cold menus identical as the hidden answer varies",
       _leak_a == _leak_b == _leak_c == _freqm,
       f"a={_leak_a} b={_leak_b} c={_leak_c} memoized={_freqm}")
-check("freq menu is deterministic across calls",
+_mctx.menu_memo.clear()          # cold, or this is a memo hit proving nothing
+check("freq menu is deterministic across COLD calls",
       arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq") == _freqm)
 
 # Filter-before-cap: a stopword with a huge corpus count must not consume a cap
@@ -418,6 +419,34 @@ try:
     check("freq menu: unknown rank raises", False, "no exception")
 except ValueError:
     check("freq menu: unknown rank raises", True)
+# Config errors must fire even when the item has NO partner — the no-partner
+# early return used to swallow them (2026-07-28 review).
+try:
+    arms._rhyme_menu(_nopartner_item := {**_menu_item(),
+                     "constraints": {"rhymeWith": None}}, _mctx,
+                     max_n=10, rank="wat")
+    check("rank validation fires before the no-partner early return",
+          False, "no exception")
+except ValueError:
+    check("rank validation fires before the no-partner early return", True)
+
+# The ALPHA path's historical semantics, pinned as a golden: rhyme_search sorts
+# alphabetically, CAPS, and only then does the stopword filter run — so a
+# stopword inside the cap window consumes a slot and the menu comes back SHORT.
+# This is deliberately NOT "fixed": every pre-2026-07-27 board number was
+# measured against exactly this construction, and its paid cache must keep
+# replaying byte-for-byte. Before this golden, flipping alpha to
+# filter-before-cap passed every suite ("byte-identical" was only proven by an
+# out-of-band cache replay).
+_alpha_pron = Pronouncer(lexicon={
+    "rain": [["R", "EY1", "N"]], "been": [["B", "EY1", "N"]],   # stopword, sorts first
+    "main": [["M", "EY1", "N"]], "vain": [["V", "EY1", "N"]],
+}, g2p=lambda w: None)
+_alpha_ctx = arms.ArmContext(pron=_alpha_pron, freq={"main": 5, "vain": 3}, k=5)
+check("alpha menu GOLDEN: cap first, then filter — stopword eats a cap slot",
+      arms._rhyme_menu(_menu_item(), _alpha_ctx, max_n=2, rank="alpha")
+      == ["main"],
+      str(arms._rhyme_menu(_menu_item(), _alpha_ctx, max_n=2, rank="alpha")))
 
 # prompt-rhyme-menu-fp / -fp200: same prompt shape as the historical arm, freq
 # palette. The fixture must show the DIFFERENCE, so assert order + size in the

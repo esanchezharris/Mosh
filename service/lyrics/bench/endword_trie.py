@@ -36,7 +36,15 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 # Bump when variant expansion changes what is REACHABLE — it belongs in the
 # generation cache key, or a widened variant set replays narrow results.
-TRIE_VERSION = "v1"
+# v2: pool_sha became ORDER-SENSITIVE. The v1 sha hashed the sorted SET, so two
+# arms whose pools were the same words in different order (alpha vs freq
+# truncation, any rime family that fits under the cap) shared cache keys and
+# replayed each other's generations — and a freq-table change that only
+# REORDERED a pool did not re-key it. Ordering participates in tie-breaks and
+# in what the model is shown, so it is part of the computation's identity.
+# Found by the 2026-07-28 adversarial review. Bumping this deliberately colds
+# every local-arm cache entry; both local arms were re-run to repopulate.
+TRIE_VERSION = "v2"
 
 NEG_INF = float("-inf")
 
@@ -228,6 +236,12 @@ def decode(trie: Trie, logits_fn: Callable[[List[int]], Sequence[float]],
 def pool_sha(pool: Iterable[str]) -> str:
     """Stable id for a candidate pool — a phonology or lexicon change moves
     `rhyme_search`'s output, and without this in the cache key the arm would
-    replay stale picks against a new menu."""
-    words = sorted({(w or "").strip().lower() for w in pool if (w or "").strip()})
+    replay stale picks against a new menu.
+
+    ORDER-SENSITIVE (v2): the same words in a different order are a different
+    pool. Ordering decides stable-sort tie-breaks in the worker's ranking and
+    the sequence a model is shown, so two arms with set-equal, order-different
+    pools must never share a cache entry. (The v1 set-hash let exactly that
+    happen — see TRIE_VERSION.)"""
+    words = [(w or "").strip().lower() for w in pool if (w or "").strip()]
     return hashlib.sha256("\n".join(words).encode("utf-8")).hexdigest()

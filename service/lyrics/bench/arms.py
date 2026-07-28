@@ -47,6 +47,12 @@ class ArmContext:
     # than in the arm NAME, so a model swap re-keys the cache without minting a
     # new scoreboard row.
     arm_config: Dict = field(default_factory=dict)
+    # Per-context menu memo (was a module global keyed on id(pron)/id(freq) —
+    # object IDENTITY, which a recycled address or an in-place table mutation
+    # silently defeats; 2026-07-28 review). Scoping it to the context makes
+    # cross-context aliasing structurally impossible: a new pron or freq table
+    # arrives on a new context with an empty memo.
+    menu_memo: Dict = field(default_factory=dict, repr=False)
 
     def cached_chat(self, messages: List[dict], **kw) -> dict:
         payload = {"messages": messages, **{k: v for k, v in sorted(kw.items())}}
@@ -99,24 +105,26 @@ def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40,
         Requires `ctx.freq`; an empty table raises rather than quietly
         degrading to a differently-ordered pool.
     """
-    con = item.get("constraints") or {}
-    partner = con.get("rhymeWith")
-    if not partner or ctx.pron is None:
-        return []
+    # Config errors are raised UNCONDITIONALLY — before the no-partner early
+    # return, or a word/span item would silently swallow a typo'd rank.
     if rank not in ("alpha", "freq"):
         raise ValueError(f"unknown menu rank {rank!r}")
     if rank == "freq" and not ctx.freq:
         raise ValueError("rank='freq' needs a corpus frequency table in ctx.freq")
+    con = item.get("constraints") or {}
+    partner = con.get("rhymeWith")
+    if not partner or ctx.pron is None:
+        return []
     syllables = con.get("syllables") if item.get("granularity") in ("word", "rhyme") \
         else None
     strictness = con.get("rhymeStrictness", "slant")
     # rhyme_search scans the whole lexicon, so it is the cost of a sweep, and
     # the floor and the prompt arm ask for the SAME menus over the same items.
-    # The freq table participates in the freq-ranked result, so it joins the key.
-    key = (id(ctx.pron), partner.lower(), strictness, syllables, max_n,
-           rank, id(ctx.freq) if rank == "freq" else None)
-    if key in _MENU_MEMO:
-        return _MENU_MEMO[key]
+    # The memo lives ON the context (see ArmContext.menu_memo), so pron/freq
+    # identity needs no place in the key.
+    key = (partner.lower(), strictness, syllables, max_n, rank)
+    if key in ctx.menu_memo:
+        return ctx.menu_memo[key]
     try:
         if rank == "freq":
             # Uncapped scan; filter, then cap — see the docstring for why the
@@ -136,11 +144,8 @@ def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40,
     out = [w for w in menu if w and len(w) >= 3 and w.lower() not in STOP_AND_FILLER]
     if rank == "freq":
         out = out[:max_n]
-    _MENU_MEMO[key] = out
+    ctx.menu_memo[key] = out
     return out
-
-
-_MENU_MEMO: Dict[tuple, List[str]] = {}
 
 
 def _dedupe_cap(fills: List[str], k: int) -> List[dict]:

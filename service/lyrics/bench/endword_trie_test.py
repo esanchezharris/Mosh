@@ -219,11 +219,20 @@ blank = et.build_trie(["", "   ", None], fake_encode)
 check("blank pool entries are dropped, not turned into paths",
       et.reachable_words(blank) == set() and blank.paths == 0)
 
-# ── 9. pool_sha is order- and case-stable, and moves with content ────────────────
-check("pool_sha: stable across ordering and case",
-      et.pool_sha(["Gold", "chain"]) == et.pool_sha(["chain", "gold"]))
+# ── 9. pool_sha is ORDER-SENSITIVE (v2) and moves with content ───────────────────
+# v1 hashed the sorted set, which let two arms with set-equal, order-different
+# pools (alpha vs freq truncation of a small rime family) share cache entries
+# and replay each other's generations. Ordering is part of the computation's
+# identity: it breaks stable-sort ties in the worker and is the sequence a
+# model is shown.
+check("pool_sha: DIFFERENT when the same words are reordered",
+      et.pool_sha(["gold", "chain"]) != et.pool_sha(["chain", "gold"]))
+check("pool_sha: case-insensitive at fixed order",
+      et.pool_sha(["Gold", "chain"]) == et.pool_sha(["gold", "chain"]))
 check("pool_sha: changes when the pool changes",
       et.pool_sha(["gold", "chain"]) != et.pool_sha(["gold", "chain", "pain"]))
+check("pool_sha: stable across calls",
+      et.pool_sha(["gold", "chain"]) == et.pool_sha(["gold", "chain"]))
 
 # ── 10. opt-in: the REAL tokenizer (not in the gate) ─────────────────────────────
 if os.environ.get("LYRICS_BENCH_MLX_SMOKE") == "1":
