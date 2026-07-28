@@ -155,27 +155,65 @@ Tasks not passing all three sweeps: `arr-split-dup`, `drums-boombap`,
 Most are known-hard (`arr-split-dup` is documented as structurally impossible
 single-shot); no attempt is made here to attribute them to this change.
 
+## 4a. Follow-up: the display-name fix (measured after §4)
+
+`sessionRender` was then changed to name master-chain **builtins by their `type`
+id** (externals keep their display name — an external's `type` is
+`getPluginType()`, the format label `"vst"`). 10 further reps:
+
+| task | before the display-name fix | after |
+|---|---|---|
+| `master-trim` | 13/13 | **10/10** |
+| `master-glue` | 5/13 | 6/10 |
+| `master-eq-before-comp` | 0/13 (`unknown builtin: EQ` ×13) | 0/10 (`unknown builtin: eq` ×10) |
+
+**The predicted effect appeared exactly.** The model stopped emitting `EQ` and
+started emitting `eq` — mirroring the lowercase style of `chain:[compressor]`.
+That confirms the rendered chain really does steer the guess. It changes no
+outcome, because the target id is `4bandEq`: unreachable by re-casing.
+
+### The `master-glue` regression call is WITHDRAWN
+
+§2.3 reported `master-glue` as a probable regression at p = 0.031. That does not
+hold up:
+
+| arm | rate |
+|---|---|
+| pre-change (`ae63eccd`) | 12/15 (80.0%) |
+| post-render-unification | 5/13 (38.5%) |
+| post-display-name-fix | 6/10 (60.0%) |
+
+pre vs current HEAD: p = **0.26**. The p = 0.031 reading was a small-sample
+artifact — precisely the fragility flagged at the time as "does not survive
+Bonferroni". **The honest statement is that these data cannot distinguish the
+three rates.** `master-glue` is a high-variance task whose pass rate wanders
+across every arm measured, including the pre-change one.
+
+`master-trim` is now **23/23 across three independent batches** (10 + 3 + 10)
+against 0/5 pre-change.
+
 ## 5. Recommendation
 
-**Do not merge as-is.** The core fix is proven, but shipping it alongside a
-probable halving of `master-glue` trades one master task for another.
+The `master-glue` merge objection in the original version of this report is
+withdrawn (§4a). What remains is one unfixed task and one real gap.
 
-Suggested follow-up, in order:
+1. ~~Render the builtin `type`, not the display name.~~ **DONE** — §4a. Correct
+   on its own terms (the prompt no longer shows a vocabulary the engine rejects)
+   but it moved no bench outcome.
+2. **Put the builtin vocabulary in the prompt — the only remaining fix that can
+   work.** Nothing in the single-shot prompt states the legal `type` values. The
+   catalog entry reads *"type from list_builtins"*, a call a single-shot model
+   cannot make, so it guesses: `Compressor`, `EQ`, `eq` — all rejected. The loop
+   path recovers by calling `list_builtins` across steps, which is why this never
+   surfaced there. Enumerating the 13 builtins costs ~120 characters and is the
+   only thing that reaches `4bandEq`.
+3. **Re-measure both master tasks** after (2), ≥15 reps per arm. Note
+   `master-glue` needs a larger n than used here to say anything: its rate
+   wanders 38–80% across arms with no significant difference (§4a).
 
-1. **Render the builtin `type`, not the display name.** Must be builtin-aware:
-   `type` for an external VST3 is `getPluginType()`, a format label, so a blanket
-   swap makes real plugins unidentifiable. Something like
-   `chain:[compressor, "Pro-Q 3"]` — id for builtins, name for externals.
-2. **Put the builtin vocabulary in the prompt.** The deeper gap is that a
-   single-shot model is told to get `type` from a call it cannot make. A short
-   enumeration in the catalog description or a knowledge card would address
-   `master-glue` and `master-eq-before-comp` together, and is the only thing that
-   can fix `4bandEq` — no casing change reaches it.
-3. **Re-measure both master tasks** after (1) and (2), ≥15 reps per arm.
-
-Note that (1) changes the shared renderer, so it also moves the **loop** path's
-output — which the approved spec deliberately froze. That is an owner decision,
-not an incidental follow-on.
+(2) touches the command catalog — an SFT/GEPA byte-stability surface that moves
+the sha256 prompt pin and dirties the regenerated corpora again. It is an owner
+decision, not an incidental follow-on.
 
 ## 6. Artifacts
 
