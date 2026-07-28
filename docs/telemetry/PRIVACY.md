@@ -183,6 +183,61 @@ future decision — it is not part of what this module ships. Every test in
 configured" path injects a fake in-process uploader function; none of them,
 and nothing in this module's default configuration, makes a real HTTP request.
 
+## Sentry (crash reporting to a third party) — build-gated OFF
+
+There is a second, **optional** crash path: the Sentry Native SDK with the
+**crashpad** backend (FS-K3). Two independent switches both have to be on before
+it does anything, and the shipped default build fails the first one:
+
+1. **Compile-time.** It only exists in a build configured with
+   `-DMOSH_ENABLE_SENTRY=ON`. The default build (and every artifact released so
+   far) links no Sentry at all — `src/telemetry/SentryReporter.cpp` compiles down
+   to two empty functions, and `cmake/Sentry.cmake` doesn't even download the SDK.
+2. **Run-time.** Even in a Sentry-ON build it needs **the same opt-in flag** as
+   everything else on this page (`~/Library/Mosh/telemetry.optin`, absent by
+   default) **and** a configured DSN. Miss either and `initSentryReporter()`
+   returns before creating a directory, starting a process, or opening a socket.
+
+### What "PII scrubbing on crash payloads" honestly means here
+
+Worth being precise, because the obvious reading is wrong. A crashpad minidump is
+written and uploaded by a **separate handler process**, and Sentry's own header is
+explicit that neither client hook can rewrite it: `on_crash` *"does not work with
+crashpad on macOS"*, and `before_send` is bypassed for crash events. **So no
+callback of ours edits the minidump.** What actually protects you is:
+
+- **Minimising at source** — the only reliable control. The SDK is initialised with
+  no user context, no environment block and no file attachments; breadcrumbs are
+  already command-**names** only (see "Redaction" above).
+- **Removing the SDK's own identifier.** sentry-native mints a random UUID of its
+  own and attaches it as the event's `user.id` — a stable handle linking every crash
+  from one installation. It isn't derived from your machine, your account, or the
+  install id described above, but it's still a correlation handle, and `before_send`
+  can't strip it (that callback doesn't run on the crash path). So it's removed
+  in-process with `sentry_remove_user()` right after startup. A captured crash event
+  ends up carrying only: an event id, `fatal`, `native`, the release tag
+  (`mosh@<version>`), the environment, and the SDK version. No identifier.
+
+**A minidump still contains process memory, including stack contents.** That is
+what a crash report *is* — it cannot be otherwise and still be useful. Measured, not
+assumed: in the induced-crash test the developer's username appeared 10 times in the
+minidump's strings and **0** times in the structured event.
+- **Scrubbing everything reachable** — `scrubEvent()` is installed as `before_send`,
+  which does run for every non-crash event. It **drops** (not blanks) any field
+  named like a secret (`*_KEY`, `*token*`, `*secret*`, `*password*`,
+  `Authorization`, `Cookie`, and the install id) and rewrites `/Users/<you>/…` to
+  `~/…` in every surviving string, at any nesting depth. It is unit-tested in
+  `tests/test_sentry_scrub.cpp`.
+
+That asymmetry is precisely why this path is opt-in *and* build-gated off rather
+than defaulted on, and it is stated here rather than papered over with a claim that
+the dump is "scrubbed".
+
+Nothing about this changes the local report described above: that is still written
+to your own disk (both it and the minidump were produced by the same induced crash —
+Sentry does not replace it), and deleting `~/Library/Mosh/telemetry.optin` still
+turns off every upload path at once.
+
 ## Retention
 
 - **Local files** (`~/Library/Mosh/diagnostics/crash-*.txt`,
@@ -228,6 +283,10 @@ and `~/Library/Mosh/telemetry/` folders) whenever you like.
 | `ui/src/bridge.ts` (`setTelemetryOptIn`) | the native call the toggle's effect uses |
 | `src/webview/WebBridge.cpp` (`execute_command`, `set_telemetry_optin`) | the redaction chokepoint + the native handler for the toggle |
 | `tests/test_telemetry.cpp` | the Catch2 coverage for all of the above, including a real fork+SIGSEGV crash |
+| `src/telemetry/SentryReporter.{h,cpp}` | FS-K3: the pure PII scrubber + the gated Sentry/crashpad lifecycle (no-ops without `MOSH_ENABLE_SENTRY`) |
+| `cmake/Sentry.cmake` | the `MOSH_ENABLE_SENTRY` option (OFF) + the pinned sentry-native fetch |
+| `scripts/release/upload-dsyms.sh` | dSYM upload for symbolication; skips cleanly when Sentry isn't configured |
+| `tests/test_sentry_scrub.cpp` | Catch2 coverage for the scrubber and for "opt-out wins even with a DSN" |
 
 `installCrashHandler()` is called exactly once, as the first statement of
 `MoshApplication::initialise()` in `src/Main.cpp` — see the comment there.

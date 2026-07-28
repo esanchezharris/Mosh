@@ -35,6 +35,13 @@ target_sources(MoshTests PRIVATE
     test_rave_engine.cpp
     test_stem_export.cpp
     test_telemetry.cpp
+    # FS-K3 — Sentry crash reporting. SentryReporter.cpp is compiled
+    # unconditionally (MOSH_HAVE_SENTRY gates its BODY, not its existence — the
+    # RaveEngine.cpp arrangement noted below); MoshTests never defines
+    # MOSH_HAVE_SENTRY, so these cases pin the pure scrubber + the consent gate
+    # against the no-SDK branch, with no DSN, no network and no crashpad handler.
+    test_sentry_scrub.cpp
+    ${CMAKE_SOURCE_DIR}/src/telemetry/SentryReporter.cpp
     ${CMAKE_SOURCE_DIR}/src/telemetry/Breadcrumbs.cpp
     ${CMAKE_SOURCE_DIR}/src/telemetry/CrashReportFormatter.cpp
     ${CMAKE_SOURCE_DIR}/src/telemetry/TelemetryConfig.cpp
