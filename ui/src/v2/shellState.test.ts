@@ -39,6 +39,29 @@ describe("v2 shellState — browser drawer", () => {
   });
 });
 
+describe("openBrowserTab pending collection (one-shot)", () => {
+  it("opens the drawer on the tab with no collection by default", () => {
+    useShell.getState().openBrowserTab("plugins");
+    expect(useShell.getState().browserOpen).toBe(true);
+    expect(useShell.getState().browserTab).toBe("plugins");
+    expect(useShell.getState().takePendingCollection()).toBeNull();
+  });
+
+  it("carries a requested collection through exactly once", () => {
+    useShell.getState().openBrowserTab("plugins", "inst");
+    expect(useShell.getState().takePendingCollection()).toBe("inst");
+    // One-shot: a second read is empty, so it never fights the user's own chip clicks
+    // on a later re-render.
+    expect(useShell.getState().takePendingCollection()).toBeNull();
+  });
+
+  it("a later plain open clears a collection that was never consumed", () => {
+    useShell.getState().openBrowserTab("plugins", "inst");
+    useShell.getState().openBrowserTab("sounds");
+    expect(useShell.getState().takePendingCollection()).toBeNull();
+  });
+});
+
 describe("v2 shellState — right dock (agent rail)", () => {
   beforeEach(() => {
     useShell.setState({ rightOpen: true });

@@ -5,6 +5,7 @@
 // broadcast/lock claim). This slice only adds genuinely-new v2 view concerns.
 
 import { create } from "zustand";
+import type { CollectionId } from "./pluginPicker";
 
 export type InspectorTab = "mix" | "fx" | "gen" | "lyrics" | "midi" | "takes" | "warp" | "clip";
 export type SectionZoom = "8b" | "16b" | "full";
@@ -24,6 +25,10 @@ interface ShellState {
   activityOpen: boolean;
   browserOpen: boolean;            // LEFT push-dock (sounds + plugins), pull-tab toggled
   browserTab: BrowserTab;
+  // A collection the drawer should land on when it opens ("inst" for "Add instrument…").
+  // ONE-SHOT: PluginDock takes it on mount and clears it, so it seeds the initial view
+  // without overriding the chips the user clicks afterwards.
+  pendingCollection: CollectionId | null;
   rightOpen: boolean;              // RIGHT push-dock (agent · inspector · collaborators); default open
   // Session picker, shown once per app LAUNCH. Module-scope zustand means this lives
   // exactly as long as the React app does — deliberately NOT persisted to localStorage,
@@ -44,7 +49,8 @@ interface ShellState {
   setActivityOpen: (b: boolean) => void;
   setBrowserOpen: (b: boolean) => void;
   toggleBrowser: () => void;
-  openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
+  openBrowserTab: (t: BrowserTab, collection?: CollectionId) => void;  // open the drawer ON a tab
+  takePendingCollection: () => CollectionId | null;                    // read-and-clear
   setRightOpen: (b: boolean) => void;
   dismissSessionPicker: () => void;
   toggleRight: () => void;
@@ -52,7 +58,7 @@ interface ShellState {
   setTimeRangeDragging: (b: boolean) => void;
 }
 
-export const useShell = create<ShellState>((set) => ({
+export const useShell = create<ShellState>((set, get) => ({
   selectedClipId: null,
   inspectorTab: "mix",
   inspectorOpen: false,
@@ -60,6 +66,7 @@ export const useShell = create<ShellState>((set) => ({
   activityOpen: false,
   browserOpen: false,
   browserTab: "sounds",
+  pendingCollection: null,
   rightOpen: true,
   sessionPickerDismissed: false,
   timeRange: null,
@@ -74,7 +81,12 @@ export const useShell = create<ShellState>((set) => ({
   setActivityOpen: (b) => set({ activityOpen: b }),
   setBrowserOpen: (b) => set({ browserOpen: b }),
   toggleBrowser: () => set((s) => ({ browserOpen: !s.browserOpen })),
-  openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
+  openBrowserTab: (t, collection) => set({ browserOpen: true, browserTab: t, pendingCollection: collection ?? null }),
+  takePendingCollection: () => {
+    const c = get().pendingCollection;
+    if (c !== null) set({ pendingCollection: null });
+    return c;
+  },
   setRightOpen: (b) => set({ rightOpen: b }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
   dismissSessionPicker: () => set({ sessionPickerDismissed: true }),

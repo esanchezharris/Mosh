@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useShell } from "./shellState";
 import {
   builtinEntry, installedEntry, visibleRange,
   loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
@@ -31,7 +32,7 @@ type Rows = ReturnType<typeof rowsForCollection>;
 
 // Shared state/logic — collections, search, rows, favorites, loading. The modal + the dock
 // each get their own instance (separate surfaces) but identical behavior.
-function usePluginPicker(onLoaded?: () => void) {
+function usePluginPicker(onLoaded?: () => void, initialCollection?: CollectionId) {
   const plugins = useStore((s) => s.availablePlugins);
   const builtins = useStore((s) => s.availableBuiltins);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -39,7 +40,7 @@ function usePluginPicker(onLoaded?: () => void) {
   const ensureCatalog = useStore((s) => s.ensurePluginCatalog);
 
   const [q, setQ] = useState("");
-  const [collection, setCollection] = useState<CollectionId>("all");
+  const [collection, setCollection] = useState<CollectionId>(initialCollection ?? "all");
   const [favorites, setFavorites] = useState<string[]>(() => loadFavorites());
   const [recents, setRecents] = useState<string[]>(() => loadPluginRecents());
 
@@ -158,7 +159,11 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
 
 // ── The dock — collections as a chip row, then the shared list. The one v2 plugin surface. ──
 export function PluginDock() {
-  const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
+  // ONE-SHOT read: "Add instrument…" asks the drawer to open on Instruments. useState's
+  // initialiser runs once per mount, which is exactly the lifetime we want — after this
+  // the user's own chip clicks own the selection.
+  const [seed] = useState(() => useShell.getState().takePendingCollection() ?? undefined);
+  const pk = usePluginPicker(undefined, seed); // no onLoaded → the dock stays open after adding (it's a dock)
   // FIT-003 — v2 previously had ZERO rescan control and no progress UI at all (the
   // classic modal already had both). This brings the default shell to parity: a
   // compact Rescan button + a live indeterminate progress line while scanning.
