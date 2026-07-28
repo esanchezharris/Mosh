@@ -166,10 +166,16 @@ implemented differently from the sketch above; recorded here because the reasons
    load. `verify.py`'s safe-mode check asserts the plugin node is **still in the file** afterwards —
    the assertion that would catch a regression here.
 
-**A fourth registration surface, not the three in `CLAUDE.md`.** Beyond dispatch + lock scope +
-agent-catalog/classification, `ui/src/bridge.mock.ts` (guarded by `bridge.mock.test.ts`) must case or
-allowlist every command the UI dispatches. It caught `open_without_plugins` on the full vitest run.
-All four guards were RED-proved before being satisfied.
+**A new MoshOps command needs FIVE registrations, not the three in `CLAUDE.md`.** Beyond dispatch +
+LockManager scope + agent-catalog/classification:
+4. `ui/src/bridge.mock.ts` (guarded by `bridge.mock.test.ts`) must case or allowlist every command the
+   UI dispatches — caught `open_without_plugins` on the full local vitest run.
+5. `docs/FEATURE_AUDIT.md` — the generated conformance scoreboard counts the dispatch surface
+   (209 → 210 here), and BOTH gates assert it matches its inputs. **Only CI caught this one**: the
+   local gate sequence in §0 does not include `scripts/daw-conformance/scoreboard.py`, so PR #471
+   went red on `parity_scoreboard` / `daw_scoreboard_current` after a fully green local run. Fix is
+   `python3 scripts/daw-conformance/scoreboard.py` + commit; the regeneration is idempotent.
+All five guards were RED-proved or observed failing before being satisfied.
 
 ### Two bugs the gates caught in this lane's own code (both would have shipped)
 
