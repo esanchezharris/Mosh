@@ -212,6 +212,35 @@ bundle_service() {                              # $1 = installed app
   [ -f "$ROOT/service/sketch/.sketch.env" ] && cp "$ROOT/service/sketch/.sketch.env" "$SVC/sketch/.sketch.env"
   [ -f "$ROOT/service/transform/.transform.env" ] && cp "$ROOT/service/transform/.transform.env" "$SVC/transform/.transform.env"
   find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  emit_notices "$DEST"
+}
+
+# FS-K4 — third-party acknowledgements, GENERATED from docs/DEPENDENCY_BOM.md §1 so the
+# shipped NOTICES can never drift from the verified inventory. packaging_check then
+# re-reads this file and fails the deploy if a shipping BOM row is unacknowledged or a
+# mandatory "Powered by ..." attribution is missing.
+emit_notices() {                                # $1 = installed app
+  local DEST="$1" OUT="$1/Contents/Resources/NOTICES.txt"
+  echo "emitting NOTICES → ${OUT#$ROOT/}"
+  if ! python3 "$ROOT/service/scripts/packaging_check.py" --emit-notices >"$OUT"; then
+    rm -f "$OUT"                                # never leave a truncated/partial notice file
+    echo "FATAL: could not generate NOTICES.txt from docs/DEPENDENCY_BOM.md" >&2
+    exit 1
+  fi
+}
+
+# FS-K4 — the BLOCKING packaging/BOM compliance check (SPEC §5 K1).
+# Refuses to ship a bundle that carries RAVE/anira artifacts (§1.11), is missing a NOTICE
+# for any shipping BOM §1 row or a mandatory attribution, or ships third-party payload with
+# no BOM row. Mirrors the existing fail-closed Info.plist net in install_app.
+packaging_check() {                             # $1 = bundle, $2 = "warn-only" (optional)
+  local DEST="$1" MODE_FLAG=""
+  [ "${2:-}" = "warn-only" ] && MODE_FLAG="--warn-only"
+  python3 "$ROOT/service/scripts/packaging_check.py" --bundle "$DEST" $MODE_FLAG || {
+    echo "FATAL: packaging check refused this bundle — see the reasons above." >&2
+    echo "       (SPEC §5 K1 / §1.11 · inventory: docs/DEPENDENCY_BOM.md)" >&2
+    exit 1
+  }
 }
 
 # Bundle the Moshi brain key(s) INTO the app so a Finder/Dock double-click (which inherits
@@ -404,6 +433,7 @@ case "$MODE" in
     install_app "$APP" "$DEST"
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
+    packaging_check "$DEST"          # FS-K4 — fail-closed BEFORE sealing the bundle
     sign_app "$DEST" "ad-hoc"        # re-seal after service + brain-key edits (covers brain.env)
     finish_deployed_app "$DEST"
     echo "deployed one canonical /Applications/Mosh.app (default build; service bundled)."
@@ -421,6 +451,11 @@ case "$MODE" in
     bundle_service "$DEST"
     bundle_brain_key "$DEST"
     selfcontain_anira "$DEST"
+    # FS-K4 — this path deliberately DOES carry anira/LibTorch, so the check runs warn-only:
+    # it is the private, non-distributable build (SPEC §1.11 / BOM §0 fact 2 — in-tree and
+    # undistributed creates no obligation). Warn loudly so nobody notarizes or shares it.
+    packaging_check "$DEST" warn-only
+    echo "⚠️  NON-DISTRIBUTABLE BUILD (anira/RAVE present) — never notarize, release or share this bundle."
     finish_deployed_app "$DEST"
     echo "deployed anira /Applications/Mosh.app (real-time RAVE + service bundled; LibTorch self-contained)."
     echo "drop a real RAVE <target>.ts into ~/AI/rave-models — the '+ RAVE' rack button then hosts it live."
@@ -442,6 +477,9 @@ case "$MODE" in
     install_app "$APP" "$STAGED"
     bundle_service "$STAGED"
     bundle_brain_key "$STAGED"            # the key is sealed INTO the notarized bundle (see note below)
+    # FS-K4 — BEFORE signing on purpose: signing here also notarizes, which UPLOADS the
+    # bundle to Apple. A compliance failure must stop the release while it is still local.
+    packaging_check "$STAGED"
     echo "signing + notarizing + stapling the app…"
     "$RELEASE_SIGN" "$STAGED"
     DMG="$OUTDIR/Mosh.dmg"
