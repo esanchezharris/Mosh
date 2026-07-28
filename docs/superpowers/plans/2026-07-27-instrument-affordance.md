@@ -336,28 +336,35 @@ Expected: PASS.
 
 - [ ] **Step 5: Consume it in PluginDock**
 
-In `ui/src/v2/PluginBrowser.tsx`, change the `usePluginPicker` signature (line 34) to accept an initial collection:
+Consume via a **subscribed selector plus an effect** — not a `useState` lazy initialiser.
 
-```ts
-function usePluginPicker(onLoaded?: () => void, initialCollection?: CollectionId) {
-```
+Two reasons a mount-time initialiser does not work here, both verified against this repo:
+1. The app is wrapped in `<React.StrictMode>` (`ui/src/main.tsx:39`), which double-invokes a `useState` initialiser and keeps only the **second** call's result. The first call would read `"inst"` and clear the store; the second would read `null`. Every dev-mode run would silently fail to pre-filter.
+2. `PluginDock` renders conditionally on `tab === "plugins"` (`ui/src/v2/LeftDrawer.tsx:77`), so it does **not** remount when the drawer is already open on Plugins. A second `openBrowserTab("plugins", "inst")` would set the store and nothing would ever read it.
 
-and its collection state (line 42):
-
-```ts
-  const [collection, setCollection] = useState<CollectionId>(initialCollection ?? "all");
-```
-
-In `PluginDock` (line 161), take the pending collection once on mount and seed the picker with it:
+`usePluginPicker` needs **no new parameter** — leave its signature alone. In `PluginDock` (line 161):
 
 ```ts
 export function PluginDock() {
-  // ONE-SHOT read: "Add instrument…" asks the drawer to open on Instruments. useState's
-  // initialiser runs once per mount, which is exactly the lifetime we want — after this
-  // the user's own chip clicks own the selection.
-  const [seed] = useState(() => useShell.getState().takePendingCollection() ?? undefined);
-  const pk = usePluginPicker(undefined, seed); // no onLoaded → the dock stays open after adding (it's a dock)
+  const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
+  const { setCollection } = pk;
+  // "Add instrument…" asks the drawer to land on Instruments. An EFFECT, not a mount-time
+  // initialiser: StrictMode double-invokes initialisers (the clearing read would be thrown
+  // away), and this component stays mounted when the drawer is already on Plugins, so a
+  // later request has to reach it too. Clearing inside the effect keeps it one-shot — the
+  // user's own chip clicks own the selection afterwards.
+  const pending = useShell((s) => s.pendingCollection);
+  const takePendingCollection = useShell((s) => s.takePendingCollection);
+  useEffect(() => {
+    if (!pending) return;
+    setCollection(pending);
+    takePendingCollection();
+  }, [pending, setCollection, takePendingCollection]);
 ```
+
+`setCollection` is a `useState` setter and therefore referentially stable, so the effect runs only when `pending` actually changes.
+
+**This must be covered by a test that renders `PluginDock`.** The store-level tests in Step 1 cannot catch either failure mode — they never mount the consumer. That gap is exactly the vacuous-verification trap this repo documents.
 
 `CollectionId` is already imported at line 20. `useShell` is not — add it after the `useSettings` import at line 14:
 
