@@ -601,3 +601,18 @@ numbers and hashes only.
   The owner's sitting now lands on an interpreted scale: well above .20 ⇒ human
   headroom is real and the .413 arm is chasing something reachable; at or below
   it ⇒ exact on this material mostly measures unguessability.
+- **2026-07-28 — NORMING SITTING DONE (owner, n=34 of 200; declared complete).**
+  Owner exact **.765** (26/34; ex-giveaway .741), machine on the SAME 34 items
+  .412 — paired: owner-only 13 vs machine-only 1 (McNemar p≈.002). The owner's
+  skips (16 of the first 50) self-select easier items — the machine's jump from
+  .200 (all 200) to .412 (his 34) is the measure of that skew — so the honest
+  ceiling is a BRACKET: worst-case-all-skips-miss floor .52, answered-only .77.
+  **Even the pessimistic end clears the machine (.20) and the best arm (.413):
+  exact on this material is not unguessability, and the arm has real human
+  headroom above it.** This is the reading the sitting existed to produce; a
+  tighter point estimate changes no near-term decision, so the sitting is
+  CLOSED at n=34. Method refinement recorded for any future multi-rater pass:
+  50 items, NO skip affordance (a forced "I've got nothing" is data; a skip
+  destroys it), ~10 min per rater. Sequencing consequence: with norming closed,
+  the accept-pass lock on the remaining 166 packet items is lifted — it only
+  protected answers still to be written blind.
