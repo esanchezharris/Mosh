@@ -764,6 +764,34 @@ def cmd_accept(args) -> int:
     return 0
 
 
+def cmd_sit(args) -> int:
+    """One loopback page for the two owner sittings (norming first, then the
+    accept pass), with the sequencing rule enforced server-side."""
+    import glob as _glob
+
+    from lyrics.bench import sit
+
+    packet_dir = args.packet or os.path.join(paths.subdir("norming"), "packet")
+    if not os.path.exists(os.path.join(packet_dir, "packet.json")):
+        print(f"no packet at {packet_dir} — run `norming export` first",
+              file=sys.stderr)
+        return 2
+    run = args.run
+    if not run:
+        cands = sorted(_glob.glob(os.path.join(
+            paths.data_root(), "runs", "*-prompt-rhyme-menu-fp-dev")))
+        if not cands:
+            print("no prompt-rhyme-menu-fp run found — pass --run",
+                  file=sys.stderr)
+            return 2
+        run = cands[-1]
+    run_dir = run if os.path.isabs(run) else os.path.join(
+        paths.data_root(), "runs", run)
+    sit.serve(packet_dir, run_dir, slice_=args.slice, rater=args.rater,
+              port=args.port)
+    return 0
+
+
 def cmd_norming(args) -> int:
     """Blind answer sheet so the HUMAN ceiling can be measured on our own items."""
     if args.action == "export":
@@ -953,6 +981,17 @@ def main(argv=None) -> int:
     p.add_argument("--sheets", nargs="*", default=[],
                    help="filled ANSWER-SHEET.txt files, one per rater (score)")
     p.set_defaults(fn=cmd_norming)
+
+    p = sub.add_parser("sit", help="the owner-sitting page: norming + accept "
+                                   "pass on one loopback surface")
+    p.add_argument("--run", default="", help="run dir name under runs/ "
+                   "(default: latest prompt-rhyme-menu-fp run)")
+    p.add_argument("--packet", default="", help="norming packet dir "
+                   "(default: {data_root}/norming/packet)")
+    p.add_argument("--slice", default="dev", choices=["dev", "golden", "train"])
+    p.add_argument("--rater", default="owner")
+    p.add_argument("--port", type=int, default=8767)
+    p.set_defaults(fn=cmd_sit)
 
     p = sub.add_parser("scoreboard")
     p.set_defaults(fn=cmd_scoreboard)
