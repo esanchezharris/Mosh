@@ -6,6 +6,22 @@
 build tooling, outside the safe allowlist) · **First-session verdict (2026-07-12): GAP EXISTS —
 this is a BUILD plan.**
 
+> ## STATUS: BUILT 2026-07-27 — see "Result" at the bottom
+>
+> The 2026-07-12 plan below was re-verified against the tree 15 days later and its verdict
+> **still held**: nothing had been built. Two of its rows have since changed, though, and the
+> plan text is left as written rather than retro-edited:
+> - `docs/DEPENDENCY_BOM.md` is now **committed** (FS-000 landed), so the soft prereq is met.
+> - The release output dir is now `~/Library/Mosh/release`, **not** `~/Desktop/Mosh-share` —
+>   FS-K1 moved it because iCloud re-applies FinderInfo under `codesign`. Ignore the Desktop
+>   path where the plan mentions it.
+> - The §0 baselines quoted below (selftest ≈1254, vitest ≈874, e2e 125) are stale; they are
+>   ~2045, 2020 and 254 today. Counts are environment-dependent — never paste one into a gate.
+>
+> One thing the plan did **not** anticipate: `Contents/Frameworks/Sparkle.framework` now ships
+> (FS-K2, the same day), so the bundle has a third-party binary payload for the first time. It
+> has a BOM row, and the enumeration maps it.
+
 Backlog row (do not invent a schema; this is the registered one):
 `{"id":"FS-K4","lane":"K","title":"Wire the K1 packaging check + BOM enforcement","class":"native",`
 `"size":"M","order":35,"files":["scripts/","run-mosh.sh"], … owner-merge}`.
@@ -192,3 +208,77 @@ without touching the deploy script — which is exactly why K4/K1 are owner-gate
 - **JUCE 8 free-tier splash confirmation** (BOM §5 caveat: JUCE 7 required a splash; whether JUCE 8
   Starter/Indie does was not verified). If confirmed required, it is a *build/branding* change, not a
   packaging-check change — track separately, not in FS-K4.
+
+---
+
+## Result — BUILT 2026-07-27
+
+### What landed
+
+| Path | Role |
+|---|---|
+| `service/scripts/packaging_check.py` | NEW — the check. `--emit-notices` / `--bundle <app>` / static enumeration. |
+| `service/scripts/packaging_check_test.py` | NEW — 21 hermetic assertions, auto-discovered by `gate.sh run_py_tests`. |
+| `run-mosh.sh` | EDIT — `stage_notices` + `packaging_check` wired **fail-closed** into `deploy` and `release`; **warn-only** on `deploy-anira`. |
+| `docs/FUNDRAISE_NOTES.md` | NEW — BOM §2 thresholds where the owner reads them at raise close. |
+| `docs/DEPENDENCY_BOM.md` | §4 marked WIRED; the `ui/` gap recorded. |
+
+### Evidence
+
+Against a **real notarized bundle** (the FS-K2 `rel-0.0.2` app), not a fixture:
+
+```
+no NOTICES.txt                      → FAIL, exit 1   "missing Contents/Resources/NOTICES.txt"
++ generated NOTICES.txt             → OK,   exit 0   "distributable"
++ planted libanira.2.dylib          → FAIL, exit 1   "RAVE/anira artifact … SPEC §1.11"
+  same, --warn-only                 → exit 0         (the deploy-anira path)
+dylib removed                       → OK,   exit 0
+```
+
+Hermetic suite: **21/21**, and the whole `service/` Python suite (91 files) stays green.
+
+### Three judgement calls worth knowing
+
+1. **"Ship status: OK" ≠ "is in the bundle."** The BOM's column means *legally clear to ship*.
+   Qwen3-30B-A3B's own row says it is not bundled; ACE-Step and SoulX are parked; sentry-native
+   is not built. Generating NOTICES from every OK row would attribute code we do not distribute
+   — false attribution, which is worse than a missing notice. So the shipped set is derived from
+   an explicit `PAYLOAD` map, and two paired tests keep that honest: one asserts some OK rows are
+   *not* bundled (so the fixture is meaningful), the other asserts none of them leak into NOTICES.
+   Sabotaging `shipping_rows` to return all OK rows reds both.
+2. **Both documented false-positive traps are pinned as tests.** A `*rave*`-named beat recipe
+   must still PASS (four of them ship — `owner_newage_rave_*.json`; they are the music genre),
+   and a source `.ts` must not be mistaken for a TorchScript weight. TorchScript is detected by
+   **ZIP magic**, not extension, which also catches a weight renamed to `.bin`.
+3. **`Contents/Resources/ui` is a recorded gap, not a silent pass.** Vite inlines React et al.
+   into `index.html`, so third-party JS ships with no §1 row — which hook 2 forbids. Those deps
+   are MIT/BSD with no threshold or attribution condition, so failing the release over it would
+   block shipping for no legal reason. It is mapped with a written reason, printed by the static
+   enumeration on every run, and flagged in BOM §4. Adding an npm-inventory row is BOM work.
+
+### The check was green for the wrong reason once
+
+The first version of the anira test planted the dylib at `Contents/Resources/` and asserted
+`"anira" in failure`. It passed **with `find_forbidden()` stubbed to return `[]`** — because a
+dylib dropped there is *also* unmapped payload, and the assertion was reading the enumeration's
+error text. Only the sabotage run exposed it. Fixed by planting inside an already-mapped dir and
+asserting on `"RAVE/anira artifact"` specifically. Both artifact cases now go red when the
+detector is stubbed; restored clean (`grep SABOTAGE` → 0).
+
+### Gate
+
+`service/` Python suite 91/91 · `packaging_check_test.py` 21/21 · `bundle_completeness_test.py`
+still parses the edited `bundle_service` · `bash -n run-mosh.sh` clean · `--selftest` 2045/2045
+(no C++ touched — regression sanity only) · `grep SABOTAGE` clean.
+
+### Not done
+
+- **The live `./run-mosh.sh deploy` run.** It overwrites `/Applications/Mosh.app`, which is the
+  owner's working install; doing that unasked from a branch with unrelated uncommitted work is
+  not this lane's call. The check was instead exercised against a real notarized bundle by hand
+  (above), which runs the identical code path. Run `./run-mosh.sh deploy` to confirm the wiring
+  in situ.
+- **The optional in-app About/licences surface** stays deferred — K1 accepts *"about screen **or**
+  bundled NOTICES file"*, and the bundled file now exists.
+- **O4 (register SA3 commercial use)** is what makes the "Powered by Stability AI" notice legally
+  *true*. The check asserts the string is present; it cannot assert the registration happened.

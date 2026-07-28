@@ -38,7 +38,7 @@ items in §5. Prices and thresholds re-confirm at purchase. Longer clause excerp
 | ACE-Step 1.5 | MIT (HF card `ACE-Step/Ace-Step1.5` + repo LICENSE) | OK | none | Retain MIT notice. Card is explicitly commercial-friendly with licensed/royalty-free/synthetic training-data statement; responsible-use language is advisory. **Version note: ACE-Step v1 (3.5B) is Apache-2.0 — record which version ships** |
 | SoulX-Singer | Apache-2.0 (HF card `Soul-AILab/SoulX-Singer` + repo) | OK | none | Retain LICENSE/NOTICE. Consent language advisory — Mosh's own-voice-only design complies in spirit; keep a voice-consent line in the tester agreement |
 | Qwen3-30B-A3B | Apache-2.0 (HF card + repo LICENSE) | OK (adapter is local tooling; not bundled in the app) | none | Retain notices if a derivative ever distributes. **Not all Qwen generations are Apache — re-check the license field before adopting any other Qwen variant** |
-| Sparkle 2 | MIT (sparkle-project.org + repo) | OK | none | Notice retention |
+| Sparkle 2 | MIT (sparkle-project.org + repo) | OK | none | Notice retention. **Actually ships as of FS-K2** — `Contents/Frameworks/Sparkle.framework` 2.9.4, pinned in `scripts/release/sparkle-pin.env`. This row's obligation is now live rather than hypothetical, and the framework carries no LICENSE file of its own, so the MIT text has to come from the NOTICES surface K4 generates from this table |
 | sentry-native SDK | MIT (repo LICENSE). SDK only — Sentry *server* licensing differs and is irrelevant here | OK | none | Notice retention. Hosted sentry.io = standard SaaS; configure PII scrubbing on crash payloads before external builds |
 | Opus (libopus) | 3-clause BSD + royalty-free patent grants (opus-codec.org/license) | OK | none | Notice retention. Do not copy code from the GPLv2 `opusinfo` tool |
 | Supabase client libraries | MIT/Apache (clients) | OK | none | Nothing unusual |
@@ -85,6 +85,20 @@ made available to end users). Conditions, wired into Lane T1:
 ---
 
 ## §4. Enforcement hooks (wired in Lane K)
+
+> **WIRED 2026-07-27 (FS-K4).** Hooks 1 and 2 are now a blocking script, not a note:
+> `service/scripts/packaging_check.py`, run fail-closed at the end of `./run-mosh.sh deploy`
+> and before signing in `./run-mosh.sh release` (warn-only on the non-distributable
+> `deploy-anira`). It generates `Contents/Resources/NOTICES.txt` **from the §1 table below**,
+> so the shipped notices cannot drift from this document. Hermetic tests:
+> `service/scripts/packaging_check_test.py`. Hook 4's thresholds are mirrored for the owner in
+> [`FUNDRAISE_NOTES.md`](FUNDRAISE_NOTES.md).
+>
+> One caveat the check records rather than hides: `Contents/Resources/ui` ships third-party JS
+> (React et al., inlined into `index.html` by Vite) with no §1 row. Those deps are MIT/BSD with
+> no threshold or attribution condition, which is presumably why §1 was scoped to the
+> licence-risky deps — but hook 2 says *anything* shipped needs a row, and this does not. Adding
+> an npm-inventory row is BOM work, not packaging-check work.
 
 1. **K1 packaging check (scripted, blocking):** no RAVE/anira artifacts or weights in the bundle;
    NOTICE/acknowledgements present for every §1 row that ships; "Powered by Stability AI" and
