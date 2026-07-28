@@ -539,3 +539,30 @@ numbers and hashes only.
     The `_end_word` fix's real effect is apostrophe handling (1.9% of packet
     context lines tokenize differently; 0 giveaway verdicts flip). Number
     normalization remains a dormant gap, not a live one.
+- **2026-07-28 — THE PROMPT PLATEAU WAS THE PALETTE. `prompt-rhyme-menu-fp` is
+  the new best arm: exact .413, topk .513.** Same prompt shape, same 40-word
+  budget as the historical arm — only the truncation changed (freq pool, shown
+  in full vs alpha pool cut to 24): **.320 → .413 exact** (+29% rel), and
+  rhyme_perfect .493. `llm-constrained` (.373/.486) is no longer the leader.
+  The other end of the dial: `-fp200` (all 200 pool words in-prompt) collapses
+  to .267 — DeepSeek's in-menu precision falls 57.3% → 28.7% as the wall grows
+  (choice overload), and its off-menu recall shuts down (19 off-menu-correct
+  @40 vs **1** @200). Decompositions: fp@40 = 50.0% menu coverage, 43 menu-hits
+  + 19 off-menu; fp200 = 90.7% coverage, 39 + 1. `-fp100` runs now to locate
+  the knee. Two-source framing: the earlier "prompt side plateaued" verdict is
+  VOID — it was measured against an alphabetically-truncated palette.
+  - **Known uniform artifact (recorded, deliberately not churned):** ~11% of
+    prompt-arm rows carry a multi-word candidate ("the division" for
+    `division`); last-word extraction would flip exact on 2–3 items per arm,
+    uniformly, reordering nothing. Fold into the next natural version bump.
+- **2026-07-28 — 21-agent adversarial review of the pool fix: 3 clusters
+  confirmed, all remediated (commits `195c7692`, `5c1bb528`).** (1) The freq
+  no-leak guard was memo-masked (vacuous); now cold-called + RED-proved — and
+  the same vacuity turned out to afflict the PRE-EXISTING prompt-rhyme-menu and
+  fusion leak guards, fixed structurally by scoping the menu memo to the
+  ArmContext (id()-keying eliminated). (2) `pool_sha` hashed the sorted SET, so
+  set-equal order-different pools shared localgen cache keys; order-sensitive
+  now, TRIE v2, both local arms re-run under cold keys. (3) "alpha byte-identical"
+  had no committed regression guard — an alpha golden now pins filter-after-cap.
+  Review also CONFIRMED the load-bearing equivalence: the shipped freq pipeline
+  computes exactly the probe's 89.3% set. 17/17 sabotages RED.
