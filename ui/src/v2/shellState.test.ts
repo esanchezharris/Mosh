@@ -40,6 +40,10 @@ describe("v2 shellState — browser drawer", () => {
 });
 
 describe("openBrowserTab pending collection (one-shot)", () => {
+  beforeEach(() => {
+    useShell.setState({ browserOpen: false, browserTab: "sounds", pendingCollection: null });
+  });
+
   it("opens the drawer on the tab with no collection by default", () => {
     useShell.getState().openBrowserTab("plugins");
     expect(useShell.getState().browserOpen).toBe(true);

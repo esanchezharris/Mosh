@@ -32,7 +32,7 @@ type Rows = ReturnType<typeof rowsForCollection>;
 
 // Shared state/logic — collections, search, rows, favorites, loading. The modal + the dock
 // each get their own instance (separate surfaces) but identical behavior.
-function usePluginPicker(onLoaded?: () => void, initialCollection?: CollectionId) {
+function usePluginPicker(onLoaded?: () => void) {
   const plugins = useStore((s) => s.availablePlugins);
   const builtins = useStore((s) => s.availableBuiltins);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -40,7 +40,7 @@ function usePluginPicker(onLoaded?: () => void, initialCollection?: CollectionId
   const ensureCatalog = useStore((s) => s.ensurePluginCatalog);
 
   const [q, setQ] = useState("");
-  const [collection, setCollection] = useState<CollectionId>(initialCollection ?? "all");
+  const [collection, setCollection] = useState<CollectionId>("all");
   const [favorites, setFavorites] = useState<string[]>(() => loadFavorites());
   const [recents, setRecents] = useState<string[]>(() => loadPluginRecents());
 
@@ -159,11 +159,20 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
 
 // ── The dock — collections as a chip row, then the shared list. The one v2 plugin surface. ──
 export function PluginDock() {
-  // ONE-SHOT read: "Add instrument…" asks the drawer to open on Instruments. useState's
-  // initialiser runs once per mount, which is exactly the lifetime we want — after this
-  // the user's own chip clicks own the selection.
-  const [seed] = useState(() => useShell.getState().takePendingCollection() ?? undefined);
-  const pk = usePluginPicker(undefined, seed); // no onLoaded → the dock stays open after adding (it's a dock)
+  const pk = usePluginPicker(); // no onLoaded → the dock stays open after adding (it's a dock)
+  const { setCollection } = pk;
+  // "Add instrument…" asks the drawer to land on Instruments. An EFFECT, not a mount-time
+  // initialiser: StrictMode double-invokes initialisers (the clearing read would be thrown
+  // away), and this component stays mounted when the drawer is already on Plugins, so a
+  // later request has to reach it too. Clearing inside the effect keeps it one-shot — the
+  // user's own chip clicks own the selection afterwards.
+  const pending = useShell((s) => s.pendingCollection);
+  const takePendingCollection = useShell((s) => s.takePendingCollection);
+  useEffect(() => {
+    if (!pending) return;
+    setCollection(pending);
+    takePendingCollection();
+  }, [pending, setCollection, takePendingCollection]);
   // FIT-003 — v2 previously had ZERO rescan control and no progress UI at all (the
   // classic modal already had both). This brings the default shell to parity: a
   // compact Rescan button + a live indeterminate progress line while scanning.
