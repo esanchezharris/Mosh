@@ -38,12 +38,38 @@ have() { command -v "$1" >/dev/null 2>&1; }
 if [ "${1:-}" = "--set-token" ]; then
   KEY="${2:-}"
   case "$KEY" in
-    SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|OPENAI_API_KEY|XAI_API_KEY) ;;
-    *) echo "usage: $0 --set-token {SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID}" >&2; exit 2 ;;
+    SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|OPENAI_API_KEY|XAI_API_KEY) ;;
+    CLOUDFLARE_ACCOUNT_ID)
+      echo "CLOUDFLARE_ACCOUNT_ID is discovered automatically from the API token — do not set it" >&2
+      echo "by hand. Set CLOUDFLARE_API_TOKEN, then just run: $0" >&2
+      exit 2 ;;
+    *) echo "usage: $0 --set-token {SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|OPENAI_API_KEY}" >&2; exit 2 ;;
   esac
   printf 'Paste %s (input hidden), then Enter: ' "$KEY" >&2
   IFS= read -rs VALUE; echo >&2
   [ -n "$VALUE" ] || { echo "empty — nothing written." >&2; exit 1; }
+
+  # SHAPE CHECK. Hidden prompts that look identical invite a one-slot paste shuffle, and
+  # the resulting failure is unreadable: a Supabase token in CLOUDFLARE_API_TOKEN and a
+  # Cloudflare token in CLOUDFLARE_ACCOUNT_ID produced
+  #   "Could not route to /accounts/cfut_.../r2/buckets ... [code: 7003]"
+  # which names neither the wrong key nor the wrong value. Checking the prefix costs
+  # nothing and turns that into one clear line. Never prints the value.
+  bad=""
+  case "$KEY" in
+    SUPABASE_ACCESS_TOKEN) case "$VALUE" in sbp_*) ;; *) bad="expected a Supabase token (sbp_…)";; esac ;;
+    CLOUDFLARE_API_TOKEN)  case "$VALUE" in
+                             sbp_*) bad="that is a SUPABASE token (sbp_…), not a Cloudflare one";;
+                             *) [ "${#VALUE}" -eq 32 ] && bad="that looks like an account ID, not an API token";;
+                           esac ;;
+    OPENAI_API_KEY)        case "$VALUE" in sk-*) ;; *) bad="expected an OpenAI key (sk-…)";; esac ;;
+    XAI_API_KEY)           case "$VALUE" in xai-*) ;; *) bad="expected an xAI key (xai-…)";; esac ;;
+  esac
+  if [ -n "$bad" ]; then
+    unset VALUE
+    echo "  REFUSED: $bad. Nothing written — re-run and paste the right one." >&2
+    exit 1
+  fi
   touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
   # Replace an existing line rather than appending a duplicate the shell would re-read.
   if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
@@ -128,6 +154,21 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   say "      CLOUDFLARE_ACCOUNT_ID=...        # shown on the R2 overview page"
   say ""
 else
+  # Discovered, never pasted. Asking for it was a third near-identical hidden prompt and
+  # that is exactly where the paste shuffle happened; the token already knows the answer.
+  if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+    ACC="$(wrangler whoami 2>/dev/null | grep -oE '\b[0-9a-f]{32}\b' | head -1 || true)"
+    if [ -n "$ACC" ]; then
+      grep -v '^CLOUDFLARE_ACCOUNT_ID=' "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+      mv "$ENV_FILE.tmp" "$ENV_FILE"; chmod 600 "$ENV_FILE"
+      printf 'CLOUDFLARE_ACCOUNT_ID=%s\n' "$ACC" >> "$ENV_FILE"
+      export CLOUDFLARE_ACCOUNT_ID="$ACC"
+      say "── R2: discovered account $ACC (not a secret — it is in every dashboard URL)"
+    else
+      say "!! could not discover the Cloudflare account id — is CLOUDFLARE_API_TOKEN valid?"
+      say "   check with: wrangler whoami"
+    fi
+  fi
   for bucket in mosh-takes mosh-updates; do
     say "── R2: ensuring bucket $bucket ──"
     if wrangler r2 bucket create "$bucket" 2>&1 | tee /dev/stderr | grep -qi "already"; then
