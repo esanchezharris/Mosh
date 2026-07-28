@@ -35,8 +35,13 @@ export function makeSingleShotRunner(deps: SingleShotDeps): AgentRunner {
     const transcript: StepRecord[] = [];
     let snapshot = await env.getSnapshot();
     const system = buildSystemPrompt(deps.rules ?? DEFAULT_RULES, snapshot);
+    // Prior turns sit between the system block and this turn's ask — the same
+    // placement the shipped brain uses (agent/brain.ts keeps `history.slice(-8)`
+    // after the system message). With no history the array is byte-identical to
+    // the pre-conversation shape, so single-turn scoreboards stay comparable.
     const base: ChatMessage[] = [
       { role: "system", content: system },
+      ...(task.history ?? []).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
       { role: "user", content: task.ask },
     ];
 

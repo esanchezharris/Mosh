@@ -3808,6 +3808,28 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (trackById (plain).getProperty ("type", var()).toString() == "audio", "undo reverts set_track_type to audio");
         check (! (bool) trackById (plain).getProperty ("isInstrument", true), "undo removes the auto-loaded kit");
 
+        // ...but a track HOLDING WAVE AUDIO must refuse the drum flip: the auto-loaded
+        // sampler would silence the audio. add_drum_pattern has guarded this since
+        // DRM-002; set_track_type did not, so the same destruction was one command
+        // away — and it became reachable once the agent prompt started showing track
+        // type (2026-07-27), which led models to "fix" the type instead.
+        {
+            auto wv = cmd (ops, "create_track", args1 ("name", "WaveKeep"))["data"].getProperty ("trackId", var()).toString();
+            cmd (ops, "add_test_tone_clip", objN ({{ "trackId", wv }, { "seconds", 0.5 }}));
+            auto rj = cmd (ops, "set_track_type", objN ({{ "trackId", wv }, { "type", "drum" }}));
+            check (! ok (rj), "set_track_type drum is REJECTED on a track holding wave audio");
+            check (rj.getProperty ("error", var()).toString().contains ("silence"),
+                   "set_track_type rejection names the silencing risk");
+            check (trackById (wv).getProperty ("type", var()).toString() == "audio",
+                   "the rejected flip left the track's type untouched");
+            check (! (bool) trackById (wv).getProperty ("isInstrument", false),
+                   "the rejected flip loaded no sampler");
+            // The reverse direction stays allowed — nothing is silenced going to audio.
+            check (ok (cmd (ops, "set_track_type", objN ({{ "trackId", wv }, { "type", "audio" }}))),
+                   "set_track_type audio still allowed on a wave track");
+            cmd (ops, "remove_track", args1 ("trackId", wv));
+        }
+
         // Default-instrument policy: a MIDI clip on a plain audio track auto-loads 4OSC.
         auto mel = cmd (ops, "create_track", args1 ("name", "Mel"))["data"].getProperty ("trackId", var()).toString();
         cmd (ops, "add_midi_clip", objN ({{ "trackId", mel }, { "length", 1.0 }}));
@@ -6866,12 +6888,16 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         mosh::setEnvVar ("XAI_MODEL", "grok-test");
         mosh::setEnvVar ("XAI_API_KEY", "sk-test-xai");
         mosh::unsetEnvVar ("OPENAI_API_KEY");          // leave openai incomplete
+        // The local (MLX) seat must be cleared too, or a dev machine that is currently
+        // serving a model on 8080 for the agent bench would make `local` complete and
+        // flip the "nothing resolves" check below into a pass for the wrong reason.
+        mosh::unsetEnvVar ("LOCAL_BASE_URL"); mosh::unsetEnvVar ("LOCAL_API_KEY"); mosh::unsetEnvVar ("LOCAL_MODEL");
         mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
 
         auto info  = BrainProxy::providersInfo();
         auto provs = info.getProperty ("providers", var());
-        check (provs.isArray() && provs.getArray()->size() == 3,
-               "brain: three providers enumerated (deepseek/openai/xai)");
+        check (provs.isArray() && provs.getArray()->size() == 4,
+               "brain: four providers enumerated (deepseek/openai/xai/local)");
 
         auto chosen = BrainProxy::resolve();    // honours MOSHI_BRAIN_PROVIDER=xai
         check (chosen.id == "xai", "brain: MOSHI_BRAIN_PROVIDER selects the default provider");
@@ -6884,6 +6910,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto fallback = BrainProxy::resolve ("openai");   // incomplete → fall back
         check (fallback.id != "openai" && fallback.isComplete(),
                "brain: an incomplete requested provider falls back to a configured one");
+
+        // The local (MLX) seat, added with the in-app brain picker: a loopback server has
+        // nothing to authenticate, so URL + model alone must make it usable. Set no key.
+        mosh::setEnvVar ("LOCAL_BASE_URL", "http://127.0.0.1:8080/v1");
+        mosh::setEnvVar ("LOCAL_MODEL", "local-test-model");
+        auto localSeat = BrainProxy::resolve ("local");
+        check (localSeat.id == "local" && localSeat.isComplete(),
+               "brain: the local seat resolves from URL+model alone (key is defaulted)");
+        // ...and it must NOT have stolen the auto-default from the cloud seats: `local` is
+        // appended last, so an install that never sets LOCAL_* is unaffected by it existing.
+        mosh::unsetEnvVar ("MOSHI_BRAIN_PROVIDER");
+        check (BrainProxy::resolve().id == "deepseek",
+               "brain: adding the local seat left the auto-default unchanged");
+        mosh::setEnvVar ("MOSHI_BRAIN_PROVIDER", "xai");
+        mosh::unsetEnvVar ("LOCAL_BASE_URL"); mosh::unsetEnvVar ("LOCAL_MODEL");
+
+        // providersInfo is what the WebView picker reads — it must carry reachability and
+        // NEVER a key (the whole reason provider resolution stayed native).
+        check (! juce::JSON::toString (info).contains ("sk-test-deepseek"),
+               "brain: providersInfo leaks no API key to the WebView");
 
         auto badShape = BrainProxy::chat (var(), "deepseek");   // not an array → no HTTP
         check (! (bool) badShape.getProperty ("ok", true)

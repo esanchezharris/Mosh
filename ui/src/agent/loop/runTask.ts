@@ -68,7 +68,10 @@ const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string 
 
 async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   try {
-    return await brainChat(messages);
+    // Same seat the single-shot brain uses (agent/brain.ts) — read per step, so switching
+    // the picker mid-task takes effect on the next step. "" ⇒ undefined ⇒ backend default.
+    const picked = useSettings.getState().get("brainProvider");
+    return await brainChat(messages, typeof picked === "string" && picked !== "" ? picked : undefined);
   } catch {
     return mockLoopChat(messages); // proxy unreachable → the deterministic demo loop
   }

@@ -1,5 +1,9 @@
 # AGENTS.md
 
+*This file is for coding agents working **on** the repo. For driving the DAW **with** an AI
+— pointing Moshi at an API key, swapping seats, and benchmarking how well a model actually
+operates Mosh — see [docs/AGENT_ONBOARDING.md](docs/AGENT_ONBOARDING.md).*
+
 **Trunk:** `main` is the only development trunk (per
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
 the full v0 DAW slice plus the post-v0 work merged through 2026-07-16: the DAW-parity

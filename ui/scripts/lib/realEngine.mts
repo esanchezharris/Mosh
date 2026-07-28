@@ -180,6 +180,41 @@ export function callClaudeCli(
 // That makes this seat shape DIFFERENT from the HTTP sweep: always run a
 // cross-transport control (a model with an existing OpenRouter board) before
 // trusting comparisons. Usage + the final agent_message come from --json events.
+/** The reply contract as a JSON Schema, for `codex exec --output-schema`
+ *  (MOSH_CODEX_SCHEMA=1). Covers BOTH runner shapes in one object because a single
+ *  schema file serves every call in a run: `intent`/`say`/`commands` are the
+ *  single-shot contract (agent/brainCore.ts parseReply), and `status`/`plan` are
+ *  what the loop additionally reads (agent/loop/parse.ts).
+ *
+ *  Everything is optional and `additionalProperties` stays open on purpose. A
+ *  strict schema here would not be "validation", it would be a second, stricter
+ *  contract than the parser's — and the seat would then be measured against a rule
+ *  the HTTP seats never see, which is exactly the confound this is meant to remove.
+ *  `args` is deliberately unconstrained: per-command arg shapes live in the agent
+ *  catalog and are already enforced downstream by validateCommand. */
+const CODEX_REPLY_SCHEMA = {
+  type: "object",
+  properties: {
+    intent: { type: "string" },
+    say: { type: "string" },
+    status: { type: "string", enum: ["continue", "done", "need_user"] },
+    plan: {
+      type: "array",
+      items: { type: "object", properties: { goal: { type: "string" } }, additionalProperties: true },
+    },
+    commands: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { command: { type: "string" }, args: { type: "object", additionalProperties: true } },
+        required: ["command"],
+        additionalProperties: true,
+      },
+    },
+  },
+  additionalProperties: true,
+} as const;
+
 export function callCodexCli(
   model: string,
   messages: Array<{ role: string; content: string }>,
@@ -190,6 +225,10 @@ export function callCodexCli(
   const convo = rest.length === 1
     ? rest[0].content
     : rest.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
+  // NB the multi-message branch above is what carries a CONVERSATIONAL task's prior
+  // turns into this seat — history arrives as extra non-system messages and gets
+  // rendered as labelled [user]/[assistant] blocks. Nothing to add here for it.
+  //
   // Seat variants (MOSH_CODEX_SEAT):
   //   inline   — system delivered as a [system] block inside the user prompt.
   //              Measured cost on the 5.6-sol control: 58.8% vs 67.6% OpenRouter,
@@ -215,10 +254,18 @@ export function callCodexCli(
   } else {
     prompt = `[system]\n${sys}\n\n[user]\n${convo}\n\n${guard}`;
   }
+  // MOSH_CODEX_SCHEMA=1 → constrain the final message with --output-schema, so a
+  // reply that isn't the contract shape can't score as a task failure and silently
+  // inflate the seat's losses. OFF by default and A/B'd before adoption: this
+  // CHANGES the seat (it is a decoding constraint, not a parser), and the seat is
+  // demonstrably wording-sensitive — the "commands" guard cost ~9pp on its own.
+  const schemaPath = process.env.MOSH_CODEX_SCHEMA === "1" ? join(dir, "reply.schema.json") : null;
+  if (schemaPath) writeFileSync(schemaPath, JSON.stringify(CODEX_REPLY_SCHEMA, null, 2));
   const t0 = Date.now();
   const raw = spawnSync("codex", [
     "exec", "-m", model,
     ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
+    ...(schemaPath ? ["--output-schema", schemaPath] : []),
     "--ephemeral", "--ignore-user-config", "--skip-git-repo-check",
     "-s", "read-only", "--color", "never", "--json", "-",
   ], { cwd: dir, input: prompt, encoding: "utf8", timeout: 600_000 });

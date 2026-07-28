@@ -159,6 +159,30 @@ export const SETTINGS: SettingDef[] = [
     help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
   },
   {
+    // Which LLM seat drives Moshi. The option ids mirror BrainProxy::providers()
+    // (src/brain/BrainProxy.cpp) and the Vite dev proxy — a fixed, code-level list, so
+    // it stays a static enum. Which of them this install can actually REACH is a runtime
+    // fact (whose keys are set), read separately via bridge.listBrainProviders(); the
+    // picker greys out the rest. "" = whatever the backend would have chosen anyway, so
+    // the default is behaviour-identical to before this setting existed.
+    id: "brainProvider",
+    type: "enum",
+    default: "",
+    scope: "app",
+    category: "Moshi",
+    label: "Brain",
+    help: "Which model answers when you talk to Moshi. Auto uses whichever seat is configured. Local runs a model on this Mac (needs an OpenAI-compatible server and LOCAL_BASE_URL/LOCAL_MODEL set); the rest need that provider's API key.",
+    constraints: {
+      options: [
+        { value: "", label: "Auto" },
+        { value: "deepseek", label: "DeepSeek" },
+        { value: "openai", label: "OpenAI" },
+        { value: "xai", label: "Grok (xAI)" },
+        { value: "local", label: "Local (this Mac)" },
+      ],
+    },
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",

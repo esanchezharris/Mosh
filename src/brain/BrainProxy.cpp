@@ -141,6 +141,16 @@ Array<BrainProxy::Provider> BrainProxy::providers()
     all.add ({ "deepseek", "DEEPSEEK", env ("DEEPSEEK_BASE_URL"), env ("DEEPSEEK_API_KEY"), env ("DEEPSEEK_MODEL") });
     all.add ({ "openai",   "OPENAI",   env ("OPENAI_BASE_URL"),   env ("OPENAI_API_KEY"),   env ("OPENAI_MODEL") });
     all.add ({ "xai",      "GROK",     env ("XAI_BASE_URL"),      env ("XAI_API_KEY"),      env ("XAI_MODEL") });
+    // The MLX seat: an OpenAI-compatible server on this machine (mlx_lm.server serving a
+    // fused local model). Its key is a formality, so default it whenever LOCAL_BASE_URL is
+    // set — LOCAL_BASE_URL + LOCAL_MODEL then suffice, exactly as in the Vite dev proxy
+    // (ui/vite.config.ts → moshiBrain). Appended LAST so the auto-default order for an
+    // install with no LOCAL_* is byte-identical to before this entry existed.
+    const auto localUrl = env ("LOCAL_BASE_URL");
+    const auto localKey = env ("LOCAL_API_KEY");
+    all.add ({ "local", "LOCAL", localUrl,
+               localKey.isNotEmpty() ? localKey : (localUrl.isNotEmpty() ? String ("local") : String()),
+               env ("LOCAL_MODEL") });
     return all;
 }
 

@@ -28,7 +28,30 @@ export type GoalCheck =
       eq?: unknown; min?: number; max?: number; tol?: number }
   | { kind: "cmdOkAny"; names: string[]; min: number }
   | { kind: "netTrackLevelDelta"; track: string; dir: "down" | "up"; minDb: number; maxDb?: number }
-  | { kind: "sessionKey"; tonic: string; mode: string };
+  | { kind: "sessionKey"; tonic: string; mode: string }
+  | ConversationalCheck;
+
+/** Goals about behaviour ACROSS user turns, for the conversational categories.
+ *  Unlike every other check these read the TRANSCRIPT, not the snapshot — state
+ *  alone cannot distinguish "asked first, then acted" from "acted immediately",
+ *  and that distinction is the whole point of those tasks. Graded by
+ *  `gradeConversational` (scoreTask routes them); `grade()` never sees them, so
+ *  the moshi-bench single-turn caller is untouched. */
+export type ConversationalCheck =
+  /** Turn `turn` emitted ZERO commands and said something — it responded with
+   *  words instead of actions. NB: we do not verify the words form a question;
+   *  that needs a judge, the same limit the scripted follow-ups carry. */
+  | { kind: "askedAtTurn"; turn: number }
+  /** Turn `turn` landed at least one SUCCESSFUL command. */
+  | { kind: "actedAtTurn"; turn: number }
+  /** Nothing was mutated before turn `turn`. This is what makes "ask first" mean
+   *  something: without it an agent that acts AND asks scores like one that
+   *  waited, and the acting is exactly the behaviour the task is testing for. */
+  | { kind: "noCommandsBeforeTurn"; turn: number };
+
+const CONVERSATIONAL_KINDS = new Set(["askedAtTurn", "actedAtTurn", "noCommandsBeforeTurn"]);
+export const isConversationalCheck = (c: GoalCheck): c is ConversationalCheck =>
+  CONVERSATIONAL_KINDS.has((c as { kind: string }).kind);
 
 export type CheckResult = { check: GoalCheck; pass: boolean; note: string };
 export type CmdResult = { command: string; ok: boolean };
@@ -248,6 +271,51 @@ export function grade(check: GoalCheck, before: Snapshot, after: Snapshot, cmdRe
         && String(k.mode ?? "").toLowerCase() === check.mode.toLowerCase();
       return ok ? pass(`key ${k.tonic} ${k.mode}`) : fail(`key ${k.tonic ?? "?"} ${k.mode ?? "?"} ≠ ${check.tonic} ${check.mode}`);
     }
+    // Conversational checks need the transcript, which grade() does not receive.
+    // scoreTask routes them to gradeConversational; reaching here means a caller
+    // graded one directly. FAIL loudly rather than returning undefined — a check
+    // that silently vanished would read on a scoreboard as a check that passed.
+    case "askedAtTurn":
+    case "actedAtTurn":
+    case "noCommandsBeforeTurn":
+      return fail(`${check.kind} is a conversational check — grade via scoreTask/gradeConversational`);
+  }
+}
+
+// ── conversational grading (transcript, not snapshot) ─────────────────────────
+
+/** Steps belonging to one user turn. Steps carry `turn` only on conversational
+ *  runs; a single-turn run's steps are all implicitly turn 0. */
+const stepsOfTurn = (run: AgentTaskRun, turn: number) =>
+  run.transcript.filter((s) => (s.turn ?? 0) === turn);
+
+export function gradeConversational(check: ConversationalCheck, run: AgentTaskRun): CheckResult {
+  const fail = (note: string): CheckResult => ({ check, pass: false, note });
+  const pass = (note: string): CheckResult => ({ check, pass: true, note });
+
+  switch (check.kind) {
+    case "askedAtTurn": {
+      const steps = stepsOfTurn(run, check.turn);
+      if (steps.length === 0) return fail(`turn ${check.turn} never ran`);
+      const emitted = steps.reduce((n, s) => n + s.commands.length, 0);
+      if (emitted > 0) return fail(`turn ${check.turn} acted (${emitted} command(s)) instead of asking`);
+      const said = steps.some((s) => (s.say ?? "").trim().length > 0);
+      return said ? pass(`turn ${check.turn} asked`) : fail(`turn ${check.turn} emitted nothing and said nothing`);
+    }
+    case "actedAtTurn": {
+      const steps = stepsOfTurn(run, check.turn);
+      if (steps.length === 0) return fail(`turn ${check.turn} never ran`);
+      const ok = steps.reduce((n, s) => n + s.results.filter((r) => r.ok).length, 0);
+      return ok > 0 ? pass(`turn ${check.turn} landed ${ok} command(s)`) : fail(`turn ${check.turn} landed nothing`);
+    }
+    case "noCommandsBeforeTurn": {
+      const early = run.transcript
+        .filter((s) => (s.turn ?? 0) < check.turn)
+        .reduce((n, s) => n + s.commands.length, 0);
+      return early === 0
+        ? pass(`nothing touched before turn ${check.turn}`)
+        : fail(`${early} command(s) emitted before turn ${check.turn}`);
+    }
   }
 }
 
@@ -278,7 +346,11 @@ export function scoreTask(task: TaskSpec, before: Snapshot, run: AgentTaskRun): 
   const flat = run.transcript.flatMap((s) => [...s.results]);
   const emitted = run.transcript.reduce((n, s) => n + s.commands.length, 0);
   const invalid = run.transcript.reduce((n, s) => n + s.invalidCount, 0);
-  const checks = task.goals.map((g) => grade(g, before, run.finalSnapshot, flat));
+  // Conversational goals read the transcript; everything else reads the final
+  // snapshot. Routing here (rather than widening grade()) keeps moshi-bench's
+  // single-turn caller, which has no AgentTaskRun to give, exactly as it was.
+  const checks = task.goals.map((g) =>
+    isConversationalCheck(g) ? gradeConversational(g, run) : grade(g, before, run.finalSnapshot, flat));
   const goalsPass = checks.every((c) => c.pass);
   const cmdErrRate = flat.length ? flat.filter((r) => !r.ok).length / flat.length : 0;
   const invalidRate = emitted ? invalid / emitted : 0;

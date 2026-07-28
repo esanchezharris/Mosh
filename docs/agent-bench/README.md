@@ -21,6 +21,24 @@ vs par, command-error rate, invalid-command rate, wrong-defers (action tasks
 answered with a question) and defer-correct% (ambiguous tasks that correctly
 declined to act).
 
+## Suites
+
+- **`--suite single`** (default) — the 34 single-turn tasks above. Unchanged, so every
+  scoreboard from 2026-07-18 onward stays comparable.
+- **`--suite conversational`** — 12 multi-turn tasks (`converse-clarify` / `-correct` /
+  `-session` / `-recover`) added 2026-07-27. A task carries `followUps`, the harness drives
+  one runner call per user turn threading prior turns as history
+  (`ui/src/bench/conversation.ts`), and the env accumulates across turns so "undo that" and
+  "no, the other one" have something to refer to. Three transcript-reading goal kinds —
+  `askedAtTurn`, `actedAtTurn`, `noCommandsBeforeTurn` — grade behaviour that state alone
+  cannot distinguish.
+- **`--suite all`** — both. Success is a percentage of whatever ran, so **never compare
+  across suites**.
+
+Follow-up turns are literal strings, not a model playing the user: deterministic grading is
+what makes these numbers worth anything. The cost is that we can check *that* the agent
+asked and what it did with the answer, but not whether the question was well-posed.
+
 ## Substrates
 
 - **Real headless engine** (the gate): `Mosh --run-script` via cumulative-prefix
@@ -65,6 +83,11 @@ Needs a Mosh binary (`--bin`, or auto-discovered newest of the build trees /
 `~/mosh-agentbench-artifacts/<tag>/` — the by-ear side channel (never gating).
 
 ## Reading results honestly
+
+- **The codex seat's run-to-run spread is ~12pp.** Four runs of one identical config
+  (gpt-5.6-sol / agentsmd / xhigh) scored 22, 23, 24, 26 of 34. A single run of this seat
+  cannot support a comparison; quote a range or run n≥3. Reasoning effort showed no
+  detectable effect once that noise floor was known.
 
 - **compactSnapshot blind spots**: the brain's session rendering currently
   omits buses, the master chain, the tempo map and the key — master/tempo-map

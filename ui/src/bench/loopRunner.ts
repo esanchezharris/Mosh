@@ -10,5 +10,8 @@ export type LoopChatFn = (messages: ChatMessage[]) => Promise<{ content: string;
 
 export function makeLoopRunner(deps: { chat: LoopChatFn }): AgentRunner {
   return async (task, env, opts) =>
-    runAgentLoop({ ask: task.ask }, { chat: deps.chat, env, budgets: { maxSteps: opts.maxSteps } });
+    runAgentLoop(
+      { ask: task.ask, history: task.history },
+      { chat: deps.chat, env, budgets: { maxSteps: opts.maxSteps } },
+    );
 }

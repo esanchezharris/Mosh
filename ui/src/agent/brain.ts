@@ -44,6 +44,14 @@ export type Brain = { send: (text: string) => Promise<BrainReply>; clear: () => 
 
 const bestOfNOn = (): boolean => useSettings.getState().get("bestOfNServing") === true;
 const memoryOn = (): boolean => useSettings.getState().get("agentMemory") !== false;
+// Which brain seat to ask. "" (the default) sends NO provider, so the backend resolves
+// exactly as it did before this setting existed — MOSHI_BRAIN_PROVIDER, else the first
+// configured one. An explicit pick is honoured per call, and silently ignored by
+// BrainProxy::resolve if that seat isn't fully configured (it falls back rather than fails).
+const brainProvider = (): string | undefined => {
+  const v = useSettings.getState().get("brainProvider");
+  return typeof v === "string" && v !== "" ? v : undefined;
+};
 
 /** The M2/M3 memory section for one turn's query: the remember_preference tool doc
  *  (always, when the flag is on) plus whatever's relevant from the pools (M2 —
@@ -70,7 +78,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
       const memory = await memorySectionFor(text);
       const messages = [{ role: "system", content: systemPrompt(snap, text, memory) }, ...history.slice(-8)];
       try {
-        const { content } = await brainChat(messages);
+        const { content } = await brainChat(messages, brainProvider());
         const reply = parseReply(content);
 
         // Best-of-n augmentation (flag-gated). It must NEVER discard the valid
@@ -87,7 +95,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
           else {
             // Validator-retry (corrective ops) — one re-prompt with the exact failure.
             const retried = await maybeValidatorRetry(text, reply, messages, {
-              enabled: bestOfNOn, chat: brainChat, parse: parseReply, archive: archivePair,
+              enabled: bestOfNOn, chat: (m) => brainChat(m, brainProvider()), parse: parseReply, archive: archivePair,
             });
             if (retried) { chosen = retried; replaced = true; }
           }

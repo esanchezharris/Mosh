@@ -12,20 +12,75 @@ export type BrainReply = { say?: string; intent?: string; commands?: AgentComman
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
 
-function compactSnapshot(s: Snapshot): string {
+const db = (v: unknown): string => `${typeof v === "number" ? +v.toFixed(1) : 0}dB`;
+
+/** How Moshi SEES the session — the single renderer for every path.
+ *
+ *  History worth knowing before touching this: there used to be two. The
+ *  single-shot brain rendered a `compactSnapshot` (tempo, sections, tracks) while
+ *  the agentic loop rendered this richer block, on the reasoning that brainCore was
+ *  "byte-frozen for the SFT/gepa/bench consumers". The freeze held, and the cost of
+ *  it was that the shipped brain could not see the master bus, buses, the key or
+ *  the tempo map — so it was routinely asked to change things it had never been
+ *  shown. Measured 2026-07-27: EVERY model scored 0/3 or 1/3 on the bench's
+ *  `master` category through the compact renderer, while the loop (this block) and
+ *  a tool-driving seat that could call get_snapshot both got the same tasks right.
+ *  Since `agenticLoop` defaults OFF, that blindness shipped to real users.
+ *
+ *  So: one renderer, used by both paths. Two renderers is what caused the gap, and
+ *  keeping them in sync by hand is the thing that already failed once.
+ *
+ *  What the model needs to SEE, beyond the obvious: master (whose fader defaults to
+ *  −3dB, so "it's quiet" is often about a control it can't otherwise find), the
+ *  master chain, buses, the tempo map WITH the indices remove_tempo_change takes,
+ *  the key, and per-track pan/sends. */
+export function sessionBlock(s: Snapshot): string {
+  const ses = s.session;
+  const lines: string[] = [];
+  lines.push(`tempo ${ses?.tempo ?? 120} BPM, ${ses?.timeSigNumerator ?? 4}/${ses?.timeSigDenominator ?? 4}`);
+  const map = ses?.tempoMap;
+  if (map && map.length > 1)
+    lines.push(`tempo map (by index): ${map.map((p, i) => `[${i}] ${p.bpm}bpm@${p.time}s${(p.curve ?? 1) === 1 || (p.curve ?? 1) === -1 ? "" : " ramp"}`).join(", ")}`);
+  if (ses?.key) lines.push(`key: ${ses.key.tonic} ${ses.key.mode}`);
+  const m = s.master;
+  const chain = (m?.plugins ?? []).map((p) => (p as { name?: string }).name ?? "?").join(", ");
+  lines.push(`master: ${db(m?.volumeDb)} pan ${m?.pan ?? 0} chain:[${chain || "empty"}]`);
+  const buses = s.buses ?? [];
+  if (buses.length) lines.push(`buses: ${buses.map((b) => `${b.bus} "${b.name}"`).join(", ")}`);
+  const sections = (s.sections ?? [])
+    .map((x) => `${x.id} "${x.name}" beats ${x.startBeat}-${x.endBeat}`)
+    .join("; ");
+  lines.push(`sections: ${sections || "(none)"}`);
   const tracks = (s.tracks ?? [])
     .map((t) => {
       // ids are QUOTED so the model copies them as JSON strings — an unquoted
       // numeric-looking id (e.g. 17) gets emitted as the number 17, which fails
       // the string-typed trackId/clipId validation and the command is dropped.
-      const clips = (t.clips ?? []).map((c) => `"${c.id}":${c.type}@${c.start}s`).join(", ");
-      return `  "${t.id}" "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
+      //
+      // Clip LENGTH is rendered next to start because trim_clip/split_clip need it:
+      // "make it 3 seconds" is unanswerable without knowing what it is now.
+      const clips = (t.clips ?? [])
+        .map((c) => {
+          const gain = typeof c.gainDb === "number" && c.gainDb !== 0 ? ` ${c.gainDb}dB` : "";
+          return `"${c.id}":${c.type}@${c.start}s+${c.length ?? 0}s${gain}${c.mute ? " muted" : ""}`;
+        })
+        .join(", ");
+      const sends = ((t as { sends?: Array<{ bus: number; db?: number }> }).sends ?? [])
+        .map((x) => `bus${x.bus}@${x.db ?? 0}dB`).join(",");
+      // The per-track FX chain, IN ORDER — remove_plugin and reorder_plugin address
+      // plugins by index, so without this the model is choosing an index blind.
+      const fx = (t.plugins ?? [])
+        .map((p, i) => `${i}:${(p as { name?: string; type?: string }).name ?? (p as { type?: string }).type ?? "?"}`)
+        .join(",");
+      // Track TYPE decides what a command may legally do to it — a drum pattern on a
+      // wave track is rejected, and every model measured answered that rejection by
+      // converting the track (losing the audio). It could not see the type.
+      const kind = t.type ? ` ${t.type}` : "";
+      return `  "${t.id}" "${t.name}"${kind} ${t.volumeDb ?? 0}dB${t.pan ? ` pan ${t.pan}` : ""}${t.mute ? " muted" : ""}${t.solo ? " solo" : ""}${t.armed ? " armed" : ""}${sends ? ` sends:[${sends}]` : ""}${fx ? ` fx:[${fx}]` : ""} clips:[${clips}]`;
     })
     .join("\n");
-  const sections = (s.sections ?? [])
-    .map((x) => `${x.id} "${x.name}" beats ${x.startBeat}-${x.endBeat}`)
-    .join("; ");
-  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\nsections: ${sections || "(none)"}\ntracks:\n${tracks || "  (none)"}`;
+  lines.push("tracks:", tracks || "  (none)");
+  return lines.join("\n");
 }
 
 // The fixed persona/format preamble. Not optimized — it defines the reply contract.
@@ -71,7 +126,7 @@ export function buildSystemPrompt(
   const parts = [PREAMBLE, catalog ?? commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
   if (memory) parts.push(memory);
-  parts.push(rules, "Current session:", snap ? compactSnapshot(snap) : "(empty session)");
+  parts.push(rules, "Current session:", snap ? sessionBlock(snap) : "(empty session)");
   return parts.join("\n");
 }
 

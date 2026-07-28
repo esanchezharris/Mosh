@@ -793,6 +793,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const t = findTrack(str(args.trackId));
       if (!t) return err(command, "track not found");
       const type = str(args.type, "audio") === "drum" ? "drum" : "audio";
+      // Mock parity with MoshOps::cmdSetTrackType — converting a track holding wave
+      // audio to a drum track silences it; see the note there.
+      if (type === "drum" && t.clips.some((c) => c.type === "wave"))
+        return err(command, "track holds wave audio — making it a drum track would silence it. "
+          + "Make a NEW drum track instead (add_drum_pattern without trackId creates one), "
+          + "or pass the trackId of an existing drum track.");
       pushUndo();
       t.type = type;
       if (type === "drum") ensureInstrument(t, true);
@@ -2276,7 +2282,11 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       let t = str(args.trackId) ? findTrack(str(args.trackId)) : null;
       if (str(args.trackId) && !t) return err(command, "no track with that id");
       if (t && t.clips.some((c) => c.type === "wave"))
-        return err(command, "track holds wave audio — a drum sampler would silence it; use a drum track");
+        // Kept verbatim in step with MoshOps.cpp's copy (mock parity) — see the note
+        // there on why the recovery is spelled out rather than implied.
+        return err(command, "track holds wave audio — a drum sampler would silence it. "
+          + "Call add_drum_pattern again WITHOUT trackId to put the pattern on a new drum track, "
+          + "or pass the trackId of an existing drum track. Do NOT convert this track.");
       pushUndo();
       if (!t) {
         t = { id: nextTrackId(), index: snapshot.tracks.length, name: "Drums", type: "drum", volumeDb: 0, pan: 0, mute: false, solo: false, clips: [], plugins: [] };

@@ -1,12 +1,16 @@
-// The loop's OWN prompt module. brainCore's buildSystemPrompt/compactSnapshot
-// are byte-frozen for the SFT/gepa/bench consumers, so every loop-specific
-// prompt element — the multi-step reply contract, the loop rules, and the RICH
-// session block (master chain, buses, tempo map, key — the Phase-A visibility
-// fix) — lives here, in the loop path only.
+// The loop's OWN prompt module: the multi-step reply contract and the loop rules.
+//
+// The RICH session block used to live here too, because brainCore's prompt was
+// treated as byte-frozen for the SFT/gepa/bench consumers. That freeze is over
+// (2026-07-27): keeping the richer rendering loop-only meant the SHIPPED
+// single-shot brain could not see the master bus, buses, the key or the tempo map,
+// and `agenticLoop` defaults OFF — so the blindness reached real users. The
+// renderer now lives in brainCore as `sessionBlock` and BOTH paths import it.
+// Do not reintroduce a second copy; the divergence is what caused the bug.
 
 import { commandCatalogPrompt } from "../commands";
 import { retrieveCards, knowledgePromptSection } from "../knowledge";
-import { INTENTS } from "../brainCore";
+import { INTENTS, sessionBlock } from "../brainCore";
 import type { Snapshot } from "../../types";
 import type { StepRecord } from "../loopSeam";
 import type { PlanStep } from "./parse";
@@ -33,38 +37,9 @@ export const LOOP_RULES = [
   "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",
 ].join("\n");
 
-const db = (v: unknown): string => `${typeof v === "number" ? +v.toFixed(1) : 0}dB`;
-
-/** The rich session rendering — the compact style, plus everything the
- *  baseline proved the model needs to SEE: master (the fader defaults to −3dB!),
- *  its chain, buses, the tempo map (with the indices remove_tempo_change takes),
- *  the key, and per-track pan/sends. */
-export function richSessionBlock(s: Snapshot): string {
-  const ses = s.session;
-  const lines: string[] = [];
-  lines.push(`tempo ${ses?.tempo ?? 120} BPM, ${ses?.timeSigNumerator ?? 4}/${ses?.timeSigDenominator ?? 4}`);
-  const map = ses?.tempoMap;
-  if (map && map.length > 1)
-    lines.push(`tempo map (by index): ${map.map((p, i) => `[${i}] ${p.bpm}bpm@${p.time}s${(p.curve ?? 1) === 1 || (p.curve ?? 1) === -1 ? "" : " ramp"}`).join(", ")}`);
-  if (ses?.key) lines.push(`key: ${ses.key.tonic} ${ses.key.mode}`);
-  const m = s.master;
-  const chain = (m?.plugins ?? []).map((p) => (p as { name?: string }).name ?? "?").join(", ");
-  lines.push(`master: ${db(m?.volumeDb)} pan ${m?.pan ?? 0} chain:[${chain || "empty"}]`);
-  const buses = s.buses ?? [];
-  if (buses.length) lines.push(`buses: ${buses.map((b) => `${b.bus} "${b.name}"`).join(", ")}`);
-  const sections = (s.sections ?? []).map((x) => `${x.id} "${x.name}" beats ${x.startBeat}-${x.endBeat}`).join("; ");
-  lines.push(`sections: ${sections || "(none)"}`);
-  const tracks = (s.tracks ?? [])
-    .map((t) => {
-      const clips = (t.clips ?? []).map((c) => `"${c.id}":${c.type}@${c.start}s`).join(", ");
-      const sends = ((t as { sends?: Array<{ bus: number; db?: number }> }).sends ?? [])
-        .map((x) => `bus${x.bus}@${x.db ?? 0}dB`).join(",");
-      return `  "${t.id}" "${t.name}" ${t.volumeDb ?? 0}dB${t.pan ? ` pan ${t.pan}` : ""}${t.mute ? " muted" : ""}${t.solo ? " solo" : ""}${sends ? ` sends:[${sends}]` : ""} clips:[${clips}]`;
-    })
-    .join("\n");
-  lines.push("tracks:", tracks || "  (none)");
-  return lines.join("\n");
-}
+/** Re-exported so the loop's existing importers (and loopPrompt.test.ts) keep a
+ *  stable name while the implementation lives in brainCore — one renderer. */
+export const richSessionBlock = sessionBlock;
 
 /** System prompt for every loop call: loop preamble + full catalog +
  *  [knowledge for the ask] + [memory] + loop rules + the RICH session. Rebuilt fresh

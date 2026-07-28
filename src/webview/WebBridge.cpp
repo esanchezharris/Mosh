@@ -231,6 +231,20 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
+        // Which brain seats this install can reach — the native equivalent of the dev
+        // server's GET /api/brain/providers, and the only thing the in-app provider
+        // picker needs that did not already exist (brain_chat has always forwarded a
+        // per-call `provider`). Deliberately SYNCHRONOUS, unlike brain_chat: this reads
+        // the environment + the bundled brain.env only — no HTTP, no service spawn — so
+        // it cannot stall the message thread the way a service-spawning execute_command
+        // does. Keys are never included; providersInfo() exposes id/label/model/configured.
+        .withNativeFunction (
+            juce::Identifier ("list_brain_providers"),
+            [] (const juce::Array<juce::var>&,
+                juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                completion (BrainProxy::providersInfo());
+            })
         // WP-11 best-of-n relays (UI → generative service via native — the WebView
         // cannot reach the service port). Threaded like brain_chat: the escalation
         // blocks up to ~60s in GenerativeJobManager, so it must never run on the

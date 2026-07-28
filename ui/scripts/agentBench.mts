@@ -44,27 +44,40 @@ import {
   argFlag, brainConfigFromEnv, callBrain, callClaudeCli, callCodexCli, findBin, loadEnv, runScript, snapshotAt,
   type BrainUsage, type Cmd as EngineCmd,
 } from "./lib/realEngine.mts";
-import { AGENT_TASKS, type AgentTask } from "../src/bench/agentTasks";
+import { AGENT_TASKS, suiteTasks, type AgentTask, type SuiteName } from "../src/bench/agentTasks";
 import { scoreTask, type TaskScore } from "../src/bench/goalChecks";
 import { validateCommand } from "../src/agent/commands";
 import { screenDestructive, DESTRUCTIVE_BLOCK_REASON, type AgentCommandCall } from "../src/agent/destructiveScreen";
 import { makeSingleShotRunner } from "../src/bench/singleShotRunner";
 import { makeLoopRunner } from "../src/bench/loopRunner";
 import type { AgentEnv, AgentRunner, StepCommandResult } from "../src/agent/loopSeam";
+import { runConversation } from "../src/bench/conversation";
+import { runCodexMcpTask } from "./lib/codexMcpSeat.mts";
+import { buildSystemPrompt, DEFAULT_RULES } from "../src/agent/brainCore";
 import type { Snapshot } from "../src/types";
 
 const env = loadEnv();
 const RUNNER = argFlag("runner", "single")!;
 const CLAUDE_CLI = process.argv.includes("--claude-cli");
 const CODEX_CLI = process.argv.includes("--codex-cli");
-if (CLAUDE_CLI && CODEX_CLI) throw new Error("--claude-cli and --codex-cli are mutually exclusive");
+// The TOOL-DRIVING seat: codex reaches Mosh through an MCP server instead of
+// answering with one JSON blob. A different measurement, reported separately —
+// and it needs codex's sandbox off, see lib/codexMcpSeat.mts.
+const CODEX_MCP = process.argv.includes("--codex-mcp");
+if ([CLAUDE_CLI, CODEX_CLI, CODEX_MCP].filter(Boolean).length > 1)
+  throw new Error("--claude-cli / --codex-cli / --codex-mcp are mutually exclusive");
 const CLI_TRANSPORT = CLAUDE_CLI || CODEX_CLI;
 const baseOverride = argFlag("base");
 const keyEnv = argFlag("key-env");
 if (keyEnv && !env[keyEnv]) throw new Error(`--key-env ${keyEnv}: that env var is empty`);
-if (CLI_TRANSPORT && !argFlag("model")) throw new Error("--claude-cli/--codex-cli require --model");
-const cfg = CLI_TRANSPORT
-  ? { base: CLAUDE_CLI ? "claude-cli(subscription)" : "codex-cli(subscription)", key: "-", model: argFlag("model")! }
+if ((CLI_TRANSPORT || CODEX_MCP) && !argFlag("model"))
+  throw new Error("--claude-cli/--codex-cli/--codex-mcp require --model");
+const cfg = CLI_TRANSPORT || CODEX_MCP
+  ? {
+      base: CLAUDE_CLI ? "claude-cli(subscription)"
+        : CODEX_MCP ? "codex-mcp(subscription, tool-driving)" : "codex-cli(subscription)",
+      key: "-", model: argFlag("model")!,
+    }
   : brainConfigFromEnv(
       {
         ...env,
@@ -81,6 +94,13 @@ const MAX_STEPS = Number(argFlag("max-steps", "8"));
 // always-on-thinking models need headroom (their reasoning spends the cap).
 const CHAT_MAX_TOKENS = Number(argFlag("chat-max-tokens", "800"));
 const TASK_FILTER = (argFlag("tasks", "all") || "all").split(",");
+// Which suite: `single` (the 34 single-turn tasks every historical board measured,
+// and the DEFAULT so those boards stay comparable), `conversational` (the
+// multi-turn categories), or `all`. Success is a percentage of whatever ran, so
+// mixing suites silently would change what the headline number means.
+const SUITE = (argFlag("suite", "single") || "single") as SuiteName;
+if (!["single", "conversational", "all"].includes(SUITE))
+  throw new Error(`--suite must be single | conversational | all (got "${SUITE}")`);
 const RENDER = !process.argv.includes("--no-render");
 const ART_DIR = join(homedir(), "mosh-agentbench-artifacts", TAG);
 mkdirSync(OUT_DIR, { recursive: true });
@@ -214,13 +234,27 @@ type Row = {
   renders: string[];
 };
 
+/** The tool-driving seat needs the task's OWN setup + session, so unlike the chat
+ *  seats its runner is built per task rather than once for the sweep. */
+function makeMcpRunner(task: AgentTask, sessionBase: string, usage: BrainUsage): AgentRunner {
+  return async (t, env) => {
+    // Same system prompt the one-shot seats get, over the same start snapshot —
+    // so the only variable between this seat and --codex-cli is TOOL ACCESS.
+    const system = buildSystemPrompt(DEFAULT_RULES, await env.getSnapshot());
+    return runCodexMcpTask(t.ask, {
+      bin: BIN, model: cfg.model, setup: task.setup as EngineCmd[],
+      session: sessionBase, systemPrompt: system, usage,
+    });
+  };
+}
+
 async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
   const sessionBase = sessionSafe(`ab-${TAG}-${task.id}`);
   const realEnv = makeRealEnv(task, sessionBase);
   const before = await realEnv.getSnapshot();
 
   const t0 = Date.now();
-  let run = await runner({ ask: task.ask }, realEnv, { maxSteps: task.maxSteps ?? MAX_STEPS });
+  let run = await runConversation(task, runner, realEnv, { maxSteps: task.maxSteps ?? MAX_STEPS });
   // Async jobs (generative renders) need a settle window before the final read.
   if (task.needsWaitMs) run = { ...run, finalSnapshot: realEnv.finalSnapshot(task.needsWaitMs) };
   const wallMs = Date.now() - t0;
@@ -249,14 +283,18 @@ async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
 }
 
 async function main() {
-  const tasks = TASK_FILTER[0] === "all" ? [...AGENT_TASKS] : AGENT_TASKS.filter((t) => TASK_FILTER.includes(t.id));
+  // --tasks names ids explicitly and may reach outside the suite (handy for
+  // re-running one conversational task); otherwise the suite decides.
+  const tasks = TASK_FILTER[0] === "all"
+    ? [...suiteTasks(SUITE)]
+    : AGENT_TASKS.filter((t) => TASK_FILTER.includes(t.id));
   if (tasks.length === 0) throw new Error(`--tasks matched nothing (${TASK_FILTER.join(",")})`);
   const usage: BrainUsage = { promptTokens: 0, completionTokens: 0, calls: 0 };
-  const runner = makeRunner(usage);
+  const runner = CODEX_MCP ? null : makeRunner(usage);
 
   const rows: Row[] = [];
   for (const t of tasks) {
-    const r = await runTask(t, runner);
+    const r = await runTask(t, runner ?? makeMcpRunner(t, sessionSafe(`ab-${TAG}-${t.id}`), usage));
     rows.push(r);
     const s = r.score;
     process.stderr.write(

@@ -122,9 +122,16 @@ describe("renderTaskContext", () => {
 });
 
 describe("legacy prompt byte-stability pin", () => {
-  // The SHIPPED single-shot prompt (SFT/gepa/bench surface) must never move as
-  // a side effect of loop work. An INTENTIONAL prompt change updates this hash
-  // consciously — that is the point of the pin.
+  // The SHIPPED single-shot prompt (SFT/gepa/bench surface) must never move by
+  // ACCIDENT. An INTENTIONAL prompt change updates this hash consciously — that is
+  // the point of the pin.
+  //
+  // Since 2026-07-27 the session renderer is SHARED with the loop
+  // (brainCore.sessionBlock), so an edit made "for the loop" now moves this hash
+  // too. That is the intended coupling, not a leak: one renderer is what stops the
+  // two paths drifting again. If this pin fails after a loop-side edit, the
+  // question to ask is whether the shipped brain should see that change — usually
+  // the answer is yes, which is the whole reason they were merged.
   it("systemPrompt(FIXTURE) hash is unchanged", () => {
     const fixture = {
       schemaVersion: 1,
@@ -137,13 +144,25 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-07-26, consciously: `unfreeze_layer` was added to the agent catalog (the
-    // thaw for freeze_layer, which had none), and freeze_layer's own description was
-    // corrected — it used to say "commit the rendered audio", which described a label it
-    // wrote rather than what it does. The catalog is rendered into this prompt, so both
-    // edits move the hash. Nothing about the prompt's SHAPE changed.
-    // Previous pin: a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c
-    expect(hash).toBe("70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e");
+    // Moved 2026-07-27, consciously — and this one DID change the prompt's shape.
+    // "The unblinding": the shipped single-shot brain was rendering a compact block
+    // that hid most of the session, so it was routinely asked to change things it had
+    // never been shown. It now uses the same `sessionBlock` the loop does, and that
+    // block additionally renders what the catalog's own commands need:
+    //   • master (fader/pan/chain), buses, key, tempo map — every model scored 0/3
+    //     or 1/3 on the bench's `master` category while these were hidden;
+    //   • track TYPE — a drum pattern on a wave track is rejected, and every model
+    //     answered that rejection by CONVERTING the track (losing the audio),
+    //     because it could not see which kind it was;
+    //   • the per-track FX chain WITH indices — remove_plugin/reorder_plugin take an
+    //     index the model was previously guessing;
+    //   • clip length (and non-default gain/mute) — "make it 3 seconds" is
+    //     unanswerable without knowing what it is now.
+    // For THIS fixture the diff is: two added lines (`key:`, `master:`), the track
+    // line gains its type (`audio`), and the clip gains `+4s`.
+    // Previous pin: a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
+    // Before that:  70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
+    expect(hash).toBe("34f27dc06ab1dbcf1f2f4acfe883f0fd1eac4e02dcb9e43cc76629ca7d8bf20c");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

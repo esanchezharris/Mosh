@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { systemPrompt, buildSystemPrompt, DEFAULT_RULES, parseReply } from "./brainCore";
+import { systemPrompt, buildSystemPrompt, sessionBlock, DEFAULT_RULES, parseReply } from "./brainCore";
 import { validateCommand } from "./commands";
 import type { Snapshot } from "../types";
 
@@ -26,6 +26,49 @@ describe("systemPrompt id quoting", () => {
 
   it("states that ids are strings in the rules", () => {
     expect(systemPrompt(snap).toLowerCase()).toContain("string id");
+  });
+});
+
+describe("the shipped brain can SEE the whole session (the 2026-07-27 unblinding)", () => {
+  // The bug this guards: the single-shot prompt used to render only tempo, sections
+  // and tracks, so Moshi was asked to change the master bus — and the key, buses and
+  // tempo map — without ever being shown them. It failed the bench's entire `master`
+  // category for every model, and since `agenticLoop` defaults OFF it shipped.
+  //
+  // These assert the CONTENT a producer's request actually depends on, not the
+  // formatting. The sha256 pin in loopPrompt.test.ts covers exact bytes.
+
+  it("renders the master fader, its chain, and the key", () => {
+    const p = systemPrompt(snap);
+    expect(p).toContain("master:");
+    expect(p).toMatch(/master: .*chain:\[/);
+    expect(p).toContain("key: C major");
+  });
+
+  it("renders buses, per-track pan and sends when the session has them", () => {
+    const withRouting = {
+      ...snap,
+      buses: [{ bus: 0, name: "Reverb" }],
+      tracks: [{ ...snap.tracks[0], pan: -0.3, sends: [{ bus: 0, db: -10 }] }],
+    } as unknown as Snapshot;
+    const p = systemPrompt(withRouting);
+    expect(p).toContain('buses: 0 "Reverb"');
+    expect(p).toContain("pan -0.3");
+    expect(p).toContain("sends:[bus0@-10dB]");
+  });
+
+  it("renders the tempo map WITH the indices remove_tempo_change takes", () => {
+    const withMap = {
+      ...snap,
+      session: { ...snap.session, tempoMap: [{ time: 0, bpm: 120 }, { time: 8, bpm: 140 }] },
+    } as unknown as Snapshot;
+    expect(systemPrompt(withMap)).toContain("[1] 140bpm@8s");
+  });
+
+  it("is the SAME renderer the loop uses — one source, so they cannot drift again", async () => {
+    // The gap existed because there were two renderers and only one got the fix.
+    const { richSessionBlock } = await import("./loop/loopPrompt");
+    expect(richSessionBlock(snap)).toBe(sessionBlock(snap));
   });
 });
 

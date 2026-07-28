@@ -69,7 +69,14 @@ export type LoopRun = AgentTaskRun & { outcome: LoopOutcome; say?: string };
 const countInvalid = (calls: readonly AgentCommandCall[]): number =>
   calls.filter((c) => validateCommand(c.command, (c.args ?? {}) as Record<string, unknown>) !== null).length;
 
-export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promise<LoopRun> {
+/** `history` (optional) is the conversation before this turn's ask — used by the
+ *  conversational bench so a task can span several user turns. Absent for every
+ *  in-app call and every single-turn bench task, and when absent the message array
+ *  is byte-identical to the pre-conversation shape. */
+export async function runAgentLoop(
+  task: { ask: string; history?: readonly { role: "user" | "assistant"; content: string }[] },
+  deps: LoopDeps,
+): Promise<LoopRun> {
   const b: LoopBudgets = { ...DEFAULT_LOOP_BUDGETS, ...deps.budgets };
   const now = deps.now ?? (() => Date.now());
   const t0 = now();
@@ -91,6 +98,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
   const callModel = async (mode: TaskContextMode, goal?: string): Promise<LoopReply | null> => {
     const messages: ChatMessage[] = [
       { role: "system", content: buildLoopSystemPrompt(snap, task.ask, deps.memory) },
+      ...(task.history ?? []).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
       { role: "user", content: renderTaskContext({
           ask: task.ask, plan, planIdx, history: transcript,
           stepsLeft: Math.max(0, b.maxSteps - transcript.length), repliesLeft: repliesLeft(),

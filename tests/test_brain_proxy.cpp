@@ -58,7 +58,14 @@ namespace
         ScopedEnv k { "XAI_BASE_URL", "" };
         ScopedEnv l { "XAI_API_KEY", "" };
         ScopedEnv m { "XAI_MODEL", "" };
-        ScopedEnv n { "MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1" };   // also skip any stray bundled brain.env
+        // The `local` (MLX) seat. Load-bearing for hermeticity, not just completeness:
+        // this dev machine serves a local model on 8080 for the agent bench, so leaving
+        // LOCAL_* set would make `local` a CONFIGURED provider and flip the
+        // "no provider configured" cases below into passes-for-the-wrong-reason.
+        ScopedEnv n { "LOCAL_BASE_URL", "" };
+        ScopedEnv o { "LOCAL_API_KEY", "" };
+        ScopedEnv p { "LOCAL_MODEL", "" };
+        ScopedEnv q { "MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1" };   // also skip any stray bundled brain.env
     };
 }
 
@@ -147,4 +154,79 @@ TEST_CASE ("BrainProxy default path (proxy unset) is unchanged: no provider conf
     auto r = BrainProxy::chat (var (Array<var>{}), String());
     CHECK_FALSE ((bool) r.getProperty ("ok", true));
     CHECK (r.getProperty ("error", var()).toString().contains ("no brain provider configured"));
+}
+
+// ── The `local` (MLX) seat + the picker's provider list ──────────────────────────
+// Added with the in-app brain picker. The seat exists so a model served on THIS machine
+// (mlx_lm.server) is selectable from the packaged app, not only from the Vite dev proxy.
+
+TEST_CASE ("BrainProxy local seat needs no API key — URL + model are enough", "[brain][provider]")
+{
+    ScopedCleanBrainEnv clean;
+    // Deliberately NO LOCAL_API_KEY: a loopback server has nothing to authenticate, so
+    // requiring one would make the seat unusable exactly where it is meant to be used.
+    ScopedEnv url ("LOCAL_BASE_URL", "http://127.0.0.1:8080/v1");
+    ScopedEnv model ("LOCAL_MODEL", "some-fused-local-model");
+
+    const auto p = BrainProxy::resolve ("local");
+    CHECK (p.id == "local");
+    CHECK (p.isComplete());        // the defaulted key is what makes this true
+    CHECK (p.key.isNotEmpty());
+}
+
+TEST_CASE ("BrainProxy local seat stays absent when LOCAL_BASE_URL is unset", "[brain][provider]")
+{
+    ScopedCleanBrainEnv clean;
+    // The key must NOT be defaulted into existence on its own — otherwise every install
+    // would carry a half-configured "local" entry that the picker would then offer.
+    ScopedEnv model ("LOCAL_MODEL", "some-fused-local-model");
+
+    bool sawLocal = false;
+    for (const auto& p : BrainProxy::providers())
+        if (p.id == "local") { sawLocal = true; CHECK_FALSE (p.isComplete()); CHECK (p.key.isEmpty()); }
+    CHECK (sawLocal);              // present in the list, just not usable
+}
+
+TEST_CASE ("BrainProxy adding the local seat did not change the auto-default", "[brain][provider]")
+{
+    ScopedCleanBrainEnv clean;
+    // The additive claim, pinned: with a cloud seat AND a local seat both complete and no
+    // explicit preference, resolve() must still pick the cloud one — `local` is appended
+    // LAST, so an existing install's default is untouched by this entry's existence.
+    ScopedEnv burl ("DEEPSEEK_BASE_URL", "http://127.0.0.1:2");
+    ScopedEnv bkey ("DEEPSEEK_API_KEY", "sk-test");
+    ScopedEnv bmodel ("DEEPSEEK_MODEL", "deepseek-test");
+    ScopedEnv lurl ("LOCAL_BASE_URL", "http://127.0.0.1:8080/v1");
+    ScopedEnv lmodel ("LOCAL_MODEL", "some-fused-local-model");
+
+    CHECK (BrainProxy::resolve().id == "deepseek");
+    CHECK (BrainProxy::resolve ("local").id == "local");   // ...but an explicit pick still wins
+}
+
+TEST_CASE ("BrainProxy providersInfo reports reachability and leaks no key", "[brain][provider]")
+{
+    ScopedCleanBrainEnv clean;
+    ScopedEnv burl ("OPENAI_BASE_URL", "http://127.0.0.1:2");
+    ScopedEnv bkey ("OPENAI_API_KEY", "sk-secret-not-for-the-webview");
+    ScopedEnv bmodel ("OPENAI_MODEL", "some-model");
+
+    const auto info = BrainProxy::providersInfo();
+    const auto listVar = info.getProperty ("providers", var());
+    auto* list = listVar.getArray();          // bind first: a var temporary would die here
+    REQUIRE (list != nullptr);
+
+    bool sawConfiguredOpenAI = false, sawUnconfigured = false;
+    for (const auto& e : *list)
+    {
+        const bool configured = (bool) e.getProperty ("configured", false);
+        if (e.getProperty ("id", var()).toString() == "openai") { CHECK (configured); sawConfiguredOpenAI = true; }
+        else if (! configured) sawUnconfigured = true;
+    }
+    CHECK (sawConfiguredOpenAI);
+    CHECK (sawUnconfigured);                  // the picker can tell reachable from not
+
+    // The whole point of resolving keys natively: the payload the WebView receives
+    // carries ids/labels/models only. If this ever fails, a key is on its way to the UI.
+    CHECK_FALSE (JSON::toString (info).contains ("sk-secret-not-for-the-webview"));
+    CHECK (info.getProperty ("default", var()).toString() == "openai");
 }

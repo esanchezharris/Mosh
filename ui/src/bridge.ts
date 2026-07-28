@@ -133,6 +133,29 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+// Which brain seats this install can reach, for the in-app picker. Native
+// `list_brain_providers` in the packaged app, GET /api/brain/providers in dev — both
+// return { providers:[{id,label,model,configured}], default } and neither ever carries
+// a key. Resolves to an EMPTY list rather than throwing when there is no backend at all
+// (mock/browser), so a picker can render "no seats configured" instead of erroring.
+export type BrainProviderInfo = { id: string; label: string; model: string; configured?: boolean };
+export type BrainProviders = { providers: BrainProviderInfo[]; default: string };
+export async function listBrainProviders(): Promise<BrainProviders> {
+  const empty: BrainProviders = { providers: [], default: "" };
+  try {
+    if (realNative()) {
+      const r = (await native("list_brain_providers")()) as Partial<BrainProviders> | undefined;
+      return { providers: r?.providers ?? [], default: String(r?.default ?? "") };
+    }
+    const r = await fetch("/api/brain/providers");
+    if (!r.ok) return empty;
+    const j = (await r.json()) as Partial<BrainProviders>;
+    return { providers: j?.providers ?? [], default: String(j?.default ?? "") };
+  } catch {
+    return empty; // no bridge / no dev server — the picker degrades to "not configured"
+  }
+}
+
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
 // through the app, never directly; same layering as brain_chat). In dev/mock there
 // is no service to escalate to: escalateCandidates throws (the hook degrades to the

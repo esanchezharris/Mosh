@@ -35,6 +35,11 @@ export type StepRecord = {
   readonly invalidCount: number;
   /** Model latency for this step, ms. */
   readonly ms: number;
+  /** Which USER TURN this step belongs to (0-based; conversational tasks only).
+   *  A runner never sets this — the bench harness stamps it when it stitches the
+   *  per-turn runs together, so turn-addressed goals can find their turn. Absent
+   *  on every single-turn task, which is why it stays optional. */
+  readonly turn?: number;
 };
 
 export type AgentTaskRun = {
@@ -55,8 +60,18 @@ export type AgentEnv = {
   ): Promise<{ results: StepCommandResult[]; snapshot: Snapshot }>;
 };
 
+/** A prior conversational turn, as the model should see it replayed. `assistant`
+ *  carries the RAW reply text the model produced (the JSON blob), not a summary —
+ *  a paraphrase would teach it a reply shape it never emits. */
+export type ConversationMessage = { readonly role: "user" | "assistant"; readonly content: string };
+
 export type AgentRunner = (
-  task: { readonly ask: string },
+  /** `history` is the conversation BEFORE this turn's `ask` (empty/absent on turn
+   *  0). Runners splice it between the system message and the new user turn, so a
+   *  single-turn caller that passes nothing gets a byte-identical prompt to the
+   *  pre-conversation shape — that equivalence is what keeps every existing
+   *  scoreboard comparable across this change. */
+  task: { readonly ask: string; readonly history?: readonly ConversationMessage[] },
   env: AgentEnv,
   opts: { readonly maxSteps: number },
 ) => Promise<AgentTaskRun>;

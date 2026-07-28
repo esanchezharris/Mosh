@@ -4,7 +4,7 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
@@ -12,7 +12,7 @@ import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
-import { pickFiles, pickSaveFile, brainChat } from "../bridge";
+import { pickFiles, pickSaveFile, brainChat, listBrainProviders, type BrainProviderInfo } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "../ui/RecentProjectList";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -251,11 +251,55 @@ function OverflowMenu() {
               <div className="v2-menu-sep" />
               {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
               {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
+              <BrainSeatGroup open={open} onPick={close} />
             </div>
           </div>
         </>
       )}
     </div>
+  );
+}
+
+// ── Which model drives Moshi ─────────────────────────────────────────────────────
+// The seats are a fixed code-level list (settings/schema.ts `brainProvider`, mirroring
+// BrainProxy::providers()), but which of them THIS install can reach depends on whose
+// keys are set — a runtime fact only the backend knows. So the rows come from
+// bridge.listBrainProviders(), fetched LAZILY on menu open: never at module init, per
+// the rule that made the service-spawning commands freeze the UI. (This particular call
+// is cheap and native-synchronous — env reads only — but the discipline is the point.)
+//
+// Renders NOTHING unless there are at least two reachable seats: with one seat there is
+// no choice to make, and an inert "Brain" row would be pure noise. The full setting
+// (including seats that aren't configured yet) always stays available in Settings ▸ Moshi.
+export function BrainSeatGroup({ open, onPick }: { open: boolean; onPick: () => void }) {
+  const [seats, setSeats] = useState<BrainProviderInfo[] | null>(null);
+  const picked = useSettings((s) => s.get("brainProvider"));
+  const setSetting = useSettings((s) => s.set);
+
+  useEffect(() => {
+    if (!open || seats) return;
+    let alive = true;
+    void listBrainProviders().then((r) => {
+      if (alive) setSeats(r.providers.filter((p) => p.configured !== false));
+    });
+    return () => { alive = false; };
+  }, [open, seats]);
+
+  if (!seats || seats.length < 2) return null;
+
+  const row = (value: string, label: string, hint?: string) => (
+    <button key={value || "auto"} role="menuitem" data-brain-seat={value || "auto"}
+      onClick={() => { onPick(); setSetting("brainProvider", value); }}>
+      {label}{picked === value ? <kbd>current</kbd> : hint ? <kbd>{hint}</kbd> : null}
+    </button>
+  );
+
+  return (
+    <>
+      <div className="v2-menu-sep" />
+      {row("", "Brain: Auto")}
+      {seats.map((p) => row(p.id, `Brain: ${p.label}`, p.model))}
+    </>
   );
 }
 

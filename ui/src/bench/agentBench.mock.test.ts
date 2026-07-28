@@ -9,11 +9,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
-import { AGENT_TASKS, taskById } from "./agentTasks";
+import { AGENT_TASKS, CONVERSATIONAL_TASKS, SINGLE_TURN_TASKS, suiteTasks, taskById } from "./agentTasks";
 import { scoreTask, grade } from "./goalChecks";
 import { makeSingleShotRunner, type ChatMessage } from "./singleShotRunner";
 import { makeLoopRunner } from "./loopRunner";
 import { makeMockEnv, runMockSetup } from "./mockEnv";
+import { runConversation } from "./conversation";
+import type { AgentRunner } from "../agent/loopSeam";
 import { AGENT_COMMAND_MAP } from "../agent/commands";
 
 // A scripted brain: pops replies off a queue (JSON strings, exactly what a
@@ -54,9 +56,41 @@ describe("agent task suite — static sanity", () => {
   it("covers every category with multiple tasks", () => {
     const byCat: Record<string, number> = {};
     for (const t of AGENT_TASKS) byCat[t.category] = (byCat[t.category] ?? 0) + 1;
-    for (const cat of ["arrange", "compose-drums", "compose-melody", "mix", "master", "generative", "lyrics", "repair", "ambiguous"])
+    for (const cat of [
+      "arrange", "compose-drums", "compose-melody", "mix", "master", "generative", "lyrics", "repair", "ambiguous",
+      "converse-clarify", "converse-correct", "converse-session", "converse-recover",
+    ])
       expect(byCat[cat], `category ${cat}`).toBeGreaterThanOrEqual(2);
     expect(AGENT_TASKS.length).toBeGreaterThanOrEqual(28);
+  });
+
+  it("the single-turn suite is EXACTLY the historical 34 (scoreboard comparability)", () => {
+    // The number every board from 2026-07-18 onward is a percentage of. If a
+    // conversational task ever leaks into this suite, every historical comparison
+    // silently shifts while still looking like the same metric.
+    expect(SINGLE_TURN_TASKS).toHaveLength(34);
+    expect(SINGLE_TURN_TASKS.every((t) => !t.followUps)).toBe(true);
+    expect(CONVERSATIONAL_TASKS.every((t) => t.category.startsWith("converse-"))).toBe(true);
+    expect(suiteTasks("single")).toEqual(SINGLE_TURN_TASKS);
+    expect(suiteTasks("all")).toEqual(AGENT_TASKS);
+  });
+
+  it("conversational tasks are well-formed: follow-ups, turn-addressed goals in range", () => {
+    for (const t of CONVERSATIONAL_TASKS) {
+      const turns = 1 + (t.followUps?.length ?? 0);
+      expect(turns, `${t.id} needs >1 turn`).toBeGreaterThan(1);
+      expect(t.ambiguous, `${t.id} must not also be an ambiguous task`).toBeFalsy();
+      for (const g of t.goals) {
+        const k = (g as { kind: string }).kind;
+        if (k === "askedAtTurn" || k === "actedAtTurn" || k === "noCommandsBeforeTurn") {
+          const turn = (g as { turn: number }).turn;
+          // A goal addressing a turn that never runs would be unsatisfiable —
+          // a task that can only ever fail looks exactly like a hard task.
+          expect(turn, `${t.id} ${k} turn ${turn} out of range (${turns} turns)`).toBeLessThan(turns);
+          expect(turn).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
   });
 
   it("every setup command is agent-callable (keeps setups replayable on both substrates)", () => {
@@ -255,6 +289,204 @@ describe("goal predicates against real mock state", () => {
     ]);
     expect(grade({ kind: "netTrackLevelDelta", track: "808", dir: "down", minDb: 6 }, before, after, []).pass).toBe(true);
     expect(grade({ kind: "netTrackLevelDelta", track: "808", dir: "down", minDb: 20 }, before, after, []).pass).toBe(false);
+  });
+});
+
+describe("conversational tasks — the multi-turn driver", () => {
+  beforeEach(() => __resetMockForTests());
+
+  it("a task with no followUps is ONE runner call with no history (scoreboard comparability)", async () => {
+    // The load-bearing equivalence: every scoreboard recorded before conversations
+    // existed must still mean the same thing. If this breaks, all prior numbers are
+    // silently incomparable to all later ones.
+    const { task, env } = await freshEnvFor("mix-balance");
+    const calls: Array<{ ask: string; history?: readonly unknown[] }> = [];
+    const runner: AgentRunner = async (t, e) => {
+      calls.push({ ask: t.ask, history: t.history });
+      return { finalSnapshot: await e.getSnapshot(), transcript: [], stepCount: 0, deferred: true };
+    };
+    await runConversation(task, runner, env, { maxSteps: 4 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].ask).toBe(task.ask);
+    expect(calls[0].history ?? []).toEqual([]);
+  });
+
+  it("drives each turn with the prior turns as history, and stamps steps with their turn", async () => {
+    const { task, env } = await freshEnvFor("conv-clarify-louder");
+    const snap = await env.getSnapshot();
+    const drums = snap.tracks.find((t) => t.name === "Drums")!.id;
+
+    // Turn 0 asks; turn 1 acts. Exactly the behaviour the category rewards.
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "HUH", say: "which track — drums, 808, keys or the vocal?" }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: drums, db: 3 } }] }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    expect(run.transcript.map((s) => s.turn)).toEqual([0, 1]);
+    expect(run.transcript[0].commands).toHaveLength(0);
+    expect(run.transcript[1].results.every((r) => r.ok)).toBe(true);
+    // Asked THEN acted is not a deferral — the whole point of the category.
+    expect(run.deferred).toBe(false);
+  });
+
+  it("the second turn's prompt actually carries turn 0 (history threading)", async () => {
+    const { task, env } = await freshEnvFor("conv-clarify-louder");
+    const snap = await env.getSnapshot();
+    const drums = snap.tracks.find((t) => t.name === "Drums")!.id;
+    const { chat, seen } = scriptedChat([
+      JSON.stringify({ intent: "HUH", say: "which track?" }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: drums, db: 3 } }] }),
+    ]);
+    await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    expect(seen).toHaveLength(2);
+    const second = seen[1]!;
+    // system + user(turn0) + assistant(turn0 reply) + user(turn1)
+    expect(second).toHaveLength(4);
+    expect(second[1]).toEqual({ role: "user", content: task.ask });
+    expect(second[2].role).toBe("assistant");
+    expect(second[2].content).toContain("which track?");
+    expect(second[3].content).toBe(task.followUps![0].say);
+  });
+
+  it("an acting turn replays its COMMANDS to the next turn, so 'undo that' has a referent", async () => {
+    const { task, env } = await freshEnvFor("conv-correct-undo");
+    const snap = await env.getSnapshot();
+    const keysClip = snap.tracks.find((t) => t.name === "Keys")!.clips[0].id;
+    const { chat, seen } = scriptedChat([
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "duplicate_clip", args: { clipId: keysClip } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "undo", args: {} }] }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const assistantMsg = seen[1]!.find((m) => m.role === "assistant")!.content;
+    expect(assistantMsg).toContain("duplicate_clip");   // it can see WHAT it did
+    expect(run.transcript.map((s) => s.turn)).toEqual([0, 1]);
+  });
+
+  it("scores the clarify shape end-to-end: asked@0 + acted@1 + the state goal", async () => {
+    const { task, env, before } = await freshEnvFor("conv-clarify-louder");
+    const snap = await env.getSnapshot();
+    const drums = snap.tracks.find((t) => t.name === "Drums")!.id;
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "HUH", say: "which track?" }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: drums, db: 3 } }] }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const score = scoreTask(task, before, run);
+    expect(score.checks.filter((c) => !c.pass).map((c) => c.note)).toEqual([]);
+    expect(score.success).toBe(true);
+    expect(score.wrongDefer).toBe(false);
+  });
+
+  it("acting on turn 0 instead of asking FAILS the clarify task (the whole point)", async () => {
+    // An agent that guesses "louder" means the drums gets the state right and the
+    // BEHAVIOUR wrong. Without askedAtTurn this would score as a clean pass.
+    const { task, env, before } = await freshEnvFor("conv-clarify-louder");
+    const snap = await env.getSnapshot();
+    const drums = snap.tracks.find((t) => t.name === "Drums")!.id;
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: drums, db: 3 } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", say: "already done" }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const score = scoreTask(task, before, run);
+    expect(score.success).toBe(false);
+    expect(score.checks.find((c) => (c.check as { kind: string }).kind === "askedAtTurn")!.pass).toBe(false);
+    // ...and the state goal it "got right" still passed — proving the failure came
+    // from the behavioural check, not from the task being unsatisfiable.
+    expect(score.checks.find((c) => (c.check as { kind: string }).kind === "trackDelta")!.pass).toBe(true);
+  });
+
+  it("noCommandsBeforeTurn catches a half-guess made before the answer arrived", async () => {
+    const { task, env, before } = await freshEnvFor("conv-clarify-two-step");
+    const snap = await env.getSnapshot();
+    const t808 = snap.tracks.find((t) => t.name === "808")!.id;
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "HUH", say: "clean up what — levels, timing, arrangement?" }),
+      // Turn 1: jumps the gun and starts moving faders before being told which.
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: t808, db: -4 } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", say: "already balanced" }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const score = scoreTask(task, before, run);
+    expect(score.checks.find((c) => (c.check as { kind: string }).kind === "noCommandsBeforeTurn")!.pass).toBe(false);
+    expect(score.success).toBe(false);
+  });
+
+  it("conv-recover-clipping PASSES the correct fix — restoring the level it boosted", async () => {
+    // Regression pin for a task-design bug caught live on 2026-07-27: the first draft
+    // required the 808 to end 5 dB BELOW its original level, so a run that correctly
+    // undid its own +10 boost (ending at 0) was scored a failure while nothing could
+    // pass. A task that punishes the right answer is indistinguishable from a hard
+    // task on a scoreboard, which is exactly why this is pinned rather than eyeballed.
+    const { task, env, before } = await freshEnvFor("conv-recover-clipping");
+    const snap = await env.getSnapshot();
+    const t808 = snap.tracks.find((t) => t.name === "808")!.id;
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: t808, db: 10 } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: t808, db: 0 } }] }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const score = scoreTask(task, before, run);
+    expect(score.checks.filter((c) => !c.pass).map((c) => c.note)).toEqual([]);
+    expect(score.success).toBe(true);
+  });
+
+  it("conv-recover-clipping FAILS a half-fix that leaves the track hot", async () => {
+    // The other side of the band: +10 then only down to +6 is not a fix. Without this
+    // the task would pass anything that moved the fader in the right direction.
+    const { task, env, before } = await freshEnvFor("conv-recover-clipping");
+    const snap = await env.getSnapshot();
+    const t808 = snap.tracks.find((t) => t.name === "808")!.id;
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: t808, db: 10 } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_track_volume", args: { trackId: t808, db: 6 } }] }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+    expect(scoreTask(task, before, run).success).toBe(false);
+  });
+
+  it("conv-session-beat's final turn is reachable in ONE reply (no id-chaining)", async () => {
+    // The other 2026-07-27 design bug: the first draft asked a single-shot seat to
+    // create a track, add a clip to it, and add notes to that clip in one reply —
+    // impossible, since the ids don't exist until the earlier commands run. Seeding
+    // the Bass track + clip makes the last turn pure add_note, which this proves by
+    // playing exactly that and requiring the key goal to pass.
+    const { task, env, before } = await freshEnvFor("conv-session-beat");
+    const snap = await env.getSnapshot();
+    const clip = snap.tracks.find((t) => t.name === "Bass")!.clips[0].id;
+    const notes = [45, 48, 52, 55]; // A2 C3 E3 G3 — all in A minor
+    const { chat } = scriptedChat([
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_tempo", args: { bpm: 92 } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "add_drum_pattern", args: { pattern: "kick: x...x...; snare: ....x...; hat: x.x.x.x." } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: [{ command: "set_key", args: { tonic: "A", mode: "minor" } }] }),
+      JSON.stringify({ intent: "ACK_GOT_IT", commands: notes.map((pitch, i) => ({ command: "add_note", args: { clipId: clip, pitch, start: i, length: 0.5 } })) }),
+    ]);
+    const run = await runConversation(task, makeSingleShotRunner({ chat }), env, { maxSteps: 4 });
+
+    const score = scoreTask(task, before, run);
+    expect(score.checks.filter((c) => !c.pass).map((c) => c.note)).toEqual([]);
+    expect(score.success).toBe(true);
+  });
+
+  it("a brain error ends the conversation instead of replaying more turns at it", async () => {
+    const { task, env } = await freshEnvFor("conv-clarify-louder");
+    let calls = 0;
+    const runner: AgentRunner = async (_t, e) => {
+      calls++;
+      return { finalSnapshot: await e.getSnapshot(), transcript: [], stepCount: 0, deferred: true, error: "network down" };
+    };
+    const run = await runConversation(task, runner, env, { maxSteps: 4 });
+
+    expect(calls).toBe(1);              // turn 1 was never sent
+    expect(run.error).toBe("network down");
   });
 });
 

@@ -5849,6 +5849,24 @@ juce::var MoshOps::cmdSetTrackType (const juce::var& args)
     if (type != "audio" && type != "drum")
         return errResult ("set_track_type", "type must be 'audio' or 'drum'");
 
+    // Converting a track that HOLDS WAVE AUDIO to a drum track silences it: the flip
+    // auto-loads a sampler, and a synth on the source track means its wave clips stop
+    // sounding. add_drum_pattern has refused this since DRM-002 for exactly that
+    // reason — this path did not, so the same destruction was one command away.
+    //
+    // It became reachable in practice on 2026-07-27, when the agent prompt started
+    // rendering track TYPE: models that previously issued add_drum_pattern (and hit
+    // its guard) began pre-emptively "fixing" the type instead. Same recovery copy as
+    // that guard, so both routes teach the same move.
+    if (type == "drum")
+        for (auto* c : track->getClips())
+            if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                return errResult ("set_track_type",
+                    juce::String (juce::CharPointer_UTF8 (
+                        "track holds wave audio — making it a drum track would silence it. "
+                        "Make a NEW drum track instead (add_drum_pattern without trackId creates one), "
+                        "or pass the trackId of an existing drum track.")));
+
     beginTxn ("set_track_type");
     track->state.setProperty (ids::trackType, type, &undoManager());
     if (type == "drum")
@@ -6738,8 +6756,18 @@ juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
             return errResult ("add_drum_pattern", "no track with that id");
         for (auto* c : track->getClips())
             if (dynamic_cast<te::WaveAudioClip*> (c) != nullptr)
+                // The recovery is spelled out because "use a drum track" was read by
+                // every model measured as "convert THIS track" — they answered a
+                // rejection by flipping the wave track's type, losing the audio the
+                // rejection existed to protect (MoshAgentBench drums-new-hats, all
+                // seats). Naming the actual move — omit trackId and one gets created —
+                // is a copy fix, but it is the difference between an error that
+                // teaches and one that misleads.
                 return errResult ("add_drum_pattern",
-                    juce::String (juce::CharPointer_UTF8 ("track holds wave audio — a drum sampler would silence it; use a drum track")));
+                    juce::String (juce::CharPointer_UTF8 (
+                        "track holds wave audio — a drum sampler would silence it. "
+                        "Call add_drum_pattern again WITHOUT trackId to put the pattern on a new drum track, "
+                        "or pass the trackId of an existing drum track. Do NOT convert this track.")));
     }
 
     beginTxn ("add_drum_pattern");

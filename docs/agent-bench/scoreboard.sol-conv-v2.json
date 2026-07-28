@@ -1,0 +1,854 @@
+{
+  "tag": "sol-conv-v2",
+  "model": "gpt-5.6-sol",
+  "base": "codex-cli(subscription)",
+  "runner": "single",
+  "bin": "/Applications/Mosh.app/Contents/MacOS/Mosh",
+  "maxSteps": 8,
+  "ranAt": "2026-07-28T01:46:52.182Z",
+  "success": 0.75,
+  "passed": 9,
+  "total": 12,
+  "stepEffMean": 1,
+  "cmdErrRateMean": 0.016666666666666666,
+  "invalidRateMean": 0,
+  "wrongDefers": 0,
+  "deferCorrect": null,
+  "byCat": {
+    "converse-clarify": {
+      "pass": 1,
+      "total": 3
+    },
+    "converse-correct": {
+      "pass": 3,
+      "total": 3
+    },
+    "converse-session": {
+      "pass": 3,
+      "total": 3
+    },
+    "converse-recover": {
+      "pass": 2,
+      "total": 3
+    }
+  },
+  "usage": {
+    "promptTokens": 651947,
+    "completionTokens": 5290,
+    "calls": 29
+  },
+  "rows": [
+    {
+      "id": "conv-clarify-louder",
+      "category": "converse-clarify",
+      "ask": "make it louder",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "askedAtTurn",
+              "turn": 0
+            },
+            "pass": false,
+            "note": "turn 0 acted (1 command(s)) instead of asking"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Drums",
+              "field": "volumeDb",
+              "dir": "up",
+              "min": 1.5,
+              "max": 5
+            },
+            "pass": true,
+            "note": "volumeDb moved up 3.0"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_master_volume",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_master_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 18593,
+      "renders": []
+    },
+    {
+      "id": "conv-clarify-trim",
+      "category": "converse-clarify",
+      "ask": "trim it",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "askedAtTurn",
+              "turn": 0
+            },
+            "pass": true,
+            "note": "turn 0 asked"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "clipField",
+              "track": "808",
+              "clipIndex": 0,
+              "field": "length",
+              "min": 2.6,
+              "max": 3.4
+            },
+            "pass": true,
+            "note": "length=3"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "trim_clip"
+      ],
+      "results": [
+        {
+          "command": "trim_clip",
+          "ok": true
+        }
+      ],
+      "wallMs": 19387,
+      "renders": []
+    },
+    {
+      "id": "conv-clarify-two-step",
+      "category": "converse-clarify",
+      "ask": "can you clean this up",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "askedAtTurn",
+              "turn": 0
+            },
+            "pass": true,
+            "note": "turn 0 asked"
+          },
+          {
+            "check": {
+              "kind": "noCommandsBeforeTurn",
+              "turn": 2
+            },
+            "pass": false,
+            "note": "7 command(s) emitted before turn 2"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 2
+            },
+            "pass": true,
+            "note": "turn 2 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "808",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 2,
+              "max": 6
+            },
+            "pass": false,
+            "note": "volumeDb Δ-10.0 not down within [2,6]"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "normalize_clip",
+        "normalize_clip",
+        "set_track_volume",
+        "set_track_volume",
+        "set_track_volume",
+        "set_track_volume",
+        "set_master_volume",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "normalize_clip",
+          "ok": true
+        },
+        {
+          "command": "normalize_clip",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_master_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 29165,
+      "renders": []
+    },
+    {
+      "id": "conv-correct-too-much",
+      "category": "converse-correct",
+      "ask": "drop the drums 8 dB",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 0
+            },
+            "pass": true,
+            "note": "turn 0 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Drums",
+              "field": "volumeDb",
+              "eq": -3,
+              "tol": 1
+            },
+            "pass": true,
+            "note": "volumeDb=-3.000000476837158"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_track_volume",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 16864,
+      "renders": []
+    },
+    {
+      "id": "conv-correct-wrong-track",
+      "category": "converse-correct",
+      "ask": "bring up the bass a few dB",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 2 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "volumeDb",
+              "eq": 0,
+              "tol": 0.6
+            },
+            "pass": true,
+            "note": "volumeDb=-2.384185791015625e-7"
+          },
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Keys",
+              "field": "volumeDb",
+              "dir": "up",
+              "min": 1,
+              "max": 8
+            },
+            "pass": true,
+            "note": "volumeDb moved up 3.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_track_volume",
+        "set_track_volume",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 20493,
+      "renders": []
+    },
+    {
+      "id": "conv-correct-undo",
+      "category": "converse-correct",
+      "ask": "duplicate the keys clip",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 0
+            },
+            "pass": true,
+            "note": "turn 0 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "clipCount",
+              "track": "Keys",
+              "delta": 0
+            },
+            "pass": true,
+            "note": "Δclips 0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "duplicate_clip",
+        "undo"
+      ],
+      "results": [
+        {
+          "command": "duplicate_clip",
+          "ok": true
+        },
+        {
+          "command": "undo",
+          "ok": true
+        }
+      ],
+      "wallMs": 19213,
+      "renders": []
+    },
+    {
+      "id": "conv-session-beat",
+      "category": "converse-session",
+      "ask": "let's start a beat at 92 bpm",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "tempo",
+              "eq": 92
+            },
+            "pass": true,
+            "note": "tempo 92"
+          },
+          {
+            "check": {
+              "kind": "cmdOk",
+              "name": "add_drum_pattern",
+              "min": 1
+            },
+            "pass": true,
+            "note": "add_drum_pattern ×2"
+          },
+          {
+            "check": {
+              "kind": "sessionKey",
+              "tonic": "A",
+              "mode": "minor"
+            },
+            "pass": true,
+            "note": "key A minor"
+          },
+          {
+            "check": {
+              "kind": "notesInKey",
+              "track": "Bass",
+              "tonic": "A",
+              "mode": "minor",
+              "minNotes": 3
+            },
+            "pass": true,
+            "note": "4/4 in A minor"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 4,
+      "commands": [
+        "set_tempo",
+        "add_drum_pattern",
+        "create_track",
+        "add_drum_pattern",
+        "set_key",
+        "add_note",
+        "add_note",
+        "add_note",
+        "add_note"
+      ],
+      "results": [
+        {
+          "command": "set_tempo",
+          "ok": true
+        },
+        {
+          "command": "add_drum_pattern",
+          "ok": true
+        },
+        {
+          "command": "create_track",
+          "ok": true
+        },
+        {
+          "command": "add_drum_pattern",
+          "ok": true
+        },
+        {
+          "command": "set_key",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        },
+        {
+          "command": "add_note",
+          "ok": true
+        }
+      ],
+      "wallMs": 55564,
+      "renders": [
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/sol-conv-v2/conv-session-beat.before.wav",
+        "/Users/emiliosanchez-harris/mosh-agentbench-artifacts/sol-conv-v2/conv-session-beat.after.wav"
+      ]
+    },
+    {
+      "id": "conv-session-arrange",
+      "category": "converse-session",
+      "ask": "map this out — intro, verse, hook",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "sectionExists",
+              "name": "Hook"
+            },
+            "pass": true,
+            "note": "section \"Hook\" ok"
+          },
+          {
+            "check": {
+              "kind": "sectionExists",
+              "name": "Verse"
+            },
+            "pass": true,
+            "note": "section \"Verse\" ok"
+          },
+          {
+            "check": {
+              "kind": "clipStart",
+              "track": "808",
+              "clipIndex": 0,
+              "minSec": 3.8,
+              "maxSec": 4.2
+            },
+            "pass": true,
+            "note": "start 4s"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0.2,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "create_section",
+        "create_section",
+        "create_section",
+        "move_section",
+        "move_clip"
+      ],
+      "results": [
+        {
+          "command": "create_section",
+          "ok": true
+        },
+        {
+          "command": "create_section",
+          "ok": true
+        },
+        {
+          "command": "create_section",
+          "ok": true
+        },
+        {
+          "command": "move_section",
+          "ok": false,
+          "error": "no section: 738528d8a73d411ea8714a14fb58086e"
+        },
+        {
+          "command": "move_clip",
+          "ok": true
+        }
+      ],
+      "wallMs": 31108,
+      "renders": []
+    },
+    {
+      "id": "conv-session-mix",
+      "category": "converse-session",
+      "ask": "give the vocal some space",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "busCountDelta",
+              "delta": 1
+            },
+            "pass": true,
+            "note": "Δbuses 1"
+          },
+          {
+            "check": {
+              "kind": "sendExists",
+              "track": "Vocal"
+            },
+            "pass": true,
+            "note": "\"Vocal\" has a send"
+          },
+          {
+            "check": {
+              "kind": "trackDelta",
+              "track": "Drums",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1,
+              "max": 5
+            },
+            "pass": true,
+            "note": "volumeDb moved down 2.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 3,
+      "commands": [
+        "create_bus",
+        "add_send",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "create_bus",
+          "ok": true
+        },
+        {
+          "command": "add_send",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 37262,
+      "renders": []
+    },
+    {
+      "id": "conv-recover-clipping",
+      "category": "converse-recover",
+      "ask": "push the 808 way up, like 10 dB",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "808",
+              "field": "volumeDb",
+              "eq": 0,
+              "tol": 3
+            },
+            "pass": false,
+            "note": "volumeDb=6 ≠ 0"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Drums",
+              "field": "volumeDb",
+              "eq": 0,
+              "tol": 0.6
+            },
+            "pass": true,
+            "note": "volumeDb=0"
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_track_volume",
+        "set_track_volume"
+      ],
+      "results": [
+        {
+          "command": "set_track_volume",
+          "ok": true
+        },
+        {
+          "command": "set_track_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 19901,
+      "renders": []
+    },
+    {
+      "id": "conv-recover-solo",
+      "category": "converse-recover",
+      "ask": "solo the vocal so I can hear it on its own",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 0
+            },
+            "pass": true,
+            "note": "turn 0 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "trackField",
+              "track": "Vocal",
+              "field": "solo",
+              "eq": false
+            },
+            "pass": true,
+            "note": "solo=false"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_track_solo",
+        "set_track_solo"
+      ],
+      "results": [
+        {
+          "command": "set_track_solo",
+          "ok": true
+        },
+        {
+          "command": "set_track_solo",
+          "ok": true
+        }
+      ],
+      "wallMs": 13201,
+      "renders": []
+    },
+    {
+      "id": "conv-recover-tempo",
+      "category": "converse-recover",
+      "ask": "speed it way up",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "actedAtTurn",
+              "turn": 1
+            },
+            "pass": true,
+            "note": "turn 1 landed 1 command(s)"
+          },
+          {
+            "check": {
+              "kind": "tempo",
+              "eq": 120
+            },
+            "pass": true,
+            "note": "tempo 120"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 2,
+      "commands": [
+        "set_tempo",
+        "set_tempo"
+      ],
+      "results": [
+        {
+          "command": "set_tempo",
+          "ok": true
+        },
+        {
+          "command": "set_tempo",
+          "ok": true
+        }
+      ],
+      "wallMs": 19459,
+      "renders": []
+    }
+  ]
+}

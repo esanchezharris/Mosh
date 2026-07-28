@@ -12,7 +12,8 @@ namespace mosh
     the chat completion.
 
     Mirrors the dev proxy exactly (ui/vite.config.ts → moshiBrain):
-      • providers: deepseek | openai | xai, each via <PREFIX>_BASE_URL / _API_KEY / _MODEL
+      • providers: deepseek | openai | xai | local, each via <PREFIX>_BASE_URL / _API_KEY
+        / _MODEL (`local` defaults its key, so a URL + model are enough)
       • default: MOSHI_BRAIN_PROVIDER if fully configured, else the first complete one
       • request: POST {url}/chat/completions, response_format=json_object, max 800 tokens
       • OpenAI reasoning models (gpt-5/6, o-series) use max_completion_tokens + no temp
@@ -28,8 +29,9 @@ struct BrainProxy
         bool isComplete() const { return key.isNotEmpty() && url.isNotEmpty() && model.isNotEmpty(); }
     };
 
-    /** The three known providers with their env-resolved fields (regardless of
-        whether they are fully configured). Order: deepseek, openai, xai. */
+    /** The known providers with their env-resolved fields (regardless of whether they
+        are fully configured). Order: deepseek, openai, xai, local — `local` is LAST so
+        adding it did not change which provider an existing install auto-defaults to. */
     static juce::Array<Provider> providers();
 
     /** Pick the provider to use: `requested` if it is complete, else
@@ -50,7 +52,9 @@ struct BrainProxy
         so an unset MOSH_BRAIN_PROXY_URL is byte-identical to before this existed). */
     static juce::var chat (const juce::var& messages, const juce::String& requested = {});
 
-    /** Diagnostics for a future picker / the log: which providers are configured. */
+    /** Which providers are configured — { providers:[{id,label,model,configured}],
+        default }. Surfaced to the WebView by the `list_brain_providers` binding so the
+        in-app picker can offer exactly the seats this install can actually reach. */
     static juce::var providersInfo();
 
     /** True when MOSH_BRAIN_PROXY_URL is set — the signal to prefer the server-side

@@ -19,7 +19,7 @@ segment of the system prompt is parsed LIVE out of ui/src/agent/commands.ts
 (AGENT_COMMANDS) — never hand-copied — so this builder can't invent a command name
 or silently drift from the real agent catalog; the PREAMBLE/rules/session-render
 segments mirror ui/src/agent/brainCore.ts's PREAMBLE / DEFAULT_RULES /
-compactSnapshot (the persona/format contract, stable, kept in sync by hand).
+sessionBlock (the persona/format contract, kept in sync by hand — see render_session).
 
 Deterministic: no RNG, no wall-clock, no network, no I/O other than reading
 commands.ts and (optionally) writing --out. Running it twice byte-diffs identical.
@@ -160,7 +160,7 @@ def command_catalog_prompt(commands: list[Command]) -> str:
 
 
 # ── system-prompt scaffold — mirrors ui/src/agent/brainCore.ts PREAMBLE /
-#    DEFAULT_RULES / compactSnapshot verbatim (the persona/format contract) ────
+#    DEFAULT_RULES / sessionBlock verbatim (the persona/format contract) ────
 
 INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"]
 
@@ -185,10 +185,27 @@ DEFAULT_RULES = "\n".join([
 
 
 def render_session(track_id: str, track_name: str, clip_id: str, tempo: int = 120) -> str:
-    """Mirrors ui/src/agent/brainCore.ts compactSnapshot() for a one-track,
-    one-MIDI-clip session — the shape these add_note-population rows target."""
-    track_line = f'  "{track_id}" "{track_name}" 0dB clips:["{clip_id}":midi@0s]'
-    return f"tempo {tempo} BPM, 4/4\nsections: (none)\ntracks:\n{track_line}"
+    """Mirrors ui/src/agent/brainCore.ts sessionBlock() for a one-track,
+    one-MIDI-clip session — the shape these add_note-population rows target.
+
+    Updated 2026-07-27 with "the unblinding": sessionBlock replaced the old
+    compactSnapshot. Versus the previous shape this adds `key:` and `master:` lines,
+    the track's TYPE, and the clip's LENGTH (plus buses / tempo map / pan / sends /
+    fx / clip gain when present — none of which this minimal fixture has).
+
+    Training rows must carry the SAME prompt shape the app now sends: an adapter
+    trained on the old shape meets a prompt it never saw at serve time. Any adapter
+    built before this date (a3b-r5 and earlier) is trained against the OLD shape and
+    should be re-measured before being trusted on the new one.
+    """
+    track_line = f'  "{track_id}" "{track_name}" audio 0dB clips:["{clip_id}":midi@0s+4s]'
+    return (
+        f"tempo {tempo} BPM, 4/4\n"
+        "key: C major\n"
+        "master: 0dB pan 0 chain:[empty]\n"
+        "sections: (none)\n"
+        f"tracks:\n{track_line}"
+    )
 
 
 def build_system_prompt(commands: list[Command], track_id: str, track_name: str, clip_id: str) -> str:
