@@ -9,7 +9,13 @@ cmake_minimum_required(VERSION 3.24)
 # GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is CI-tracked
 # but not yet a supported target. See docs/2026-07-07-linux-build-spike.md.
 # ─────────────────────────────────────────────────────────────────────────────
-project(Mosh VERSION 0.0.1 LANGUAGES C CXX)
+# The shipped version. Overridable (-DMOSH_VERSION=0.0.2) because auto-update is only
+# testable across two of them: FS-K2's gate is "install 0.0.x, publish 0.0.y, update,
+# relaunch on 0.0.y", and Sparkle decides what is newer by comparing exactly this value
+# (CFBundleVersion / CFBundleShortVersionString, both fed from here by JUCE). Editing
+# this line for every test build would put a version bump in the diff of unrelated work.
+set(MOSH_VERSION "0.0.1" CACHE STRING "Bundle version (CFBundleShortVersionString + CFBundleVersion)")
+project(Mosh VERSION ${MOSH_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -289,6 +295,15 @@ if (MOSH_BUILD_APP)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
 
+        # FS-K2 — Sparkle 2 auto-update. Obj-C++ with ARC, same pattern as the two
+        # .mm TUs above. Compiles unconditionally on Apple; the Sparkle calls inside
+        # are behind MOSH_HAVE_SPARKLE, which cmake/Sparkle.cmake defines only when the
+        # framework is actually fetched and embedded (-DMOSH_ENABLE_SPARKLE=OFF builds
+        # the same TU as a no-op, so the call sites never need their own guards).
+        target_sources(Mosh PRIVATE src/app/SparkleUpdater.mm)
+        set_source_files_properties(src/app/SparkleUpdater.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+        include(cmake/Sparkle.cmake)
+
         # Suppress AppKit's window-restoration / "reopen after crash" modal on headless
         # CLI launches (see src/app/MacStateRestoration.h). Obj-C++ with ARC.
         target_sources(Mosh PRIVATE src/app/MacStateRestoration.mm)
@@ -319,16 +334,25 @@ if (MOSH_BUILD_APP)
         # /Applications/Mosh.app shipped). MoshFixInfoPlist (ALL, always-run) is the
         # injection-only backstop; MoshRefreshBundleMetadata below performs the final
         # inject + ad-hoc sign after resource staging.
+        #
+        # The Sparkle keys (SUFeedURL / SUPublicEDKey) ride the SAME path for the SAME
+        # reason — a naively-merged SUPublicEDKey would be dropped by the generator and
+        # the shipped app would refuse every update as unsigned.
         set(MOSH_INJECT_PLIST_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/InjectInfoPlistKeys.cmake")
+        set(MOSH_INJECT_PLIST_ARGS
+            "-DMOSH_SPARKLE_FEED_URL=${MOSH_SPARKLE_FEED_URL}"
+            "-DMOSH_SPARKLE_PUBLIC_KEY=${MOSH_SPARKLE_PUBLIC_KEY}")
         add_custom_command(TARGET Mosh POST_BUILD
             COMMAND ${CMAKE_COMMAND}
                     -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    ${MOSH_INJECT_PLIST_ARGS}
                     -P "${MOSH_INJECT_PLIST_SCRIPT}"
-            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera)"
+            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera + Sparkle)"
             VERBATIM)
         add_custom_target(MoshFixInfoPlist ALL
             COMMAND ${CMAKE_COMMAND}
                     -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    ${MOSH_INJECT_PLIST_ARGS}
                     -P "${MOSH_INJECT_PLIST_SCRIPT}"
             COMMENT "Re-injecting Info.plist keys into the app (no-relink/deploy-safe backstop)"
             VERBATIM)
@@ -351,6 +375,8 @@ if (MOSH_BUILD_APP)
     #    NativeSpeech.h surface WebBridge links against. ──────────────────────────
     if (NOT APPLE)
         target_sources(Mosh PRIVATE src/voice/NativeSpeech_stub.cpp)
+        # Sparkle is macOS-only; the stub keeps Main.cpp/MenuController platform-free.
+        target_sources(Mosh PRIVATE src/app/SparkleUpdater_stub.cpp)
         add_custom_command(TARGET Mosh POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                     "${CMAKE_SOURCE_DIR}/resources/drumkits"
@@ -390,10 +416,18 @@ if (MOSH_BUILD_APP)
             COMMAND ${CMAKE_COMMAND}
                     -DBUNDLE=$<TARGET_BUNDLE_DIR:Mosh>
                     -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
+                    ${MOSH_INJECT_PLIST_ARGS}
                     -P "${CMAKE_SOURCE_DIR}/cmake/RefreshMacBundleMetadata.cmake"
             COMMENT "Refreshing macOS bundle Info.plist and ad-hoc signature"
             VERBATIM)
         add_dependencies(MoshRefreshBundleMetadata Mosh MoshFixInfoPlist)
+        # The ad-hoc `codesign --deep` inside RefreshMacBundleMetadata seals whatever is
+        # in the bundle, so Sparkle.framework must already be embedded when it runs —
+        # otherwise the dev bundle's signature does not cover the framework and the app
+        # fails codesign --verify --deep --strict the moment the framework lands.
+        if (TARGET MoshEmbedSparkle)
+            add_dependencies(MoshRefreshBundleMetadata MoshEmbedSparkle)
+        endif()
         if (TARGET MoshStageUI)
             add_dependencies(MoshRefreshBundleMetadata MoshStageUI)
         endif()

@@ -25,8 +25,12 @@ public:
     using ActionSink = std::function<void (const juce::var&)>;
     /** Returns the session's recentProjects array ([{ path, name }], newest-first). */
     using RecentProvider = std::function<juce::var()>;
+    /** Invoked by the application menu's "Check for Updates…" item (FS-K2). Pass an
+        empty function when no updater is configured — the item is then not added at
+        all, rather than added and inert. */
+    using UpdateAction = std::function<void()>;
 
-    MenuController (ActionSink sink, RecentProvider recents);
+    MenuController (ActionSink sink, RecentProvider recents, UpdateAction checkForUpdates = {});
     ~MenuController() override;
 
     /** Rebuild the menus (e.g. after the Recent list changed). Message thread only. */
@@ -59,6 +63,7 @@ private:
     TargetedCommandManager commands;
     ActionSink sink;
     RecentProvider recents;
+    UpdateAction checkForUpdates;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MenuController)
 };
