@@ -27,7 +27,7 @@ SERVICE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
-                          preflight,
+                          canaries, contamination, preflight,
                           ingest, judge, llm_cache, mask, metrics, paths,
                           mixpairs, panel, pilot, runner, sampling, scoreboard,
                           scrape, torchjudge)
@@ -200,6 +200,19 @@ def cmd_run(args) -> int:
               f"pass --limit N or --yes to confirm the full slice", file=sys.stderr)
         return 2
 
+    from phonology.core import Pronouncer as _Pron
+    _canary = canaries.run_canaries(items, _Pron())
+    if not _canary["ok"]:
+        print(f"CANARY FAILURE — {len(_canary['violations'])} degenerate fill(s) "
+              f"scored as a pass. Every number from this run would be unreadable:",
+              file=sys.stderr)
+        for v in _canary["violations"][:6]:
+            print(f"  {v['canary']}/{v['metric']} on {v['itemId']}: {v['why']}",
+                  file=sys.stderr)
+        return 2
+    print(f"canaries ✓ ({_canary['assertionsChecked']} assertions over "
+          f"{_canary['itemsSampled']} items)")
+
     # An arm that declines a granularity scores it as exact=0 (metrics.score_item
     # on an empty list), so a mixed draw would publish zeros the arm never earned.
     # Refuse before the loop rather than explain it afterwards.
@@ -268,7 +281,9 @@ def cmd_run(args) -> int:
     out_dir = os.path.join(paths.subdir("runs"),
                            f"{ts}-{args.arm}-{args.slice}")
     try:
-        res = runner.run_arm(args.arm, items, ctx, out_dir=out_dir)
+        res = runner.run_arm(args.arm, items, ctx, out_dir=out_dir,
+                             song_index=contamination.song_index(_load_corpus()),
+                             canary=_canary)
     finally:
         if local_worker is not None:
             local_worker.close()   # an 8GB MLX process must not outlive the bench

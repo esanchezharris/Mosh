@@ -1,117 +1,139 @@
-# FMS M4 — tier-2 LineSpec FSA (design only; DO NOT BUILD)
+# FMS M4 — line-level constraint: hard slot, soft line (design only; DO NOT BUILD)
 
 *2026-07-27. Spec only. Built after M2/M3 land and an owner sitting has happened.*
+*Revised the same day by Amendment 1, which replaced the original direction.*
 
-## 1. What it would enforce
+## 0. What changed, and why it matters
 
-Tier-1 (M2) constrains **one slot**: the bar's terminal word must come from a
-phonology-valid set. Tier-2 constrains **the whole line**: the bar must land on its
-`syllableTarget ± syllableTol`, and optionally match a stress contour — enforced
-inside the decoder as a state machine over logits, not checked afterwards.
+The first draft of this spec proposed a whole-line FSA: hard per-token masks
+enforcing syllable count across the entire bar. **That direction is withdrawn.**
 
-Today syllable fit is a *validator* (`core._evaluate` → re-prompt, 3 attempts).
-`llm-constrained` hits `syl_fit` 85.6% on the dev slice, so roughly one bar in
-seven either burns retries or ships off-target.
+Hard masking every token distorts the output distribution and suppresses exactly
+the semantic channel the owner's ear rewards. The program already has the
+evidence: `prompt-rhyme-menu` moved `rhyme_perfect` +16.7 points and moved `exact`
+*down*, because anchoring the model onto formally-correct rhymes cost meaning. A
+full-line mask is that failure mode with a stronger instrument — it would improve
+`syl_fit` and plausibly make the bars worse, and the pre-registered rule is that
+`syl_fit` rising while keep-rate is flat means the constraint was never the
+binding problem.
 
-## 2. Why this is a different problem from tier-1, not a bigger one
+The replacement is three mechanisms with sharply different force, applied where
+each is justified.
 
-Tier-1 works because the allowed set is a **finite, enumerable list of words**. A
-trie over their token sequences is exact, and the mask at each step is just the
-children of the current node. Building it taught the shape of the real difficulty:
+## 1. The three mechanisms
 
-- the model's `tokens` argument is not the generated history, so state must
-  advance on `tokens[-1]` (M2 handles this);
-- a word is reachable if ANY of its tokenizations is, so variants must be expanded
-  (M2 handles this).
+**(a) Hard mask at the rhyme slot only.** Exactly M2's built mechanism: at the
+terminal-word position the allowed set is the phonology-valid pool, enforced by
+the token trie. One slot, fully enumerable, off-menu impossible. Nothing new.
 
-Tier-2 has no enumerable set. The state is `(syllables committed, partial word in
-flight)` over an open vocabulary, and the legal continuations at each step are
-"every token that keeps some completion within budget" — which is not a lookup.
-
-## 3. Proposed shape
-
-A logits processor holding:
+**(b) Soft phonology bias across the rest of the line.** Rather than forbidding
+tokens, interpolate the model's logits with a rhyme/register prior
+(DeepRapper-style):
 
 ```
-state = (syllables_committed, pending_grapheme_buffer, words_committed)
+logits' = logits + λ · prior
 ```
 
-Per step: decode the candidate token's text, decide whether it *closes* a word
-(leading space / punctuation / EOS), and if so score the completed word's
-syllables via Bar-IQ's layered `Pronouncer` (user lexicon → CMUdict → g2p →
-heuristic). Mask any token whose resulting state cannot reach the target.
+where `prior` scores tokens by register fit (does this word appear in the corpus's
+rap register at all) and by phonological affinity to the bar's rhyme family. `λ`
+is a dial, **defeatable**, and `λ = 0` must reproduce the unconstrained arm
+byte-for-byte — that equivalence is the first test, not an afterthought. A soft
+bias shifts probability without removing options, so the model can still say the
+thing it wanted to say.
 
-## 4. Failure modes — enumerated BEFORE any code
+**(c) Satisfiability check, hard-masking only at the cliff edge.** The line's
+syllable budget is enforced *only* when it is about to become unsatisfiable:
 
-These are the reasons this is spec-only. Each needs an answer that is not
-"probably fine".
+```
+remaining_budget − min_syllables(any legal ending) ≥ 0
+```
 
-**F1 — OOV subword tokens mid-word.** Syllables are a property of a *word*, but
-masking happens per *token*. Mid-word the count is unknown, so the processor can
-only bound it. Needs a min/max-syllables-reachable interval per trie/vocabulary
-prefix, not a point estimate.
+While that holds, nothing is masked. When emitting a token would drive it
+negative, that token is masked. This is the minimum intervention that guarantees
+the bar can still be finished, and it touches a small fraction of positions
+instead of all of them.
 
-**F2 — tokens spanning word boundaries.** A BPE token may be `" it's"` or `"ing a"`
-— closing one word and opening the next in a single step. A state machine that
-assumes "one token advances at most one word" will miscount. The transition must
-be defined over the token's *decoded text*, splitting internally.
+**Stress contour stays in the external validator.** No decode-time stress
+enforcement exists anywhere in the literature or this codebase; inventing one is
+out of scope. `_evaluate` and `_analyze_line` already grade stress after the fact,
+and that is where it stays.
+
+## 2. Failure modes — enumerated BEFORE any code
+
+Requirement carried over from the first draft. Some are softened by the new
+design; that is noted rather than assumed.
+
+**F1 — OOV subword tokens mid-word.** Syllables are a property of a word, but
+masking happens per token; mid-word the count is unknown. *Softened:* only (c)
+needs this, and only near the cliff edge, so a conservative bound (assume the
+in-flight word costs at least one more syllable) is sound and cheap.
+
+**F2 — tokens spanning word boundaries.** A BPE token may be `" it's"` or
+`"ing a"`, closing one word and opening the next. Transitions must be defined over
+the token's decoded TEXT, split internally — never "one token, one word".
 
 **F3 — syllable-count ambiguity.** CMUdict gives multiple pronunciations
-(`fire` = 1 or 2). `Pronouncer.syllables` takes `prons[0]`, which is a *choice*,
-not a fact. A hard gate on an ambiguous count will reject bars a human scans as
-correct. Options: carry an interval `[min, max]` per word, or gate on the interval
-overlapping the target. Deciding this needs the owner's ear, not a rule.
+(`fire` = 1 or 2) and `Pronouncer.syllables` takes `prons[0]`, which is a choice,
+not a fact. *Materially softened:* (c) only needs the MINIMUM syllables of a legal
+ending, and a min over pronunciations is well-defined where a point estimate was
+not. Take the min; never gate on an ambiguous point value.
 
-**F4 — dead ends.** The crux. Greedy masking can commit to a partial word that
-cannot be completed within budget — e.g. 2 syllables left and the prefix `un-` in
-flight, where every completion is ≥3. The decoder then has *no* legal token, and
-the run either backtracks (which `generate_step` cannot do) or emits garbage.
-Avoiding it requires reachability lookahead: for every vocabulary prefix, the
-min/max syllables of any completion, precomputed once per tokenizer. That table is
-the real cost of tier-2 and should be sized before anything is built.
+**F4 — dead ends.** The crux of the old design, and the reason it was expensive:
+greedy masking can commit to a prefix no legal completion can finish. *This is now
+the mechanism rather than a hazard* — (c) IS the reachability check, and it needs
+a per-vocabulary-prefix table of `min_syllables(completion)`. **Size that table
+against the real Qwen vocabulary before building anything.** If it is not
+affordable, M4 is not affordable, and §4.2 is the answer instead.
 
-**F5 — interaction with the tier-1 end-word trie.** At the final slot both
-constraints apply: the terminal word must be in the phonology pool AND land the
-line's total. These intersect — the pool must be filtered to words whose syllable
-count closes the budget exactly. If that intersection is empty the line is
-*unsatisfiable*, and the processor must detect it **before** decoding starts, not
-mid-bar. Cheap to check up front; catastrophic to discover at token 14.
+**F5 — interaction with the tier-1 pool.** At the final slot both constraints
+apply: the word must be in the phonology pool AND close the budget. Their
+intersection can be EMPTY, which makes the line unsatisfiable. Check it **before**
+decoding starts — cheap up front, catastrophic to discover at token 14. When
+empty, the honest move is to widen the pool or relax the target, and to say which.
 
-**F6 — the fluency telemetry trap.** Measured in M2: `generate_step` renormalizes
-logprobs *after* the processors run, so under a mask the reported logprob is ≈0.0.
-Any tier-2 fluency number must come from a separate teacher-forced pass under the
-unconstrained model. Stated here because it will otherwise be re-discovered.
+**F6 — the fluency-telemetry trap.** Measured during M2: `generate_step`
+renormalizes logprobs *after* processors run, so under a mask the reported logprob
+is ≈0.0 and any constrained output looks perfectly fluent. Telemetry must come
+from a separate teacher-forced pass under the unconstrained model.
 
-**F7 — cache identity.** A syllable table is derived from the lexicon; a lexicon
-change silently changes what is legal. `fsaVersion` + a lexicon hash must join the
-generation-cache key, exactly as `poolSha` does for tier-1.
+**F7 — cache identity.** Syllable and prior tables derive from the lexicon, and
+mask tables derive from the tokenizer AND the quantizer — a quantizer change can
+silently shift token ids. Version by `(model, tokenizer, quantizer, lexicon)` and
+put it in the generation-cache key, exactly as `poolSha` does for tier-1.
 
-## 5. Cheaper alternatives to weigh first
+**F8 — λ is a distribution edit, and edits compound.** (b) and (c) both modify
+logits. Applied together their interaction is not the sum of their measured
+effects. Measure λ alone, satisfiability alone, and both — three arms, not one.
 
-Tier-2 should not be built until these are ruled out, because M2 already showed
-the expensive mechanism is not automatically the better one:
+## 3. Pre-registered routing
 
-1. **Best-of-n with the validator** — sample k lines locally (free), keep those
-   that pass `_evaluate`. No new machinery. Local inference makes n cheap in a way
-   API arms never made it.
-2. **Terminal-word-only budget closing** — tier-1 already picks the last word.
-   Filtering that pool to counts that *close* the line converts a whole-line
-   constraint into a one-slot one, which is already built (F5's check, used as the
-   mechanism rather than as a guard).
-3. **Length-steered prompting** — cheapest, already partly present, and the
-   measured baseline any FSA must beat.
+Consistent with Amendment 1: numeric bars route, they do not define success.
 
-**Pre-registered:** tier-2 is justified only if `syl_fit` under (1) and (2) is
-still materially short of the target AND the owner's keep-rate is the thing
-limited by it. `syl_fit` rising while keep-rate is flat means the constraint was
-never the binding problem — the same trap `prompt-rhyme-menu` fell into when it
-moved `rhyme_perfect` +16.7 points and moved `exact` down.
+- `λ = 0` must reproduce `local-constrained-endword` byte-for-byte. Not a bar —
+  a build gate. If it does not, the interpolation is wrong and nothing downstream
+  is readable.
+- Soft bias is worth keeping only if `syl_fit` rises **and** accept-set score does
+  not fall. `syl_fit` up with accept-set flat is the Goodhart alarm M5 exists to
+  raise, and routes to abandoning (b), not to tuning λ.
+- Ship/keep still gates on an owner sitting. Always.
 
-## 6. Prerequisites
+## 4. Cheaper alternatives to rule out first
 
-- M2 landed and measured on the dev slice.
-- M3 landed (the planner supplies the per-line anchor tier-2 must close around).
-- An owner sitting has happened, so keep-rate — not `syl_fit` — decides whether
-  this is worth building.
-- The F4 reachability table sized against the real Qwen vocabulary. If it is not
-  affordable, tier-2 is not affordable, and §5.2 is the answer instead.
+M2 already demonstrated that the expensive mechanism is not automatically the
+better one — trie-masked sampling turned out to buy nothing at the rhyme slot
+because the masked distribution was degenerate (p=0.9998 on one token).
+
+1. **Best-of-n with the existing validator.** Sample k lines locally (free on
+   local weights), keep those that pass `_evaluate`. No new machinery at all.
+2. **Terminal-word budget closing.** Tier-1 already picks the last word; filtering
+   that pool to counts that CLOSE the line converts a whole-line constraint into a
+   one-slot one that is already built. This is F5's check used as the mechanism
+   rather than as a guard, and it is the strongest cheap option.
+3. **Length-steered prompting.** The measured baseline any of this must beat.
+
+## 5. Prerequisites
+
+- M2 landed and measured, with M5's contamination split and canaries applied.
+- M3 landed (the planner supplies the per-line anchor the budget closes around).
+- An owner sitting has happened, so keep-rate — not `syl_fit` — decides.
+- The F4 prefix table sized against the real vocabulary.

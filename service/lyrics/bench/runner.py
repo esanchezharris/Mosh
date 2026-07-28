@@ -17,7 +17,7 @@ import json
 import os
 from typing import List
 
-from lyrics.bench import metrics
+from lyrics.bench import contamination, metrics
 from lyrics.bench.arms import ARM_VERSIONS, ARMS, ArmContext
 
 
@@ -30,7 +30,8 @@ def _items_sha(items: List[dict]) -> str:
 
 
 def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
-            out_dir: str, run_name: str = "") -> dict:
+            out_dir: str, run_name: str = "", song_index: dict = None,
+            canary: dict = None) -> dict:
     if arm_name not in ARMS:
         raise KeyError(f"unknown arm {arm_name!r}; known: {sorted(ARMS)}")
     arm, version = ARMS[arm_name], ARM_VERSIONS[arm_name]
@@ -78,6 +79,12 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
             rows.append(row)
             out.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
+    # Famous songs are plausibly in every base model's pretraining data, so an
+    # absolute exact level is part memorization. Until this split is read, only
+    # cross-arm deltas under identical conditions are signal (Amendment 1).
+    if song_index is not None:
+        contamination.annotate(rows, song_index)
+
     summary = {
         "arm": {"name": arm_name, "version": version,
                 "productBackend": ctx.product_backend, "k": ctx.k,
@@ -96,6 +103,11 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
         # every scored row.
         "metricsByFame": metrics.aggregate_by_fame(rows),
         "cache": dict(ctx.cache.stats) if ctx.cache is not None else None,
+        "metricsByContamination": (contamination.aggregate_by_contamination(rows)
+                                   if song_index is not None else None),
+        # Recorded IN the summary, not just printed: a run whose canaries were
+        # never checked must be distinguishable from one that passed them.
+        "canaries": canary,
     }
     with open(os.path.join(out_dir, f"summary-{run_name or arm_name}.json"),
               "w", encoding="utf-8") as f:

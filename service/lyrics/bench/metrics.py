@@ -110,6 +110,10 @@ def score_item(item: dict, candidates: List[str], pron) -> dict:
 
     row = {
         "itemId": item["itemId"], "granularity": gran,
+        # songId travels with the score so downstream splits can join back to
+        # corpus metadata. Without it the contamination split silently bucketed
+        # every row as "unknown" — a whole instrument reading as no-data.
+        "songId": item.get("songId"),
         "split": item.get("split"), "views": item.get("views", 0),
         "exact": exact, "topk": topk,
         "syl_fit": _syl_fit(item, top1, pron) if top1 else None,

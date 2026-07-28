@@ -28,6 +28,8 @@ numbers and hashes only.
 | llm-zeroshot | baseline (frontier, naive); `views` is on every item but the fame-bucket scoreboard stratification lands with I2 | I1 ✅ |
 | llm-constrained | baseline (constraints spelled out) | I1 ✅ |
 | product-llm | THE BAR — the shipped `fill_gap` loop as-is | I1 ✅ |
+| local-unconstrained | WS1 control — local open weights, no decoder constraint | WS1 ✅ |
+| local-constrained-endword | WS1 tier-1 — terminal word decoded from the phonology-valid pool (rhyme granularity only) | WS1 ✅ |
 | prompt-constrained / prompt-rag / prompt-nbest-rerank | I3 | pending |
 | mlm-cloze (PLL floor, word only) | I3, optional | pending |
 | fim-lora (cond / nocond) | I4 | pending |
@@ -335,3 +337,62 @@ numbers and hashes only.
     union-of-sources ceiling of 64.7% and an oracle of 100%.
   - **Still unmeasured:** `nbest-rerank` — the one cheap prompt-side stone left
     unturned before committing to training.
+- **2026-07-27 — WS1: decoder-level constraint built and measured. Off-menu is 0
+  by construction; `exact` decomposes into coverage × precision and BOTH bind.**
+  Full working: the [M6 design note](../superpowers/specs/2026-07-27-fms-m6-pointwise-taste-ranker-design.md).
+  Local open weights (Qwen2.5-14B-Instruct-4bit, rev `dad51014`, 4-bit/group-64,
+  mlx-lm 0.31.3) behind the bench's provider seam, with the phonology constraint
+  enforced in the decoder rather than in a prompt or a post-filter.
+  - **Same frozen slice throughout** — `itemsSha 1b9aad2eea0f…`, n=146 low-fame
+    rhyme, identical to the `llm-constrained` baseline, asserted on every run.
+
+  | arm | exact | topk | rhyme_fit | rhyme_perfect | multi_depth | syl_fit |
+  |---|---|---|---|---|---|---|
+  | llm-constrained (prompt-side best) | .384 | .486 | .912 | .353 | .831 | .856 |
+  | local-unconstrained (WS1 control) | .185 | .185 | .558 | .248 | .611 | .733 |
+  | local-constrained-endword (WS1 tier-1) | .178 | .212 | **1.000** | .616 | .952 | **1.000** |
+
+  - **The constraint works exactly as specified and does not help `exact`.**
+    `rhyme_fit`, `syl_fit` and `constrained_fit` are 1.000 and `offMenu` is 0 on
+    every one of 150 items — by construction, not by luck. `exact` is flat against
+    the local control and well below the prompt-side baseline.
+  - **Why, measured rather than argued.** Truth-in-pool coverage — the artist's
+    word is in the phonology-valid pool at all — is **40.0%**. The arm picked
+    correctly 17.3%, so within-pool ranking precision is **43.3%**, and
+    0.400 × 0.433 = 0.173, the observed number. This is the same decomposition
+    `fusion-rerank` produced on the prompt side (63.3% × 58.9% = 37.3%),
+    reproduced at the decoder — evidence it is a property of the problem, not of
+    either implementation. A perfect ranker over today's pool scores 40.0%; a
+    perfect pool with today's ranker scores 43.3%.
+  - **Amendment 1's kill condition is unreachable as written, and that is
+    informative.** It needs `rhyme_perfect ≥90%`, which needs a perfect-only pool;
+    perfect-only coverage is **30.0%**, WORSE than slant's 40.0%. The condition
+    could only fire in a configuration whose ceiling is already below its own
+    exact threshold — it would trigger automatically and carry no information.
+    The decomposition above answers the question it was designed to ask: within-set
+    semantic ranking IS a binding constraint (43.3%), which routes to M6.
+  - **Trie-masked greedy is measurably weaker than exact pool scoring**, as
+    suspected rather than assumed: the trie's own pick matched the
+    teacher-forced argmax on only **61/150** items, median rank 2. Reported as
+    `trieRankUnderExact` on every row. Sampling the trie was also tried and
+    abandoned — the masked first-token distribution put p=0.9998 on one token, so
+    ten seeded draws returned one word.
+  - **The pool is full of CMUdict junk**, visible on sight in real top-5 lists:
+    `lyne`, `rhyne`, `rea`, `rey`, `brack`, `booz`, `back's`. `_rhyme_menu` filters
+    stopwords and sub-3-char tokens but not proper nouns, surnames or rare
+    entries. This is the same defect class as the 32.2% junk-item finding, on the
+    GENERATION side. Corpus-frequency filtering of the pool is the untried cheap
+    lever, and it attacks coverage — the factor the ranker cannot.
+- **2026-07-27 — M5 rung 0: canaries + contamination split landed as standing
+  instrumentation.** Canaries run on EVERY benchmark execution before any model
+  loads and are fatal. They earned their keep immediately by catching two false
+  assertions in themselves: `"the the the"` legitimately SCANS on a 3-syllable
+  target (the metric was right, the canary was wrong), and a spelling-based
+  "non-rhyme" can slant-rhyme, so the off-menu canary is now VERIFIED against the
+  pronouncer rather than guessed. Both are recorded blind spots: nothing
+  deterministic on the board rejects a bar that scans and means nothing.
+  The contamination split (recent AND low-view = obscure; unknown never credited
+  to obscure) exposed that `metrics.score_item` never emitted `songId`, so the
+  whole split silently bucketed every row as "unknown" — an instrument reading as
+  no-data while looking healthy. Fixed; a real scored row is now asserted to carry
+  the join key.
