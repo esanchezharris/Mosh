@@ -37,6 +37,44 @@ sub-item is genuinely missing from the current tree, not already shipped by a st
 
 ### Verdict: **gapExists = true.** This lane builds the enforcement; it does not re-derive the BOM.
 
+### RE-VERIFIED 2026-07-28 (execution session, fresh worktree off `origin/main` @ `ae63eccd`)
+
+§0 requires verifying the gap before building, and the table above is 16 days old — so every row was
+re-checked. **All six sub-items are still open, and every gotcha is still real.** Two rows improved:
+
+| Row | 2026-07-12 | 2026-07-28 |
+|---|---|---|
+| BOM committed (soft prereq) | ⚠️ untracked | ✅ **RESOLVED** — `docs/DEPENDENCY_BOM.md` is tracked; **FS-000 is `done`**. The BOM-parse prerequisite is met. |
+| Funding thresholds | ⚠️ partial | unchanged — thresholds live in BOM §2; still no fundraise-notes doc referencing them. |
+| Packaging check on deploy | ❌ missing | unchanged — `run-mosh.sh` `deploy` (:399), `deploy-anira` (:413), `release` (:429) run `build_app → install_app → bundle_service → bundle_brain_key → sign …` with **no check step**. |
+| NOTICES surface | ❌ missing | unchanged — `git ls-files` finds no NOTICES/acknowledgements/third-party-license file (only unrelated `*Notice.tsx` UI components). |
+| "Powered by …" strings | ❌ missing | unchanged — both appear **only** in `docs/` (BOM, SPEC, backlog, this plan). Neither is in any shipping artifact. |
+| Payload-vs-BOM enumeration | ❌ missing | unchanged — `bundle_service` (:174) still ships a hand-list + 14 whole dirs with nothing mapping payload → a BOM row. |
+
+**Gotchas re-confirmed against the tree (do not regress these):**
+- The naive-`rave`-grep trap is **live**: `service/recipes/library/owner_core_cust_ravelover_*.json` and
+  `owner_mill9ion_rave_party_*.json` are real owner beat recipes that **do** ship (`recipes` is one of
+  the whole-dir copies). Substring matching would false-fail every distributable bundle.
+- `service/transform/transform_cli.py` + `setup-transform.sh` still ship by design; `bundle_service`
+  itself comments *"the CLI + setup only — NEVER the .venv (torch, GBs)"*.
+
+**New finding (not in the 2026-07-12 table):** one weight-shaped file currently ships —
+`service/scripts/golden/lora_dora_fixture.npz`, carried in by the whole-dir `scripts` copy. It is a
+**Mosh-authored test golden**, not third-party payload, so it needs no BOM row — but the enumeration
+must classify it correctly or it becomes a permanent false failure. Handled via an explicit
+first-party allowlist rather than by widening the weight patterns.
+
+**Line numbers that drifted** (the plan's were stale): the `install_app` fail-closed plist net to
+mirror is at `run-mosh.sh:247` (not :233); `bundle_service` is at `:174`.
+
+**One wiring correction to the plan.** The plan says run the blocking check *"at the END of the
+`deploy` and `release` cases."* For `release` that is too late: the end of that case is **after**
+`$RELEASE_SIGN` has signed, notarized and stapled — i.e. after a non-compliant bundle has already
+been **uploaded to Apple's notary service**. The check therefore runs **after `bundle_brain_key` and
+before signing** in both paths, which is strictly earlier and fails before anything leaves the
+machine. (It also keeps the signature valid: `bundle_service` writes `NOTICES.txt`, then the check
+reads it, then `sign_app`/`$RELEASE_SIGN` seals the finished bundle.)
+
 ---
 
 ## Design (what to build — not implemented here)
@@ -149,6 +187,48 @@ same code path against a real bundle.
   discovered by the EXISTING `run_py_tests` glob **without editing `scripts/auto-loop/gate.sh`**
   (which is a hard REJECT). Also touches none of: `CLAUDE.md`, specs 00–06,
   `cmake/Dependencies.cmake` / version pins, `.github/**`.
+
+---
+
+## Gate results (2026-07-28, worktree `fs-k4-packaging-check` off `origin/main` @ `ae63eccd`)
+
+| Gate | Result |
+|---|---|
+| `gate.sh run_py_tests` (simulated with its exact `git ls-files` globs) | **94 py tests, 0 failed** — includes the new `packaging_check_test.py`, and no neighbour regressed |
+| `packaging_check_test.py` | **24 checks, 0 failures, deterministic ×3** |
+| `--emit-notices` byte-stability | identical sha256 ×3 (`2bf6cf85…`) — NOTICES cannot drift run-to-run |
+| `bundle_completeness_test.py` (parses `run-mosh.sh`; must not break) | 0 failures, incl. the `run-mosh.ps1` whitelist mirror |
+| `bash -n run-mosh.sh` | clean |
+| Live chain `bundle_service → emit_notices → packaging_check` | NOTICES written, check **OK** |
+| `Mosh --selftest` / vitest / `tsc` | **unaffected by construction** — this lane touches zero C++ and zero `ui/` (diff is `service/**.py`, `run-mosh.sh`, `docs/`) |
+
+**Discovery gotcha worth keeping:** `gate.sh run_py_tests` enumerates via `git ls-files`, so a **new
+test file is invisible to the gate until it is tracked**. Verified by staging the two new files and
+re-running the glob — before `git add`, the loop would have reported "py tests pass" while never
+executing this one.
+
+### Proofs against a REAL bundle (not just fixtures)
+
+- The **currently installed `/Applications/Mosh.app` FAILS the check** — `NOTICES.txt missing`. That
+  is the compliance gap this lane closes, demonstrated on a genuinely shipped artifact rather than a
+  fixture. (It is otherwise clean: no forbidden artifacts, no unattributed payload.)
+- A copy of that real bundle, after `--emit-notices`, **PASSES**: *"12 shipping BOM rows
+  acknowledged, no RAVE/anira artifacts, no unattributed payload."*
+- **RED-proved on that same real bundle:** a planted `libanira.2.dylib` → exit 1 (§1.11); the same
+  bundle under `--warn-only` → exit 0, confirming `deploy-anira` is correctly **non**-blocking; a
+  stripped `Powered by Stability AI` line → exit 1.
+- **Sabotage RED-proof of the suite itself:** stubbing `check_bundle` to `return []` failed **9 of
+  24** checks, so the fixtures genuinely detect a disarmed gate. Restored and re-verified;
+  `grep SABOTAGE` clean.
+- The fail-closed NOTICES path was proved accidentally-then-deliberately: when the generator errors,
+  `emit_notices` prints FATAL, removes the partial file and aborts the deploy — no truncated notice
+  file ever ships.
+
+**Not run, deliberately:** a full `./run-mosh.sh deploy`. It rebuilds and **overwrites the owner's
+installed `/Applications/Mosh.app`**, which is not a side effect to take unasked; every piece of that
+path was instead proved against a copy of the real bundle. `./run-mosh.sh release` additionally needs
+signing credentials (O1) and would upload to Apple's notary service. Both remain owner-runnable, and
+the check is now positioned to fail **before** either signs or uploads anything.
 
 ---
 
