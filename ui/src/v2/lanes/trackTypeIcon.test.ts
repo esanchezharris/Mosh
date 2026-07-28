@@ -19,17 +19,30 @@ describe("pickTrackIcon", () => {
 });
 
 describe("iconArgsForKind", () => {
-  it("covers all TRACK_KINDS so a newly added kind cannot silently go uncovered", () => {
-    // Verify that every kind in TRACK_KINDS has an entry below.
-    const kinds = TRACK_KINDS.map(k => k.kind);
-    expect(kinds.length).toBeGreaterThan(0);
+  // A real exhaustiveness guard: every kind the menu offers must have an EXPECTED glyph
+  // here. Adding a TrackKind without adding its row fails this test rather than silently
+  // inheriting the catch-all mapping — which is the whole point, since iconArgsForKind's
+  // fallthrough returns a plausible-looking {type: kind, isInstrument: false} for anything.
+  const EXPECTED_GLYPH: Record<string, string> = {
+    audio: "waveform",
+    drum: "drum",
+    midi: "keys",
+    tone: "waveform",
+  };
 
-    for (const kind of kinds) {
+  it("covers all TRACK_KINDS so a newly added kind cannot silently go uncovered", () => {
+    // Verify that every kind in TRACK_KINDS has an entry in EXPECTED_GLYPH.
+    for (const { kind } of TRACK_KINDS) {
+      const expected = EXPECTED_GLYPH[kind];
+      expect(expected, `TrackKind "${kind}" has no row in EXPECTED_GLYPH — add one`).toBeDefined();
       const args = iconArgsForKind(kind);
-      expect(args).toBeDefined();
-      expect(args.type).toBeDefined();
-      expect(typeof args.isInstrument).toBe("boolean");
+      const actual = pickTrackIcon(args.type, args.isInstrument);
+      expect(actual, `kind "${kind}"`).toBe(expected);
     }
+    // And no stale rows: every listed kind must still be offered by the menu.
+    expect(Object.keys(EXPECTED_GLYPH).sort()).toEqual(
+      TRACK_KINDS.map((k) => k.kind).sort(),
+    );
   });
 
   it("maps midi to audio type with isInstrument:true → keys glyph", () => {
