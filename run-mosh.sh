@@ -433,9 +433,14 @@ case "$MODE" in
     "$RELEASE_SIGN" --preflight-only
 
     # --- build Release, stage, bundle service + brain key, sign, notarize, DMG ---
-    build_app macos-arm64-release macos-arm64-release-app
-    APP="$(resolve_app)"
+    # UNIVERSAL 2 (arm64 + x86_64): a release is the artifact strangers install, so it
+    # must run on Intel Macs too. `deploy`/`build` stay arm64 for fast local iteration —
+    # only what ships is fat. See docs/MACOS_INTEL.md.
+    build_app macos-universal-release macos-universal-release-app
+    APP="$(find "$ROOT/build-macos-universal-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
     [ -n "$APP" ] || { echo "no built app to release" >&2; exit 1; }
+    # Fail closed BEFORE burning notary quota on a bundle that can't run on half the Macs.
+    "$ROOT/scripts/release/assert-universal.sh" "$APP"
     OUTDIR="${MOSH_RELEASE_DIR:-$HOME/Desktop/Mosh-share}"
     mkdir -p "$OUTDIR"
     STAGED="$OUTDIR/Mosh.app"

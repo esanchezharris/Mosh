@@ -114,23 +114,31 @@ if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
   note_warn "SKIP_BUILD=1 — reusing the newest existing Release build (not rebuilding)"
 else
   say "configuring…"
-  if ! cmake --preset macos-arm64-release \
+  if ! cmake --preset macos-universal-release \
       -DCPM_SOURCE_CACHE="$CPM_SOURCE_CACHE" \
       -DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE="$FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE"; then
     note_bad "cmake configure failed"
     exit 1
   fi
   say "building (Mosh + MoshStageUI + MoshFixInfoPlist)…"
-  if ! cmake --build --preset macos-arm64-release-app; then
+  if ! cmake --build --preset macos-universal-release-app; then
     note_bad "cmake build failed"
     exit 1
   fi
   note_ok "build complete"
 fi
 
-BUILT_APP="$(resolve_app)"
+# NOT resolve_app(): that helper (extracted from run-mosh.sh above) only searches the
+# arm64 build dirs, so after a universal build it would silently hand back a STALE
+# arm64 Mosh.app — a guest zip that cannot launch on Intel. Resolve the universal dir
+# explicitly, then assert the Mach-O really is both-arch before anyone downloads it.
+BUILT_APP="$(find "$ROOT/build-macos-universal-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
 if [[ -z "$BUILT_APP" || ! -x "$BUILT_APP/Contents/MacOS/Mosh" ]]; then
-  note_bad "no built Mosh.app found under build-macos-arm64-release/"
+  note_bad "no built Mosh.app found under build-macos-universal-release/"
+  exit 1
+fi
+if ! "$ROOT/scripts/release/assert-universal.sh" "$BUILT_APP"; then
+  note_bad "built app is not a Universal 2 / macOS 11 bundle — refusing to mint a guest zip"
   exit 1
 fi
 note_ok "built app: $BUILT_APP"

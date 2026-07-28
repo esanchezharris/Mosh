@@ -11,7 +11,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-BIN="${MOSH_BIN:-$(find "$ROOT/build-macos-arm64-release" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
+# Prefer the universal release (what actually ships) over the arm64 dev build.
+BIN="${MOSH_BIN:-$(find "$ROOT/build-macos-universal-release" "$ROOT/build-macos-arm64-release" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
 [ -x "$BIN" ] && [ -n "$BIN" ] || BIN="/Applications/Mosh.app/Contents/MacOS/Mosh"
 [ -x "$BIN" ] || { echo "✗ No Mosh binary. Build first: ./run-mosh.sh deploy"; exit 2; }
 

@@ -55,11 +55,15 @@ else
   fail "host OS is not macOS: $(uname -s)"
 fi
 
-if [[ "$(uname -m)" == "arm64" ]]; then
-  pass "host architecture is arm64"
-else
-  fail "host architecture is not arm64: $(uname -m)"
-fi
+# Mosh ships a Universal 2 binary, so an Intel Mac is a SUPPORTED host to run this
+# preflight on — it is the machine the Intel half of the release is verified against.
+# arm64 remains canonical (it is the only arch with the MLX generative backend), so
+# note which one we are on rather than failing. See docs/MACOS_INTEL.md.
+case "$(uname -m)" in
+  arm64)  pass "host architecture is arm64 (canonical — MLX generative backend available)" ;;
+  x86_64) pass "host architecture is x86_64 (Intel — supported; generative tier runs the preview engine)" ;;
+  *)      fail "host architecture is neither arm64 nor x86_64: $(uname -m)" ;;
+esac
 
 for cmd in cmake npm rg python3 swift osascript screencapture ffmpeg system_profiler git; do
   require_cmd "$cmd"

@@ -6,7 +6,7 @@
 
 ## 1. What Mosh is
 
-**Mosh is a native desktop app.** macOS (Apple Silicon / arm64) is canonical; a **Windows + NVIDIA/CUDA** build is an additive port of the same codebase (see §Platforms below). `Mosh.app` / `Mosh.exe` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, DSP, file I/O, window and menus are all native.
+**Mosh is a native desktop app.** macOS (Apple Silicon / arm64) is canonical; a **Windows + NVIDIA/CUDA** build is an additive port of the same codebase (see §Platforms below). The shipped macOS artifact is a **Universal 2 binary (arm64 + x86_64)**, so it runs natively on Intel Macs too — with the generative tier degrading to the preview engine there, since MLX is Apple-Silicon-only ([docs/MACOS_INTEL.md](docs/MACOS_INTEL.md)). `Mosh.app` / `Mosh.exe` is a native C++ binary built with JUCE 8 + Tracktion Engine. The audio engine, plugin hosting, DSP, file I/O, window and menus are all native.
 
 The one nuance that trips everyone up: the **visual UI is not drawn with native Cocoa controls** — it's a React app rendered inside an embedded JUCE `WebBrowserComponent` (a "WebView"), shipped *inside* the app bundle at `Mosh.app/Contents/Resources/ui`. It talks to the C++ core through an **in-process bridge**, never over a network.
 
@@ -117,9 +117,12 @@ What Mosh can actually do today, grouped for a producer. Status is honest: `work
 
 One codebase, platform-guarded. JUCE + Tracktion + the whole MoshOps/snapshot/events spine + the React UI are cross-platform; only a thin OS-integration shell and the generative backend differ.
 
+macOS ships **one Universal 2 bundle** covering both Mac architectures, so "macOS" below means both unless a row says otherwise. The differences an Intel Mac actually sees are small enough to state here in full: the generative tier runs the **preview (Fake) engine** instead of Stable Audio 3 (MLX is Apple-Silicon-only — the drawer's amber "preview" badge says so), and hosted VST3/AU plugins must have an x86_64 or universal slice, because an x86_64 host process cannot load an arm64-only plugin. Everything else — engine, transport, arrangement, mixer, plugin hosting, export, multiplayer, companion — is the same code. Detail: [docs/MACOS_INTEL.md](docs/MACOS_INTEL.md).
+
 | Concern | macOS (canonical) | Windows (NVIDIA/CUDA) |
 |---|---|---|
-| Build | `cmake --preset macos-arm64-{debug,release}` (Ninja) → `Mosh.app` | `cmake --preset windows-x64-{debug,release}` (VS 17 2022) → `Mosh.exe` |
+| Build | dev: `cmake --preset macos-arm64-{debug,release}` (Ninja, fast single-arch) · **ships**: `macos-universal-release` (arm64 + x86_64) → `Mosh.app` | `cmake --preset windows-x64-{debug,release}` (VS 17 2022) → `Mosh.exe` |
+| Minimum OS | **macOS 11 (Big Sur)** — set in `CMakeLists.txt` *above* `project()`, enforced on every shipped bundle by `scripts/release/assert-universal.sh` | Windows 10+ (WebView2 runtime) |
 | Layout | `.app` bundle; UI at `Contents/Resources/ui` | flat: `ui/` + `drumkits/` next to `Mosh.exe`; `run-mosh.ps1 -Package` also stages `service/` + `brain.env` as siblings (BrainProxy + GenerativeJobManager read the flat layout) |
 | WebView | WKWebView | **WebView2** (Edge Chromium; `NEEDS_WEBVIEW2`/`JUCE_USE_WIN_WEBVIEW2=1`) |
 | Audio | CoreAudio (JUCE auto) | WASAPI (JUCE auto; ASIO deferred) |

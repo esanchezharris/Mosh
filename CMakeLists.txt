@@ -9,16 +9,48 @@ cmake_minimum_required(VERSION 3.24)
 # GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is CI-tracked
 # but not yet a supported target. See docs/2026-07-07-linux-build-spike.md.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ── macOS target selection — MUST stay ABOVE project() ────────────────────────
+# project() itself creates an EMPTY CMAKE_OSX_DEPLOYMENT_TARGET cache entry as part
+# of Darwin platform detection. A `set(... CACHE STRING "")` AFTER that line is a
+# silent no-op (CACHE without FORCE never overwrites an existing entry), so the 11.0
+# below sat dead from the day it was written: builds inherited the host SDK default
+# and shipped `minos 26.0` — an app that refuses to launch on anything older than
+# macOS 26, while docs/TESTER_QUICKSTART.md promised "macOS 11 (Big Sur) or newer"
+# and NativeSpeech/WebView guarded macOS 12 APIs behind @available for a floor that
+# never existed. Above project() the cache entry does not exist yet, so these defaults
+# apply AND an explicit -D / preset value still wins. Verify after any edit here:
+#   otool -l <Mosh.app>/Contents/MacOS/Mosh | grep -A3 LC_BUILD_VERSION   # minos 11.0
+#
+# arm64 is the DEFAULT (a bare `cmake -S . -B build` on an Apple Silicon Mac is
+# unchanged), but it is no longer the only target: the macos-universal-* presets set
+# "arm64;x86_64" and that Universal 2 binary is what release/packaging ships, so Mosh
+# runs natively on Intel Macs too. See docs/MACOS_INTEL.md.
+if (CMAKE_HOST_APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "default target arch; presets may override")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "minimum supported macOS")
+
+    # SELF-HEAL for build dirs configured before the fix above. Being above project() only
+    # helps a FRESH cache: an existing build-*/CMakeCache.txt already holds the empty entry
+    # project() wrote back then, and CACHE-without-FORCE never overwrites one — so every
+    # long-lived build dir (dev machines, the auto-loop) would silently keep producing
+    # minos-26 binaries until someone thought to wipe it. Deleting build dirs by hand is
+    # whack-a-mole; heal it here instead.
+    #
+    # Only an EMPTY value is healed, so an explicit -DCMAKE_OSX_DEPLOYMENT_TARGET=... or a
+    # preset cacheVariable (both applied before this file is processed, hence non-empty)
+    # still wins.
+    if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "minimum supported macOS" FORCE)
+        message(STATUS "Mosh: healed an empty CMAKE_OSX_DEPLOYMENT_TARGET in a pre-existing cache → 11.0")
+    endif()
+endif()
+
 project(Mosh VERSION 0.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-if (APPLE)
-    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "v0 is arm64-only")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
-endif()
 
 # Keep a single CPM/FetchContent cache so re-configures don't re-download.
 #

@@ -10,7 +10,8 @@
 # Usage:   scripts/package-for-sharing.sh        # run from the repo root checkout
 #
 # The app is ad-hoc signed (not notarized), so the friend clears quarantine once with
-# the command in READ-ME-FIRST.txt. Requirements for them: Apple Silicon, macOS 11+.
+# the command in READ-ME-FIRST.txt. Requirements for them: any Mac (Apple Silicon or
+# Intel — this ships a Universal 2 binary), macOS 11+.
 #
 # MOSH_CMAKE_EXTRA — extra args appended to the configure step (e.g. a worktree passing
 #   -DCPM_SOURCE_CACHE=... -DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=...). Empty in the
@@ -21,10 +22,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist"
 RELAY_URL="https://tpvkqaqydafpgockzchm.supabase.co/functions/v1/relay"
 
-echo "==> building Mosh (macos-arm64-release)…"
+echo "==> building Mosh (macos-universal-release — arm64 + Intel)…"
 # shellcheck disable=SC2086
-cmake --preset macos-arm64-release ${MOSH_CMAKE_EXTRA:-}
-cmake --build --preset macos-arm64-release-app
+cmake --preset macos-universal-release ${MOSH_CMAKE_EXTRA:-}
+cmake --build --preset macos-universal-release-app
 
 # Resolve the freshly built Mosh.app (newest by mtime under the release build dir).
 APP=""
@@ -32,12 +33,16 @@ best=0
 while IFS= read -r p; do
   t="$(stat -f '%m' "$p" 2>/dev/null || echo 0)"
   if [ "$t" -ge "$best" ]; then best="$t"; APP="$p"; fi
-done < <(find "$ROOT/build-macos-arm64-release" -maxdepth 3 -name 'Mosh.app' -type d 2>/dev/null)
+done < <(find "$ROOT/build-macos-universal-release" -maxdepth 3 -name 'Mosh.app' -type d 2>/dev/null)
 if [ -z "$APP" ] || [ ! -d "$APP" ]; then
-  echo "ERROR: built Mosh.app not found under build-macos-arm64-release/" >&2
+  echo "ERROR: built Mosh.app not found under build-macos-universal-release/" >&2
   exit 1
 fi
 echo "==> built app: $APP"
+
+# Fail closed if this is not actually a both-arch, macOS-11 bundle — the README below
+# promises Intel + macOS 11+, and nothing else in this script reads the Mach-O header.
+"$ROOT/scripts/release/assert-universal.sh" "$APP"
 
 # Stage a clean copy (the freshly built app carries the UI + drumkits but NOT the
 # Python service — exactly what we want for an MP-only share).
@@ -58,9 +63,14 @@ Mosh — multiplayer test build
 =============================
 
 REQUIREMENTS
-  • An Apple Silicon Mac (M1/M2/M3/M4).  (This build will NOT run on Intel.)
+  • Any Mac — Apple Silicon (M1/M2/M3/M4) or Intel.  This is a Universal build.
   • macOS 11 (Big Sur) or newer.
-  To check: Apple menu  >  About This Mac  (look for "Chip: Apple M…").
+  To check: Apple menu  >  About This Mac.
+
+  Note for Intel Macs: everything in the DAW works, but the on-device generative
+  model (Stable Audio 3) needs Apple Silicon, so generative renders fall back to
+  the fast "preview" engine — the drawer labels this, so you always know which
+  one you heard.  See docs/MACOS_INTEL.md.
 
 INSTALL
   1. Unzip Mosh-mp.zip (double-click it).

@@ -9,8 +9,10 @@ coding, no accounts, nothing to sign up for.
 
 ## 1. What you need
 
-- An **Apple Silicon Mac** (an M1, M2, M3, or M4 chip — anything from the last few years).
-  This build won't run on an older Intel Mac.
+- **Any Mac** — Apple Silicon (M1/M2/M3/M4) or Intel. Mosh ships as a Universal app.
+  On an Intel Mac everything in the DAW works; the one difference is that the on-device
+  AI engine (step 7) needs Apple Silicon, so generative renders use the fast **preview**
+  engine instead. Mosh labels which one you're hearing, so you're never guessing.
 - **macOS 11 (Big Sur) or newer.**
 - About **1 GB** of free disk space for the app itself. If you later opt into the real AI
   engine (step 7, totally optional), budget another **~10 GB**.

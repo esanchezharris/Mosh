@@ -207,16 +207,26 @@ jobs:
       # ── build once here so a broken build fails BEFORE notarization is attempted;
       # `./run-mosh.sh release` below rebuilds against the same preset, which is then
       # a fast no-op incremental step (nothing changed) ──────────────────────────
-      - name: Build (Release)
+      # Universal 2 (arm64 + x86_64): a release is what strangers install, so it must run
+      # on Intel Macs too. Cross-compiling the x86_64 slice from this arm64 runner is
+      # native clang behaviour — no extra tooling. See docs/MACOS_INTEL.md.
+      - name: Build (Release, Universal 2)
         run: |
           set -euo pipefail
-          cmake --preset macos-arm64-release
-          cmake --build --preset macos-arm64-release-app
+          cmake --preset macos-universal-release
+          cmake --build --preset macos-universal-release-app
+
+      - name: Assert Universal 2 + min macOS (fail closed before notarization)
+        run: |
+          set -euo pipefail
+          APP="$(find build-macos-universal-release -maxdepth 4 -name 'Mosh.app' -type d | sort | tail -n 1)"
+          [ -n "$APP" ] || { echo "::error::built Mosh.app not found"; exit 1; }
+          ./scripts/release/assert-universal.sh "$APP"
 
       - name: Selftest smoke (fail before burning notary quota on a broken build)
         run: |
           set -euo pipefail
-          APP="$(find build-macos-arm64-release -maxdepth 4 -name 'Mosh.app' -type d | sort | tail -n 1)"
+          APP="$(find build-macos-universal-release -maxdepth 4 -name 'Mosh.app' -type d | sort | tail -n 1)"
           BIN="$APP/Contents/MacOS/Mosh"
           [ -x "$BIN" ] || { echo "::error::built Mosh binary not found"; exit 1; }
           SESS="ci-release-$$"

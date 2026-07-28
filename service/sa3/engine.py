@@ -17,6 +17,7 @@ contiguous-first path; the coverage stitch fallback only covers clips past the c
 """
 from __future__ import annotations
 
+import importlib.util
 import math
 import os
 import sys
@@ -48,10 +49,31 @@ _engine = None
 _engine_lock = threading.Lock()
 
 
-def engine_available() -> bool:
-    """True if the SA3 model code + dir are present (gates the capability + /health)."""
+def model_dir_present() -> bool:
+    """True if the SA3 model code + weights dir are on disk."""
     return os.path.isdir(SA3_MLX_DIR) and os.path.isfile(
         os.path.join(SA3_MLX_DIR, "scripts", "sa3_mlx.py"))
+
+
+def mlx_importable() -> bool:
+    """True if `import mlx.core` — _Engine.__init__'s hard dependency — can actually succeed.
+
+    MLX is Apple-Silicon/Metal only; there are no x86_64 macOS wheels. On an Intel Mac the
+    directory check ALONE is not enough: an SA3_MLX_DIR that arrives by any route (guest zip,
+    Time Machine restore, synced folder, a copied external drive) would make /health advertise
+    `stable_audio3` and light the green "SA3" badge in the generative drawer, and the lie would
+    only surface as a traceback at the first render. find_spec LOCATES the package without
+    importing it, so this stays cheap enough to sit on the /health path.
+    """
+    return importlib.util.find_spec("mlx") is not None
+
+
+def engine_available() -> bool:
+    """True if the SA3 model dir is present AND the MLX runtime can load (gates /health).
+
+    Cheap check first: the dir stat short-circuits the common "SA3 not installed" case.
+    """
+    return model_dir_present() and mlx_importable()
 
 
 def get_engine():

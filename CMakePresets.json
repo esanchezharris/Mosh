@@ -30,6 +30,34 @@
       }
     },
     {
+      "name": "macos-universal-debug",
+      "displayName": "macOS Universal 2 Debug (arm64 + Intel)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-macos-universal",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
+    },
+    {
+      "name": "macos-universal-release",
+      "displayName": "macOS Universal 2 Release (arm64 + Intel) — this is what ships",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-macos-universal-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "MOSH_BUILD_APP": "ON",
+        "MOSH_BUILD_TESTS": "ON",
+        "MOSH_BUILD_UI": "ON",
+        "MOSH_BUILD_PLUGIN_FIXTURES": "ON"
+      }
+    },
+    {
       "name": "windows-x64-debug",
       "displayName": "Windows x64 Debug (NVIDIA/CUDA)",
       "generator": "Visual Studio 17 2022",
@@ -168,6 +196,34 @@
       "name": "macos-arm64-release-tests",
       "displayName": "Build macOS Apple Silicon tests (Release)",
       "configurePreset": "macos-arm64-release",
+      "targets": [
+        "MoshTests"
+      ]
+    },
+    {
+      "name": "macos-universal-app",
+      "displayName": "Build macOS Universal 2 app",
+      "configurePreset": "macos-universal-debug",
+      "targets": [
+        "Mosh",
+        "MoshStageUI",
+        "MoshFixInfoPlist"
+      ]
+    },
+    {
+      "name": "macos-universal-release-app",
+      "displayName": "Build macOS Universal 2 app (Release)",
+      "configurePreset": "macos-universal-release",
+      "targets": [
+        "Mosh",
+        "MoshStageUI",
+        "MoshFixInfoPlist"
+      ]
+    },
+    {
+      "name": "macos-universal-release-tests",
+      "displayName": "Build macOS Universal 2 tests (Release)",
+      "configurePreset": "macos-universal-release",
       "targets": [
         "MoshTests"
       ]
