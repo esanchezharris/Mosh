@@ -509,9 +509,17 @@ test("the arrangement shrink-wraps to its tracks; the add-track row creates a tr
 
 // TRK-KIND — the v2 shell shipped able to create ONLY audio tracks, so a mouse-only user
 // could never program a beat or a melody. Prove both newly-reachable kinds land a track
-// that is actually playable: an instrument in the rack (else it is silent), and for the
-// instrument kind a MIDI clip to open in the piano roll.
-test("the add-track menu reaches drum and instrument tracks, and they land playable", async ({ page }) => {
+// that is actually playable: an instrument in the rack (else it is silent).
+//
+// The instrument kind used to also land with a MIDI clip already on it (auto-added via
+// add_midi_clip, which silently loaded a default synth the user never picked — see
+// TrackLaneList.tsx's addTrackOfKind). The instrument-affordance work made that track land
+// BARE instead, so the Inspector's pinned instrument slot (or the empty-lane double-click)
+// gets to ask a real question instead of a silent default winning by omission. That fuller
+// bare→pick-a-synth→add-a-clip loop is proven end-to-end in
+// ui/e2e/instrument-affordance.spec.ts; this test now only checks the track itself lands,
+// with no clip and no instrument yet.
+test("the add-track menu reaches drum and instrument tracks, and the instrument one lands bare", async ({ page }) => {
   await bootV2(page);
   const before = await page.getByTestId("v2-track-header").count();
 
@@ -524,13 +532,13 @@ test("the add-track menu reaches drum and instrument tracks, and they land playa
   await page.getByTestId("v2-track-add").click();
   await page.getByTestId("v2-track-add-midi").click();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 2);
-  // …and the instrument track arrives with a clip already ON IT, so the piano roll —
-  // which only opens on an existing MIDI clip — is reachable at last. Scoped to the new
-  // track's own lane: the clip must not land on tracks[0], which is where an omitted
-  // trackId would put it in the mock.
+  // …lands bare: no clip yet, no preset shown (no instrument loaded). Scoped to the new
+  // track's own lane, not tracks[0], where an omitted trackId would have put a clip in
+  // the mock.
   const newTrackId = await page.getByTestId("v2-track-header").last().getAttribute("data-track-id");
   expect(newTrackId).toBeTruthy();
-  await expect(page.locator(`.v2-lane[data-track-id="${newTrackId}"]`).getByTestId("v2-clip")).toHaveCount(1);
+  await expect(page.locator(`.v2-lane[data-track-id="${newTrackId}"]`).getByTestId("v2-clip")).toHaveCount(0);
+  await expect(page.getByTestId("v2-track-header").last().locator(".v2-lpreset")).toHaveCount(0);
 });
 
 // TRK-RENAME — `rename_track` shipped with no user-facing call site in EITHER shell, so
