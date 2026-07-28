@@ -251,13 +251,16 @@ function home(){mode=null;
    : n.answered+' of '+n.total+' answered · ~'+Math.ceil((n.total-n.answered)*11/60)+' min left';
  document.getElementById('bN').style.width=pct(n.answered,n.total);
  const mA=document.getElementById('mA');
- mA.innerHTML = a.queue.length===0
+ const held = a.excludedUntilNormed
+   ? '<div class=note>'+a.excludedUntilNormed+' item(s) held back until you '
+     +'answer them in the norming packet above — seeing the machine\'s word '
+     +'first would contaminate your ceiling. They unlock as you go.</div>' : '';
+ mA.innerHTML = (a.queue.length===0 && !a.excludedUntilNormed)
    ? '<span class=done>queue empty — '+a.judged+' judgement(s) recorded</span>'
-   : a.queue.length+' fills to judge · run '+a.run
-     +(a.excludedUntilNormed?'<div class=note>'+a.excludedUntilNormed
-       +' item(s) held back until you answer them in the norming packet — '
-       +'seeing the machine\'s word first would contaminate your ceiling.</div>':'');
- document.getElementById('bA').style.width=a.queue.length?'0%':'100%';}
+   : (a.queue.length+' fill(s) judgeable now · '+a.judged
+      +' recorded · run '+a.run+held);
+ document.getElementById('bA').style.width=
+   (a.queue.length||a.excludedUntilNormed)?'0%':'100%';}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function startNorming(){mode='norm';
  ni=S.norming.items.findIndex(p=>!p.answered); if(ni<0) ni=0; showNorm();}

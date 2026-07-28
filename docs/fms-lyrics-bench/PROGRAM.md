@@ -60,6 +60,13 @@ numbers and hashes only.
 
 ## Owner runbook (current asks)
 
+> **One-command surface (2026-07-28):** both remaining sittings now live on a
+> single loopback page — `python3 service/lyrics/bench/bench_cli.py sit` →
+> http://127.0.0.1:8767/. Norming first, accept pass second; the page enforces
+> the order (accept items stay locked until their packet item is answered, so
+> the machine's word can't contaminate your ceiling). Items 4 and 5 below are
+> the manual equivalents and stay valid for extra raters.
+
 1. ~~Golden spec~~ **DONE 2026-07-24** — owner declared the taste anchor in the
    plan thread: **Ken Carson, Young Thug, Playboi Carti, Future, Drake** (Drake
    swapped in for SLAYR, absent from the dump). Their songs stand in for "my

@@ -36,6 +36,12 @@
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": ["-c", "cd /Users/emiliosanchez-harris/mosh-fms-ksb/hybrid-demo && exec /usr/bin/python3 -m http.server 8190 --bind 127.0.0.1"],
       "port": 8190
+    },
+    {
+      "name": "sitting",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["service/lyrics/bench/bench_cli.py", "sit"],
+      "port": 8767
     }
   ]
 }
