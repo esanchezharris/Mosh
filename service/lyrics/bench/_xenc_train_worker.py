@@ -52,7 +52,28 @@ def main():
     tok = AutoTokenizer.from_pretrained(cfg["model"])
     model = AutoModelForSequenceClassification.from_pretrained(cfg["model"])
     model.to(device).train()
-    opt = torch.optim.AdamW(model.parameters(), lr=float(cfg.get("lr", 2e-5)))
+    # Freeze the lower encoder: full-model AdamW on 568M params keeps ~9GB of
+    # optimizer state and OOM'd the MPS watermark on the first run. Training the
+    # top-N layers + head (~50M) is the memory fix AND the right first
+    # fine-tune for a multilingual base — the task signal is a reranking head's
+    # job, not the tokenizer's world model. freezeBelow=-1 trains everything.
+    freeze_below = int(cfg.get("freezeBelow", 20))
+    n_trainable = 0
+    if freeze_below >= 0:
+        for name, p in model.named_parameters():
+            layer = None
+            if ".layer." in name:
+                layer = int(name.split(".layer.")[1].split(".")[0])
+            trainable = (layer is not None and layer >= freeze_below) \
+                or ("classifier" in name or "pooler" in name)
+            p.requires_grad = trainable
+            n_trainable += p.numel() if trainable else 0
+    else:
+        n_trainable = sum(p.numel() for p in model.parameters())
+    print(f"trainable params: {n_trainable/1e6:.1f}M "
+          f"(freezeBelow={freeze_below})", flush=True)
+    opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                            lr=float(cfg.get("lr", 2e-5)))
     B = int(cfg.get("batch", 8))
     max_len = int(cfg.get("maxLength", 256))
     max_steps = int(cfg.get("maxSteps", 1000))
@@ -102,6 +123,8 @@ def main():
             print(f"step {step} train {run_train / 100:.4f} val {v:.4f}",
                   flush=True)
             run_train = 0.0
+            if device == "mps":
+                torch.mps.empty_cache()
 
     os.makedirs(cfg["out"], exist_ok=True)
     model.eval()
