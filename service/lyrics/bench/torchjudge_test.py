@@ -64,10 +64,19 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         del os.environ["LYRICS_BENCH_TORCH_PY"]
 
+# Every case below injects `run_backend`, so no interpreter is ever executed —
+# but `score_pairs` resolves one BEFORE calling the backend and bails when there
+# is none. Without an explicit `python=`, these cases silently depended on the
+# dev machine happening to have a torch venv: on a runner without one they
+# crashed (available path) or passed for the wrong reason (unavailable path,
+# which bailed at resolution and never reached the backend it claims to test).
+# Passing a stub path makes them hermetic. It is never executed.
+STUB_PY = "/nonexistent/stub/bin/python"
+
 # ---- unavailable degrades honestly ----
 with tempfile.TemporaryDirectory() as td:
     out = torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                                 cache=llm_cache.Cache(td),
+                                 cache=llm_cache.Cache(td), python=STUB_PY,
                                  run_backend=lambda *a, **k: {
                                      "ok": False, "error": "torch not installed"})
     check("absent backend → status unavailable, score None (never 0.0)",
@@ -89,19 +98,19 @@ with tempfile.TemporaryDirectory() as td:
     cache = llm_cache.Cache(td)
     pairs = [(ITEM, "stacking all"), (ITEM, "counting up")]
     out = torchjudge.score_pairs(pairs, kind="emb", cache=cache,
-                                 run_backend=scripted)
+                                 python=STUB_PY, run_backend=scripted)
     check("available: one score per pair", out["scores"] == [0.75, 0.75], str(out))
     check("available: backend provenance recorded (interpreter + model)",
           out["backend"]["model"] == "stub-model-v1" and out["backend"]["python"],
           str(out.get("backend")))
     first = CALLS["n"]
     out2 = torchjudge.score_pairs(pairs, kind="emb", cache=cache,
-                                  run_backend=scripted)
+                                  python=STUB_PY, run_backend=scripted)
     check("cache: identical pairs re-score with no new backend call",
           CALLS["n"] == first and out2["scores"] == out["scores"],
           f"{CALLS['n']} vs {first}")
     out3 = torchjudge.score_pairs([(ITEM, "different fill entirely")], kind="emb",
-                                  cache=cache, run_backend=scripted)
+                                  cache=cache, python=STUB_PY, run_backend=scripted)
     check("cache: a new fill DOES reach the backend", CALLS["n"] == first + 1)
     check("cache: kind is part of the key (emb vs ppl never collide)",
           torchjudge._pair_key(ITEM, "x", "emb") !=
@@ -119,7 +128,8 @@ def capture(python, script, payload):
 
 with tempfile.TemporaryDirectory() as td:
     torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                           cache=llm_cache.Cache(td), run_backend=capture)
+                           cache=llm_cache.Cache(td), python=STUB_PY,
+                           run_backend=capture)
     pair = SEEN["pairs"][0]
     check("backend receives the truth-filled and candidate-filled LINES",
           pair["truth"] == "I was counting up the rent, no debate"
@@ -130,7 +140,7 @@ with tempfile.TemporaryDirectory() as td:
 # ---- ppl kind flows through the same seam ----
 with tempfile.TemporaryDirectory() as td:
     out = torchjudge.score_pairs([(ITEM, "stacking all")], kind="ppl",
-                                 cache=llm_cache.Cache(td),
+                                 cache=llm_cache.Cache(td), python=STUB_PY,
                                  run_backend=lambda p, s, pay: {
                                      "ok": True, "backend": {"python": p, "model": "m"},
                                      "scores": [-1.25]})
@@ -140,7 +150,8 @@ with tempfile.TemporaryDirectory() as td:
 # ---- determinism ----
 with tempfile.TemporaryDirectory() as td:
     runs = [torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                                   cache=llm_cache.Cache(td), run_backend=scripted)
+                                   cache=llm_cache.Cache(td), python=STUB_PY,
+                                   run_backend=scripted)
             for _ in range(3)]
     check("determinism: 3x identical", runs[0] == runs[1] == runs[2])
 
