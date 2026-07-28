@@ -726,3 +726,22 @@ numbers and hashes only.
   instead of re-ranking proposals; (b) scale M6 against the evidence; (c)
   promote fp (.413 exact / .75 owner-acceptable) into the product behind a
   flag while lanes continue. Recorded as an open decision, not taken.**
+- **2026-07-28 — PROMOTION VALIDATED END-TO-END through the shipped loop.**
+  `product-llm` A/B on the frozen 150 (flag folded into the runner cache key so
+  ON cannot replay OFF): rhyme_fit .986→.993, **rhyme_perfect .642→.887
+  (+24.5 points)**, exact .053→.087 (+63% rel; whole-line composition keeps
+  absolute exact low by nature — the slot-level numbers are the fp arm's
+  .413/.75). Nothing degraded. Raw reads: mostly modest upgrades (`feuds` over
+  `blue crews`); one caveat observed live — `burk`-class name-junk can surface
+  because the PRODUCT palette draws from the vendored Norvig general-English
+  table, not the rap-corpus table the bench measured with (`MOSH_FREQ_TABLE`
+  points the product at a better one). **Default stays OFF: flipping
+  `MOSH_RHYME_PALETTE=1` to default is an EAR decision the owner makes in the
+  app, with +24.5 rhyme_perfect as the measured case for it.**
+- **2026-07-28 — I4 under way.** 7,431 leak-clean triples minted (the per-row
+  leakage guard refused **569 real corpus items** whose masked line already
+  carried its answer — each would have been a copy-task freebie); templated at
+  byte-parity with the local arms' serve prompts (7,060/371 train/valid);
+  LoRA training on the 4-bit base in flight (mask-prompt, seq 1024, seed
+  pinned, adapters served via the new LocalConfig.adapter seam — keyed
+  conditionally, loud-fail on a missing dir, never fused per r5).
