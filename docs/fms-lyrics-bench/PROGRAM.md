@@ -671,3 +671,15 @@ numbers and hashes only.
   order. M6 routes to I3: fine-tune the cross-encoder on truth-vs-poolmate
   pairs (spec §3), bar = .413 exact / .75 acceptFit.** Train-slice data only —
   the leak discipline is the first guard I3 lands.
+- **2026-07-28 — M6-I3 under way: the fine-tune trajectory is live and pointed
+  the right way.** Minted 3,000 train-slice triples (15k pairs; leak-clean by
+  DIRECT measurement — 0 id / 0 song overlap with dev+golden across 470k eval
+  items; content-sha deterministic). Trainer: bge-reranker-v2-m3, top-4 layers
+  + head (51.4M trainable; full-model AdamW OOM'd the MPS watermark), BCE on
+  the logit, val split BY ITEM. Smoke 500 steps: val 1.589 → 0.450, train ≈
+  val (no memorization gap) — but with 1:4 class prior, BCE .50 is the
+  always-predict-prior baseline, so 500 steps mostly bought calibration.
+  Checkpoint eval on the frozen 150: **exact .247** (zero-shot .213 → +3.4),
+  acceptFit .778 @ 48% coverage, topk .513 preserved, checkpoint provenance in
+  `arm.config.xencModel`. Trajectory: .213 (0 steps) → .247 (500) → 3,000-step
+  run in flight. Bar unchanged: .413 exact / .75 acceptFit.
