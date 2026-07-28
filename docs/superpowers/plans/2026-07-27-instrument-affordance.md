@@ -18,6 +18,7 @@
 - **No `SABOTAGE` left in the tree.** If you temporarily break code to prove a test fails, restore it and run `grep -rn SABOTAGE ui/src` before committing.
 - **`EditorAction` string values are persisted** in templates/localStorage. `"lane_new"` is permanent once shipped — do not rename it later.
 - **DRM-001 stays.** Never remove the default-instrument auto-load in `src/moshops/MoshOps.cpp:6648`. A MIDI clip on an instrument-less track is silent.
+- **Unit tests must be named `*.test.ts`, never `*.test.tsx`.** `ui/vitest.config.ts:14` sets `include: ["src/**/*.test.ts"]`, so a `.tsx` test file is silently never collected — it looks exactly like a passing suite. There are zero `.test.tsx` files in the repo. Mount components with `React.createElement` rather than JSX so the `.ts` extension is honest.
 - **Test commands** run from `ui/`: `npm test` (vitest), `npm run typecheck`, `npm run test:e2e`.
 - **e2e uses the isolated config only:** `npx playwright test --config playwright.isolated.config.ts` (port 5191). Never `:5173` — another session's dev server may own it and will false-fail every spec.
 
@@ -397,7 +398,7 @@ The visible payoff: double-click and right-click on empty lane space do somethin
 - Create: `ui/src/v2/lanes/LaneMenu.tsx`
 - Modify: `ui/src/v2/lanes/TrackLaneList.tsx` (imports, component state, `.v2-lane` at line 196)
 - Modify: `ui/src/v2/shell.css` (append)
-- Test: `ui/src/v2/lanes/laneGesture.test.tsx`
+- Test: `ui/src/v2/lanes/laneGesture.test.ts`
 
 **Interfaces:**
 - Consumes: `EditorAction.LANE_NEW` (Task 1), `resolveLaneNew` / `LaneNewPlan` (Task 2), `openBrowserTab(tab, collection)` (Task 3).
@@ -460,7 +461,7 @@ export function LaneMenu({ x, y, track, start, barLen, onClose }: {
 
 - [ ] **Step 2: Write the failing test**
 
-Create `ui/src/v2/lanes/laneGesture.test.tsx`:
+Create `ui/src/v2/lanes/laneGesture.test.ts`:
 
 ```tsx
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -535,7 +536,7 @@ import { LaneMenu } from "./LaneMenu";
 - [ ] **Step 3: Run test to verify it fails**
 
 ```bash
-cd ui && npx vitest run src/v2/lanes/laneGesture.test.tsx
+cd ui && npx vitest run src/v2/lanes/laneGesture.test.ts
 ```
 
 Expected: FAIL on the `LaneMenu` import until Step 1's file is saved; if Step 1 is already saved, the gesture tests pass and only a mounting mismatch (if any) remains.
@@ -685,7 +686,7 @@ Note: this e2e case needs a clip to exist, so it must add the clip explicitly vi
 - [ ] **Step 8: Commit**
 
 ```bash
-git add ui/src/v2/lanes/LaneMenu.tsx ui/src/v2/lanes/TrackLaneList.tsx ui/src/v2/lanes/laneGesture.test.tsx ui/src/v2/shell.css
+git add ui/src/v2/lanes/LaneMenu.tsx ui/src/v2/lanes/TrackLaneList.tsx ui/src/v2/lanes/laneGesture.test.ts ui/src/v2/shell.css
 git commit -m "feat(v2): empty-lane double-click and right-click — instrument, import, MIDI clip"
 ```
 
@@ -698,7 +699,7 @@ git commit -m "feat(v2): empty-lane double-click and right-click — instrument,
 - Modify: `ui/src/v2/inspector/Inspector.tsx:66`
 - Modify: `ui/src/ui/Dock.tsx:30-55`
 - Modify: `ui/src/v2/shell.css` (append)
-- Test: `ui/src/v2/inspector/instrumentSlot.test.tsx`
+- Test: `ui/src/v2/inspector/instrumentSlot.test.ts`
 
 **Interfaces:**
 - Consumes: `openBrowserTab(tab, collection)` (Task 3).
@@ -706,7 +707,7 @@ git commit -m "feat(v2): empty-lane double-click and right-click — instrument,
 
 - [ ] **Step 1: Write the failing test**
 
-Create `ui/src/v2/inspector/instrumentSlot.test.tsx`:
+Create `ui/src/v2/inspector/instrumentSlot.test.ts`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
@@ -733,7 +734,7 @@ describe("instrumentOf", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.tsx
+cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.ts
 ```
 
 Expected: FAIL — `Failed to resolve import "./InstrumentSlot"`.
@@ -794,7 +795,7 @@ export function InstrumentSlot({ track }: { track: Track }) {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.tsx
+cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.ts
 ```
 
 Expected: PASS, 3 tests.
@@ -876,7 +877,7 @@ Expected: PASS across the whole suite. If any existing Dock/Rack test asserts a 
 
 - [ ] **Step 9: Add the de-duplication test and RED-prove it**
 
-`instrumentOf` alone cannot catch a double-render — that needs the real `Rack` filter. Add to `ui/src/v2/inspector/instrumentSlot.test.tsx` (note: no `@testing-library/react` in this repo — `React.act` + `createRoot`, same as `ui/src/v2/busAndMasterParams.test.ts`):
+`instrumentOf` alone cannot catch a double-render — that needs the real `Rack` filter. Add to `ui/src/v2/inspector/instrumentSlot.test.ts` (note: no `@testing-library/react` in this repo — `React.act` + `createRoot`, same as `ui/src/v2/busAndMasterParams.test.ts`):
 
 ```tsx
 import React, { act } from "react";
@@ -919,13 +920,13 @@ describe("Rack hideInstrument", () => {
 RED-prove: drop the `.filter((p) => !(hideInstrument && p.isInstrument))` line and confirm the first test FAILS with `["OTT","Vital"]`. Restore, confirm both pass. The second test is what stops a future "simplification" from filtering the instrument out for classic too.
 
 ```bash
-cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.tsx && grep -rn SABOTAGE src/ || echo "clean"
+cd ui && npx vitest run src/v2/inspector/instrumentSlot.test.ts && grep -rn SABOTAGE src/ || echo "clean"
 ```
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add ui/src/v2/inspector/InstrumentSlot.tsx ui/src/v2/inspector/Inspector.tsx ui/src/v2/inspector/instrumentSlot.test.tsx ui/src/ui/Dock.tsx ui/src/v2/shell.css
+git add ui/src/v2/inspector/InstrumentSlot.tsx ui/src/v2/inspector/Inspector.tsx ui/src/v2/inspector/instrumentSlot.test.ts ui/src/ui/Dock.tsx ui/src/v2/shell.css
 git commit -m "feat(v2): pinned instrument slot above the FX rack"
 ```
 
@@ -936,7 +937,7 @@ git commit -m "feat(v2): pinned instrument slot above the FX rack"
 **Files:**
 - Modify: `ui/src/ui/icons.tsx` (append near `IconDrum`, line 92)
 - Modify: `ui/src/v2/lanes/TrackLaneList.tsx:24,459-463`
-- Test: `ui/src/v2/lanes/trackTypeIcon.test.tsx`
+- Test: `ui/src/v2/lanes/trackTypeIcon.test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -944,7 +945,7 @@ git commit -m "feat(v2): pinned instrument slot above the FX rack"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `ui/src/v2/lanes/trackTypeIcon.test.tsx`:
+Create `ui/src/v2/lanes/trackTypeIcon.test.ts`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
@@ -971,7 +972,7 @@ describe("pickTrackIcon", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd ui && npx vitest run src/v2/lanes/trackTypeIcon.test.tsx
+cd ui && npx vitest run src/v2/lanes/trackTypeIcon.test.ts
 ```
 
 Expected: FAIL — `pickTrackIcon` is not exported.
@@ -1038,13 +1039,13 @@ Expected: PASS, `tsc` clean.
 Temporarily remove the `if (isInstrument) return "keys";` line and confirm the first test FAILS with `expected 'waveform' to be 'keys'`. Restore.
 
 ```bash
-cd ui && npx vitest run src/v2/lanes/trackTypeIcon.test.tsx && grep -rn SABOTAGE src/ || echo "clean"
+cd ui && npx vitest run src/v2/lanes/trackTypeIcon.test.ts && grep -rn SABOTAGE src/ || echo "clean"
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add ui/src/ui/icons.tsx ui/src/v2/lanes/TrackLaneList.tsx ui/src/v2/lanes/trackTypeIcon.test.tsx
+git add ui/src/ui/icons.tsx ui/src/v2/lanes/TrackLaneList.tsx ui/src/v2/lanes/trackTypeIcon.test.ts
 git commit -m "feat(v2): instrument tracks get their own header icon"
 ```
 
