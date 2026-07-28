@@ -97,6 +97,31 @@ check("perfect-but-empty: and it is NOT the artist's word", row.get("exact") == 
 check("perfect-but-empty: the canary records that this is the uncaught failure",
       "not quality" in pe["why"])
 
+# ---- 3b. the off-menu canary is VERIFIED, not guessed ----
+# The suite's default partner ("mind") does not rhyme with the first pool word, so
+# a guessing implementation looks identical there — it passed a sabotage that
+# skipped the check entirely. This uses a lexicon where the FIRST pool word DOES
+# rhyme with the partner, so an unverified pick would be wrong.
+from phonology.core import Pronouncer  # noqa: E402
+
+# `lozenge` is given a rime IDENTICAL to `orange`'s so the two genuinely rhyme in
+# this fixture. Real English has no rhyme for orange, which is exactly why the
+# default suite could not exhibit this case.
+_RHYMES_ORANGE = {"orange": [["AO1", "R", "AH0", "N", "JH"]],
+                  "lozenge": [["L", "AO1", "R", "AH0", "N", "JH"]],
+                  "silver": [["S", "IH1", "L", "V", "ER0"]]}
+_op = Pronouncer(lexicon=_RHYMES_ORANGE, g2p=lambda w: None)
+check("off-menu fixture: the FIRST pool word really does rhyme with this partner",
+      _op.rhyme(canaries._NON_RHYME_POOL[0], "lozenge", "slant"),
+      f"{canaries._NON_RHYME_POOL[0]} vs lozenge")
+_picked = canaries._non_rhyme_for("lozenge", "slant", _op)
+check("off-menu: a rhyming candidate is SKIPPED, not returned",
+      _picked != canaries._NON_RHYME_POOL[0], str(_picked))
+check("off-menu: whatever is returned genuinely does not rhyme",
+      _picked is None or not _op.rhyme(_picked, "lozenge", "slant"), str(_picked))
+check("off-menu: no verifiable candidate ⇒ None, never a fabricated one",
+      canaries._non_rhyme_for("lozenge", "slant", None) is None)
+
 # ---- 4. canaries derive from the item, not from a frozen word list ----
 alt = item(9)
 alt["constraints"]["rhymeWith"] = "gold"

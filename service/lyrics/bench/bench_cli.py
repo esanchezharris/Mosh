@@ -27,7 +27,8 @@ SERVICE = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, SERVICE)
 
 from lyrics.bench import (arms, build_eval, calibrate, calibrate_page,  # noqa: E402
-                          canaries, contamination, preflight,
+                          accept_set, canaries, contamination, norming,
+                          preflight,
                           ingest, judge, llm_cache, mask, metrics, paths,
                           mixpairs, panel, pilot, runner, sampling, scoreboard,
                           scrape, torchjudge)
@@ -283,7 +284,9 @@ def cmd_run(args) -> int:
     try:
         res = runner.run_arm(args.arm, items, ctx, out_dir=out_dir,
                              song_index=contamination.song_index(_load_corpus()),
-                             canary=_canary)
+                             canary=_canary,
+                             accept_sets=accept_set.load(args.slice),
+                             items_by_id={i["itemId"]: i for i in items})
     finally:
         if local_worker is not None:
             local_worker.close()   # an 8GB MLX process must not outlive the bench
@@ -679,6 +682,126 @@ def cmd_calibrate(args) -> int:
     return 0
 
 
+def cmd_accept(args) -> int:
+    """Tag non-exact fills the owner would still have kept.
+
+    `exact` asks whether the arm reproduced the artist's word. This asks the
+    question the arm is actually for. Reads a run's rows, shows only the items
+    the arm got WRONG (the exact ones need no judgement), and records accept /
+    reject per fill.
+    """
+    if args.action == "stats":
+        sets = accept_set.load(args.slice)
+        judged = sum(len(v["accept"]) + len(v["reject"]) for v in sets.values())
+        print(json.dumps({"slice": args.slice, "itemsWithLabels": len(sets),
+                          "judgements": judged,
+                          "accepted": sum(len(v["accept"]) for v in sets.values()),
+                          "rejected": sum(len(v["reject"]) for v in sets.values())},
+                         indent=1))
+        return 0
+
+    run_dir = args.run if os.path.isabs(args.run) else os.path.join(
+        paths.data_root(), "runs", args.run)
+    rows = _load_run_rows(run_dir)
+    if not rows:
+        print(f"no scored rows under {run_dir}", file=sys.stderr)
+        return 2
+    items_path = os.path.join(paths.data_root(), "eval", f"items-{args.slice}.jsonl")
+    wanted = {r["itemId"] for r in rows}
+    items = {}
+    with open(items_path, encoding="utf-8") as f:
+        for ln in f:
+            if not ln.strip():
+                continue
+            it = json.loads(ln)
+            if it["itemId"] in wanted:
+                items[it["itemId"]] = it
+                if len(items) == len(wanted):
+                    break
+
+    existing = accept_set.load(args.slice)
+    # Only WRONG answers need a judgement — an exact match is already a pass, and
+    # asking about it would burn the owner's attention on settled items.
+    todo = [r for r in rows
+            if r.get("exact") == 0 and (r.get("candidates") or [])
+            and metrics.normalize((r["candidates"] or [""])[0])
+            not in (existing.get(r["itemId"], {}).get("accept", set())
+                    | existing.get(r["itemId"], {}).get("reject", set()))]
+    todo = todo[:args.limit] if args.limit else todo
+    if not todo:
+        print("nothing left to judge in this run")
+        return 0
+
+    print(f"{len(todo)} fill(s) to judge.  [a]ccept  [r]eject  [s]kip  [q]uit\n")
+    n = 0
+    for row in todo:
+        it = items.get(row["itemId"])
+        if not it:
+            continue
+        fill = (row["candidates"] or [""])[0]
+        print("-" * 68)
+        for line in (it["context"].get("before") or [])[-2:]:
+            print(f"   {line}")
+        print(f"   {metrics.apply_fill(it, fill)}")
+        for line in (it["context"].get("after") or [])[:1]:
+            print(f"   {line}")
+        print(f"\n   the machine wrote: {fill!r}")
+        try:
+            ans = input("   keep it? [a/r/s/q] ").strip().lower()[:1]
+        except (EOFError, KeyboardInterrupt):
+            print("\nstopped.")
+            break
+        if ans == "q":
+            break
+        if ans in ("a", "r"):
+            accept_set.record(args.slice, row["itemId"], fill,
+                              "accept" if ans == "a" else "reject", source="cli")
+            n += 1
+    print(f"\nrecorded {n} judgement(s) -> {accept_set.log_path(args.slice)}")
+    return 0
+
+
+def cmd_norming(args) -> int:
+    """Blind answer sheet so the HUMAN ceiling can be measured on our own items."""
+    if args.action == "export":
+        items_path = os.path.join(paths.data_root(), "eval",
+                                  f"items-{args.slice}.jsonl")
+        if not os.path.exists(items_path):
+            print(f"no {items_path} — run build-eval first", file=sys.stderr)
+            return 2
+        items = []
+        with open(items_path, encoding="utf-8") as f:
+            for ln in f:
+                if ln.strip():
+                    it = json.loads(ln)
+                    if it["granularity"] == args.granularity:
+                        items.append(it)
+        songs = {s["songId"]: s for s in _load_corpus()}
+        out_dir = args.out or os.path.join(paths.subdir("norming"), "packet")
+        answers = args.answers or os.path.join(paths.subdir("norming"),
+                                               f"answers-{args.slice}.json")
+        rep = norming.export(items, songs, out_dir=out_dir, answers_path=answers,
+                             n=args.n, slice_=args.slice)
+        print(json.dumps(rep, indent=1))
+        print(f"\nGive the rater ONLY: {out_dir}")
+        print(f"Answers withheld at: {answers}  (do not share)")
+        return 0
+
+    with open(args.answers, encoding="utf-8") as f:
+        answers = json.load(f)["answers"]
+    scores = []
+    for sheet_path in args.sheets:
+        with open(sheet_path, encoding="utf-8") as f:
+            sheet = norming.parse_sheet(f.read())
+        scores.append(norming.score(sheet, answers,
+                                    rater=os.path.basename(sheet_path)))
+    for s in scores:
+        print(json.dumps(s, indent=1))
+    print("\nPOOLED HUMAN CEILING:")
+    print(json.dumps(norming.pool(scores), indent=1))
+    return 0
+
+
 def cmd_scoreboard(_args) -> int:
     entries = []
     for summ_path in sorted(glob.glob(os.path.join(paths.data_root(), "runs", "*",
@@ -809,6 +932,24 @@ def main(argv=None) -> int:
     p = sub.add_parser("pilot", help="N read-aloud verse candidates (owner sitting)")
     pilot.add_arguments(p)
     p.set_defaults(fn=pilot.run)
+
+    p = sub.add_parser("accept", help="tag non-exact fills the owner would keep")
+    p.add_argument("action", choices=["mark", "stats"])
+    p.add_argument("--run", default="", help="run dir name under runs/ (mark)")
+    p.add_argument("--slice", default="dev", choices=["dev", "golden", "train"])
+    p.add_argument("--limit", type=int, default=40)
+    p.set_defaults(fn=cmd_accept)
+
+    p = sub.add_parser("norming", help="blind packet to measure the human ceiling")
+    p.add_argument("action", choices=["export", "score"])
+    p.add_argument("--slice", default="dev", choices=["dev", "golden", "train"])
+    p.add_argument("--granularity", default="rhyme")
+    p.add_argument("-n", type=int, default=200)
+    p.add_argument("--out", default="", help="packet dir (export)")
+    p.add_argument("--answers", default="", help="withheld answer key path")
+    p.add_argument("--sheets", nargs="*", default=[],
+                   help="filled ANSWER-SHEET.txt files, one per rater (score)")
+    p.set_defaults(fn=cmd_norming)
 
     p = sub.add_parser("scoreboard")
     p.set_defaults(fn=cmd_scoreboard)

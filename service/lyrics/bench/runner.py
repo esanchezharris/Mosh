@@ -17,7 +17,7 @@ import json
 import os
 from typing import List
 
-from lyrics.bench import contamination, metrics
+from lyrics.bench import accept_set, contamination, metrics
 from lyrics.bench.arms import ARM_VERSIONS, ARMS, ArmContext
 
 
@@ -31,7 +31,8 @@ def _items_sha(items: List[dict]) -> str:
 
 def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
             out_dir: str, run_name: str = "", song_index: dict = None,
-            canary: dict = None) -> dict:
+            canary: dict = None, accept_sets: dict = None,
+            items_by_id: dict = None) -> dict:
     if arm_name not in ARMS:
         raise KeyError(f"unknown arm {arm_name!r}; known: {sorted(ARMS)}")
     arm, version = ARMS[arm_name], ARM_VERSIONS[arm_name]
@@ -84,6 +85,10 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
     # cross-arm deltas under identical conditions are signal (Amendment 1).
     if song_index is not None:
         contamination.annotate(rows, song_index)
+    # The owner's own judgement, reported BESIDE exact. Divergence between them —
+    # exact climbing while this stalls — is the Goodhart alarm.
+    if accept_sets is not None and items_by_id is not None:
+        accept_set.annotate(rows, items_by_id, accept_sets)
 
     summary = {
         "arm": {"name": arm_name, "version": version,
@@ -108,6 +113,7 @@ def run_arm(arm_name: str, items: List[dict], ctx: ArmContext, *,
         # Recorded IN the summary, not just printed: a run whose canaries were
         # never checked must be distinguishable from one that passed them.
         "canaries": canary,
+        "acceptSet": (accept_set.summarize(rows) if accept_sets is not None else None),
     }
     with open(os.path.join(out_dir, f"summary-{run_name or arm_name}.json"),
               "w", encoding="utf-8") as f:

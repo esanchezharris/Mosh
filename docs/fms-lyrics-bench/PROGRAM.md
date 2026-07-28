@@ -90,6 +90,43 @@ numbers and hashes only.
    That prints which automated metric (if any) actually tracks your ear, writes
    `calibration/TRUSTED_METRICS.json`, and either lifts the HALT or keeps it.
 
+4. **Norming sitting** (~40 min, READY) — measures the HUMAN ceiling on our own
+   items, which replaces the 64.7% figure every prior pre-registration was written
+   against. A packet is already exported:
+
+   ```bash
+   python3 service/lyrics/bench/bench_cli.py norming export -n 200 --slice dev
+   ```
+
+   Give each rater ONLY `~/Library/Mosh/lyrics-bench/norming/packet/` — the
+   answers are withheld in `answers-dev.json` next to it, and the exporter refuses
+   to place them inside the packet. Each rater fills in `ANSWER-SHEET.txt`
+   (`7 = money, honey`, up to 5 guesses, best first). You plus two others. Then:
+
+   ```bash
+   python3 service/lyrics/bench/bench_cli.py norming score \
+     --answers ~/Library/Mosh/lyrics-bench/norming/answers-dev.json \
+     --sheets sheet-owner.txt sheet-b.txt sheet-c.txt
+   ```
+
+   Reports exact / top-5 per rater and a pooled ceiling. 10% of items have the
+   answer already visible as another line's end word; those are flagged in the
+   withheld key and the ceiling is reported both with and without them.
+
+5. **Accept-set marking** (~20 min, READY) — teaches the bench which non-exact
+   fills you would actually have kept, so `exact` stops being the only signal:
+
+   ```bash
+   python3 service/lyrics/bench/bench_cli.py accept mark \
+     --run 2026-07-28T00-21-29-local-constrained-endword-dev --limit 40
+   ```
+
+   Shows only the bars the arm got WRONG, one at a time: `a` keep, `r` reject,
+   `s` skip, `q` quit. Resumable — it never re-asks a judged fill. Every later run
+   then reports accept-set score beside exact, and flags the divergence (exact up,
+   accept-set flat) as a Goodhart alarm. **Currently zero labels, so that alarm
+   cannot fire yet.**
+
 ## Decision ledger (append-only)
 
 - **2026-07-24** — Program approved (plan thread). Corpus: all sources; arms: all;
@@ -396,3 +433,60 @@ numbers and hashes only.
   whole split silently bucketed every row as "unknown" — an instrument reading as
   no-data while looking healthy. Fixed; a real scored row is now asserted to carry
   the join key.
+- **2026-07-27 — M5 complete: accept-set + norming packet. Two instruments that
+  were built, run against real data, and immediately found things the unit tests
+  could not.**
+  - **Accept-set** (`bench_cli.py accept mark|stats`): append-only judgement log,
+    last verdict per (item, word) wins, so a sitting can be interrupted or revised
+    without rewriting history. Scored beside `exact` in every run summary with its
+    COVERAGE stated — an accept score without its denominator is how a number over
+    three judged items gets quoted later. Unlabelled items score **None**, never 0:
+    counting them as failures would make the metric look bad in exact proportion
+    to how little labelling has happened. `goodhart_alarm` fires when exact climbs
+    while accept-set does not, and reports `no-labels` rather than manufacturing a
+    verdict. **Zero labels so far — the alarm cannot be read until the owner marks
+    a run.**
+  - **Norming packet** (`bench_cli.py norming export|score`): 200 seeded items,
+    full-section context, answers withheld in a separate file the exporter refuses
+    to place inside the packet directory. Scored with the SAME `normalize` and
+    `TOPK` the arms use, so the human ceiling and the arm scores are commensurable.
+  - **Found by exporting the real packet: 10% of items hand the rater the answer.**
+    On the first 200-item export, 20 items had the answer already visible as
+    ANOTHER LINE'S END WORD — a rater can copy it, and the ceiling would be
+    inflated by up to ten points. Those items are now flagged in the *withheld*
+    answer key (never in the packet — telling the rater which are easy is its own
+    contamination) and `score` reports `exactExGiveaway` alongside `exact`. The
+    synthetic test fixtures never repeated a word at a line end, so nothing but
+    real data could surface this. A related bug fell out of the same fixture:
+    `_end_word` used `[A-Za-z']+`, which strips digits, while `normalize` keeps
+    them — so a bar ending on `9mm` or `24` could never match.
+  - Section stratification (chorus vs verse) is **skipped, with the reason
+    recorded**: dev rhyme items are ~96% `verse` / 4% `other`. There is no chorus
+    stratum on this corpus.
+- **2026-07-27 — Prior arms re-run LIVE under the current policy; the cache
+  survived the payload change.** `llm-constrained`, `prompt-rhyme-menu` and
+  `fusion-rerank` were replayed on the frozen slice with `MOSH_INFILL_CACHE_ONLY=1`
+  — **zero misses**, which is the integrity proof that making `armConfig`
+  conditional did not re-key any response already paid for. Live numbers reproduce
+  the remembered ones exactly (`.384` / `.322` / `.377`), so from here every
+  comparison is against a live baseline.
+- **⚠ 2026-07-27 — The contamination cut is BUILT but UNDERPOWERED, and this is
+  the blocker on reading any absolute exact-match level.** The instrument works;
+  the corpus does not support it yet:
+
+  | | songs | share |
+  |---|---|---|
+  | famous (charted or pre-2023) | 23,454 | 90.2% |
+  | obscure (2023+ AND < 50k views) | 2,560 | 9.8% |
+
+  A 150-item dev draw therefore yields **~12–15 obscure items** (observed: 12 of
+  146). All three prompt arms score exactly `0.250` there — 3 of 12 — which is a
+  sample size, not a finding. The famous/obscure gap for `llm-constrained` is
+  `.384` vs `.250`, directionally consistent with memorization and nowhere near
+  readable.
+  **Consequence:** Amendment 1's instruction to treat cross-arm deltas as the
+  signal stands, and absolute levels stay unreadable until the obscure bucket
+  grows. The Genius scrape lane (`ingest scrape`, token already configured) is
+  therefore not optional polish — it is the prerequisite for the contamination cut
+  to mean anything. Growing it requires an eval rebuild, which voids `itemsSha`
+  comparability and re-baselines every arm, so it is a deliberate, scheduled step.
