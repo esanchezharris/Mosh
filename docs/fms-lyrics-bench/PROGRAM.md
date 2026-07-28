@@ -594,3 +594,26 @@ numbers and hashes only.
   The owner's sitting now lands on an interpreted scale: well above .20 ⇒ human
   headroom is real and the .413 arm is chasing something reachable; at or below
   it ⇒ exact on this material mostly measures unguessability.
+- **2026-07-28 — PRODUCT PORT of the pool fix (commit `e882b5ce`): the three
+  shipped alphabetical-truncation sites now serve the freq pipeline.**
+  (1) `phonology/core.get_rhymes` — the seam behind BOTH `/get_rhymes` paths
+  (venv CLI + in-process), so the UI rhyme helper stops showing `booz`/`brack`;
+  envelope gains `rankedBy`. Live CLI smoke: "flame" now answers
+  `name/same/game/came/frame…` where it answered `aim/aime/ame/baim…`.
+  (2) `lyrics/core._rhyme_ends` (the generation loop's max_n=40 hint pool — the
+  template backend had shipped a line ending on "graeme"). (3)
+  `lyrics/planner.plan_anchors` — the candidate universe (a re-rank cannot
+  recover words the truncation dropped); `freq=None` now loads the product
+  table. The open frequency-source question resolved as a VENDORED
+  general-English table (`service/phonology/data/en_word_ranks.txt`, Norvig
+  `count_1w` top-50k, provenance + license basis in `data/README.md`) rather
+  than first-run derivation — nothing on a user machine can derive corpus
+  frequencies, and an optional setup step would leave the bug silently in
+  place exactly where it ships. The bench's corpus table stays bench-only
+  (`MOSH_FREQ_TABLE` can point the product at it). Pipeline shape is the
+  proven one (uncapped scan, stop/len>=3 filter BEFORE the cap, then cap);
+  missing table degrades byte-identically to the historical alpha path.
+  Product `STOP_AND_FILLER` is a frozen copy drift-pinned by test against the
+  bench's list. Fixtures carry 50/228-word rime families (> the 40/200 caps);
+  5 sabotages RED-proved incl. filter-after-cap, dropped-freq-tiebreak, and
+  alpha-revert at each site.

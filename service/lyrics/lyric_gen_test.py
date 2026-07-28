@@ -24,7 +24,8 @@ from phonology import core as _ph  # noqa: E402
 fails = []
 
 # RHYME grading needs a real pronunciation dictionary: the fake generator searches cmudict for
-# rhyming end words (core._P.rhyme_search), and rhymes() grades phoneme rimes. cmudict is an
+# rhyming end words (core._rhyme_ends → the freq-ranked pipeline), and rhymes() grades phoneme
+# rimes. cmudict is an
 # OPTIONAL dep (setup-phonology.sh; the core degrades to a spelling heuristic) — so, like
 # phonology_core_test.py's real-cmudict layer, the rhyme-satisfaction checks are guarded and
 # skipped-with-note when the dict is absent, "so the golden gate never fails for a missing
