@@ -165,6 +165,24 @@ No service package is added. A future service consumer must establish a
 generated or otherwise single-source boundary instead of creating a second
 hand-maintained catalog.
 
+> **STATUS 2026-07-27 — resolved, see
+> [`SKILL_CATALOG_BOUNDARY.md`](../SKILL_CATALOG_BOUNDARY.md) (FS-B1a).**
+> `service/skills/` did land later (#409). It is **not** a second
+> hand-maintained command catalog — `moshops_catalog.py` parses
+> `ui/src/agent/commands.ts` as ground truth, and its 36-skill `library.jsonl`
+> is *mined*, not hand-authored. Overlap with `skills.ts` is 5 of 40 commands
+> and **zero** skill names; the two are different kinds of artifact (executable
+> workflow DAGs vs an offline retrieval corpus) and are deliberately kept
+> separate. Two real defects were found and fixed: the projection silently
+> **truncated 2 of 124 command descriptions** (escape-unaware regex), and the
+> shipped mined library was **never validated** against the catalog it names.
+> The boundary is now guarded from both lanes by
+> `ui/src/agent/skillCatalogBoundary.test.ts` and
+> `service/skills/contract_test.py`, RED-proved against five planted
+> divergences. Note also that the FS-B1 *backlog row* listed `service/skills/`
+> in its own `files` array — this section narrowed that scope, and the two
+> documents disagreed.
+
 ## §0 constraints and non-goals
 
 - This worktree and branch contain FS-B1 only.
