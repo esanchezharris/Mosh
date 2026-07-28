@@ -757,3 +757,18 @@ numbers and hashes only.
   the v1 training set: the stronger guard refuses **48/7,431 (0.65%)** — the
   in-flight LoRA's smoke read stands; v2 data (MINT_VERSION v2) is the
   dataset of record for the final train.
+- **2026-07-28 — I4 SMOKE RESULT: TEACHING THE GENERATOR WORKS WHERE SCORING
+  DID NOT.** One 600-iter LoRA (51M-token-free smoke on 7k v1 triples, val
+  9.597→0.768): `local-constrained-endword-fp` + adapter = **exact .393 /
+  topk .560** (from .253/.407) — 2 points off the API champion (.413), with
+  `rhyme_fit 1.0` BY CONSTRUCTION, fully local, and **topk exceeding
+  DeepSeek's .513**. In-pool precision 27.9% → 43.4%. `local-unconstrained` +
+  adapter .247 (from .185). Raw reads: the register learned right —
+  contractions, ad-libs, explicit vocabulary, no sanitizing. Provenance:
+  `arm.config.adapter` names the checkpoint; acceptFit 1.0 @ 46% coverage
+  (self-selected denominator, standing caveat). The M6 negative predicted
+  exactly this: elicitation carries what external scores cannot — so improve
+  the elicitor. **Scaled run launched: v2-guard mint at 20k items, 2,000
+  iters.** If it clears .413/.45, the routing-bar conversation reopens with a
+  LOCAL guaranteed-rhyme arm as the candidate — an owner decision, flagged
+  ahead of time.
