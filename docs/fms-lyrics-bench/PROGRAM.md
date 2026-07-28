@@ -645,3 +645,17 @@ numbers and hashes only.
   the truth sits in the arm's own top-5 a full 10 points more often than at
   top-1, the 86 taste labels just showed formal grade doesn't predict keeps,
   and a reranker is the instrument that converts both facts into top-1.
+- **2026-07-28 — M6 increment 1 (zero-training rerank bracket): NEGATIVE, and
+  informative.** `local-rerank-fp40` (fp's own candidates rescored pointwise by
+  the local 14B's teacher-forced logprob): exact **.300** vs fp's .413 — the
+  free scorer DESTROYS 11 points. Move decomposition: 88/150 top-1s moved,
+  **22 correct answers broken vs 5 misses fixed**; topk .513 preserved exactly
+  (same sets permuted — built-in sanity proof). The breaks are plausible-but-
+  topic-blind (stash-for-bag, proof-for-roof, lie-for-die), the same signature
+  as the local model's 27.9% pool precision. Conclusions, pre-registered
+  reading honored: (1) the generator's own ordering is a better ranker than
+  local logprob — elicitation order carries contextual commitment; (2) the M6
+  lane needs the TRAINED cross-encoder (spec §2 class), and its bar is fp's
+  .413/.75, not this bracket's .300; (3) local teacher-forcing is ruled out as
+  the M6 mechanism. acceptFit .824 on this arm rides 45% coverage — not
+  comparable to fp's .75 @ 99% (the instrument's own caveat applies).
