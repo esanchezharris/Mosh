@@ -683,3 +683,23 @@ numbers and hashes only.
   acceptFit .778 @ 48% coverage, topk .513 preserved, checkpoint provenance in
   `arm.config.xencModel`. Trajectory: .213 (0 steps) → .247 (500) → 3,000-step
   run in flight. Bar unchanged: .413 exact / .75 acceptFit.
+- **2026-07-28 — M6 LANE COMPLETE: NEGATIVE, replicated, closed.** ft-v1
+  (3,000 steps, val 1.589→.351, genuinely below the .50 class-prior floor,
+  train≈val throughout): top-5 rerank exact **.267** (trajectory .213→.247→
+  .267, decelerating — 6× compute bought +2 points), full-pool probe **.227 /
+  top5 .427** against the .907 ceiling. The complete matrix: generation order
+  .413 > local logprob .300/.253 > ft-v1 .267/.227 > zero-shot .213. **Every
+  pointwise scorer — trained or not, over candidates or over the pool — loses
+  to the generator's own elicitation order, and every one breaks more exacts
+  than it fixes (22:5, 34:4, 28:6).** The replicated conclusion: DeepSeek's
+  generation order encodes contextual commitment that no external pointwise
+  score of (context, candidate) recovers at this scale. Remaining M6 variables
+  (10× data, listwise loss, larger trainable fraction) face visibly
+  decelerating returns against a 15-point gap; the lane CLOSES rather than
+  chases them. Assets that persist: the truth-free xenc seam + trainer + miner
+  (all tested/RED-proved), ft-v1 with provenance, and the finding itself.
+  **Routing now needs the owner: the bar's fail-route (this lane) is
+  exhausted. Fork: (a) I4 FIM-LoRA on the GENERATOR — change what is proposed
+  instead of re-ranking proposals; (b) scale M6 against the evidence; (c)
+  promote fp (.413 exact / .75 owner-acceptable) into the product behind a
+  flag while lanes continue. Recorded as an open decision, not taken.**
