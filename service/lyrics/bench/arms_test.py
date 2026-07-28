@@ -371,9 +371,21 @@ check("menu memo separates the two ranks (same ctx, same partner, same cap)",
       arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="alpha") == _alpha
       and arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq") == _freqm,
       "a memo key without `rank` replays one ordering as the other")
-check("freq menu: NO LEAK — identical when the hidden answer changes",
-      arms._rhyme_menu(_menu_item(target="pane"), _mctx, max_n=10, rank="freq")
-      == _freqm)
+# The memo must be BYPASSED here or this check is vacuous: a target-dependent
+# mutation that runs before memoization gets replayed verbatim to the second
+# call (same partner ⇒ same key ⇒ memo hit), so the two lists compare equal
+# with a live leak in the code. Proven by sabotage: promote the target one slot
+# pre-memo — with the memo warm this check passed; cleared, it goes red.
+arms._MENU_MEMO.clear()
+_leak_a = arms._rhyme_menu(_menu_item(target="pain"), _mctx, max_n=10, rank="freq")
+arms._MENU_MEMO.clear()
+_leak_b = arms._rhyme_menu(_menu_item(target="pane"), _mctx, max_n=10, rank="freq")
+arms._MENU_MEMO.clear()
+_leak_c = arms._rhyme_menu(_menu_item(target="zzznotaword"), _mctx, max_n=10,
+                           rank="freq")
+check("freq menu: NO LEAK — cold menus identical as the hidden answer varies",
+      _leak_a == _leak_b == _leak_c == _freqm,
+      f"a={_leak_a} b={_leak_b} c={_leak_c} memoized={_freqm}")
 check("freq menu is deterministic across calls",
       arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq") == _freqm)
 

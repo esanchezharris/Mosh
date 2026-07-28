@@ -614,6 +614,11 @@ def _local_constrained_endword(item: dict, ctx: ArmContext, *,
                      "offMenu": out.get("offMenu", 0) + len(off),
                      "trieTop1": out.get("trieTop1"),
                      "trieRankUnderExact": out.get("trieRankUnderExact"),
+                     # Full teacher-forced ordering when the worker provides it
+                     # (absent on responses cached before 2026-07-27). Lets the
+                     # analysis read truth-rank-in-pool from run artifacts
+                     # instead of capping every precision question at top-5.
+                     "poolRanking": out.get("poolRanking"),
                      "unreachable": out.get("unreachable"),
                      "logprobMean": (out.get("candidates") or [{}])[0].get("logprobMean"),
                      "backend": out.get("backend")}}

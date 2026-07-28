@@ -405,6 +405,13 @@ def op_generate_endword(req):
             "offMenu": off_menu, "resampleCount": 0,
             "poolSize": len(pool), "scored": len(scored), "reachable": len(reachable),
             "unreachable": sorted(set(pool) - reachable)[:8],
+            # The FULL teacher-forced ordering, words only. Response-side
+            # diagnostics: candidates carry top-k, which caps every precision
+            # analysis at rank 5 — the fp ablation needed truth-rank-in-200 and
+            # could not have it without re-paying the run. ~2KB per item.
+            # The worker never sees the held-out truth; joining rank against it
+            # happens offline in analysis.
+            "poolRanking": ranking,
             "triePaths": trie.paths, "trieVersion": et.TRIE_VERSION}
 
 
