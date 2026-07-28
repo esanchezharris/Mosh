@@ -287,12 +287,26 @@ def _trie_processor(trie, eos_id):
 def op_hello(req):
     model_id = req.get("model") or "mlx-community/Qwen2.5-14B-Instruct-4bit"
     revision = req.get("revision") or None
-    kw = {"revision": revision} if revision else {}
+    adapter = req.get("adapter") or None
+    kw = {}
+    if revision:
+        kw["revision"] = revision
+    if adapter:
+        # I4: LoRA adapters ride adapter_path on the 4-bit base — never fused
+        # (r5: fusing kept ~17% of the delta). A missing dir must fail the
+        # handshake loudly, not silently serve the base model as "the adapter".
+        if not os.path.isdir(adapter):
+            return {"ok": False, "error": f"adapter dir not found: {adapter}"}
+        kw["adapter_path"] = adapter
     try:
         model, tok = load(model_id, **kw)
     except TypeError:
+        if adapter:
+            return {"ok": False,
+                    "error": "this mlx_lm cannot load adapter_path — upgrade it"}
         model, tok = load(model_id)
-    _STATE.update({"model": model, "tok": tok, "id": model_id, "revision": revision or ""})
+    _STATE.update({"model": model, "tok": tok, "id": model_id,
+                   "revision": revision or "", "adapter": adapter or ""})
     inner = getattr(tok, "_tokenizer", tok)
     template = getattr(inner, "chat_template", "") or ""
     try:
@@ -302,6 +316,7 @@ def op_hello(req):
         version = ""
     return {"ok": True, "python": sys.executable, "model": model_id,
             "revision": revision or _resolved_revision(model_id),
+            "adapter": adapter or "",
             "quant": _quant_of(model),
             "tokenizerSha": _sha_of(json.dumps(
                 sorted(inner.get_vocab().items())[:1] if hasattr(inner, "get_vocab") else [])

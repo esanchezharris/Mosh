@@ -58,6 +58,7 @@ CACHE_NAMESPACE = "lyrics-bench/local-mlx/v1"
 # wins is recorded in the manifest.
 _CANDIDATE_VENVS = ("lyrics-bench", "sft", "transform", "nsf")
 
+DEFAULT_ADAPTER = os.environ.get("LYRICS_BENCH_MLX_ADAPTER", "")
 DEFAULT_MODEL = os.environ.get("LYRICS_BENCH_LOCAL_MODEL",
                                "mlx-community/Qwen2.5-14B-Instruct-4bit")
 
@@ -99,6 +100,11 @@ def resolve_python() -> Optional[str]:
 class LocalConfig:
     model: str = DEFAULT_MODEL
     revision: str = ""              # filled from the worker's hello when unpinned
+    # LoRA adapter dir served via mlx_lm's adapter_path (I4). NEVER fused — the
+    # r5 lesson: fusing into a 4-bit base kept ~17% of the delta. Rides the
+    # cache payload + arm_config so an adapter swap re-keys instead of
+    # replaying base-model generations. Env: LYRICS_BENCH_MLX_ADAPTER.
+    adapter: str = DEFAULT_ADAPTER
     mode: str = "greedy"            # "greedy" | "sampled"
     run_seed: int = 0
     max_tokens: int = 24
@@ -149,6 +155,10 @@ def payload_for(op: str, *, prompt: str, cfg: LocalConfig, seed: int,
         "maxTokens": int(cfg.max_tokens),
         "sampler": cfg.sampler() if cfg.mode == "sampled" else {},
     }
+    # CONDITIONAL: an adapter joins the key only when one is configured, so
+    # every base-model response already cached keeps its key byte-for-byte.
+    if cfg.adapter:
+        payload["adapter"] = cfg.adapter
     payload.update(extra or {})
     return payload
 
@@ -207,14 +217,16 @@ class Worker:
         self._reader.start()
         atexit.register(self.close)
         hello = self._call({"op": "hello", "model": self.cfg.model,
-                            "revision": self.cfg.revision or None},
+                            "revision": self.cfg.revision or None,
+                            "adapter": self.cfg.adapter or None},
                            timeout=HELLO_TIMEOUT_S)
         if not hello.get("ok"):
             self._die(hello.get("error") or "worker handshake failed")
             return False
         self.backend = {k: hello.get(k) for k in
-                        ("python", "model", "revision", "quant", "tokenizerSha",
-                         "chatTemplateSha", "eosId", "mlxLmVersion")}
+                        ("python", "model", "revision", "adapter", "quant",
+                         "tokenizerSha", "chatTemplateSha", "eosId",
+                         "mlxLmVersion")}
         self.backend["python"] = py
         return True
 

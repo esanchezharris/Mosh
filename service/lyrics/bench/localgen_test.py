@@ -501,5 +501,26 @@ with tempfile.TemporaryDirectory() as td:
           first > 0 and _chatcalls["n"] == first,
           f"first={first} second={_chatcalls['n'] - first}")
 
+# ── adapter identity (I4): joins the cache payload ONLY when configured ─────────
+_base_cfg = localgen.LocalConfig(model="fake/model-4bit", revision="rev0")
+_base_cfg.adapter = ""
+_ad_cfg = localgen.LocalConfig(model="fake/model-4bit", revision="rev0")
+_ad_cfg.adapter = "/fake/adapters/fim-v1"
+_bk = {"revision": "rev0", "quant": {}, "tokenizerSha": "t", "chatTemplateSha": "c"}
+_p_base = localgen.payload_for("generate", prompt="p", cfg=_base_cfg, seed=1,
+                               backend=_bk)
+_p_ad = localgen.payload_for("generate", prompt="p", cfg=_ad_cfg, seed=1,
+                             backend=_bk)
+check("adapter ABSENT → payload has no adapter key (existing caches keep "
+      "their keys byte-for-byte)", "adapter" not in _p_base, str(sorted(_p_base)))
+check("adapter SET → payload carries it (an adapter swap re-keys, never "
+      "replays base-model generations)",
+      _p_ad.get("adapter") == "/fake/adapters/fim-v1" and _p_base != _p_ad)
+_hw = FakeWorker()
+_hw.cfg.adapter = "/fake/adapters/fim-v1"
+check("FakeWorker path still green with an adapter configured",
+      arms.ARMS["local-unconstrained"](rhyme_item(), ctx_with(_hw))
+      ["meta"]["status"] == "ok")
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
