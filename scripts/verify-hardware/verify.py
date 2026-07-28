@@ -921,13 +921,8 @@ def check_freeze_stops_rerender(ctx):
                 "failed_commands": fails})
 
 
-def check_crash_recovery(ctx):
-    """A3: full JSONL-replay crash recovery. Run 1 saves a track (Alpha), then makes UNSAVED
-    edits (track Beta + a clip on Beta) and __crash-es. Run 2 (same kept session) detects the
-    unclean exit, replays the recovery-journal tail with id-rebinding (Beta gets a fresh
-    engine id; the clip's reference to the old id must rebind), and the lost work comes back.
-    Asserts: before-recover the saved state has 1 track; after-recover it has 2, and the
-    recovered Beta carries its clip (proves the value-based id-rebinding worked)."""
+def _crash_recovery_once(ctx):
+    """One full crash→relaunch→replay round trip. Returns the observed outcome dict."""
     SESSION = "verify-recovery"
     base = _mosh_session_base() / SESSION
     if base.exists():
@@ -965,10 +960,131 @@ def check_crash_recovery(ctx):
         if r.get("command") == "recover_session":
             recovered = r.get("data", {}).get("recovered", 0)
 
-    ok = (before == 1 and available and after == 2 and beta_clips == 1 and recovered >= 2)
-    return row("Crash recovery (JSONL replay)", ok,
-               {"before_tracks": before, "recoveryAvailable": available, "after_tracks": after,
-                "recovered_cmds": recovered, "beta_clips": beta_clips, "stderr": proc.stderr[-300:] if not ok else ""})
+    return {"before_tracks": before, "recoveryAvailable": available, "after_tracks": after,
+            "recovered_cmds": recovered, "beta_clips": beta_clips,
+            "stderr": proc.stderr[-300:]}
+
+
+def check_crash_recovery(ctx):
+    """A3: full JSONL-replay crash recovery. Run 1 saves a track (Alpha), then makes UNSAVED
+    edits (track Beta + a clip on Beta) and __crash-es. Run 2 (same kept session) detects the
+    unclean exit, replays the recovery-journal tail with id-rebinding (Beta gets a fresh
+    engine id; the clip's reference to the old id must rebind), and the lost work comes back.
+    Asserts: before-recover the saved state has 1 track; after-recover it has 2, and the
+    recovered Beta carries its clip (proves the value-based id-rebinding worked).
+
+    FS-T2: the round trip runs x3 and every run must produce an IDENTICAL outcome. SPEC §4 T2
+    asks for a deterministic x3 crash-recovery gate; gate.sh runs verify.py --gate exactly
+    once (only --selftest is looped x3), so the repetition has to live here. A replay that
+    recovers 2 commands on one run and 1 on the next is a real defect this catches and a
+    single run cannot."""
+    runs = [_crash_recovery_once(ctx) for _ in range(3)]
+    first = runs[0]
+    # Compare everything except stderr (timing/log noise is not part of the contract).
+    keys = ("before_tracks", "recoveryAvailable", "after_tracks", "recovered_cmds", "beta_clips")
+    deterministic = all(tuple(r[k] for k in keys) == tuple(first[k] for k in keys) for r in runs)
+    ok = (deterministic and first["before_tracks"] == 1 and first["recoveryAvailable"]
+          and first["after_tracks"] == 2 and first["beta_clips"] == 1 and first["recovered_cmds"] >= 2)
+    return row("Crash recovery (JSONL replay, deterministic x3)", ok,
+               {**{k: first[k] for k in keys}, "deterministic_x3": deterministic,
+                "runs": [tuple(r[k] for k in keys) for r in runs],
+                "stderr": first["stderr"] if not ok else ""})
+
+
+def check_crash_recovery_safe_mode(ctx):
+    """FS-T2: recovery after a crash a THIRD-PARTY PLUGIN caused.
+
+    This is the crash autosave cannot help with. A plugin that dies while the project is
+    LOADING re-crashes on every relaunch, and it dies BEFORE the session.running sentinel is
+    written — so it leaves no unclean-exit flag and the producer never reaches a window.
+
+    Simulated faithfully and hermetically, without needing a real crashing plugin (which
+    could not be deterministic, and installing one is not reproducible in CI):
+      1. Build + save a normal project, then inject a <PLUGIN type="vst"> node into the saved
+         .tracktionedit. That is EXACTLY the on-disk shape Tracktion writes for a hosted
+         VST/VST3/AU (ExternalPlugin::create), so the scrub is exercised against the real
+         format, not a mock.
+      2. Plant the plugin-loading breadcrumb — the actual artifact a load-time crash strands.
+      3. Relaunch. The engine must auto-degrade: come up in safe mode, skip the plugin node,
+         report it as a suspect, and REFUSE to save (the guard that stops the 30s auto-save
+         from overwriting the producer's plugin chain with the stripped version).
+
+    Asserts the whole contract, including that the arrangement survived the scrub."""
+    SESSION = "verify-safemode"
+    base = _mosh_session_base() / SESSION
+    if base.exists():
+        shutil.rmtree(base, ignore_errors=True)
+    keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
+
+    # (1) A real project, saved.
+    run1 = [
+        {"command": "create_track", "args": {"name": "Keeper"}, "capture": {"K": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${K}", "seconds": 1.0, "freq": 330.0}},
+        {"command": "save", "args": {}},
+    ]
+    run_script(ctx.bin, run1, SESSION, extra_env=keep, timeout=120)
+
+    edit_file = base / "session.tracktionedit"
+    if not edit_file.exists():
+        return row("Crash recovery: plugin safe mode", False, {"error": f"no edit file at {edit_file}"})
+
+    # (2) Inject a third-party plugin node into the FIRST track, exactly as Tracktion persists
+    # one, then strand the breadcrumb that a crash mid-load would leave.
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(edit_file)
+    root = tree.getroot()
+    track = root.find(".//TRACK")
+    if track is None:
+        return row("Crash recovery: plugin safe mode", False, {"error": "no TRACK node in saved edit"})
+    ET.SubElement(track, "PLUGIN", {
+        "type": "vst", "name": "HarnessCrasher", "manufacturer": "Mosh Harness",
+        "filename": "/nonexistent/HarnessCrasher.vst3", "uid": "deadbeef",
+    })
+    tree.write(edit_file, encoding="UTF-8", xml_declaration=True)
+    injected = edit_file.read_text().count('type="vst"')
+
+    (base / "plugin-loading.json").write_text(json.dumps({"plugins": [
+        {"name": "HarnessCrasher", "manufacturer": "Mosh Harness",
+         "filename": "/nonexistent/HarnessCrasher.vst3", "uid": "deadbeef"},
+    ]}))
+
+    # (3) Relaunch: must auto-degrade into safe mode.
+    run2 = [
+        {"command": "__snapshot", "args": {"label": "safe"}},
+        {"command": "save", "args": {}},          # must be REFUSED / must not strip the file
+    ]
+    results, proc = run_script(ctx.bin, run2, SESSION, extra_env=keep, timeout=120)
+
+    safe_active = suspects = tracks = clips = plugins_on_track = None
+    save_refused = None
+    for r in results:
+        if r.get("command") == "__snapshot" and r.get("label") == "safe":
+            sess = r.get("data", {}).get("session", {})
+            safe_active = bool(sess.get("safeModeActive"))
+            suspects = sess.get("pluginCrashSuspects") or []
+            tlist = r.get("data", {}).get("tracks", [])
+            tracks = len(tlist)
+            keeper = next((t for t in tlist if t.get("name") == "Keeper"), None)
+            clips = len(keeper.get("clips", [])) if keeper else 0
+            # The scrub actually happened: no third-party plugin in the loaded rack.
+            plugins_on_track = [p.get("name") for t in tlist for p in (t.get("plugins") or [])]
+        if r.get("command") == "save":
+            # Safe mode is READ-ONLY: the save must be REFUSED, not silently succeed.
+            save_refused = not r.get("ok", False)
+
+    # The on-disk project must STILL carry the plugin node: safe mode is read-only precisely
+    # so the producer's plugin chain survives. This is the assertion that would have caught
+    # an auto-save silently stripping it.
+    still_on_disk = edit_file.read_text().count('type="vst"')
+
+    ok = (injected == 1 and safe_active is True and suspects == ["HarnessCrasher"]
+          and tracks == 1 and clips == 1 and plugins_on_track == []
+          and save_refused is True and still_on_disk == 1)
+    return row("Crash recovery: plugin safe mode (auto-degrade + read-only)", ok,
+               {"injected_vst_nodes": injected, "safeModeActive": safe_active, "suspects": suspects,
+                "tracks": tracks, "keeper_clips": clips, "plugins_in_loaded_rack": plugins_on_track,
+                "save_refused": save_refused, "plugin_still_in_file": still_on_disk,
+                "stderr": proc.stderr[-300:] if not ok else ""})
 
 
 def check_stem_export(ctx):
@@ -1291,7 +1407,8 @@ OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile
                   check_midi_reimagine_beneath, check_reactive_rerender,
                   check_freeze_stops_rerender, check_full_loop,
                   check_relative_ref_export, check_export_range_tail, check_bypass_layer,
-                  check_render_artifact_portability, check_crash_recovery, check_stem_export,
+                  check_render_artifact_portability, check_crash_recovery,
+                  check_crash_recovery_safe_mode, check_stem_export,
                   check_clip_fades, check_clip_reverse, check_warp_stretch,
                   check_automation_ramp, check_send_return, check_master_chain]
 

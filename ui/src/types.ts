@@ -568,6 +568,20 @@ export type Snapshot = {
     // (recover_session) to restore work done since the last save. 0 ⇒ nothing to replay
     // (the notice is purely informational).
     recoverableCount?: number;
+    // FS-T2 — third-party plugins implicated in a crash while the project was LOADING.
+    // Present ⇒ the previous launch died mid-load with these being instantiated. Note this
+    // is independent of recoveryAvailable: a load-time crash dies BEFORE the session.running
+    // sentinel is written, so it reports a clean prior exit while being the worst case.
+    pluginCrashSuspects?: string[];
+    // The single plugin that taking safe mode will also quarantine (block_plugin). Empty
+    // unless there is exactly ONE suspect — blocklisting is permanent, so with several
+    // candidates Mosh skips them all but blocklists none. Backend-decided; never re-derived
+    // in the UI.
+    pluginQuarantineTarget?: string;
+    // FS-T2 — the live Edit was loaded with third-party plugin nodes scrubbed out, so the
+    // project is READ-ONLY (the backend refuses save(), including the 30s auto-save, rather
+    // than overwrite the producer's plugin chain with the stripped version).
+    safeModeActive?: boolean;
     recentProjects?: { path: string; name: string }[]; // gap 2 — Recent list (newest-first)
     projectExtension?: string; // backend-owned project container extension (no leading dot)
     // SES-001 — the tempo MAP (additive; tempo/timeSig* above stay point 0).

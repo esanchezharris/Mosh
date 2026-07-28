@@ -32,6 +32,11 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "render_ahead_tick",
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
+        // FS-T2 — plugin-crash safe mode reopens the LOCAL project with third-party plugins
+        // skipped. Same posture as reload/open_project above (a whole-Edit swap, not a track
+        // edit), and deliberately local: which plugins crashed this machine is a property of
+        // THIS install's plugin folder, so it must never propagate to peers.
+        "open_without_plugins",
         "mark_take", "batch_begin", "batch_end", "enable_track_meter", "disable_track_meter",
         "enable_all_meters", "set_audio_device", "retry_audio_device", "set_buffer_size", "set_audio_threads",
         "set_project_settings", "set_key", "rescan_plugins", "get_plugin_blocklist",

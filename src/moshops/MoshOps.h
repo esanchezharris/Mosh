@@ -743,6 +743,7 @@ private:
     juce::var  substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap);
     juce::var  cmdRecoverSession (const juce::var& args);
     juce::var  cmdDiscardRecovery (const juce::var& args);
+    juce::var  cmdOpenWithoutPlugins (const juce::var& args);   // FS-T2 — plugin-crash safe mode
     bool        wasPlaying = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
     double      lastPresenceBroadcastMs = 0.0;

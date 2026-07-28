@@ -9,6 +9,26 @@ relaunch-after-plugin-crash **safe mode** ("open without third-party plugins" vi
 break and runs once), and (3) a **plugin-induced-abort** recovery test. This doc registers those
 against existing gates.
 
+> **RE-CONFIRMED 2026-07-27 (execution session).** §0 requires verifying the gap before building,
+> and a written reason is a claim about the code that ages — so the whole 2026-07-12 table was
+> re-checked against the tree at `ae63eccd` (worktree `git diff --stat origin/main` **empty** for
+> `src/moshops/`, `src/engine/`, `src/Main.cpp`, `SelfTest.cpp`, `verify.py`, `RecoveryNotice.tsx`).
+> **The verdict holds; only line numbers moved.** Refreshed references: autosave timer
+> `Main.cpp:342` (`autoSave.onTick → saveIfDirty`), sentinel `Main.cpp:336`/`:363` and
+> `MoshEngine.cpp:256`/`:656`/`:657`, save-on-quit `Main.cpp:362`, journal chokepoint
+> `MoshOps.cpp:1050`, allowlist `:11936`, `cmdRecoverSession` `:11978`, `cmdDiscardRecovery`
+> `:12021`, `recoveryAvailable` `:10962`, truncate-on-save `MoshEngine.cpp:642`,
+> `check_crash_recovery` `verify.py:924` (still a soft `__crash` at `:942`, still run once),
+> A3 journal-mechanics selftest `SelfTest.cpp:5875`.
+>
+> **Scope correction against the task brief.** The brief listed *replay-from-snapshot* as MISSING.
+> It is **not** — `recover_session`/`discard_recovery`/`isReplayableCommand`/`replayingRecovery_`
+> and `recovery-journal.jsonl` are all present and merged (see the nuance below on why the journal
+> is dedicated rather than `mosh-log.jsonl`). A fresh `grep -rniE 'safe.?mode|pluginCrashSuspect'`
+> over `src/` + `ui/src/` returns **nothing** outside an unrelated entitlements comment, so
+> **safe mode is the only missing product capability.** The lane is therefore even smaller than
+> `size:"L"`: one capability plus the three gates.
+
 ---
 
 ## Context
@@ -81,6 +101,21 @@ out-of-scope: reworking the already-merged autosave/journal/recovery-notice core
 Stay inside the prime directives. The safe-mode path is a **load-time policy**, and it must remain
 MoshOps-mediated (one mutation seam):
 
+**Design decision (2026-07-27, execution session): the scrub is a header-only, engine-free seam.**
+`src/state/SafeMode.h` mirrors `state/Migrations.h` exactly — `juce_data_structures` only, no engine
+dependency — so the load-time policy is **unit-testable in `MoshTests` (Catch2)** without building
+the app target. That matters twice over: the Vite/esbuild step is known to SIGKILL in a fresh
+worktree (so an app build is the fragile path), and a pure-function seam is cheap to **RED-prove**,
+which is this repo's stated recurring failure mode. **Verified against the pinned clone
+(`2877b621`)**: `ExternalPlugin::xmlTypeName == "vst"`
+(`tracktion_ExternalPlugin.cpp:696`) and every VST/VST3/AU node persists as
+`<PLUGIN type="vst" uid filename manufacturer name/>` (`:668-674`) — so `type == "vst"` is the
+**single, exact** discriminator for "third-party", and it agrees with the runtime discriminator
+MoshOps already uses (`dynamic_cast<te::ExternalPlugin*>`, `MoshOps.cpp:594`). Mosh/Tracktion
+built-ins (`LevelMeterPlugin`, `MasterSpectralTapPlugin`, `SamplerPlugin`, volume/pan, RAVE) carry
+their own `xmlTypeName` and are therefore untouched by construction, not by an allowlist that could
+drift.
+
 - **Load-time suspect breadcrumb (mirror the scan-time dead-mans-pedal).** During project load, before
   instantiating each saved plugin, write a small breadcrumb file under `~/Library/Mosh/` (e.g.
   `session/plugin-loading.txt` naming the plugin id being brought up) and clear it after the instance
@@ -103,6 +138,55 @@ MoshOps-mediated (one mutation seam):
 
 Keep the change surgical: the autosave/journal/recovery-notice core is load-bearing and must stay
 byte-behaviour-stable.
+
+### What execution changed about this plan (2026-07-27) — two correctness findings
+
+The plan above assumed safe mode could be a pure **offer** surfaced in `RecoveryNotice`. Reading the
+actual startup order falsified that, and a second reading found a data-loss hole. Both are now
+implemented differently from the sketch above; recorded here because the reasons outlive the code.
+
+1. **A load-time plugin crash leaves NO sentinel, so an "offer" is unreachable.**
+   `markSessionRunning()` runs in `Main.cpp:336`, *after* `shell().load()` — i.e. after the engine
+   ctor has already loaded the Edit. A plugin that crashes during that load therefore dies *before*
+   the sentinel is written: the next launch reads `wasUncleanShutdown() == false`, sets no
+   `recoveryAvailable`, renders no notice — and re-loads the identical project, re-crashing. The
+   producer never reaches a window to accept any offer. **Fix: auto-degrade.** A breadcrumb that
+   survived to startup makes the ctor load in safe mode *automatically* (`MoshEngine.cpp`, ctor),
+   and the UI then explains what happened and offers **Reopen with plugins** (the existing `reload`).
+   `open_without_plugins` remains for the case where the app *did* start and a suspect is on record
+   (an intermittent crasher). False-positive cost — force-quitting mid-load also strands a breadcrumb
+   — is one read-only launch plus a dismissible notice; the alternative is an unbreakable crash loop.
+2. **A safe-mode Edit must be READ-ONLY or autosave destroys the plugin chain.**
+   In safe mode the in-memory Edit deliberately lacks the producer's third-party plugin nodes. The
+   30 s `AutoSaveTimer` (`Main.cpp:342`) would persist exactly that within half a minute of opening —
+   silently stripping every VST/AU from their project file. That is the precise loss this lane
+   exists to prevent, so `MoshEngine::save()` now refuses while `safeModeActive`, reusing the guard
+   shape `loadError` already established. `snapshot.session.safeModeActive` tells the UI to say so
+   rather than let the producer believe they are being auto-saved. Cleared by any successful normal
+   load. `verify.py`'s safe-mode check asserts the plugin node is **still in the file** afterwards —
+   the assertion that would catch a regression here.
+
+**A fourth registration surface, not the three in `CLAUDE.md`.** Beyond dispatch + lock scope +
+agent-catalog/classification, `ui/src/bridge.mock.ts` (guarded by `bridge.mock.test.ts`) must case or
+allowlist every command the UI dispatches. It caught `open_without_plugins` on the full vitest run.
+All four guards were RED-proved before being satisfied.
+
+### Two bugs the gates caught in this lane's own code (both would have shipped)
+
+- **A `StringArray`-temporary UAF that segfaulted `snapshot()`.** `MoshOps` built the suspects list
+  with `std::vector<juce::String> (eng.pluginCrashSuspects().begin(), eng.pluginCrashSuspects().end())`.
+  `pluginCrashSuspects()` returns **by value**, so the two calls produced two *different* temporaries,
+  both destroyed before the vector was built — `EXC_BAD_ACCESS` in `MoshOps::snapshot()`, SIGSEGV at
+  startup, but **only on the safe-mode path**, which no green run reached. This is the documented
+  `if (auto* p = someVarReturningFn().getArray())` trap in a new costume: **bind to a named local
+  first.** It was invisible to `--selftest` (2060/2060 green) and surfaced only because `verify.py`
+  exercises a real cross-restart launch. Another entry for "selftest can't see it, verify.py can".
+- **A vacuous assertion in this lane's own selftest section**, found by RED-proving it. The pair
+  `markDirty(); check(!save()); check(!saveIfDirty())` passes its second half for the *wrong reason*
+  when the guard is broken: the wrongly-successful `save()` clears `dirty`, so `saveIfDirty()`
+  returns false because there is nothing to save. Sabotaging the guard failed only 1 of 2 checks.
+  Fixed by re-marking dirty and asserting `isDirty()` between them; the sabotage then fails both.
+  Exactly the repo's recurring failure mode — and only a RED-proof exposes it.
 
 ---
 
@@ -195,6 +279,54 @@ save-on-quit, sentinel), the `MoshOps` journal/`recover_session`/`discard_recove
 - **Never edit the loop rulebook / specs 00–06 / `cmake/Dependencies.cmake` + pins / `.github/**`** —
   in particular **`scripts/auto-loop/gate.sh` is off-limits**; all new gate coverage lands in
   `SelfTest.cpp` + `verify.py`, which `gate.sh` already invokes.
+
+---
+
+## RT-safety review (gate requirement: "no audio-thread allocations/locks introduced")
+
+Reviewed by hand across every line this lane adds. **No new allocation, lock, or file I/O is
+reachable from any real-time path.**
+
+- `mosh::safemode::*` (`src/state/SafeMode.h`) allocates (`std::vector`, `ValueTree` removal,
+  `JSON::toString`) but is called from exactly three places, all on the message/load thread:
+  `MoshEngine::loadEditBracketed`, `MoshOps::cmdOpenWithoutPlugins`, and `MoshOps::snapshot`. None
+  is reachable from `applyToBuffer` or any audio callback.
+- The breadcrumb write/delete is plain file I/O inside `loadEditBracketed`, which runs only during
+  Edit construction / `reload` / `open_project` / `open_without_plugins` — never while the audio
+  thread is running against that Edit (all three swap paths stop the transport and free the playback
+  context first, matching the existing `reloadFromFile`/`openProject` dance).
+- `safeModeActive` is a plain `bool` read on the message thread only (`save()`, `snapshot()`); it is
+  never consulted from DSP.
+- No existing RT code was touched. `test_rt_guard.cpp` and the full Catch2 suite stay green.
+
+---
+
+## Gate results (2026-07-27, this worktree, `ae63eccd` + this lane)
+
+| Gate | Result |
+|---|---|
+| `Mosh --selftest` ×3 | **2060/2060, 0 failed**, byte-identical across runs (baseline was 2038; +22 FS-T2 checks) |
+| `Mosh --selftest-undo` | 18/18 |
+| Catch2 (`MoshTests`) | **2350 assertions / 238 cases** (+43 assertions / 9 cases from `test_safe_mode.cpp`) |
+| `verify.py --gate` (from repo ROOT) | **29/29**, incl. `Crash recovery (JSONL replay, deterministic x3)` and `Crash recovery: plugin safe mode (auto-degrade + read-only)` |
+| `crash_recovery_kill9.sh` | **PASS** — real SIGKILL mid-edit, 5 unsaved mutations replayed, ×3 identical (`6,5`) |
+| `tsc --noEmit` | clean |
+| vitest | **2005 passed**, 1 skipped |
+| Playwright (`playwright.isolated.config.ts`) | 253 passed / 8 skipped; **`replay-capture.spec.ts` fails — PRE-EXISTING**, reproduced identically with this lane stashed (`git stash` A/B on a clean `origin/main` tree). Known scrim-deadlock signature (`<div></div> … intercepts pointer events`), unrelated to FS-T2. |
+
+**RED-proofs (every new guard shown able to fail):**
+- `test_safe_mode.cpp` — against an inert stub header: **7 of 9 cases failed** (the 2 passers are
+  negative-space cases that legitimately hold when everything returns empty).
+- AL-011 lock-scope drift guard — failed naming `open_without_plugins` before classification.
+- `commands.contract.test.ts` — failed naming `open_without_plugins` before classification.
+- `bridge.mock.test.ts` — failed naming `open_without_plugins` before allowlisting.
+- Selftest safe-mode section — sabotaging `save()`'s `safeModeActive` guard failed the two
+  read-only checks (and exposed one of them as vacuous; see above).
+- `crash_recovery_kill9.sh` — deleting the journal before relaunch drops it to `recovered: 0`,
+  1 track, exit 1.
+
+`grep -rn SABOTAGE src/ ui/src/ tests/ scripts/` → **no matches** (sabotage applied via an absolute
+path and the restore verified byte-wise from a backup copy).
 
 ---
 

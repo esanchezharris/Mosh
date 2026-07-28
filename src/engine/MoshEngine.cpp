@@ -3,6 +3,7 @@
 #include "SessionPaths.h"
 #include "SourceRef.h"
 #include "state/Migrations.h"
+#include "state/SafeMode.h"
 
 #include <atomic>
 #include <iostream>
@@ -254,6 +255,15 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // ⇒ the last GUI session didn't shut down cleanly (crashed). Wiped freshSession dirs
     // (headless harnesses) never have it, so they always read clean.
     uncleanAtStartup = session.getChildFile ("session.running").existsAsFile();
+    // FS-T2 — same discipline for the plugin crash breadcrumb: latch it BEFORE this run's
+    // load overwrites it. A breadcrumb still on disk means the last launch died WHILE
+    // instantiating the plugins it names, so those are the safe-mode suspects.
+    {
+        const auto crumb = pluginBreadcrumbFile();
+        if (crumb.existsAsFile())
+            for (auto& n : mosh::safemode::suspectsFromBreadcrumb (crumb.loadFileAsString()))
+                pluginSuspectsAtStartup.add (n);
+    }
     // gap 2 — reopen the last project on relaunch (GUI path). The harness keeps the fixed
     // session file: a freshSession dir is wiped above, so last-project.json never exists
     // there and startupEditFile() would fall back anyway — we short-circuit it explicitly.
@@ -282,9 +292,27 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     if (editPath.existsAsFile())
     {
         // Persisted session: load it (tracks/clips/RenderLayers come back).
-        editPtr = te::loadEditFromFile (*enginePtr, editPath);
+        // FS-T2 — bracketed: this is the load that a crashing third-party plugin kills, and
+        // the breadcrumb it leaves is what makes the next launch able to offer safe mode.
+        //
+        // AUTO-DEGRADE on a surviving breadcrumb. This cannot be a UI "offer": the sentinel
+        // that drives the recovery notice is written AFTER this load (Main.cpp — markSessionRunning
+        // follows shell().load()), so a plugin that crashes HERE leaves no sentinel, shows no
+        // notice, and re-crashes identically on every relaunch. The user would never reach a
+        // window from which to accept any offer. So the second consecutive load attempt goes
+        // safe automatically — the browser/Office pattern — and the UI then explains what
+        // happened and offers to reopen normally.
+        //
+        // False-positive cost is deliberately small: force-quitting mid-load also strands a
+        // breadcrumb, which costs exactly one read-only launch plus a dismissible notice.
+        // The alternative failure — an unbreakable crash loop — is unrecoverable.
+        safeModeActive = ! pluginSuspectsAtStartup.isEmpty();
+        editPtr = loadEditBracketed (editPath, safeModeActive, nullptr);
         // PRJ-FMT — gate BEFORE the engine uses the Edit (before wireEditResolvers).
-        auto mr = mosh::migrateOrRefuse (editPtr->state);
+        // (A null Edit means an unreadable/invalid state tree; fall through to the safe
+        // empty Edit below rather than dereferencing it.)
+        auto mr = editPtr != nullptr ? mosh::migrateOrRefuse (editPtr->state)
+                                     : mosh::MigrationResult { false, 0, 0, "Project file could not be read." };
         if (mr.ok)
             loadedFromFile = true;
         else
@@ -630,6 +658,15 @@ bool MoshEngine::save()
     if (loadError.isNotEmpty())
         return false;
 
+    // FS-T2 — a SAFE-MODE Edit is loaded READ-ONLY for exactly the same reason: its
+    // third-party plugin nodes were scrubbed so the project could open at all, so the
+    // in-memory Edit is deliberately NOT what the user authored. Persisting it — and the
+    // 30s auto-save timer would, silently, within half a minute of opening — would strip
+    // every VST/AU from their project file. That is the data loss this whole lane exists to
+    // prevent, so safe mode never writes. Saving resumes once a normal load succeeds.
+    if (safeModeActive)
+        return false;
+
     stampFormatVersion();                  // PRJ-FMT — always current on disk
     const bool ok = te::EditFileOperations (edit()).save (false, true, false);
     if (ok)
@@ -655,6 +692,103 @@ bool MoshEngine::saveIfDirty() { return dirty ? save() : false; }
 // session crashed. A plain empty file — its mere existence is the signal.
 void MoshEngine::markSessionRunning()  { session.getChildFile ("session.running").create(); }
 void MoshEngine::clearSessionRunning() { session.getChildFile ("session.running").deleteFile(); }
+
+// ─── FS-T2 — plugin-crash safe mode ────────────────────────────────────────────────────
+//
+// The breadcrumb lives beside the sentinel, under the session dir (never ~/Documents).
+juce::File MoshEngine::pluginBreadcrumbFile() const
+{
+    return session.getChildFile ("plugin-loading.json");
+}
+
+void MoshEngine::clearPluginCrashSuspects()
+{
+    pluginSuspectsAtStartup.clear();
+    pluginBreadcrumbFile().deleteFile();
+}
+
+// The ONE load-from-file path. Replicates te::loadEditFromFile(engine, file)'s own two-step
+// (tracktion_EditFileOperations.cpp:507-511 — load the state, then createEdit with a file
+// retriever so save() still binds to `file`) so that non-safe-mode behaviour is unchanged;
+// the additions are the breadcrumb bracket and the optional scrub.
+//
+// Threading: this runs on the message/load thread only (ctor, reload, open_project). It
+// touches the filesystem, so it must never be reachable from applyToBuffer or any other RT
+// path — and it is not: no audio callback calls into Edit loading.
+std::unique_ptr<te::Edit> MoshEngine::loadEditBracketed (const juce::File& file, bool safeMode, int* scrubbed)
+{
+    auto editState = te::loadEditFromFile (*enginePtr, file, te::ProjectItemID{});
+    if (! editState.isValid())
+        return {};
+
+    if (safeMode)
+    {
+        const int n = mosh::safemode::scrubThirdPartyPlugins (editState);
+        if (scrubbed != nullptr) *scrubbed = n;
+        // Nothing to bracket: the plugins that could crash the load are gone.
+        pluginBreadcrumbFile().deleteFile();
+    }
+    else
+    {
+        // Record what we are ABOUT to instantiate. If the process dies inside createEdit
+        // below, this file is the only evidence of which plugins were being brought up.
+        const auto plugins = mosh::safemode::collectThirdPartyPlugins (editState);
+        if (! plugins.empty())
+            pluginBreadcrumbFile().replaceWithText (mosh::safemode::makeBreadcrumb (plugins));
+        else
+            pluginBreadcrumbFile().deleteFile();
+    }
+
+    auto id = te::ProjectItemID::fromProperty (editState, te::IDs::projectID);
+    if (! id.isValid())
+        id = te::ProjectItemID::createNewID (0);
+
+    auto ed = te::Edit::createEdit (te::Edit::Options
+    {
+        *enginePtr,
+        editState,
+        id,
+        te::Edit::forEditing,
+        nullptr,
+        te::Edit::getDefaultNumUndoLevels(),
+        [file] { return file; },
+        {}
+    });
+
+    // Survived the load — the breadcrumb has done its job. Deleting it here (not on quit)
+    // is what makes it a LOAD-time pedal: a crash later in the session is the sentinel's
+    // business and must not be misattributed to a plugin.
+    pluginBreadcrumbFile().deleteFile();
+    return ed;
+}
+
+juce::String MoshEngine::reloadInSafeMode (int* pluginsSkipped)
+{
+    // Do NOT save() first: the live Edit may be a half-loaded casualty of the crash, and
+    // persisting it over the user's project is precisely the loss this lane exists to
+    // prevent. Read the file as it stands.
+    int skipped = 0;
+    auto fresh = loadEditBracketed (editPath, true, &skipped);
+    if (fresh == nullptr)
+        return "Project file could not be read.";
+
+    auto mr = mosh::migrateOrRefuse (fresh->state);
+    if (! mr.ok) return mr.error;          // newer-format file: keep the current Edit
+    loadError.clear();
+
+    editPtr->getTransport().stop (false, false);
+    editPtr->getTransport().freePlaybackContext();
+    editPtr = std::move (fresh);
+    wireEditResolvers();
+    dirty = false;                          // freshly loaded from disk
+    safeModeActive = true;                  // READ-ONLY from here: save() must not strip the plugins
+
+    if (pluginsSkipped != nullptr) *pluginsSkipped = skipped;
+    // The offer has been taken; stop advertising it. The suspect (if unambiguous) is
+    // quarantined by the MoshOps command via block_plugin — the existing lever.
+    pluginSuspectsAtStartup.clear();
+    return {};
+}
 
 // gap 2 — reopen-last-project. last-project.json = { "last": <abs>, "recent": [<abs>…] }
 // in the session dir. The recent list is newest-first, deduped, capped at 10.
@@ -802,10 +936,12 @@ juce::String MoshEngine::reloadFromFile()
     // PRJ-FMT — temp-load → gate → swap-on-success so a newer-format file on disk never
     // clobbers the live Edit. On refusal keep the current Edit and RETURN the error (the
     // command surfaces it); on success swap it in.
-    auto fresh = te::loadEditFromFile (*enginePtr, editPath);
+    auto fresh = loadEditBracketed (editPath, false, nullptr);   // FS-T2 — bracketed like the cold start
+    if (fresh == nullptr) return "Project file could not be read.";
     auto mr = mosh::migrateOrRefuse (fresh->state);
     if (! mr.ok) return mr.error;           // current Edit kept; not latched (it's still valid + saveable)
     loadError.clear();                      // any prior cold-start refusal is now resolved
+    safeModeActive = false;                 // FS-T2 — a normal load succeeded; saving resumes
 
     editPtr->getTransport().stop (false, false);
     editPtr = std::move (fresh);
@@ -872,10 +1008,12 @@ juce::String MoshEngine::openProject (const juce::File& file)
     // PRJ-FMT — temp-load → gate → swap-on-success. On refusal (newer-format file) keep the
     // CURRENT project loaded + playing and RETURN the error; the open_project command turns
     // that into an error envelope the UI shows. The current project stays saveable.
-    auto fresh = te::loadEditFromFile (*enginePtr, file);
+    auto fresh = loadEditBracketed (file, false, nullptr);   // FS-T2 — bracketed like the cold start
+    if (fresh == nullptr) return "Project file could not be read.";
     auto mr = mosh::migrateOrRefuse (fresh->state);
     if (! mr.ok) return mr.error;            // current project kept; not latched
     loadError.clear();                       // any prior cold-start refusal is now resolved
+    safeModeActive = false;                  // FS-T2 — a normal load succeeded; saving resumes
 
     editPtr->getTransport().stop (false, false);
     editPtr->getTransport().freePlaybackContext();

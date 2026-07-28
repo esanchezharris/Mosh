@@ -18,6 +18,8 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   reload: "discards unsaved changes back to the last save — a data-loss gate that stays human",
   recover_session: "crash-recovery acceptance is an explicit human decision",
   discard_recovery: "throwing away a recovery point is an explicit human decision",
+  open_without_plugins:
+    "reopens the project with the producer's third-party plugins skipped and may quarantine one — a trust decision about their own gear, made from the crash notice",
   relink_clip: "repairs a broken source-file reference — file-path surgery, not a musical move",
   import_clip_data: "carries a base64 clip payload (multiplayer/clipboard plumbing) — unrepresentable in ArgSpec",
   paste_clip: "object-typed 'clip' descriptor unrepresentable in ArgSpec (and the SFT parser's S/N/B set); agent equivalent = duplicate_clip + move_clip",
