@@ -116,6 +116,25 @@ def _fixed_end_word(line: dict) -> Optional[str]:
     return None
 
 
+def _planned_end_word(line: dict) -> Optional[str]:
+    """The PLANNED end word for this line (M3): an anchor the rhyme planner
+    proposed and the producer may have edited.
+
+    A third state, deliberately kept out of `_fixed_end_word`. Writing a planned
+    anchor into `seedText`/`text` instead would make `_fixed_end_word` return it,
+    which makes `_group_anchors` adopt it as the GROUP's anchor, which sets
+    `must_rhyme = False` for **every other line in the group** — silently turning
+    the phonology gate into a no-op across the whole verse. Keeping it in its own
+    field means `_group_anchors` never sees it and the group's rhyme target is
+    unaffected.
+
+    Precedence, wherever this is consulted: producer-fixed > planned > group
+    rhyme target.
+    """
+    w = (line.get("rhymeAnchor") or "").strip()
+    return w or None
+
+
 def _fillable(line: dict) -> bool:
     txt = (line.get("text") or "").strip()
     if txt and not _has_gap(line.get("seedText", "")):
@@ -161,16 +180,23 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
     """Validate one candidate line against the constraints — the shared gate both the
     fake and the LLM backend feed into. The end word is read from the text."""
     fixed = _fixed_end_word(line)
+    planned = _planned_end_word(line)
     words = re.findall(r"[A-Za-z']+", text)
     end = words[-1] if words else ""
     nsyl = syllables(text)
     syl_ok = abs(nsyl - target) <= tol
-    must_rhyme = anchor is not None and fixed is None
+    # A PLANNED anchor supersedes the rhyme test rather than weakening it: landing
+    # exactly on a word drawn from the group's rhyme set is strictly stronger than
+    # rhyming with the group. `end_word_ok` below carries that requirement, so the
+    # gate keeps its teeth — unlike the seedText route, which would drop the test
+    # for the whole group and put nothing in its place.
+    must_rhyme = anchor is not None and fixed is None and planned is None
     rhyme_ok = (not must_rhyme) or (anchor is not None and rhymes(end, anchor, strict))
+    end_word_ok = planned is None or (end != "" and end.lower() == planned.lower())
     # Locked words: the producer's non-gap seed words must survive in the candidate.
     seed_words = [t["w"] for t in _tokens(line.get("seedText", "")) if not t["gap"]]
     locked_ok = all(w.lower() in text.lower() for w in seed_words)
-    passes = syl_ok and rhyme_ok and locked_ok
+    passes = syl_ok and rhyme_ok and locked_ok and end_word_ok
     grade = ("anchor" if fixed else
              (phon.rhyme_grade(_P.phones(end) or [], _P.phones(anchor) or []) if anchor else "free"))
     # Bar IQ C — reward MULTISYLLABIC rhymes: how many trailing syllables of the end word
@@ -182,7 +208,8 @@ def _evaluate(text: str, line: dict, spec: dict, anchor: Optional[str],
         + (1.0 - min(1.0, abs(nsyl - target) / max(1, target))) \
         + 0.5 * max(0, depth - 1)
     return {"text": text, "endWord": end, "syllables": nsyl, "syllableOk": syl_ok,
-            "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "passes": passes,
+            "rhymeOk": rhyme_ok, "lockedOk": locked_ok, "endWordOk": end_word_ok,
+            "passes": passes,
             "grade": grade, "depth": depth, "score": round(score, 3)}
 
 
@@ -250,8 +277,13 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
              f"Each line MUST be ~{target} syllables (±{tol}).",
              "Keep these words, in order: " + (", ".join(seed_words) if seed_words else "(none)") + ".",
              f"Fill the gaps (___) in: \"{line.get('seedText', '') or '(write from scratch)'}\"."]
+    planned = _planned_end_word(line)
     if fixed:
         rules.append(f"The line must END on the word \"{fixed}\".")
+    elif planned:
+        # M3: the planner chose this word for this line, so the model's job is to
+        # write a bar that LANDS there — composition, not rhyme recall.
+        rules.append(f"The line must END on the word \"{planned}\".")
     elif anchor:
         rules.append(f"The line must END on a word that is a {strict} rhyme with \"{anchor}\".")
     if spec.get("topic"):
@@ -297,9 +329,12 @@ def _parse_lines(content: str) -> List[str]:
     return [s.strip() for s in out if s and s.strip()]
 
 
-def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], strict: str) -> str:
+def _failure_reason(d: dict, target: int, tol: int, anchor: Optional[str], strict: str,
+                    planned: Optional[str] = None) -> str:
     if not d["syllableOk"]:
         return f"\"{d['text']}\" was {d['syllables']} syllables, need {target}±{tol}."
+    if planned and not d.get("endWordOk", True):
+        return f"the line must end on the word \"{planned}\", not \"{d['endWord']}\"."
     if not d.get("rhymeOk", True) and anchor:
         return f"the last word \"{d['endWord']}\" must be a {strict} rhyme with \"{anchor}\"."
     if not d.get("lockedOk", True):
@@ -332,7 +367,8 @@ def _llm_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int)
         fails = [c for c in fresh if not c["passes"]]
         if not fresh or not fails:
             break
-        feedback = _failure_reason(fails[0], target, tol, anchor, strict)
+        feedback = _failure_reason(fails[0], target, tol, anchor, strict,
+                                   _planned_end_word(line))
     if not cands:   # LLM/service unreachable mid-call → fall back to the fake for this line
         return _fake_propose_line(line, spec, anchor, regen)
     return _rank(cands)
@@ -450,7 +486,8 @@ def _analyze_line(line: dict, spec: dict, anchor: Optional[str]) -> dict:
     else:
         grade, rhyme_ok = "free", True
     base["rhymeOk"] = rhyme_ok
-    base["passes"] = bool(base["syllableOk"] and rhyme_ok and base["lockedOk"])
+    base["passes"] = bool(base["syllableOk"] and rhyme_ok and base["lockedOk"]
+                          and base.get("endWordOk", True))
 
     # Bar IQ C — rhyme CRAFT for the flow visualizer: how deep the end rhyme runs vs the
     # anchor (multisyllabic) + which words rhyme internally (a hallmark of skilled flow).
