@@ -526,6 +526,24 @@ _w200 = arms.ARMS["prompt-rhyme-menu-fp200"](_menu_item(), _big_ctx)
 check("fp200 wrapper on the big family: 45 drawn AND word #45 is in the prompt",
       len(_w200["meta"]["menu"]) == 45 and "zane44" in SEEN[-1])
 
+# fp100 needs a family bigger than its cap or a narrowed-to-40 sabotage is
+# invisible: a 120-word family makes the 100 cap (and word #100) observable.
+_huge_lex = {"rain": [["R", "EY1", "N"]]}
+_huge_freq = {}
+for _i in range(120):
+    _w = f"qane{_i:03d}"
+    _huge_lex[_w] = [["K", "EY1", "N"]]
+    _huge_freq[_w] = 2000 - _i
+_huge_ctx = arms.ArmContext(chat=_big_spy,
+                            pron=Pronouncer(lexicon=_huge_lex, g2p=lambda w: None),
+                            freq=_huge_freq, k=5)
+SEEN.clear()
+_w100 = arms.ARMS["prompt-rhyme-menu-fp100"](_menu_item(), _huge_ctx)
+check("fp100 wrapper on a 120-word family: exactly 100 drawn, #100 in prompt",
+      len(_w100["meta"]["menu"]) == 100 and "qane099" in SEEN[-1]
+      and "qane100" not in SEEN[-1],
+      f"menu n={len(_w100['meta']['menu'])}")
+
 # rhyme-floor-fp: the no-model control is the freq pool's head, verbatim.
 # The floor uses the arm-standard 200 cap, not the 10 cap the ordering checks
 # used above — compare against the menu it actually draws from.

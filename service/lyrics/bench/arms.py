@@ -362,6 +362,14 @@ def arm_prompt_rhyme_menu_fp(item: dict, ctx: ArmContext) -> dict:
     return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=40, show_n=40)
 
 
+@register("prompt-rhyme-menu-fp100", "v1")
+def arm_prompt_rhyme_menu_fp100(item: dict, ctx: ArmContext) -> dict:
+    """The size dial's midpoint. Measured frontier: 40 words -> exact .413,
+    200 words -> .267 (choice overload collapses the ranker's precision while
+    menu coverage climbs 50% -> 91%). This locates the knee."""
+    return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=100, show_n=100)
+
+
 @register("prompt-rhyme-menu-fp200", "v1")
 def arm_prompt_rhyme_menu_fp200(item: dict, ctx: ArmContext) -> dict:
     """The coverage play: the full 200-word freq pool in the prompt — the same
