@@ -127,7 +127,7 @@ numbers and hashes only.
 
    (Updated 2026-07-28: the target run is now `prompt-rhyme-menu-fp` — the new
    best arm. Marking a superseded arm's misses would label a configuration no
-   longer on the路.)
+   longer on the board.)
 
    Shows only the bars the arm got WRONG, one at a time: `a` keep, `r` reject,
    `s` skip, `q` quit. Resumable — it never re-asks a judged fill. Every later run
