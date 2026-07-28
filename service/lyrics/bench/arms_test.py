@@ -526,6 +526,13 @@ _w200 = arms.ARMS["prompt-rhyme-menu-fp200"](_menu_item(), _big_ctx)
 check("fp200 wrapper on the big family: 45 drawn AND word #45 is in the prompt",
       len(_w200["meta"]["menu"]) == 45 and "zane44" in SEEN[-1])
 
+SEEN.clear()
+_w24 = arms.ARMS["prompt-rhyme-menu-fp24"](_menu_item(), _big_ctx)
+check("fp24 wrapper on the big family: exactly 24 drawn, #24 in, #25 out",
+      len(_w24["meta"]["menu"]) == 24 and "zane23" in SEEN[-1]
+      and "zane24" not in SEEN[-1],
+      f"menu n={len(_w24['meta']['menu'])}")
+
 # fp100 needs a family bigger than its cap or a narrowed-to-40 sabotage is
 # invisible: a 120-word family makes the 100 cap (and word #100) observable.
 _huge_lex = {"rain": [["R", "EY1", "N"]]}

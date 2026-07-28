@@ -362,6 +362,16 @@ def arm_prompt_rhyme_menu_fp(item: dict, ctx: ArmContext) -> dict:
     return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=40, show_n=40)
 
 
+@register("prompt-rhyme-menu-fp24", "v1")
+def arm_prompt_rhyme_menu_fp24(item: dict, ctx: ArmContext) -> dict:
+    """The left edge of the size dial. Frontier measured right-to-left:
+    200 -> .267, 100 -> .320, 40 -> .413 — monotone toward smaller palettes,
+    so the knee is at or left of 40. 24 matches the HISTORICAL shown-count
+    (which scored .320 from the alpha pool), completing the controlled pair:
+    same 24 slots, palette quality the only variable."""
+    return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=24, show_n=24)
+
+
 @register("prompt-rhyme-menu-fp100", "v1")
 def arm_prompt_rhyme_menu_fp100(item: dict, ctx: ArmContext) -> dict:
     """The size dial's midpoint. Measured frontier: 40 words -> exact .413,

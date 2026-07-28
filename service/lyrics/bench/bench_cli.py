@@ -42,7 +42,7 @@ SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.
 # prompt-rhyme-menu on its first run.
 API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
              "prompt-rhyme-menu-fp", "prompt-rhyme-menu-fp200",
-             "prompt-rhyme-menu-fp100",
+             "prompt-rhyme-menu-fp100", "prompt-rhyme-menu-fp24",
              "nbest-rerank", "fusion-rerank")
 
 # Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
