@@ -147,16 +147,24 @@ describe("MemoryTool — the memory panel", () => {
     const clearBtn = host.querySelector<HTMLButtonElement>('[data-testid="memory-tier-drum_pattern"] .mem-clear');
     expect(clearBtn).not.toBeNull();
 
+    // The dialog is rendered via createPortal to document.body (so `.modal-backdrop`'s
+    // `inset: 0` resolves against the viewport rather than the overflow panel, which is a
+    // containing block for fixed descendants thanks to its backdrop-filter) — so assert
+    // against the portaled node, not `host`. Querying `host` here would find nothing and
+    // make the "dialog closed" assertion below vacuously true.
+    const backdrop = () => document.body.querySelector(".modal-backdrop");
+
     // cancel first — must NOT call agent_memory_clear
     await act(async () => { clearBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    const cancelBtn = host.querySelector<HTMLButtonElement>('.modal-backdrop button:not([data-testid])');
+    expect(backdrop(), "the confirm dialog never opened").not.toBeNull();
+    const cancelBtn = backdrop()!.querySelector<HTMLButtonElement>('button:not([data-testid])');
     await act(async () => { cancelBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     expect(cleared).toBeUndefined();
-    expect(host.querySelector(".modal-backdrop")).toBeNull();
+    expect(backdrop()).toBeNull();
 
     // now confirm
     await act(async () => { clearBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    const confirmBtn = host.querySelector<HTMLButtonElement>('[data-testid="memory-clear-confirm-confirm"]');
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="memory-clear-confirm-confirm"]');
     expect(confirmBtn).not.toBeNull();
     await act(async () => { confirmBtn!.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await act(async () => {});
