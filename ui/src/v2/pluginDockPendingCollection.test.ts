@@ -13,10 +13,10 @@
 //      while the dock stays mounted never re-runs a mount-time initialiser, so the
 //      store gets set and nothing reads it.
 //
-// Both are proven here against the CURRENT effect-based consumer (GREEN). The RED
-// proof against the old useState-initialiser approach is recorded in the fix report
-// (docs/.superpowers/sdd/task-3-report.md) rather than kept as a permanent skip/xfail
-// in this file, per the instructions for this pass.
+// Both are proven here against the CURRENT effect-based consumer (GREEN). The RED proof
+// against the old useState-initialiser approach (both failure modes reproduced, then
+// fixed by switching to the effect-based consumer above) was run locally during that
+// fix and is not kept as a permanent skip/xfail in this file.
 
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";

@@ -52,7 +52,7 @@ type TrackKind = "audio" | "drum" | "midi" | "tone";
 export const TRACK_KINDS: { kind: TrackKind; label: string; hint: string }[] = [
   { kind: "audio", label: "Audio",      hint: "Record or drop a file" },
   { kind: "drum",  label: "Drums",      hint: "Sampler + kit, ready to program" },
-  { kind: "midi",  label: "Instrument", hint: "Synth + an empty MIDI clip" },
+  { kind: "midi",  label: "Instrument", hint: "An empty track — pick your synth" },
   { kind: "tone",  label: "Test tone",  hint: "A reference tone — check you can hear anything" },
 ];
 
@@ -266,14 +266,19 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   );
 }
 
+const trackIdOf = (r: CommandResult) => (r.data as { trackId?: string } | undefined)?.trackId;
+
 // Create a track of the given kind. Pure of React so the reachability test can drive it
-// with a recording fake `exec` and assert the exact command sequence.
+// with a recording fake `exec` and assert the exact command sequence — no store import
+// here, on purpose: the caller (AddTrackMenu.pick, below) owns selecting the new track
+// and, for "midi", flipping the Inspector to its FX tab. Returns the new track's id (or
+// undefined on failure) so the caller can select it.
 export async function addTrackOfKind(
   kind: TrackKind,
   exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>,
-): Promise<void> {
-  if (kind === "audio") { await exec("create_track", { name: "Audio" }); return; }
-  if (kind === "drum") { await exec("create_track", { name: "Drums", type: "drum" }); return; }
+): Promise<string | undefined> {
+  if (kind === "audio") { return trackIdOf(await exec("create_track", { name: "Audio" })); }
+  if (kind === "drum") { return trackIdOf(await exec("create_track", { name: "Drums", type: "drum" })); }
   // A reference tone, for hearing whether the output path works at all. Classic had this in
   // its Topbar targeting the SELECTED track; v2 has no "add a clip to this track" affordance
   // to hang it off, so it arrives the same way an Instrument track does — make the track,
@@ -281,9 +286,9 @@ export async function addTrackOfKind(
   // anything reaching my speakers", i.e. before you trust any existing track.
   if (kind === "tone") {
     const toneRes = await exec("create_track", { name: "Tone" });
-    const toneTrackId = (toneRes.data as { trackId?: string } | undefined)?.trackId;
+    const toneTrackId = trackIdOf(toneRes);
     if (toneRes.ok && toneTrackId) await exec("add_test_tone_clip", { trackId: toneTrackId });
-    return;
+    return toneRes.ok ? toneTrackId : undefined;
   }
   // There is no native "midi" track TYPE — cmdCreateTrack accepts only audio|drum, and an
   // instrument track IS an audio track carrying a synth plus MIDI clips.
@@ -294,7 +299,7 @@ export async function addTrackOfKind(
   // slot now asks instead, and double-clicking the empty lane offers the same choice.
   // DRM-001 itself is untouched and still correct for every other caller: it exists
   // because a MIDI clip on an instrument-less track is silent.
-  await exec("create_track", { name: "Instrument" });
+  return trackIdOf(await exec("create_track", { name: "Instrument" }));
 }
 
 // The add-track affordance: a menu, not a button. `variant` only picks the trigger's skin —
@@ -314,6 +319,8 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
   const close = useCallback(() => setOpen(false), []);
   useEscapeToClose(open, close);
   const exec = useStore((s) => s.exec);
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const setInspectorTab = useShell((s) => s.setInspectorTab);
 
   const toggle = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
@@ -335,8 +342,17 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
 
   const pick = useCallback((kind: TrackKind) => {
     setOpen(false);
-    void addTrackOfKind(kind, exec);
-  }, [exec]);
+    void (async () => {
+      // Selecting the track you just created is standard DAW behaviour, and doing it for
+      // only one kind would be incoherent — every kind gets it. Instrument additionally
+      // flips the Inspector to FX so the pinned instrument slot (which now asks instead
+      // of auto-loading a synth — see addTrackOfKind) is actually the thing on screen.
+      const trackId = await addTrackOfKind(kind, exec);
+      if (!trackId) return;
+      setSelectedTrack(trackId);
+      if (kind === "midi") setInspectorTab("fx");
+    })();
+  }, [exec, setSelectedTrack, setInspectorTab]);
 
   return (
     <div className="v2-addtrack">

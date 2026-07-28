@@ -16,9 +16,15 @@ export function instrumentOf(track: Pick<Track, "plugins">): Plugin | null {
 
 export function InstrumentSlot({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
+  const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const openBrowserTab = useShell((s) => s.openBrowserTab);
   const inst = instrumentOf(track);
-  const pick = () => openBrowserTab("plugins", "inst");
+  // LOAD-BEARING: the picker loads onto store.selectedTrackId, not onto the track this
+  // slot is displaying. Inspector.tsx shows a CLIP's track here (clipTrack ?? selectedTrack)
+  // — select a clip on track B while track A is selected, and without this line the slot
+  // would display B's instrument (Edit/✕ correctly target B, they pass track.id) while
+  // pick() loads onto A. Same hazard, same fix, as the lane handler in TrackLaneList.tsx.
+  const pick = () => { setSelectedTrack(track.id); openBrowserTab("plugins", "inst"); };
 
   if (!inst) {
     return (

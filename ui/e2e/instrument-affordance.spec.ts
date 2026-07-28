@@ -105,3 +105,65 @@ test("double-clicking a MIDI clip opens the piano roll, not the lane menu", asyn
   await expect(page.getByTestId("piano-roll")).toBeVisible();
   await expect(lane.locator("[data-clip-id]")).toHaveCount(1);
 });
+
+// Final-review finding 4: the HEADLINE gesture — double-clicking an empty lane on a
+// track that already carries an instrument lands a clip immediately, no menu — was
+// exercised by NO test at any layer. laneGesture.test.ts never mounts the handler that
+// runs it, and every other case in this file drives only the {kind:"menu"} branch (a
+// bare track). A wrong or missing trackId in that direct `exec("add_midi_clip", ...)`
+// call would land the clip on tracks[0] in the mock and on some other track natively —
+// this test is the only place that would catch it.
+test("double-clicking an instrument-bearing lane a second time lands a clip directly on THAT track, with no menu", async ({ page }) => {
+  const lane = page.getByTestId("v2-lane").last();
+  const trackId = await lane.getAttribute("data-track-id");
+
+  // bootV2's seeded tracks (Drums/Bass/Keys) already carry clips of their own — capture
+  // the OTHER tracks' total before touching anything, so the post-assertion is "this
+  // test added nothing elsewhere", not the wrong claim "every other track has zero".
+  const otherTracksClipCountBefore = await page.evaluate((wantId) => {
+    const store = (window as unknown as {
+      __moshStore: { getState: () => { snapshot: { tracks: { id: string; clips: unknown[] }[] } } };
+    }).__moshStore;
+    return store.getState().snapshot.tracks
+      .filter((t) => t.id !== wantId)
+      .reduce((sum, t) => sum + t.clips.length, 0);
+  }, trackId);
+
+  // Give the track a real instrument the same way the piano-roll test above does: land
+  // the first clip via the bare-track menu, which trips DRM-001's default-instrument
+  // load in the same transaction. One clip, one instrument, same as any producer's
+  // actual first click-through.
+  await lane.dblclick({ position: { x: 200, y: 20 } });
+  await page.getByTestId("lane-add-midi-clip").click();
+  const firstClip = lane.locator("[data-clip-id]").first();
+  await expect(firstClip).toBeVisible();
+  await expect(lane.locator("[data-clip-id]")).toHaveCount(1);
+
+  // Double-click a DIFFERENT x on the SAME lane, clear of the first clip so the hit
+  // lands on the empty lane (e.target === e.currentTarget), not on the clip itself.
+  const firstBox = (await firstClip.boundingBox())!;
+  const laneBox = (await lane.boundingBox())!;
+  const secondX = Math.round(firstBox.x + firstBox.width - laneBox.x) + 80;
+
+  await lane.dblclick({ position: { x: secondX, y: 20 } });
+
+  // (c) no menu — the track already carries an instrument, so resolveLaneNew resolves
+  // straight to {kind:"clip"} and the direct exec("add_midi_clip", ...) branch fires.
+  await expect(page.getByTestId("v2-lane-menu")).toHaveCount(0);
+  // (a) a second clip appears
+  await expect(lane.locator("[data-clip-id]")).toHaveCount(2);
+
+  // (b) both clips belong to THIS track, not tracks[0] or any other track — the
+  // failure mode a wrong/omitted trackId in the direct branch would produce. Every
+  // other track's clip count must be EXACTLY what it was before this test touched
+  // anything (bootV2's seeded tracks already carry their own clips).
+  const otherTracksClipCountAfter = await page.evaluate((wantId) => {
+    const store = (window as unknown as {
+      __moshStore: { getState: () => { snapshot: { tracks: { id: string; clips: unknown[] }[] } } };
+    }).__moshStore;
+    return store.getState().snapshot.tracks
+      .filter((t) => t.id !== wantId)
+      .reduce((sum, t) => sum + t.clips.length, 0);
+  }, trackId);
+  expect(otherTracksClipCountAfter).toBe(otherTracksClipCountBefore);
+});

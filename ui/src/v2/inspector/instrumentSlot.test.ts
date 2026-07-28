@@ -1,9 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach } from "vitest";
-import { instrumentOf } from "./InstrumentSlot";
+import { instrumentOf, InstrumentSlot } from "./InstrumentSlot";
 import { Rack } from "../../ui/Dock";
+import { useStore } from "../../store";
+import { useShell } from "../shellState";
+import { __resetMockForTests } from "../../bridge.mock";
 
 // The slot's whole job is answering "does this track have a synth, and which one".
 // That lookup is the part worth pinning; the buttons are thin exec wrappers.
@@ -50,5 +53,52 @@ describe("Rack hideInstrument", () => {
   it("classic passes no flag and keeps the flat chain it always had", async () => {
     await act(async () => { root.render(React.createElement(Rack, { track })); });
     expect(cardNames()).toEqual(["OTT", "Vital"]);
+  });
+});
+
+// Regression for the finding-3 fix: the slot can DISPLAY a track that differs from
+// store.selectedTrackId (Inspector.tsx shows a selected CLIP's track, clipTrack ??
+// selectedTrack). usePluginPicker.load loads onto store.selectedTrackId, so without
+// selecting the displayed track first, "click to choose" would load the instrument
+// onto whatever track was selected before — not the track the slot is showing.
+describe("InstrumentSlot pick() selects the DISPLAYED track before opening the picker", () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  const displayedTrack = {
+    id: "displayed-track", name: "Shown", type: "audio", clips: [], plugins: [],
+  } as never;
+
+  beforeEach(async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    __resetMockForTests();
+    await useStore.getState().refresh();
+    // A DIFFERENT track is selected than the one this slot instance displays.
+    useStore.setState({ selectedTrackId: "some-other-selected-track" });
+    useShell.setState({ browserOpen: false, browserTab: "sounds", pendingCollection: null });
+    host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+  });
+  afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+  it("calls setSelectedTrack(displayed track id) before openBrowserTab, on an empty slot", async () => {
+    const calls: string[] = [];
+    vi.spyOn(useStore.getState(), "setSelectedTrack").mockImplementation((id) => {
+      calls.push(`setSelectedTrack:${id}`);
+      useStore.setState({ selectedTrackId: id });
+    });
+    vi.spyOn(useShell.getState(), "openBrowserTab").mockImplementation((t, c) => {
+      calls.push(`openBrowserTab:${t}:${c}`);
+      useShell.setState({ browserOpen: true, browserTab: t, pendingCollection: c ?? null });
+    });
+
+    await act(async () => { root.render(React.createElement(InstrumentSlot, { track: displayedTrack })); });
+    const btn = host.querySelector('[data-testid="instslot-choose"]') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    await act(async () => { btn.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+
+    expect(calls).toEqual([
+      "setSelectedTrack:displayed-track",
+      "openBrowserTab:plugins:inst",
+    ]);
+    expect(useStore.getState().selectedTrackId).toBe("displayed-track");
   });
 });
