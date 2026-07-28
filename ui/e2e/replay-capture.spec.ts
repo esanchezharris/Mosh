@@ -36,8 +36,13 @@ test("canonical arrangement flow → command trace artifact", async ({ page }) =
   await page.getByTestId("v2-clip-loop").click();
   await page.getByTestId("v2-clip-loop-length").fill("1");
 
-  // A new track from the add affordance.
+  // A new track from the add affordance. Since TRK-KIND this is a MENU, not a one-step
+  // button: the trigger only opens a kind picker, and picking the kind is what emits
+  // create_track. Driving just the trigger emitted nothing AND left the menu's click-away
+  // scrim mounted over the shell, which deadlocked the next click.
   await page.getByTestId("v2-track-add").click();
+  await page.getByTestId("v2-track-add-audio").click();
+  await expect(page.getByTestId("v2-track-add-audio")).toHaveCount(0);
 
   // Mixer: master fader + a bus with a send.
   await page.getByTestId("v2-master-volume").fill("-4");
@@ -51,6 +56,15 @@ test("canonical arrangement flow → command trace artifact", async ({ page }) =
   // bug, not a replay candidate.
   for (const t of trace as { command: string; ok: boolean }[])
     expect(t.ok, `mock rejected ${t.command}`).toBe(true);
+
+  // The replay lane is generic — it replays whatever this artifact contains and exits 0.
+  // So a gesture that silently stops emitting (an affordance grows a step, a testid moves)
+  // shrinks the native proof with nothing going red. Name what this flow CLAIMS to cover
+  // so that loss is a failure here instead. `create_track` went missing exactly this way.
+  const emitted = new Set((trace as { command: string }[]).map((t) => t.command));
+  for (const c of ["set_clip_fade", "set_clip_gain", "set_clip_loop", "create_track",
+    "set_master_volume", "create_bus"])
+    expect(emitted.has(c), `canonical flow emitted no ${c} — a gesture went inert`).toBe(true);
 
   mkdirSync(ART_DIR, { recursive: true });
   writeFileSync(join(ART_DIR, "canonical-flow.json"), JSON.stringify(trace, null, 1));
