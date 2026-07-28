@@ -368,5 +368,33 @@ with tempfile.TemporaryDirectory() as td:
           summ["unusableItems"].get("unavailable") == 1 and summ["emptyCandidates"] == 1,
           str(summ["unusableItems"]))
 
+
+# ── the fp arm really sends the FREQ pool (2026-07-27 truncation fix) ───────────
+# FakeWorker records every request, so "which pool did the model actually see"
+# is a recorded fact, not an inference. The freq ctx makes the two orders differ
+# ('grind' carries the only nonzero count in its grade), so a sabotage that
+# routes the fp arm through the alpha pool cannot produce the expected order.
+_wa, _wf = FakeWorker(), FakeWorker()
+res_a = arms.ARMS["local-constrained-endword"](rhyme_item(), ctx_with(_wa))
+res_f = arms.ARMS["local-constrained-endword-fp"](rhyme_item(), ctx_with(_wf))
+_pool_a = _wa.calls[-1].get("pool")
+_pool_f = _wf.calls[-1].get("pool")
+check("fp arm: worker received a freq-ordered pool, alpha arm an alpha one",
+      _pool_a is not None and _pool_f is not None
+      and sorted(_pool_a) == sorted(_pool_f) and _pool_a != _pool_f
+      and _pool_f[0] == "grind",
+      f"alpha={_pool_a[:4] if _pool_a else None} freq={_pool_f[:4] if _pool_f else None}")
+check("fp arm: candidates come from the freq pool head (FakeWorker echoes it)",
+      [c["text"] for c in res_f["candidates"]][0] == "grind",
+      str(res_f["candidates"][:2]))
+check("fp arm: offMenu still zero, poolSize reported",
+      res_f["meta"].get("offMenu") == 0
+      and res_f["meta"].get("poolSize") == len(_pool_f), str(res_f["meta"]))
+check("fp arm: declines non-rhyme granularity like its alpha twin",
+      arms.ARMS["local-constrained-endword-fp"](word_item(), ctx_with(FakeWorker()))
+      ["meta"]["status"] == "declined")
+check("fp arm registered rhyme-only in ARM_GRANULARITIES",
+      arms.ARM_GRANULARITIES.get("local-constrained-endword-fp") == ("rhyme",))
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

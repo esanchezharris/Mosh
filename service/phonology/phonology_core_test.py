@@ -199,5 +199,47 @@ check("syllabify group count == syllable count",
       len(core.syllabify_phones(_banana)) == core.syllable_count_phones(_banana))
 check("syllabify is deterministic", core.syllabify_phones(_banana) == core.syllabify_phones(_banana))
 
+# ── 13. rhyme_search freq ranking (FMS pool fix, 2026-07-27): `freq` breaks the
+# final tie by descending corpus frequency. The point is TRUNCATION — max_n cuts
+# after the sort, so the ordering decides which words survive a cap. The fixture
+# is built so alphabetical and frequency orders genuinely differ (a fixture where
+# they coincide could not catch a sabotage that ignores the param). ─────────────
+_fx = core.Pronouncer(lexicon={
+    "flame": [["F", "L", "EY1", "M"]],
+    "aim": [["EY1", "M"]],
+    "fame": [["F", "EY1", "M"]],
+    "game": [["G", "EY1", "M"]],
+    "maim": [["M", "EY1", "M"]],
+    "tame": [["T", "EY1", "M"]],
+    # 2 syllables, perfect rhyme, ASTRONOMICAL frequency — pins that syllable
+    # count still outranks frequency (freq is a tiebreak, never the primary key).
+    "aflame": [["AH0", "F", "L", "EY1", "M"]],
+})
+_freq = {"game": 100, "tame": 50, "aflame": 10 ** 9}
+check("rhyme_search default (freq=None) is byte-identical alphabetical",
+      _fx.rhyme_search("flame", "perfect", max_n=10)
+      == ["aim", "fame", "game", "maim", "tame", "aflame"],
+      str(_fx.rhyme_search("flame", "perfect", max_n=10)))
+check("rhyme_search freq order: commonest first within the tie",
+      _fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq)
+      == ["game", "tame", "aim", "fame", "maim", "aflame"],
+      str(_fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq)))
+check("the cap keeps DIFFERENT words under the two orderings (the whole point)",
+      _fx.rhyme_search("flame", "perfect", max_n=2) == ["aim", "fame"]
+      and _fx.rhyme_search("flame", "perfect", max_n=2, freq=_freq)
+      == ["game", "tame"],
+      f"alpha={_fx.rhyme_search('flame', 'perfect', max_n=2)} "
+      f"freq={_fx.rhyme_search('flame', 'perfect', max_n=2, freq=_freq)}")
+check("syllable count still dominates frequency (freq=10^9 can't jump the queue)",
+      _fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq)[-1] == "aflame",
+      str(_fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq)))
+check("freq ranking is deterministic across calls",
+      _fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq)
+      == _fx.rhyme_search("flame", "perfect", max_n=10, freq=_freq))
+check("words absent from the freq table rank by count 0, alpha tiebreak",
+      _fx.rhyme_search("flame", "perfect", max_n=5, freq=_freq)[2:]
+      == ["aim", "fame", "maim"],
+      str(_fx.rhyme_search("flame", "perfect", max_n=5, freq=_freq)))
+
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))

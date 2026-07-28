@@ -68,7 +68,8 @@ def register_granularities(name: str, granularities: tuple) -> None:
     ARM_GRANULARITIES[name] = tuple(granularities)
 
 
-def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
+def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40,
+                rank: str = "alpha") -> List[str]:
     """Real rhymes of the item's PARTNER word at the required syllable count.
 
     Derived from `constraints.rhymeWith` and nothing else — never from the held
@@ -79,22 +80,52 @@ def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
 
     Shared by the floor and the prompt arm so the two cannot drift apart — the
     comparison between them is only meaningful if they see the same candidates.
+
+    `rank` picks how the pool is TRUNCATED, which turned out to matter more than
+    anything else about it:
+
+      * `"alpha"` — the historical path, byte-for-byte: `rhyme_search` sorts
+        (grade, syllables, alphabetical), caps at `max_n`, THEN the stopword
+        filter runs. Every arm number on the board before 2026-07-27 was
+        measured against this. Truth-in-pool coverage at 200: **40.0%** —
+        an alphabetical cap keeps `booz`/`brack` and drops the word the writer
+        used.
+      * `"freq"` — same candidate set, ranked (grade, syllables, corpus
+        frequency desc). The stopword/len filter runs BEFORE the cap — order
+        matters here in a way it never did for alpha: stopwords are the most
+        frequent words in any corpus, so filtering after a freq-ranked cap
+        would let them consume cap slots and then vanish, silently shrinking
+        the pool. Coverage at 200: **89.3%** (uncapped phonology roof: 99.3%).
+        Requires `ctx.freq`; an empty table raises rather than quietly
+        degrading to a differently-ordered pool.
     """
     con = item.get("constraints") or {}
     partner = con.get("rhymeWith")
     if not partner or ctx.pron is None:
         return []
+    if rank not in ("alpha", "freq"):
+        raise ValueError(f"unknown menu rank {rank!r}")
+    if rank == "freq" and not ctx.freq:
+        raise ValueError("rank='freq' needs a corpus frequency table in ctx.freq")
     syllables = con.get("syllables") if item.get("granularity") in ("word", "rhyme") \
         else None
     strictness = con.get("rhymeStrictness", "slant")
     # rhyme_search scans the whole lexicon, so it is the cost of a sweep, and
     # the floor and the prompt arm ask for the SAME menus over the same items.
-    key = (id(ctx.pron), partner.lower(), strictness, syllables, max_n)
+    # The freq table participates in the freq-ranked result, so it joins the key.
+    key = (id(ctx.pron), partner.lower(), strictness, syllables, max_n,
+           rank, id(ctx.freq) if rank == "freq" else None)
     if key in _MENU_MEMO:
         return _MENU_MEMO[key]
     try:
-        menu = ctx.pron.rhyme_search(partner, strictness, max_n=max_n,
-                                     syllables=syllables)
+        if rank == "freq":
+            # Uncapped scan; filter, then cap — see the docstring for why the
+            # order is load-bearing on this path.
+            menu = ctx.pron.rhyme_search(partner, strictness, max_n=10 ** 9,
+                                         syllables=syllables, freq=ctx.freq)
+        else:
+            menu = ctx.pron.rhyme_search(partner, strictness, max_n=max_n,
+                                         syllables=syllables)
     except Exception:  # noqa: BLE001 — a lexicon miss is an empty menu, not a crash
         menu = []
     # Function words dominate any corpus frequency table and many of them
@@ -103,6 +134,8 @@ def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
     # No writer ends a bar there, and a floor that weak flatters every arm it is
     # compared against. `freq-floor` has always applied this filter.
     out = [w for w in menu if w and len(w) >= 3 and w.lower() not in STOP_AND_FILLER]
+    if rank == "freq":
+        out = out[:max_n]
     _MENU_MEMO[key] = out
     return out
 
@@ -524,8 +557,8 @@ def arm_local_unconstrained(item: dict, ctx: ArmContext) -> dict:
                      "backend": out.get("backend")}}
 
 
-@register("local-constrained-endword", "v1")
-def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
+def _local_constrained_endword(item: dict, ctx: ArmContext, *,
+                               pool_rank: str) -> dict:
     """Tier-1: the terminal word can only be a phonology-valid one.
 
     Rhyme granularity ONLY. `word` and `span` items carry `rhymeWith: None`
@@ -538,6 +571,11 @@ def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
     `len(tokens)-1` — the blank IS the last word, so the prefix is fully supplied
     and pass 1 would be dead code on 100% of this slice. This is single-pass
     constrained decode over a fixed prefix.
+
+    `pool_rank` is the ONLY difference between the two registered arms sharing
+    this body: how the 200-word pool is truncated (see `_rhyme_menu`). The pool
+    travels in the cache key via `poolSha`, so the two arms can never replay each
+    other's picks even though everything else about their payloads matches.
     """
     from lyrics.bench import endword_trie, localgen
     if item.get("granularity") != "rhyme":
@@ -546,7 +584,7 @@ def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
     if ctx.local is None:
         return _unavailable_arm("no local backend configured")
 
-    pool = _rhyme_menu(item, ctx, max_n=200)
+    pool = _rhyme_menu(item, ctx, max_n=200, rank=pool_rank)
     if not pool:
         return _unavailable_arm("no phonology-valid pool for this partner",
                                 status="no-pool")
@@ -581,7 +619,44 @@ def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
                      "backend": out.get("backend")}}
 
 
+@register("local-constrained-endword", "v1")
+def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
+    """The original arm: alphabetically-truncated pool. See
+    `_local_constrained_endword`. Kept byte-identical (same pool, same payloads,
+    same cache keys) so its scoreboard row and paid cache stay comparable."""
+    return _local_constrained_endword(item, ctx, pool_rank="alpha")
+
+
+@register("local-constrained-endword-fp", "v1")
+def arm_local_constrained_endword_fp(item: dict, ctx: ArmContext) -> dict:
+    """The frequency-pool ablation: identical mechanism, identical model,
+    identical cap — the pool is truncated by corpus frequency instead of the
+    alphabet. Registered as its OWN arm rather than a v2 bump because the
+    question is a side-by-side: coverage moved 40.0% → 89.3%; this measures
+    what that buys in `exact` once a real model ranks the harder pool."""
+    return _local_constrained_endword(item, ctx, pool_rank="freq")
+
+
+@register("rhyme-floor-fp", "v1")
+def arm_rhyme_floor_fp(item: dict, ctx: ArmContext) -> dict:
+    """The no-model control for the freq pool: its top-k, verbatim.
+
+    The freq-ranked menu is already ordered (grade, syllables, corpus frequency)
+    — exactly the ranking `rhyme-floor` computes over the alpha menu — so the
+    floor is the pool's head. If THIS arm approaches the constrained arm's
+    exact, the model's ranking adds nothing over the pool's own ordering, and
+    the win belongs to the pool fix rather than the decoder. Falls back to
+    `freq-floor` on items with no partner, same as `rhyme-floor`."""
+    menu = _rhyme_menu(item, ctx, max_n=200, rank="freq")
+    if not menu:
+        return arm_freq_floor(item, ctx)
+    return {"candidates": _dedupe_cap(menu, ctx.k),
+            "meta": {"menuSize": len(menu),
+                     "perfect": len(_perfect_set(item, menu, ctx))}}
+
+
 register_granularities("local-constrained-endword", ("rhyme",))
+register_granularities("local-constrained-endword-fp", ("rhyme",))
 
 
 # ── the shipped product loop as an arm ───────────────────────────────────────────

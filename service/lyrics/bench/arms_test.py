@@ -342,9 +342,92 @@ with tempfile.TemporaryDirectory() as td:
     check("fusion: deterministic under the cache", a == b, f"{a} vs {b}")
 
 
+# ── the freq-ranked pool (2026-07-27 truncation fix) ────────────────────────────
+# Alphabetical truncation held 40.0% of true answers at cap 200; frequency
+# truncation held 89.3% of the SAME candidate set. These guards pin the freq
+# path's three load-bearing properties: ordering, filter-before-cap, and memo
+# separation from the alpha path. The fixture makes alpha and freq orders
+# genuinely differ — a fixture where they coincide could not catch a sabotage
+# that ignores `rank`.
+
+
+def _menu_item(target="pain", partner="rain"):
+    return {"itemId": f"t:{target}", "granularity": "rhyme", "songId": "gs:1",
+            "target": {"text": target},
+            "context": {"before": [], "maskedLine": "____", "after": []},
+            "constraints": {"syllables": 1, "rhymeWith": partner,
+                            "rhymeStrictness": "slant"}}
+
+
+_mctx = arms.ArmContext(pron=PRON, freq=FREQ, k=5)
+_alpha = arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="alpha")
+_freqm = arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq")
+check("freq menu: same candidate set as alpha, different order",
+      sorted(_alpha) == sorted(_freqm) and _alpha != _freqm,
+      f"alpha={_alpha} freq={_freqm}")
+check("freq menu: commonest first within a grade (train=90 leads)",
+      _freqm and _freqm[0] == "train", str(_freqm))
+check("menu memo separates the two ranks (same ctx, same partner, same cap)",
+      arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="alpha") == _alpha
+      and arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq") == _freqm,
+      "a memo key without `rank` replays one ordering as the other")
+check("freq menu: NO LEAK — identical when the hidden answer changes",
+      arms._rhyme_menu(_menu_item(target="pane"), _mctx, max_n=10, rank="freq")
+      == _freqm)
+check("freq menu is deterministic across calls",
+      arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="freq") == _freqm)
+
+# Filter-before-cap: a stopword with a huge corpus count must not consume a cap
+# slot. The injected lexicon deliberately pronounces the stopword 'when' into
+# the rime family — with filter-after-cap the cap keeps [when, main], the filter
+# then deletes 'when', and 'vain' is silently gone.
+from phonology.core import Pronouncer  # noqa: E402
+_stop_pron = Pronouncer(lexicon={
+    "rain": [["R", "EY1", "N"]], "main": [["M", "EY1", "N"]],
+    "vain": [["V", "EY1", "N"]], "when": [["W", "EY1", "N"]],
+}, g2p=lambda w: None)
+_stop_ctx = arms.ArmContext(pron=_stop_pron,
+                            freq={"when": 1000, "main": 5, "vain": 3}, k=5)
+check("freq menu: stopword filter runs BEFORE the cap",
+      arms._rhyme_menu(_menu_item(), _stop_ctx, max_n=2, rank="freq")
+      == ["main", "vain"],
+      str(arms._rhyme_menu(_menu_item(), _stop_ctx, max_n=2, rank="freq")))
+
+_bad = arms.ArmContext(pron=PRON, freq={}, k=5)
+try:
+    arms._rhyme_menu(_menu_item(), _bad, max_n=10, rank="freq")
+    check("freq menu: empty freq table raises rather than silently degrading",
+          False, "no exception")
+except ValueError:
+    check("freq menu: empty freq table raises rather than silently degrading",
+          True)
+try:
+    arms._rhyme_menu(_menu_item(), _mctx, max_n=10, rank="wat")
+    check("freq menu: unknown rank raises", False, "no exception")
+except ValueError:
+    check("freq menu: unknown rank raises", True)
+
+# rhyme-floor-fp: the no-model control is the freq pool's head, verbatim.
+# The floor uses the arm-standard 200 cap, not the 10 cap the ordering checks
+# used above — compare against the menu it actually draws from.
+_floor_menu = arms._rhyme_menu(_menu_item(), _mctx, max_n=200, rank="freq")
+_fp = arms.ARMS["rhyme-floor-fp"](_menu_item(), _mctx)
+_fp_words = [c["text"] for c in _fp["candidates"]]
+check("rhyme-floor-fp: candidates are the freq menu's top-k",
+      _fp_words == _floor_menu[:5], f"{_fp_words} vs {_floor_menu[:5]}")
+check("rhyme-floor-fp: meta reports menuSize + perfect count",
+      _fp["meta"].get("menuSize") == len(_floor_menu)
+      and isinstance(_fp["meta"].get("perfect"), int), str(_fp["meta"]))
+_nopart = _menu_item()
+_nopart["constraints"]["rhymeWith"] = None
+check("rhyme-floor-fp: falls back to freq-floor when there is no partner",
+      [c["text"] for c in arms.ARMS["rhyme-floor-fp"](_nopart, _mctx)["candidates"]]
+      == [c["text"] for c in arms.ARMS["freq-floor"](_nopart, _mctx)["candidates"]])
+
+
 # ── registry hygiene ────────────────────────────────────────────────────────────
 for name in ("rhyme-floor", "prompt-rhyme-menu", "nbest-rerank",
-             "fusion-rerank"):
+             "fusion-rerank", "rhyme-floor-fp", "local-constrained-endword-fp"):
     check(f"{name}: registered with a version",
           name in arms.ARMS and arms.ARM_VERSIONS.get(name),
           str(arms.ARM_VERSIONS.get(name)))

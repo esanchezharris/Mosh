@@ -60,6 +60,10 @@ _ARM_BEHAVIOUR_VERSIONS = {
     # ctx.arm_config, which the runner folds into the cache key and the summary.
     # Baking them into the name would make every model swap a new scoreboard row.
     "local-unconstrained": "v1", "local-constrained-endword": "v1",
+    # The freq-pool ablation pair (2026-07-27): same mechanism as their alpha
+    # counterparts, pool truncated by corpus frequency instead of the alphabet.
+    # Separate arm IDS, not version bumps — the point is the side-by-side.
+    "local-constrained-endword-fp": "v1", "rhyme-floor-fp": "v1",
 }
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),
