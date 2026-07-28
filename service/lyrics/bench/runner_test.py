@@ -69,6 +69,22 @@ _ARM_BEHAVIOUR_VERSIONS = {
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),
       f"registry={sorted(arms.ARMS)} pinned={sorted(_ARM_BEHAVIOUR_VERSIONS)}")
+
+# CLI wiring drift guard: an API arm missing from bench_cli.API_ARMS gets
+# ctx.chat=None and CRASHES on its first live cache miss (TypeError mid-run) —
+# exactly how prompt-rhyme-menu-fp failed on 2026-07-28. Convention: prompt-*/
+# llm-*/nbest-*/fusion-* arms speak to the chat API; local-* arms need the
+# worker wiring in LOCAL_ARMS.
+from lyrics.bench import bench_cli  # noqa: E402
+_api_named = {a for a in arms.ARMS
+              if a.split("-")[0] in ("prompt", "llm", "nbest", "fusion")}
+check("every chat-API arm is wired in bench_cli.API_ARMS",
+      _api_named <= set(bench_cli.API_ARMS),
+      f"missing: {sorted(_api_named - set(bench_cli.API_ARMS))}")
+check("every local arm is wired in bench_cli.LOCAL_ARMS",
+      {a for a in arms.ARMS if a.startswith("local-")}
+      <= set(bench_cli.LOCAL_ARMS),
+      f"missing: {sorted({a for a in arms.ARMS if a.startswith('local-')} - set(bench_cli.LOCAL_ARMS))}")
 check("no arm changed behaviour without bumping its version",
       all(arms.ARM_VERSIONS[a] == v for a, v in _ARM_BEHAVIOUR_VERSIONS.items()
           if a in arms.ARM_VERSIONS),

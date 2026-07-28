@@ -41,6 +41,7 @@ SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.
 # AND silently escapes the spend check — both of which happened to
 # prompt-rhyme-menu on its first run.
 API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
+             "prompt-rhyme-menu-fp", "prompt-rhyme-menu-fp200",
              "nbest-rerank", "fusion-rerank")
 
 # Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
