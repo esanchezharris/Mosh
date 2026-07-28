@@ -3,8 +3,14 @@
 (FMS lyrics-bench I2).
 
 Hermetic by construction: the heavy work lives in a SUBPROCESS behind
-`torchjudge.run_backend`, which the tests replace with a scripted stub. What
-must hold:
+`torchjudge.run_backend`, which the tests replace with a scripted stub — AND
+with an injected `python=STUB_PY`, because `score_pairs` resolves a real
+interpreter before it calls any backend, stub or not. Stubbing only the backend
+left that resolution live, so the default gate quietly depended on a
+`lyrics-bench` venv existing: green on a dev Mac, red on CI. The env pins below
+make that impossible to reintroduce.
+
+What must hold:
   - absent torch degrades to `unavailable` — never a fabricated 0.0 score that
     would silently enter calibration as data;
   - the interpreter/model actually used is RECORDED (reproducibility: a score
@@ -32,6 +38,32 @@ def check(name, ok, detail=""):
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
     if not ok:
         fails.append(name)
+
+
+# Hermeticity, enforced rather than assumed. Every default-gate check below
+# drives a SCRIPTED backend, so none of them may consult a machine-local venv:
+# point the resolver at nothing, drop any inherited override, and pass
+# `python=STUB_PY` explicitly wherever a stub backend is injected. A check that
+# forgets it now degrades to `unavailable` and FAILS loudly on every machine,
+# instead of passing only on a dev Mac that happens to have `lyrics-bench`
+# installed — the divergence that redded CI while every local run was green.
+_REAL_ENV = {k: os.environ.get(k)
+             for k in ("MOSH_VENVS_DIR", "LYRICS_BENCH_TORCH_PY")}
+os.environ["MOSH_VENVS_DIR"] = "/nonexistent/lyrics-bench-hermetic-no-venvs"
+os.environ.pop("LYRICS_BENCH_TORCH_PY", None)
+
+# Not a real interpreter: the scripted backends never launch it, they only echo
+# it back as provenance, which is what the manifest check below pins.
+STUB_PY = "/nonexistent/stub-torch-interpreter/bin/python"
+
+
+def restore_real_env():
+    """Undo the hermetic pins — only the opt-in real-weights smoke wants them."""
+    for k, v in _REAL_ENV.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
 
 
 ITEM = {
@@ -67,13 +99,16 @@ with tempfile.TemporaryDirectory() as td:
 # ---- unavailable degrades honestly ----
 with tempfile.TemporaryDirectory() as td:
     out = torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                                 cache=llm_cache.Cache(td),
+                                 cache=llm_cache.Cache(td), python=STUB_PY,
                                  run_backend=lambda *a, **k: {
                                      "ok": False, "error": "torch not installed"})
     check("absent backend → status unavailable, score None (never 0.0)",
           out["status"] == "unavailable" and out["scores"] == [None], str(out))
+    # The stub's EXACT message: a bare "torch" substring was also satisfied by
+    # the resolver's own "no interpreter with torch+transformers" error, so this
+    # check used to pass on a venv-less box without ever reaching the backend.
     check("unavailable carries the reason for the manifest",
-          "torch" in (out.get("error") or ""), str(out.get("error")))
+          "torch not installed" in (out.get("error") or ""), str(out.get("error")))
 
 # ---- available path records provenance + caches ----
 CALLS = {"n": 0}
@@ -88,20 +123,24 @@ def scripted(python, script, payload):
 with tempfile.TemporaryDirectory() as td:
     cache = llm_cache.Cache(td)
     pairs = [(ITEM, "stacking all"), (ITEM, "counting up")]
-    out = torchjudge.score_pairs(pairs, kind="emb", cache=cache,
+    out = torchjudge.score_pairs(pairs, kind="emb", cache=cache, python=STUB_PY,
                                  run_backend=scripted)
     check("available: one score per pair", out["scores"] == [0.75, 0.75], str(out))
+    # `== STUB_PY`, not merely truthy: pins that the interpreter recorded is the
+    # one handed to the backend, so a resolver leak reads as a failure here.
     check("available: backend provenance recorded (interpreter + model)",
-          out["backend"]["model"] == "stub-model-v1" and out["backend"]["python"],
+          (out["backend"] or {}).get("model") == "stub-model-v1"
+          and (out["backend"] or {}).get("python") == STUB_PY,
           str(out.get("backend")))
     first = CALLS["n"]
-    out2 = torchjudge.score_pairs(pairs, kind="emb", cache=cache,
+    out2 = torchjudge.score_pairs(pairs, kind="emb", cache=cache, python=STUB_PY,
                                   run_backend=scripted)
     check("cache: identical pairs re-score with no new backend call",
           CALLS["n"] == first and out2["scores"] == out["scores"],
           f"{CALLS['n']} vs {first}")
     out3 = torchjudge.score_pairs([(ITEM, "different fill entirely")], kind="emb",
-                                  cache=cache, run_backend=scripted)
+                                  cache=cache, python=STUB_PY,
+                                  run_backend=scripted)
     check("cache: a new fill DOES reach the backend", CALLS["n"] == first + 1)
     check("cache: kind is part of the key (emb vs ppl never collide)",
           torchjudge._pair_key(ITEM, "x", "emb") !=
@@ -119,7 +158,8 @@ def capture(python, script, payload):
 
 with tempfile.TemporaryDirectory() as td:
     torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                           cache=llm_cache.Cache(td), run_backend=capture)
+                           cache=llm_cache.Cache(td), python=STUB_PY,
+                           run_backend=capture)
     pair = SEEN["pairs"][0]
     check("backend receives the truth-filled and candidate-filled LINES",
           pair["truth"] == "I was counting up the rent, no debate"
@@ -130,7 +170,7 @@ with tempfile.TemporaryDirectory() as td:
 # ---- ppl kind flows through the same seam ----
 with tempfile.TemporaryDirectory() as td:
     out = torchjudge.score_pairs([(ITEM, "stacking all")], kind="ppl",
-                                 cache=llm_cache.Cache(td),
+                                 cache=llm_cache.Cache(td), python=STUB_PY,
                                  run_backend=lambda p, s, pay: {
                                      "ok": True, "backend": {"python": p, "model": "m"},
                                      "scores": [-1.25]})
@@ -140,7 +180,8 @@ with tempfile.TemporaryDirectory() as td:
 # ---- determinism ----
 with tempfile.TemporaryDirectory() as td:
     runs = [torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",
-                                   cache=llm_cache.Cache(td), run_backend=scripted)
+                                   cache=llm_cache.Cache(td), python=STUB_PY,
+                                   run_backend=scripted)
             for _ in range(3)]
     check("determinism: 3x identical", runs[0] == runs[1] == runs[2])
 
@@ -150,6 +191,9 @@ with tempfile.TemporaryDirectory() as td:
 # a judge whose scores don't separate identical / plausible / nonsense is not a
 # judge, whatever its absolute numbers are.
 if os.environ.get("LYRICS_BENCH_TORCH_SMOKE") == "1":
+    # The ONLY block that wants a machine-local interpreter — hand the real
+    # env back so the resolver can find the bench venv.
+    restore_real_env()
     real_item = {
         "itemId": "smoke", "granularity": "line",
         "context": {"before": ["kept the pen on the paper through the winter"],
