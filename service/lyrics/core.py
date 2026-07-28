@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from typing import Dict, List, Optional
 
@@ -279,6 +280,29 @@ def _style_exemplars(spec: dict, k: int = 3) -> List[str]:
 
 # ── the LLM backend (L3): prompt → validate → re-prompt with the SPECIFIC failure ──
 
+def _palette_enabled(spec: dict) -> bool:
+    """The 2026-07-28 promotion flag (`prompt-rhyme-menu-fp`, exact .413 /
+    owner-acceptable top-1 .75 on the frozen bench slice — the best measured
+    configuration). Spec-explicit `rhymePalette` wins either way; otherwise the
+    env lever `MOSH_RHYME_PALETTE=1` turns it on app-wide. Default OFF: the
+    shipped prompt stays byte-identical until the flag is thrown."""
+    v = spec.get("rhymePalette")
+    if v is not None:
+        return bool(v)
+    return os.environ.get("MOSH_RHYME_PALETTE") == "1"
+
+
+def _rhyme_palette(anchor: str, strict: str) -> List[str]:
+    """The palette the bench measured: freq-ranked rhymes of the anchor, 40
+    shown IN FULL. Menu size is a measured dial with an interior maximum AT 40
+    (24→.387, 40→.413, 100→.320, 200→.267 — choice overload) — do not 'help'
+    by showing more. No syllable filter: the bench pool filtered to the slot's
+    count, but a product line has no end-word syllable constraint, and the
+    model handles length; the palette's job is recall."""
+    from phonology import freq as pfreq
+    return pfreq.ranked_rhymes(_P, anchor, strict, max_n=40, syllables=None)
+
+
 def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
                     tol: int, strict: str, feedback: Optional[str]) -> List[dict]:
     fixed = _fixed_end_word(line)
@@ -296,6 +320,15 @@ def _build_messages(line: dict, spec: dict, anchor: Optional[str], target: int,
         rules.append(f"The line must END on the word \"{planned}\".")
     elif anchor:
         rules.append(f"The line must END on a word that is a {strict} rhyme with \"{anchor}\".")
+        # The measured wording, near-verbatim from the bench arm: an offered
+        # palette with an explicit escape hatch — the arm's 19 off-menu-correct
+        # answers came through that hatch, so it stays.
+        if _palette_enabled(spec):
+            palette = _rhyme_palette(anchor, strict)
+            if palette:
+                rules.append("Words that genuinely rhyme here (you may use one, "
+                             "or any other word that rhymes as well): "
+                             + ", ".join(palette) + ".")
     if spec.get("topic"):
         rules.append(f"Topic: {spec['topic']}.")
     if spec.get("mood"):

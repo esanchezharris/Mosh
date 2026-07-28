@@ -214,6 +214,52 @@ try:
                   alpha_ends == _JUNK2[:40], str(alpha_ends[:8]))
         finally:
             del os.environ["MOSH_FREQ_TABLE"]
+
+        # ── 12. The PROMOTION flag (2026-07-28): the measured fp palette in the
+        # LLM prompt, default OFF byte-identical. Reuses this block's fixture —
+        # the family is bigger than the cap and freq order != alpha order, so a
+        # sabotage that draws the palette alphabetically, or ignores the flag,
+        # has something to be caught against. ────────────────────────────────
+        os.environ["MOSH_FREQ_TABLE"] = tab
+        try:
+            _pl = {"index": 1, "role": "verse", "seedText": "", "text": "",
+                   "syllableTarget": 3, "syllableTol": 2, "rhymeGroup": "A",
+                   "locked": False}
+            _sentinel = "Words that genuinely rhyme here"
+
+            def _user(spec_extra):
+                sp = {"grid": "1/16", "rhymeStrictness": "perfect", "topic": "",
+                      "mood": "", "lines": [_pl], **spec_extra}
+                return core._build_messages(_pl, sp, "day", 3, 2, "perfect",
+                                            None)[1]["content"]
+
+            off = _user({})
+            check("palette flag OFF by default — prompt byte-free of the palette",
+                  _sentinel not in off and "way, say" not in off, off[-120:])
+            on = _user({"rhymePalette": True})
+            check("palette flag ON — the freq-ranked words, in order, in full",
+                  "way, say, play, stay, gray" in on, on[-160:])
+            check("palette shows the WRITER's words, never the junk the alpha "
+                  "cap kept", "ba, bb" not in on)
+            os.environ["MOSH_RHYME_PALETTE"] = "1"
+            try:
+                check("env lever turns the palette on app-wide",
+                      _sentinel in _user({}))
+                check("spec-explicit False overrides the env lever",
+                      _sentinel not in _user({"rhymePalette": False}))
+            finally:
+                del os.environ["MOSH_RHYME_PALETTE"]
+            _fixed_line = {**_pl, "seedText": "ends on flame",
+                           "text": "ends on flame"}
+            spf = {"grid": "1/16", "rhymeStrictness": "perfect", "topic": "",
+                   "mood": "", "rhymePalette": True, "lines": [_fixed_line]}
+            fixed_user = core._build_messages(
+                {**_fixed_line, "rhymeAnchor": "day"}, spf, None, 3, 2,
+                "perfect", None)[1]["content"]
+            check("no palette when the end word is already decided (no anchor)",
+                  _sentinel not in fixed_user)
+        finally:
+            del os.environ["MOSH_FREQ_TABLE"]
 finally:
     core._P = _REAL_P
 

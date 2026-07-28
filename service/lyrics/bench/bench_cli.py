@@ -251,6 +251,12 @@ def cmd_run(args) -> int:
             return 2
 
     local_worker, local_cfg, arm_config = None, None, {}
+    # The promotion flag changes product-llm's PROMPTS via the env lever, but
+    # the runner cache key would not move with it — an ON run would replay the
+    # OFF run's cached results and the A/B would compare a number to itself.
+    # Conditional, so runs without the flag keep their existing keys.
+    if os.environ.get("MOSH_RHYME_PALETTE") == "1":
+        arm_config["rhymePalette"] = "1"
     if args.arm in LOCAL_ARMS:
         from lyrics.bench import localgen
         py = localgen.resolve_python()
