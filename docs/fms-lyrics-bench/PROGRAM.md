@@ -616,3 +616,22 @@ numbers and hashes only.
   destroys it), ~10 min per rater. Sequencing consequence: with norming closed,
   the accept-pass lock on the remaining 166 packet items is lifted — it only
   protected answers still to be written blind.
+- **2026-07-28 — ACCEPT PASS DONE (owner, 86 of 88 fp misses judged). THE
+  PRIMARY METRIC EXISTS: `prompt-rhyme-menu-fp` top-1 is owner-acceptable
+  75.0% of the time** (62 exact + 49 kept misses over 148 judged; keep-rate on
+  misses 57.0%). `exact .413` understates the arm by ~34 points — more than
+  half its "wrong" words are words the owner would keep. All future summaries
+  now carry `acceptFit` beside `exact` (coverage stated; the .98/.88 readings
+  on older arms ride 45–48% coverage where exacts self-count — only fp's .75 @
+  99% coverage is a real number). The Goodhart alarm is ARMED for same-arm
+  version comparisons from here.
+  - **Taste taxonomy from the labels (M6 ranker features, deliberately NOT
+    arm hacks):** formal rhyme grade does not predict keeps (perfect 52% vs
+    slant 57% — flat; the sitting-5 suspicion is now measured); partner-echo
+    top-1s (machine answers the rhyme partner itself) run 5:2 AGAINST but not
+    unanimous — rap legitimately repeats end words, so the mechanical
+    echo-drop is rejected as overfitting n=7; OOV/multi-word slang keeps at
+    70% (register signal). Last-word extraction for multi-word fills remains
+    the one uniform answer-shape fix, still parked for the next natural bump.
+  - Judgement counts: 49 accepted / 37 rejected; labels live in the
+    append-only accept log (last-verdict-wins), minted via the sit page.
