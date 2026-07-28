@@ -659,3 +659,15 @@ numbers and hashes only.
   .413/.75, not this bracket's .300; (3) local teacher-forcing is ruled out as
   the M6 mechanism. acceptFit .824 on this arm rides 45% coverage — not
   comparable to fp's .75 @ 99% (the instrument's own caveat applies).
+- **2026-07-28 — M6 increment 2 (untrained cross-encoder bracket): NEGATIVE,
+  completing the zero-training ladder.** `xenc-rerank-fp40` (zero-shot
+  bge-reranker-v2-m3 over fp's candidates, truth-free seam): exact **.213** —
+  below even the local-logprob bracket (.300), 34 broken : 4 fixed, topk .513
+  preserved (sanity). The breaks name the failure: roof→proof, time→mind,
+  town→sound — general RELEVANCE prefers words that echo the context, while
+  the right word advances it. Ladder verdict, pre-registered readings honored:
+  generation order .413 > local logprob .300 > zero-shot relevance .213 —
+  **no zero-training pointwise scorer beats the generator's own elicitation
+  order. M6 routes to I3: fine-tune the cross-encoder on truth-vs-poolmate
+  pairs (spec §3), bar = .413 exact / .75 acceptFit.** Train-slice data only —
+  the leak discipline is the first guard I3 lands.
