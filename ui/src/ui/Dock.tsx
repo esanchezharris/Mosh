@@ -27,12 +27,17 @@ export function Dock({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-export function Rack({ track, onAddPlugin }: { track: Track | null; onAddPlugin?: () => void }) {
+export function Rack({ track, onAddPlugin, hideInstrument }: { track: Track | null; onAddPlugin?: () => void; hideInstrument?: boolean }) {
   const openBrowser = useStore((s) => s.openBrowser);
   const openAutomation = useStore((s) => s.openAutomation);
   const exec = useStore((s) => s.exec);
   const raveAvailable = useStore((s) => s.snapshot?.session?.raveAvailable ?? false);
-  const plugins = (track?.plugins ?? []).filter((p) => p.external || p.builtin || p.rave);
+  // hideInstrument: the v2 Inspector renders the instrument in its own pinned slot above
+  // this rack, so showing it here too would render the same device twice. Classic passes
+  // nothing and keeps the flat chain it has always had.
+  const plugins = (track?.plugins ?? [])
+    .filter((p) => p.external || p.builtin || p.rave)
+    .filter((p) => !(hideInstrument && p.isInstrument));
   // The "+ Plugin" target is injectable: the classic shell opens the modal browser
   // (store.openBrowser); the v2 shell routes it to its left browser dock instead so the
   // plugin picker lives on ONE surface. Default preserves the classic modal behavior.

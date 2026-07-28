@@ -12,6 +12,7 @@ import { useShell, type InspectorTab } from "../shellState";
 import { Rack, GenDrawer } from "../../ui/Dock";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
+import { InstrumentSlot } from "./InstrumentSlot";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
@@ -63,7 +64,12 @@ export function Inspector() {
       </div>
       <div className="v2-insp-body" id="v2-insp-body" role="tabpanel" aria-labelledby={`v2-insp-tab-${active}`} data-testid="v2-insp-body">
         {active === "mix" && <MixTab track={track} />}
-        {active === "fx" && <Rack track={track} onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />}
+        {active === "fx" && (
+          <>
+            <InstrumentSlot track={track} />
+            <Rack track={track} hideInstrument onAddPlugin={() => useShell.getState().openBrowserTab("plugins")} />
+          </>
+        )}
         {active === "gen" && <GenDrawer track={track} selectedClipId={selectedClipId ?? undefined} />}
         {active === "lyrics" && <LyricPanel track={track} />}
         {active === "clip" && clip && <ClipTab clip={clip} />}

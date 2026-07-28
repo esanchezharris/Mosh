@@ -1848,3 +1848,27 @@
   color: var(--v2-text); font: inherit; font-size: var(--v2-fs-base); padding: 8px 10px; border-radius: var(--v2-radius-md); cursor: pointer;
 }
 .v2-lanemenu button:hover { background: var(--v2-accent-soft); }
+
+/* Instrument slot — pinned above the effects rack, visually distinct from a plugin card
+   so an empty one reads as "something goes here", not as a missing item. Uses the radius
+   SCALE (--v2-radius-lg), same call as .v2-lanemenu above it. */
+.v2-instslot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: var(--v2-radius-lg);
+  border: 1px solid var(--v2-line);
+  background: var(--v2-surface-2);
+}
+.v2-instslot-empty { border-style: dashed; }
+.v2-instslot-label {
+  font-size: var(--v2-fs-2xs);
+  letter-spacing: var(--v2-tracking-caps);
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.v2-instslot-name { font-weight: 600; }
+.v2-instslot-actions { margin-left: auto; display: flex; gap: 4px; }
+.v2-instslot-pick { margin-left: auto; }
