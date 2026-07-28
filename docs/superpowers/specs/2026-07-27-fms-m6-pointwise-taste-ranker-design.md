@@ -102,3 +102,33 @@ the CMUdict junk that M2's raw output is full of (`lyne`, `rhyne`, `rea`, `brack
 
 Fine-tuning the generator; any listwise or generative reranking; anything that
 puts candidates in a prompt.
+
+---
+
+## Addendum 2026-07-28 — the pool fix and the sittings change the premises
+
+Everything in §1 and §5 was measured against the ALPHABETICALLY-truncated pool
+(the 2026-07-28 ledger entry "the 40% ceiling was an alphabetical sort"). Updates:
+
+- **Coverage is 90.7%, not 40.0%** (freq-ranked truncation @200). A perfect
+  within-pool ranker now scores .907, not .400 — ranking is no longer the
+  smaller factor, it is effectively the whole problem. §5's "coverage becomes
+  the binding constraint" already happened, from the other direction.
+- **The label dependency (§4) is satisfied**: 86 owner accept/reject labels
+  exist (2026-07-28 accept pass). They are one-judged-word-per-item, so
+  within-item pairwise agreement is not yet computable; until labels are
+  denser, the operational promotion read is **acceptFit of the reranked top-1
+  vs the base arm's .75, under the armed Goodhart alarm** (exact up +
+  acceptFit down = dead, automatically).
+- **The routing bar (registered 2026-07-28) routed HERE**: fp measures
+  .413/.493 against exact ≥.45 AND rhyme_perfect ≥.60. The evidence for the
+  lane: fp's topk .513 — the truth sits in its own top-5 ten points more often
+  than at top-1 — and grade-flat keep rates (taste is learnable signal, not
+  phonology).
+- **Bracket discipline before any training**: increment 1 is the ZERO-training
+  pointwise scorer — the local model's teacher-forced score over the fp arm's
+  own ≤5 candidates (`local-rerank-fp40`). Pointwise by construction (§2's
+  properties hold: no list, no position bias, no invention — output ⊆ input).
+  Pre-registered expectations: ceiling = fp's topk .513; the arm is read
+  against fp's exact .413 AND acceptFit .75. If the free scorer already
+  converts top-5 into top-1, a trained cross-encoder must beat IT, not fp.
