@@ -923,6 +923,364 @@ export const AUTOMATE_PARAMETER_SKILL: SkillDefinition = {
   },
 };
 
+// ── FS-B2 (2026-07-28) ────────────────────────────────────────────────────────────
+// Five workflow skills, selected on EVIDENCE rather than a demo script (O2 was
+// withdrawn 2026-07-28 — there is no demo).
+//
+// The evidence is `service/skills/library.jsonl`: 36 micro-skills mined from the SFT
+// demonstration corpus, each carrying `provenance` (the exact corpus rows that produced
+// it). Per docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md that library is a mined
+// retrieval corpus for the offline router and is NOT hand-authored — so it is read here
+// as a source of *which workflows are real*, never copied from.
+//
+// Selection rule: a skill must encode **two or more commands that genuinely go
+// together**. Provenance count alone is a bad rule — the mined library's single biggest
+// entry (`assign-sample`, 51 rows) wraps one command 1:1, and a 1:1 wrapper adds a name,
+// not a capability; `validateCommand` already covers the single call. Twenty-two of the
+// 36 mined entries are such wrappers and are deliberately not ported.
+//
+// Two mined families collapse here rather than porting as-is: six near-duplicate
+// `create-bus-add-send*` variants, and three `load-builtin-set-plugin-param*` variants.
+//
+// WHAT COULD NOT BE PORTED, and why — both are schema limits, not oversights:
+//   · Nothing that needs an id RETURNED by an earlier command. The template language is
+//     declarative: an arg is a literal or `{slot}`, so `create_bus` → `add_send(bus: ?)`
+//     cannot chain. `send_to_bus` therefore targets an EXISTING bus. `add_builtin_effect`
+//     works around it honestly by making the chain `index` an explicit slot that both
+//     commands read.
+//   · The mined `add-note-pattern` / `add-note-from-note-names` (provenance 20 each, the
+//     joint-highest multi-row entries) need `list<note>` slots. `SkillSlot` is
+//     string/number/boolean only. Porting them needs a schema change, not a definition.
+
+const NEW_BUS_MIN = 0;
+const NEW_BUS_MAX = 63;
+
+export const PREPARE_DRUM_TRACK_SKILL: SkillDefinition = {
+  name: "prepare_drum_track",
+  description:
+    "Turn an existing track into a drum track and load the built-in kit onto its sampler, ready for a pattern.",
+  slots: [
+    {
+      name: "trackId",
+      type: "string",
+      required: true,
+      description: "Stable id of the existing track to convert.",
+    },
+  ],
+  template: [
+    {
+      kind: "command",
+      command: "set_track_type",
+      args: { trackId: { slot: "trackId" }, type: "drum" },
+    },
+    { kind: "command", command: "load_drum_kit", args: { trackId: { slot: "trackId" } } },
+  ],
+  precondition: (snapshot, slots) => {
+    const trackId = slots.trackId;
+    if (typeof trackId !== "string")
+      return { ok: false, reason: "prepare_drum_track: validated trackId is unavailable." };
+    const track = trackFor(snapshot, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
+    // Refused for the same reason MoshOps refuses it natively: converting a track that
+    // already holds audio discards that audio. The native handler's error names this
+    // recovery ("call add_drum_pattern again WITHOUT trackId"); do not paper over it.
+    if (track.clips.some((clip) => clip.type === "wave"))
+      return {
+        ok: false,
+        reason: `Track "${trackId}" holds audio clips; converting it to a drum track would discard them. Make a new track instead.`,
+      };
+    return { ok: true };
+  },
+  postcondition: (_before, after, slots) => {
+    const trackId = slots.trackId as string;
+    const track = trackFor(after, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" vanished during the skill.` };
+    if (track.type !== "drum")
+      return { ok: false, reason: `Track "${trackId}" is "${track.type}", not a drum track.` };
+    return { ok: true };
+  },
+};
+
+export const SEND_TO_BUS_SKILL: SkillDefinition = {
+  name: "send_to_bus",
+  description:
+    "Send an existing track to an existing aux/return bus at a set level — the reverb/delay send move.",
+  slots: [
+    {
+      name: "trackId",
+      type: "string",
+      required: true,
+      description: "Stable id of the track to send from.",
+    },
+    {
+      name: "bus",
+      type: "number",
+      required: true,
+      description: "Number of the existing destination bus.",
+      min: NEW_BUS_MIN,
+      max: NEW_BUS_MAX,
+    },
+    {
+      name: "db",
+      type: "number",
+      required: true,
+      description: "Send level in decibels.",
+      min: -60,
+      max: 6,
+    },
+  ],
+  template: [
+    {
+      kind: "command",
+      command: "add_send",
+      args: { trackId: { slot: "trackId" }, bus: { slot: "bus" } },
+    },
+    {
+      kind: "command",
+      command: "set_send_level",
+      args: { trackId: { slot: "trackId" }, bus: { slot: "bus" }, db: { slot: "db" } },
+    },
+  ],
+  precondition: (snapshot, slots) => {
+    const trackId = slots.trackId;
+    const bus = slots.bus;
+    if (typeof trackId !== "string" || typeof bus !== "number")
+      return { ok: false, reason: "send_to_bus: validated slots are unavailable." };
+    const track = trackFor(snapshot, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
+    const buses = snapshot.buses ?? [];
+    if (!buses.some((candidate) => candidate.bus === bus))
+      return {
+        ok: false,
+        reason: `Bus ${bus} does not exist. Create it first — this skill cannot create one, because the template language cannot read back the new bus number.`,
+      };
+    if (buses.some((candidate) => candidate.trackId === trackId))
+      return { ok: false, reason: `Track "${trackId}" is itself a bus; sending it to a bus would feed back.` };
+    return { ok: true };
+  },
+  postcondition: (_before, after, slots) => {
+    const trackId = slots.trackId as string;
+    const bus = slots.bus as number;
+    const db = slots.db as number;
+    const track = trackFor(after, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" vanished during the skill.` };
+    const sends = (track as unknown as { sends?: { bus: number; db?: number }[] }).sends ?? [];
+    const send = sends.find((candidate) => candidate.bus === bus);
+    if (!send) return { ok: false, reason: `No send to bus ${bus} exists on "${trackId}".` };
+    if (Math.abs((send.db ?? 0) - db) > 1e-6)
+      return { ok: false, reason: `Send to bus ${bus} is at ${send.db ?? 0} dB, not ${db} dB.` };
+    return { ok: true };
+  },
+};
+
+export const RECORD_TAKE_SKILL: SkillDefinition = {
+  name: "record_take",
+  description:
+    "Arm a track, set its input monitoring, and roll the transport into record — the whole 'capture a take' move.",
+  slots: [
+    {
+      name: "trackId",
+      type: "string",
+      required: true,
+      description: "Stable id of the track to record onto.",
+    },
+    {
+      name: "monitor",
+      type: "string",
+      required: false,
+      description: "Input monitoring mode; omit to leave it as it is.",
+      enum: ["off", "automatic", "on"],
+    },
+  ],
+  template: [
+    { kind: "command", command: "arm_track", args: { trackId: { slot: "trackId" }, armed: true } },
+    {
+      kind: "if_present",
+      slot: "monitor",
+      then: [
+        {
+          kind: "command",
+          command: "set_input_monitor",
+          args: { trackId: { slot: "trackId" }, mode: { slot: "monitor" } },
+        },
+      ],
+    },
+    { kind: "command", command: "set_transport", args: { action: "record" } },
+  ],
+  precondition: (snapshot, slots) => {
+    const trackId = slots.trackId;
+    if (typeof trackId !== "string")
+      return { ok: false, reason: "record_take: validated trackId is unavailable." };
+    const track = trackFor(snapshot, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
+    // Rolling into record while already recording would land a second take nobody asked
+    // for, and the skill's own postcondition could not tell the two apart.
+    if (snapshot.transport?.recording)
+      return { ok: false, reason: "The transport is already recording; stop it before starting a new take." };
+    return { ok: true };
+  },
+  postcondition: (_before, after, slots) => {
+    const trackId = slots.trackId as string;
+    const track = trackFor(after, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" vanished during the skill.` };
+    if (!after.transport?.recording)
+      return { ok: false, reason: "The transport is not recording after the skill ran." };
+    return { ok: true };
+  },
+};
+
+export const KEEP_LAST_TAKE_SKILL: SkillDefinition = {
+  name: "keep_last_take",
+  description:
+    "Stop recording and keep one take lane on the recorded clip, discarding the rest — the 'that one, bin the others' move.",
+  slots: [
+    {
+      name: "clipId",
+      type: "string",
+      required: true,
+      description: "Stable id of the recorded clip whose current take should be kept.",
+    },
+  ],
+  template: [
+    { kind: "command", command: "stop_recording", args: { discardRecordings: false } },
+    { kind: "command", command: "keep_take", args: { clipId: { slot: "clipId" } } },
+  ],
+  precondition: (snapshot, slots) => {
+    const clipId = slots.clipId;
+    if (typeof clipId !== "string")
+      return { ok: false, reason: "keep_last_take: validated clipId is unavailable." };
+    if (!clipFor(snapshot, clipId))
+      return { ok: false, reason: `Clip "${clipId}" is no longer available.` };
+    return { ok: true };
+  },
+  postcondition: (_before, after, slots) => {
+    const clipId = slots.clipId as string;
+    if (after.transport?.recording)
+      return { ok: false, reason: "The transport is still recording after the skill ran." };
+    if (!clipFor(after, clipId))
+      return { ok: false, reason: `Clip "${clipId}" no longer exists after keeping the take.` };
+    return { ok: true };
+  },
+};
+
+export const ADD_BUILTIN_EFFECT_SKILL: SkillDefinition = {
+  name: "add_builtin_effect",
+  description:
+    "Add a built-in effect at a chosen slot in a track's chain and optionally dial one of its parameters in.",
+  slots: [
+    {
+      name: "trackId",
+      type: "string",
+      required: true,
+      description: "Stable id of the track to add the effect to.",
+    },
+    {
+      name: "type",
+      type: "string",
+      required: true,
+      description: "Built-in effect type, as reported by the builtin list.",
+    },
+    {
+      // Explicit rather than derived, and that is the point: the template language cannot
+      // read back the index `load_builtin` chose, so the only honest way to let
+      // set_plugin_param address the plugin it just added is to place it deliberately.
+      name: "index",
+      type: "number",
+      required: true,
+      description: "Chain position to insert at — the same index the parameter is then set on.",
+      min: 0,
+      max: 63,
+    },
+    {
+      name: "paramIndex",
+      type: "number",
+      required: false,
+      description: "Optional parameter to set on the new effect.",
+      min: 0,
+      max: 511,
+    },
+    {
+      name: "value",
+      type: "number",
+      required: false,
+      description: "Normalised parameter value.",
+      min: 0,
+      max: 1,
+    },
+  ],
+  template: [
+    {
+      kind: "command",
+      command: "load_builtin",
+      args: { trackId: { slot: "trackId" }, type: { slot: "type" }, index: { slot: "index" } },
+    },
+    // NESTED, not flat. `set_plugin_param` reads two optional slots, and the contract
+    // walker requires each one to sit inside an `if_present` naming that slot — a flat
+    // `if_present("paramIndex")` leaves `value` unguarded, so a caller supplying only
+    // paramIndex would emit the command with an unbound arg. The precondition below
+    // rejects that combination too, but a runtime check is not what the static contract
+    // is asking for, and it was right to refuse: the template must be safe on its own.
+    {
+      kind: "if_present",
+      slot: "paramIndex",
+      then: [
+        {
+          kind: "if_present",
+          slot: "value",
+          then: [
+            {
+              kind: "command",
+              command: "set_plugin_param",
+              args: {
+                trackId: { slot: "trackId" },
+                index: { slot: "index" },
+                paramIndex: { slot: "paramIndex" },
+                value: { slot: "value" },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  precondition: (snapshot, slots) => {
+    const trackId = slots.trackId;
+    if (typeof trackId !== "string")
+      return { ok: false, reason: "add_builtin_effect: validated trackId is unavailable." };
+    const track = trackFor(snapshot, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" is no longer available.` };
+    // `value` is only optional in the sense that the whole parameter branch is. Asking
+    // for a parameter without a value would emit set_plugin_param with an unbound arg.
+    if (owns(slots, "paramIndex") && !owns(slots, "value"))
+      return { ok: false, reason: "paramIndex was given without a value; supply both or neither." };
+    if (owns(slots, "value") && !owns(slots, "paramIndex"))
+      return { ok: false, reason: "value was given without a paramIndex; supply both or neither." };
+    const index = slots.index;
+    if (typeof index !== "number" || index > (track.plugins?.length ?? 0))
+      return {
+        ok: false,
+        reason: `Chain position ${String(index)} is past the end of "${trackId}"'s chain (${track.plugins?.length ?? 0} plugins).`,
+      };
+    return { ok: true };
+  },
+  postcondition: (before, after, slots) => {
+    const trackId = slots.trackId as string;
+    const track = trackFor(after, trackId);
+    if (!track) return { ok: false, reason: `Track "${trackId}" vanished during the skill.` };
+    const beforeCount = trackFor(before, trackId)?.plugins?.length ?? 0;
+    const afterCount = track.plugins?.length ?? 0;
+    if (afterCount !== beforeCount + 1)
+      return { ok: false, reason: `Track "${trackId}" went from ${beforeCount} to ${afterCount} plugins; expected one more.` };
+    if (owns(slots, "paramIndex")) {
+      const plugin = track.plugins?.[slots.index as number];
+      const param = plugin?.params?.find((p) => p.index === (slots.paramIndex as number));
+      if (!param || Math.abs(param.value - (slots.value as number)) > 1e-6)
+        return { ok: false, reason: `Parameter ${String(slots.paramIndex)} did not reach ${String(slots.value)}.` };
+    }
+    return { ok: true };
+  },
+};
+
 export const SKILL_CATALOG: readonly SkillDefinition[] = [
   SET_TRACK_LEVEL_SKILL,
   ARRANGE_BEAT_SKILL,
@@ -932,4 +1290,10 @@ export const SKILL_CATALOG: readonly SkillDefinition[] = [
   HOST_PLUGIN_SKILL,
   WARP_LOOP_TO_GRID_SKILL,
   AUTOMATE_PARAMETER_SKILL,
+  // FS-B2
+  PREPARE_DRUM_TRACK_SKILL,
+  SEND_TO_BUS_SKILL,
+  RECORD_TAKE_SKILL,
+  KEEP_LAST_TAKE_SKILL,
+  ADD_BUILTIN_EFFECT_SKILL,
 ];
