@@ -52,8 +52,10 @@ if [ ! -f "$PLIST" ]; then
   exit 1
 fi
 
-# key ; human label. Mirrors cmake/InjectInfoPlistKeys.cmake's three keys exactly —
-# keep this list in sync with that file if it ever grows another key.
+# key ; human label. Mirrors the three UNCONDITIONAL keys in
+# cmake/InjectInfoPlistKeys.cmake — keep this list in sync with that file if it ever
+# grows another always-present key. (Its two Sparkle keys are conditional and are
+# checked separately below, since a build with no updater legitimately has neither.)
 #
 # `plutil -extract <key> raw -o -` is used deliberately over `-extract <key> json`:
 # json format REFUSES to print a bare top-level scalar ("Invalid object in plist for
@@ -84,6 +86,30 @@ while IFS= read -r entry; do
 done <<EOF
 $CHECKS
 EOF
+
+# ── Sparkle (FS-K2) — CONDITIONAL, unlike the keys above ─────────────────────────
+# Sparkle is optional: a build with no feed configured has neither key, which is a
+# perfectly good state (the app simply has no updater). What is NOT a good state is a
+# feed URL with no public key — Sparkle then fetches the appcast, downloads the update,
+# and rejects it as unsigned. To a user that is indistinguishable from "no update
+# available", so it can persist for the entire life of a release without anyone
+# noticing. cmake/InjectInfoPlistKeys.cmake refuses to build that combination; this is
+# the signing-side half of the same guarantee, for the same reason as everything above:
+# nothing in the sign/notarize/staple chain is *supposed* to rewrite Info.plist.
+feed=""
+edkey=""
+feed="$(/usr/bin/plutil -extract SUFeedURL raw -o - "$PLIST" 2>/dev/null)" || feed=""
+edkey="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$PLIST" 2>/dev/null)" || edkey=""
+if [ -n "$feed" ]; then
+  if [ -z "$edkey" ]; then
+    echo "check-plist-keys ($CHECKPOINT): MISSING SUPublicEDKey — but SUFeedURL is set ($feed)." >&2
+    echo "  This bundle would check for updates and then reject every one of them as" >&2
+    echo "  unsigned, silently and forever. Refusing to treat it as shippable." >&2
+    fail=1
+  else
+    echo "check-plist-keys ($CHECKPOINT): OK      SUFeedURL + SUPublicEDKey (Sparkle auto-update)"
+  fi
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "check-plist-keys ($CHECKPOINT): FAILED — $(basename "$APP") is missing a required" >&2

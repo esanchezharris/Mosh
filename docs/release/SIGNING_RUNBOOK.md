@@ -4,12 +4,23 @@ How Mosh gets from a local build to a DMG/zip that a friend can download and ope
 double-clicking — no Gatekeeper "unidentified developer" wall, no right-click-Open, no
 `xattr` dance.
 
-**Status as of this writing:** the pipeline is built and its control flow (credential
-resolution, fail-closed behavior, command construction) is proven with `--dry-run` and
-deliberately-wrong credentials — see the PR that introduced this doc for the transcript.
-**Real signing against Apple's notary service is NOT yet verified** — this machine has
-no Developer ID Application certificate (`security find-identity -v -p codesigning`
-shows only "Apple Development" identities). Step 1 below is the owner's first real gate.
+**Status: LIVE as of 2026-07-27.** The owner's Apple Developer enrollment is active and
+the certificate is installed — `security find-identity -v -p codesigning` shows
+`Developer ID Application: EMILIO SANCHEZ-HARRIS (ZYT77F9B27)` — and the `mosh-notary`
+keychain profile authenticates against Apple's notary service. `sign-and-notarize.sh
+--preflight-only` passes with both live-verified, so steps 1 and 2 below are **done**;
+they are kept as the setup reference for a new machine or a CI runner.
+
+> **Building in a git worktree?** Two traps, both hit on the first real run:
+> 1. Configure the release dir with the dep-cache recipe or `juceaide` fails on a stale
+>    cache — `cmake --preset macos-arm64-release
+>    -DCPM_SOURCE_CACHE=$HOME/Library/Mosh/work/cpm-cache
+>    -DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$HOME/Library/Mosh/work/deps/tracktion_engine-src`.
+>    The presets deliberately do NOT hardcode these (the paths don't exist on CI).
+> 2. `ui/node_modules` must be a REAL directory, not a symlink to the main checkout.
+>    The build runs `npm install`, which deletes the symlink mid-build and then fails
+>    (`npm warn reify Removing non-directory …/ui/node_modules`). Symlinking is fine for
+>    worktrees you only run tests in; a worktree you *build* in needs its own install.
 
 ## How the pieces fit together
 
@@ -103,7 +114,11 @@ This builds a Release app, stages it, bundles the Python service + your `ui/.env
 brain key (if you have one — see the note in §6), signs it (Hardened Runtime +
 `scripts/release/entitlements.plist`), notarizes it, staples the ticket, packages a
 drag-to-Applications DMG, signs/notarizes/staples *that* too, and zips the app for
-AirDrop. Output lands in `~/Desktop/Mosh-share/` (override with `MOSH_RELEASE_DIR`).
+AirDrop. Output lands in `~/Library/Mosh/release/` (override with `MOSH_RELEASE_DIR`).
+The default is deliberately NOT the Desktop: with iCloud "Desktop & Documents" syncing on,
+the file provider stamps `com.apple.FinderInfo` on the bundle and codesign then refuses it
+("resource fork, Finder information, or similar detritus not allowed") — the release verb
+fails fast on a cloud-synced destination rather than dying 10 minutes later at signing.
 
 The whole thing typically takes several minutes, most of it waiting on Apple's notary
 service (`--wait` blocks 1–5 minutes per submission, and there are two submissions —
@@ -280,15 +295,83 @@ the signing scripts, without touching what the public sees.
   end-to-end, and the CI workflow only builds the default (non-anira) target. A future
   `release-anira` verb / workflow variant is the natural next step if that build ever
   needs to ship notarized.
-- **Auto-update (Sparkle / an appcast feed) is NOT built.** This pipeline stops at "a
-  notarized, stapled DMG + zip exist as GitHub Release assets." The natural hook point
-  for a future Sparkle integration is **right after** the "Create GitHub Release" step
-  in `.github/workflows/release.yml`: generate/sign an `appcast.xml` entry pointing at
-  the just-uploaded (notarized) DMG/zip URLs and either commit it to a
-  `gh-pages`-style branch or upload it as a release asset alongside the DMG. Sparkle
-  needs its own EdDSA signing key (separate from the Developer ID cert used here) and
-  an `SUFeedURL` baked into the app's `Info.plist` at build time — neither exists yet.
-  Do not build this speculatively; wire it up when auto-update is actually prioritized.
+- **Publishing the appcast.** Auto-update itself IS built now (§8), but nothing in this
+  repo uploads `appcast.xml` + the update zip anywhere — the host is a deliberate gap,
+  not an oversight. See §8's "the one thing still owner-gated".
+
+## 8. Auto-update (Sparkle 2) — FS-K2
+
+The app embeds **Sparkle 2.9.4** and the release verb can generate a signed appcast.
+Both halves are off unless configured, and they are configured independently:
+
+| What | Where it comes from | Default |
+|---|---|---|
+| Sparkle in the bundle | `-DMOSH_ENABLE_SPARKLE` (CMake) | **ON** (macOS) |
+| The feed the app checks | `-DMOSH_SPARKLE_FEED_URL` → `Info.plist` `SUFeedURL` | **empty → no updater at all** |
+| The key updates are verified against | `-DMOSH_SPARKLE_PUBLIC_KEY` → `SUPublicEDKey` | the project key (below) |
+| Generating an appcast at release time | `MOSH_SPARKLE_DOWNLOAD_PREFIX` (env) | unset → skipped, loudly |
+
+With no feed URL, the app carries Sparkle but never checks anything and the
+**Check for Updates…** item is not added to the application menu — an item that can
+never find an update is worse than no item.
+
+### The keys
+
+Generated 2026-07-27 with Sparkle's `generate_keys`. The **private** key lives only in
+the owner's login Keychain (Keychain Access → "Private key for signing Sparkle
+updates"). It is not in the repo, not in CI, and **not recoverable if that Keychain is
+lost** — losing it means every existing install is permanently unable to update, and the
+only fix is shipping a new build with a new key by some other channel. Back it up:
+
+```bash
+# reveals the private key — treat like a signing cert, store it in a password manager
+scripts/release/sparkle-tools.sh --print-bin   # then: <bin>/generate_keys -x /path/to/backup
+```
+
+The **public** key is `95F1BbVbpmGsAzS9Cr3Brzwl6/gAncabM6NhnZM1b1g=`, baked into
+`cmake/Sparkle.cmake` as the default. Public by construction — it belongs in the repo
+and in every shipped `Info.plist`; that is what pins updates to this project's key.
+
+### Cutting an update
+
+```bash
+cmake --preset macos-arm64-release -DMOSH_VERSION=0.0.2 \
+      -DMOSH_SPARKLE_FEED_URL=https://<host>/appcast.xml
+MOSH_SPARKLE_DOWNLOAD_PREFIX=https://<host>/ ./run-mosh.sh release
+```
+
+That produces `$MOSH_RELEASE_DIR/updates/` containing `appcast.xml` and
+`Mosh-0.0.2.zip`; upload both to `<host>`. The zip is made from the app **after**
+signing, notarizing *and* stapling — order matters: an update zipped before stapling
+installs an app that must reach Apple on first launch and fails Gatekeeper offline.
+
+Sparkle compares `CFBundleVersion`, which comes from `MOSH_VERSION`. An update whose
+version is not strictly greater is simply never offered.
+
+### Signing the framework
+
+Sparkle's binary release is **ad-hoc signed** (`TeamIdentifier=not set`), so
+`sign-and-notarize.sh` re-signs the whole framework tree with our Developer ID:
+`XPCServices/*.xpc`, `Updater.app`, the loose `Autoupdate` helper, then the framework.
+This is not optional politeness — Sparkle refuses to launch an installer whose team ID
+does not match the host app's, and notarization rejects the bundle outright.
+
+`Autoupdate` is the one that bites: it is not a dylib, not a bundle, and not under
+`Contents/MacOS`, so it falls through every "obvious" signing loop. Verify it directly
+after any change to that script:
+
+```bash
+codesign -dv "Mosh.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate" 2>&1 | grep TeamIdentifier
+```
+
+### The one thing still owner-gated
+
+**Where the appcast is hosted.** `zeke431/Mosh` is private, so GitHub Pages needs a paid
+plan and release-asset URLs need auth Sparkle cannot present; R2 is owner task O4. And
+a public feed means publishing signed builds publicly, which this build is not ready for
+(it seals provider keys into the bundle by standing decision — CLAUDE.md § Standing
+policy). Pick a host, then it is two flags. Everything downstream of that choice is
+built and proven — see `docs/first-stranger-program/lanes/fs-k2.md`.
 
 ## Quick reference
 

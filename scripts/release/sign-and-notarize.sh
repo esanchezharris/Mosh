@@ -299,9 +299,14 @@ preflight() {
 # first, each WITHOUT entitlements (Apple: entitlements only apply to the main
 # executable), then the outer bundle last, WITH entitlements. Apple discourages
 # `codesign --deep` for distribution signing (it can silently skip or mis-sign nested
-# code); explicit inside-out beats it. In Mosh's default build there is no nested
-# Mach-O (JUCE links statically) — this loop is what covers the anira build's bundled
-# LibTorch/libanira dylibs if that variant is ever routed through this script.
+# code); explicit inside-out beats it.
+#
+# The default build DOES have nested code as of FS-K2: Sparkle.framework, which is
+# itself a small tree (a framework containing a helper .app, three .xpc services and a
+# loose Mach-O installer). It ships ad-hoc signed by the Sparkle project, so every
+# piece must be re-signed with our identity or notarization fails and Sparkle's own
+# team-ID check refuses to run the installer. These loops also cover the anira build's
+# bundled LibTorch/libanira dylibs if that variant is ever routed through this script.
 sign_app_bundle() {                                # $1 = app path
   local DEST="$1" f
   run xattr -cr "$DEST" || true
@@ -310,9 +315,44 @@ sign_app_bundle() {                                # $1 = app path
     run codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$f"
   done < <(find "$DEST/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null)
 
+  # Loose Mach-O helper executables living INSIDE a framework — e.g. Sparkle's
+  # Versions/B/Autoupdate, the process that actually installs the update after the app
+  # quits. Nothing else in this function reaches it: it is not a dylib, not under
+  # Contents/MacOS or Contents/Helpers, and signing the enclosing framework bundle does
+  # NOT re-sign it. Left alone it keeps Sparkle's ad-hoc signature, and the notarized
+  # app then refuses to launch its own installer (Sparkle requires the helper's team ID
+  # to match the host app's unless the app is ad-hoc signed). Anything inside a nested
+  # .app/.xpc is excluded here — those are sealed as bundles just below, and re-signing
+  # a bundle's inner binary afterwards would break its seal.
+  #
+  # The exclusions are anchored AFTER '.framework/Versions/' on purpose. find's -path
+  # glob lets '*' match '/', so a bare `! -path '*.app/*'` excludes literally everything
+  # under Mosh.app — it matched the OUTER bundle's own name and this loop silently
+  # signed nothing. Caught only by reading TeamIdentifier off Autoupdate afterwards; the
+  # run looked identical either way.
+  while IFS= read -r f; do
+    if file "$f" 2>/dev/null | grep -q 'Mach-O'; then
+      run codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$f"
+    fi
+  done < <(find "$DEST/Contents" -path '*.framework/Versions/*' -type f \
+                ! -path '*.framework/Versions/*/*.app/*' \
+                ! -path '*.framework/Versions/*/*.xpc/*' 2>/dev/null)
+
+  # Nested bundles, deepest-first: XPC services (Sparkle's Installer{Launcher,Status,
+  # Connection}.xpc) then helper .app bundles (Sparkle's Updater.app, which draws the
+  # update UI). -depth so an inner bundle is sealed before whatever contains it.
   while IFS= read -r f; do
     run codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$f"
-  done < <(find "$DEST/Contents" -type d -name '*.framework' 2>/dev/null)
+  done < <(find "$DEST/Contents" -type d -name '*.xpc' -depth 2>/dev/null)
+
+  # (The search root is $DEST/Contents, so the outer bundle can never turn up here.)
+  while IFS= read -r f; do
+    run codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$f"
+  done < <(find "$DEST/Contents" -type d -name '*.app' -depth 2>/dev/null)
+
+  while IFS= read -r f; do
+    run codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$f"
+  done < <(find "$DEST/Contents" -type d -name '*.framework' -depth 2>/dev/null)
 
   # Nested Mach-O executables (helper tools), if any ever appear. The main app
   # executable is sealed by the whole-bundle sign below, not here.
@@ -398,7 +438,15 @@ final_verify() {                                   # $1 = app or flat-file path
   if [[ "$TGT" == *.app ]]; then
     spctl -a -t exec -vvv "$TGT" 2>&1 | sed 's/^/  gatekeeper: /'
   else
-    spctl -a -t open -vvv "$TGT" 2>&1 | sed 's/^/  gatekeeper: /'
+    # A disk image/archive needs BOTH `-t open` and an explicit context. Without
+    # `--context context:primary-signature` spctl has no rule to apply and answers
+    #     <path>: rejected
+    #     source=Insufficient Context
+    # on a perfectly good, notarized, stapled DMG — which reads as a FAILED release
+    # (observed on the first real run, 2026-07-27, where the same DMG assessed
+    # `accepted / source=Notarized Developer ID` the moment the context was supplied).
+    # An assessment that cries wolf on success is worse than no assessment.
+    spctl -a -t open --context context:primary-signature -vvv "$TGT" 2>&1 | sed 's/^/  gatekeeper: /'
   fi
 }
 
@@ -422,6 +470,35 @@ esac
 if [ "$IS_APP" -eq 1 ]; then
   [ -f "$TARGET/Contents/Info.plist" ] || fail "not a valid app bundle (no Contents/Info.plist): $TARGET"
   [ -f "$ENTITLEMENTS" ] || fail "entitlements file not found: $ENTITLEMENTS"
+
+  # Normalize the entitlements before codesign sees them.
+  #
+  # codesign parses this file with AMFI's XML reader, which — unlike plutil, and unlike
+  # every other plist consumer on the system — does NOT accept XML comments. Our
+  # entitlements.plist is heavily commented on purpose (every key is load-bearing and
+  # every omission is a documented decision), so handing it over raw fails with:
+  #     Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 17
+  # ...where line 17 is inside the first comment block. `plutil -lint` reports OK, which
+  # is why this survived review: the file IS valid XML, AMFI is just stricter.
+  #
+  # This went unnoticed until the first REAL signing run (2026-07-27) because --dry-run
+  # echoes the codesign command instead of executing it — the entitlements were never
+  # actually parsed. Worth remembering when reading this script's dry-run claims: it
+  # proves command CONSTRUCTION, not that the arguments are acceptable to the tools.
+  #
+  # So: keep the documented file as the source of truth, and give codesign a
+  # comment-free copy. -convert xml1 preserves the key/value content exactly.
+  ENTITLEMENTS_SRC="$ENTITLEMENTS"
+  ENTITLEMENTS_NORM="$(mktemp -t mosh-entitlements).plist"
+  if plutil -convert xml1 -o "$ENTITLEMENTS_NORM" "$ENTITLEMENTS_SRC" 2>/dev/null; then
+    ENTITLEMENTS="$ENTITLEMENTS_NORM"
+    trap 'rm -f "$ENTITLEMENTS_NORM"' EXIT
+    log "entitlements: normalized (comments stripped for AMFI) from $ENTITLEMENTS_SRC"
+  else
+    rm -f "$ENTITLEMENTS_NORM"
+    fail "entitlements file is not a readable plist: $ENTITLEMENTS_SRC (plutil -convert failed)"
+  fi
+
   log "plist check (pre-sign):"
   check_plist "$TARGET" "pre-sign" || fail "refusing to sign a bundle that's already missing required Info.plist keys — fix the build, not this script"
 fi
