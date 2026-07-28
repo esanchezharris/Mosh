@@ -745,3 +745,15 @@ numbers and hashes only.
   LoRA training on the 4-bit base in flight (mask-prompt, seq 1024, seed
   pinned, adapters served via the new LocalConfig.adapter seam — keyed
   conditionally, loud-fail on a missing dir, never fused per r5).
+- **2026-07-28 — Promo/I4 adversarial review (19 agents): 3 confirmed, all
+  remediated + RED-proved (`29f51904`).** (1) `arm_config()` silently carried
+  `adapter:""` into every local-arm RESULT-cache key — the layer the first fix
+  missed; conditional at both layers now, MOSH_INFILL_CACHE_ONLY replays of
+  pre-adapter runs restored. (2) The palette env fold re-keyed/mis-labelled
+  every arm; now scoped to product-llm via a unit-pinned helper (the inline
+  version had NO observing test — the vacuous sabotage is what exposed it).
+  (3) Leakage guard v2: punctuation is a boundary, not a deletion —
+  `grind-house` no longer smuggles a truth past the check. Measured against
+  the v1 training set: the stronger guard refuses **48/7,431 (0.65%)** — the
+  in-flight LoRA's smoke read stands; v2 data (MINT_VERSION v2) is the
+  dataset of record for the final train.
