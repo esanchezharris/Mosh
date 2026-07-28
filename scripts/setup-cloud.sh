@@ -27,6 +27,43 @@ CHECK_ONLY=0
 say() { printf '%s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# --set-token: paste a token at a HIDDEN prompt; it goes keyboard → file and is never
+# echoed, never in shell history, never in a transcript. Exists because ui/.env.local is
+# a dotfile and therefore invisible in Finder — "I can't see .env" is a real problem and
+# hunting for the file is not the answer.
+#
+#   scripts/setup-cloud.sh --set-token SUPABASE_ACCESS_TOKEN
+#   scripts/setup-cloud.sh --set-token CLOUDFLARE_API_TOKEN
+#   scripts/setup-cloud.sh --edit           # or just open the file in TextEdit
+if [ "${1:-}" = "--set-token" ]; then
+  KEY="${2:-}"
+  case "$KEY" in
+    SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|OPENAI_API_KEY|XAI_API_KEY) ;;
+    *) echo "usage: $0 --set-token {SUPABASE_ACCESS_TOKEN|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID}" >&2; exit 2 ;;
+  esac
+  printf 'Paste %s (input hidden), then Enter: ' "$KEY" >&2
+  IFS= read -rs VALUE; echo >&2
+  [ -n "$VALUE" ] || { echo "empty — nothing written." >&2; exit 1; }
+  touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
+  # Replace an existing line rather than appending a duplicate the shell would re-read.
+  if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
+    TMP="$(mktemp)"; grep -v "^${KEY}=" "$ENV_FILE" > "$TMP"; mv "$TMP" "$ENV_FILE"; chmod 600 "$ENV_FILE"
+    echo "  (replaced the existing $KEY)" >&2
+  fi
+  printf '%s=%s\n' "$KEY" "$VALUE" >> "$ENV_FILE"
+  unset VALUE
+  echo "  wrote $KEY to ${ENV_FILE/#$HOME/\~} — value not displayed." >&2
+  echo "  now run: scripts/setup-cloud.sh" >&2
+  exit 0
+fi
+
+if [ "${1:-}" = "--edit" ]; then
+  touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
+  say "opening ${ENV_FILE/#$HOME/\~} — it is a dotfile, so Finder hides it by default."
+  say "(In any Finder window, Cmd-Shift-. toggles hidden files.)"
+  exec open -e "$ENV_FILE"
+fi
+
 if [ -f "$ENV_FILE" ]; then
   set -a; . "$ENV_FILE"; set +a
 else
