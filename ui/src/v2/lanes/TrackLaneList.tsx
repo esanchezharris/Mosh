@@ -21,7 +21,7 @@ import { Playhead } from "../timeline/Playhead";
 import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
-import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
+import { IconDrum, IconKeys, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 import { EditorAction as EA, type Mods } from "../../interaction/actions";
 import { resolveGesture } from "../../interaction/gestures";
 import { getGestureTable } from "../../interaction/gestureTables";
@@ -371,8 +371,8 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
                   <span className="v2-licon" aria-hidden="true">
                     {/* "tone" is not a track type — it makes an AUDIO track with a tone on
                         it — so it borrows the waveform icon rather than falling through to
-                        TrackTypeIcon's unknown-type default. */}
-                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
+                        TrackTypeIcon's unknown-type default. "midi" creates an instrument track. */}
+                    <TrackTypeIcon type={kind === "tone" ? "audio" : kind === "midi" ? "audio" : kind} isInstrument={kind === "midi"} />
                   </span>
                   <span className="v2-menu-text">
                     <span className="v2-menu-label">{label}</span>
@@ -432,7 +432,7 @@ function TrackLaneHeader({ track }: { track: Track }) {
       data-testid="v2-track-header"
       data-track-id={track.id}
     >
-      <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
+      <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} isInstrument={track.isInstrument} /></span>
       <span className="v2-lmeta">
         <span className="v2-lrow">
           <span className="v2-lname" title={track.name}>{track.name}</span>
@@ -500,8 +500,20 @@ export function TrackMeterBar({ trackId }: { trackId: string }) {
   );
 }
 
-function TrackTypeIcon({ type }: { type: string }) {
-  if (type === "drum") return <IconDrum size={16} />;
-  if (type === "audio") return <IconWaveform size={16} />;
+/** Which glyph a track gets. Pure + exported so the choice is unit-testable — the
+ *  interesting case is that an INSTRUMENT track has type "audio" (there is no native
+ *  "midi" track type), so type alone cannot tell it from a plain audio track. */
+export function pickTrackIcon(type: string, isInstrument?: boolean): "drum" | "keys" | "waveform" | "layers" {
+  if (type === "drum") return "drum";      // a drum track hosts a sampler; it is still drums
+  if (isInstrument) return "keys";
+  if (type === "audio") return "waveform";
+  return "layers";
+}
+
+function TrackTypeIcon({ type, isInstrument }: { type: string; isInstrument?: boolean }) {
+  const which = pickTrackIcon(type, isInstrument);
+  if (which === "drum") return <IconDrum size={16} />;
+  if (which === "keys") return <IconKeys size={16} />;
+  if (which === "waveform") return <IconWaveform size={16} />;
   return <IconLayers size={16} />;
 }

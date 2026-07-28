@@ -100,6 +100,15 @@ export function IconDrum(p: IconProps) {
   );
 }
 
+export function IconKeys(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="6" width="18" height="12" rx="1.6" />
+      <path d="M8 6v7M12 6v7M16 6v7" />
+    </Svg>
+  );
+}
+
 export function IconLayers(p: IconProps) {
   return (
     <Svg {...p}>
