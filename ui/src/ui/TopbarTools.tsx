@@ -5,6 +5,7 @@
 // companion is real-backend only (the mock reports it unavailable).
 
 import { Fragment, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as QRCode from "qrcode";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
@@ -19,6 +20,7 @@ import { MultiplayerPanel } from "./MultiplayerPanel";
 import { ExportControls } from "./ExportControls";
 import { deriveTrainingJob } from "./trainingJobView";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { isInModalLayer } from "../hooks/modalLayer";
 import { copyText } from "../clipboard";
 import type { MemoryRecord } from "../agent/memory/retrieveContext";
 import {
@@ -67,7 +69,13 @@ function Pop({
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    // isInModalLayer: a ConfirmDialog opened from inside this popover is portaled to
+    // document.body, so it is not a DOM descendant and a click in it would otherwise
+    // read as "outside" and close the popover out from under its own dialog.
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current && !ref.current.contains(t) && !isInModalLayer(t)) setOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
@@ -638,7 +646,13 @@ function MemoryBody({ editFile }: { editFile: string }) {
         </div>
         <div className="pop-note">Folder hidden by default — in Finder press ⌘⇧G (Go to Folder) and paste it.</div>
       </div>
-      {pendingTier && (
+      {/* Portaled to <body> (same precedent as TrackLaneList's delete-track confirm).
+          `.v2-menu-panel` carries `backdrop-filter`, which makes it the containing block
+          for `position: fixed` descendants — so rendered in place, `.modal-backdrop`'s
+          `inset: 0` resolved to the 248px panel instead of the viewport, and this 374px
+          dialog overflowed it. It was only ever reachable because the shell happened to
+          be scrolled right; measured at a 1280px viewport, "Cancel" sat at x=1304. */}
+      {pendingTier && createPortal(
         <ConfirmDialog
           title={`Clear ${pendingTier.label}?`}
           body="This removes everything Moshi has stored here, including anything you explicitly asked it to remember. This can't be undone."
@@ -647,7 +661,8 @@ function MemoryBody({ editFile }: { editFile: string }) {
           onConfirm={() => void clearTier(pendingTier)}
           onCancel={() => setPendingClear(null)}
           testId="memory-clear-confirm"
-        />
+        />,
+        document.body,
       )}
     </>
   );

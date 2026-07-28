@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { isInModalLayer } from "./modalLayer";
 import { placeAnchoredPanel, type Placement } from "../v2/anchorPanel";
 
 // Open/close + viewport-clamped placement for a panel anchored to a trigger button.
@@ -69,6 +70,7 @@ export function useAnchoredPanel(
       if (!t) return;
       if (panelRef.current?.contains(t)) return;
       if (anchorRef.current?.contains(t)) return; // let the trigger's own onClick toggle
+      if (isInModalLayer(t)) return; // a modal opened FROM this panel is portaled out of it
       setOpen(false);
     };
     const onDismiss = (e: Event) => {
