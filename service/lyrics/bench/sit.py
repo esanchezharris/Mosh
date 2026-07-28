@@ -49,6 +49,16 @@ def sheet_path(out_dir: str, rater: str = "owner") -> str:
     return os.path.join(out_dir, f"sheet-{rater}.txt")
 
 
+def norming_closed(out_dir: str) -> bool:
+    """True once the owner has DECLARED the norming sitting complete (a `CLOSED`
+    marker beside the packet). The accept-pass lock exists to keep answers that
+    are still going to be written blind; once the sitting is closed there are no
+    such answers left to protect, and holding the queue would just strand it.
+    Explicit marker, never inferred — a low answer count is a paused sitting,
+    not a finished one."""
+    return os.path.exists(os.path.join(out_dir, "CLOSED"))
+
+
 def read_sheet(path: str) -> Dict[int, List[str]]:
     if not os.path.exists(path):
         return {}
@@ -119,11 +129,13 @@ def accept_queue(rows: List[dict], items_by_id: Dict[str, dict],
 
 def build_state(packet_dir: str, sheet: Dict[int, List[str]],
                 run_rows: List[dict], items_by_id: Dict[str, dict],
-                sets: Dict[str, Dict[str, set]], *, run_name: str = "") -> Dict:
+                sets: Dict[str, Dict[str, set]], *, run_name: str = "",
+                closed: bool = False) -> Dict:
     packet = load_packet(packet_dir)
     answered = {int(n) for n in sheet}
     no_to_id = {p["no"]: p["itemId"] for p in packet}
-    norming_ids = set(no_to_id.values())
+    # A closed sitting has no blind answers left to protect — the lock lifts.
+    norming_ids = set() if closed else set(no_to_id.values())
     answered_ids = {no_to_id[n] for n in answered if n in no_to_id}
     aq = accept_queue(run_rows, items_by_id, sets,
                       norming_ids=norming_ids, answered_ids=answered_ids)
@@ -246,10 +258,12 @@ function home(){mode=null;
  document.getElementById('home').style.display='block';
  const n=S.norming, a=S.accept;
  const mN=document.getElementById('mN');
- mN.innerHTML = n.answered>=n.total
-   ? '<span class=done>done — '+n.total+' / '+n.total+'</span>'
-   : n.answered+' of '+n.total+' answered · ~'+Math.ceil((n.total-n.answered)*11/60)+' min left';
- document.getElementById('bN').style.width=pct(n.answered,n.total);
+ mN.innerHTML = n.closed
+   ? '<span class=done>closed — scored at '+n.answered+' answered (declared complete)</span>'
+   : (n.answered>=n.total
+      ? '<span class=done>done — '+n.total+' / '+n.total+'</span>'
+      : n.answered+' of '+n.total+' answered · ~'+Math.ceil((n.total-n.answered)*11/60)+' min left');
+ document.getElementById('bN').style.width=n.closed?'100%':pct(n.answered,n.total);
  const mA=document.getElementById('mA');
  const held = a.excludedUntilNormed
    ? '<div class=note>'+a.excludedUntilNormed+' item(s) held back until you '
@@ -360,7 +374,11 @@ def make_server(packet_dir: str, run_dir: str, *, slice_: str = "dev",
 
     def state() -> bytes:
         s = build_state(packet_dir, read_sheet(spath), rows, items_by_id,
-                        accept_set.load(slice_), run_name=run_name)
+                        accept_set.load(slice_), run_name=run_name,
+                        closed=norming_closed(
+                            os.path.dirname(os.path.abspath(packet_dir))))
+        s["norming"]["closed"] = norming_closed(
+            os.path.dirname(os.path.abspath(packet_dir)))
         return json.dumps(s, ensure_ascii=False).encode("utf-8")
 
     page = PAGE.encode("utf-8")

@@ -192,6 +192,28 @@ r = post("/api/accept", {"itemId": "t:queue:3", "word": "grow", "verdict": "mayb
 check("POST /api/accept: an invalid verdict is refused, never recorded",
       not r.get("ok"))
 
+# ── the CLOSED marker lifts the sequencing lock (and ONLY the marker does) ──────
+# Un-answer item 1 so the overlap item goes back behind the lock…
+post("/api/norming", {"no": 1, "guesses": []})
+state4 = json.loads(get("/api/state"))
+check("lock re-engages when an answer is withdrawn (marker absent)",
+      state4["accept"]["excludedUntilNormed"] == 1
+      and not state4["norming"]["closed"],
+      str(state4["accept"]["excludedUntilNormed"]))
+# …then declare the sitting closed.
+_marker = os.path.join(_TMP, "norming", "CLOSED")
+with open(_marker, "w", encoding="utf-8") as f:
+    f.write("declared complete in test\n")
+state5 = json.loads(get("/api/state"))
+check("CLOSED marker: lock lifts, blind item enters the accept queue",
+      state5["norming"]["closed"]
+      and state5["accept"]["excludedUntilNormed"] == 0
+      and "t:overlap:1" in [q["itemId"] for q in state5["accept"]["queue"]],
+      str(state5["accept"]))
+check("BLINDNESS survives the closed state (answers still never on the wire)",
+      TRUTH not in json.dumps(state5))
+os.remove(_marker)
+
 srv.shutdown()
 srv.server_close()
 
