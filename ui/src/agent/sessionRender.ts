@@ -29,7 +29,18 @@ export function renderSession(s: Snapshot): string {
     lines.push(`tempo map (by index): ${map.map((p, i) => `[${i}] ${p.bpm}bpm@${p.time}s${(p.curve ?? 1) === 1 || (p.curve ?? 1) === -1 ? "" : " ramp"}`).join(", ")}`);
   if (ses?.key) lines.push(`key: ${ses.key.tonic} ${ses.key.mode}`);
   const m = s.master;
-  const chain = (m?.plugins ?? []).map((p) => (p as { name?: string }).name ?? "?").join(", ");
+  // Builtins render by their `type` id — the exact string load_master_builtin /
+  // load_builtin take — NOT their display name. The engine's builtin table
+  // (MoshOps.cpp kBuiltins) deliberately differs between the two: type
+  // "compressor" vs name "Compressor", type "4bandEq" vs name "4-Band EQ". A
+  // chain rendered as `[Compressor]` teaches a model to emit type "Compressor",
+  // which the engine rejects with `unknown builtin: Compressor`.
+  // Externals keep their NAME: an external's `type` is getPluginType(), a format
+  // label ("vst"), so rendering it would make every real plugin indistinguishable.
+  const chain = (m?.plugins ?? []).map((p) => {
+    const q = p as { name?: string; type?: string; builtin?: boolean };
+    return q.builtin && q.type ? q.type : q.name ?? "?";
+  }).join(", ");
   lines.push(`master: ${db(m?.volumeDb)} pan ${m?.pan ?? 0} chain:[${chain || "empty"}]`);
   const buses = s.buses ?? [];
   if (buses.length) lines.push(`buses: ${buses.map((b) => `${b.bus} "${b.name}"`).join(", ")}`);

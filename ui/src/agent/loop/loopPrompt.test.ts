@@ -18,7 +18,10 @@ const SNAP: Snapshot = {
       clips: [{ id: "101", name: "beat", type: "midi", start: 0, length: 4, offset: 0, hasRenderLayer: false }] },
   ],
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
-  master: { volumeDb: -3, pan: 0, plugins: [{ index: 0, name: "Compressor", enabled: true }] },
+  // a real snapshot's master plugins always carry `type` + `builtin` (MoshOps
+  // pluginToVar) — the chain renders the TYPE for builtins, since that is the
+  // string load_master_builtin takes. See sessionRender.test.ts.
+  master: { volumeDb: -3, pan: 0, plugins: [{ index: 0, name: "Compressor", type: "compressor", builtin: true, enabled: true }] },
   buses: [{ bus: 1, name: "Reverb", trackId: "9" }],
 } as unknown as Snapshot;
 
@@ -26,7 +29,7 @@ describe("renderSession — the Phase-A visibility fix", () => {
   const block = renderSession(SNAP);
 
   it("shows the master fader (the −3dB default nobody could see), pan and chain", () => {
-    expect(block).toContain("master: -3dB pan 0 chain:[Compressor]");
+    expect(block).toContain("master: -3dB pan 0 chain:[compressor]");
   });
 
   it("shows the tempo map WITH the indices remove_tempo_change takes", () => {
