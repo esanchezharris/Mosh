@@ -410,35 +410,32 @@
 .v2-btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
 .v2-btn.icon { padding: 8px 10px; }
 
-/* reused classic tool popovers (training/log/remote/help/multiplayer) — subtle ghost
-   icons in the v2 topbar so every feature keeps a home without loud chrome. */
-.v2-tools { display: flex; align-items: center; gap: 1px; }
-.v2-shell .v2-tools .btn {
-  background: transparent; border: 1px solid transparent; color: var(--v2-dim);
-  border-radius: 9px; padding: 6px 8px; font-size: var(--v2-fs-base); line-height: 1; cursor: pointer;
-}
-.v2-shell .v2-tools .btn:hover, .v2-shell .v2-tools .btn.on { color: var(--v2-text); background: var(--v2-surface-sunken); border-color: var(--v2-line); }
-
 /* topbar chrome floats on the cream ground — light pills + ground-toned ghost icons */
 .v2-topbar .v2-btn { background: var(--v2-ground-card); border-color: var(--v2-ground-line); color: var(--v2-ground-text); }
 .v2-topbar .v2-btn:hover { border-color: var(--v2-ground-line-strong); }
 .v2-invite-btn { font-weight: 700; }
 .v2-invite-btn svg { flex: 0 0 auto; }
-.v2-topbar .v2-tools .btn { color: var(--v2-ground-dim); padding: 7px 8px; }
-.v2-topbar .v2-tools .btn:hover, .v2-topbar .v2-tools .btn.on { color: var(--v2-ground-text); background: var(--v2-ground-card); border-color: var(--v2-ground-line); }
-/* the reused classic tool popovers carry wide text labels ("Multiplayer", "iPhone",
-   "LoRA") that would blow out the topbar grid — compact them to single glyphs in v2
-   only (scoped to .v2-topbar, so the classic cluster keeps its labels). */
-.v2-topbar .v2-tools .mp-pop > .btn,
-.v2-topbar .v2-tools .training-pop > .btn,
-.v2-topbar .v2-tools .remote-pop > .btn { font-size: 0; }
-.v2-topbar .v2-tools .mp-pop > .btn::after { content: "👥"; font-size: var(--v2-fs-base); }
-.v2-topbar .v2-tools .training-pop > .btn::after { content: "✦"; font-size: 14px; }
-.v2-topbar .v2-tools .remote-pop > .btn::after { content: "📱"; font-size: var(--v2-fs-base); }
-/* classic sizes the training popover by putting width on the WRAP (.training-pop) — in
-   v2's flex topbar that stretches the cluster, so reset the wrap and size the popover. */
-.v2-topbar .v2-tools .training-pop { width: auto; max-height: none; overflow: visible; }
-.v2-topbar .v2-tools .training-pop .pop { width: min(94vw, 380px); max-height: min(80vh, 620px); overflow: auto; }
+
+/* Classic sizes the training popover by putting width on the WRAP (.training-pop,
+   mosh.css) — right for classic's flex topbar, wrong everywhere else. v2's reset for it
+   used to live here scoped to `.v2-topbar .v2-tools`, alongside a `.v2-tools` ghost-icon
+   block and glyph ::after overrides. When the tools moved out of the topbar cluster and
+   into the overflow menu, `.v2-tools` stopped being rendered — nothing carries the class
+   in any .tsx (`v2-shell.spec.ts` asserts count 0) — so that whole scope went dead and
+   took this reset with it, silently.
+
+   Unreset, `.training-pop`'s `width: min(94vw, 380px)` landed on a cell of
+   `.v2-menu-tools`'s repeat(5, minmax(0,1fr)) grid inside a 248px panel, and
+   `.v2-menu-tools .btn { width: 100% }` stretched the BUTTON to match: a 380px
+   transparent slab lying across the ~40px tool row — overlapping its neighbours' hover
+   targets and running ~171px past the right edge of a 1280px viewport. Its `overflow:
+   auto` also clipped its own `.pop` (absolute, containing block = the wrap) out of
+   existence, turning a popover into a scrollbar.
+
+   Re-scoped onto `.v2-overflow-tool`, the class TopBar.tsx actually puts on each wrap.
+   Compound (not descendant) so it beats mosh.css on specificity wherever a wrap sits. */
+.v2-overflow-tool.training-pop { width: auto; max-height: none; overflow: visible; }
+.v2-overflow-tool.training-pop .pop { width: min(94vw, 380px); max-height: min(80vh, 620px); overflow: auto; }
 
 /* collaborator avatar cluster — overlapped initials circles, tinted by peer color */
 .v2-avatars { display: flex; align-items: center; }
@@ -459,6 +456,10 @@
   right: 0;
   z-index: 60;
   min-width: 248px;
+  /* Belt to the min-width's braces: whatever a panel's content asks for, never let it
+     exceed the viewport. `min-width` alone wins over `max-width` when they conflict, so
+     this only bites content wider than 248px — which is the case it exists for. */
+  max-width: calc(100vw - 16px);
   padding: 8px;
   background: var(--v2-surface-2);
   border: 1px solid var(--v2-line-strong);

@@ -284,3 +284,66 @@ test.describe("L7 · viewport floor", () => {
     expect(m.canScrollX).toBe(true);   // …because the shell keeps a floor and scrolls
   });
 });
+
+test.describe("L8 · overflow-menu containment", () => {
+  // The tools moved out of the topbar cluster into the overflow menu, but v2's reset for
+  // mosh.css's `.training-pop { width: min(94vw, 380px); overflow: auto }` — which sizes
+  // the WRAP, right for classic's flex topbar — kept the now-unrendered `.v2-tools`
+  // scope and went dead. Result: a 380px trigger in a 40px grid cell inside a 248px
+  // panel, overlapping its neighbours' hover targets and running off the right edge of
+  // the screen, plus a popover clipped out of existence by the wrap's own overflow.
+  //
+  // The pre-existing specs missed it because `toBeVisible()` only needs a non-empty box,
+  // which a clipped, overflowing element still has. So assert GEOMETRY, not visibility.
+  test("every overflow tool fits inside the panel, and the panel inside the viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    const panel = await page.locator(".v2-menu-panel").boundingBox();
+    if (!panel) throw new Error("missing panel bounds");
+    expect(panel.x).toBeGreaterThanOrEqual(0);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(1280 + 1);
+
+    const tools = page.locator(".v2-menu-tools > *");
+    const n = await tools.count();
+    expect(n).toBeGreaterThanOrEqual(6); // guard: an empty set would pass the loop vacuously
+    for (let i = 0; i < n; i++) {
+      const cls = await tools.nth(i).getAttribute("class");
+      const box = await tools.nth(i).boundingBox();
+      if (!box) throw new Error(`missing bounds for tool ${i}`);
+      expect(box.width, `tool ${i} (${cls}) is wider than the panel`).toBeLessThanOrEqual(panel.width);
+      expect(box.x + box.width, `tool ${i} (${cls}) overflows the panel's right edge`)
+        .toBeLessThanOrEqual(panel.x + panel.width + 1);
+    }
+  });
+
+  test("the Training popover opens at full size inside the viewport, not clipped by its wrap", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await page.getByTestId("v2-tool-training").click();
+
+    // The wrap must not be a scroll container — that is what clipped its own absolutely
+    // positioned .pop (whose containing block IS the wrap) down to nothing.
+    const wrapOverflow = await page.locator(".training-pop").evaluate((el) => getComputedStyle(el).overflow);
+    expect(wrapOverflow).toBe("visible");
+
+    const pop = await page.locator(".training-pop .pop").boundingBox();
+    if (!pop) throw new Error("missing training popover bounds");
+    expect(pop.width, "popover collapsed — the wrap's width/overflow leaked onto it").toBeGreaterThan(300);
+    expect(pop.height, "popover collapsed to a sliver").toBeGreaterThan(200);
+    expect(pop.x).toBeGreaterThanOrEqual(0);
+    expect(pop.x + pop.width).toBeLessThanOrEqual(1280 + 1);
+
+    // Not `toBeVisible()` — that is exactly what let the clipped popover ship. Assert the
+    // badge's BOX is on screen.
+    const badge = await page.getByTestId("training-preview-badge").boundingBox();
+    if (!badge) throw new Error("missing preview badge bounds");
+    expect(badge.x).toBeGreaterThanOrEqual(0);
+    expect(badge.x + badge.width).toBeLessThanOrEqual(1280 + 1);
+    expect(badge.y).toBeGreaterThanOrEqual(0);
+    expect(badge.y + badge.height).toBeLessThanOrEqual(800 + 1);
+  });
+});
