@@ -90,9 +90,13 @@ numbers and hashes only.
    That prints which automated metric (if any) actually tracks your ear, writes
    `calibration/TRUSTED_METRICS.json`, and either lifts the HALT or keeps it.
 
-4. **Norming sitting** (~40 min, READY) — measures the HUMAN ceiling on our own
-   items, which replaces the 64.7% figure every prior pre-registration was written
-   against. A packet is already exported:
+4. **Norming sitting** (~40 min, READY — now with a machine reference) — measures
+   the HUMAN ceiling on our own items. The 64.7% figure it was to replace is
+   doubly void (it measured the arms, and the arms' pools were alphabetically
+   truncated). A machine reference now exists on the SAME blind packet: the
+   local 14B scores exact .200 / top-5 .240 (ex-giveaway .189) — your score
+   lands on an interpreted scale the moment the sitting happens. A packet is
+   already exported:
 
    ```bash
    python3 service/lyrics/bench/bench_cli.py norming export -n 200 --slice dev
@@ -118,8 +122,12 @@ numbers and hashes only.
 
    ```bash
    python3 service/lyrics/bench/bench_cli.py accept mark \
-     --run 2026-07-28T00-21-29-local-constrained-endword-dev --limit 40
+     --run 2026-07-28T02-22-49-prompt-rhyme-menu-fp-dev --limit 40
    ```
+
+   (Updated 2026-07-28: the target run is now `prompt-rhyme-menu-fp` — the new
+   best arm. Marking a superseded arm's misses would label a configuration no
+   longer on the路.)
 
    Shows only the bars the arm got WRONG, one at a time: `a` keep, `r` reject,
    `s` skip, `q` quit. Resumable — it never re-asks a judged fill. Every later run
