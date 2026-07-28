@@ -490,3 +490,52 @@ numbers and hashes only.
   therefore not optional polish — it is the prerequisite for the contamination cut
   to mean anything. Growing it requires an eval rebuild, which voids `itemsSha`
   comparability and re-baselines every arm, so it is a deliberate, scheduled step.
+- **2026-07-28 — THE 40% POOL CEILING WAS AN ALPHABETICAL SORT, NOT PHONOLOGY.**
+  `rhyme_search` ranks (grade, syllables, **alphabetical**) and truncates at the
+  cap, so every pool kept the alphabetically-early slice of its rime family —
+  `booz`/`brack`/`lyne` survived while the word the writer used fell off the
+  end. Measured on the frozen 150 (`itemsSha 1b9aad2e…`), same candidate set,
+  cap 200: **alpha truncation holds 40.0% of true answers; frequency-tiebreak
+  truncation holds 89.3%** (uncapped phonology roof: 99.3%; @400 = 94.7%,
+  @800 = 98.7%). Truth's median rank in the freq ordering is 41 — frequency
+  alone cannot rank it (floor below), so decoder skill above the floor is real.
+  - New arms (separate ids, alpha twins byte-identical — cache-only replays of
+    `local-constrained-endword`, `llm-constrained` and `prompt-rhyme-menu`
+    reproduce `.173`/`.373`/`.320` with zero misses):
+
+    | arm | exact | topk | coverage | prec(top1\|pool) |
+    |---|---|---|---|---|
+    | local-constrained-endword (alpha) | .173 | .207 | 40.0% | 43.3% |
+    | **local-constrained-endword-fp** | **.253** | **.407** | 90.7% | 27.9% |
+    | rhyme-floor-fp (no model) | .113 | .227 | 90.7% | 12.5% |
+
+    Decomposition identities hold to 3 decimals. The local model beats the
+    freq-order floor 2.2× on in-pool precision — genuine ranking skill — but
+    its misses read topic-blind (picks `realization` over `dedication`,
+    `conjugate` over `meditate`), which is a ranking-capacity limit, not a
+    plumbing bug (the scoring prompt carries the context bars).
+  - **Pre-registrations voided:** the "menu-only caps exact at ~40%" expectation
+    and Amendment 1's routing bar (`exact ≥45% AND perfect ≥90%`) were both
+    calibrated against the alpha pool; the kill condition was already shown
+    unreachable (perfect-only coverage 30% < slant's 40%). Owner directed: run
+    the ablation first, re-register after. **No new numeric bar is registered in
+    this entry** — proposals go to the owner with the fp results.
+  - `prompt-rhyme-menu`'s historical "+16.7 rhyme_perfect, exact flat" verdict
+    was measured against a palette drawn from the alpha-truncated 40 (then cut
+    to 24) — a sliver that rarely contained the answer. `prompt-rhyme-menu-fp`
+    (freq 40, shown in full) and `-fp200` (the full 200 pool in-prompt) re-test
+    the prompt-plateau premise under corrected conditions, per Amendment 1's
+    live-baseline rule. Runs in flight at entry time; results appended below.
+  - Guard story: 13/13 sabotages RED, two found vacuous on the way and fixed —
+    the no-leak menu check was **memo-masked** (a target-dependent mutation
+    before memoization replays identically to both sides of the comparison; the
+    check now clears the memo per call), and the testlex rime family (11 words)
+    made a re-imposed [:24] palette cut invisible (a synthetic 45-word family
+    now makes it bite). Plus a CLI wiring guard: an API arm absent from
+    `API_ARMS` gets `chat=None` and crashes mid-run — now a named red.
+  - **Correction to the 2026-07-27 norming entry:** the `9mm`/`24` example was
+    wrong about reachability — `mask._WORD_RE` is `[A-Za-z']+`, so no eval item
+    can carry a digit-bearing target (measured: 0 of 43,006 dev rhyme items).
+    The `_end_word` fix's real effect is apostrophe handling (1.9% of packet
+    context lines tokenize differently; 0 giveaway verdicts flip). Number
+    normalization remains a dormant gap, not a live one.
