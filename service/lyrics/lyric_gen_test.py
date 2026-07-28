@@ -24,7 +24,8 @@ from phonology import core as _ph  # noqa: E402
 fails = []
 
 # RHYME grading needs a real pronunciation dictionary: the fake generator searches cmudict for
-# rhyming end words (core._P.rhyme_search), and rhymes() grades phoneme rimes. cmudict is an
+# rhyming end words (core._rhyme_ends → the freq-ranked pipeline), and rhymes() grades phoneme
+# rimes. cmudict is an
 # OPTIONAL dep (setup-phonology.sh; the core degrades to a spelling heuristic) — so, like
 # phonology_core_test.py's real-cmudict layer, the rhyme-satisfaction checks are guarded and
 # skipped-with-note when the dict is absent, "so the golden gate never fails for a missing
@@ -165,6 +166,56 @@ check("partial line keeps every heard anchor word",
       all(w in props3[0]["text"].split() for w in ("they", "me")), props3[0]["text"])
 check_dict("gap line rhymes against the EXTRACTED line's end word (group A anchored by 'flame')",
            bool(props3[0].get("passes")), str(props3[0]))
+
+# ── 11. Rhyme hints are FREQ-truncated (the 2026-07-28 pool fix). The historical
+# `_P.rhyme_search(anchor, strict, max_n=40, syllables=1)` kept the alphabetically
+# -early slice of a big rime family, so the template backend drew its end words
+# from booz/brack-class junk. The fixture family is LARGER than the 40-cap (50
+# words — a small family makes cap semantics invisible): 45 two-letter junk words
+# that dominate an alphabetical cap but die in the pipeline's len>=3 filter, plus
+# 5 common words that only survive the cap under frequency ranking. ─────────────
+import tempfile  # noqa: E402
+
+_JUNK2 = sorted(a + b for a in "bcdfg" for b in "abcdefghi")   # 45 two-letter words
+_HINT_LEX = {"day": [["D", "EY1"]],
+             "way": [["W", "EY1"]], "say": [["S", "EY1"]],
+             "play": [["P", "L", "EY1"]], "stay": [["S", "T", "EY1"]],
+             "gray": [["G", "R", "EY1"]]}
+_HINT_LEX.update({j: [["B", "EY1"]] for j in _JUNK2})
+_REAL_P = core._P
+core._P = _ph.Pronouncer(lexicon=_HINT_LEX, g2p=lambda w: None)
+try:
+    with tempfile.TemporaryDirectory() as td:
+        tab = os.path.join(td, "ranks.txt")
+        with open(tab, "w", encoding="utf-8") as f:
+            f.write("way\nsay\nplay\nstay\ngray\n")
+        os.environ["MOSH_FREQ_TABLE"] = tab
+        try:
+            ends = core._rhyme_ends("day", "perfect")
+            check("rhyme hints keep the words a writer would use (freq truncation)",
+                  ends == ["way", "say", "play", "stay", "gray"], str(ends[:8]))
+            line = {"index": 1, "role": "verse", "seedText": "", "text": "",
+                    "syllableTarget": 3, "syllableTol": 2, "rhymeGroup": "A",
+                    "locked": False}
+            spec = {"grid": "1/16", "rhymeStrictness": "perfect", "topic": "",
+                    "mood": "", "lines": [line]}
+            props = core._fake_propose_line(line, spec, "day", 0)
+            check("fake backend draws end words from the freq pool, never the junk",
+                  props and all(c["endWord"] in {"way", "say", "play", "stay",
+                                                 "gray"} for c in props),
+                  str([c["endWord"] for c in props]))
+        finally:
+            del os.environ["MOSH_FREQ_TABLE"]
+        os.environ["MOSH_FREQ_TABLE"] = os.path.join(td, "nope.txt")
+        try:
+            alpha_ends = core._rhyme_ends("day", "perfect")
+            check("no freq table → the historical alpha top-40, byte-identical "
+                  "(the fixture's failure mode: all junk)",
+                  alpha_ends == _JUNK2[:40], str(alpha_ends[:8]))
+        finally:
+            del os.environ["MOSH_FREQ_TABLE"]
+finally:
+    core._P = _REAL_P
 
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")
 sys.exit(len(fails))

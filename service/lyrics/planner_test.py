@@ -320,5 +320,57 @@ _an = product_core._analyze_line({**_line, "text": "i had to get it out here on 
 check("analysis: a wrong end word is NOT marked passing (agrees with _evaluate)",
       not _an["passes"], str({k: _an.get(k) for k in ("passes", "endWordOk", "endWord")}))
 
+# ---- 10. the candidate UNIVERSE is freq-truncated (2026-07-28 pool fix) ----
+# plan_anchors drew its universe as rhyme_search's alpha-truncated 200 and then
+# re-ranked — but a re-rank cannot recover words the truncation already dropped.
+# The fixture's rime family is LARGER than the internal 200-cap (228 words; a
+# small family makes cap semantics invisible): 225 alphabetically-early junk
+# words that pass the stop/len filters, plus 3 common words late in the alphabet
+# that only survive the cap under frequency ranking. All are perfect same-family
+# rhymes at depth 1, so the fix — not scoring — decides who is even considered.
+import tempfile  # noqa: E402
+
+_CAP_JUNK = sorted("aab" + c1 + c2 for c1 in "abcdefghijklmno"
+                   for c2 in "abcdefghijklmno")               # 225 words
+_CAP_LEX = {"mind": [["M", "AY1", "N", "D"]],
+            "signed": [["S", "AY1", "N", "D"]],
+            "twined": [["T", "W", "AY1", "N", "D"]],
+            "wined": [["W", "AY1", "N", "D"]]}
+_CAP_LEX.update({j: [["B", "AY1", "N", "D"]] for j in _CAP_JUNK})
+_CAP_FREQ = {"signed": 900, "twined": 800, "wined": 700}
+_cap_pron = Pronouncer(lexicon=_CAP_LEX, g2p=lambda w: None)
+_CAP_SPEC = {"grid": "1/16", "rhymeStrictness": "slant", "lines": [
+    {"index": 0, "text": "i came up with it heavy on my mind", "locked": True,
+     "rhymeGroup": "A"},
+    {"index": 1, "seedText": "____", "syllableTarget": 10, "syllableTol": 1,
+     "rhymeGroup": "A"}]}
+
+# Fixture adequacy: the alpha-truncated 200 really does lose every common word —
+# the failure mode this section exists to catch, exhibited, not assumed.
+_alpha200 = _cap_pron.rhyme_search("mind", "slant", max_n=200)
+check("universe fixture: the alpha 200-cap holds ONLY junk (family 228 > cap)",
+      len(_alpha200) == 200 and not {"signed", "twined", "wined"} & set(_alpha200),
+      f"kept {sum(w in _alpha200 for w in _CAP_JUNK)} junk")
+
+_cap_plan = planner.plan_anchors(_CAP_SPEC, freq=_CAP_FREQ, pronouncer=_cap_pron)
+_cap_words = [c["word"] for c in _cap_plan["groups"]["A"]["candidates"]]
+check("universe: common words survive the 200-cap and junk does not",
+      _cap_words == ["signed", "twined"], str(_cap_words[:4]))
+
+# freq=None must load the PRODUCT table (env-overridden here), so the planner is
+# fixed for real callers, not only for tests that hand it a table.
+with tempfile.TemporaryDirectory() as _td:
+    _tab = os.path.join(_td, "ranks.txt")
+    with open(_tab, "w", encoding="utf-8") as _f:
+        _f.write("signed\ntwined\nwined\n")
+    os.environ["MOSH_FREQ_TABLE"] = _tab
+    try:
+        _defplan = planner.plan_anchors(_CAP_SPEC, pronouncer=_cap_pron)
+        _defwords = [c["word"] for c in _defplan["groups"]["A"]["candidates"]]
+        check("universe: freq=None loads the product frequency table",
+              _defwords == ["signed", "twined"], str(_defwords[:4]))
+    finally:
+        del os.environ["MOSH_FREQ_TABLE"]
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
