@@ -1,0 +1,43 @@
+/* #53 — an unbroken token (path/UUID/arg dump) must wrap, not become the bar's
+   min-content width: without overflow-wrap the shell's single grid column inflated to
+   the message width and the whole stage displaced sideways. Tall messages scroll. */
+.v2-errbar { margin: 0 14px; padding: 7px 14px; background: color-mix(in srgb, var(--status-danger-glow) 14%, transparent); color: var(--status-danger-text); border: 1px solid color-mix(in srgb, var(--status-danger-glow) 40%, transparent); border-radius: var(--v2-radius-sm); font-size: 12px; min-width: 0; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+.v2-drop { position: absolute; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(5, 8, 20, 0.7); color: var(--v2-accent); font-size: 16px; border: 2px dashed var(--v2-accent); border-radius: var(--v2-radius); }
+
+/* agent-change toast — self-dismissing, with an Undo grace window (hover to pause) */
+.v2-toast {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 85;
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: var(--v2-radius-lg);
+  box-shadow: var(--v2-shadow); backdrop-filter: blur(20px); color: var(--v2-text); font-size: var(--v2-fs-base);
+  animation: v2-toast-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.v2-toast.out { animation: v2-toast-out 240ms ease forwards; }
+.v2-toast.err { border-color: color-mix(in srgb, var(--status-danger) 45%, transparent); }
+.v2-toast-dot { color: var(--v2-accent); }
+.v2-toast.err .v2-toast-dot { color: var(--v2-rec); }
+.v2-toast-text { color: var(--v2-dim); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-toast-undo {
+  background: transparent; border: 1px solid var(--v2-line); color: var(--v2-text); font: inherit; font-size: 12px;
+  padding: 4px 11px; border-radius: var(--v2-radius-md); cursor: pointer;
+}
+.v2-toast-undo:hover { border-color: var(--v2-accent); color: var(--v2-accent); }
+@keyframes v2-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes v2-toast-out { to { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .v2-toast, .v2-toast.out { animation: none; } }
+
+.v2-boot { display: grid; place-items: center; height: 100%; color: var(--v2-dim); gap: 8px; }
+.v2-boot h2 { font-family: var(--font-display); font-size: var(--v2-fs-display); color: var(--v2-text); margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-shell .v2-tbtn, .v2-shell .v2-btn { transition: none; }
+  /* neutralize the hover lift too — transition:none still left the 1px jump */
+  .v2-shell .v2-tbtn:hover, .v2-shell .v2-btn:hover { transform: none; }
+  .v2-shell .v2-pill .led.busy { animation: none; }
+  /* in-flight clip badge (transcribing…/lyrics…/flow…) shares the v2-blink keyframe;
+     freeze it too — v2-blink is opacity:1 at 0%/100% so the badge stays fully visible. */
+  .v2-clip-badge.working { animation: none; }
+  /* same freeze for the sample-browser row's "sketching…" pill (also v2-blink-driven). */
+  .sb-row-status { animation: none; }
+}
+

@@ -1,0 +1,208 @@
+/* ─────────────────────────────── RIGHT RAIL ──────────────────────────────── */
+.v2-rail { display: flex; flex-direction: column; gap: var(--v2-gap); min-height: 0; overflow: auto; }
+.v2-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--v2-fs-sm); letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-dim);
+  padding: 12px 14px 0;
+}
+/* #49 — card titles carry user content ("Inspector · <track name>"): truncate to one
+   line so a hostile name can't wrap the head across the panel and push controls out. */
+.v2-card-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-collab-kicker {
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: var(--v2-faint);
+}
+.v2-live { display: inline-flex; align-items: center; gap: 6px; color: var(--v2-accent); font-size: var(--v2-fs-xs); }
+.v2-live .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+
+.v2-mosh-card { padding-bottom: 12px; }
+/* the head carries Live + a collapse control on the right */
+.v2-mosh-head-r { display: inline-flex; align-items: center; gap: 8px; }
+.v2-rail-collapse {
+  appearance: none; background: transparent; border: 1px solid transparent; cursor: pointer;
+  width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+  color: var(--v2-faint); font-size: var(--v2-fs-base); line-height: 1; transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-rail-collapse:hover { color: var(--v2-text); border-color: var(--v2-line); background: var(--v2-surface-sunken); }
+/* the agent is "maximized" — a tall, prominent stage at the top of the rail. The live WebGL
+   Moshi sits DIRECTLY on the dark card (transparent mount — no light "egg" pod) like the concept. */
+.v2-mosh-stage { display: grid; place-items: center; padding: 8px 0 4px; }
+.v2-shell .v2-mosh-stage .moshi-dock { width: 100%; border-left: none; background: transparent; padding: 4px; }
+.v2-shell .v2-mosh-stage .moshi-mount { min-height: 218px; background: transparent; box-shadow: none; }
+/* the reused Moshi dock carries classic --bone-dim status text → dark-on-dark in the v2 rail.
+   Recolor its cap/state/mood to read on the dark card (mood word still lights up by state). */
+.v2-shell .v2-mosh-stage .moshi-state { color: var(--v2-dim); }
+.v2-shell .v2-mosh-stage .moshi-mute, .v2-shell .v2-mosh-stage .moshi-handsfree { color: var(--v2-dim); display: inline-flex; align-items: center; justify-content: center; }
+.v2-shell .v2-mosh-stage .moshi-mute:hover, .v2-shell .v2-mosh-stage .moshi-handsfree:hover { color: var(--v2-text); }
+.v2-shell .v2-mosh-stage .moshi-handsfree.on { color: var(--v2-accent); }
+.v2-shell .v2-mosh-card .moshi-mood { color: var(--v2-faint); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="listen"] { color: var(--v2-accent); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="rec"] { color: var(--v2-rec); }
+.v2-shell .v2-mosh-card .moshi-mood[data-mood="work"] { color: #ffcf6a; }
+.v2-mosh-status { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; color: var(--v2-dim); font-size: 12px; }
+.v2-mosh-status .wave { color: var(--v2-accent); }
+
+/* contextual inspector */
+.v2-insp-tabs { display: flex; gap: 3px; padding: 8px 12px 0; flex-wrap: wrap; }
+.v2-insp-tabs button {
+  font: inherit; font-size: var(--v2-fs-sm); padding: 5px 11px; border-radius: 9px;
+  background: transparent; border: 1px solid transparent; color: var(--v2-dim); cursor: pointer;
+}
+.v2-insp-tabs button.on { color: var(--v2-text); background: var(--v2-surface-sunken); border-color: var(--v2-line); }
+.v2-insp-body { padding: 10px 12px 12px; }
+.v2-mix { display: flex; flex-direction: column; gap: 10px; }
+.v2-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--v2-dim); }
+.v2-field > span:first-child { flex: 0 0 30px; }
+.v2-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-field select { flex: 1 1 auto; min-width: 0; }
+.v2-field input[type="text"] {
+  flex: 1 1 auto; min-width: 0; font: inherit; color: var(--v2-text);
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 6px; padding: 5px 8px;
+}
+.v2-val { flex: 0 0 40px; text-align: right; color: var(--v2-text); font-family: var(--font-mono); font-size: var(--v2-fs-sm); }
+/* set_input_monitor's applied:false readout — an `ok:true` result that did nothing
+   (no input device matches this track), which the global lastError banner does not
+   catch since the command itself did not fail. */
+.v2-field-warn { font-size: var(--v2-fs-xs); color: var(--status-danger-text); margin: -4px 0 2px 38px; }
+.v2-mix-btns { display: flex; gap: 8px; }
+.v2-mix-btns button {
+  flex: 1 1 auto; padding: 7px; border-radius: var(--v2-radius-md); font: inherit; font-size: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+.v2-mix-btns button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* sends / returns — a small aux-bus panel inside the Mix tab */
+.v2-sends { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--v2-line); }
+.v2-sends-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--v2-dim); }
+.v2-sends-empty { font-size: var(--v2-fs-sm); color: var(--v2-faint); }
+.v2-send-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.v2-send-name { flex: 0 0 auto; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); }
+.v2-send-row input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-send-row .v2-btn { flex: 0 0 auto; }
+.v2-takes { display: flex; flex-direction: column; gap: 6px; }
+.v2-take {
+  display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: var(--v2-radius-md);
+  font: inherit; font-size: 12px; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text); cursor: pointer;
+}
+.v2-take.on { border-color: var(--v2-accent); }
+.v2-take .cur { color: var(--v2-accent); }
+/* reused classic Rack/GenDrawer flow full-width inside the narrow rail */
+.v2-insp-body .rack, .v2-insp-body .gen { width: 100%; min-width: 0; }
+.v2-insp-body .rack-chain { flex-wrap: wrap; }
+/* the reused Rack/GenDrawer ship classic light .btn pills — restyle them to the dark card
+   (mirrors the browser-dock buttons). Action buttons (+ Plugin / + RAVE / Re-imagine …)
+   become subtle sunken pills; primaries take the lime. */
+.v2-shell .v2-insp-body .btn {
+  appearance: none; font: inherit; font-size: 12px; padding: 6px 11px; border-radius: var(--v2-radius-md); cursor: pointer;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-shell .v2-insp-body .btn:hover:not(:disabled) { color: var(--v2-text); border-color: var(--v2-accent); }
+.v2-shell .v2-insp-body .btn:disabled { opacity: 0.38; cursor: default; }
+.v2-shell .v2-insp-body .btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-shell .v2-insp-body .btn.primary:hover:not(:disabled) { color: var(--v2-accent-ink); filter: brightness(1.06); }
+.v2-insp-body .rack-empty { color: var(--v2-faint); font-size: 12px; padding: 8px 2px; }
+.v2-insp-body .pg-label, .v2-insp-body .gen-head, .v2-insp-body .rack-head { color: var(--v2-dim); }
+
+/* master bus card — same field/val layout as the Inspector Mix tab, own body padding */
+.v2-master-body { padding: 10px 12px 12px; }
+
+/* master-bus plugin rack (limiter, bus EQ, …) — mirrors the classic Rack/PluginCard's
+   bypass-dot/name/actions row shape, in the v2 card's own dark-field visual language
+   (not the classic .rack/.pcard ink+lime look, which is only re-themed for reuse inside
+   .v2-insp-body — see the CSS comment there). */
+.v2-master-rack { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--v2-line); }
+.v2-master-rack-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--v2-fs-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--v2-dim); }
+.v2-master-empty { font-size: var(--v2-fs-sm); color: var(--v2-faint); padding: 4px 0; }
+.v2-master-plugin-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.v2-master-plugin-row.bypassed { opacity: 0.55; }
+.v2-master-plugin-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--v2-line); background: transparent; cursor: pointer; flex: 0 0 auto; padding: 0; }
+.v2-master-plugin-dot.on { background: var(--v2-accent); border-color: var(--v2-accent); box-shadow: 0 0 5px var(--v2-accent-soft); }
+.v2-master-plugin-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); }
+.v2-master-plugin-row .v2-btn.icon { padding: 4px 6px; font-size: var(--v2-fs-sm); border-radius: 7px; }
+.v2-master-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.v2-master-picker-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--v2-line); border-radius: var(--v2-radius-sm); }
+.v2-master-picker-list .v2-pb-add { border-radius: 0; }
+.v2-master-picker-list .v2-pb-add + .v2-pb-add { border-top: 1px solid var(--v2-line); }
+
+.v2-presence { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+.v2-collab-card[data-active="false"] .v2-presence { gap: 12px; }
+.v2-cam { appearance: none; background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: var(--v2-radius-md); padding: 3px 8px; font-size: var(--v2-fs-base); line-height: 1; cursor: pointer; color: var(--v2-dim); }
+.v2-cam.on { border-color: var(--v2-accent); color: var(--v2-accent); }
+.v2-collab-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--v2-radius-lg);
+  border: 1px dashed var(--v2-line-strong);
+  background: rgba(255, 255, 255, 0.015);
+}
+.v2-collab-empty-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--v2-radius-sm);
+  background: var(--v2-surface-sunken);
+  color: var(--v2-accent);
+}
+.v2-collab-empty-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--v2-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.v2-collab-empty-copy strong {
+  color: var(--v2-text);
+  font-size: 12.5px;
+}
+.v2-collab-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.v2-collab-hint {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-sm);
+  line-height: 1.4;
+}
+
+/* large webcam presence card — video fills, a name + online dot ride a bottom scrim */
+.v2-pcard {
+  position: relative; border-radius: var(--v2-radius-lg); overflow: hidden; aspect-ratio: 16 / 10;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+}
+.v2-shell .v2-pcard .video-tile { width: 100%; height: 100%; max-width: none; aspect-ratio: auto; border-radius: 0; object-fit: cover; background: #000; }
+.v2-shell [data-testid="v2-collab-self"] .video-tile { transform: scaleX(-1); }
+/* Same "dark glyph on a bright generated avatar fill" case as .v2-avatar above. */
+.v2-pcard-av { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 800; font-size: 30px; color: var(--on-accent); }
+.v2-pcard-meta {
+  position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: linear-gradient(to top, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0));
+}
+.v2-pcard-meta .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
+.v2-pcard-meta .dot.off { background: rgba(255, 255, 255, 0.4); box-shadow: none; }
+.v2-pcard-meta .nm { flex: 1 1 auto; min-width: 0; font-size: var(--v2-fs-base); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+/* live audio-level bars — PresenceMeter drives scaleY on each span when audio is present.
+   Scoped to .v2-pcard-meta and named for its card: this used to be a second bare `.v2-meter`
+   rule, which collided with the track-header meter above. `.v2-meter span` is a DESCENDANT
+   selector, so it also matched the `.mbar` spans two levels inside TrackMeterBar's wrapper
+   and pinned `width: 3px; transform: scaleY(0.18)` on them — properties mosh.css's
+   `.meter .mbar` never contests and Meter.tsx's rAF loop never overwrites (it only ever
+   writes `.mmask`'s width). The shipped per-track peak meters were therefore frozen 3px
+   slivers at 18% height regardless of level. Keep this scoped so it can never reach again. */
+.v2-pcard-meta .v2-pcard-level { flex: 0 0 auto; display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+.v2-pcard-meta .v2-pcard-level span { width: 3px; height: 100%; border-radius: 1px; background: var(--v2-accent); transform: scaleY(0.18); transform-origin: bottom; transition: transform 80ms linear; }
+
+.v2-invite {
+  display: flex; align-items: center; gap: 8px; width: 100%; justify-content: center;
+  background: transparent; border: 1px dashed var(--v2-line-strong); color: var(--v2-dim);
+  font: inherit; font-size: var(--v2-fs-base); padding: 10px; border-radius: var(--v2-radius-lg); cursor: pointer;
+}
+.v2-invite:hover { color: var(--v2-text); border-color: var(--v2-accent); }
+.v2-invite svg { flex: 0 0 auto; }
+

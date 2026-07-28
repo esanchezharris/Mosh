@@ -1,0 +1,270 @@
+/* ============================================================================
+   MOSH v2 SHELL — the from-scratch demo-driven interface. ONE Mosh-native design:
+   dark "Midnight Drive" neon is the hero; light is a glass token-swap (same layout).
+   All tokens + rules are scoped under .v2-shell so this never touches the legacy
+   shell's :root tokens (both bundles coexist until cutover). Theme axis only — no
+   skin axis (effects.ts pins data-skin=mosh while v2 is active).
+   ============================================================================ */
+
+.v2-shell {
+  /* ── geometry — concept-compact: small lanes/headers, airy cream margins ── */
+  /* 168px left exactly 28px for the track NAME once the icon, meter, M/S column and
+     three gaps were paid for — which is why every name truncated to "Ser…". Widened
+     alongside removing the redundant type pill and slimming the meter/gaps; the name
+     column now gets ~76px. MUST move in lockstep with HEAD_W_FALLBACK in
+     timeline/geom.ts (and its test), which mirrors this token for pre-mount renders. */
+  --v2-head-w: 200px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
+  --v2-lane-h: 64px;
+  --v2-ribbon-h: 40px;
+  --v2-tempo-h: 22px;
+  --v2-ruler-h: 24px;
+  --v2-ann-h: 22px;
+  --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
+  --v2-radius: 16px;
+  --v2-radius-sm: 10px;
+  --v2-gap: 14px;
+  --v2-rail-w: 286px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
+  --v2-browser-w: 340px;    /* the LEFT dock when expanded (samples · plugins) */
+  --v2-tab-w: 46px;         /* a collapsed dock — just its vertical pull-tab rail */
+  --v2-stage-max: 1000px;   /* the centered work area cap (arrangement · nav · composer) */
+  /* live dock widths — flipped by data-left-open / data-right-open on .v2-shell (below) */
+  --v2-left-w: var(--v2-tab-w);
+  --v2-right-w: var(--v2-rail-w);
+
+  /* ── dark hero — near-black ink + lime, matching the classic shell. Minimal blue:
+       surfaces are neutral warm-black, the only saturated color is the lime accent;
+       clips are desaturated slate so the canvas reads black, not blue. ── */
+  --v2-bg: radial-gradient(130% 90% at 50% -10%, #161616 0%, #0c0c0c 52%, #050505 100%);
+  --v2-ink: #0a0a0a;
+  --v2-surface: rgba(24, 24, 25, 0.64);
+  --v2-surface-2: rgba(33, 33, 35, 0.74);
+  --v2-surface-sunken: rgba(12, 12, 13, 0.62);
+  --v2-line: rgba(255, 255, 255, 0.09);
+  --v2-line-strong: rgba(255, 255, 255, 0.18);
+  --v2-text: #ededee;
+  --v2-dim: rgba(232, 232, 234, 0.56);
+  --v2-faint: rgba(220, 220, 224, 0.34);
+  --v2-accent: #ccff36;             /* lime — play / active / live / selection */
+  --v2-accent-ink: #0a0f04;         /* text on the lime fill */
+  --v2-accent-soft: rgba(204, 255, 54, 0.13);
+  --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
+  --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
+  --v2-clip-midi: rgba(196, 202, 220, 0.82);
+  --v2-clip-drum: rgba(204, 255, 54, 0.7);
+  --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
+  --v2-playhead: #ccff36;           /* lime scrub line (matches the classic shell) */
+  --v2-rec: #ff3b5c;
+  --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* ── type scale (PR-2.3) — role-named; values = the de-facto size clusters so adoption is a no-op ── */
+  --v2-fs-2xs: 9px;
+  --v2-fs-xs: 10px;
+  --v2-fs-sm: 11px;
+  --v2-fs-base: 13px;
+  --v2-fs-md: 15px;
+  --v2-fs-lg: 17px;
+  --v2-fs-xl: 20px;
+  --v2-fs-display: 40px;
+  --v2-tracking-caps: 0.14em;   /* the recurring uppercase-label treatment */
+
+  /* ── spacing scale (PR-2.3) — 8-step; stray 5/7/9px round to neighbours at adoption ── */
+  --v2-space-1: 2px;
+  --v2-space-2: 4px;
+  --v2-space-3: 6px;
+  --v2-space-4: 8px;
+  --v2-space-5: 10px;
+  --v2-space-6: 12px;
+  --v2-space-7: 16px;
+  --v2-space-8: 24px;
+
+  /* ── radius scale (PR-2.3). Legacy --v2-radius (16) / --v2-radius-sm (10) kept as-is;
+       the de-facto 7/9/11px live on until PR-2.6 handles them as documented normalisations. ── */
+  --v2-radius-xs: 4px;
+  --v2-radius-md: 8px;
+  --v2-radius-lg: 12px;
+  --v2-radius-pill: 999px;
+
+  /* ── semantic role aliases (PR-2.4) — Option-A: v2 maps roles onto its own palette; a
+       future 4-skin bridge remaps these per [data-skin] with zero consumer edits. Accent
+       roles reference the theme-aware --v2-* tokens (so they track dark↔light for free);
+       status values are exact literals (verified against consumers, NOT derived — e.g.
+       --status-danger-text is #ffb3c1, which is NOT any color-mix of --v2-rec). The two
+       reds are kept DISTINCT (--v2-rec vs --status-danger-glow) rather than collapsed. ── */
+  --accent: var(--v2-accent);
+  --accent-ink: var(--v2-accent-ink);
+  --accent-soft: var(--v2-accent-soft);
+  --status-rec: var(--v2-rec);
+  --status-danger: var(--v2-rec);
+  --status-danger-glow: rgb(255, 71, 106);   /* the 2nd red (rec-arm glow, errbar) — not --v2-rec */
+  --status-danger-text: #ffb3c1;             /* exact; NOT a mix of --v2-rec */
+  --status-ok: #3fe06a;
+  --status-warn: #ffd45c;
+  --status-off: var(--v2-faint);
+
+  /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
+       avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
+       light/cream theme overrides them — page goes cream, panels stay dark. ── */
+  --v2-ground: #0c0c0c;
+  --v2-ground-text: var(--v2-text);
+  --v2-ground-dim: var(--v2-dim);
+  --v2-ground-card: var(--v2-surface-2);
+  --v2-ground-line: var(--v2-line);
+  --v2-ground-line-strong: var(--v2-line-strong);
+
+  /* ── the MIDI editor (--pr-*) ──────────────────────────────────────────────
+     PianoRoll lives in ui/src/ui (the shared component library) and is mounted by
+     BOTH shells, so it paints through the --pr-* family rather than either palette
+     directly. mosh.css defines that family for the classic shell, where the panel is
+     genuinely white in the light theme; v2 keeps DARK panels on a cream page in both
+     themes, so the whole family is re-pinned here. These sit in the BASE block with
+     no light twin on purpose — every value below is itself a --v2-* token, and those
+     already flip in [data-theme="light"] .v2-shell, so the panel stays dark either way.
+
+     This is the fix for the "white slab over the dark timeline" and for the invisible
+     key labels underneath it: the labels were always rendered, but `.pr-key.white`
+     hardcoded a near-black background while the label colour flipped DARK with the
+     light theme. Both sides are tokens now, and pianoRollCss.test.ts fails the build
+     if a bare literal is reintroduced. */
+  --pr-panel: var(--v2-surface);
+  --pr-text: var(--v2-text);
+  --pr-text-dim: var(--v2-dim);
+  --pr-grid-bg: var(--v2-surface-sunken);
+  --pr-line: var(--v2-line);
+  --pr-line-bar: var(--v2-line-strong);
+  --pr-row-alt: rgba(255, 255, 255, 0.05);
+  --pr-key-white-bg: var(--v2-surface-2);
+  --pr-key-black-bg: var(--v2-ink);
+  --pr-key-text: var(--v2-dim);
+  --pr-key-line: var(--v2-line);
+  --pr-note: var(--v2-accent);
+  --pr-note-edge: color-mix(in srgb, var(--v2-accent) 68%, #000);
+  --pr-note-sel: var(--v2-accent);
+  --pr-note-ring: var(--v2-text);
+  --pr-lasso: var(--v2-accent-soft);
+  --pr-lasso-edge: color-mix(in srgb, var(--v2-accent) 45%, transparent);
+  --pr-offkey: rgba(255, 255, 255, 0.07);
+  --pr-playhead: var(--v2-playhead);
+  --pr-ruler-bg: var(--v2-surface-sunken);
+  --pr-ruler-text: var(--v2-faint);
+  --pr-vel-bg: var(--v2-surface-sunken);
+  --pr-vel-bar: color-mix(in srgb, var(--v2-accent) 55%, transparent);
+  --pr-vel-bar-sel: var(--v2-accent);
+  /* The ruler is the same height as the arrangement's, so the two read as one system. */
+  --pr-ruler-h: var(--v2-ruler-h);
+
+  position: absolute;
+  inset: 0;
+  /* Flex column (was `grid: auto 1fr`): the grid template mis-rowed whenever the
+     conditional banners (errbar / RecoveryNotice / MissingMediaBanner) rendered —
+     the SECOND child landed in the 1fr row, so with an error showing, the errbar
+     took the flexible row and the body fell to an implicit one. Flex keeps every
+     banner content-sized and the body (below) flexes, whatever renders. */
+  display: flex;
+  flex-direction: column;
+  background: var(--v2-bg);
+  color: var(--v2-text);
+  font-family: var(--font-body);
+  /* #52 — usability floor. Below ~1120px the topbar's centred transport starts
+     covering the left meta controls and by ~560px the whole shell piled up on
+     itself. Keep a minimum layout width and let the SHELL scroll horizontally
+     (body is overflow:hidden) — an honest scrollbar instead of self-destruction. */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.v2-shell > * { min-width: 1120px; flex: none; }
+.v2-shell > .v2-body { flex: 1; min-height: 0; }
+
+/* dock open-state → live column widths (the .v2-body grid reads these). Collapsed = a thin
+   pull-tab rail; open = the panel width. Symmetric on both flanks. */
+.v2-shell[data-left-open="true"]  { --v2-left-w: var(--v2-browser-w); }
+.v2-shell[data-left-open="false"] { --v2-left-w: var(--v2-tab-w); }
+.v2-shell[data-right-open="true"]  { --v2-right-w: var(--v2-rail-w); }
+.v2-shell[data-right-open="false"] { --v2-right-w: var(--v2-tab-w); }
+
+/* ── light "cream" — warm paper page, DARK content panels, bright lime. The concept
+     look (and the v2 default). The PAGE ground is light but every panel stays dark, so we
+     keep the dark surface/text tokens and override only the page bg + the ground set
+     (the chrome that sits directly on the cream). ── */
+[data-theme="light"] .v2-shell {
+  --v2-bg: radial-gradient(135% 105% at 50% -8%, #f7f1e6 0%, #f1ebde 52%, #ebe3d2 100%);
+  --v2-ink: #0c0c0c;
+  /* #54 — the errbar sits on the CREAM ground here; the dark theme's pale-pink
+     danger text (#ffb3c1) is near-invisible on it. Deep red on the rose wash. */
+  --status-danger-text: #8c1228;
+  --v2-surface: #1b1b1d;
+  --v2-surface-2: #242427;
+  --v2-surface-sunken: #141416;
+  --v2-line: rgba(255, 255, 255, 0.09);
+  --v2-line-strong: rgba(255, 255, 255, 0.2);
+  --v2-text: #f0efe9;
+  --v2-dim: rgba(240, 239, 233, 0.58);
+  --v2-faint: rgba(236, 234, 226, 0.34);
+  --v2-accent: #c2f53f;
+  --v2-accent-ink: #16210a;
+  --v2-accent-soft: rgba(194, 245, 63, 0.16);
+  --v2-blue: #a7adba;
+  --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
+  --v2-clip-midi: rgba(196, 202, 220, 0.82);
+  --v2-clip-drum: rgba(194, 245, 63, 0.7);
+  --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
+  --v2-playhead: #c2f53f;
+  --v2-shadow: 0 22px 50px rgba(70, 56, 28, 0.18);
+  --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  /* chrome sitting directly on the cream page (NOT inside a dark panel) */
+  --v2-ground: #f1ebde;
+  --v2-ground-text: #17150f;
+  --v2-ground-dim: rgba(23, 21, 15, 0.56);
+  --v2-ground-card: #fffdf6;
+  --v2-ground-line: rgba(34, 26, 12, 0.14);
+  --v2-ground-line-strong: rgba(34, 26, 12, 0.26);
+
+  /* ── classic palette, re-pinned for this subtree ──────────────────────────────
+     v2 mounts ~15 components out of ui/src/ui (the shared component library): the FX
+     rack and its plugin cards, the generative drawer, the sample browser, the agent
+     composer, every topbar tool popover, the automation panel, the drum window, the
+     multiplayer panel. They paint from mosh.css's --ink/--bone/--lime palette, which
+     flips WHOLESALE to cream/white in the light theme — while v2 deliberately keeps
+     DARK panels on a cream page (see --v2-surface above, and settings/schema.ts, which
+     describes the theme as "warm cream + dark panels").
+
+     The result was cream cards floating inside dark v2 panels, and in a few places
+     worse than cosmetic: a white .pop popover inside the dark overflow menu, a cream
+     meter mask on a dark lane header. Re-pin the whole classic palette to its DARK
+     values for this subtree — one block, in the same place every other v2 token lives.
+
+     THE RULE this encodes, and that themeTokens.test.ts enforces: a per-theme value must
+     be a TOKEN the theme block overrides, never a `[data-theme="light"] .foo {…}` element
+     rule — because only a token can be re-pinned at a nested scope like this one. ── */
+  --ink: #0b0b0b;
+  --ink-raise: #131312;
+  --ink-deep: #060606;
+  --ink-line: #232323;
+  --ink-line-soft: #1a1a1a;
+  --bone: #f6f2eb;
+  --mist: #e5e5e1;
+  --bone-dim: rgba(246, 242, 235, 0.55);
+  --lime-dim: rgba(204, 255, 35, 0.42);
+  --lime-faint: rgba(204, 255, 35, 0.12);
+  --lime-text: var(--lime);
+  --auto-line: var(--lime);
+  --focus-ring: var(--lime);
+  /* --danger/-deep/-line are NOT re-pinned here: see the .error-bar exception below. */
+}
+
+/* EXCEPTION — .error-bar (RecoveryNotice / MissingMediaBanner) is a DIRECT child of
+   .v2-shell, so unlike every component above it sits on the cream PAGE, not inside a dark
+   panel. It must stay light-themed, exactly as v2's own .v2-errbar does a few lines up
+   (--status-danger-text: #8c1228, "deep red on the rose wash"). Restore the light danger
+   trio for it alone. */
+[data-theme="light"] .v2-shell > .error-bar {
+  --danger: #a01228;
+  --danger-deep: #ffe1e6;
+  --danger-line: #f1b6bf;
+}
+
+/* (A `.v2-shell .pr` classic-token bridge used to sit here, added so the piano roll's
+   Drums tab would not render cream cells on a dark panel. The `[data-theme="light"]
+   .v2-shell` re-pin above now does the same thing for EVERY classic component in the
+   subtree, so keeping this would be a second source of truth for one of them.) */
+

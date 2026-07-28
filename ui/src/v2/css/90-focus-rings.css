@@ -1,0 +1,16 @@
+/* ─────────────────────────── KEYBOARD FOCUS RINGS ────────────────────────────
+   Every interactive control gets a visible :focus-visible ring for keyboard nav
+   (mouse/touch focus stays ringless). Outline follows the control's border-radius
+   and adds no layout shift; the 2px offset lifts it onto the surrounding surface so
+   even lime-filled controls (play, active tabs/chips) still show a clear ring. */
+.v2-shell button:focus-visible,
+.v2-shell a:focus-visible,
+.v2-shell input:focus-visible,
+.v2-shell select:focus-visible,
+.v2-shell textarea:focus-visible,
+.v2-shell [role="tab"]:focus-visible,
+.v2-shell [tabindex]:focus-visible {
+  outline: 2px solid var(--v2-accent);
+  outline-offset: 2px;
+}
+
