@@ -66,7 +66,7 @@ _ARM_BEHAVIOUR_VERSIONS = {
     "local-constrained-endword-fp": "v1", "rhyme-floor-fp": "v1",
     "prompt-rhyme-menu-fp": "v1", "prompt-rhyme-menu-fp200": "v1",
     "prompt-rhyme-menu-fp100": "v1", "prompt-rhyme-menu-fp24": "v1",
-    "local-rerank-fp40": "v1",
+    "local-rerank-fp40": "v1", "xenc-rerank-fp40": "v1",
 }
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),
@@ -79,7 +79,7 @@ check("every registered arm is version-pinned in the test",
 # worker wiring in LOCAL_ARMS.
 from lyrics.bench import bench_cli  # noqa: E402
 _api_named = {a for a in arms.ARMS
-              if a.split("-")[0] in ("prompt", "llm", "nbest", "fusion")}
+              if a.split("-")[0] in ("prompt", "llm", "nbest", "fusion", "xenc")}
 check("every chat-API arm is wired in bench_cli.API_ARMS",
       _api_named <= set(bench_cli.API_ARMS),
       f"missing: {sorted(_api_named - set(bench_cli.API_ARMS))}")

@@ -44,6 +44,7 @@ API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
              "prompt-rhyme-menu-fp", "prompt-rhyme-menu-fp200",
              "prompt-rhyme-menu-fp100", "prompt-rhyme-menu-fp24",
              "local-rerank-fp40",   # dual-wired: cached-chat replay + local scorer
+             "xenc-rerank-fp40",    # cached-chat replay + torch cross-encoder
              "nbest-rerank", "fusion-rerank")
 
 # Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
@@ -242,6 +243,13 @@ def cmd_run(args) -> int:
     elif args.arm in API_ARMS:
         chat = None
 
+    if args.arm.startswith("xenc-"):
+        from lyrics.bench import xenc as _xenc
+        if not torchjudge.resolve_python():
+            print("no torch interpreter for the cross-encoder "
+                  "(set LYRICS_BENCH_TORCH_PY)", file=sys.stderr)
+            return 2
+
     local_worker, local_cfg, arm_config = None, None, {}
     if args.arm in LOCAL_ARMS:
         from lyrics.bench import localgen
@@ -282,6 +290,11 @@ def cmd_run(args) -> int:
                           product_backend=args.product_backend,
                           local=local_worker, local_cfg=local_cfg,
                           arm_config=arm_config)
+    if args.arm.startswith("xenc-"):
+        from lyrics.bench import xenc as _xenc
+        ctx.xenc_score = lambda item, fills: _xenc.score_candidates(
+            item, fills, cache=ctx.cache)
+        ctx.arm_config = {**ctx.arm_config, "xencModel": _xenc.XENC_MODEL}
     ts = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
     out_dir = os.path.join(paths.subdir("runs"),
                            f"{ts}-{args.arm}-{args.slice}")

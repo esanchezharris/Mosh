@@ -47,6 +47,11 @@ class ArmContext:
     # than in the arm NAME, so a model swap re-keys the cache without minting a
     # new scoreboard row.
     arm_config: Dict = field(default_factory=dict)
+    # Cross-encoder scorer seam (M6): fn(item, fills) -> {"status", "scores",
+    # "backend"}. Injectable so tests script it; the CLI binds
+    # xenc.score_candidates with the run's cache. None => the xenc arms report
+    # unavailable rather than crashing or passing the base order through.
+    xenc_score: Optional[Callable] = None
     # Per-context menu memo (was a module global keyed on id(pron)/id(freq) —
     # object IDENTITY, which a recycled address or an in-place table mutation
     # silently defeats; 2026-07-28 review). Scoping it to the context makes
@@ -763,6 +768,45 @@ def arm_local_rerank_fp40(item: dict, ctx: ArmContext) -> dict:
 
 
 register_granularities("local-rerank-fp40", ("rhyme",))
+
+
+@register("xenc-rerank-fp40", "v1")
+def arm_xenc_rerank_fp40(item: dict, ctx: ArmContext) -> dict:
+    """M6 increment 2 — the untrained cross-encoder bracket (spec §2 class).
+
+    Same shape as `local-rerank-fp40` with the scorer swapped: fp's cached
+    candidates re-ranked by a zero-shot `bge-reranker-v2-m3` relevance score of
+    (context-with-blank, candidate-completed-line). The local-logprob bracket
+    came in at .300 vs fp's .413 (22 broken : 5 fixed) and is ruled out; this
+    asks whether an actual cross-encoder — untrained — does better before any
+    fine-tuning is paid for. Truth-free by seam contract (see xenc.py).
+    """
+    from lyrics.bench import xenc
+    if item.get("granularity") != "rhyme":
+        return _unavailable_arm(f"granularity {item.get('granularity')!r} has no "
+                                f"end-word slot", status="declined")
+    base = arm_prompt_rhyme_menu_fp(item, ctx)
+    cands = [c["text"] for c in base.get("candidates") or []]
+    if not cands:
+        return _unavailable_arm("base fp arm produced no candidates",
+                                status="no-candidates")
+    if ctx.xenc_score is None:
+        return _unavailable_arm("no cross-encoder configured")
+    out = ctx.xenc_score(item, cands)
+    if out.get("status") != "ok" or any(s is None for s in out.get("scores") or []):
+        # NEVER the base order laundered through as a rerank.
+        return _unavailable_arm(out.get("error") or "cross-encoder unavailable")
+    ranked = [w for _, w in sorted(zip(out["scores"], cands),
+                                   key=lambda t: -t[0])]
+    moved = bool(ranked) and ranked[0].lower() != cands[0].lower()
+    return {"candidates": _dedupe_cap(ranked, ctx.k),
+            "meta": {"status": "ok", "baseTop1": cands[0],
+                     "rerankedTop1": ranked[0], "movedTop1": moved,
+                     "nCandidates": len(cands),
+                     "backend": out.get("backend")}}
+
+
+register_granularities("xenc-rerank-fp40", ("rhyme",))
 
 
 @register("rhyme-floor-fp", "v1")
