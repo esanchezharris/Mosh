@@ -119,11 +119,20 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 - **Branch protection vs the loops:** `enforce_admins` is on, so **`gh pr merge --admin` cannot
   bypass a required check**; `merge-one.sh` waits for the check and merges without `--admin`.
   Don't reintroduce `--admin` — it will just fail.
-  **Since 2026-07-24 the required `cheap gate` context is REMOVED** (GitHub Actions billing is
-  dead — every check fails in 1–3s, which is the tell), so merges go through on the local gate.
-  Verify with `gh api repos/zeke431/Mosh/branches/main/protection`; restore the context when
-  billing recovers. A 1-second "failure" is an outage, not a red test — but read the durations
-  before believing that.
+  On CI itself, two separate facts — as of 2026-07-27 one still holds and one has flipped:
+  1. **`main` still has NO required status checks** (removed 2026-07-24). `gh api
+     repos/zeke431/Mosh/branches/main/protection` returns no `required_status_checks` key at all,
+     `enforce_admins` still true. So CI red does **not** block a merge — **the local gate is the
+     gate**, and it is the only thing standing between a branch and `main`. Worth restoring the
+     `cheap gate` context now that it can pass again.
+  2. **Actions billing has RECOVERED, so red means red.** The old tell — "every check fails in
+     1–3s" — is dead. Runs complete with real durations and real output (on #462's branch: native
+     gate 17m50s PASS, cheap gate 7m35s FAIL, linux-x64 5m21s PASS). **Read the log before
+     dismissing a failure**; do not wave one through as an outage.
+  Still read durations, just not to that conclusion: `classify change` legitimately passes in ~9s,
+  and the separate `.github/workflows/release.yml` run fails in **0s with no log on every push**
+  (including on `main`) — a long-standing workflow-config fault, not billing, and not a required
+  check. Don't read that one as the outage returning.
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.
