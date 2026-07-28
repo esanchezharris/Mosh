@@ -83,6 +83,17 @@ _api_named = {a for a in arms.ARMS
 check("every chat-API arm is wired in bench_cli.API_ARMS",
       _api_named <= set(bench_cli.API_ARMS),
       f"missing: {sorted(_api_named - set(bench_cli.API_ARMS))}")
+os.environ["MOSH_RHYME_PALETTE"] = "1"
+try:
+    check("palette fold is SCOPED: product-llm re-keys under the flag, "
+          "no other arm does",
+          bench_cli._palette_arm_config("product-llm") == {"rhymePalette": "1"}
+          and bench_cli._palette_arm_config("prompt-rhyme-menu-fp") == {}
+          and bench_cli._palette_arm_config("local-constrained-endword-fp") == {})
+finally:
+    del os.environ["MOSH_RHYME_PALETTE"]
+check("palette fold inert without the env flag",
+      bench_cli._palette_arm_config("product-llm") == {})
 check("every local arm is wired in bench_cli.LOCAL_ARMS",
       {a for a in arms.ARMS if a.startswith("local-")}
       <= set(bench_cli.LOCAL_ARMS),

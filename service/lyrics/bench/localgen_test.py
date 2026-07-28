@@ -516,6 +516,12 @@ check("adapter ABSENT → payload has no adapter key (existing caches keep "
 check("adapter SET → payload carries it (an adapter swap re-keys, never "
       "replays base-model generations)",
       _p_ad.get("adapter") == "/fake/adapters/fim-v1" and _p_base != _p_ad)
+check("arm_config: adapter ABSENT → key absent (pre-adapter result caches "
+      "keep their keys; MOSH_INFILL_CACHE_ONLY replays survive)",
+      "adapter" not in _base_cfg.arm_config(),
+      str(sorted(_base_cfg.arm_config())))
+check("arm_config: adapter SET → carried (a swap re-keys arm results too)",
+      _ad_cfg.arm_config().get("adapter") == "/fake/adapters/fim-v1")
 _hw = FakeWorker()
 _hw.cfg.adapter = "/fake/adapters/fim-v1"
 check("FakeWorker path still green with an adapter configured",

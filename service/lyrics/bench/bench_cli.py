@@ -163,6 +163,16 @@ def cmd_build_eval(args) -> int:
     return 0
 
 
+def _palette_arm_config(arm: str) -> dict:
+    """The promotion flag's cache-key fold, SCOPED to the one arm whose prompts
+    read it (core._palette_enabled; product-llm is its only bench consumer).
+    The 2026-07-28 review caught the unscoped version re-keying and
+    mis-labelling every other arm's results whenever the env flag was set."""
+    if arm == "product-llm" and os.environ.get("MOSH_RHYME_PALETTE") == "1":
+        return {"rhymePalette": "1"}
+    return {}
+
+
 def cmd_run(args) -> int:
     items_path = os.path.join(paths.data_root(), "eval", f"items-{args.slice}.jsonl")
     if not os.path.exists(items_path):
@@ -255,8 +265,7 @@ def cmd_run(args) -> int:
     # the runner cache key would not move with it — an ON run would replay the
     # OFF run's cached results and the A/B would compare a number to itself.
     # Conditional, so runs without the flag keep their existing keys.
-    if os.environ.get("MOSH_RHYME_PALETTE") == "1":
-        arm_config["rhymePalette"] = "1"
+    arm_config.update(_palette_arm_config(args.arm))
     if args.arm in LOCAL_ARMS:
         from lyrics.bench import localgen
         py = localgen.resolve_python()

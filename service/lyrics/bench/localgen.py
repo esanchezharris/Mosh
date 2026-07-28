@@ -119,8 +119,16 @@ class LocalConfig:
     def arm_config(self, extra: Optional[Dict] = None) -> Dict:
         """What lands in the run summary and in the arm-result cache key. Model
         identity lives HERE rather than in the arm name: the scoreboard groups by
-        name, so baking `qwen2.5-14b-i4` into it makes every model swap a new row."""
+        name, so baking `qwen2.5-14b-i4` into it makes every model swap a new row.
+
+        `adapter` joins ONLY when set — the 2026-07-28 review caught the asdict
+        default silently carrying `"adapter": ""` into every arm-result key,
+        cold-missing all pre-adapter local runs and breaking
+        MOSH_INFILL_CACHE_ONLY replays of them. Same conditional discipline as
+        `payload_for`, at the layer the first fix missed."""
         out = {k: v for k, v in asdict(self).items()}
+        if not out.get("adapter"):
+            out.pop("adapter", None)
         out.update(extra or {})
         return out
 

@@ -68,6 +68,17 @@ check("forbidden ids/songs excluded; exclude-manifest sizes recorded",
 check("multi-word targets are skipped (end-word task only)",
       fim_data.mint_triples([item(70, target="the grind")],
                             n_items=5)["manifest"]["nItems"] == 0)
+# v2 guard: a truth fused to a neighbor by punctuation is STILL a leak, and
+# an unrelated superstring is NOT (no substring over-blocking).
+fused = [item(80, masked="the grind-house taught me ____")]
+check("punctuation-FUSED truth is refused (hyphen is a boundary, not deleted)",
+      fim_data.mint_triples(fused, n_items=5)["manifest"]["leakedRefused"] == 1,
+      str(fim_data.mint_triples(fused, n_items=5)["manifest"]))
+superstr = [item(81, masked="i kept grinding for the ____")]
+check("a superstring ('grinding') does NOT over-refuse the truth ('grind')",
+      fim_data.mint_triples(superstr, n_items=5)["manifest"]["nItems"] == 1,
+      str(fim_data.mint_triples(superstr, n_items=5)["manifest"]))
+
 check("deterministic content sha",
       fim_data.mint_triples(ITEMS, n_items=10)["manifest"]["contentSha"]
       == m["manifest"]["contentSha"])

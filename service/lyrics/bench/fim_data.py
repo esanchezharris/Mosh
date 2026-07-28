@@ -28,10 +28,25 @@ import json
 import os
 from typing import Dict, Optional, Sequence, Set
 
+import re
+
 from lyrics.bench import sampling
 from lyrics.bench.metrics import normalize
 
-MINT_VERSION = "v1"
+MINT_VERSION = "v2"        # v2: leakage guard treats punctuation as a boundary
+
+_GUARD_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _guard_tokens(text: str):
+    """Tokenize for the LEAKAGE guard: punctuation is a BOUNDARY, not deleted.
+
+    metrics.normalize deletes punctuation without inserting a space, so a truth
+    fused to a neighbor by hyphen/slash ("grind-house" → "grindhouse") sailed
+    past a whitespace-token check while "grind-" sat visibly in the prompt —
+    the 2026-07-28 review caught it. Boundary-splitting catches the fused class
+    without substring over-blocking ("grinding" still doesn't refuse "grind")."""
+    return set(_GUARD_SPLIT.split(text.lower().replace("'", "")))
 
 
 def mint_triples(items: Sequence[dict], *, n_items: int, seed: int = 20260728,
@@ -66,8 +81,8 @@ def mint_triples(items: Sequence[dict], *, n_items: int, seed: int = 20260728,
         # the answer. A masked-line regression that leaked the truth into the
         # prefill would otherwise mint a copy-task dataset that trains a model
         # to look great and learn nothing.
-        if normalize(truth) in (normalize(instruction).split()
-                                + normalize(prefill).split()):
+        if normalize(truth) in (_guard_tokens(instruction)
+                                | _guard_tokens(prefill)):
             leaked += 1
             continue
         triples.append({"itemId": it["itemId"], "songId": it.get("songId"),
