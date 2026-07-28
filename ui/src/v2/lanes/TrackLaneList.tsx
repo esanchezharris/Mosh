@@ -369,10 +369,7 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
                   onClick={() => pick(kind)}
                 >
                   <span className="v2-licon" aria-hidden="true">
-                    {/* "tone" is not a track type — it makes an AUDIO track with a tone on
-                        it — so it borrows the waveform icon rather than falling through to
-                        TrackTypeIcon's unknown-type default. "midi" creates an instrument track. */}
-                    <TrackTypeIcon type={kind === "tone" ? "audio" : kind === "midi" ? "audio" : kind} isInstrument={kind === "midi"} />
+                    <TrackTypeIcon {...iconArgsForKind(kind)} />
                   </span>
                   <span className="v2-menu-text">
                     <span className="v2-menu-label">{label}</span>
@@ -498,6 +495,16 @@ export function TrackMeterBar({ trackId }: { trackId: string }) {
       <AudioLevelMeter trackId={trackId} />
     </span>
   );
+}
+
+/** A menu TrackKind is not a track `type` — `midi` and `tone` both create audio tracks
+ *  (an instrument track IS an audio track carrying a synth). This maps the menu's
+ *  vocabulary onto what TrackTypeIcon needs, so the preview glyph matches what the
+ *  kind will actually produce. */
+export function iconArgsForKind(kind: TrackKind): { type: string; isInstrument: boolean } {
+  if (kind === "midi") return { type: "audio", isInstrument: true };
+  if (kind === "tone") return { type: "audio", isInstrument: false };
+  return { type: kind, isInstrument: false };
 }
 
 /** Which glyph a track gets. Pure + exported so the choice is unit-testable — the
