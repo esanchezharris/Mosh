@@ -24,6 +24,9 @@ const ALLOWLIST = new Set<string>([
   // A3 crash recovery is a native-only flow (no crash journal in the in-memory dev mock):
   "recover_session",
   "discard_recovery",
+  // FS-T2 safe mode reloads the real project file with third-party plugin nodes scrubbed;
+  // the dev mock hosts no plugins and has no project file, so there is nothing to mutate.
+  "open_without_plugins",
   // KNOWN DEV-MOCK GAPS — these DO mutate session state, so the dev mock has no case.
   // AL-017 made the mock FAIL-CLOSED, so at runtime these now hit `default: err(...)`
   // (not a silent fake success) — surfacing the gap loudly. They stay allowlisted here

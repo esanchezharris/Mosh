@@ -96,6 +96,42 @@ public:
     void markSessionRunning();   // GUI: write the sentinel once the window is live
     void clearSessionRunning();  // GUI: delete the sentinel on clean shutdown (after the final save)
 
+    /** FS-T2 — plugin-crash SAFE MODE.
+
+        A third-party plugin that crashes while the project is being LOADED is unrecoverable
+        by the normal path: every relaunch reopens the same project and re-crashes on the
+        same plugin, so autosave + journal replay cannot help — the user never reaches a
+        window. (This is the in-window mitigation for out-of-process hosting, which SPEC §2
+        puts out of scope.)
+
+        The lever is a breadcrumb that BRACKETS the load: before Tracktion instantiates
+        anything we record which third-party plugins this project brings up; we delete the
+        record the moment the load returns. A breadcrumb still on disk at the next launch
+        therefore means the process died mid-load, and its contents name the candidates.
+        `pluginCrashSuspects()` is that list, latched in the ctor before this run overwrites
+        it — exactly like the `session.running` sentinel it complements.
+
+        Note the deliberate limit: the breadcrumb brackets the WHOLE load, so a project with
+        several plugins leaves several candidates and we cannot say which one crashed. Safe
+        mode skips them ALL (that is the user-facing promise); blocklisting is reserved for a
+        lone, unambiguous suspect (mosh::safemode::quarantineTarget). */
+    juce::StringArray pluginCrashSuspects() const { return pluginSuspectsAtStartup; }
+    bool wasPluginCrashSuspected() const { return ! pluginSuspectsAtStartup.isEmpty(); }
+    void clearPluginCrashSuspects();   // the user chose Recover/Dismiss: stop offering safe mode
+
+    /** True while the live Edit was loaded with third-party plugins scrubbed out.
+
+        Such an Edit is READ-ONLY (see save()): it is deliberately not what the user
+        authored, so persisting it would strip their whole plugin chain. Cleared by any
+        successful normal load. */
+    bool inSafeMode() const { return safeModeActive; }
+
+    /** Reload the current project with every third-party plugin node scrubbed OUT of the
+        state before Tracktion sees it ("load then remove" cannot work — loading is what
+        crashes). Built-in inserts, tracks and clips are untouched. Returns a non-empty
+        error on failure (current Edit kept); `pluginsSkipped` receives the count. */
+    juce::String reloadInSafeMode (int* pluginsSkipped = nullptr);
+
     /** Project lifecycle (wave: settings). Each replaces the live Edit object, so
         callers must re-read edit() and refetch any cached track/clip pointers
         afterwards. They are machine/whole-Edit operations — NOT undoable. The
@@ -163,10 +199,20 @@ private:
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
     void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
+
+    /** FS-T2 — the ONE load-from-file path, bracketed by the plugin crash breadcrumb.
+        Behaviour-identical to te::loadEditFromFile(engine, file) when safeMode is false
+        (it replicates that function's own two-step: load the state, then createEdit with a
+        file retriever so save() still binds to `file`) — plus the breadcrumb write/clear.
+        With safeMode true it scrubs third-party plugin nodes from the state first. */
+    std::unique_ptr<te::Edit> loadEditBracketed (const juce::File& file, bool safeMode, int* scrubbed);
+    juce::File pluginBreadcrumbFile() const;
     bool       audioOpen = false;
     bool       audioWanted = false;        // AUD-017 — audio was requested (see audioRequested())
     bool       dirty = false;              // unsaved-changes flag (gap 1)
     bool       uncleanAtStartup = false;   // A2 — the session.running sentinel existed at launch (prior crash)
+    juce::StringArray pluginSuspectsAtStartup;   // FS-T2 — breadcrumb survived the last load ⇒ crash suspects
+    bool       safeModeActive = false;           // FS-T2 — live Edit has third-party plugins scrubbed (READ-ONLY)
     juce::String loadError;                // PRJ-FMT — non-empty ⇒ a refused (newer-format) load is live
     bool       inputsConfigured = false;   // one-time wave-input enablement latch (audio-only)
     juce::String audioError;

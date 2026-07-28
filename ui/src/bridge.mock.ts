@@ -485,6 +485,10 @@ const DEFAULT_OK = new Set([
   "import_clip_data",  // bytes-over-bridge is native-only; dev imports via import_clip
   "recover_session",   // A3 crash recovery — native-only (no dev-mock crash journal)
   "discard_recovery",  // "
+  // FS-T2 plugin-crash safe mode — native-only for the same reason: it reloads the real
+  // .tracktionedit with third-party plugin nodes scrubbed out, and the dev mock hosts no
+  // plugins and has no project file to reload.
+  "open_without_plugins",
 ]);
 
 // LYR-001 — a tiny deterministic rhyme map so the rhyme tool returns something in

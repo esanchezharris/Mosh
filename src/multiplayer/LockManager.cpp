@@ -42,6 +42,11 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // a peer could hold, and blocking it would leave a producer unable to walk back
         // out of their own history while someone else is working.
         "jump_to_history",
+        // FS-T2 — plugin-crash safe mode reopens the LOCAL project with third-party plugins
+        // skipped. Same posture as reload/open_project above (a whole-Edit swap, not a track
+        // edit), and deliberately local: which plugins crashed this machine is a property of
+        // THIS install's plugin folder, so it must never propagate to peers.
+        "open_without_plugins",
         "mark_take", "batch_begin", "batch_end",
         // FS-B2a — batch_status is a pure read; batch_rollback undoes exactly the agent
         // transaction the CALLER owns (proven by undo-head + fingerprint), so like

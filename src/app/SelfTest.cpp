@@ -7,6 +7,7 @@
 #include "state/Lyrics.h"
 #include "state/Migrations.h"
 #include "state/TrackIcons.h"
+#include "state/SafeMode.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
@@ -7666,6 +7667,96 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (journalLines() == 0, "A3: save truncates the journal (saved edit supersedes the tail)");
 
         cmd (ops, "remove_track", args1 ("trackId", jid));   // tidy
+    }
+
+    // ─── FS-T2 — plugin-crash SAFE MODE ───
+    // A third-party plugin that crashes while the project is LOADING is the one crash
+    // autosave cannot help with: every relaunch reopens the same project and re-crashes, so
+    // the producer never reaches a window. Safe mode scrubs third-party plugin nodes out of
+    // the state BEFORE Tracktion instantiates them ("load then remove" cannot work — loading
+    // is what crashes) and loads the result READ-ONLY.
+    //
+    // Hermetic: this drives the pure scrub + the breadcrumb + the read-only guard directly.
+    // No real crashing plugin is needed (and none could be made deterministic). The live
+    // cross-restart round trip is verify.py's check_crash_recovery_safe_mode.
+    section ("FS-T2: plugin-crash safe mode");
+    {
+        // (1) DRIFT GUARD on the discriminator. SafeMode.h is engine-free, so it hardcodes
+        // the "vst" node type rather than including Tracktion. If a tracktion_engine bump
+        // ever renamed ExternalPlugin::xmlTypeName, the scrub would silently match NOTHING
+        // and safe mode would quietly become a no-op that still reports success. Fail here
+        // instead.
+        check (juce::String (mosh::safemode::kExternalPluginType) == juce::String (te::ExternalPlugin::xmlTypeName),
+               "FS-T2: SafeMode's third-party discriminator still matches te::ExternalPlugin::xmlTypeName");
+
+        // (2) The scrub, against a state tree shaped exactly like a saved Edit.
+        juce::ValueTree edit ("EDIT");
+        juce::ValueTree trk ("TRACK");
+        juce::ValueTree builtin ("PLUGIN");
+        builtin.setProperty ("type", te::VolumeAndPanPlugin::xmlTypeName, nullptr);
+        juce::ValueTree ext ("PLUGIN");
+        ext.setProperty ("type", te::ExternalPlugin::xmlTypeName, nullptr);
+        ext.setProperty ("name", "HarnessCrasher", nullptr);
+        ext.setProperty ("filename", "/nonexistent/HarnessCrasher.vst3", nullptr);
+        trk.appendChild (builtin, nullptr);
+        trk.appendChild (ext, nullptr);
+        edit.appendChild (trk, nullptr);
+
+        const auto found = mosh::safemode::collectThirdPartyPlugins (edit);
+        check (found.size() == 1 && found[0].name == "HarnessCrasher",
+               "FS-T2: collect finds the third-party plugin by its real Tracktion node shape");
+
+        const auto crumb = mosh::safemode::makeBreadcrumb (found);
+        const auto suspects = mosh::safemode::suspectsFromBreadcrumb (crumb);
+        check (suspects.size() == 1 && suspects[0] == "HarnessCrasher",
+               "FS-T2: breadcrumb round-trips the suspect name");
+        check (mosh::safemode::quarantineTarget (suspects) == "HarnessCrasher",
+               "FS-T2: a lone suspect is the quarantine target");
+        check (mosh::safemode::quarantineTarget ({ "A", "B" }).isEmpty(),
+               "FS-T2: several candidates ⇒ NO quarantine (never blocklist on a guess)");
+
+        check (mosh::safemode::scrubThirdPartyPlugins (edit) == 1, "FS-T2: scrub removes the third-party node");
+        check (mosh::safemode::collectThirdPartyPlugins (edit).empty(), "FS-T2: no third-party nodes remain");
+        check (trk.getChildWithProperty ("type", te::VolumeAndPanPlugin::xmlTypeName).isValid(),
+               "FS-T2: the BUILT-IN insert survives the scrub");
+        check (edit.getChildWithName ("TRACK").isValid(), "FS-T2: the track itself survives the scrub");
+
+        // (3) The command is dispatched and reports its shape. There is no crash suspect in a
+        // clean headless session, so this asserts the no-suspect path: it still reopens the
+        // project (skipping zero plugins) and quarantines nothing.
+        check (! eng.wasPluginCrashSuspected(), "FS-T2: clean headless start has no plugin crash suspect");
+        check (! ops.snapshot().getProperty ("session", var()).hasProperty ("safeModeActive"),
+               "FS-T2: snapshot omits safeModeActive on a normal start");
+        check (ok (cmd (ops, "save")), "FS-T2: save ok before the safe-mode open");
+
+        auto sm = cmd (ops, "open_without_plugins");
+        check (ok (sm), "FS-T2: open_without_plugins ok");
+        check ((int) sm["data"].getProperty ("pluginsSkipped", var (-1)) == 0,
+               "FS-T2: nothing to skip in a plugin-free harness project");
+        check (sm["data"].getProperty ("quarantined", var()).toString().isEmpty(),
+               "FS-T2: nothing quarantined without a lone suspect");
+
+        // (4) THE data-safety guard: a safe-mode Edit is READ-ONLY. Without this the 30s
+        // auto-save timer would, within half a minute, overwrite the producer's project with
+        // the plugin-stripped version — destroying the very chain safe mode exists to rescue.
+        check (eng.inSafeMode(), "FS-T2: engine reports safe mode after open_without_plugins");
+        check ((bool) ops.snapshot().getProperty ("session", var()).getProperty ("safeModeActive", false),
+               "FS-T2: snapshot advertises safeModeActive so the UI can say it is read-only");
+        eng.markDirty();
+        check (! eng.save(), "FS-T2: save() REFUSES while in safe mode (never strip the plugin chain)");
+        // Re-mark dirty FIRST. Without this the check is vacuous: if save() above wrongly
+        // SUCCEEDED it would have cleared the dirty flag, and saveIfDirty would then return
+        // false because there was nothing to save — passing for the opposite of the right
+        // reason. (Caught by RED-proving this section against a disabled guard.)
+        eng.markDirty();
+        check (eng.isDirty(), "FS-T2: the edit really is dirty going into the auto-save check");
+        check (! eng.saveIfDirty(), "FS-T2: the auto-save timer's saveIfDirty is refused too");
+
+        // (5) A normal reload leaves safe mode and restores saving.
+        check (ok (cmd (ops, "reload")), "FS-T2: reload ok");
+        check (! eng.inSafeMode(), "FS-T2: a normal load clears safe mode");
+        eng.markDirty();
+        check (eng.save(), "FS-T2: saving resumes after a normal load");
     }
 
     // ─── KEY-001 — the project's musical key (tonic + mode) ───
