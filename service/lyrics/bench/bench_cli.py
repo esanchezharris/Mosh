@@ -42,6 +42,12 @@ SCOREBOARD_MD = os.path.join(REPO_ROOT, "docs", "fms-lyrics-bench", "SCOREBOARD.
 API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
              "nbest-rerank", "fusion-rerank")
 
+# Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
+# money, so the budget guard must not fire on them. The guard they need instead
+# is an interpreter check — without mlx-lm every item would return `unavailable`
+# and the run would complete looking like a slice of honest zeros.
+LOCAL_ARMS = ("local-unconstrained", "local-constrained-endword")
+
 
 def _load_corpus() -> list:
     songs = []
@@ -194,6 +200,19 @@ def cmd_run(args) -> int:
               f"pass --limit N or --yes to confirm the full slice", file=sys.stderr)
         return 2
 
+    # An arm that declines a granularity scores it as exact=0 (metrics.score_item
+    # on an empty list), so a mixed draw would publish zeros the arm never earned.
+    # Refuse before the loop rather than explain it afterwards.
+    declines = arms.ARM_GRANULARITIES.get(args.arm)
+    if declines:
+        present = sorted({i["granularity"] for i in items})
+        bad = [g for g in present if g not in declines]
+        if bad and not args.yes:
+            print(f"refusing: arm {args.arm} answers only {list(declines)} but the "
+                  f"draw contains {bad}. Pass --granularity {declines[0]} "
+                  f"(or --yes to score the declines as zeros).", file=sys.stderr)
+            return 2
+
     chat = None
     if needs_api:
         import brain_client
@@ -205,6 +224,33 @@ def cmd_run(args) -> int:
     elif args.arm in API_ARMS:
         chat = None
 
+    local_worker, local_cfg, arm_config = None, None, {}
+    if args.arm in LOCAL_ARMS:
+        from lyrics.bench import localgen
+        py = localgen.resolve_python()
+        if not py:
+            print("no interpreter with mlx_lm found — cannot run local arms "
+                  "(set LYRICS_BENCH_MLX_PY or run setup-lyrics-bench.sh --mlx)",
+                  file=sys.stderr)
+            return 2
+        local_cfg = localgen.LocalConfig(model=args.local_model, mode=args.local_mode,
+                                         run_seed=args.local_seed, k=args.k)
+        local_worker = localgen.Worker(python=py, cfg=local_cfg)
+        if not local_worker.start():
+            print(f"local backend failed to start: {local_worker.error}",
+                  file=sys.stderr)
+            return 2
+        # The worker's hello resolves what the config could only request, so the
+        # recorded identity is the weights that ACTUALLY loaded.
+        local_cfg.revision = local_worker.backend.get("revision") or ""
+        arm_config = local_cfg.arm_config({
+            "quant": local_worker.backend.get("quant") or {},
+            "tokenizerSha": local_worker.backend.get("tokenizerSha") or "",
+            "chatTemplateSha": local_worker.backend.get("chatTemplateSha") or "",
+            "mlxLmVersion": local_worker.backend.get("mlxLmVersion") or ""})
+        print(f"local backend: {local_cfg.model} @ {local_cfg.revision[:12]} "
+              f"{arm_config.get('quant')} via {py}")
+
     from phonology.core import Pronouncer
     freq_path = os.path.join(paths.data_root(), "corpus", "freq_table.json")
     freq = {}
@@ -215,11 +261,17 @@ def cmd_run(args) -> int:
     ctx = arms.ArmContext(chat=chat, pron=Pronouncer(), freq=freq, k=args.k,
                           cache=llm_cache.Cache(os.path.join(paths.subdir("cache",
                                                                           "llm"))),
-                          product_backend=args.product_backend)
+                          product_backend=args.product_backend,
+                          local=local_worker, local_cfg=local_cfg,
+                          arm_config=arm_config)
     ts = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
     out_dir = os.path.join(paths.subdir("runs"),
                            f"{ts}-{args.arm}-{args.slice}")
-    res = runner.run_arm(args.arm, items, ctx, out_dir=out_dir)
+    try:
+        res = runner.run_arm(args.arm, items, ctx, out_dir=out_dir)
+    finally:
+        if local_worker is not None:
+            local_worker.close()   # an 8GB MLX process must not outlive the bench
     print(json.dumps(res["summary"], indent=1, sort_keys=True))
     print(f"run dir: {out_dir}")
     return 0
@@ -689,6 +741,12 @@ def main(argv=None) -> int:
                         "— for calibration sittings, where the rater must be "
                         "able to play the track (never for arm evaluation)")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--local-model", default=os.environ.get(
+        "LYRICS_BENCH_LOCAL_MODEL", "mlx-community/Qwen2.5-14B-Instruct-4bit"),
+        help="local arms: mlx-lm model id (recorded in the arm config, not the name)")
+    p.add_argument("--local-mode", default="greedy", choices=["greedy", "sampled"])
+    p.add_argument("--local-seed", type=int, default=0,
+                   help="local arms: run-level seed; per-item seeds derive from it")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("judge")

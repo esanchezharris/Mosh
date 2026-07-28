@@ -56,6 +56,10 @@ _ARM_BEHAVIOUR_VERSIONS = {
     "llm-constrained": "v1", "product-llm": "v2",
     "rhyme-floor": "v2", "prompt-rhyme-menu": "v1", "nbest-rerank": "v1",
     "fusion-rerank": "v2",
+    # WS1. The model id / quant / mode are NOT in the version — they ride in
+    # ctx.arm_config, which the runner folds into the cache key and the summary.
+    # Baking them into the name would make every model swap a new scoreboard row.
+    "local-unconstrained": "v1", "local-constrained-endword": "v1",
 }
 check("every registered arm is version-pinned in the test",
       set(arms.ARMS) == set(_ARM_BEHAVIOUR_VERSIONS),

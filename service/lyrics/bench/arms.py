@@ -40,12 +40,32 @@ class ArmContext:
     k: int = 5
     cache: object = None                 # llm_cache.Cache
     product_backend: str = "llm"         # "fake" pins hermetic runs
+    local: object = None                 # localgen.Worker (or an injected stand-in)
+    local_cfg: object = None             # localgen.LocalConfig
+    # Folded into the arm-result cache key by the runner (only when non-empty) and
+    # echoed into the summary. Model id / revision / quant / mode live here rather
+    # than in the arm NAME, so a model swap re-keys the cache without minting a
+    # new scoreboard row.
+    arm_config: Dict = field(default_factory=dict)
 
     def cached_chat(self, messages: List[dict], **kw) -> dict:
         payload = {"messages": messages, **{k: v for k, v in sorted(kw.items())}}
         if self.cache is None:
             return self.chat(messages, **kw)
         return self.cache.cached_call(payload, lambda: self.chat(messages, **kw))
+
+
+# Granularities an arm will actually answer. Absent ⇒ all of them.
+#
+# This is not documentation: `metrics.score_item` scores an empty candidate list
+# as exact=0/topk=0, so an arm that quietly declines an item PUBLISHES a zero it
+# did not earn. `bench_cli` refuses a run whose drawn items include a granularity
+# the arm declines, and the arm returns status="declined" rather than [].
+ARM_GRANULARITIES: Dict[str, tuple] = {}
+
+
+def register_granularities(name: str, granularities: tuple) -> None:
+    ARM_GRANULARITIES[name] = tuple(granularities)
 
 
 def _rhyme_menu(item: dict, ctx: ArmContext, max_n: int = 40) -> List[str]:
@@ -409,6 +429,159 @@ def _depth_of(item: dict, fill: str, ctx: ArmContext) -> int:
     catch an arm drifting toward blandness."""
     from lyrics.bench.metrics import _rhyme_metrics
     return _rhyme_metrics(item, fill, ctx.pron).get("multi_depth") or 0
+
+
+# ── WS1: local open-weights arms (we own the decoder) ────────────────────────────
+
+def _seed_sha(item: dict) -> str:
+    """Content hash for per-item seeding — over `context` + `constraints` only.
+
+    Deliberately NOT the runner's hash, which also covers `target`: an arm must
+    stay blind to the held-out answer, and hashing it (even into a seed that never
+    reaches the prompt) is a hole in that. Re-masking the same itemId changes the
+    masked line anyway, so the seed still moves when the eval is rebuilt.
+    """
+    blob = json.dumps({k: item.get(k) for k in ("context", "constraints")},
+                      sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _prefix_suffix(item: dict):
+    """The bar up to the blank, and whatever follows it.
+
+    Uses the shared blank regex — NEVER `tokenize()`, whose word pattern silently
+    drops underscore tokens (the documented product-llm review blocker).
+    """
+    masked = item["context"]["maskedLine"]
+    m = _BLANK_REGION.search(masked)
+    if not m:
+        return masked, ""
+    return masked[:m.start()], masked[m.end():]
+
+
+def _local_prompt(item: dict):
+    """(instruction, assistant-prefill). The prefill makes the model CONTINUE a
+    bar rather than answer a question about one — the shape a base-ish instruct
+    model handles far better than a menu-in-prompt format."""
+    con, gran = item["constraints"], item["granularity"]
+    before = "\n".join(item["context"]["before"])
+    bits = [f"You are finishing a bar. Continue it naturally."]
+    if gran == "line":
+        bits.append(f"Write one line of about {con['lineSyllableTarget']} syllables.")
+    else:
+        blanks = item["context"]["maskedLine"].count("____")
+        bits.append(f"Fill in {blanks} word(s) totalling about "
+                    f"{con.get('syllables')} syllable(s).")
+    if con.get("rhymeWith"):
+        bits.append(f'The last word must {con.get("rhymeStrictness", "slant")}-rhyme '
+                    f'with "{con["rhymeWith"]}".')
+    prefix, _suffix = _prefix_suffix(item)
+    instruction = " ".join(bits) + ("\n\nPrevious bars:\n" + before if before else "")
+    prefill = (before + "\n" if before else "") + (prefix if gran != "line" else "")
+    return instruction, prefill
+
+
+def _first_words(text: str, n: int) -> str:
+    words = re.findall(r"[A-Za-z']+", text or "")
+    return " ".join(words[:max(1, n)])
+
+
+def _unavailable_arm(err: str, status: str = "unavailable") -> dict:
+    """No candidates and a named reason. Never a fabricated fill, and never a
+    fallback to another arm — that would launder its score into this arm's row."""
+    return {"candidates": [], "meta": {"status": status, "error": err}}
+
+
+@register("local-unconstrained", "v1")
+def arm_local_unconstrained(item: dict, ctx: ArmContext) -> dict:
+    """The local model with NO decoder constraint — M2's control.
+
+    Not comparable to `llm-constrained`: that arm asks a hosted model for a JSON
+    list of fills, this one continues a bar on local weights. The pair that
+    isolates the constraint is this arm against `local-constrained-endword`.
+    """
+    from lyrics.bench import localgen
+    if ctx.local is None:
+        return _unavailable_arm("no local backend configured")
+    cfg = ctx.local_cfg or getattr(ctx.local, "cfg", None) or localgen.LocalConfig()
+    instruction, prefill = _local_prompt(item)
+    seed = localgen.item_seed(item["itemId"], _seed_sha(item), cfg)
+    out = localgen.generate(ctx.local, op="generate", prompt=instruction, cfg=cfg,
+                            seed=seed, cache=ctx.cache,
+                            extra_request={"prefill": prefill})
+    if out.get("status") != "ok":
+        return _unavailable_arm(out.get("error") or "local generation failed")
+    text = (out.get("text") or "").strip().splitlines()[0] if out.get("text") else ""
+    gran = item["granularity"]
+    if gran == "line":
+        fill = text
+    else:
+        blanks = max(1, item["context"]["maskedLine"].count("____"))
+        fill = _first_words(text, blanks)
+    return {"candidates": _dedupe_cap([fill], ctx.k),
+            "meta": {"status": "ok", "seed": seed, "raw": text,
+                     "logprobMean": out.get("logprobMean"),
+                     "backend": out.get("backend")}}
+
+
+@register("local-constrained-endword", "v1")
+def arm_local_constrained_endword(item: dict, ctx: ArmContext) -> dict:
+    """Tier-1: the terminal word can only be a phonology-valid one.
+
+    Rhyme granularity ONLY. `word` and `span` items carry `rhymeWith: None`
+    (mask.py:199,275) so there is no pool to constrain to, and `line` needs the
+    genuine two-pass shape that is M3's problem. Declining is explicit — see
+    ARM_GRANULARITIES for why silence would be worse than refusal.
+
+    Note the decoding shape. The brief specified two passes (generate freely up to
+    the final slot, then constrain it), but `mask._rhyme_item` sets the blank at
+    `len(tokens)-1` — the blank IS the last word, so the prefix is fully supplied
+    and pass 1 would be dead code on 100% of this slice. This is single-pass
+    constrained decode over a fixed prefix.
+    """
+    from lyrics.bench import endword_trie, localgen
+    if item.get("granularity") != "rhyme":
+        return _unavailable_arm(f"granularity {item.get('granularity')!r} has no "
+                                f"end-word pool", status="declined")
+    if ctx.local is None:
+        return _unavailable_arm("no local backend configured")
+
+    pool = _rhyme_menu(item, ctx, max_n=200)
+    if not pool:
+        return _unavailable_arm("no phonology-valid pool for this partner",
+                                status="no-pool")
+
+    cfg = ctx.local_cfg or getattr(ctx.local, "cfg", None) or localgen.LocalConfig()
+    instruction, prefill = _local_prompt(item)
+    seed = localgen.item_seed(item["itemId"], _seed_sha(item), cfg)
+    out = localgen.generate(
+        ctx.local, op="generate_endword", prompt=instruction, cfg=cfg, seed=seed,
+        cache=ctx.cache, extra_request={"prefill": prefill, "pool": pool},
+        # The pool is part of the ANSWER, so it must be part of the key: a
+        # lexicon change moves rhyme_search's output and would otherwise replay
+        # stale picks against a new menu.
+        extra_key={"constraint": {"kind": "endword-trie",
+                                  "trieVersion": endword_trie.TRIE_VERSION,
+                                  "poolSha": endword_trie.pool_sha(pool),
+                                  "poolSize": len(pool)}})
+    if out.get("status") != "ok":
+        return _unavailable_arm(out.get("error") or "local generation failed")
+
+    words = [c["word"] for c in out.get("candidates") or []]
+    off = [w for w in words if w not in pool]
+    return {"candidates": _dedupe_cap(words, ctx.k),
+            "meta": {"status": "ok", "seed": seed, "poolSize": len(pool),
+                     # Zero by construction; reported so a broken mask is a NUMBER
+                     # rather than silence. arms_test asserts it stays zero.
+                     "offMenu": out.get("offMenu", 0) + len(off),
+                     "trieTop1": out.get("trieTop1"),
+                     "trieRankUnderExact": out.get("trieRankUnderExact"),
+                     "unreachable": out.get("unreachable"),
+                     "logprobMean": (out.get("candidates") or [{}])[0].get("logprobMean"),
+                     "backend": out.get("backend")}}
+
+
+register_granularities("local-constrained-endword", ("rhyme",))
 
 
 # ── the shipped product loop as an arm ───────────────────────────────────────────
