@@ -113,6 +113,24 @@ describe("mosh preset — current behavior preserved", () => {
     expect(r("mosh", { region: "clip.body", gesture: "dblclick" })).toBe(A.OPEN);
     expect(r("mosh", { region: "clip.body", gesture: "contextmenu" })).toBe(A.CONTEXT_MENU);
   });
+  it("empty: dblclick → LANE_NEW, contextmenu → CONTEXT_MENU", () => {
+    expect(r("mosh", { region: "empty", gesture: "dblclick" })).toBe(A.LANE_NEW);
+    expect(r("mosh", { region: "empty", gesture: "contextmenu" })).toBe(A.CONTEXT_MENU);
+  });
+  it("the new empty rules do not disturb the existing ones", () => {
+    expect(r("mosh", { region: "empty", gesture: "click" })).toBe(A.DESELECT);
+    expect(r("mosh", { region: "empty", gesture: "drag" })).toBe(A.MARQUEE);
+    expect(r("mosh", { region: "empty", gesture: "drag", tool: "range" })).toBe(A.TIME_SELECT);
+  });
+  it("clip dblclick still OPENs — the new empty rule does not out-rank it", () => {
+    expect(r("mosh", { region: "clip.body", gesture: "dblclick" })).toBe(A.OPEN);
+  });
+  it("LANE_NEW is mosh-only — other presets leave empty dblclick unbound", () => {
+    for (const t of ["ableton", "fl", "protools", "logic"]) {
+      expect(r(t, { region: "empty", gesture: "dblclick" })).toBeNull();
+      expect(r(t, { region: "empty", gesture: "contextmenu" })).toBeNull();
+    }
+  });
 });
 
 describe("all presets share the ruler transport surface", () => {

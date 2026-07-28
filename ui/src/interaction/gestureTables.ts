@@ -40,6 +40,11 @@ const MOSH: GestureTable = [
   { region: "empty", gesture: "click", action: A.DESELECT },
   { region: "empty", gesture: "drag", action: A.MARQUEE },
   { region: "empty", gesture: "drag", tool: "range", action: A.TIME_SELECT },
+  // v2 only: the classic Arrange resolves just `empty × drag`, so these two are inert
+  // there and classic behaviour is unchanged even on the mosh table. Both are deliberately
+  // absent from the other presets — v2 pins to "mosh" (see v2/lanes/ClipView.tsx).
+  { region: "empty", gesture: "dblclick", action: A.LANE_NEW },
+  { region: "empty", gesture: "contextmenu", action: A.CONTEXT_MENU },
   ...RULER_RULES,
 ];
 

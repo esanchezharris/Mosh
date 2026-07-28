@@ -22,6 +22,10 @@ export const EditorAction = {
   SPLIT: "split",
   OPEN: "open",
   PAINT: "paint",
+  // Empty-lane "make something here" (dblclick). The lane handler picks the concrete
+  // outcome from track state (see v2/lanes/laneNew.ts): a MIDI clip when the track
+  // already hosts an instrument, otherwise a menu offering instrument vs audio.
+  LANE_NEW: "lane_new",
   CONTEXT_MENU: "context_menu",
 
   // pointer — transport surface (ruler)
