@@ -18,8 +18,10 @@ Seeding reuses `core._group_anchors` verbatim so the planner and the generation
 loop can never disagree about which word anchors a group — the same discipline
 that makes `_analyze_line` reuse `_evaluate`.
 
-Lives here rather than in `phonology/core.py` (which stays LineSpec-agnostic) or
-`lyrics/core.py` (which stays free of the bench's frequency table).
+Lives here rather than in `phonology/core.py` (which stays LineSpec-agnostic).
+Frequency comes from the PRODUCT table (`phonology/freq.py`, vendored
+general-English ranks) unless the caller injects one — the bench's corpus-derived
+table never ships and stays bench-only.
 """
 from __future__ import annotations
 
@@ -49,10 +51,12 @@ def _pron():
 
 
 def _stopwords():
-    """Reuse the bench's list rather than re-deriving one — two copies would drift,
-    and the reason this filter exists at all is that raw frequency ranking answers
-    'been / an / a / they / but' (PROGRAM.md, 2026-07-26)."""
-    from lyrics.bench.mask import STOP_AND_FILLER
+    """The PRODUCT stop list (phonology/freq.py) — drift-pinned by equality test
+    against the bench's measured list, so the two cannot silently diverge and the
+    planner no longer imports bench code. The reason this filter exists at all is
+    that raw frequency ranking answers 'been / an / a / they / but'
+    (PROGRAM.md, 2026-07-26)."""
+    from phonology.freq import STOP_AND_FILLER
     return STOP_AND_FILLER
 
 
@@ -111,7 +115,11 @@ def plan_anchors(spec: dict, *, per_group: int = DEFAULT_PER_GROUP,
     RNG anywhere. Ties break alphabetically so the order is total.
     """
     pron = pronouncer or _pron()
-    freq = freq or {}
+    if freq is None:
+        # The product frequency table (vendored general-English ranks). An
+        # explicit {} stays {} — callers can force the historical alpha path.
+        from phonology.freq import load_freq
+        freq = load_freq()
     stop = _stopwords()
 
     from lyrics import core as product_core
@@ -134,7 +142,13 @@ def plan_anchors(spec: dict, *, per_group: int = DEFAULT_PER_GROUP,
                    if b is not None]
         budget = min(budgets) if budgets else None
 
-        raw = pron.rhyme_search(seed, strictness, max_n=200)
+        # The candidate UNIVERSE, truncated by frequency rank rather than
+        # alphabet (2026-07-28 pool fix): the old alpha-truncated 200 kept the
+        # alphabetically-early slice of a big rime family, and no amount of
+        # re-ranking below can recover words the truncation already dropped.
+        # With freq={} this is the historical capped alpha search byte-for-byte.
+        from phonology.freq import ranked_rhymes
+        raw = ranked_rhymes(pron, seed, strictness, max_n=200, freq=freq)
         scored: List[dict] = []
         for word in raw:
             if len(word) < 3 or word.lower() in stop:

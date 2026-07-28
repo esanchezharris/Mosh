@@ -223,6 +223,16 @@ def _rank(cands: List[dict], n: int = 3) -> List[dict]:
     return uniq[:n]
 
 
+def _rhyme_ends(anchor: str, strict: str) -> List[str]:
+    """One-syllable end-word hints for a rhyme-anchored line, truncated by
+    FREQUENCY rank rather than alphabet (freq.ranked_rhymes — the 2026-07-28 pool
+    fix: the alphabetical cap fed the template backend booz/brack-class junk, and
+    it shipped lines ending on 'graeme'). With no frequency table this is the
+    historical alpha top-40, byte-identical."""
+    from phonology import freq as pfreq
+    return pfreq.ranked_rhymes(_P, anchor, strict, max_n=40, syllables=1)
+
+
 def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int) -> List[dict]:
     """The deterministic, constraint-aware template backend (always available)."""
     target, tol, strict = _target(line, spec), int(line.get("syllableTol", 1) or 1), _strictness(line, spec)
@@ -233,7 +243,7 @@ def _fake_propose_line(line: dict, spec: dict, anchor: Optional[str], regen: int
         if fixed:
             end = fixed
         elif anchor:
-            ends = _P.rhyme_search(anchor, strict, max_n=40, syllables=1)
+            ends = _rhyme_ends(anchor, strict)
             end = _pick(ends, seed) if ends else _pick(_topic_ends(spec), seed)
         else:
             end = _pick(_topic_ends(spec), seed)

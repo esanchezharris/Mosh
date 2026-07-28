@@ -345,9 +345,20 @@ class Pronouncer:
 def get_rhymes(word: str, strictness: str = "slant", max_n: int = 50,
                syllables: Optional[int] = None,
                pronouncer: Optional[Pronouncer] = None) -> dict:
-    """Ranked rhyme result envelope. Used by the service /get_rhymes and the CLI."""
+    """Ranked rhyme result envelope. Used by the service /get_rhymes and the CLI.
+
+    Candidates are truncated by FREQUENCY rank, not alphabet (freq.ranked_rhymes
+    — the 2026-07-28 pool fix: an alphabetical cap kept `booz`/`brack`-class
+    entries while the word a writer would use fell off). Stopwords/fillers and
+    <3-letter words are filtered on that path — no writer ends a bar there.
+    `rankedBy` reports which ordering served the request; with no frequency
+    table the result is byte-identical to the historical alpha search.
+    """
+    from phonology import freq as _freq   # lazy: keeps core's import graph flat
     p = pronouncer or Pronouncer()
-    words = p.rhyme_search(word, strictness=strictness, max_n=max_n, syllables=syllables)
+    table = _freq.load_freq()
+    words = _freq.ranked_rhymes(p, word, strictness, max_n=max_n,
+                                syllables=syllables, freq=table)
     qphones = p.phones(word)
     return {
         "ok": True,
@@ -355,6 +366,7 @@ def get_rhymes(word: str, strictness: str = "slant", max_n: int = 50,
         "strictness": strictness,
         "inDict": qphones is not None,
         "queryPhones": qphones,   # lets the caller merge palette rhymes without re-pronouncing
+        "rankedBy": "freq" if table else "alpha",
         "candidates": [{"word": w, "syllables": p.syllables(w),
                         "grade": rhyme_grade(qphones or [], p.phones(w) or [])}
                        for w in words],
