@@ -31,6 +31,15 @@ test("empty-lane double-click on a bare track offers instrument vs audio", async
 });
 
 test("the Inspector FX tab shows an empty instrument slot on a bare track", async ({ page }) => {
+  // store.ts's refresh() only reassigns selectedTrackId when the current one no longer
+  // exists in the snapshot, so bootV2's seeded first track stays selected even after
+  // beforeEach creates the new bare Instrument track. Select it explicitly, or the
+  // Inspector below (and this whole test) would silently be looking at the wrong track.
+  const lane = page.getByTestId("v2-lane").last();
+  const trackId = await lane.getAttribute("data-track-id");
+  const header = page.locator(`[data-testid="v2-track-header"][data-track-id="${trackId}"]`);
+  await header.click();
+  await expect(page.getByTestId("v2-inspector")).toContainText("Inspector · Instrument");
   await page.getByTestId("v2-insp-tab-fx").click();
   await expect(page.getByTestId("instslot-choose")).toBeVisible();
 });
