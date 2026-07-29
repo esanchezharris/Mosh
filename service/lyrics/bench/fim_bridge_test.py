@@ -160,6 +160,42 @@ with tempfile.TemporaryDirectory() as td:
     except ValueError:
         check("adapter: alpha/r ≠ serve scale REFUSES (mis-weighted serve)", True)
 
+# ── opt-in: CUDA-trainer encoding parity vs mlx_lm's CompletionsDataset ─────────
+# The 2026-07-29 twin run failed because the two stacks encoded rows
+# differently (mlx_lm re-templates; the CUDA trainer concatenated raw). This
+# pins _cuda_train_fim.encode_row byte-for-byte against the real thing, with
+# the REAL tokenizer — a fake vocab cannot carry a chat-template drift.
+if os.environ.get("LYRICS_BENCH_MLX_SMOKE") == "1":
+    try:
+        from transformers import AutoTokenizer
+        from mlx_lm.tuner.datasets import CompletionsDataset
+
+        from lyrics.bench import _cuda_train_fim
+
+        _tok = AutoTokenizer.from_pretrained(
+            "mlx-community/Qwen2.5-14B-Instruct-4bit")
+        _rows = [
+            {"prompt": "<|im_start|>system\nfinish the bar<|im_end|>\n"
+                       "<|im_start|>user\nfill it<|im_end|>\n"
+                       "<|im_start|>assistant\nMan, these times has been ",
+             "completion": "rough\n"},
+            {"prompt": "plain instruction, no baked template, ends mid ",
+             "completion": "word\n"},
+        ]
+        _ds = CompletionsDataset(_rows, _tok, "prompt", "completion",
+                                 mask_prompt=True)
+        _ok = True
+        for _r in _rows:
+            _ids, _labels = _cuda_train_fim.encode_row(
+                _tok, _r["prompt"], _r["completion"], 4096)
+            _want_ids, _want_off = _ds.process(_r)
+            _ok = (_ok and _ids == list(_want_ids)
+                   and _labels[:_want_off] == [-100] * _want_off
+                   and _labels[_want_off:] == list(_want_ids)[_want_off:])
+        check("SMOKE: encode_row == CompletionsDataset.process (ids+mask)", _ok)
+    except ImportError as e:
+        print(f"[SKIP] SMOKE encoding parity: {e}")
+
 # ── opt-in ground truth vs mx.quantize (Apple silicon only) ─────────────────────
 if os.environ.get("LYRICS_BENCH_MLX_SMOKE") == "1":
     try:

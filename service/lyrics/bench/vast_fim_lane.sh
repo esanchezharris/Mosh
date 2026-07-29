@@ -194,10 +194,19 @@ $SSH "cd /root && python vast_dequant.py"
 log "5/6 train ($ITERS iters, batch $BATCH)"
 $SSH "cd /root && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python vast_train.py $ITERS $BATCH $LR"
 
-log "6/6 fetch the adapter"
+log "6/6 fetch the adapter(s)"
 mkdir -p "$OUT"
 scp -q -P "$SSH_PORT" $SSH_OPTS \
   "root@$SSH_HOST:/root/peft-out/adapter_model.safetensors" \
   "root@$SSH_HOST:/root/peft-out/adapter_config.json" "$OUT/"
+# The best-val checkpoint (saved whenever a val block improves) — the first
+# run's val minimum was mid-run and lost with the box. Fetch if it exists.
+if $SSH "test -d /root/peft-out-best"; then
+  mkdir -p "$OUT-best"
+  scp -q -P "$SSH_PORT" $SSH_OPTS \
+    "root@$SSH_HOST:/root/peft-out-best/adapter_model.safetensors" \
+    "root@$SSH_HOST:/root/peft-out-best/adapter_config.json" "$OUT-best/"
+  log "best-val adapter at $OUT-best"
+fi
 log "adapter at $OUT — the trap now destroys the box"
 # trap fires here: destroy + assert-empty + cost report

@@ -12,14 +12,38 @@ Config as JSON argv[1]:
    "iters": 1500, "batch": 16, "lr": 2e-5, "seed": 20260728, "maxLength": 384}
 
 Loss is COMPLETION-ONLY (labels -100 over the prompt), mirroring mlx_lm's
---mask-prompt. Data rows are {"prompt", "completion"} — the prompt already
-carries the full chat template from the mint's stage 2, so NO re-templating
-happens here (re-templating with a different tokenizer revision is the quiet
-way to train against prompts serve never sends).
+--mask-prompt. ENCODING: this trainer reproduces mlx_lm's
+`CompletionsDataset.process` byte-for-byte — the row is wrapped as a
+user/assistant chat turn via `apply_chat_template`, and the mask offset is
+the user-only template with `add_generation_prompt=True`. That wrap is a
+SECOND templating (the minted prompt already carries the serve template as
+text), which is exactly what mlx_lm trains; the 2026-07-29 twin run measured
+that this double-wrapped recipe transfers to serve (.393 exact) while the
+raw serve-parity concatenation anti-transfers (.173, below base .253) — see
+CUDA-BRIDGE.md. Matching mlx_lm here is what makes the twin bar meaningful.
+
+Checkpoints: `out` gets the endpoint; `out + "-best"` tracks the best val
+block (the first run's val minimum was mid-run and unrecoverable).
 """
 import json
 import random
 import sys
+
+
+def encode_row(tok, prompt, completion, max_len):
+    """mlx_lm `CompletionsDataset.process` parity — ids, labels (-100 to the
+    assistant boundary), truncated head-kept like mlx_lm's trainer. The
+    opt-in smoke in fim_bridge_test.py pins byte-parity against the real
+    thing; drift here silently trains a different task than the MLX twin."""
+    messages = [{"role": "user", "content": prompt},
+                {"role": "assistant", "content": completion}]
+    ids = list(tok.apply_chat_template(messages, return_dict=False))
+    offset = len(tok.apply_chat_template(
+        messages[:-1], add_generation_prompt=True, return_dict=False))
+    ids = ids[:max_len]
+    cut = min(offset, len(ids))
+    labels = [-100] * cut + ids[cut:]
+    return ids, labels
 
 
 def main():
@@ -64,14 +88,8 @@ def main():
     max_len = int(cfg.get("maxLength", 384))
 
     def encode(rows):
-        out = []
-        for r in rows:
-            p = tok(r["prompt"], add_special_tokens=False)["input_ids"]
-            c = tok(r["completion"], add_special_tokens=False)["input_ids"]
-            ids = (p + c)[:max_len]
-            labels = ([-100] * len(p) + c)[:max_len]
-            out.append((ids, labels))
-        return out
+        return [encode_row(tok, r["prompt"], r["completion"], max_len)
+                for r in rows]
 
     train_enc, valid_enc = encode(train), encode(valid)
     rng = random.Random(seed)
@@ -119,6 +137,7 @@ def main():
     ptr, run = 0, 0.0
     curve = [{"step": 0, "val": round(val_loss(), 4)}]
     print(f"step 0 val {curve[0]['val']}", flush=True)
+    best_val = curve[0]["val"]
     for step in range(1, int(cfg.get("iters", 1500)) + 1):
         opt.zero_grad()
         step_loss = 0.0
@@ -138,10 +157,15 @@ def main():
                           "val": round(v, 4)})
             print(f"step {step} train {run / 100:.4f} val {v:.4f}", flush=True)
             run = 0.0
+            if v < best_val:
+                best_val = v
+                model.save_pretrained(cfg["out"] + "-best")
+                print(f"best checkpoint at step {step} (val {v:.4f})",
+                      flush=True)
 
     model.save_pretrained(cfg["out"])
     print(json.dumps({"ok": True, "out": cfg["out"], "curve": curve,
-                      "seed": seed, "recipe": rec}))
+                      "bestVal": best_val, "seed": seed, "recipe": rec}))
 
 
 if __name__ == "__main__":
