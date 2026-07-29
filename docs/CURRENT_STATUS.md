@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 > **This is the only rolling status doc.** Dated snapshots live in
 > [`docs/resumption/`](resumption/). History lives in [`docs/worklog/`](worklog/INDEX.md).
