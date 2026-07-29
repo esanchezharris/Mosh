@@ -34,13 +34,18 @@
 // `v2/lanes/trackKinds.test.ts` pins the add-track wiring against the real mock backend.
 //
 // The worst instance of that floor leaking has now been closed, and it is worth recording
-// how it looked, because it looked like success. `v2/lanes/ClipView.tsx` imports four
-// PRESENTATIONAL exports from classic's `ui/Arrange.tsx`; the import drags the whole file
+// how it looked, because it looked like success. `v2/lanes/ClipView.tsx` imported four
+// PRESENTATIONAL exports from classic's `ui/Arrange.tsx`; the import dragged the whole file
 // (and everything only IT imports) into the graph. So `remove_track`, whose sole call site
-// in the entire codebase is the × on classic's track header, and the three annotation
+// in the entire codebase was the × on classic's track header, and the three annotation
 // commands, whose only call site is `ui/AnnotationRuler.tsx` — a component v2 never mounts —
-// all read as REACHABLE. Four commands a mouse-only v2 user cannot get to, reported green.
-// CLASSIC_ONLY_MODULES below is the fix: a declared boundary the walk does not cross.
+// all read as REACHABLE. Four commands a mouse-only v2 user could not get to, reported green.
+// CLASSIC_ONLY_MODULES below was the first fix: a declared boundary the walk does not cross.
+// The lasting fix removed the need for the entry: those four exports now live in their own
+// module (`ui/clipRenderers.tsx`), so v2 no longer imports Arrange.tsx at all and the whole
+// classic-only subtree is out of the graph STRUCTURALLY, not by policy. The map below is
+// empty today; the mechanism stays for the next file v2 imports for a helper but never
+// renders.
 
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -64,23 +69,16 @@ function resolveImport(fromDir: string, spec: string): string | null {
 // written reason, reviewed like UI_REACH_GAPS — not a convenience list.
 //
 // The walk STOPS at these rather than merely skipping them, because the leak is transitive:
-// skipping Arrange.tsx alone still leaves `ui/AnnotationRuler.tsx` in the graph (Arrange is
-// the only thing that imports it), and the annotation commands would keep reading as
-// reachable. Stopping at the boundary drops the whole classic-only subtree — measured, that
-// is Arrange.tsx plus RemotePlayheads.tsx, AnnotationRuler.tsx, TrackFxDrawer.tsx and
-// laneLayout.ts.
+// skipping the boundary file alone still leaves everything only IT imports in the graph.
+// When Arrange.tsx was the entry here, stopping at it dropped the whole classic-only
+// subtree (RemotePlayheads.tsx, AnnotationRuler.tsx, TrackFxDrawer.tsx, laneLayout.ts).
 //
 // Excluding a file v2 partly renders risks a FALSE NEGATIVE, which would be worse than the
-// leak. Checked before adding: the four exports v2 takes from Arrange.tsx (ClipWave,
-// ClipMidi, ClipDrumGrid, isDrumClip — Arrange.tsx:710-800) are canvas/SVG drawing with no
-// `exec(` and no store access at all, so they cannot be the only site of any command.
-const CLASSIC_ONLY_MODULES: Readonly<Record<string, string>> = {
-  "ui/Arrange.tsx":
-    "classic's whole arrangement view. v2 imports only ClipWave/ClipMidi/ClipDrumGrid/isDrumClip " +
-    "from it — presentational renderers that dispatch nothing — and mounts none of the file's own " +
-    "UI. Everything Arrange itself renders (its track headers, ruler, clip menu, and the " +
-    "AnnotationRuler + RemotePlayheads + TrackFxDrawer it pulls in) is unreachable in v2.",
-};
+// leak — before adding an entry, check that what v2 imports from it cannot be the only
+// site of any command (Arrange's four clip renderers qualified: pure canvas drawing, no
+// `exec(`, no store access; they have since moved to `ui/clipRenderers.tsx`, which is why
+// this map is empty today).
+const CLASSIC_ONLY_MODULES: Readonly<Record<string, string>> = {};
 
 /** Every module transitively reachable from an entry point, via relative imports.
  *  The walk does not cross a `stopAt` boundary: such a module is recorded, but its own
@@ -140,14 +138,23 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
     // A boundary that names a file which does not exist, or one the v2 graph never reached
     // anyway, silently excludes nothing while looking like it tightened the probe. That is
     // the same shape as the leak this whole mechanism exists to close, so it must fail.
+    //
+    // An EMPTY map is legal — it means the v2 graph currently needs no declared boundary
+    // (v2 stopped importing Arrange.tsx when the clip renderers moved to their own module,
+    // so the classic subtree is out of the graph structurally). The per-entry checks and
+    // the shrink check below are the mechanism, and they still run in full the moment a
+    // future entry is added.
     const unstopped = moduleGraph(join(SRC, "v2", "AppV2.tsx"));
     for (const rel of Object.keys(CLASSIC_ONLY_MODULES)) {
       const abs = join(SRC, rel);
       expect(existsSync(abs), `${rel} does not exist`).toBe(true);
       expect(unstopped.includes(abs), `${rel} is not in the v2 graph — excluding it does nothing`).toBe(true);
     }
-    // And the exclusion must actually shrink the searched surface, or it is decoration.
-    expect(files.length).toBeLessThan(unstopped.filter((f) => !f.startsWith(join(SRC, "agent")) && !f.endsWith("bridge.mock.ts")).length);
+    // With entries present, the exclusion must actually shrink the searched surface, or it
+    // is decoration. (With no entries there is nothing to shrink: the stopped and unstopped
+    // graphs are identical by construction.)
+    if (Object.keys(CLASSIC_ONLY_MODULES).length > 0)
+      expect(files.length).toBeLessThan(unstopped.filter((f) => !f.startsWith(join(SRC, "agent")) && !f.endsWith("bridge.mock.ts")).length);
   });
 
   it("every catalog command is reachable, or declared with a reason", () => {
