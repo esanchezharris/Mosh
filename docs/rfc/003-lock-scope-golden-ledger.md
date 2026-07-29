@@ -8,9 +8,12 @@
 [`LockManager::classify`](../../src/multiplayer/LockManager.cpp) decides which multiplayer lock
 scope guards each MoshOps command. Exhaustiveness is enforced by a drift guard in
 [`tests/test_multiplayer_lock_manager.cpp`](../../tests/test_multiplayer_lock_manager.cpp)
-(AL-011): every dispatched command must be classified or reasoned-allow-listed — 209 = 170 + 39
-today. But only ~61 spot assertions pin **which** scope a command gets; the other ~150
-classifications could silently flip scope without any test noticing. Worse, the documentation
+(AL-011): every dispatched command must be classified or reasoned-allow-listed — today
+`classify()`'s explicit sets pin 171 commands (77 Unguarded + 56 Track + 38 Clip), the remaining
+38 fall through to the `SessionGlobal` fail-closed default, and the drift guard's allow-list has
+39 entries with one overlap (`set_key` sits in BOTH the Unguarded set and the allow-list:
+171 + 39 − 1 = 209). But only 59 spot assertions pin **which** scope a command gets; the other
+150 classifications could silently flip scope without any test noticing. Worse, the documentation
 disagrees with the code: CLAUDE.md's gotcha claims "unclassified means unguarded", while
 `LockManager.cpp:108` actually fails **CLOSED** to `Scope::SessionGlobal` ("guarded until
 deliberately classified"). A written reason is a claim about the code, and this one aged wrong —
@@ -34,11 +37,13 @@ row without a dispatched command; no dispatched command without a golden row). T
 *inside* the existing `test_multiplayer_lock_manager.cpp` because `tests/CMakeLists.txt` is on
 the exclusion list in [`classify.sh`](../../scripts/auto-loop/classify.sh) — extending an
 existing TU needs no build-file change. Chosen because the PR review of the 209 rows —
-especially the ~77 `Unguarded` ones — **is** the classification audit, and every future scope
-change becomes a visible diff on a reviewable file.
+especially the 77 `Unguarded` ones — **is** the classification audit, and every future scope
+change becomes a visible diff on a reviewable file. (Ledger ground truth as generated:
+209 = 77 Unguarded + 56 Track + 38 Clip + 38 SessionGlobal. The `set_key` double-listing above
+should get a cleanup note in the ledger PR.)
 
 **(b) More spot assertions — REJECTED because** spot coverage is exactly what allowed the
-current gap: ~61 of 209 pinned, and nobody can see which 148 are not.
+current gap: 59 of 209 pinned, and nobody can see which 150 are not.
 
 **(c) Fix only the CLAUDE.md wording — REJECTED because** it corrects the stale claim but pins
 nothing; the next scope flip is still silent. (The wording still gets fixed, in the program's
@@ -56,7 +61,7 @@ fourth registration: its golden row.
 
 One PR. Change-class per [`classify.sh`](../../scripts/auto-loop/classify.sh): touches `tests/`
 (not in the cheap set) → **native**; full gate; owner-merge per program routing. The PR
-description must call out the ~77 `Unguarded` rows explicitly so the review is the audit, not a
+description must call out the 77 `Unguarded` rows explicitly so the review is the audit, not a
 rubber stamp.
 
 ## Verification

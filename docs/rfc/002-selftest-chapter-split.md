@@ -56,6 +56,14 @@ leading run of sections per PR. Change-class per
 owner-merge. Each PR's review checks the moved chapter is verbatim (`--color-moved`) and the
 `SelfTestCtx` additions are exactly the locals the compiler demanded.
 
+A fourth textual consumer constrains this split:
+[`scripts/daw-conformance/coverage_check.py`](../../scripts/daw-conformance/coverage_check.py)
+uses `src/app/SelfTest.cpp` as the `selftest` coverage-evidence surface, so moving sections out
+of that file would strip coverage for every command exercised only there (loud gate-red, not
+silent). The guards-first PR (RFC 001's A-PR0) already widens that surface to
+`src/app/SelfTest*.cpp` + `src/app/selftest/*.cpp`; each split PR must still confirm
+`coverage_check.py` passes with unchanged covered/waived counts.
+
 ## Verification
 
 - **Identity oracle (the load-bearing one):** the `--selftest` stderr transcript, with timing
