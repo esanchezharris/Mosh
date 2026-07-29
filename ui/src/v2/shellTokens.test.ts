@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { readShellCss } from "./cssSource";
 
 // PR-2.6 — the type and radius scales were DEFINED in shell.css but essentially unadopted
 // (`var(--v2-fs-` appeared once; `var(--v2-space-` zero times). 129 declarations matched a
@@ -18,8 +16,7 @@ import { dirname, join } from "node:path";
 // visual harness covers few of those sites. It was measured at ~192 declarations and
 // dropped as net-negative.
 
-const here = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(here, "shell.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const css = readShellCss().replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** Values that legitimately sit outside the scale, each with why. Shrink-only. */
 const DOCUMENTED_LITERALS: Record<string, Record<string, string>> = {
