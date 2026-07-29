@@ -310,6 +310,15 @@ def cmd_run(args) -> int:
         ctx.xenc_score = lambda item, fills: _xenc.score_candidates(
             item, fills, cache=ctx.cache)
         ctx.arm_config = {**ctx.arm_config, "xencModel": _xenc.XENC_MODEL}
+    # Pool depth MUST reach arm_config or a sweep is a lie: runner.py keys its
+    # per-item cache on (arm, version, item, armConfig), so a depth change that
+    # lives only in the arm body replays the previous depth's answers and
+    # reports "no effect" — measured 2026-07-29, a depth-1000 run came back
+    # byte-identical with poolSize still 200. Added only when the override is
+    # set, so the default key (and every paid cached result) is unchanged.
+    if os.environ.get("LYRICS_BENCH_POOL_MAX"):
+        ctx.arm_config = {**ctx.arm_config,
+                          "poolMax": int(os.environ["LYRICS_BENCH_POOL_MAX"])}
     ts = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
     out_dir = os.path.join(paths.subdir("runs"),
                            f"{ts}-{args.arm}-{args.slice}")
