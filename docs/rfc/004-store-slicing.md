@@ -77,3 +77,4 @@ auto-merge on a green gate + review per the program's routing.
 ## Status log
 
 - 2026-07-28 — accepted (owner approved the program plan).
+- 2026-07-29 — **implemented and merged**: #493 (event-rail extraction to `store/events.ts`) and #498 (slice composition — `store/{telemetry,mp,jobs,catalogs}.ts`). Both verified pure motion; `useStore`, the `State` type, every type re-export, `window.__moshStore` and the module-level `mpSyncChain` singleton all unchanged, so no consumer import moved. Full vitest + e2e green.
