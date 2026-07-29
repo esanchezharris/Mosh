@@ -998,3 +998,33 @@ numbers and hashes only.
   incumbent cap — apparently picked by convention — is now empirically the
   right number with the curve measured on both sides, and pool depth is closed
   as a lever.
+- **2026-07-29 — 3x DATA DOES NOT HELP: the FIM-LoRA lane is SATURATED at
+  ~.42 exact.** Attempt 8b trained the v3 mint (54,456 triples / 20,235 songs)
+  for 3000 iters (~0.93 epoch), capped val, best-val checkpointing; $1.60,
+  207 min, G1/G4 clean, account independently verified `[]`. Frozen 150:
+
+  | adapter | data | exact | topk | perfect |
+  |---|---|---|---|---|
+  | fim-v2-ckpt1000 | v2 (18k) | **.433** | .540 | .293 |
+  | bridged-cuda-v3-best | v2 (18k) | .427 | .580 | .293 |
+  | bridged-cuda-v4-best | v3 (54k) | .413 | .567 | .287 |
+  | bridged-cuda-v4 | v3 (54k) | .413 | .540 | .273 |
+
+  delta -.020 vs the incumbent, McNemar p = .51 — indistinguishable, and NOT
+  the gain the loss curve implied. Stated precisely (val losses are NOT
+  comparable across mints): v3 lifted the overfit ceiling exactly as
+  diagnosed — monotone improvement through all 3000 steps, best 0.7291 @ 2900,
+  where v2 turned over at step 1000 — **and `exact` still did not move.**
+  Better held-out FIM completion loss does not transfer into choosing the
+  artist's word. Every trained adapter and the prompt champion now form ONE
+  statistical cluster (.413-.433): fim-v2 .433, v3-best .427, v4 .413,
+  prompt-rhyme-menu-fp .413.
+  **Night's thesis, five independent measurements agreeing:** the machine side
+  is saturated — reranking (M6 + 2-way selector + frequency), pool depth
+  (200 is an interior optimum), and now data scale are all closed. The
+  remaining headroom is the human loop: oracle-of-2 .553, agreement 84.6%
+  precise, palette-40 holds the artist's word .800. Next lever is therefore a
+  PRODUCT change (present the palette / the two-way choice), not a training
+  change — and the one measurement that would change this conclusion is the
+  queued keep-rate sitting, since `exact` is a diagnostic by the program's own
+  decision record.
