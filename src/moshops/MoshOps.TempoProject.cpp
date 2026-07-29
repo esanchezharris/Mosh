@@ -1,0 +1,481 @@
+// RFC 001 (A-PR2) — MoshOps partial-class split: the transport/tempo/project
+// command bodies (set_transport, SES-001 tempo map: set_tempo/time-signature/
+// insert/remove tempo + time-sig changes/tempo curve, set_metronome, KEY-001
+// musical key, PRJ-008 project settings, G2b count-in), moved VERBATIM from
+// MoshOps.cpp — including the KEY-001 file-local validation tables (their only
+// consumers are here) and the kDefaultKeyTonic/kDefaultKeyMode static member
+// definitions. Same class, same member functions — only the translation unit
+// changed. The dispatch if-chain and all transaction/log/result/emit plumbing
+// stay in MoshOps.cpp (one mutation path, by construction).
+
+#include "MoshOps.h"
+#include "state/Ids.h"
+#include "state/CountIn.h"
+#include "state/Migrations.h"
+
+namespace mosh
+{
+using namespace juce;
+
+juce::var MoshOps::cmdSetTransport (const juce::var& args)
+{
+    auto& transport = eng.edit().getTransport();
+    const auto action = args.getProperty ("action", var()).toString();
+
+    // Play/record touch the audio device; skip them in no-audio (headless) mode.
+    if ((action == "play" || (action == "toggle" && ! transport.isPlaying())) && eng.hasAudio())
+    {
+        eng.ensurePlaybackContext();
+        transport.play (false);
+    }
+    else if (action == "stop" || (action == "toggle" && transport.isPlaying()))
+    {
+        transport.stop (false, false);
+    }
+    else if (action == "record" && eng.hasAudio())
+    {
+        // G2b — re-sync the live Edit's pre-roll to the stored project preference
+        // right before every record start, so a save/reload that swapped in a
+        // different Edit instance (or a countInBars change from another session)
+        // is always honored. transport.record() below is what actually consults
+        // it (te::Edit::getNumCountInBeats(), via TransportControl).
+        applyCountInToEdit();
+        eng.ensurePlaybackContext();
+        transport.record (false);
+    }
+
+    if (action == "to_end")
+        transport.setPosition (tracktion::TimePosition::fromSeconds (eng.edit().getLength().inSeconds()));
+    else if (action == "to_start")
+        transport.setPosition (tracktion::TimePosition());
+
+    if (args.hasProperty ("position"))
+        transport.setPosition (tracktion::TimePosition::fromSeconds ((double) args.getProperty ("position", 0.0)));
+
+    if (args.hasProperty ("loop"))
+        transport.looping = (bool) args.getProperty ("loop", false);
+
+    if (args.hasProperty ("loopStart") && args.hasProperty ("loopEnd"))
+        transport.setLoopRange ({ tracktion::TimePosition::fromSeconds ((double) args.getProperty ("loopStart", 0.0)),
+                                  tracktion::TimePosition::fromSeconds ((double) args.getProperty ("loopEnd", 0.0)) });
+
+    logLine ("set_transport", args, true, {}, false);          // transport is NOT undoable
+    emit ("transport", transportToVar());
+    return okResult ("set_transport", transportToVar());
+}
+
+juce::var MoshOps::cmdSetTempo (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
+    if (tempo == nullptr) return errResult ("set_tempo", "no tempo setting");
+
+    const double bpm = juce::jlimit (20.0, 999.0, (double) args.getProperty ("bpm", 120.0));
+    beginTxn ("set_tempo");
+    tempo->setBpm (bpm);
+    logLine ("set_tempo", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("bpm", tempo->getBpm());
+    return okResult ("set_tempo", var (data));
+}
+
+juce::var MoshOps::cmdSetTimeSignature (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    auto* ts = edit.tempoSequence.getTimeSig (0);
+    if (ts == nullptr) return errResult ("set_time_signature", "no time signature");
+
+    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
+    const int den = (int) args.getProperty ("denominator", 4);
+    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
+    bool denOk = false;
+    for (int d : validDen) if (d == den) denOk = true;
+    if (! denOk) return errResult ("set_time_signature", "denominator must be a power of two (1..32)");
+
+    beginTxn ("set_time_signature");
+    ts->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
+    logLine ("set_time_signature", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("numerator", ts->numerator.get());
+    data->setProperty ("denominator", ts->denominator.get());
+    return okResult ("set_time_signature", var (data));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SES-001 — the tempo MAP. te::TempoSequence natively supports multi-point tempo
+// and time-sig changes (insert/remove/toBeats/toTime; playback honors the map
+// with no clip-anchoring work). Mosh inserts STEP changes only: curve = 1.0 is
+// the engine's hold-then-jump form (the ramp branch in tracktion_core's
+// Sequence::Section build is gated on curve != +-1.0). Bezier ramps + audio warp
+// are deliberately deferred. set_tempo / set_time_signature keep editing point 0.
+// ─────────────────────────────────────────────────────────────────────────────
+juce::var MoshOps::cmdInsertTempoChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const double time = (double) args.getProperty ("time", -1.0);
+    if (time < 0.0) return errResult ("insert_tempo_change", "missing/negative 'time'");
+    const double bpm = (double) args.getProperty ("bpm", 0.0);
+    if (bpm < 20.0 || bpm > 999.0) return errResult ("insert_tempo_change", "bpm must be 20..999");
+
+    // Optional curve: shapes the ramp FROM the PREVIOUS point TO this one is NOT how
+    // the engine models it — curve lives on the setting that STARTS a span (this
+    // setting's curve shapes the ramp from HERE to the NEXT point). 1.0 (default) =
+    // step (hold-then-jump); values in (-1, 1) ramp: <0 log, 0 linear, >0 exponential.
+    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
+
+    beginTxn ("insert_tempo_change");
+    auto setting = edit.tempoSequence.insertTempo (tracktion::TimePosition::fromSeconds (time));
+    if (setting == nullptr) return errResult ("insert_tempo_change", "insertTempo failed");
+    setting->setBpm (bpm);
+    setting->setCurve ((float) curve);
+
+    logLine ("insert_tempo_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("time", setting->getStartTime().inSeconds());
+    data->setProperty ("bpm", setting->getBpm());
+    data->setProperty ("curve", (double) setting->getCurve());
+    data->setProperty ("count", edit.tempoSequence.getNumTempos());
+    return okResult ("insert_tempo_change", var (data));
+}
+
+juce::var MoshOps::cmdSetTempoCurve (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    if (index < 0 || index >= edit.tempoSequence.getNumTempos())
+        return errResult ("set_tempo_curve", "index must be 0..numTempos-1");
+    if (! args.hasProperty ("curve"))
+        return errResult ("set_tempo_curve", "missing 'curve'");
+    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
+
+    // The curve on point N shapes the span FROM point N TO point N+1 (the engine's
+    // Section build gates the ramp subdivision on currTempo.curve != +-1).
+    beginTxn ("set_tempo_curve");
+    edit.tempoSequence.getTempo (index)->setCurve ((float) curve);
+    logLine ("set_tempo_curve", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("index", index);
+    data->setProperty ("curve", curve);
+    return okResult ("set_tempo_curve", var (data));
+}
+
+juce::var MoshOps::cmdRemoveTempoChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    // Index 0 is the edit's base tempo (the engine requires a first setting; it is
+    // edited via set_tempo, never removed).
+    if (index <= 0 || index >= edit.tempoSequence.getNumTempos())
+        return errResult ("remove_tempo_change", "index must be 1..numTempos-1");
+
+    beginTxn ("remove_tempo_change");
+    // remapEdit=false: Mosh's command surface is seconds-anchored, so removing a
+    // tempo point must not shift clip positions.
+    edit.tempoSequence.removeTempo (index, false);
+    logLine ("remove_tempo_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("count", edit.tempoSequence.getNumTempos());
+    return okResult ("remove_tempo_change", var (data));
+}
+
+juce::var MoshOps::cmdInsertTimeSigChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const double time = (double) args.getProperty ("time", -1.0);
+    if (time < 0.0) return errResult ("insert_time_sig_change", "missing/negative 'time'");
+    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
+    const int den = (int) args.getProperty ("denominator", 4);
+    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
+    bool denOk = false;
+    for (int d : validDen) if (d == den) denOk = true;
+    if (! denOk) return errResult ("insert_time_sig_change", "denominator must be a power of two (1..32)");
+
+    beginTxn ("insert_time_sig_change");
+    auto setting = edit.tempoSequence.insertTimeSig (tracktion::TimePosition::fromSeconds (time));
+    if (setting == nullptr) return errResult ("insert_time_sig_change", "insertTimeSig failed");
+    setting->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
+
+    logLine ("insert_time_sig_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("numerator", setting->numerator.get());
+    data->setProperty ("denominator", setting->denominator.get());
+    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
+    return okResult ("insert_time_sig_change", var (data));
+}
+
+juce::var MoshOps::cmdRemoveTimeSigChange (const juce::var& args)
+{
+    auto& edit = eng.edit();
+    const int index = (int) args.getProperty ("index", -1);
+    if (index <= 0 || index >= edit.tempoSequence.getNumTimeSigs())
+        return errResult ("remove_time_sig_change", "index must be 1..numTimeSigs-1");
+
+    beginTxn ("remove_time_sig_change");
+    edit.tempoSequence.removeTimeSig (index);
+    logLine ("remove_time_sig_change", args, true, {}, true);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
+    return okResult ("remove_time_sig_change", var (data));
+}
+
+juce::var MoshOps::cmdSetMetronome (const juce::var& args)
+{
+    // The click track is a transport/monitoring preference (like loop), not a
+    // session edit — not undoable.
+    const bool on = (bool) args.getProperty ("enabled", false);
+    eng.edit().clickTrackEnabled = on;
+    logLine ("set_metronome", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject(); data->setProperty ("metronome", on);
+    return okResult ("set_metronome", var (data));
+}
+
+// KEY-001 — the musical-key domains. These MUST stay byte-identical to the literal
+// arrays in ui/src/vendor/voice.js (NOTE_PC keys + SCALES keys); Moshi's voice snaps
+// every earcon to (tonic, mode), so a mismatch would make the host accept a key the
+// voice cannot sing. Validated by cmdSetKey; the snapshot defaults below match the
+// voice's neutral start (A4 tonic + SCALES.minor).
+namespace
+{
+    // voice.js NOTE_PC keys (enharmonic spellings included), in declaration order.
+    const char* const kNotePcNames[] = {
+        "C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb",
+        "G", "G#", "Ab", "A", "A#", "Bb", "B"
+    };
+    // voice.js SCALES keys.
+    const char* const kScaleNames[] = {
+        "major", "minor", "dorian", "mixolydian", "pentatonic", "chromatic"
+    };
+
+    bool isValidTonic (const juce::String& t)
+    {
+        for (auto* n : kNotePcNames) if (t == n) return true;
+        return false;
+    }
+    bool isValidMode (const juce::String& m)
+    {
+        for (auto* n : kScaleNames) if (m == n) return true;
+        return false;
+    }
+}
+
+const char* const MoshOps::kDefaultKeyTonic = "A";
+const char* const MoshOps::kDefaultKeyMode  = "minor";
+
+// PRJ-008 — the MOSH_PROJECT child of the Edit's own ValueTree (mirrors the
+// MOSH_RENDERLAYER parenting). Created empty on first access so it saves/reloads
+// with the .tracktionedit. Pure storage accessor: no undo manager, no logging.
+juce::ValueTree MoshOps::projectSettingsTree()
+{
+    auto state = eng.edit().state;
+    auto node = state.getChildWithName (ids::MOSH_PROJECT);
+    if (! node.isValid())
+    {
+        node = juce::ValueTree (ids::MOSH_PROJECT);
+        state.appendChild (node, nullptr);   // nullptr: not an undoable edit (preference)
+    }
+    return node;
+}
+
+juce::var MoshOps::projectSettingsToVar()
+{
+    // Project INTENT where stored; live device readout as the fallback (device values
+    // stay the live truth, project = intent). timeBase has no device analogue, so it
+    // defaults to "seconds". NON-mutating read (snapshot() is read-only by contract):
+    // getChildWithName returns an invalid tree when unset, whose hasProperty() is false,
+    // so the device-fallback below handles the absent case without writing the Edit tree.
+    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    auto& dm = eng.engine().getDeviceManager();
+
+    double sr = dm.getSampleRate();
+    if (sr < 7000.0) sr = 44100.0;
+    if (node.hasProperty (ids::projectSampleRate))
+        sr = (double) node.getProperty (ids::projectSampleRate);
+
+    int bd = dm.getBitDepth();
+    if (bd != 16 && bd != 24 && bd != 32) bd = 24;
+    if (node.hasProperty (ids::projectBitDepth))
+        bd = (int) node.getProperty (ids::projectBitDepth);
+
+    juce::String tb = node.hasProperty (ids::timeBase)
+                          ? node.getProperty (ids::timeBase).toString()
+                          : juce::String ("seconds");
+
+    // KEY-001 — the musical key, ALWAYS present so the UI never sees a missing field.
+    // Default A/minor (matches voice.js's neutral A4 tonic + SCALES.minor). Stored on
+    // the same MOSH_PROJECT node; falls back to the default where unset.
+    juce::String tonic = node.hasProperty (ids::musicalTonic)
+                             ? node.getProperty (ids::musicalTonic).toString()
+                             : juce::String (kDefaultKeyTonic);
+    juce::String keyMode = node.hasProperty (ids::musicalMode)
+                               ? node.getProperty (ids::musicalMode).toString()
+                               : juce::String (kDefaultKeyMode);
+
+    auto* key = new DynamicObject();
+    key->setProperty ("tonic", tonic);
+    key->setProperty ("mode", keyMode);
+
+    // G2b — count-in / pre-roll bars, ALWAYS present (default 0/off) so the UI
+    // never sees a missing field, mirroring the key default above.
+    const int countInBars = node.hasProperty (ids::countInBars)
+                                ? (int) node.getProperty (ids::countInBars) : 0;
+
+    auto* o = new DynamicObject();
+    o->setProperty ("sampleRate", sr);
+    o->setProperty ("bitDepth", bd);
+    o->setProperty ("timeBase", tb);
+    o->setProperty ("key", var (key));
+    o->setProperty ("countInBars", countInBars);
+    // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
+    // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
+    o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
+    return var (o);
+}
+
+juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
+{
+    // Per-project format / time-base INTENT — a producer preference (the export/
+    // format default + the timeline display base), NOT a live device change. Stored
+    // on a MOSH_PROJECT child of the Edit tree so it persists with the session, and
+    // followed the cmdSetMetronome template exactly: no Tracktion transaction (no
+    // beginNewTransaction), logLine(..., false), emitSnapshotInvalidated. Works
+    // headless (no audio device required).
+    //
+    // Validate every supplied field before writing anything (partial patch: each
+    // field is optional, but a present field that fails validation is a hard error
+    // and leaves the stored settings untouched).
+    if (args.hasProperty ("sampleRate"))
+    {
+        const double sr = (double) args.getProperty ("sampleRate", 0.0);
+        if (sr < 7000.0)
+            return errResult ("set_project_settings", "sampleRate must be >= 7000");
+    }
+    if (args.hasProperty ("bitDepth"))
+    {
+        const int bd = (int) args.getProperty ("bitDepth", 0);
+        if (bd != 16 && bd != 24 && bd != 32)
+            return errResult ("set_project_settings", "bitDepth must be one of 16, 24, 32");
+    }
+    if (args.hasProperty ("timeBase"))
+    {
+        const auto tb = args.getProperty ("timeBase", var()).toString();
+        if (tb != "seconds" && tb != "barsBeats")
+            return errResult ("set_project_settings", "timeBase must be 'seconds' or 'barsBeats'");
+    }
+
+    auto node = projectSettingsTree();
+    if (args.hasProperty ("sampleRate"))
+        node.setProperty (ids::projectSampleRate, (double) args.getProperty ("sampleRate", 0.0), nullptr);
+    if (args.hasProperty ("bitDepth"))
+        node.setProperty (ids::projectBitDepth, (int) args.getProperty ("bitDepth", 0), nullptr);
+    if (args.hasProperty ("timeBase"))
+        node.setProperty (ids::timeBase, args.getProperty ("timeBase", var()).toString(), nullptr);
+
+    eng.markDirty();                                           // edit-state change → needs re-save (gap 1)
+    logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_project_settings", projectSettingsToVar());
+}
+
+juce::var MoshOps::cmdSetKey (const juce::var& args)
+{
+    // KEY-001 — the project's musical key (tonic + mode). Producer INTENT, stored on
+    // the same MOSH_PROJECT node as the format/time-base prefs, so it saves/reloads
+    // with the .tracktionedit. Followed the cmdSetProjectSettings template exactly:
+    // validate-then-write, NO Tracktion transaction (no beginNewTransaction),
+    // logLine(..., false) → NON-undoable preference, emitSnapshotInvalidated. Works
+    // headless (no audio device required).
+    //
+    // Validate against the voice.js NOTE_PC / SCALES domains BEFORE writing anything
+    // (a present-but-invalid field is a hard error that leaves storage untouched).
+    if (args.hasProperty ("tonic"))
+    {
+        const auto tonic = args.getProperty ("tonic", var()).toString();
+        if (! isValidTonic (tonic))
+            return errResult ("set_key", "tonic must be one of the voice.js NOTE_PC names (C..B incl. enharmonics)");
+    }
+    if (args.hasProperty ("mode"))
+    {
+        const auto m = args.getProperty ("mode", var()).toString();
+        if (! isValidMode (m))
+            return errResult ("set_key", "mode must be one of the voice.js SCALES (major|minor|dorian|mixolydian|pentatonic|chromatic)");
+    }
+
+    auto node = projectSettingsTree();
+    if (args.hasProperty ("tonic"))
+        node.setProperty (ids::musicalTonic, args.getProperty ("tonic", var()).toString(), nullptr);
+    if (args.hasProperty ("mode"))
+        node.setProperty (ids::musicalMode, args.getProperty ("mode", var()).toString(), nullptr);
+
+    eng.markDirty();                              // edit-state change → needs re-save (gap 1)
+    logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
+    emitSnapshotInvalidated();
+    return okResult ("set_key", projectSettingsToVar());
+}
+
+// G2b — count-in / pre-roll bars. te::Edit::CountIn's none/oneBar/twoBar values
+// are 0/1/2 — exactly mosh::countin's {0,1,2} bars domain — so a validated bars
+// value casts straight across with no lookup table. Asserted here (rather than in
+// the engine-free state/CountIn.h) because only this translation unit can see the
+// real tracktion_engine enum.
+static_assert (static_cast<int> (te::Edit::CountIn::none)   == 0
+            && static_cast<int> (te::Edit::CountIn::oneBar) == 1
+            && static_cast<int> (te::Edit::CountIn::twoBar) == 2,
+               "mosh::countin's {0,1,2} bars domain assumes te::Edit::CountIn's "
+               "none/oneBar/twoBar == 0/1/2 — update the cast in applyCountInToEdit "
+               "if tracktion_engine ever renumbers this enum");
+
+void MoshOps::applyCountInToEdit()
+{
+    // Re-applies the STORED preference to the LIVE Edit's real pre-roll every time
+    // it's called (cmdSetCountIn, and cmdSetTransport's "record" branch) rather
+    // than only at load time — so recording always honors the CURRENT project
+    // setting regardless of when/how the Edit was loaded. Cheap (writes engine
+    // property storage; no audio device needed) and safe headless.
+    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
+    const int bars = node.hasProperty (ids::countInBars) ? (int) node.getProperty (ids::countInBars) : 0;
+    const int clamped = mosh::countin::isValidBars (bars) ? bars : 0;   // defensive: never feed the engine a bad value
+    eng.edit().setCountInMode (static_cast<te::Edit::CountIn> (clamped));
+}
+
+juce::var MoshOps::cmdSetCountIn (const juce::var& args)
+{
+    // G2b — count-in / pre-roll bars before recording. Producer INTENT, stored on
+    // the same MOSH_PROJECT node as timeBase/key, following the cmdSetKey template
+    // exactly: validate-then-write, NO Tracktion transaction (no
+    // beginNewTransaction), logLine(..., false) → NON-undoable preference,
+    // emitSnapshotInvalidated. Works headless (no audio device required).
+    //
+    // ENGINE-WIRED, not just stored: applyCountInToEdit() below pushes the value
+    // straight into tracktion_engine's own pre-roll (te::Edit::setCountInMode),
+    // which TransportControl's record-start logic already consults
+    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an
+    // audible click through the pre-roll before capture actually begins — see
+    // tracktion_TransportControl.cpp's performRecord. No new recording machinery was
+    // needed; Mosh just exposes + persists the setting the engine already honors.
+    if (! args.hasProperty ("bars"))
+        return errResult ("set_count_in", "bars is required");
+
+    const int bars = (int) args.getProperty ("bars", 0);
+    if (! mosh::countin::isValidBars (bars))
+        return errResult ("set_count_in", mosh::countin::validationError());
+
+    auto node = projectSettingsTree();
+    node.setProperty (ids::countInBars, bars, nullptr);
+    applyCountInToEdit();                                  // immediate effect this session
+
+    eng.markDirty();                                        // edit-state change → needs re-save (gap 1)
+    logLine ("set_count_in", args, true, {}, false);        // preference — NOT undoable
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("countInBars", bars);
+    return okResult ("set_count_in", var (data));
+}
+
+} // namespace mosh

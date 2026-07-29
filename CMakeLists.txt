@@ -171,6 +171,9 @@ if (MOSH_BUILD_APP)
         src/moshops/MoshOps.cpp
         src/moshops/MoshOps.Lyrics.cpp
         src/moshops/MoshOps.Notes.cpp
+        src/moshops/MoshOps.Clips.cpp
+        src/moshops/MoshOps.Tracks.cpp
+        src/moshops/MoshOps.TempoProject.cpp
         # MP-001 — 2-player multiplayer (track-lock + commit-on-move)
         src/multiplayer/TrackCommit.cpp
         src/multiplayer/MultiplayerClient.cpp
