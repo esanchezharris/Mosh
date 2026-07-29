@@ -103,6 +103,64 @@ namespace
         return juce::var (o);
     }
 
+    // ── FS-B2a helpers: the agent batch-TRANSACTION envelope ─────────────────────
+    // Transaction metadata rides BESIDE the handler's args (never mixed into them), which
+    // is the shape docs/first-stranger-program/lanes/fs-b2.md specifies and the shape the
+    // WebView sends (WebBridge passes args[0] whole, so the sibling field survives).
+    juce::var txnCmd (MoshOps& ops, const juce::String& name, juce::var args,
+                      const juce::String& txnId, const juce::String& requestId, int index)
+    {
+        auto* t = new juce::DynamicObject();
+        t->setProperty ("transactionId", txnId);
+        t->setProperty ("requestId", requestId);
+        t->setProperty ("index", index);
+
+        auto* c = new juce::DynamicObject();
+        c->setProperty ("command", name);
+        if (! args.isVoid()) c->setProperty ("args", args);
+        c->setProperty ("transaction", juce::var (t));
+        return ops.execute (juce::var (c));
+    }
+
+    /** A manifest from (requestId, command) pairs, indexed from 0 in order. */
+    juce::var txnManifest (std::initializer_list<std::pair<const char*, const char*>> steps)
+    {
+        juce::Array<juce::var> a;
+        int i = 0;
+        for (auto& s : steps)
+            a.add (objN ({ { "index", i++ }, { "requestId", s.first }, { "command", s.second } }));
+        return juce::var (a);
+    }
+
+    juce::var txnBegin (MoshOps& ops, const juce::String& txnId, const juce::String& name,
+                        juce::var manifest)
+    {
+        return cmd (ops, "batch_begin", objN ({ { "transactionId", txnId },
+                                               { "name", name },
+                                               { "commands", manifest } }));
+    }
+
+    juce::var txnStatus (MoshOps& ops, const juce::String& txnId)
+    {
+        return cmd (ops, "batch_status", objN ({ { "transactionId", txnId } }));
+    }
+
+    /** A status field out of a batch_status / batch_begin / batch_end result. */
+    juce::String txnField (const juce::var& result, const char* field)
+    {
+        return result.getProperty ("data", juce::var()).getProperty (field, juce::var()).toString();
+    }
+
+    /** Read the durable ledger the way the NEXT process will: whatever it says is
+        unresolved is what would block skills after a restart. Uses the same pure helper
+        MoshOps::initTxnLedger does, so there is no second implementation to drift. */
+    juce::StringArray unresolvedIdsInLedger (const juce::File& ledger)
+    {
+        if (! ledger.existsAsFile()) return {};
+        return mosh::agenttxn::unresolvedIdsIn (
+            juce::StringArray::fromLines (ledger.loadFileAsString()));
+    }
+
     // A fixed filename in the shared, machine-wide system temp dir collides when two
     // `Mosh --selftest` processes run at once on the same host (a self-hosted CI runner
     // racing a dev's local run, or two concurrent worktree gates): one process's
@@ -670,6 +728,117 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (tracks (ops) == batchBase + 2, "one redo restores the whole batch");
     cmd (ops, "undo");
     check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
+
+    // ─── AGT-PROV (FS-B2a): the ASK is recoverable from mosh-log.jsonl ───────────
+    // Real-session skill mining needs the natural-language ask, not just the commands
+    // it produced. The utterance rides the EXISTING batch_begin marker (no new command,
+    // no second log) and MoshOps::logLine writes args verbatim — but until now every
+    // guard on that was a vitest against a MOCKED exec, so nothing proved the round
+    // trip survives to the file on disk. This section reads the JSONL back and proves:
+    //   1. an agent turn's marker carries the utterance verbatim,
+    //   2. the batch's own command lines do NOT (it rides the marker only, once),
+    //   3. a DIRECT UI action's line carries no utterance/turn_id at all — absent,
+    //      not empty-string, so the log stays honest about what was agent-driven,
+    //   4. an UNSERVED ask (a turn that produced zero commands) is still recorded,
+    //      and its empty marker pair does not consume an undo step.
+    section ("AGT-PROV: the ask is recoverable from the command log");
+    auto provLog = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    const int provLinesBefore = StringArray::fromLines (provLog.loadFileAsString()).size();
+    const String provUtterance   ("AGT-PROV make the drums hit harder");
+    const String provEmptyAsk    ("AGT-PROV make it sound purple");
+    const String provTurnId      ("agt-prov-turn-1");
+    const String provEmptyTurnId ("agt-prov-turn-2");
+
+    // (a) An AGENT turn — exactly what ui/src/agent/executor.ts emits.
+    { auto* a = new DynamicObject();
+      a->setProperty ("name", "make the drums hit harder");   // the undo-transaction label
+      a->setProperty ("turn_id", provTurnId);
+      a->setProperty ("utterance", provUtterance);
+      a->setProperty ("source", "brain_chat");
+      check (ok (cmd (ops, "batch_begin", var (a))), "AGT-PROV agent turn opens with a marker"); }
+    cmd (ops, "create_track", objN ({ { "name", "Prov Agent" } }));
+    check (ok (cmd (ops, "batch_end")), "AGT-PROV agent turn closes");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "AGT-PROV agent turn undone — state unchanged");
+
+    // (b) A DIRECT UI action — a mouse move, no ask behind it.
+    cmd (ops, "create_track", objN ({ { "name", "Prov Direct" } }));
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "AGT-PROV direct action undone — state unchanged");
+
+    // (c) An UNSERVED ask: the brain planned nothing / everything was rejected. The
+    // marker pair runs with no commands between. beginNewTransaction only sets a flag
+    // (no ActionSet until a perform()), so the sentinel below must still be the thing
+    // undo reverts — an empty pair must not eat the previous edit (the G14 hazard).
+    cmd (ops, "create_track", objN ({ { "name", "Prov Sentinel" } }));
+    check (tracks (ops) == batchBase + 1, "AGT-PROV sentinel track created");
+    { auto* a = new DynamicObject();
+      a->setProperty ("name", "no idea what you mean");
+      a->setProperty ("turn_id", provEmptyTurnId);
+      a->setProperty ("utterance", provEmptyAsk);
+      a->setProperty ("source", "brain_chat");
+      check (ok (cmd (ops, "batch_begin", var (a))), "AGT-PROV unserved ask opens a marker"); }
+    check (ok (cmd (ops, "batch_end")), "AGT-PROV unserved ask closes with zero commands");
+    check (tracks (ops) == batchBase + 1, "AGT-PROV empty turn marker mutated nothing");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase,
+           "AGT-PROV empty turn marker did NOT consume the undo step (sentinel reverted)");
+
+    // Now read the log back off disk and inspect only the lines this section wrote.
+    var provBegin, provInner, provDirect, provEmpty;
+    int provUtteranceLines = 0;
+    {
+        auto provLines = StringArray::fromLines (provLog.loadFileAsString());
+        for (int i = jmax (0, provLinesBefore - 1); i < provLines.size(); ++i)
+        {
+            const auto l = provLines[i].trim();
+            if (l.isEmpty()) continue;
+            if (l.contains (provUtterance)) ++provUtteranceLines;
+            const auto row = JSON::parse (l);        // named local — the var-temporary UAF class
+            if (! row.isObject()) continue;
+            const auto rowCommand = row.getProperty ("command", var()).toString();
+            const auto rowArgs    = row.getProperty ("args", var());
+            if (rowCommand == "batch_begin")
+            {
+                const auto tid = rowArgs.getProperty ("turn_id", var()).toString();
+                if (tid == provTurnId)      provBegin = row;
+                if (tid == provEmptyTurnId) provEmpty = row;
+            }
+            else if (rowCommand == "create_track")
+            {
+                const auto nm = rowArgs.getProperty ("name", var()).toString();
+                if (nm == "Prov Agent")  provInner  = row;
+                if (nm == "Prov Direct") provDirect = row;
+            }
+        }
+    }
+
+    check (provBegin.isObject(), "AGT-PROV the agent turn's batch_begin reached the JSONL");
+    { const auto beginArgs = provBegin.getProperty ("args", var());
+      check (beginArgs.getProperty ("utterance", var()).toString() == provUtterance,
+             "AGT-PROV batch_begin carries the originating utterance VERBATIM");
+      check (beginArgs.getProperty ("source", var()).toString() == "brain_chat",
+             "AGT-PROV batch_begin carries the turn source");
+      check (beginArgs.getProperty ("turn_id", var()).toString().isNotEmpty(),
+             "AGT-PROV batch_begin carries a turn_id (the harvester's grouping key)"); }
+
+    check (provInner.isObject(), "AGT-PROV the in-batch create_track reached the JSONL");
+    { const auto innerArgs = provInner.getProperty ("args", var());
+      check (! innerArgs.hasProperty ("utterance") && ! innerArgs.hasProperty ("turn_id"),
+             "AGT-PROV the batch's own command line carries NO utterance (marker only)"); }
+    check (provUtteranceLines == 1,
+           "AGT-PROV the utterance appears on exactly ONE line — the marker, not every command");
+
+    check (provDirect.isObject(), "AGT-PROV the direct (non-agent) create_track reached the JSONL");
+    { const auto directArgs = provDirect.getProperty ("args", var());
+      check (! directArgs.hasProperty ("utterance"),
+             "AGT-PROV a DIRECT UI action's line has NO utterance key — absent, not empty");
+      check (! directArgs.hasProperty ("turn_id"),
+             "AGT-PROV a DIRECT UI action's line has NO turn_id — the log stays honest"); }
+
+    check (provEmpty.isObject(), "AGT-PROV the UNSERVED ask reached the JSONL despite zero commands");
+    check (provEmpty.getProperty ("args", var()).getProperty ("utterance", var()).toString() == provEmptyAsk,
+           "AGT-PROV the unserved ask's utterance is recoverable (the missing-skill signal)");
 
     // ─── Stage 2: arrangement editing + mixer stub ───
     section ("Stage 2: arrangement + mixer");
@@ -5628,14 +5797,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // Every entry is well-formed: non-empty command + bool ok + bool undoable.
             bool allShaped = true;
             bool sawGetCommandLog = false;
+            bool sawArgs = false;
             for (auto& e : *entries)
             {
                 if (e.getProperty ("command", var()).toString().isEmpty()) allShaped = false;
                 if (! e.getProperty ("ok", var()).isBool()) allShaped = false;
                 if (! e.getProperty ("undoable", var()).isBool()) allShaped = false;
                 if (e.getProperty ("command", var()).toString() == "get_command_log") sawGetCommandLog = true;
+                if (e.hasProperty ("args")) sawArgs = true;
             }
             check (allShaped, "every entry has command (non-empty), ok (bool), undoable (bool)");
+            // PRIVACY (FS-B2a): the projection must keep DROPPING args. The command log's
+            // args now carry the user's own words on an agent turn's batch_begin marker,
+            // so widening this window would put user speech on a surface that was only
+            // ever meant to show command names. Absence here is the whole guarantee.
+            check (! sawArgs, "get_command_log projects NO args — user utterances never reach this window");
             // READ-ONLY proof: get_command_log never logs itself.
             check (! sawGetCommandLog, "get_command_log is READ-ONLY: it does NOT appear in the log it returns");
         }
@@ -8998,6 +9174,486 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (postLoad == preSave, "matrix: save/reload round-trips EVERY mutated field (canonical snapshot equal)");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // FS-B2a — the agent batch-TRANSACTION contract, against a REAL engine.
+    // Spec: docs/first-stranger-program/lanes/fs-b2.md, one section per acceptance
+    // bullet. Runs after the undo matrix, so the fixture is a richly-mutated project —
+    // a fingerprint over an empty session would prove very little.
+    //
+    // Two things every section here is written to avoid:
+    //  • a suppression fixture that carries nothing to suppress (TXN-FOREIGN proves the
+    //    refused call SUCCEEDS after commit, so "refused" means something);
+    //  • trusting a `replayed` flag on its own (TXN-REPLAY asserts state is UNCHANGED).
+    {
+        section ("TXN-COMMIT: an identified 2-command transaction commits exactly");
+
+        // The engine's own canonical fingerprint, read back through batch_status — so the
+        // harness and the assertions here compare the SAME number the engine computes,
+        // with no second implementation to drift.
+        auto txnTrack = cmd (ops, "create_track", objN ({ { "name", "TXN Fixture" } }));
+        const auto tid = txnTrack["data"].getProperty ("trackId", var()).toString();
+        check (tid.isNotEmpty(), "TXN fixture track created");
+
+        const juce::String t1 = "txn-commit-0001";
+        auto begin = txnBegin (ops, t1, "set_track_level",
+                               txnManifest ({ { "rq-a", "set_track_volume" },
+                                              { "rq-b", "set_track_mute" } }));
+        check (ok (begin), "batch_begin with a manifest ok");
+        check (txnField (begin, "status") == "open", "status is open after begin");
+        const auto preFp = txnField (begin, "preFingerprint");
+        check (preFp.isNotEmpty(), "begin captured a pre-transaction fingerprint");
+        check (txnField (begin, "fingerprint") == preFp,
+               "begin itself mutates nothing (fingerprint == preFingerprint)");
+
+        check (ok (txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -7.5 } }),
+                           t1, "rq-a", 0)), "manifested step 0 applied");
+        check (ok (txnCmd (ops, "set_track_mute", objN ({ { "trackId", tid }, { "mute", true } }),
+                           t1, "rq-b", 1)), "manifested step 1 applied");
+
+        // Step 5 of the harness protocol: read the resulting state WHILE THE TRANSACTION
+        // IS STILL OPEN. This is the whole point of keeping it open — it removes the race
+        // where a generic undo is attempted after batch_end.
+        auto midStatus = txnStatus (ops, t1);
+        check (ok (midStatus), "batch_status readable while open");
+        check (txnField (midStatus, "status") == "open", "still open before commit");
+        check ((int) midStatus["data"].getProperty ("applied", 0) == 2, "both steps recorded applied");
+        check ((bool) midStatus["data"].getProperty ("canCommit", false), "commit is legal");
+        check ((bool) midStatus["data"].getProperty ("canRollback", false), "rollback is legal");
+        // ANTI-VACUITY: the fingerprint must have MOVED. If it had not, every "restores the
+        // pre-state" assertion below would pass without the rollback doing anything.
+        check (txnField (midStatus, "fingerprint") != preFp,
+               "the open transaction HAS changed the session (fingerprint moved)");
+        auto snapTrack = trackById (tid);
+        check (std::abs ((double) snapTrack.getProperty ("volumeDb", 0.0) + 7.5) < 0.01,
+               "the open transaction's volume is visible in the snapshot");
+
+        auto end = cmd (ops, "batch_end", objN ({ { "transactionId", t1 } }));
+        check (ok (end), "batch_end (commit) ok");
+        check (txnField (end, "status") == "committed", "status is committed");
+        check (txnField (txnStatus (ops, t1), "status") == "committed",
+               "batch_status confirms committed");
+        check ((bool) txnStatus (ops, t1)["data"].getProperty ("canRollback", true) == false,
+               "a committed transaction may no longer be rolled back");
+        // ONE undo still reverts the whole batch — the pre-existing guarantee is intact.
+        check (ok (cmd (ops, "undo")), "undo after commit ok");
+        auto afterUndo = trackById (tid);
+        check (std::abs ((double) afterUndo.getProperty ("volumeDb", 0.0) + 7.5) > 0.01,
+               "ONE undo reverted the whole committed transaction");
+        cmd (ops, "redo");
+
+        section ("TXN-ROLLBACK: a mid-transaction failure rolls back to the EXACT pre-state");
+
+        const juce::String t2 = "txn-rollback-0002";
+        auto begin2 = txnBegin (ops, t2, "set_track_level",
+                                txnManifest ({ { "rq-a", "set_track_volume" },
+                                               { "rq-b", "set_track_mute" } }));
+        check (ok (begin2), "rollback fixture begin ok");
+        const auto pre2 = txnField (begin2, "preFingerprint");
+
+        check (ok (txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -12.0 } }),
+                           t2, "rq-a", 0)), "step 0 applied before the failure");
+        check (txnField (txnStatus (ops, t2), "fingerprint") != pre2,
+               "step 0 really mutated the session (so the rollback below has work to do)");
+        // Step 1 fails for a REAL engine reason: an unknown track id.
+        auto failed = txnCmd (ops, "set_track_mute", objN ({ { "trackId", "no-such-track" },
+                                                            { "mute", true } }), t2, "rq-b", 1);
+        check (! ok (failed), "step 1 fails (unknown track)");
+        auto failedStatus = txnStatus (ops, t2);
+        check (txnField (failedStatus, "status") == "failed", "transaction status is failed");
+        check (txnField (failedStatus, "failureCode") == "command_failed", "stable failure code");
+        check ((int) failedStatus["data"].getProperty ("applied", -1) == 1, "exactly one step applied");
+        check ((bool) failedStatus["data"].getProperty ("canCommit", true) == false,
+               "a failed transaction may not commit");
+
+        // Commit must REFUSE, and refuse without mutating.
+        auto badCommit = cmd (ops, "batch_end", objN ({ { "transactionId", t2 } }));
+        check (! ok (badCommit), "batch_end refuses an incomplete transaction");
+        check (badCommit.getProperty ("error", var()).toString().contains ("transaction_incomplete"),
+               "the refusal names transaction_incomplete");
+
+        auto rolled = cmd (ops, "batch_rollback", objN ({ { "transactionId", t2 } }));
+        check (ok (rolled), "batch_rollback ok");
+        check (txnField (rolled, "status") == "rolled_back", "status is rolled_back");
+        check (txnField (rolled, "fingerprint") == pre2,
+               "rollback restored the EXACT pre-transaction fingerprint");
+        // Repeating it is idempotent, not a second undo (which would eat unrelated work).
+        auto rolledAgain = cmd (ops, "batch_rollback", objN ({ { "transactionId", t2 } }));
+        check (ok (rolledAgain), "repeat batch_rollback is idempotent");
+        check (txnField (rolledAgain, "fingerprint") == pre2,
+               "the repeat undid nothing further (fingerprint unmoved)");
+
+        section ("TXN-POSTCOND: a false postcondition rolls back the STILL-OPEN transaction");
+
+        const juce::String t3 = "txn-postcond-0003";
+        auto begin3 = txnBegin (ops, t3, "set_track_level",
+                                txnManifest ({ { "rq-a", "set_track_volume" } }));
+        const auto pre3 = txnField (begin3, "preFingerprint");
+        check (ok (txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -3.25 } }),
+                           t3, "rq-a", 0)), "the command itself succeeded");
+        auto openStatus = txnStatus (ops, t3);
+        check (txnField (openStatus, "status") == "open", "transaction still open for the check");
+        check ((bool) openStatus["data"].getProperty ("canCommit", false),
+               "commit WOULD be legal — the postcondition is the only thing stopping it");
+        // The harness evaluates its postcondition here and (in this fixture) rejects.
+        auto rolled3 = cmd (ops, "batch_rollback", objN ({ { "transactionId", t3 } }));
+        check (ok (rolled3), "rollback of a successful-but-rejected transaction ok");
+        check (txnField (rolled3, "fingerprint") == pre3, "pre-state restored exactly");
+        auto t3Track = trackById (tid);
+        check (std::abs ((double) t3Track.getProperty ("volumeDb", 0.0) + 3.25) > 0.01,
+               "the rejected volume is gone from the snapshot");
+
+        section ("TXN-REPLAY: response-loss injection never double-applies");
+
+        const juce::String t4 = "txn-replay-0004";
+        auto manifest4 = txnManifest ({ { "rq-a", "set_track_volume" } });
+        // (1) A lost batch_begin response: retry with the identical manifest.
+        auto b4 = txnBegin (ops, t4, "set_track_level", manifest4);
+        check (ok (b4), "begin ok");
+        auto b4again = txnBegin (ops, t4, "set_track_level",
+                                 txnManifest ({ { "rq-a", "set_track_volume" } }));
+        check (ok (b4again), "retried begin with an identical manifest is idempotent");
+        check ((bool) b4again["data"].getProperty ("replayed", false), "the retry is marked replayed");
+        check (txnField (b4again, "status") == "open", "…and did not open a second transaction");
+        const auto pre4 = txnField (b4, "preFingerprint");
+
+        // (2) A lost COMMAND response: retry the same requestId with the same envelope.
+        check (ok (txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -9.0 } }),
+                           t4, "rq-a", 0)), "step 0 applied");
+        const auto fpAfterOnce = txnField (txnStatus (ops, t4), "fingerprint");
+        auto retry = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -9.0 } }),
+                             t4, "rq-a", 0);
+        check (ok (retry), "the retried command returns the recorded result");
+        check ((bool) retry.getProperty ("replayed", false), "…marked replayed");
+        // A `replayed` flag proves nothing on its own. THIS is the assertion that matters:
+        check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
+               "the retry applied NOTHING (fingerprint unchanged)");
+        check ((int) txnStatus (ops, t4)["data"].getProperty ("applied", -1) == 1,
+               "…and did not double-count the step");
+
+        // (3) A retry whose content silently changed must be REJECTED, not replayed.
+        auto conflict = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -9.5 } }),
+                               t4, "rq-a", 0);
+        check (! ok (conflict), "a reused requestId with different args is rejected");
+        check (conflict.getProperty ("error", var()).toString().contains ("request_envelope_conflict"),
+               "…naming request_envelope_conflict");
+        check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
+               "the rejected retry mutated nothing");
+
+        // (4) A lost batch_end response: repeat it.
+        auto e4 = cmd (ops, "batch_end", objN ({ { "transactionId", t4 } }));
+        check (ok (e4), "commit ok");
+        auto e4again = cmd (ops, "batch_end", objN ({ { "transactionId", t4 } }));
+        check (ok (e4again), "repeated commit is idempotent");
+        check ((bool) e4again["data"].getProperty ("replayed", false), "…marked replayed");
+        check (txnField (e4again, "fingerprint") == txnField (e4, "fingerprint"),
+               "the repeated commit changed nothing");
+        // (5) A command retry arriving AFTER commit still replays rather than re-applying.
+        auto postCommitRetry = txnCmd (ops, "set_track_volume",
+                                       objN ({ { "trackId", tid }, { "db", -9.0 } }), t4, "rq-a", 0);
+        check (ok (postCommitRetry) && (bool) postCommitRetry.getProperty ("replayed", false),
+               "a post-commit retry of a recorded step replays");
+        check (txnField (txnStatus (ops, t4), "fingerprint") == fpAfterOnce,
+               "…and applied nothing");
+        cmd (ops, "undo");   // put the fixture back
+        check (txnField (txnStatus (ops, t4), "fingerprint") == pre4,
+               "undo of the committed transaction returns to its pre-state");
+
+        // (6) THE ONE THAT ACTUALLY PROVES "never double-apply". Every leg above used
+        // set_track_volume, which sets an ABSOLUTE value — so re-dispatching it a second
+        // time is invisible in both the fingerprint and the applied count, and a sabotage
+        // that replaced the replay with a re-dispatch slipped past all of them. A command
+        // whose second application is VISIBLE is required: create_track ADDS one.
+        const juce::String t4b = "txn-replay-0004b";
+        check (ok (txnBegin (ops, t4b, "add_track_skill",
+                             txnManifest ({ { "rq-t", "create_track" } }))), "additive begin ok");
+        const int tracksBefore = tracks (ops);
+        auto made = txnCmd (ops, "create_track", objN ({ { "name", "Replay Probe" } }),
+                            t4b, "rq-t", 0);
+        check (ok (made), "create_track applied once");
+        check (tracks (ops) == tracksBefore + 1, "…adding exactly one track");
+        const auto madeId = made["data"].getProperty ("trackId", var()).toString();
+        auto madeAgain = txnCmd (ops, "create_track", objN ({ { "name", "Replay Probe" } }),
+                                 t4b, "rq-t", 0);
+        check (ok (madeAgain), "the retried create_track returns the recorded result");
+        check (tracks (ops) == tracksBefore + 1,
+               "THE DOUBLE-APPLY CHECK: a retried create_track added NO second track");
+        check (madeAgain["data"].getProperty ("trackId", var()).toString() == madeId,
+               "…and returned the SAME track id, not a new one");
+        check (ok (cmd (ops, "batch_rollback", objN ({ { "transactionId", t4b } }))),
+               "additive transaction rolled back");
+        check (tracks (ops) == tracksBefore, "…removing the probe track exactly");
+
+        section ("TXN-FOREIGN: untagged local and relay mutations are refused mid-transaction");
+
+        const juce::String t5 = "txn-foreign-0005";
+        auto b5 = txnBegin (ops, t5, "set_track_level",
+                            txnManifest ({ { "rq-a", "set_track_volume" } }));
+        check (ok (b5), "begin ok");
+        const auto fpOpen = txnField (b5, "fingerprint");
+
+        // An UNTAGGED local mutation — what a UI click would send.
+        auto foreign = cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.4 } }));
+        check (! ok (foreign), "an untagged local mutation is refused while a transaction is open");
+        check (foreign.getProperty ("error", var()).toString().contains ("transaction_in_progress"),
+               "…naming transaction_in_progress");
+        check (txnField (txnStatus (ops, t5), "fingerprint") == fpOpen,
+               "the refused mutation changed nothing");
+        check (txnField (txnStatus (ops, t5), "status") == "open",
+               "…and did not move the transaction's own state");
+
+        // A tagged call for a DIFFERENT transaction id.
+        auto wrongId = txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -1.0 } }),
+                               "some-other-txn", "rq-a", 0);
+        check (! ok (wrongId), "a call tagged for another transaction is refused");
+        check (wrongId.getProperty ("error", var()).toString().contains ("unknown_transaction"),
+               "…naming unknown_transaction");
+
+        // A read stays available (the exclusion window bounds mutation, not reading).
+        check (ok (cmd (ops, "list_plugins")), "a read-only command still works while open");
+
+        // An out-of-order manifested call.
+        const juce::String t5b = "txn-order-0005b";
+        cmd (ops, "batch_rollback", objN ({ { "transactionId", t5 } }));
+        auto b5b = txnBegin (ops, t5b, "host_plugin",
+                             txnManifest ({ { "rq-a", "set_track_volume" },
+                                            { "rq-b", "set_track_mute" } }));
+        check (ok (b5b), "two-step begin ok");
+        auto outOfOrder = txnCmd (ops, "set_track_mute", objN ({ { "trackId", tid }, { "mute", true } }),
+                                  t5b, "rq-b", 1);
+        check (! ok (outOfOrder), "step 1 before step 0 is refused");
+        check (outOfOrder.getProperty ("error", var()).toString().contains ("manifest_mismatch"),
+               "…naming manifest_mismatch");
+        // An EXTRA call not in the manifest at all.
+        auto extra = txnCmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.2 } }),
+                             t5b, "rq-not-in-manifest", 0);
+        check (! ok (extra), "a call whose requestId is not in the manifest is refused");
+        cmd (ops, "batch_rollback", objN ({ { "transactionId", t5b } }));
+
+        // AND — the anti-vacuity leg — the very same untagged call SUCCEEDS once the
+        // transaction is over. Without this, "refused" could just mean "always broken".
+        auto afterClose = cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.4 } }));
+        check (ok (afterClose), "the same untagged mutation succeeds after the transaction closes");
+        check (std::abs ((double) trackById (tid).getProperty ("pan", 0.0) - 0.4) < 0.01,
+               "…and really landed");
+        cmd (ops, "undo");
+
+        section ("TXN-IDENTITY: ids are idempotent only for identical envelopes");
+
+        const juce::String t6 = "txn-identity-0006";
+        check (ok (txnBegin (ops, t6, "set_track_level",
+                             txnManifest ({ { "rq-a", "set_track_volume" } }))), "begin ok");
+        // Same id, DIFFERENT manifest → hard error.
+        auto mutated = txnBegin (ops, t6, "set_track_level",
+                                 txnManifest ({ { "rq-a", "set_track_pan" } }));
+        check (! ok (mutated), "the same id with a different manifest is a hard error");
+        check (mutated.getProperty ("error", var()).toString().contains ("transaction_identity_conflict"),
+               "…naming transaction_identity_conflict");
+        // Same id, different skill NAME → also a different identity.
+        auto renamed = txnBegin (ops, t6, "other_skill",
+                                 txnManifest ({ { "rq-a", "set_track_volume" } }));
+        check (! ok (renamed), "the same id with a different skill name is a hard error");
+        // A SECOND id while the first is unresolved → hard error.
+        auto second = txnBegin (ops, "txn-identity-0006b", "set_track_level",
+                                txnManifest ({ { "rq-a", "set_track_volume" } }));
+        check (! ok (second), "a second transaction while one is unresolved is a hard error");
+        check (second.getProperty ("error", var()).toString().contains ("transaction_already_open"),
+               "…naming transaction_already_open");
+        check (txnField (txnStatus (ops, t6), "status") == "open",
+               "none of those refusals disturbed the open transaction");
+        cmd (ops, "batch_rollback", objN ({ { "transactionId", t6 } }));
+        // …and after it resolves, a new id is accepted.
+        check (ok (txnBegin (ops, "txn-identity-0006c", "set_track_level",
+                             txnManifest ({ { "rq-a", "set_track_volume" } }))),
+               "a new id is accepted once the previous transaction resolved");
+        cmd (ops, "batch_rollback", objN ({ { "transactionId", "txn-identity-0006c" } }));
+        // An unknown id is NOT reported as "nothing happened" — it is reported as not found,
+        // which the harness treats as unprovable rather than as success.
+        auto unknown = txnStatus (ops, "txn-never-existed");
+        check (ok (unknown), "batch_status answers for an unknown id");
+        check ((bool) unknown["data"].getProperty ("found", true) == false, "…with found:false");
+        auto rollbackUnknown = cmd (ops, "batch_rollback", objN ({ { "transactionId", "txn-never-existed" } }));
+        check (! ok (rollbackUnknown), "rollback of an unknown id is refused");
+        check (rollbackUnknown.getProperty ("error", var()).toString().contains ("unknown_transaction"),
+               "…and performs NO generic undo");
+
+        section ("TXN-PREFLIGHT: unsafe commands are rejected before any mutation");
+
+        // Each of these is a DIFFERENT rejection class from fs-b2.md's list, and each is a
+        // real command in the dispatch table — not a strawman.
+        struct { const char* command; const char* code; const char* why; } unsafe[] = {
+            { "set_metronome",  "manifest_rejected", "non-undoable engine/device preference" },
+            { "render_layer",   "manifest_rejected", "asynchronous service render" },
+            { "open_project",   "manifest_rejected", "project lifecycle" },
+            { "undo",           "manifest_rejected", "undo/redo" },
+            { "batch_begin",    "manifest_rejected", "nested batch" },
+            { "no_such_command","manifest_rejected", "unknown command" },
+        };
+        for (const auto& u : unsafe)
+        {
+            const juce::String id = juce::String ("txn-preflight-") + u.command;
+            auto rejected = txnBegin (ops, id, "unsafe_skill",
+                                      txnManifest ({ { "rq-a", u.command } }));
+            check (! ok (rejected),
+                   (juce::String ("manifest preflight rejects ") + u.command + " (" + u.why + ")").toRawUTF8());
+            check (rejected.getProperty ("error", var()).toString().contains (u.code),
+                   (juce::String ("…naming ") + u.code + " for " + u.command).toRawUTF8());
+            // No transaction may exist afterwards — a rejection must leave nothing open.
+            check ((bool) txnStatus (ops, id)["data"].getProperty ("found", true) == false,
+                   (juce::String ("…and opened no transaction for ") + u.command).toRawUTF8());
+        }
+        // A malformed manifest is rejected the same way, before any registry lookup.
+        for (const auto& bad : { objN ({ { "transactionId", "txn-bad-1" }, { "name", "s" } }),
+                                 objN ({ { "transactionId", "txn-bad-2" }, { "name", "s" },
+                                         { "commands", var (juce::Array<var>()) } }) })
+        {
+            auto rejected = cmd (ops, "batch_begin", bad);
+            check (! ok (rejected), "a missing/empty manifest is rejected");
+        }
+        // And the preflight really is a GATE, not a filter: a manifest whose FIRST step is
+        // safe but whose second is not must open nothing at all.
+        auto mixed = txnBegin (ops, "txn-preflight-mixed", "mixed_skill",
+                               txnManifest ({ { "rq-a", "set_track_volume" },
+                                              { "rq-b", "set_metronome" } }));
+        check (! ok (mixed), "one unsafe step rejects the WHOLE manifest");
+        check ((bool) txnStatus (ops, "txn-preflight-mixed")["data"].getProperty ("found", true) == false,
+               "…and opens no transaction");
+        check (ok (cmd (ops, "set_track_pan", objN ({ { "trackId", tid }, { "pan", 0.1 } }))),
+               "an ordinary mutation still works after a rejected manifest (nothing was left open)");
+        cmd (ops, "undo");
+
+        section ("TXN-HEAD: an EMPTY transaction's rollback undoes nothing (the G14 trap)");
+
+        // The reason rollback consults the undo head instead of just calling undo(): with
+        // zero actions in the current set, UndoManager::undo() reaches back and destroys the
+        // PREVIOUS edit (juce_UndoManager.cpp:256 getCurrentSet()). That is the G14
+        // empty-transaction class, and it is REACHABLE — a skill whose commands all no-op,
+        // or a postcondition rejected before any step ran, both produce it.
+        //
+        // The sibling branch (a FOREIGN transaction owning the head) is deliberately
+        // unreachable from here: while a transaction is open MoshOps refuses every untagged
+        // mutation, so nothing can take the head from underneath it. Rather than add a
+        // test-only backdoor into the UndoManager to forge it, the decision itself is a pure
+        // function — agenttxn::planRollback — with an exhaustive Catch2 decision table
+        // ("planRollback: …" in tests/test_agent_txn.cpp).
+        const juce::String t7 = "txn-head-0007";
+        // A distinctive prior edit that must SURVIVE the rollback attempt below.
+        check (ok (cmd (ops, "rename_track", objN ({ { "trackId", tid },
+                                                    { "name", "TXN Head Sentinel" } }))),
+               "sentinel edit applied before the transaction");
+        auto b7 = txnBegin (ops, t7, "set_track_level",
+                            txnManifest ({ { "rq-a", "set_track_volume" } }));
+        check (ok (b7), "begin ok");
+        auto emptyRollback = cmd (ops, "batch_rollback", objN ({ { "transactionId", t7 } }));
+        check (ok (emptyRollback), "rolling back an empty transaction succeeds");
+        check (txnField (emptyRollback, "status") == "rolled_back", "…reporting rolled_back");
+        check (trackById (tid).getProperty ("name", var()).toString() == "TXN Head Sentinel",
+               "…WITHOUT undoing the previous edit (the G14 trap)");
+        // And the sentinel is genuinely undoable — so "it survived" means the rollback chose
+        // not to undo it, not that undo was broken for everyone.
+        check (ok (cmd (ops, "undo")), "the sentinel edit IS undoable");
+        check (trackById (tid).getProperty ("name", var()).toString() != "TXN Head Sentinel",
+               "…proven by undoing it explicitly");
+        cmd (ops, "redo");
+
+        section ("TXN-3CMD: a three-command transaction commits and rolls back exactly");
+
+        // host_plugin's shape. load_builtin is used rather than a third-party VST3 so the
+        // section is hermetic on any machine.
+        const juce::String t9 = "txn-3cmd-0009";
+        auto b9 = txnBegin (ops, t9, "host_plugin",
+                            txnManifest ({ { "rq-a", "load_builtin" },
+                                           { "rq-b", "set_plugin_param" },
+                                           { "rq-c", "bypass_plugin" } }));
+        check (ok (b9), "3-command begin ok");
+        const auto pre9 = txnField (b9, "preFingerprint");
+        auto loaded = txnCmd (ops, "load_builtin", objN ({ { "trackId", tid },
+                                                          { "type", "compressor" } }), t9, "rq-a", 0);
+        check (ok (loaded), "step 0 (load_builtin) applied");
+        const int pluginIndex = (int) loaded["data"].getProperty ("index", -1);
+        check (pluginIndex >= 0, "…and reported its rack index");
+        check (ok (txnCmd (ops, "set_plugin_param", objN ({ { "trackId", tid },
+                                                           { "index", pluginIndex },
+                                                           { "paramIndex", 0 },
+                                                           { "value", 0.75 } }), t9, "rq-b", 1)),
+               "step 1 (set_plugin_param) applied");
+        check (ok (txnCmd (ops, "bypass_plugin", objN ({ { "trackId", tid },
+                                                        { "index", pluginIndex },
+                                                        { "bypassed", true } }), t9, "rq-c", 2)),
+               "step 2 (bypass_plugin) applied");
+        auto s9 = txnStatus (ops, t9);
+        check ((int) s9["data"].getProperty ("applied", -1) == 3, "all three steps applied");
+        check ((int) s9["data"].getProperty ("manifestCount", -1) == 3, "manifest count is 3");
+        check (txnField (s9, "fingerprint") != pre9, "the three steps changed the session");
+        check (ok (cmd (ops, "batch_end", objN ({ { "transactionId", t9 } }))), "3-command commit ok");
+        check (txnField (txnStatus (ops, t9), "status") == "committed", "committed");
+
+        // …and the same shape rolled back exactly.
+        const juce::String t10 = "txn-3cmd-0010";
+        auto b10 = txnBegin (ops, t10, "host_plugin",
+                             txnManifest ({ { "rq-a", "load_builtin" },
+                                            { "rq-b", "set_plugin_param" },
+                                            { "rq-c", "bypass_plugin" } }));
+        const auto pre10 = txnField (b10, "preFingerprint");
+        auto loaded10 = txnCmd (ops, "load_builtin", objN ({ { "trackId", tid },
+                                                            { "type", "reverb" } }), t10, "rq-a", 0);
+        check (ok (loaded10), "rollback fixture step 0 applied");
+        const int idx10 = (int) loaded10["data"].getProperty ("index", -1);
+        check (ok (txnCmd (ops, "set_plugin_param", objN ({ { "trackId", tid }, { "index", idx10 },
+                                                           { "paramIndex", 0 }, { "value", 0.5 } }),
+                           t10, "rq-b", 1)), "rollback fixture step 1 applied");
+        // Step 2 fails: a rack index that does not exist.
+        auto fail10 = txnCmd (ops, "bypass_plugin", objN ({ { "trackId", tid }, { "index", 9999 },
+                                                           { "bypassed", true } }), t10, "rq-c", 2);
+        check (! ok (fail10), "rollback fixture step 2 fails");
+        auto rolled10 = cmd (ops, "batch_rollback", objN ({ { "transactionId", t10 } }));
+        check (ok (rolled10), "3-command rollback ok");
+        check (txnField (rolled10, "fingerprint") == pre10,
+               "TWO applied steps reverted by ONE rollback to the exact pre-state");
+
+        section ("TXN-LEDGER: the durable ledger carries ids and status, never args");
+
+        auto ledger = eng.sessionDir().getChildFile ("agent-transactions.jsonl");
+        check (ledger.existsAsFile(), "the transaction ledger exists under ~/Library/Mosh/session");
+        const auto ledgerText = ledger.loadFileAsString();
+        check (ledgerText.contains ("txn-commit-0001"), "it records a committed transaction's id");
+        check (ledgerText.contains ("\"status\": \"committed\""), "…and its committed status");
+        check (ledgerText.contains ("\"status\": \"rolled_back\""), "…and a rolled-back status");
+        check (ledgerText.contains ("\"status\": \"failed\""), "…and a failed status");
+        check (ledgerText.contains ("\"v\": 1"), "every record carries the ledger schema version");
+        // The SUPPRESSION assertions. These are only meaningful because the transactions
+        // above really did carry args worth leaking — set_track_volume's db, a trackId, a
+        // plugin type — and because the session dir is a real path under the owner's home.
+        check (ledgerText.contains ("set_track_volume") == false,
+               "no command names leak into the ledger (only ids/status/counts)");
+        check (ledgerText.contains ("\"args\"") == false, "no args key");
+        check (ledgerText.contains ("trackId") == false, "no trackId");
+        check (ledgerText.contains ("/Users/") == false, "no owner-home path");
+        check (ledgerText.contains (tid) == false, "not even the fixture's own track id");
+
+        // The RESTART-BLOCK fixture. An unresolved transaction is exactly what a crash
+        // leaves behind: a `begin` record with no terminal record after it. Read the ledger
+        // the way the NEXT process will — through the same pure helper initTxnLedger uses —
+        // and require it to name the orphan. (The block itself needs a second process to
+        // observe, so it is proven end-to-end in verify.py's real-restart check; here the
+        // point is that the durable evidence a restart reads IS being written.)
+        const juce::String orphan = "txn-orphan-0011";
+        check (ok (txnBegin (ops, orphan, "set_track_level",
+                             txnManifest ({ { "rq-a", "set_track_volume" } }))), "orphan begin ok");
+        check (ok (txnCmd (ops, "set_track_volume", objN ({ { "trackId", tid }, { "db", -2.0 } }),
+                           orphan, "rq-a", 0)), "orphan applied a real mutation");
+        check (unresolvedIdsInLedger (ledger).contains (orphan),
+               "an unresolved transaction IS visible to the next launch (would block skills)");
+        // Resolve it properly so this harness run leaves nothing that would block the
+        // owner's next real launch — JUCE ignores $HOME, so that file is under their home.
+        check (ok (cmd (ops, "batch_rollback", objN ({ { "transactionId", orphan } }))),
+               "the orphan is resolved by an exact rollback");
+        check (unresolvedIdsInLedger (ledger).isEmpty(),
+               "…leaving nothing unresolved for the next launch");
+
+        // Clean up the fixture track so the harness leaves the session as it found it.
+        cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";
@@ -9568,6 +10224,13 @@ int runCommandScript (MoshEngine& eng, MoshOps& ops)
         auto* co = new DynamicObject();
         co->setProperty ("command", name);
         co->setProperty ("args", argsOut);
+        // FS-B2a — forward the `transaction` sibling of command/args (transaction metadata
+        // rides BESIDE the handler's args, never inside them). Without this the runner
+        // silently dropped it and every scripted call read as an untagged mutation, which
+        // an open transaction correctly refuses. ${VAR} substitution applies here too, so a
+        // golden script can capture an engine-assigned id into a later step's envelope.
+        if (const auto txnMeta = command.getProperty ("transaction", var()); txnMeta.isObject())
+            co->setProperty ("transaction", subst (txnMeta));
 
         const auto result = ops.execute (var (co));
         ++executed;

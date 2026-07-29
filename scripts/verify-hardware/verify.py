@@ -971,6 +971,157 @@ def check_crash_recovery(ctx):
                 "recovered_cmds": recovered, "beta_clips": beta_clips, "stderr": proc.stderr[-300:] if not ok else ""})
 
 
+def _replay_txn_golden(ctx, name, session):
+    """Replay a committed FS-B2a run-script golden against the REAL engine and index its
+    result lines. The goldens (tests/golden/txn/) are rendered from the SAME
+    planSkillTransaction() expansion the browser harness uses, and pinned by
+    ui/src/agent/txnGoldens.test.ts — so this leg cannot drift into proving an expansion
+    nobody sends."""
+    golden = REPO / "tests" / "golden" / "txn" / name
+    if not golden.exists():
+        return None, None, f"missing golden {name}"
+    commands = [json.loads(l) for l in golden.read_text().splitlines() if l.strip()]
+    base = _mosh_session_base() / session
+    if base.exists():
+        shutil.rmtree(base, ignore_errors=True)
+    results, proc = run_script(ctx.bin, commands, session, timeout=120)
+    statuses = [r.get("data", {}) for r in results if r.get("command") == "batch_status"]
+    return results, statuses, proc.stderr[-300:]
+
+
+def check_skill_transaction_real_engine(ctx):
+    """FS-B2a — the lane's real gate: a first REAL-ENGINE skill run proving exact commit AND
+    exact rollback, plus a lost response resolving through batch_status without
+    double-applying (docs/first-stranger-program/lanes/fs-b2.md items 3–5).
+
+    Every assertion reads the ENGINE's own fingerprints out of batch_status, so there is no
+    second implementation here to disagree with MoshOps. The anti-vacuity leg is explicit:
+    the mid-transaction fingerprint must DIFFER from preFingerprint, or "restored the
+    pre-state" would be true of a transaction that changed nothing."""
+    detail = {}
+
+    # ── 1. EXACT COMMIT ──
+    results, statuses, err = _replay_txn_golden(ctx, "set_track_level-commit.jsonl", "verify-txn-commit")
+    if results is None:
+        return row("FS-B2a skill transaction (real engine)", False, {"error": statuses or err})
+    commit_ok = (len(statuses) >= 3
+                 and statuses[0].get("status") == "open"
+                 and statuses[0].get("fingerprint") == statuses[0].get("preFingerprint")
+                 and statuses[-2].get("fingerprint") != statuses[-2].get("preFingerprint")   # it MOVED
+                 and statuses[-1].get("status") == "committed"
+                 and statuses[-1].get("applied") == statuses[-1].get("manifestCount"))
+    detail["commit"] = {"final": statuses[-1].get("status") if statuses else None,
+                        "applied": statuses[-1].get("applied") if statuses else None,
+                        "moved": statuses[-2].get("fingerprint") != statuses[-2].get("preFingerprint")
+                                 if len(statuses) >= 2 else None}
+
+    # ── 2. EXACT ROLLBACK ──
+    results, statuses, err = _replay_txn_golden(ctx, "set_track_level-rollback.jsonl", "verify-txn-rollback")
+    pre = statuses[0].get("preFingerprint") if statuses else None
+    mid = statuses[-2].get("fingerprint") if len(statuses or []) >= 2 else None
+    final = statuses[-1] if statuses else {}
+    rollback_ok = (len(statuses or []) >= 3
+                   and pre and mid and mid != pre                      # a step really applied
+                   and statuses[-2].get("status") == "failed"           # …and one really failed
+                   and statuses[-2].get("applied") == 1
+                   and final.get("status") == "rolled_back"
+                   and final.get("fingerprint") == pre)                 # …restored EXACTLY
+    detail["rollback"] = {"pre": (pre or "")[:8], "mid": (mid or "")[:8],
+                          "final_status": final.get("status"),
+                          "final_fp": (final.get("fingerprint") or "")[:8],
+                          "restored_exactly": final.get("fingerprint") == pre}
+
+    # ── 3. LOST RESPONSE → REPLAY, NEVER DOUBLE-APPLY ──
+    results, statuses, err = _replay_txn_golden(ctx, "set_track_level-replay.jsonl", "verify-txn-replay")
+    replayed = [r for r in (results or []) if r.get("replayed") is True]
+    dupes = [r for r in (results or [])
+             if r.get("command") == "set_track_volume" and not r.get("ok")]
+    replay_ok = (len(statuses or []) >= 3
+                 and len(replayed) == 1                                  # exactly one replay
+                 and not dupes                                           # the retry was not an error
+                 and statuses[-1].get("status") == "committed"
+                 # The manifest was 2 commands and the script sent 3 — a double-apply would
+                 # show as applied > manifestCount, or as a third recorded entry.
+                 and statuses[-1].get("applied") == statuses[-1].get("manifestCount")
+                 and len(statuses[-1].get("entries", [])) == statuses[-1].get("manifestCount"))
+    detail["replay"] = {"replayed_results": len(replayed),
+                        "applied": statuses[-1].get("applied") if statuses else None,
+                        "manifestCount": statuses[-1].get("manifestCount") if statuses else None}
+
+    # ── 4. THE MULTI-STEP SHAPE, committed AND rolled back ──
+    # add_vocal_with_lyrics rather than host_plugin: host_plugin's first step is load_plugin,
+    # which needs a scanned third-party VST3 and is therefore not portable to a headless run
+    # or a clean CI machine. (The 3-command PLUGIN shape is proven against the real engine in
+    # --selftest's TXN-3CMD section, which can use load_builtin.)
+    results, statuses, err = _replay_txn_golden(ctx, "add_vocal_with_lyrics-commit.jsonl", "verify-txn-multi")
+    multi_commit = (len(statuses or []) >= 3
+                    and statuses[-1].get("status") == "committed"
+                    and statuses[-1].get("manifestCount") >= 3
+                    and statuses[-1].get("applied") == statuses[-1].get("manifestCount"))
+    results, statuses2, err = _replay_txn_golden(ctx, "add_vocal_with_lyrics-rollback.jsonl", "verify-txn-multi-rb")
+    pre2 = statuses2[0].get("preFingerprint") if statuses2 else None
+    mid2 = statuses2[-2].get("fingerprint") if len(statuses2 or []) >= 2 else None
+    fin2 = statuses2[-1] if statuses2 else {}
+    multi_rollback = (pre2 and mid2 and mid2 != pre2                 # earlier steps really applied
+                      and (statuses2[-2].get("applied") or 0) >= 2   # …more than one of them
+                      and fin2.get("status") == "rolled_back"
+                      and fin2.get("fingerprint") == pre2)           # …all reverted by ONE rollback
+    three_ok = multi_commit and multi_rollback
+    detail["multi_step"] = {"commit": statuses[-1].get("status") if statuses else None,
+                            "commit_applied": statuses[-1].get("applied") if statuses else None,
+                            "rollback_applied_before": statuses2[-2].get("applied") if len(statuses2 or []) >= 2 else None,
+                            "rollback_status": fin2.get("status"),
+                            "restored_exactly": fin2.get("fingerprint") == pre2}
+
+    # ── 5. RESTART BLOCK: an unresolved transaction survives the process ──
+    # This is the only leg that NEEDS two processes, which is why it lives here and not in
+    # --selftest: run 1 opens a transaction, applies a step, and exits without resolving it
+    # (the crash shape). Run 2 must refuse to start any skill until T2's recovery resolves it.
+    SESSION = "verify-txn-restart"
+    base = _mosh_session_base() / SESSION
+    if base.exists():
+        shutil.rmtree(base, ignore_errors=True)
+    keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
+    orphan = "verify-orphan-txn"
+    run1 = [
+        {"command": "create_track", "args": {"name": "Orphan Fixture"}, "capture": {"T": "trackId"}},
+        {"command": "batch_begin", "args": {"transactionId": orphan, "name": "set_track_level",
+                                            "commands": [{"index": 0, "requestId": "rq-a",
+                                                          "command": "set_track_volume"}]}},
+        {"command": "set_track_volume", "args": {"trackId": "${T}", "db": -5.0},
+         "transaction": {"transactionId": orphan, "requestId": "rq-a", "index": 0}},
+        # …and the process ends here, with the transaction still open.
+    ]
+    run_script(ctx.bin, run1, SESSION, extra_env=keep, timeout=120)
+
+    run2 = [
+        {"command": "batch_status", "args": {"transactionId": orphan}},
+        {"command": "batch_begin", "args": {"transactionId": "a-brand-new-txn", "name": "set_track_level",
+                                            "commands": [{"index": 0, "requestId": "rq-z",
+                                                          "command": "set_track_volume"}]}},
+        {"command": "discard_recovery", "args": {}},          # T2's human gate: pre-state stands
+        {"command": "batch_begin", "args": {"transactionId": "a-brand-new-txn", "name": "set_track_level",
+                                            "commands": [{"index": 0, "requestId": "rq-z",
+                                                          "command": "set_track_volume"}]}},
+        {"command": "batch_rollback", "args": {"transactionId": "a-brand-new-txn"}},
+    ]
+    results2, proc2 = run_script(ctx.bin, run2, SESSION, extra_env=keep, timeout=120)
+    orphan_status = next((r.get("data", {}) for r in results2 if r.get("command") == "batch_status"), {})
+    begins = [r for r in results2 if r.get("command") == "batch_begin"]
+    restart_ok = (orphan_status.get("status") == "needs_recovery"
+                  and len(begins) == 2
+                  and begins[0].get("ok") is False                       # BLOCKED before recovery
+                  and "unresolved_after_restart" in (begins[0].get("error") or "")
+                  and begins[1].get("ok") is True)                       # unblocked after it
+    detail["restart_block"] = {"orphan_status": orphan_status.get("status"),
+                               "blocked_before_recovery": begins[0].get("ok") is False if begins else None,
+                               "allowed_after_recovery": begins[1].get("ok") if len(begins) > 1 else None,
+                               "stderr": proc2.stderr[-200:] if not restart_ok else ""}
+
+    ok = commit_ok and rollback_ok and replay_ok and three_ok and restart_ok
+    return row("FS-B2a skill transaction (real engine): exact commit + exact rollback", ok, detail)
+
+
 def check_stem_export(ctx):
     """G7 — per-track stem export, common zero point (reality-pack invariant 84:
     "Stem export names and aligns each stem from the same zero point"). Two tracks
@@ -1291,7 +1442,8 @@ OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile
                   check_midi_reimagine_beneath, check_reactive_rerender,
                   check_freeze_stops_rerender, check_full_loop,
                   check_relative_ref_export, check_export_range_tail, check_bypass_layer,
-                  check_render_artifact_portability, check_crash_recovery, check_stem_export,
+                  check_render_artifact_portability, check_crash_recovery,
+                  check_skill_transaction_real_engine, check_stem_export,
                   check_clip_fades, check_clip_reverse, check_warp_stretch,
                   check_automation_ramp, check_send_return, check_master_chain]
 
