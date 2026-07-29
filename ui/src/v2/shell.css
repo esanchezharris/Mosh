@@ -1745,6 +1745,57 @@
 .v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: color-mix(in srgb, var(--status-danger) 40%, transparent); }
 .v2-flow-rhyme.st-free    { color: var(--v2-faint); }
 
+/* SURF-1 — the per-line rhyme palette. 40 words is a MEASURED interior maximum
+   (24→.387, 40→.413, 100→.320, 200→.267 exact — past 40 it's choice overload), and a
+   40-word palette holds the word the original artist used 80% of the time. So the
+   layout has one job: make 40 scannable at a glance. A wrapping chip cloud does that;
+   the default <ul> would be a 40-row vertical scroll in a narrow inspector, which is
+   how a measured win becomes an unusable one. Capped height so a palette can never
+   push the bar it belongs to off screen. */
+.v2-lyric-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 6px;
+  /* Sized so all 40 fit WITHOUT scrolling at inspector width (~8 wrapped rows, measured
+     in the CSS harness): the 80%-recall claim assumes the writer can see the whole
+     palette, and a cap that clips mid-row quietly turns 40 shown into ~35 seen. Still a
+     cap, so a pathological pool can never push the bar it belongs to off screen. */
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  /* --v2-surface-sunken, NOT a made-up token: an undefined var inside color-mix()
+     invalidates the whole declaration, so the background silently vanishes while tsc
+     and the DOM tests stay green. Caught by looking at it. */
+  background: var(--v2-surface-sunken);
+}
+.v2-lyric-palette li { display: contents; }
+.v2-lyric-palette .v2-rhyme {
+  padding: 2px 7px;
+  border-radius: var(--v2-radius-pill);
+  border: 1px solid var(--v2-line);
+  background: transparent;
+  color: var(--v2-text);
+  font-size: var(--v2-fs-xs);
+  cursor: pointer;
+}
+.v2-lyric-palette .v2-rhyme:hover {
+  border-color: var(--v2-accent);
+  color: var(--v2-accent);
+}
+/* Rhyme grade is a hint, not a ranking — three independent negatives showed nothing
+   orders these 40 better than the writer does, so grade only tints. */
+.v2-lyric-palette .v2-rhyme.st-perfect { border-color: var(--v2-accent-soft); }
+.v2-lyric-palette .v2-rhyme.st-slant   { color: var(--status-warn); }
+.v2-lyric-palette .v2-rhyme-syl {
+  margin-left: 4px;
+  color: var(--v2-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
 .v2-lyric-stylebias {
   display: inline-flex;

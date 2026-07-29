@@ -128,7 +128,8 @@ export function LyricPanel({ track }: { track: Track }) {
       <ol className="v2-lyric-lines" data-testid="lyric-lines">
         {sheet.lines.map((line) => (
           <LyricLineRow key={line.index} trackId={track.id} line={line} grid={sheet.grid} busy={busy} run={run}
-            isGhost={line.index === ghostIndex} onGhostDone={() => setGhostIndex(null)} />
+            isGhost={line.index === ghostIndex} onGhostDone={() => setGhostIndex(null)}
+            strictness={sheet.rhymeStrictness} />
         ))}
       </ol>
       <div className="v2-lyric-add">
@@ -142,10 +143,13 @@ export function LyricPanel({ track }: { track: Track }) {
   );
 }
 
-function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: {
+function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone, strictness }: {
   trackId: string; line: LyricLine; grid: string; busy: boolean;
   run: (cmd: string, args: Record<string, unknown>) => Promise<void>;
   isGhost: boolean; onGhostDone: () => void;
+  // The sheet's rhyme strictness — the palette must ask for the same rhyme class the
+  // engine will grade this line against, or it would offer words the gate then rejects.
+  strictness: string;
 }) {
   const exec = useStore((s) => s.exec);
 
@@ -257,6 +261,13 @@ function LyricLineRow({ trackId, line, grid, busy, run, isGhost, onGhostDone }: 
           {count}/{target}{gaps ? ` ·${gaps}_` : ""}
         </span>
         {line.rhymeGroup && <span className="v2-lyric-rgroup">{line.rhymeGroup}</span>}
+        {/* SURF-1 — appears only once phonology has an anchor for this line to rhyme
+            with, so it can always answer when shown (and never fires the blocking
+            get_rhymes call speculatively). */}
+        {line.analysis?.rhymeAnchor && (
+          <RhymePalette trackId={trackId} line={line} anchor={line.analysis.rhymeAnchor}
+            strictness={strictness} />
+        )}
         {fillable && !line.proposals?.length && (
           <button className="btn" data-testid={`lyric-fill-${line.index}`} disabled={busy} title="fill this line"
             aria-label={`Fill line ${line.index + 1}`}
@@ -333,6 +344,81 @@ function FlowViz({ index, a }: { index: number; a: LyricAnalysis }) {
 }
 
 // The rhyme tool — rung 1: phonology only, no LLM. Type a word, get ranked rhymes.
+// ── The per-line rhyme palette (SURF-1) ──────────────────────────────────────────────
+// The measured surface. The same 40-word freq-ranked palette the generator already gets
+// in its prompt (`lyrics/core.py::_rhyme_palette`) — except until now the HUMAN never saw
+// it, so the one number the bench is most confident about was helping only the model:
+// **a 40-word palette contains the word the original artist actually used 80% of the
+// time**, against .433 for trusting the top pick. Ranking those 40 is a closed question —
+// three independent negatives (pool rerank, 2-way selector, frequency rerank) — so the
+// disambiguator is the writer, which is exactly what this renders.
+//
+// Two constraints are load-bearing, not stylistic:
+//   * `maxN` is 40 because 40 is a measured INTERIOR MAXIMUM, not a screenful:
+//     24→.387, 40→.413, 100→.320, 200→.267 (choice overload). Do not "help" by
+//     showing more.
+//   * The fetch happens ON CLICK ONLY. `get_rhymes` is a synchronous service call on
+//     the UI thread by design ("blocks briefly; an explicit on-demand lookup",
+//     MoshOps::cmdGetRhymes) — auto-fetching per focus/selection would freeze the shell.
+// Progressive disclosure: the button only exists once phonology has found an anchor to
+// rhyme WITH, so it appears exactly when it can answer.
+function RhymePalette({ trackId, line, strictness, anchor }: {
+  trackId: string; line: LyricLine; strictness: string; anchor: string;
+}) {
+  const exec = useStore((s) => s.exec);
+  const [words, setWords] = useState<RhymeCandidate[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    if (words) { setOpen(!open); return; }   // already paid for it — just toggle
+    setBusy(true); setError(null);
+    const r = await exec("get_rhymes", { word: anchor, strictness, maxN: 40 });
+    setBusy(false);
+    if (r.ok) { setWords(((r.data as { candidates?: RhymeCandidate[] })?.candidates) ?? []); setOpen(true); }
+    else setError(r.error ?? "rhyme lookup failed");
+  };
+
+  // Placing a word REPLACES the line's final token — the trailing gap if the writer left
+  // one, otherwise the last word — because "end on this" is what choosing a rhyme means.
+  // It commits through the same `set_lyric_line` path the text input uses, so a chosen
+  // end word is indistinguishable from a typed one: no third "planned" state, and hence
+  // none of the group-anchor ambiguity that route would introduce.
+  const place = (w: string) => {
+    const src = (line.text?.trim() ? line.text : line.seedText) || "";
+    const toks = src.split(/\s+/).filter(Boolean);
+    if (toks.length) toks[toks.length - 1] = w; else toks.push(w);
+    const next = toks.join(" ");
+    void exec("set_lyric_line", line.text?.trim()
+      ? { trackId, lineIndex: line.index, text: next, seedText: next }
+      : { trackId, lineIndex: line.index, seedText: next });
+  };
+
+  return (
+    <>
+      <button className={`btn${open ? " on" : ""}`} data-testid={`lyric-palette-${line.index}`}
+        disabled={busy} aria-expanded={open}
+        title={`Words that rhyme with "${anchor}" — the palette the generator sees`}
+        aria-label={`Rhyme palette for line ${line.index + 1}`}
+        onClick={() => void load()}>{busy ? "…" : "◇"}</button>
+      {error && <span className="rack-empty" role="alert" data-testid={`lyric-palette-err-${line.index}`}>{error}</span>}
+      {open && words && (
+        <ul className="v2-rhyme-results v2-lyric-palette" data-testid={`lyric-palette-list-${line.index}`}
+          aria-label={`${words.length} rhymes for ${anchor}`}>
+          {words.length === 0 ? <li className="rack-empty">no rhymes found</li>
+            : words.map((c) => (
+              <li key={c.word}>
+                <button className={`v2-rhyme st-${c.grade}`} data-testid={`lyric-palette-word-${line.index}-${c.word}`}
+                  title={`end this bar on "${c.word}" (${c.grade}, ${c.syllables} syl)`}
+                  onClick={() => place(c.word)}>{c.word}<span className="v2-rhyme-syl">{c.syllables}</span></button>
+              </li>))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 function RhymeTool() {
   const exec = useStore((s) => s.exec);
   const [word, setWord] = useState("");
