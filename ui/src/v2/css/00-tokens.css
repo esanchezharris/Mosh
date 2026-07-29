@@ -82,9 +82,15 @@
   --v2-accent-neutral: #f2f2f4;
   --v2-accent-neutral-ink: #0a0a0b;
   --v2-accent-neutral-soft: rgba(242, 242, 244, 0.10);
-  --v2-accent-agentic: #ccff36;
+  /* Chartreuse, chosen by the owner off the OKLCH bench: the same hue as the old lime
+     (124 deg to the degree) at slightly lower lightness and chroma — 0.932/0.216 -> 0.862/0.201,
+     a perceptual distance of 0.072. A nudge within the family rather than a new colour.
+     Still clears every constraint the bench measures: 13.4:1 as text on the ground, 13.3:1
+     for the ink on the fill, 0.23 from the near-white neutral, and 180 deg from the MIDI
+     violet, so it cannot be mistaken for track identity. */
+  --v2-accent-agentic: #b8e62e;
   --v2-accent-agentic-ink: #0a0f04;
-  --v2-accent-agentic-soft: rgba(204, 255, 54, 0.13);
+  --v2-accent-agentic-soft: rgba(184, 230, 46, 0.13);
 
   --v2-accent: var(--v2-accent-neutral);
   --v2-accent-ink: var(--v2-accent-neutral-ink);
@@ -304,9 +310,11 @@
      both themes, so the near-white neutral is correct in both and needs no light twin —
      --v2-accent/-ink/-soft stay DERIVED from the neutral in the base block, and must not
      be re-declared here or the reservation switch stops working in light. */
-  --v2-accent-agentic: #c2f53f;
+  /* The light twin, derived by the same (-10, -10, +9) step the shipped lime pair used
+     rather than picked afresh, so the two themes keep the relationship someone chose. */
+  --v2-accent-agentic: #aedc37;
   --v2-accent-agentic-ink: #16210a;
-  --v2-accent-agentic-soft: rgba(194, 245, 63, 0.16);
+  --v2-accent-agentic-soft: rgba(174, 220, 55, 0.16);
   --v2-blue: #a7adba;
   /* Clip bodies and ink do NOT flip: v2 keeps dark panels on the cream page, so the lane
      ground is the same in both themes. Restated rather than inherited because
