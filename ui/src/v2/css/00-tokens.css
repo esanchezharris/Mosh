@@ -14,7 +14,18 @@
      column now gets ~76px. MUST move in lockstep with HEAD_W_FALLBACK in
      timeline/geom.ts (and its test), which mirrors this token for pre-mount renders. */
   --v2-head-w: 200px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
-  --v2-lane-h: 64px;
+  /* 64 -> 72. Breathing room, bought where it is actually free.
+     Two ceilings were measured before landing this, and both are lower than they look:
+       - at 80px the arrangement stops shrink-wrapping to its tracks in a 1280x720 window.
+         The stage caps at 440px and is ALREADY there with three tracks, so adding one
+         cannot grow it and the "ground shows below the stage" property dies.
+       - raising the chrome HEIGHTS alongside it (topbar 64->72, gap 14->18, ribbon 40->44,
+         ruler 24->26) makes the trailing add-track row UNREACHABLE on a full session in a
+         short window — the e2e flip-up spec catches it. No single one of those is the
+         culprit; it is cumulative, which is why they are not here.
+     So: taller lanes yes, taller chrome no. --v2-head-w stays 200 for the same reason, and
+     because moving it drags geom.ts's HEAD_W_FALLBACK with it (now guarded in geom.test.ts). */
+  --v2-lane-h: 72px;
   --v2-ribbon-h: 40px;
   --v2-tempo-h: 22px;
   --v2-ruler-h: 24px;

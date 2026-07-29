@@ -318,7 +318,7 @@
 .v2-gl.bar { opacity: 1; }
 .v2-gl.beat { opacity: 0.45; }
 .v2-clip {
-  position: absolute; top: 8px; bottom: 8px; border-radius: var(--v2-radius-md); overflow: hidden;
+  position: absolute; top: 10px; bottom: 10px; border-radius: var(--v2-radius-md); overflow: hidden;
   background: var(--v2-clip-block); border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35); cursor: grab; min-width: 4px;
 }
