@@ -351,9 +351,11 @@
 .v2-clipmenu button:disabled { color: var(--v2-faint, rgba(240, 239, 233, 0.4)); cursor: not-allowed; }
 .v2-clipmenu button:disabled:hover { background: transparent; }
 .v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
+/* Through the tokens, not past them. These three carried hardcoded near-blacks while
+   --v2-clip-midi / --v2-clip-drum sat unused in both theme blocks. */
 .v2-clip.wave { background: var(--v2-clip-wave); }
-.v2-clip.midi { background: rgba(26, 26, 28, 0.66); border-color: rgba(255, 255, 255, 0.16); }
-.v2-clip.drum { background: rgba(24, 24, 26, 0.6); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.v2-clip.midi { background: var(--v2-clip-midi); border-color: rgba(255, 255, 255, 0.16); }
+.v2-clip.drum { background: var(--v2-clip-drum); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: var(--v2-fs-xs); color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
 /* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
 .v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: var(--v2-fs-sm); line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }

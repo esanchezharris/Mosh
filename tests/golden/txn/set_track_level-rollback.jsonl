@@ -1,0 +1,8 @@
+{"command":"create_track","args":{"name":"Golden Fixture"},"capture":{"T1":"trackId"}}
+{"command":"batch_begin","args":{"transactionId":"set_track_level-rollback-jsonl-00","name":"set_track_level","commands":[{"index":0,"requestId":"set_track_level-rollback-jsonl-01","command":"set_track_volume"},{"index":1,"requestId":"set_track_level-rollback-jsonl-02","command":"set_track_mute"}]}}
+{"command":"batch_status","args":{"transactionId":"set_track_level-rollback-jsonl-00"}}
+{"command":"set_track_volume","args":{"trackId":"${T1}","db":-12},"transaction":{"transactionId":"set_track_level-rollback-jsonl-00","requestId":"set_track_level-rollback-jsonl-01","index":0}}
+{"command":"set_track_mute","args":{"trackId":"no-such-track-id","mute":true},"transaction":{"transactionId":"set_track_level-rollback-jsonl-00","requestId":"set_track_level-rollback-jsonl-02","index":1}}
+{"command":"batch_status","args":{"transactionId":"set_track_level-rollback-jsonl-00"}}
+{"command":"batch_rollback","args":{"transactionId":"set_track_level-rollback-jsonl-00"}}
+{"command":"batch_status","args":{"transactionId":"set_track_level-rollback-jsonl-00"}}

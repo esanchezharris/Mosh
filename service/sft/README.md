@@ -313,3 +313,21 @@ disabled. It does not call Gemini, Audiobox, CLAP, SA3, MLX, or any fused model.
 Restart policy remains explicit: keep r4 running unless `audit_r4_target.py`
 proves the current target is wrong or incomplete. Assist rows, sidecar metadata,
 and the existence of an r5 idea are not restart reasons.
+
+## Session-render drift (2026-07-28)
+
+The two session renderers were unified into `ui/src/agent/sessionRender.ts`, so
+every system prompt now carries a `master: …` line (plus key/tempo-map/buses
+when the session has them). See
+`docs/superpowers/specs/2026-07-28-one-session-renderer-design.md`.
+
+- `add_note_corrective.jsonl` and `assist_demonstrations.jsonl` were regenerated
+  against the new render. Both builders are deterministic — re-run and byte-diff.
+- **`r5_train_additions.jsonl` (105 rows) was NOT regenerated.** It has no
+  builder; a hand rewrite of the `system` field would be mechanical but
+  unverifiable, which is worse than a file that is known-stale. Its rows carry
+  the pre-2026-07-28 render. Regenerate or re-curate it before the next
+  local-seat training run — a train/serve prompt-shape mismatch is exactly the
+  class of problem the r5 4-bit serve read already cost us.
+
+The shipped cloud seat is unaffected: it reads the prompt live.

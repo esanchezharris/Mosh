@@ -619,6 +619,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
+    initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
@@ -1028,7 +1029,33 @@ void MoshOps::timerCallback()
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::execute (const juce::var& command)
 {
+    // FS-B2a — re-entrancy depth. execute() is re-entered from INSIDE handlers (the
+    // multiplayer apply path, cmdSketchBeatbox, cmdGenerateBeatRecipe), so the
+    // transaction guard must govern the OUTERMOST call only: a manifested composite
+    // command's internal steps cannot each be expected to carry transaction metadata,
+    // and requiring it would break both composites. A recovery replay is exempt for the
+    // same reason.
+    struct DepthGuard
+    {
+        explicit DepthGuard (int& d) : depth (d) { ++depth; }
+        ~DepthGuard() { --depth; }
+        int& depth;
+    } depthGuard (execDepth_);
+
+    const bool outermost = (execDepth_ == 1) && ! replayingRecovery_;
+
+    if (outermost)
+    {
+        juce::var early;
+        if (txnPreDispatch (command, early))
+            return early;   // refused or replayed: no dispatch, no mutation, no journal
+    }
+
     auto result = executeImpl (command);
+
+    if (outermost)
+        txnPostDispatch (result);
+
     // A3 — feed the crash-recovery journal (single chokepoint; skipped during a replay).
     if (! replayingRecovery_)
         appendRecoveryJournal (command.getProperty ("command", var()).toString(),
@@ -1111,6 +1138,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "redo")              return cmdRedo (args);
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
+    if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
+    if (name == "batch_rollback")    return cmdBatchRollback (args);    // FS-B2a
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
     if (name == "recover_session")   return cmdRecoverSession (args);   // A3 — replay the crash tail
@@ -2844,7 +2873,7 @@ juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
     const bool did = undoManager().undo();
-    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
+    if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("undo", args, did, did ? String() : String ("nothing to undo"), false);
     emitSnapshotInvalidated();
     return okResult ("undo", var (did));
@@ -2853,7 +2882,7 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
     const bool did = undoManager().redo();
-    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
+    if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("redo", args, did, did ? String() : String ("nothing to redo"), false);
     emitSnapshotInvalidated();
     return okResult ("redo", var (did));
@@ -2863,25 +2892,609 @@ juce::var MoshOps::cmdRedo (const juce::var& args)
 // while inBatch skips its own beginNewTransaction (see beginTxn), so the whole batch
 // is a single undo step. batch_end closes it. The agent ("Monster changes") brackets
 // its edits with these so one Undo reverts the entire batch.
+//
+// FS-B2a — TWO MODES, and the split is the safety property of the whole change:
+//   • NO transactionId  ⇒ the LEGACY path, byte-identical to the pre-FS-B2a behaviour.
+//     Every existing caller (runAgentBatch, cmdSketchBeatbox and cmdGenerateBeatRecipe's
+//     ownBatch pattern, the existing --selftest batch section) keeps working untouched.
+//   • WITH transactionId ⇒ the identified, manifest-validated, exactly-rollbackable
+//     transaction defined by docs/first-stranger-program/lanes/fs-b2.md.
 juce::var MoshOps::cmdBatchBegin (const juce::var& args)
 {
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+
+    if (txnId.isEmpty())
+    {
+        // ── LEGACY MODE (unchanged) ──
+        if (inBatch)
+            return errResult ("batch_begin", "a batch is already open");
+        const auto label = args.getProperty ("name", var ("agent edit")).toString();
+        undoManager().beginNewTransaction (label);
+        inBatch = true;
+        logLine ("batch_begin", args, true, {}, false);
+        return okResult ("batch_begin");
+    }
+
+    // ── TRANSACTIONAL MODE ──
+    // A crash left something unresolved: no further skill may run until T2's recovery has
+    // proved the pre- or post-transaction state. fs-b2.md is explicit that B2 "may not
+    // call a crash-interrupted edit clean merely because the in-memory inBatch flag
+    // disappeared".
+    if (! unresolvedTxnIds_.isEmpty())
+        return errResult ("batch_begin",
+                          agenttxn::codeUnresolvedRestart() + ": transaction "
+                          + unresolvedTxnIds_[0] + " from a previous run is unresolved; "
+                          "recover or discard the session before running a skill");
+
+    const auto name = args.getProperty ("name", var()).toString();
+    std::vector<agenttxn::ManifestEntry> manifest;
+    juce::String manifestError;
+    if (! agenttxn::parseManifest (args.getProperty ("commands", var()), manifest, manifestError))
+        return errResult ("batch_begin", agenttxn::codeManifestRejected() + ": " + manifestError);
+
+    const auto digest = agenttxn::manifestDigest (name, manifest);
+
+    // Idempotent retry: SAME id + semantically identical manifest returns the existing
+    // status. This is what makes a lost batch_begin response safe to retry.
+    if (txn_ != nullptr && txn_->id == txnId)
+    {
+        if (txn_->manifestDigest != digest)
+            return errResult ("batch_begin",
+                              agenttxn::codeIdentityConflict() + ": transaction " + txnId
+                              + " already exists with a different manifest");
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_begin", status);
+    }
+
+    if (txn_ != nullptr && txn_->isOpen())
+        return errResult ("batch_begin",
+                          agenttxn::codeAlreadyOpen() + ": transaction " + txn_->id
+                          + " is still " + txn_->status);
+
     if (inBatch)
         return errResult ("batch_begin", "a batch is already open");
-    const auto label = args.getProperty ("name", var ("agent edit")).toString();
-    undoManager().beginNewTransaction (label);
+
+    // Manifest PREFLIGHT against the engine-owned registry — before the Tracktion
+    // transaction opens, so a rejection mutates nothing and leaves no open transaction.
+    for (const auto& e : manifest)
+    {
+        juce::String reason;
+        if (mosh::txnsafe::classify (e.command, reason) != mosh::txnsafe::Class::Safe)
+            return errResult ("batch_begin",
+                              agenttxn::codeManifestRejected() + ": step "
+                              + juce::String (e.index) + " — " + reason);
+    }
+
+    auto record = std::make_unique<agenttxn::Record>();
+    record->id              = txnId;
+    record->name            = name;
+    record->label           = agenttxn::labelFor (txnId);
+    record->status          = agenttxn::statusOpen();
+    record->manifestDigest  = digest;
+    record->preFingerprint  = txnFingerprint();
+    record->revisionAtBegin = editRevision_;
+    for (const auto& e : manifest)
+    {
+        agenttxn::Entry entry;
+        entry.requestId = e.requestId;
+        entry.command   = e.command;
+        record->entries.push_back (entry);
+    }
+
+    // beginNewTransaction is LAZY (juce_UndoManager.cpp:223 only sets a flag; the
+    // ActionSet appears on the first perform), so an empty transaction leaves the undo
+    // stack completely untouched — which is what lets rollback distinguish "we own a
+    // non-empty head" from "there is nothing of ours to undo".
+    undoManager().beginNewTransaction (record->label);
     inBatch = true;
+    txn_ = std::move (record);
+
     logLine ("batch_begin", args, true, {}, false);
-    return okResult ("batch_begin");
+    appendTxnLedger (*txn_);
+    return okResult ("batch_begin", txnStatusVar (*txn_));
 }
 
 juce::var MoshOps::cmdBatchEnd (const juce::var& args)
 {
-    if (! inBatch)
-        return errResult ("batch_end", "no batch is open");
-    inBatch = false;
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+
+    if (txnId.isEmpty())
+    {
+        // ── LEGACY MODE (unchanged) ──
+        if (! inBatch)
+            return errResult ("batch_end", "no batch is open");
+        inBatch = false;
+        logLine ("batch_end", args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult ("batch_end");
+    }
+
+    // ── TRANSACTIONAL MODE: batch_end IS the commit ──
+    if (txn_ == nullptr || txn_->id != txnId)
+        return errResult ("batch_end",
+                          agenttxn::codeUnknownTxn() + ": no transaction " + txnId
+                          + " — query batch_status rather than inferring from this failure");
+
+    // Idempotent: a lost commit RESPONSE is resolved by repeating the call (or by
+    // batch_status), never by a blind second mutation.
+    if (txn_->status == agenttxn::statusCommitted())
+    {
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_end", status);
+    }
+    if (! txn_->isOpen())
+        return errResult ("batch_end",
+                          agenttxn::codeUnknownTxn() + ": transaction " + txnId
+                          + " is " + txn_->status + " and cannot be committed");
+
+    if (txn_->anyFailed() || ! txn_->allResolved())
+    {
+        txn_->status      = agenttxn::statusFailed();
+        txn_->failureCode = agenttxn::codeIncomplete();
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeIncomplete() + ": " + juce::String (txn_->appliedCount())
+                          + " of " + juce::String ((int) txn_->entries.size())
+                          + " manifested commands applied; roll back instead of committing");
+    }
+
+    // Structural proof that this transaction — and nothing else — owns the edit's head.
+    const int  headActions = undoManager().getNumActionsInCurrentTransaction();
+    const auto headName    = undoManager().getUndoDescription();
+    if (headActions > 0 && headName != txn_->label)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeUndoHeadMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeUndoHeadMismatch() + ": the undo head is \"" + headName
+                          + "\", not this transaction; the edit state cannot be proven");
+    }
+    if (headActions == 0 && txnFingerprint() != txn_->preFingerprint)
+    {
+        // Nothing entered the undo system, yet the session changed — something mutated
+        // outside the one mutation path. Refuse rather than commit an unprovable edit.
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeFingerprintMismatch() + ": the session changed without "
+                          "entering the undo system; the edit state cannot be proven");
+    }
+    if (editRevision_ < txn_->revisionAtBegin)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeFingerprintMismatch() + ": edit revision went backwards");
+    }
+
+    inBatch        = false;
+    txn_->status   = agenttxn::statusCommitted();
+    txn_->failureCode.clear();
     logLine ("batch_end", args, true, {}, false);
+    appendTxnLedger (*txn_);
     emitSnapshotInvalidated();
-    return okResult ("batch_end");
+    return okResult ("batch_end", txnStatusVar (*txn_));
+}
+
+// The authoritative read. fs-b2.md: "The status is the authority after any rejected
+// promise, bridge disconnect, timeout, or duplicate call." Read-only — no transaction, no
+// mutation, and (following get_rhymes / get_lyric_corpus_stats) no JSONL line.
+juce::var MoshOps::cmdBatchStatus (const juce::var& args)
+{
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+    if (txnId.isEmpty())
+        return errResult ("batch_status", "missing 'transactionId'");
+
+    // A crash-orphaned id is NEVER reported as "nothing happened".
+    if (unresolvedTxnIds_.contains (txnId))
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("found", true);
+        o->setProperty ("transactionId", txnId);
+        o->setProperty ("status", agenttxn::statusNeedsRecovery());
+        o->setProperty ("failureCode", agenttxn::codeUnresolvedRestart());
+        o->setProperty ("canCommit", false);
+        o->setProperty ("canRollback", false);
+        o->setProperty ("revision", editRevision_);
+        return okResult ("batch_status", var (o));
+    }
+
+    if (txn_ == nullptr || txn_->id != txnId)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("found", false);
+        o->setProperty ("transactionId", txnId);
+        o->setProperty ("revision", editRevision_);
+        return okResult ("batch_status", var (o));
+    }
+
+    return okResult ("batch_status", txnStatusVar (*txn_));
+}
+
+// The ONLY automatic skill rollback. Never a generic undo: fs-b2.md requires it to prove
+// this transaction owns the UndoManager head, undo exactly that transaction, and verify
+// the pre-state fingerprint before it will report rolled_back.
+//
+// The head-ownership gate is not defensive decoration — it is the G14 empty-transaction
+// class. With zero actions in the current set, UndoManager::undo() reaches back and
+// destroys the PREVIOUS edit (juce_UndoManager.cpp:256 getCurrentSet()), so a rollback
+// that skipped this check would silently revert unrelated work.
+juce::var MoshOps::cmdBatchRollback (const juce::var& args)
+{
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+    if (txnId.isEmpty())
+        return errResult ("batch_rollback", "missing 'transactionId'");
+
+    if (txn_ == nullptr || txn_->id != txnId)
+        return errResult ("batch_rollback",
+                          agenttxn::codeUnknownTxn() + ": no transaction " + txnId
+                          + " — performing no undo");
+
+    // Idempotent once rolled back.
+    if (txn_->status == agenttxn::statusRolledBack())
+    {
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_rollback", status);
+    }
+    if (txn_->status == agenttxn::statusCommitted())
+        return errResult ("batch_rollback",
+                          agenttxn::statusNeedsRecovery() + ": transaction " + txnId
+                          + " is already committed; performing no undo");
+    if (txn_->status == agenttxn::statusNeedsRecovery())
+        return errResult ("batch_rollback",
+                          agenttxn::statusNeedsRecovery() + ": transaction " + txnId
+                          + " needs human recovery; performing no undo");
+
+    const int  headActions = undoManager().getNumActionsInCurrentTransaction();
+    const auto headName    = undoManager().getUndoDescription();
+    const auto plan        = agenttxn::planRollback (headActions, headName, txn_->label);
+
+    if (plan == agenttxn::RollbackPlan::RefuseForeignHead)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeUndoHeadMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_rollback",
+                          agenttxn::codeUndoHeadMismatch() + ": the undo head is \"" + headName
+                          + "\", not this transaction; performing no undo");
+    }
+
+    if (plan == agenttxn::RollbackPlan::UndoOurs)
+    {
+        undoManager().undo();
+        eng.markDirty();
+        ++editRevision_;
+        emitSnapshotInvalidated();
+    }
+    inBatch = false;
+
+    // Exactness check: the session must be back at the captured pre-state.
+    const auto now = txnFingerprint();
+    if (now != txn_->preFingerprint)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        appendTxnLedger (*txn_);
+        return errResult ("batch_rollback",
+                          agenttxn::codeFingerprintMismatch() + ": the undo did not restore the "
+                          "pre-transaction state; the edit needs human recovery");
+    }
+
+    txn_->status = agenttxn::statusRolledBack();
+    txn_->failureCode.clear();
+    logLine ("batch_rollback", args, true, {}, false);
+    appendTxnLedger (*txn_);
+    return okResult ("batch_rollback", txnStatusVar (*txn_));
+}
+
+// ── FS-B2a support ───────────────────────────────────────────────────────────────
+
+// The canonical semantic fingerprint of the session. Memoized on editRevision_, which
+// beginTxn/cmdUndo/cmdRedo/cmdBatchRollback bump on every Edit mutation.
+//
+// The memo is worth having: snapshot() is measured at ~330 ms / 3.7 MiB at 100 tracks
+// (see emitTrackPatch's note), and a two-command skill run asks for the fingerprint six to
+// eight times — at begin, at each ledger record, and at every batch_status the harness
+// consults. Without the memo that is a couple of seconds of message-thread time on a large
+// session, on the synchronous execute_command path.
+//
+// SOUNDNESS, stated because a stale fingerprint would silently weaken the exactness check:
+// the only writes that change the snapshot WITHOUT bumping editRevision_ are the handful of
+// non-undoable engine/device preferences that never call beginTxn (set_metronome,
+// set_input_monitor, arm_track, …). Every one of those is classified NonUndoable, so it can
+// never be a manifest step; and while a transaction is open the guard refuses it as an
+// untagged mutation. So no such write can land between a fingerprint being captured and the
+// same fingerprint being compared. If a future command mutates the Edit without going
+// through beginTxn, it MUST bump editRevision_ — that is the invariant this memo rests on.
+juce::String MoshOps::txnFingerprint()
+{
+    if (txnFingerprintRevision_ == editRevision_ && txnFingerprintCache_.isNotEmpty())
+        return txnFingerprintCache_;
+
+    txnFingerprintCache_    = agenttxn::fingerprint (snapshot());
+    txnFingerprintRevision_ = editRevision_;
+    return txnFingerprintCache_;
+}
+
+juce::var MoshOps::txnStatusVar (const agenttxn::Record& record)
+{
+    Array<var> entries;
+    for (int i = 0; i < (int) record.entries.size(); ++i)
+    {
+        const auto& e = record.entries[(size_t) i];
+        auto* eo = new DynamicObject();
+        eo->setProperty ("index", i);
+        eo->setProperty ("requestId", e.requestId);
+        eo->setProperty ("command", e.command);
+        eo->setProperty ("state", e.state);
+        // The RESULT envelope only. The command's args are deliberately never recorded
+        // here or in the ledger — they carry file paths, lyric text and track names.
+        if (! e.result.isVoid()) eo->setProperty ("result", e.result);
+        entries.add (var (eo));
+    }
+
+    auto* o = new DynamicObject();
+    o->setProperty ("found", true);
+    o->setProperty ("transactionId", record.id);
+    o->setProperty ("name", record.name);
+    o->setProperty ("status", record.status);
+    if (record.failureCode.isNotEmpty()) o->setProperty ("failureCode", record.failureCode);
+    o->setProperty ("revisionAtBegin", record.revisionAtBegin);
+    o->setProperty ("revision", editRevision_);
+    o->setProperty ("preFingerprint", record.preFingerprint);
+    o->setProperty ("fingerprint", txnFingerprint());
+    o->setProperty ("manifestCount", (int) record.entries.size());
+    o->setProperty ("applied", record.appliedCount());
+    o->setProperty ("canCommit", record.status == agenttxn::statusOpen()
+                                     && record.allResolved() && ! record.anyFailed());
+    o->setProperty ("canRollback", record.isOpen());
+    o->setProperty ("entries", entries);
+    return var (o);
+}
+
+void MoshOps::initTxnLedger()
+{
+    txnLedgerFile = eng.sessionDir().getChildFile (agenttxn::ledgerFileName());
+    if (! txnLedgerFile.existsAsFile())
+        return;
+
+    const auto lines = StringArray::fromLines (txnLedgerFile.loadFileAsString());
+    unresolvedTxnIds_ = agenttxn::unresolvedIdsIn (lines);
+}
+
+void MoshOps::appendTxnLedger (const agenttxn::Record& record)
+{
+    if (txnLedgerFile == File())
+        return;
+
+    const auto line = JSON::toString (
+        agenttxn::makeLedgerRecord (record.id, record.name, record.status, record.failureCode,
+                                    editRevision_, record.preFingerprint, txnFingerprint(),
+                                    record.appliedCount(), (int) record.entries.size()),
+        true);
+    txnLedgerFile.appendText (line + "\n");
+
+    // "Bounded" per fs-b2.md: a long session must not grow this without limit. Trim from
+    // the FRONT, and only whole lines, so the surviving tail stays parseable — and only
+    // once nothing is unresolved, so trimming can never erase the evidence of a crash.
+    static constexpr int kMaxLedgerLines = 500;
+    static constexpr int kKeepLedgerLines = 200;
+    if (unresolvedTxnIds_.isEmpty())
+    {
+        auto lines = StringArray::fromLines (txnLedgerFile.loadFileAsString());
+        while (lines.size() > 0 && lines[lines.size() - 1].trim().isEmpty())
+            lines.remove (lines.size() - 1);
+        if (lines.size() > kMaxLedgerLines)
+        {
+            lines.removeRange (0, lines.size() - kKeepLedgerLines);
+            txnLedgerFile.replaceWithText (lines.joinIntoString ("\n") + "\n");
+        }
+    }
+}
+
+// T2 coordination. fs-b2.md requires an unresolved transaction to block skills "until
+// T2's snapshot+journal recovery has proved either the complete pre-transaction or
+// complete post-transaction state". Those are exactly T2's two human-gated outcomes:
+//   recover_session  → the journal tail was replayed ⇒ the POST-transaction state stands;
+//   discard_recovery → the tail was dropped ⇒ the last SAVED (pre-transaction) state stands.
+// Either way the ambiguity is gone and a terminal record is written. Note the limit
+// honestly: this trusts T2's journal to be the faithful record of the crash tail — it is
+// the strongest proof available, not an independent one.
+// The guard. Runs on the OUTERMOST execute() only (see execute()'s DepthGuard).
+//
+// While a transaction is open this is the wall fs-b2.md asks for: "every mutation must
+// carry matching metadata and match the next manifest entry. Untagged UI mutations, relay
+// mutations, out-of-order calls, and extra calls are refused without mutation."
+//
+// FAIL-CLOSED: a command is admitted only if it is the manifest's next entry or is named
+// in readOnlyDuringTransaction(). Anything else is refused — including a brand-new command
+// nobody remembered to classify.
+bool MoshOps::txnPreDispatch (const juce::var& command, juce::var& early)
+{
+    const auto name = command.getProperty ("command", var()).toString();
+    const auto meta = command.getProperty ("transaction", var());
+    const bool hasMeta = meta.getDynamicObject() != nullptr;
+
+    pendingTxnIndex_ = -1;
+    pendingTxnEnvelopeDigest_.clear();
+
+    // The boundary commands validate their own ids; never intercept them.
+    if (name == "batch_begin" || name == "batch_end" || name == "batch_rollback"
+        || name == "batch_status")
+        return false;
+
+    const bool open = (txn_ != nullptr && txn_->isOpen());
+
+    if (! hasMeta)
+    {
+        if (! open)
+            return false;   // no transaction: ordinary behaviour, entirely unchanged
+
+        if (mosh::txnsafe::isReadOnlyDuringTransaction (name))
+            return false;   // reads stay available for the length of a skill run
+
+        // A foreign mutation — local UI, or a peer's op landing through applyingRemote_.
+        // Refused WITHOUT touching transaction state, exactly as the contract requires.
+        early = errResult (name,
+                           agenttxn::codeInProgress() + ": agent transaction " + txn_->id
+                           + " is open; this change was not applied");
+        return true;
+    }
+
+    // Metadata present. Resolve it against a transaction, whatever its status: a retry
+    // arriving after commit must still replay rather than double-apply.
+    const auto metaId    = meta.getProperty ("transactionId", var()).toString().trim();
+    const auto requestId = meta.getProperty ("requestId", var()).toString().trim();
+    const int  metaIndex = (int) meta.getProperty ("index", var (-1));
+
+    if (txn_ == nullptr || txn_->id != metaId)
+    {
+        early = errResult (name,
+                           agenttxn::codeUnknownTxn() + ": no transaction " + metaId
+                           + " — query batch_status");
+        return true;
+    }
+
+    auto* entry = txn_->findByRequestId (requestId);
+    if (entry == nullptr)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": requestId " + requestId
+                           + " is not in transaction " + metaId + "'s manifest");
+        return true;
+    }
+
+    const auto entryIndex = txn_->indexOfRequestId (requestId);
+    // The envelope's identity is command + args: a retry that quietly changed an argument
+    // must be rejected, not replayed.
+    auto* envelope = new DynamicObject();
+    envelope->setProperty ("command", name);
+    envelope->setProperty ("args", command.getProperty ("args", var()));
+    const auto digest = agenttxn::digestOf (var (envelope));
+
+    if (entry->state != agenttxn::entryPending())
+    {
+        // Already resolved: this is a RETRY after a lost response.
+        if (entry->envelopeDigest != digest)
+        {
+            early = errResult (name,
+                               agenttxn::codeEnvelopeConflict() + ": requestId " + requestId
+                               + " was already used with different content");
+            return true;
+        }
+        // Return the RECORDED result and apply nothing. This is what makes a command retry
+        // non-duplicating.
+        auto replay = entry->result;
+        if (auto* o = replay.getDynamicObject())
+            o->setProperty ("replayed", true);
+        early = replay;
+        return true;
+    }
+
+    if (! open)
+    {
+        early = errResult (name,
+                           agenttxn::codeUnknownTxn() + ": transaction " + metaId + " is "
+                           + txn_->status + "; no further commands may run");
+        return true;
+    }
+    if (entryIndex != txn_->nextIndex)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": expected manifest step "
+                           + juce::String (txn_->nextIndex) + ", got step "
+                           + juce::String (entryIndex));
+        return true;
+    }
+    if (metaIndex != entryIndex)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": envelope declares index "
+                           + juce::String (metaIndex) + " for manifest step "
+                           + juce::String (entryIndex));
+        return true;
+    }
+    if (entry->command != name)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": manifest step "
+                           + juce::String (entryIndex) + " is " + entry->command);
+        return true;
+    }
+
+    // Admitted. Hand the index/digest to txnPostDispatch, which records the outcome.
+    pendingTxnIndex_          = entryIndex;
+    pendingTxnEnvelopeDigest_ = digest;
+    return false;
+}
+
+void MoshOps::txnPostDispatch (const juce::var& result)
+{
+    if (pendingTxnIndex_ < 0 || txn_ == nullptr)
+        return;
+
+    const int index = pendingTxnIndex_;
+    const auto digest = pendingTxnEnvelopeDigest_;
+    pendingTxnIndex_ = -1;
+    pendingTxnEnvelopeDigest_.clear();
+
+    if (index >= (int) txn_->entries.size())
+        return;
+
+    auto& entry = txn_->entries[(size_t) index];
+    const bool ok = (bool) result.getProperty ("ok", false);
+    entry.state          = ok ? agenttxn::entryApplied() : agenttxn::entryFailed();
+    entry.envelopeDigest = digest;
+    entry.result         = result;
+    txn_->nextIndex      = index + 1;
+
+    if (! ok)
+    {
+        // A resolved command failure is the transaction's failure. It stays OPEN for
+        // rollback (canRollback), but no further manifested command may run.
+        txn_->status      = agenttxn::statusFailed();
+        txn_->failureCode = agenttxn::codeCommandFailed();
+        appendTxnLedger (*txn_);
+    }
+}
+
+void MoshOps::resolveUnresolvedTxns (bool provedPostState)
+{
+    // ONLY the startup set — ids orphaned by a PREVIOUS process, whose in-memory state is
+    // genuinely gone and for which the file on disk is therefore the whole truth.
+    //
+    // An in-process transaction is deliberately NOT resolvable this way, and the
+    // distinction is not pedantic: cmdDiscardRecovery drops the journal but does not
+    // reload the edit, so relabelling a live open transaction "rolled_back" would claim a
+    // restoration that never happened — the exact class of lie this whole contract exists
+    // to prevent. A live transaction resolves through batch_end or batch_rollback; a live
+    // needs_recovery one resolves through a human, which is what needs_recovery means.
+    if (unresolvedTxnIds_.isEmpty())
+        return;
+
+    const auto ids = unresolvedTxnIds_;
+    unresolvedTxnIds_.clear();   // cleared FIRST so appendTxnLedger may trim again
+
+    const auto terminal = provedPostState ? agenttxn::statusCommitted()
+                                          : agenttxn::statusRolledBack();
+    for (const auto& id : ids)
+    {
+        agenttxn::Record resolved;
+        resolved.id     = id;
+        resolved.name   = "(recovered)";
+        resolved.status = terminal;
+        appendTxnLedger (resolved);
+    }
 }
 
 juce::var MoshOps::cmdSave (const juce::var& args)
@@ -10694,6 +11307,9 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
 
     pendingRecovery_.clear();
     if (recovered > 0) { eng.markDirty(); eng.save(); }   // persist recovered work (also truncates)
+    // FS-B2a — the journal tail was replayed, so the POST-transaction state stands: a
+    // crash-orphaned agent transaction is no longer ambiguous and skills are unblocked.
+    resolveUnresolvedTxns (/*provedPostState=*/true);
     emitSnapshotInvalidated();
     logLine ("recover_session", args, true, {}, false);
 
@@ -10707,6 +11323,8 @@ juce::var MoshOps::cmdDiscardRecovery (const juce::var& args)
 {
     pendingRecovery_.clear();
     recoveryJournalFile.deleteFile();
+    // FS-B2a — the tail was dropped, so the last SAVED (pre-transaction) state stands.
+    resolveUnresolvedTxns (/*provedPostState=*/false);
     logLine ("discard_recovery", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("discard_recovery");
