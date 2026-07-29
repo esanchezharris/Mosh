@@ -671,6 +671,117 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     cmd (ops, "undo");
     check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
 
+    // ─── AGT-PROV (FS-B2a): the ASK is recoverable from mosh-log.jsonl ───────────
+    // Real-session skill mining needs the natural-language ask, not just the commands
+    // it produced. The utterance rides the EXISTING batch_begin marker (no new command,
+    // no second log) and MoshOps::logLine writes args verbatim — but until now every
+    // guard on that was a vitest against a MOCKED exec, so nothing proved the round
+    // trip survives to the file on disk. This section reads the JSONL back and proves:
+    //   1. an agent turn's marker carries the utterance verbatim,
+    //   2. the batch's own command lines do NOT (it rides the marker only, once),
+    //   3. a DIRECT UI action's line carries no utterance/turn_id at all — absent,
+    //      not empty-string, so the log stays honest about what was agent-driven,
+    //   4. an UNSERVED ask (a turn that produced zero commands) is still recorded,
+    //      and its empty marker pair does not consume an undo step.
+    section ("AGT-PROV: the ask is recoverable from the command log");
+    auto provLog = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    const int provLinesBefore = StringArray::fromLines (provLog.loadFileAsString()).size();
+    const String provUtterance   ("AGT-PROV make the drums hit harder");
+    const String provEmptyAsk    ("AGT-PROV make it sound purple");
+    const String provTurnId      ("agt-prov-turn-1");
+    const String provEmptyTurnId ("agt-prov-turn-2");
+
+    // (a) An AGENT turn — exactly what ui/src/agent/executor.ts emits.
+    { auto* a = new DynamicObject();
+      a->setProperty ("name", "make the drums hit harder");   // the undo-transaction label
+      a->setProperty ("turn_id", provTurnId);
+      a->setProperty ("utterance", provUtterance);
+      a->setProperty ("source", "brain_chat");
+      check (ok (cmd (ops, "batch_begin", var (a))), "AGT-PROV agent turn opens with a marker"); }
+    cmd (ops, "create_track", objN ({ { "name", "Prov Agent" } }));
+    check (ok (cmd (ops, "batch_end")), "AGT-PROV agent turn closes");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "AGT-PROV agent turn undone — state unchanged");
+
+    // (b) A DIRECT UI action — a mouse move, no ask behind it.
+    cmd (ops, "create_track", objN ({ { "name", "Prov Direct" } }));
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase, "AGT-PROV direct action undone — state unchanged");
+
+    // (c) An UNSERVED ask: the brain planned nothing / everything was rejected. The
+    // marker pair runs with no commands between. beginNewTransaction only sets a flag
+    // (no ActionSet until a perform()), so the sentinel below must still be the thing
+    // undo reverts — an empty pair must not eat the previous edit (the G14 hazard).
+    cmd (ops, "create_track", objN ({ { "name", "Prov Sentinel" } }));
+    check (tracks (ops) == batchBase + 1, "AGT-PROV sentinel track created");
+    { auto* a = new DynamicObject();
+      a->setProperty ("name", "no idea what you mean");
+      a->setProperty ("turn_id", provEmptyTurnId);
+      a->setProperty ("utterance", provEmptyAsk);
+      a->setProperty ("source", "brain_chat");
+      check (ok (cmd (ops, "batch_begin", var (a))), "AGT-PROV unserved ask opens a marker"); }
+    check (ok (cmd (ops, "batch_end")), "AGT-PROV unserved ask closes with zero commands");
+    check (tracks (ops) == batchBase + 1, "AGT-PROV empty turn marker mutated nothing");
+    cmd (ops, "undo");
+    check (tracks (ops) == batchBase,
+           "AGT-PROV empty turn marker did NOT consume the undo step (sentinel reverted)");
+
+    // Now read the log back off disk and inspect only the lines this section wrote.
+    var provBegin, provInner, provDirect, provEmpty;
+    int provUtteranceLines = 0;
+    {
+        auto provLines = StringArray::fromLines (provLog.loadFileAsString());
+        for (int i = jmax (0, provLinesBefore - 1); i < provLines.size(); ++i)
+        {
+            const auto l = provLines[i].trim();
+            if (l.isEmpty()) continue;
+            if (l.contains (provUtterance)) ++provUtteranceLines;
+            const auto row = JSON::parse (l);        // named local — the var-temporary UAF class
+            if (! row.isObject()) continue;
+            const auto rowCommand = row.getProperty ("command", var()).toString();
+            const auto rowArgs    = row.getProperty ("args", var());
+            if (rowCommand == "batch_begin")
+            {
+                const auto tid = rowArgs.getProperty ("turn_id", var()).toString();
+                if (tid == provTurnId)      provBegin = row;
+                if (tid == provEmptyTurnId) provEmpty = row;
+            }
+            else if (rowCommand == "create_track")
+            {
+                const auto nm = rowArgs.getProperty ("name", var()).toString();
+                if (nm == "Prov Agent")  provInner  = row;
+                if (nm == "Prov Direct") provDirect = row;
+            }
+        }
+    }
+
+    check (provBegin.isObject(), "AGT-PROV the agent turn's batch_begin reached the JSONL");
+    { const auto beginArgs = provBegin.getProperty ("args", var());
+      check (beginArgs.getProperty ("utterance", var()).toString() == provUtterance,
+             "AGT-PROV batch_begin carries the originating utterance VERBATIM");
+      check (beginArgs.getProperty ("source", var()).toString() == "brain_chat",
+             "AGT-PROV batch_begin carries the turn source");
+      check (beginArgs.getProperty ("turn_id", var()).toString().isNotEmpty(),
+             "AGT-PROV batch_begin carries a turn_id (the harvester's grouping key)"); }
+
+    check (provInner.isObject(), "AGT-PROV the in-batch create_track reached the JSONL");
+    { const auto innerArgs = provInner.getProperty ("args", var());
+      check (! innerArgs.hasProperty ("utterance") && ! innerArgs.hasProperty ("turn_id"),
+             "AGT-PROV the batch's own command line carries NO utterance (marker only)"); }
+    check (provUtteranceLines == 1,
+           "AGT-PROV the utterance appears on exactly ONE line — the marker, not every command");
+
+    check (provDirect.isObject(), "AGT-PROV the direct (non-agent) create_track reached the JSONL");
+    { const auto directArgs = provDirect.getProperty ("args", var());
+      check (! directArgs.hasProperty ("utterance"),
+             "AGT-PROV a DIRECT UI action's line has NO utterance key — absent, not empty");
+      check (! directArgs.hasProperty ("turn_id"),
+             "AGT-PROV a DIRECT UI action's line has NO turn_id — the log stays honest"); }
+
+    check (provEmpty.isObject(), "AGT-PROV the UNSERVED ask reached the JSONL despite zero commands");
+    check (provEmpty.getProperty ("args", var()).getProperty ("utterance", var()).toString() == provEmptyAsk,
+           "AGT-PROV the unserved ask's utterance is recoverable (the missing-skill signal)");
+
     // ─── Stage 2: arrangement editing + mixer stub ───
     section ("Stage 2: arrangement + mixer");
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
@@ -5628,14 +5739,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             // Every entry is well-formed: non-empty command + bool ok + bool undoable.
             bool allShaped = true;
             bool sawGetCommandLog = false;
+            bool sawArgs = false;
             for (auto& e : *entries)
             {
                 if (e.getProperty ("command", var()).toString().isEmpty()) allShaped = false;
                 if (! e.getProperty ("ok", var()).isBool()) allShaped = false;
                 if (! e.getProperty ("undoable", var()).isBool()) allShaped = false;
                 if (e.getProperty ("command", var()).toString() == "get_command_log") sawGetCommandLog = true;
+                if (e.hasProperty ("args")) sawArgs = true;
             }
             check (allShaped, "every entry has command (non-empty), ok (bool), undoable (bool)");
+            // PRIVACY (FS-B2a): the projection must keep DROPPING args. The command log's
+            // args now carry the user's own words on an agent turn's batch_begin marker,
+            // so widening this window would put user speech on a surface that was only
+            // ever meant to show command names. Absence here is the whole guarantee.
+            check (! sawArgs, "get_command_log projects NO args — user utterances never reach this window");
             // READ-ONLY proof: get_command_log never logs itself.
             check (! sawGetCommandLog, "get_command_log is READ-ONLY: it does NOT appear in the log it returns");
         }
