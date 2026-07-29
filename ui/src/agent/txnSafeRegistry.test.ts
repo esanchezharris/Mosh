@@ -12,7 +12,7 @@
 // test a lie about the engine) and skillTransaction.ts's SKILL_TRANSACTABILITY verdicts.
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SKILL_CATALOG } from "./skills";
@@ -24,7 +24,19 @@ const here = dirname(fileURLToPath(import.meta.url)); // ui/src/agent
 const read = (rel: string) => readFileSync(resolve(here, rel), "utf8");
 
 const txnSafeH = read("../../../src/moshops/TransactionSafe.h");
-const moshOps = read("../../../src/moshops/MoshOps.cpp");
+// GLOB, not a single file. MoshOps.cpp is being split into per-area translation units
+// (MoshOps.Lyrics.cpp, MoshOps.Notes.cpp, …), and a handler that moves out of MoshOps.cpp
+// would read as "not found" here — which is indistinguishable from a handler that was
+// deleted. That is exactly how this guard failed when the Lyrics TU landed: three real,
+// present handlers reported missing. Concatenate every MoshOps*.cpp so the guard tracks
+// the COMMAND SET rather than one filename. Same fix, same reason, as the glob-aware
+// lock-scope extractor in tests/test_multiplayer_lock_manager.cpp.
+const moshOpsDir = resolve(here, "../../../src/moshops");
+const moshOps = readdirSync(moshOpsDir)
+  .filter((f) => f.startsWith("MoshOps") && f.endsWith(".cpp"))
+  .sort()
+  .map((f) => readFileSync(resolve(moshOpsDir, f), "utf8"))
+  .join("\n");
 const bridgeMock = read("../bridge.mock.ts");
 
 /** Parse a `std::set<juce::String>` literal body by its variable name. */
