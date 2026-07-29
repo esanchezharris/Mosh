@@ -15,7 +15,7 @@
   color: var(--v2-faint);
 }
 .v2-live { display: inline-flex; align-items: center; gap: 6px; color: var(--v2-accent); font-size: var(--v2-fs-xs); }
-.v2-live .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+.v2-live .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); }
 
 .v2-mosh-card { padding-bottom: 12px; }
 /* the head carries Live + a collapse control on the right */
@@ -118,7 +118,7 @@
 .v2-master-plugin-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .v2-master-plugin-row.bypassed { opacity: 0.55; }
 .v2-master-plugin-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--v2-line); background: transparent; cursor: pointer; flex: 0 0 auto; padding: 0; }
-.v2-master-plugin-dot.on { background: var(--v2-accent); border-color: var(--v2-accent); box-shadow: 0 0 5px var(--v2-accent-soft); }
+.v2-master-plugin-dot.on { background: var(--v2-accent); border-color: var(--v2-accent); }
 .v2-master-plugin-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text); }
 .v2-master-plugin-row .v2-btn.icon { padding: 4px 6px; font-size: var(--v2-fs-sm); border-radius: 7px; }
 .v2-master-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
@@ -184,7 +184,7 @@
   position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; background: linear-gradient(to top, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0));
 }
-.v2-pcard-meta .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
+.v2-pcard-meta .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--status-ok); }
 .v2-pcard-meta .dot.off { background: rgba(255, 255, 255, 0.4); box-shadow: none; }
 .v2-pcard-meta .nm { flex: 1 1 auto; min-width: 0; font-size: var(--v2-fs-base); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 /* live audio-level bars — PresenceMeter drives scaleY on each span when audio is present.

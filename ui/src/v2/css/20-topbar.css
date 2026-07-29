@@ -50,10 +50,9 @@
 .v2-tbtn:active { transform: scale(0.94); }
 .v2-tbtn.play[data-on="true"], .v2-tbtn.play:hover {
   background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
-  box-shadow: 0 0 22px var(--v2-accent-soft);
 }
 .v2-tbtn.play { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
-.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px color-mix(in srgb, var(--status-danger-glow) 30%, transparent); }
+.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); }
 .v2-tbtn.rec[data-armed="true"]:not([data-on="true"]) { color: var(--v2-rec); border-color: color-mix(in srgb, var(--v2-rec) 55%, transparent); }
 .v2-tbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
 

@@ -34,7 +34,13 @@
   /* ── dark hero — near-black ink + lime, matching the classic shell. Minimal blue:
        surfaces are neutral warm-black, the only saturated color is the lime accent;
        clips are desaturated slate so the canvas reads black, not blue. ── */
-  --v2-bg: radial-gradient(130% 90% at 50% -10%, #161616 0%, #0c0c0c 52%, #050505 100%);
+  /* Flat. This was a radial-gradient bloom centred above the viewport — a soft glow
+     behind the whole app. It reads as atmosphere on a marketing page and as haze in a
+     tool you stare at for hours: it gives the eye a false focal point that has nothing
+     to do with the work, and every panel edge sits on a slightly different value, so
+     nothing lines up tonally. A single value lets the hairlines and surfaces do the
+     separating. */
+  --v2-bg: #0c0c0c;
   --v2-ink: #0a0a0a;
   --v2-surface: rgba(24, 24, 25, 0.64);
   --v2-surface-2: rgba(33, 33, 35, 0.74);
@@ -79,7 +85,10 @@
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
   --v2-playhead: var(--v2-accent-neutral); /* the scrub line is transport, not agentic — bound to the family so an agentic scope can never re-lime it */
   --v2-rec: #ff3b5c;
-  --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  /* Negative spread. A 50px blur at zero spread puts a wide, soft halo around every
+     floating panel, which is the same bloom the ground had. Pulling the spread in by
+     ~30% of the blur keeps the panel seated on the page without the halo. */
+  --v2-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.65);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
   /* ── type scale (PR-2.3) — role-named; values = the de-facto size clusters so adoption is a no-op ── */
@@ -212,7 +221,7 @@
      keep the dark surface/text tokens and override only the page bg + the ground set
      (the chrome that sits directly on the cream). ── */
 [data-theme="light"] .v2-shell {
-  --v2-bg: radial-gradient(135% 105% at 50% -8%, #f7f1e6 0%, #f1ebde 52%, #ebe3d2 100%);
+  --v2-bg: #f1ebde;   /* flat, matching the dark ground — see the base block */
   --v2-ink: #0c0c0c;
   /* #54 — the errbar sits on the CREAM ground here; the dark theme's pale-pink
      danger text (#ffb3c1) is near-invisible on it. Deep red on the rose wash. */
@@ -238,7 +247,7 @@
   --v2-clip-drum: rgba(194, 245, 63, 0.7);
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
   /* --v2-playhead is derived from --v2-accent-neutral in the base block; the scrub line does not flip. */
-  --v2-shadow: 0 22px 50px rgba(70, 56, 28, 0.18);
+  --v2-shadow: 0 18px 44px -14px rgba(70, 56, 28, 0.24);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   /* chrome sitting directly on the cream page (NOT inside a dark panel) */
   --v2-ground: #f1ebde;
