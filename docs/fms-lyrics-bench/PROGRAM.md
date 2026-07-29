@@ -850,3 +850,20 @@ numbers and hashes only.
   artist-matching metric, so default-ON stands. Caveat recorded: it also moved
   the shipped loop further from human calibration (+.342 -> +.587 error), which
   is where the trained lane's advantage lives.
+- **2026-07-29 — The two champions are COMPLEMENTARY; agreement is a
+  high-precision confidence signal.** Paired on the frozen 150:
+  trained (fim-v2-ckpt1000) .433, prompt-rhyme-menu-fp .413, but
+  trained-only-right on 21 items and prompt-only-right on 18 —
+  **oracle-of-2 = .553** (oracle-of-3 with llm-constrained = .587), i.e. ~12
+  points of headroom for a *selector* over the best single arm. The two agree
+  on top-1 for only 34.7% of items, and **when they agree they are right 84.6%
+  of the time** (vs .433/.413 unconditionally). Read honestly: agreement
+  SELECTS easy items — it is a precision signal, not a cause of correctness —
+  but that is exactly what a progressive-disclosure UI wants (agree -> present
+  one answer; disagree -> surface both as a choice instead of guessing).
+  Qualitatively the split has a shape: the trained arm wins on plain,
+  high-frequency words and grammar (plural vs singular) where the prompt arm
+  reaches for a more exotic perfect rhyme; the prompt arm wins where the
+  trained arm emits an odd token. Proposed next lever (NOT taken, owner
+  decision): the C1-C3 combo lane, but as a two-candidate CHOICE — a
+  different, easier task than the pool reranking M6 closed negative.
