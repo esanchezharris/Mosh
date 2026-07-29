@@ -192,7 +192,7 @@ log "4/6 dequantize on the box"
 $SSH "cd /root && python vast_dequant.py"
 
 log "5/6 train ($ITERS iters, batch $BATCH)"
-$SSH "cd /root && python vast_train.py $ITERS $BATCH $LR"
+$SSH "cd /root && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python vast_train.py $ITERS $BATCH $LR"
 
 log "6/6 fetch the adapter"
 mkdir -p "$OUT"

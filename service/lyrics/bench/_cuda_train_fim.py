@@ -83,12 +83,12 @@ def main():
                  "attention_mask": attn}.items()}
 
     def val_loss():
+        vb = min(int(cfg.get("batch", 16)), int(cfg.get("microBatch", 8)))
         model.eval()
         tot = n = 0
         with torch.no_grad():
-            for i in range(0, len(valid_enc), int(cfg.get("batch", 16))):
-                idxs = list(range(i, min(i + int(cfg.get("batch", 16)),
-                                         len(valid_enc))))
+            for i in range(0, len(valid_enc), vb):
+                idxs = list(range(i, min(i + vb, len(valid_enc))))
                 loss = model(**batch(valid_enc, idxs)).loss
                 tot += float(loss) * len(idxs)
                 n += len(idxs)
@@ -98,21 +98,31 @@ def main():
     opt = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                             lr=float(cfg.get("lr", 2e-5)))
     B = int(cfg.get("batch", 16))
+    # Gradient accumulation keeps the EFFECTIVE batch equal to the MLX twin's
+    # while the micro-batch fits the card: 28GB of bf16 weights + batch-16
+    # activations OOM'd a 48GB A6000 on the first backward (attempt 4).
+    micro = min(B, int(cfg.get("microBatch", 8)))
+    accum = max(1, B // micro)
+    print(f"micro-batch {micro} x accum {accum} (effective {micro * accum})",
+          flush=True)
     order = list(range(len(train_enc)))
     rng.shuffle(order)
     ptr, run = 0, 0.0
     curve = [{"step": 0, "val": round(val_loss(), 4)}]
     print(f"step 0 val {curve[0]['val']}", flush=True)
     for step in range(1, int(cfg.get("iters", 1500)) + 1):
-        if ptr + B > len(order):
-            rng.shuffle(order)
-            ptr = 0
-        loss = model(**batch(train_enc, order[ptr:ptr + B])).loss
-        ptr += B
         opt.zero_grad()
-        loss.backward()
+        step_loss = 0.0
+        for _ in range(accum):
+            if ptr + micro > len(order):
+                rng.shuffle(order)
+                ptr = 0
+            loss = model(**batch(train_enc, order[ptr:ptr + micro])).loss / accum
+            ptr += micro
+            loss.backward()
+            step_loss += float(loss)
         opt.step()
-        run += float(loss)
+        run += step_loss
         if step % 100 == 0 or step == int(cfg.get("iters", 1500)):
             v = val_loss()
             curve.append({"step": step, "train": round(run / 100, 4),
