@@ -135,6 +135,15 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   no artist name" passed a sabotage that deleted the hiding logic outright, because the fixture's
   hidden pair had no artist name to leak. Sabotage with an absolute path and verify the restore —
   a `cd x && cp backup` chain leaves the sabotage in the tree when the `cd` fails.
+  **The same class bites EXPERIMENTS, not just tests: a sweep knob that never reaches the cache
+  key reports "no effect" instead of "did not run".** A lyrics-bench pool-depth sweep
+  (2026-07-29) came back byte-identical on every metric because `runner.py` keys its per-item
+  cache on `(arm, version, item, armConfig)` and the new depth lived only in the arm body — the
+  run replayed the old depth's answers in seconds. It was caught only by reading a MECHANISM
+  witness (`poolSize` was still 200), not the scores. Always assert a witness that must change
+  when the knob bites (a size, a sha, a wall-clock that stops being instant), and prove the
+  re-key with `MOSH_INFILL_CACHE_ONLY=1`: the default must still replay, the swept value must
+  raise `CacheMiss`.
 - **Never verify a native change with a pre-existing binary.** Build from committed source.
 - **`--selftest` cannot see the reactive lane.** `reactiveTouch` returns on `!hasAudio() &&
   !MOSH_REACTIVE_DEBOUNCE_MS` **before** reading any state it gates on, so a headless run cannot
