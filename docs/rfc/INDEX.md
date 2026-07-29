@@ -2,6 +2,8 @@
 
 The ledger of go-forward architecture decisions. See [`README.md`](README.md) for the process
 and [`TEMPLATE.md`](TEMPLATE.md) for the required sections.
+[`POST-MERGE.md`](POST-MERGE.md) tracks the follow-ups that can only land after the RFC 001/002
+split stack merges.
 
 | id | title | status | decided | verification |
 |----|-------|--------|---------|--------------|
