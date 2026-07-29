@@ -279,6 +279,133 @@ const future: Snapshot[] = [];
 // is open, per-command pushUndo() is suppressed so the whole batch is ONE undo step.
 let inBatch = false;
 
+// ── FS-B2a — the agent batch-TRANSACTION contract, mirrored ──────────────────
+// docs/first-stranger-program/lanes/fs-b2.md. The mock implements the SAME semantics as
+// MoshOps so `runSkill` runs unchanged against both, which is what makes "one B2 reference
+// skill passes the same harness against both the mock and a real engine" literally true of
+// one code path rather than two lookalike ones.
+//
+// Exactness is easier here than in the engine and that is FINE — the mock's undo stack is
+// whole-snapshot clones, so "restore the pre-state" is a clone swap. The engine earns it
+// with undo-head ownership plus a fingerprint. Both must AGREE on the observable contract,
+// which is what the vitest suite pins.
+type MockTxnEntry = {
+  requestId: string;
+  command: string;
+  state: "pending" | "applied" | "failed";
+  envelopeDigest: string;
+  result?: CommandResult;
+};
+type MockTxn = {
+  id: string;
+  name: string;
+  status: "open" | "failed" | "committed" | "rolled_back" | "needs_recovery";
+  failureCode?: string;
+  manifestDigest: string;
+  preFingerprint: string;
+  preState: Snapshot;
+  revisionAtBegin: number;
+  nextIndex: number;
+  entries: MockTxnEntry[];
+};
+let mockTxn: MockTxn | null = null;
+let mockRevision = 0;
+
+/** The mock's stand-in for the engine's canonical fingerprint: the same idea (a stable
+ *  digest of the session minus declared volatile fields), not the same bytes — the two are
+ *  never compared to each other, only each to its own captured pre-state. */
+function mockFingerprint(s: Snapshot): string {
+  const stable = JSON.parse(JSON.stringify(s)) as Record<string, unknown>;
+  delete stable.transport; // playhead / play state — 30 Hz, not song content
+  delete stable.controller;
+  delete stable.audio;
+  const session = stable.session as Record<string, unknown> | undefined;
+  if (session) {
+    for (const k of ["dirty", "audioEnabled", "sampleRate", "audioDeviceName", "editFile"])
+      delete session[k];
+  }
+  return sortedJson(stable);
+}
+
+/** Key-order-independent serialization, so a rebuilt object still matches. */
+function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${sortedJson((value as Record<string, unknown>)[k])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+const mockManifestDigest = (name: string, manifest: readonly unknown[]): string =>
+  sortedJson([name, manifest]);
+
+// Mirrors src/moshops/TransactionSafe.h. A DIVERGENCE HERE IS A BUG, and it is guarded:
+// txnSafeRegistry.test.ts parses the C++ registry and requires this list to equal it, so
+// the mock cannot quietly admit something the engine refuses (or vice versa).
+const MOCK_TXN_SAFE = new Set([
+  "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
+  "create_track", "rename_track", "remove_track", "set_track_type",
+  "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
+  "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
+  "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
+  "stretch_clip", "set_clip_warp",
+  "add_midi_clip", "add_note", "set_note", "remove_note", "quantize_notes",
+  "add_drum_pattern", "assign_sample", "set_drum_lane", "load_drum_kit",
+  "load_plugin", "load_builtin", "remove_plugin", "reorder_plugin",
+  "set_plugin_param", "bypass_plugin",
+  "set_track_automation_mode", "write_automation_curve",
+  "add_automation_point", "remove_automation_point", "set_automation_point",
+  "clear_automation",
+  "create_bus", "add_send", "set_send_level", "remove_send",
+  "set_tempo", "set_time_signature",
+  "create_section", "rename_section", "move_section", "remove_section",
+  "create_lyric_sheet", "set_lyric_line", "set_lyric_constraint", "remove_lyric_line",
+]);
+
+// Mirrors TransactionSafe.h's readOnlyDuringTransaction(): reads stay available while a
+// transaction is open (the exclusion window bounds mutation, not reading).
+const MOCK_TXN_READS = new Set([
+  "batch_status",
+  "get_clip_peaks", "file_peaks", "get_command_log", "get_plugin_blocklist",
+  "list_plugins", "list_builtins", "list_takes", "list_directory",
+  "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
+  "list_track_outputs", "list_rave_models", "list_training_sources",
+  "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
+  "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
+  "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
+]);
+
+function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
+  return {
+    found: true,
+    transactionId: t.id,
+    name: t.name,
+    status: t.status,
+    ...(t.failureCode ? { failureCode: t.failureCode } : {}),
+    revisionAtBegin: t.revisionAtBegin,
+    revision: mockRevision,
+    preFingerprint: t.preFingerprint,
+    fingerprint: mockFingerprint(snapshot),
+    manifestCount: t.entries.length,
+    applied: t.entries.filter((e) => e.state === "applied").length,
+    canCommit:
+      t.status === "open" &&
+      t.nextIndex >= t.entries.length &&
+      !t.entries.some((e) => e.state === "failed"),
+    canRollback: t.status === "open" || t.status === "failed",
+    entries: t.entries.map((e, index) => ({
+      index,
+      requestId: e.requestId,
+      command: e.command,
+      state: e.state,
+      ...(e.result ? { result: e.result } : {}),
+    })),
+  };
+}
+
 // ── event bus (mirrors window.__JUCE__.backend on the real side) ─────────────
 
 type Listener = (payload: unknown) => void;
@@ -1691,13 +1818,124 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!future.length) return ok(command, { redone: false });
       history.push(clone(snapshot)); snapshot = future.pop()!; stopPlayback(); invalidate(); return ok(command, { redone: true });
     }
+    // FS-B2a — TWO MODES, mirroring MoshOps exactly: no transactionId ⇒ the legacy
+    // id-less batch (unchanged, still what runAgentBatch uses); with one ⇒ the identified,
+    // manifest-validated transaction.
     case "batch_begin": {
+      const txnId = str(args.transactionId);
+      if (!txnId) {
+        if (inBatch) return err(command, "a batch is already open");
+        pushUndo(); inBatch = true; return ok(command);
+      }
+
+      const name = str(args.name);
+      const manifest = Array.isArray(args.commands) ? (args.commands as Record<string, unknown>[]) : null;
+      if (!manifest || manifest.length === 0)
+        return err(command, "manifest_rejected: 'commands' manifest is empty");
+      for (const [i, entry] of manifest.entries()) {
+        if (!entry || typeof entry !== "object")
+          return err(command, `manifest_rejected: manifest entry ${i} is not an object`);
+        if (!str(entry.requestId)) return err(command, `manifest_rejected: manifest entry ${i} has no 'requestId'`);
+        if (!str(entry.command)) return err(command, `manifest_rejected: manifest entry ${i} has no 'command'`);
+        if (num(entry.index, -1) !== i)
+          return err(command, `manifest_rejected: manifest entry ${i} declares index ${num(entry.index, -1)}`);
+      }
+      const digest = mockManifestDigest(name, manifest);
+
+      if (mockTxn && mockTxn.id === txnId) {
+        if (mockTxn.manifestDigest !== digest)
+          return err(command, `transaction_identity_conflict: transaction ${txnId} already exists with a different manifest`);
+        return ok(command, { ...mockTxnStatusData(mockTxn), replayed: true });
+      }
+      if (mockTxn && (mockTxn.status === "open" || mockTxn.status === "failed"))
+        return err(command, `transaction_already_open: transaction ${mockTxn.id} is still ${mockTxn.status}`);
       if (inBatch) return err(command, "a batch is already open");
-      pushUndo(); inBatch = true; return ok(command);
+
+      // Manifest preflight BEFORE anything mutates.
+      for (const [i, entry] of manifest.entries()) {
+        const cmdName = str(entry.command);
+        if (!MOCK_TXN_SAFE.has(cmdName))
+          return err(command, `manifest_rejected: step ${i} — ${cmdName} is not in the engine's transactionSafe registry`);
+      }
+
+      pushUndo();
+      inBatch = true;
+      mockTxn = {
+        id: txnId,
+        name,
+        status: "open",
+        manifestDigest: digest,
+        preFingerprint: mockFingerprint(snapshot),
+        preState: clone(snapshot),
+        revisionAtBegin: mockRevision,
+        nextIndex: 0,
+        entries: manifest.map((entry) => ({
+          requestId: str(entry.requestId),
+          command: str(entry.command),
+          state: "pending" as const,
+          envelopeDigest: "",
+        })),
+      };
+      return ok(command, mockTxnStatusData(mockTxn));
     }
     case "batch_end": {
-      if (!inBatch) return err(command, "no batch is open");
-      inBatch = false; invalidate(); return ok(command);
+      const txnId = str(args.transactionId);
+      if (!txnId) {
+        if (!inBatch) return err(command, "no batch is open");
+        inBatch = false; invalidate(); return ok(command);
+      }
+      if (!mockTxn || mockTxn.id !== txnId)
+        return err(command, `unknown_transaction: no transaction ${txnId}`);
+      if (mockTxn.status === "committed")
+        return ok(command, { ...mockTxnStatusData(mockTxn), replayed: true });
+      if (mockTxn.status !== "open" && mockTxn.status !== "failed")
+        return err(command, `unknown_transaction: transaction ${txnId} is ${mockTxn.status} and cannot be committed`);
+      if (mockTxn.entries.some((e) => e.state === "failed") || mockTxn.nextIndex < mockTxn.entries.length) {
+        mockTxn.status = "failed";
+        mockTxn.failureCode = "transaction_incomplete";
+        const applied = mockTxn.entries.filter((e) => e.state === "applied").length;
+        return err(command, `transaction_incomplete: ${applied} of ${mockTxn.entries.length} manifested commands applied`);
+      }
+      inBatch = false;
+      mockTxn.status = "committed";
+      mockTxn.failureCode = undefined;
+      invalidate();
+      return ok(command, mockTxnStatusData(mockTxn));
+    }
+    case "batch_status": {
+      const txnId = str(args.transactionId);
+      if (!txnId) return err(command, "missing 'transactionId'");
+      if (!mockTxn || mockTxn.id !== txnId)
+        return ok(command, { found: false, transactionId: txnId, revision: mockRevision });
+      return ok(command, mockTxnStatusData(mockTxn));
+    }
+    case "batch_rollback": {
+      const txnId = str(args.transactionId);
+      if (!txnId) return err(command, "missing 'transactionId'");
+      if (!mockTxn || mockTxn.id !== txnId)
+        return err(command, `unknown_transaction: no transaction ${txnId} — performing no undo`);
+      if (mockTxn.status === "rolled_back")
+        return ok(command, { ...mockTxnStatusData(mockTxn), replayed: true });
+      if (mockTxn.status === "committed")
+        return err(command, `needs_recovery: transaction ${txnId} is already committed; performing no undo`);
+      if (mockTxn.status === "needs_recovery")
+        return err(command, `needs_recovery: transaction ${txnId} needs human recovery; performing no undo`);
+
+      // The mock's exact rollback: restore the captured pre-state clone. (The engine gets
+      // there via undo-head ownership + fingerprint; the observable contract is the same.)
+      snapshot = clone(mockTxn.preState);
+      inBatch = false;
+      mockRevision += 1;
+      stopPlayback();
+      invalidate();
+      if (mockFingerprint(snapshot) !== mockTxn.preFingerprint) {
+        mockTxn.status = "needs_recovery";
+        mockTxn.failureCode = "fingerprint_mismatch";
+        return err(command, "fingerprint_mismatch: the undo did not restore the pre-transaction state");
+      }
+      mockTxn.status = "rolled_back";
+      mockTxn.failureCode = undefined;
+      return ok(command, mockTxnStatusData(mockTxn));
     }
     case "save": case "reload": return ok(command);
 
@@ -2683,9 +2921,85 @@ function makePeaks(clip: Clip | null, buckets: number): [number, number][] {
 
 // ── public seam used by bridge.ts ────────────────────────────────────────────
 
+/** FS-B2a — the mirror of MoshOps::txnPreDispatch. Returns a result when dispatch must be
+ *  skipped entirely (a refusal, or a replayed recorded result), else null. Fail-closed: a
+ *  command is admitted only if it is the manifest's next entry or a declared read. */
+function mockTxnPreDispatch(
+  name: string,
+  args: Record<string, unknown>,
+  meta: { transactionId?: unknown; requestId?: unknown; index?: unknown } | undefined,
+): CommandResult | null {
+  if (name === "batch_begin" || name === "batch_end" || name === "batch_rollback" || name === "batch_status")
+    return null;
+
+  const open = mockTxn !== null && (mockTxn.status === "open" || mockTxn.status === "failed");
+
+  if (!meta) {
+    if (!open) return null;
+    if (MOCK_TXN_READS.has(name)) return null;
+    return err(name, `transaction_in_progress: agent transaction ${mockTxn!.id} is open; this change was not applied`);
+  }
+
+  const metaId = str(meta.transactionId);
+  const requestId = str(meta.requestId);
+  const metaIndex = num(meta.index, -1);
+
+  if (!mockTxn || mockTxn.id !== metaId)
+    return err(name, `unknown_transaction: no transaction ${metaId} — query batch_status`);
+
+  const entryIndex = mockTxn.entries.findIndex((e) => e.requestId === requestId);
+  if (entryIndex < 0)
+    return err(name, `manifest_mismatch: requestId ${requestId} is not in transaction ${metaId}'s manifest`);
+  const entry = mockTxn.entries[entryIndex];
+  const digest = sortedJson({ command: name, args: args ?? {} });
+
+  if (entry.state !== "pending") {
+    if (entry.envelopeDigest !== digest)
+      return err(name, `request_envelope_conflict: requestId ${requestId} was already used with different content`);
+    return { ...(entry.result ?? ok(name)), replayed: true } as CommandResult;
+  }
+  if (!open)
+    return err(name, `unknown_transaction: transaction ${metaId} is ${mockTxn.status}; no further commands may run`);
+  if (entryIndex !== mockTxn.nextIndex)
+    return err(name, `manifest_mismatch: expected manifest step ${mockTxn.nextIndex}, got step ${entryIndex}`);
+  if (metaIndex !== entryIndex)
+    return err(name, `manifest_mismatch: envelope declares index ${metaIndex} for manifest step ${entryIndex}`);
+  if (entry.command !== name)
+    return err(name, `manifest_mismatch: manifest step ${entryIndex} is ${entry.command}`);
+
+  return null;   // admitted
+}
+
 export function mockExecute<T = unknown>(command: unknown): Promise<T> {
-  const c = command as { command: string; args?: Record<string, unknown> };
+  const c = command as {
+    command: string;
+    args?: Record<string, unknown>;
+    transaction?: { transactionId?: unknown; requestId?: unknown; index?: unknown };
+  };
+
+  // FS-B2a guard, before dispatch — so a refusal mutates nothing, exactly as in the engine.
+  const early = mockTxnPreDispatch(c.command, c.args ?? {}, c.transaction);
+  if (early) return Promise.resolve(early as unknown as T);
+
+  const admittedIndex = c.transaction && mockTxn
+    ? mockTxn.entries.findIndex((e) => e.requestId === str(c.transaction!.requestId))
+    : -1;
+
   const res = dispatch(c.command, c.args ?? {});
+
+  // Mirror of txnPostDispatch: record the outcome against its manifest entry.
+  if (admittedIndex >= 0 && mockTxn) {
+    const entry = mockTxn.entries[admittedIndex];
+    entry.state = res.ok ? "applied" : "failed";
+    entry.envelopeDigest = sortedJson({ command: c.command, args: c.args ?? {} });
+    entry.result = res;
+    mockTxn.nextIndex = admittedIndex + 1;
+    mockRevision += 1;
+    if (!res.ok) {
+      mockTxn.status = "failed";
+      mockTxn.failureCode = "command_failed";
+    }
+  }
   if (!READONLY.has(c.command))
     cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now() });
   // DAW-parity P5 replay lane: a dev-only FULL trace (args + result ids) on window, so an
@@ -2728,6 +3042,8 @@ export function __resetMockForTests(): void {
   history.length = 0;
   future.length = 0;
   inBatch = false;
+  mockTxn = null;          // FS-B2a — a leaked transaction would refuse the next test's mutations
+  mockRevision = 0;
   cmdLog.length = 0;
 }
 

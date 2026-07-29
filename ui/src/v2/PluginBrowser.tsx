@@ -9,12 +9,13 @@
 // Same command seam as ever (load_builtin / load_plugin); the classic shell keeps its
 // own modal (ui/PluginBrowser.tsx) — untouched.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
+import { useElementHeight } from "../hooks/useElementHeight";
 import {
   builtinEntry, installedEntry, visibleRange,
-  loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
+  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry,
   type PluginEntry,
 } from "../ui/pluginBrowserUtil";
 import { buildCollections, rowsForCollection, type CollectionGroup, type CollectionId } from "./pluginPicker";
@@ -62,10 +63,7 @@ function usePluginPicker(onLoaded?: () => void) {
   const activeLabel = collections.find((c) => c.id === activeId)?.label ?? "All Plugins";
 
   const load = (e: PluginEntry) => {
-    if (!selectedTrackId) return;
-    if (e.loadKind === "builtin") void exec("load_builtin", { trackId: selectedTrackId, type: e.loadKey });
-    else void exec("load_plugin", { trackId: selectedTrackId, pluginId: e.loadKey });
-    addPluginRecent(e.uid);
+    if (!loadPluginEntry(e, selectedTrackId, exec)) return;
     setRecents(loadPluginRecents());
     onLoaded?.();
   };
@@ -80,16 +78,8 @@ function PluginList({ rows, favSet, activeLabel, emptyLabel, selectedTrackId, on
   selectedTrackId: string | null; onLoad: (e: PluginEntry) => void; onToggleFav: (uid: string) => void; resetKey: string;
 }) {
   const [scrollTop, setScrollTop] = useState(0);
-  const [viewportH, setViewportH] = useState(420);
-  const listRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = listRef.current; if (!el) return;
-    const update = () => setViewportH(el.clientHeight);
-    update();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(update); ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // Scroll-viewport height, tracked so the window math stays accurate on resize.
+  const { ref: listRef, height: viewportH } = useElementHeight<HTMLDivElement>(420);
   // Never land mid-list when the view changes (collection / query).
   useEffect(() => { setScrollTop(0); if (listRef.current) listRef.current.scrollTop = 0; }, [resetKey]);
 

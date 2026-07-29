@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
 #include "DrumPattern.h"
 #include "AutomationMode.h"
@@ -33,39 +34,6 @@ namespace
     RaveInsertPlugin* asRave (te::Plugin* p) { return dynamic_cast<RaveInsertPlugin*> (p); }
    #endif
 
-    // AL-008 — the id of the wave clip a render-layer landed on the "Neural Renders"
-    // lane via accept_render. Stored on the MOSH_RENDERLAYER node so bypass_layer can
-    // mute/un-mute THAT clip (the real audio re-route), not just flip a status flag.
-    // File-local on purpose: this is a MoshOps mechanism detail, not a schema field in
-    // src/state (the RenderLayer node is an open ValueTree; an extra string property is
-    // round-trip-safe through save/load and ignored by the fingerprint).
-    const juce::Identifier kLandedClipId ("landedClipId");
-
-    // Phase 2 — discriminates the drum/MIDI "hidden audio beneath the MIDI" model from the
-    // legacy "Neural Renders" lane landing. When true, the render-layer auto-applied beneath a
-    // MIDI/drum clip: kLandedClipId is the HIDDEN audio clip (on the SAME track) and the source
-    // MIDI clip was MUTED by us. Reset/remove use it to know to remove the hidden clip + un-mute
-    // (vs the legacy lane, which never touches the source clip). File-local, round-trip-safe.
-    const juce::Identifier kSourceMutedByLayer ("sourceMutedByLayer");
-
-    bool lyricTextIsCompleteForSing (const juce::String& text)
-    {
-        const auto t = text.trim();
-        if (t.isEmpty() || t.contains ("___"))
-            return false;
-        for (auto p = t.getCharPointer(); ! p.isEmpty(); ++p)
-            if (juce::CharacterFunctions::isLetterOrDigit (*p))
-                return true;
-        return false;
-    }
-
-    bool lyricLineIsAssertedForSing (const juce::ValueTree& line)
-    {
-        return line.hasProperty (ids::lyricScore)
-            && line[ids::status].toString() == "asserted"
-            && lyricTextIsCompleteForSing (line[ids::lyricText].toString());
-    }
-
     juce::String noAssertedWordsToSingMessage()
     {
         return juce::String (juce::CharPointer_UTF8 ("no asserted words to sing \xe2\x80\x94 assert the lyric line first"));
@@ -78,53 +46,6 @@ namespace
     {
         std::function<void()> fn;
         void timerCallback() override { stopTimer(); if (fn) fn(); }
-    };
-
-    // G14 — make a VolumeAndPanPlugin fader change UNDOABLE.
-    //
-    // vp->setVolumeDb()/setPan() route through the AutomatableParameter, whose
-    // ValueTree writeback uses a NULL UndoManager (AttachedFloatValue::handleAsyncUpdate
-    // -> CachedValue::setValue(.., nullptr)). So writing the fader inside a MoshOps
-    // transaction produced an EMPTY transaction — undo restored nothing even though the
-    // command logged undoable:true. A bare ValueTree write through the UndoManager would
-    // record the property change, but on undo Tracktion deliberately refreshes only the
-    // CachedValue and does NOT push the value back into the parameter's currentValue (the
-    // atomic getVolumeDb()/getPan() — and thus snapshot() — read). So the parameter must
-    // be replayed on perform/undo/redo, but without nesting another UndoManager action
-    // while JUCE is already inside this UndoableAction. Tracktion's Mosh patch exposes
-    // setParameterWithoutUndo for that replay path.
-    struct SetFaderValueAction final : public juce::UndoableAction
-    {
-        SetFaderValueAction (te::VolumeAndPanPlugin& p, bool panNotVol, float newValue)
-            : plugin (p), isPan (panNotVol), valueAfter (newValue),
-              valueBefore (panNotVol ? p.getPan() : p.getVolumeDb()) {}
-
-        bool perform() override     { apply (valueAfter);  return true; }
-        bool undo() override        { apply (valueBefore); return true; }
-        int  getSizeInUnits() override { return (int) sizeof (*this); }
-
-        void apply (float v)
-        {
-            if (isPan)
-            {
-                if (v >= -0.005f && v <= 0.005f)
-                    v = 0.0f;
-
-                plugin.panParam->setParameterWithoutUndo (juce::jlimit (-1.0f, 1.0f, v),
-                                                          juce::sendNotification);
-            }
-            else
-            {
-                plugin.volParam->setParameterWithoutUndo (juce::jlimit (0.0f, 1.0f,
-                                                                         te::decibelsToVolumeFaderPosition (v)),
-                                                          juce::sendNotification);
-            }
-        }
-
-        te::VolumeAndPanPlugin& plugin;
-        const bool  isPan;
-        const float valueAfter;
-        const float valueBefore;
     };
 
     // G10 — generalizes SetFaderValueAction (above) to ANY te::AutomatableParameter,
@@ -475,118 +396,6 @@ namespace
         return peaks;
     }
 
-    // Overall absolute-value peak sample within [startSample, endSample) of a reader
-    // (linear, 0..~1+). endSample < 0 (the default) means "to the end of the file" —
-    // callers that want the whole span (get_clip_peaks/bucketedPeaks's sibling use,
-    // or a normalize_clip fallback for warped clips, see clipAudibleSourceSpan below)
-    // just omit both bounds. Range is clamped to the reader's actual length so an
-    // offset/length that runs past EOF degrades gracefully instead of erroring.
-    // Shared with normalize_clip — reuses the same block-read shape as bucketedPeaks
-    // (Stage-2's get_clip_peaks path) instead of a dedicated render job (tracktion's
-    // ClipEffects/NormaliseEffect are an unused, heavier subsystem for this).
-    float findSourcePeak (juce::AudioFormatReader& reader, juce::int64 startSample = 0, juce::int64 endSample = -1)
-    {
-        const auto total = (juce::int64) reader.lengthInSamples;
-        const int chans = (int) reader.numChannels;
-        if (total <= 0 || chans <= 0) return 0.0f;
-        if (endSample < 0) endSample = total;
-        startSample = juce::jlimit ((juce::int64) 0, total, startSample);
-        endSample   = juce::jlimit (startSample, total, endSample);
-        if (endSample <= startSample) return 0.0f;
-
-        constexpr juce::int64 blockSize = 65536;
-        juce::AudioBuffer<float> buf (chans, (int) juce::jmin (blockSize, endSample - startSample));
-        float peak = 0.0f;
-        for (juce::int64 start = startSample; start < endSample; start += blockSize)
-        {
-            const int n = (int) juce::jmin (blockSize, endSample - start);
-            buf.clear();
-            reader.read (&buf, 0, n, start, true, chans > 1);
-            for (int c = 0; c < buf.getNumChannels(); ++c)
-            {
-                auto r = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (c), n);
-                peak = juce::jmax (peak, std::abs (r.getStart()), std::abs (r.getEnd()));
-            }
-        }
-        return peak;
-    }
-
-    // Maps a clip's PLAYED span — position offset/length, or the loop range for a
-    // looping clip — onto a [startSec, lengthSec) window in SOURCE-FILE seconds: the
-    // samples that actually sound when the clip plays, as opposed to the whole
-    // (possibly much longer) source file it was trimmed from. Mirrors the arithmetic
-    // in the (private) non-auto-tempo branch of te::AudioClipBase::getReferencedItems
-    // — sourceSec = clipTimeSec * getSpeedRatio() — which is the same formula
-    // Tracktion itself uses to report a clip's "used" file range for export/reference
-    // purposes, just not exposed as a public helper.
-    //
-    // WARPED CAVEAT: auto-tempo (warp-locked) clips are deliberately NOT mapped —
-    // lengthSec is returned negative to mean "unmapped, scan the whole file", which
-    // callers should treat as a fallback. This matches Tracktion's own
-    // getReferencedItems, which ALSO falls back to the whole source file for
-    // auto-tempo clips (see the `if (getAutoTempo())` branch that resets
-    // firstTimeUsed/lengthUsed to the full file): the elastique-driven mapping from
-    // edit time to source time isn't a simple linear scale, so there's no cheap exact
-    // window to compute here either. A precise warped-clip mapping is a documented
-    // follow-up, not attempted in this pass.
-    struct ClipSourceSpan { double startSec = 0.0; double lengthSec = -1.0; };
-
-    ClipSourceSpan clipAudibleSourceSpan (te::AudioClipBase& ac)
-    {
-        if (ac.getAutoTempo())
-            return {};   // warped — see the WARPED CAVEAT above; caller scans the whole file
-
-        const double speed = ac.getSpeedRatio();
-        if (ac.isLooping())
-            return { ac.getLoopStart().inSeconds() * speed, ac.getLoopLength().inSeconds() * speed };
-
-        auto pos = ac.getPosition();
-        return { pos.getOffset().inSeconds() * speed, pos.getLength().inSeconds() * speed };
-    }
-
-    // ARR-011 — RIPPLE shift. Moves every clip on `clipTrack` that starts at or after
-    // `fromSec` by `deltaSec` seconds (negative closes a gap, positive opens one).
-    // Shared by the opt-in `ripple` flag on delete_time_range and trim_clip; those two
-    // commands only differ in what they compute for fromSec/deltaSec, so the actual
-    // shift lives here once.
-    //
-    // Uses Clip::setStart(pos, false, true) — the SAME primitive as move_clip — so a
-    // rippled clip is repositioned exactly as if the producer had dragged it, and the
-    // whole shift joins the caller's already-open Tracktion transaction (one undo
-    // reverts the removal/trim AND the shift together).
-    //
-    // NEGATIVE-START GUARD: a resulting start is clamped at 0. A ripple can never push
-    // a clip to a negative position; in the degenerate case (a clip nearer to zero than
-    // the shift distance) it lands at 0 rather than off the timeline.
-    //
-    // `exclude` skips one clip (trim_clip passes the clip it just trimmed, which may
-    // itself satisfy the >= fromSec test after an unusual trim).
-    int rippleShiftClipsAfter (te::ClipTrack& clipTrack, double fromSec, double deltaSec,
-                               const te::Clip* exclude = nullptr)
-    {
-        constexpr double kEps = 1.0e-6;
-        if (std::abs (deltaSec) < kEps) return 0;
-
-        // Iterate a stable copy — setStart re-sorts the live clip list.
-        juce::Array<te::Clip*> snap;
-        for (auto* c : clipTrack.getClips())
-            if (c != nullptr && c != exclude)
-                snap.add (c);
-
-        int moved = 0;
-        for (auto* c : snap)
-        {
-            if (c == nullptr) continue;
-            const double s = c->getPosition().getStart().inSeconds();
-            if (s < fromSec - kEps) continue;                  // strictly before the edit point — untouched
-            const double ns = juce::jmax (0.0, s + deltaSec);  // negative-start guard
-            if (std::abs (ns - s) < kEps) continue;
-            c->setStart (tracktion::TimePosition::fromSeconds (ns), false, true);   // keep length (move_clip's primitive)
-            ++moved;
-        }
-        return moved;
-    }
-
     String findSerumRealtimeRenderReason (te::Edit& edit)
     {
         for (auto* track : te::getAudioTracks (edit))
@@ -636,6 +445,7 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
     invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
+    initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
@@ -1045,7 +855,33 @@ void MoshOps::timerCallback()
 // ─────────────────────────────────────────────────────────────────────────────
 juce::var MoshOps::execute (const juce::var& command)
 {
+    // FS-B2a — re-entrancy depth. execute() is re-entered from INSIDE handlers (the
+    // multiplayer apply path, cmdSketchBeatbox, cmdGenerateBeatRecipe), so the
+    // transaction guard must govern the OUTERMOST call only: a manifested composite
+    // command's internal steps cannot each be expected to carry transaction metadata,
+    // and requiring it would break both composites. A recovery replay is exempt for the
+    // same reason.
+    struct DepthGuard
+    {
+        explicit DepthGuard (int& d) : depth (d) { ++depth; }
+        ~DepthGuard() { --depth; }
+        int& depth;
+    } depthGuard (execDepth_);
+
+    const bool outermost = (execDepth_ == 1) && ! replayingRecovery_;
+
+    if (outermost)
+    {
+        juce::var early;
+        if (txnPreDispatch (command, early))
+            return early;   // refused or replayed: no dispatch, no mutation, no journal
+    }
+
     auto result = executeImpl (command);
+
+    if (outermost)
+        txnPostDispatch (result);
+
     // A3 — feed the crash-recovery journal (single chokepoint; skipped during a replay).
     if (! replayingRecovery_)
         appendRecoveryJournal (command.getProperty ("command", var()).toString(),
@@ -1128,6 +964,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "redo")              return cmdRedo (args);
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
+    if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
+    if (name == "batch_rollback")    return cmdBatchRollback (args);    // FS-B2a
     if (name == "save")              return cmdSave (args);
     if (name == "reload")            return cmdReload (args);
     if (name == "recover_session")   return cmdRecoverSession (args);   // A3 — replay the crash tail
@@ -1307,2047 +1145,6 @@ juce::var MoshOps::executeImpl (const juce::var& command)
 // ─────────────────────────────────────────────────────────────────────────────
 // Commands
 // ─────────────────────────────────────────────────────────────────────────────
-juce::var MoshOps::cmdCreateTrack (const juce::var& args)
-{
-    // DRM-001 — optional track type. "drum" stamps the type flag and auto-loads the
-    // working sampler + bundled kit so drum clips sound immediately ("audio" default).
-    const auto type = args.getProperty ("type", "audio").toString();
-    if (type != "audio" && type != "drum")
-        return errResult ("create_track", "type must be 'audio' or 'drum'");
-
-    beginTxn ("create_track");
-    auto* track = createAudioTrack (args.getProperty ("name", var()).toString());
-    if (track == nullptr)
-    {
-        logLine ("create_track", args, false, "insert failed", true);
-        return errResult ("create_track", "insert failed");
-    }
-
-    if (type == "drum")
-    {
-        track->state.setProperty (ids::trackType, "drum", &undoManager());
-        ensureDefaultInstrument (*track, true);   // sampler + kit
-    }
-
-    // METER-001 — auto-meter every freshly created track (must run AFTER any
-    // same-command instrument/plugin setup above, since ensureTrackMeter appends
-    // at the CURRENT end of the chain — calling it any earlier would leave the
-    // tap ahead of the instrument, silently mismeasuring the track's real output).
-    // Previously only enable_all_meters (called once at UI init) covered this, so
-    // any track created mid-session — here, or via import/paste/add_midi_clip/
-    // add_drum_pattern/create_bus/accept_render's Neural Renders lane, all fixed
-    // alongside this one — never appeared in the "levels" telemetry. Best-effort:
-    // a meter-creation failure must not fail track creation itself.
-    ensureTrackMeter (*track);
-
-    auto* data = new DynamicObject();
-    data->setProperty ("trackId", track->itemID.toString());
-    data->setProperty ("type", type);
-    data->setProperty ("isInstrument", trackHasInstrument (*track));
-    logLine ("create_track", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("create_track", var (data));
-}
-
-juce::var MoshOps::cmdRenameTrack (const juce::var& args)
-{
-    const auto id = args.getProperty ("trackId", var()).toString();
-    te::Track* track = findTrack (id);
-    if (track == nullptr) track = findGroupTrack (id);   // MIX-008: groups rename too
-    if (track == nullptr) return errResult ("rename_track", "no track: " + id);
-
-    beginTxn ("rename_track");
-    track->setName (args.getProperty ("name", var()).toString());
-    logLine ("rename_track", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("rename_track");
-}
-
-juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
-{
-    const auto id = args.getProperty ("trackId", var()).toString();
-    auto* track = findTrack (id);
-    if (track == nullptr) return errResult ("remove_track", "no track: " + id);
-
-    beginTxn ("remove_track");
-    eng.edit().deleteTrack (track);
-    logLine ("remove_track", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_track");
-}
-
-// ── SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit) ────────────
-// Beat-range regions with a name + colour; create/rename/move/remove are undoable
-// writes to the Edit's own ValueTree, so they save/reload with the .tracktionedit
-// and ride the one undo system. Section ids are engine-assigned UUIDs.
-juce::var MoshOps::cmdCreateSection (const juce::var& args)
-{
-    const auto name = args.getProperty ("name", var()).toString();
-    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
-    const double endBeat = (double) args.getProperty ("endBeat", startBeat + 16.0);
-    const auto color = args.getProperty ("color", var()).toString();
-
-    beginTxn ("create_section");
-    auto state = eng.edit().state;
-    auto sections = state.getChildWithName (ids::MOSH_SECTIONS);
-    if (! sections.isValid())
-    {
-        sections = juce::ValueTree (ids::MOSH_SECTIONS);
-        state.appendChild (sections, &undoManager());
-    }
-    const auto sectionId = juce::Uuid().toString();
-    sections.appendChild (mosh::Section::create (sectionId, name, startBeat, endBeat, color), &undoManager());
-
-    auto* data = new DynamicObject(); data->setProperty ("sectionId", sectionId);
-    logLine ("create_section", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("create_section", var (data));
-}
-
-juce::var MoshOps::cmdRenameSection (const juce::var& args)
-{
-    const auto sectionId = args.getProperty ("sectionId", var()).toString();
-    const auto name = args.getProperty ("name", var()).toString();
-    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
-    auto node = sections.getChildWithProperty (ids::id, sectionId);
-    if (! node.isValid()) return errResult ("rename_section", "no section: " + sectionId);
-
-    beginTxn ("rename_section");
-    node.setProperty (ids::sectionName, name, &undoManager());
-    logLine ("rename_section", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("rename_section");
-}
-
-juce::var MoshOps::cmdMoveSection (const juce::var& args)
-{
-    const auto sectionId = args.getProperty ("sectionId", var()).toString();
-    const double startBeat = (double) args.getProperty ("startBeat", 0.0);
-    const double endBeat = (double) args.getProperty ("endBeat", 0.0);
-    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
-    auto node = sections.getChildWithProperty (ids::id, sectionId);
-    if (! node.isValid()) return errResult ("move_section", "no section: " + sectionId);
-
-    beginTxn ("move_section");
-    node.setProperty (ids::sectionStartBeat, startBeat, &undoManager());
-    node.setProperty (ids::sectionEndBeat, endBeat, &undoManager());
-    logLine ("move_section", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("move_section");
-}
-
-juce::var MoshOps::cmdRemoveSection (const juce::var& args)
-{
-    const auto sectionId = args.getProperty ("sectionId", var()).toString();
-    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
-    auto node = sections.getChildWithProperty (ids::id, sectionId);
-    if (! node.isValid()) return errResult ("remove_section", "no section: " + sectionId);
-
-    beginTxn ("remove_section");
-    sections.removeChild (node, &undoManager());
-    logLine ("remove_section", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_section");
-}
-
-juce::var MoshOps::sectionsToVar()
-{
-    Array<var> out;
-    auto sections = eng.edit().state.getChildWithName (ids::MOSH_SECTIONS);
-    if (sections.isValid())
-        for (int i = 0; i < sections.getNumChildren(); ++i)
-        {
-            auto s = sections.getChild (i);
-            auto* o = new DynamicObject();
-            o->setProperty ("id", s[ids::id].toString());
-            o->setProperty ("name", s[ids::sectionName].toString());
-            o->setProperty ("startBeat", (double) s[ids::sectionStartBeat]);
-            o->setProperty ("endBeat", (double) s[ids::sectionEndBeat]);
-            if (s.hasProperty (ids::sectionColor))
-                o->setProperty ("color", s[ids::sectionColor].toString());
-            out.add (var (o));
-        }
-    return out;
-}
-
-// ── LYR-001 — Finish-My-Song lyric sheet (per-track MOSH_LYRICSHEET) ───────────
-
-juce::var MoshOps::cmdCreateLyricSheet (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("create_lyric_sheet", "no track: " + trackId);
-    if (t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-        return errResult ("create_lyric_sheet", "track already has a lyric sheet");
-
-    const auto grid     = args.getProperty ("grid", "1/16").toString();
-    const auto language = args.getProperty ("language", "en").toString();
-
-    beginTxn ("create_lyric_sheet");
-    const auto sheetId = juce::Uuid().toString();
-    auto sheet = mosh::LyricSheet::create (sheetId, grid, language);
-    if (args.hasProperty ("topic"))    sheet.setProperty (ids::lyricTopic,    args.getProperty ("topic", var()), nullptr);
-    if (args.hasProperty ("mood"))     sheet.setProperty (ids::lyricMood,     args.getProperty ("mood", var()), nullptr);
-    if (args.hasProperty ("explicit")) sheet.setProperty (ids::lyricExplicit, args.getProperty ("explicit", var()), nullptr);
-    t->state.appendChild (sheet, &undoManager());
-
-    auto* data = new DynamicObject();
-    data->setProperty ("sheetId", sheetId);
-    data->setProperty ("trackId", trackId);
-    logLine ("create_lyric_sheet", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("create_lyric_sheet", var (data));
-}
-
-juce::var MoshOps::cmdRemoveLyricSheet (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("remove_lyric_sheet", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("remove_lyric_sheet", "track has no lyric sheet");
-
-    beginTxn ("remove_lyric_sheet");
-    t->state.removeChild (sheet, &undoManager());
-    logLine ("remove_lyric_sheet", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_lyric_sheet");
-}
-
-juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("set_lyric_constraint", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("set_lyric_constraint", "track has no lyric sheet");
-
-    beginTxn ("set_lyric_constraint");
-    if (args.hasProperty ("grid"))            sheet.setProperty (ids::lyricGrid,            args.getProperty ("grid", var()), &undoManager());
-    if (args.hasProperty ("topic"))           sheet.setProperty (ids::lyricTopic,           args.getProperty ("topic", var()), &undoManager());
-    if (args.hasProperty ("mood"))            sheet.setProperty (ids::lyricMood,            args.getProperty ("mood", var()), &undoManager());
-    if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
-    if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
-    if (args.hasProperty ("styleBias"))       sheet.setProperty (ids::lyricStyleBias,       (bool) args.getProperty ("styleBias", false), &undoManager());
-    logLine ("set_lyric_constraint", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_lyric_constraint");
-}
-
-juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("set_lyric_line", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("set_lyric_line", "track has no lyric sheet");
-    auto lines = mosh::LyricSheet::lines (sheet);
-
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    if (lineIndex < 0) return errResult ("set_lyric_line", "lineIndex required (>= 0)");
-    if (lineIndex > lines.getNumChildren())
-        return errResult ("set_lyric_line", "lineIndex out of range (lines are kept dense)");
-
-    beginTxn ("set_lyric_line");
-    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! line.isValid())
-    {
-        // Append a new line at the next index (lineIndex == current count).
-        const auto role = args.getProperty ("role", "verse").toString();
-        line = mosh::LyricLine::create (juce::Uuid().toString(), lineIndex, role);
-        lines.appendChild (line, &undoManager());
-    }
-    if (args.hasProperty ("text"))
-    {
-        // A hand edit on a VERBATIM-sung line demotes its provenance to "edited" —
-        // we never claim an edited line as exactly what the producer sang.
-        if (line[ids::lyricOrigin].toString() == "sung"
-            && args.getProperty ("text", var()).toString() != line[ids::lyricText].toString())
-            line.setProperty (ids::lyricOrigin, "edited", &undoManager());
-        line.setProperty (ids::lyricText, args.getProperty ("text", var()), &undoManager());
-    }
-    if (args.hasProperty ("role"))            line.setProperty (ids::lyricRole,            args.getProperty ("role", var()), &undoManager());
-    if (args.hasProperty ("seedText"))
-    {
-        // The LyricPanel editor commits hand edits as seedText (review find): on a line
-        // whose text is already finalized (sung/accepted), a differing seed edit IS the
-        // new effective lyric — mirror it into lyricText so the edit takes effect, and
-        // demote a verbatim-"sung" line to "edited" (never claim it verbatim-his again).
-        const auto newSeed = args.getProperty ("seedText", var()).toString();
-        if (line[ids::lyricText].toString().isNotEmpty()
-            && newSeed != line[ids::lyricText].toString())
-        {
-            if (line[ids::lyricOrigin].toString() == "sung")
-                line.setProperty (ids::lyricOrigin, "edited", &undoManager());
-            line.setProperty (ids::lyricText, newSeed, &undoManager());
-        }
-        line.setProperty (ids::lyricSeedText, args.getProperty ("seedText", var()), &undoManager());
-    }
-    if (args.hasProperty ("syllableTarget"))  line.setProperty (ids::lyricSyllableTarget,  (int) args.getProperty ("syllableTarget", 0), &undoManager());
-    if (args.hasProperty ("syllableTol"))     line.setProperty (ids::lyricSyllableTol,     (int) args.getProperty ("syllableTol", 1), &undoManager());
-    if (args.hasProperty ("stress"))          line.setProperty (ids::lyricStress,          args.getProperty ("stress", var()), &undoManager());
-    if (args.hasProperty ("rhymeGroup"))      line.setProperty (ids::lyricRhymeGroup,      args.getProperty ("rhymeGroup", var()), &undoManager());
-    if (args.hasProperty ("rhymeStrictness")) line.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
-    if (args.hasProperty ("locked"))          line.setProperty (ids::lyricLocked,          (bool) args.getProperty ("locked", false), &undoManager());
-    if (args.hasProperty ("sectionId"))       line.setProperty (ids::lyricSectionId,       args.getProperty ("sectionId", var()), &undoManager());
-    // A line carrying a seed/text is no longer "empty" (richer statuses arrive with the
-    // generation loop in L2). EXCEPT a Phase-2 `skeleton` line: it carries an all-gaps seed
-    // but must stay `skeleton` while the producer edits the grid (the +/- syllable stepper
-    // goes through here) — confirm_skeleton does the skeleton→seed flip. (NOTE: `proposed` is
-    // L2's "has proposals" status — distinct — so it's NOT preserved here.)
-    const bool contentEdited = args.hasProperty ("text") || args.hasProperty ("seedText");
-    if (contentEdited
-        && line[ids::status].toString() != "skeleton"
-        && (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty()))
-        line.setProperty (ids::status, "seed", &undoManager());
-
-    auto* data = new DynamicObject();
-    data->setProperty ("lineIndex", lineIndex);
-    data->setProperty ("lineId", line[ids::id].toString());
-    logLine ("set_lyric_line", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_lyric_line", var (data));
-}
-
-juce::var MoshOps::cmdRemoveLyricLine (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("remove_lyric_line", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("remove_lyric_line", "track has no lyric sheet");
-    auto lines = mosh::LyricSheet::lines (sheet);
-
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! line.isValid()) return errResult ("remove_lyric_line", "no line at index " + juce::String (lineIndex));
-
-    beginTxn ("remove_lyric_line");
-    lines.removeChild (line, &undoManager());
-    // Keep indices dense: renumber the surviving lines by their child order.
-    for (int i = 0; i < lines.getNumChildren(); ++i)
-        lines.getChild (i).setProperty (ids::lyricIndex, i, &undoManager());
-    logLine ("remove_lyric_line", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_lyric_line");
-}
-
-juce::var MoshOps::cmdGetRhymes (const juce::var& args)
-{
-    const auto word = args.getProperty ("word", var()).toString().trim();
-    if (word.isEmpty()) return errResult ("get_rhymes", "word required");
-    auto strictness = args.getProperty ("strictness", "slant").toString();
-    if (strictness != "perfect" && strictness != "slant" && strictness != "free")
-        strictness = "slant";
-    const int syllables = (int) args.getProperty ("syllables", 0);
-    const int maxN      = (int) args.getProperty ("maxN", 50);
-
-    // Phonology read — a fast, deterministic SERVICE call (no LLM, not undoable, no
-    // state change). Blocks briefly; this is an explicit on-demand lookup.
-    auto res = jobManager.getRhymes (word, strictness, maxN, syllables);
-    const bool ok = res.isObject() && (bool) res.getProperty ("ok", false);
-    logLine ("get_rhymes", args, ok, ok ? juce::String() : juce::String ("phonology service unavailable"), false);
-    if (! ok)
-        return errResult ("get_rhymes", "phonology service unavailable (start the generative service)");
-    return okResult ("get_rhymes", res);
-}
-
-juce::var MoshOps::lyricSheetToVar (te::AudioTrack& t)
-{
-    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return {};
-
-    auto* o = new DynamicObject();
-    o->setProperty ("id",              sheet[ids::id].toString());
-    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
-    o->setProperty ("language",        sheet[ids::lyricLanguage].toString());
-    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
-    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
-    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
-    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
-    o->setProperty ("styleBias",       (bool) sheet[ids::lyricStyleBias]);
-    o->setProperty ("specVersion",     (int) sheet[ids::lyricSpecVersion]);
-
-    Array<var> lines;
-    auto container = mosh::LyricSheet::lines (sheet);
-    for (int i = 0; i < container.getNumChildren(); ++i)
-    {
-        auto l = container.getChild (i);
-        auto* lo = new DynamicObject();
-        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
-        lo->setProperty ("role",            l[ids::lyricRole].toString());
-        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
-        lo->setProperty ("text",            l[ids::lyricText].toString());
-        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
-        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
-        lo->setProperty ("stress",          l[ids::lyricStress].toString());
-        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
-        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
-        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
-        lo->setProperty ("sectionId",       l[ids::lyricSectionId].toString());
-        lo->setProperty ("status",          l[ids::status].toString());
-        const bool asserted = l[ids::status].toString() == "asserted"
-                              && lyricTextIsCompleteForSing (l[ids::lyricText].toString());
-        lo->setProperty ("asserted", asserted);
-        lo->setProperty ("singable", lyricLineIsAssertedForSing (l));
-        // L2 — transient ranked proposals (a JSON blob; absent ⇒ none) + regen counter.
-        if (l.hasProperty (ids::lyricProposals))
-        {
-            auto parsed = juce::JSON::parse (l[ids::lyricProposals].toString());
-            if (parsed.isArray()) lo->setProperty ("proposals", parsed);
-        }
-        if (l.hasProperty (ids::lyricRegen))
-            lo->setProperty ("regen", (int) l[ids::lyricRegen]);
-        // FMS Phase-3 — a BOOLEAN only (the blob itself stays out of the snapshot): the
-        // sing drawer shows how many lines carry a flow from the take.
-        lo->setProperty ("hasScore", l.hasProperty (ids::lyricScore));
-        // Extraction provenance: the sung-vs-generated distinction for the UI; the heard
-        // blob itself stays out of the snapshot (a boolean, like hasScore).
-        if (l.hasProperty (ids::lyricOrigin))
-            lo->setProperty ("origin", l[ids::lyricOrigin].toString());
-        lo->setProperty ("hasHeard", l.hasProperty (ids::lyricHeard));
-        // L1 — transient precise phonology (a JSON object; absent ⇒ not yet analysed).
-        if (l.hasProperty (ids::lyricAnalysis))
-        {
-            auto parsed = juce::JSON::parse (l[ids::lyricAnalysis].toString());
-            if (parsed.isObject()) lo->setProperty ("analysis", parsed);
-        }
-        lines.add (var (lo));
-    }
-    o->setProperty ("lines", lines);
-    return var (o);
-}
-
-// ── LYR-L2 — the generation loop (propose → validate → retry → rank), fake-first ──
-
-juce::var MoshOps::lyricSpecForTrack (te::AudioTrack& t)
-{
-    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return {};
-    const bool styleBias = (bool) sheet[ids::lyricStyleBias];
-    auto* o = new DynamicObject();
-    o->setProperty ("grid",            sheet[ids::lyricGrid].toString());
-    o->setProperty ("topic",           sheet[ids::lyricTopic].toString());
-    o->setProperty ("mood",            sheet[ids::lyricMood].toString());
-    o->setProperty ("explicit",        sheet[ids::lyricExplicit].toString());
-    o->setProperty ("rhymeStrictness", sheet[ids::lyricRhymeStrictness].toString());
-    o->setProperty ("styleBias",       styleBias);
-    Array<var> lines;
-    Array<var> styleCorpus;   // §7 — the artist's OWN finalized lines = the voice corpus
-    auto container = mosh::LyricSheet::lines (sheet);
-    for (int i = 0; i < container.getNumChildren(); ++i)
-    {
-        auto l = container.getChild (i);
-        auto* lo = new DynamicObject();
-        lo->setProperty ("index",           (int) l[ids::lyricIndex]);
-        lo->setProperty ("role",            l[ids::lyricRole].toString());
-        lo->setProperty ("seedText",        l[ids::lyricSeedText].toString());
-        lo->setProperty ("text",            l[ids::lyricText].toString());
-        lo->setProperty ("syllableTarget",  (int) l[ids::lyricSyllableTarget]);
-        lo->setProperty ("syllableTol",     (int) l[ids::lyricSyllableTol]);
-        lo->setProperty ("stress",          l[ids::lyricStress].toString());
-        lo->setProperty ("rhymeGroup",      l[ids::lyricRhymeGroup].toString());
-        lo->setProperty ("rhymeStrictness", l[ids::lyricRhymeStrictness].toString());
-        lo->setProperty ("locked",          (bool) l[ids::lyricLocked]);
-        lines.add (var (lo));
-        const auto finalized = l[ids::lyricText].toString();
-        if (styleBias && finalized.trim().isNotEmpty())
-            styleCorpus.add (finalized);   // user-owned only; passed inline (no persistence)
-    }
-    o->setProperty ("lines", lines);
-    if (styleBias)
-        o->setProperty ("styleCorpus", styleCorpus);
-    return var (o);
-}
-
-juce::var MoshOps::lyricRegenForTrack (te::AudioTrack& t)
-{
-    auto sheet = t.state.getChildWithName (ids::MOSH_LYRICSHEET);
-    auto* o = new DynamicObject();
-    if (sheet.isValid())
-    {
-        auto container = mosh::LyricSheet::lines (sheet);
-        for (int i = 0; i < container.getNumChildren(); ++i)
-        {
-            auto l = container.getChild (i);
-            if (l.hasProperty (ids::lyricRegen) && (int) l[ids::lyricRegen] > 0)
-                o->setProperty (juce::Identifier (l[ids::lyricIndex].toString()), (int) l[ids::lyricRegen]);
-        }
-    }
-    return var (o);
-}
-
-juce::var MoshOps::runLyricGeneration (const juce::String& cmdName, const juce::String& mode,
-                                       const juce::String& trackId, int lineIndex, int afterIndex,
-                                       const juce::var& args)
-{
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult (cmdName, "no track: " + trackId);
-    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-        return errResult (cmdName, "track has no lyric sheet");
-
-    const auto spec  = lyricSpecForTrack (*t);
-    const auto regen = lyricRegenForTrack (*t);
-
-    // Land proposals (a JSON blob per line) on the message thread; re-look-up the sheet
-    // (it may have changed) and write only lines the service returned. NON-undoable
-    // (ephemeral generation output); accept/reject is the user's commit.
-    auto land = [this, cmdName, trackId] (const juce::var& result) -> juce::var
-    {
-        auto* tt = findTrack (trackId);
-        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
-        if (! sheet.isValid()) return errResult (cmdName, "lyric sheet gone");
-        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
-            return errResult (cmdName, "lyric service unavailable (start the generative service)");
-        auto lines = mosh::LyricSheet::lines (sheet);
-        auto resLines = result.getProperty ("lines", var());
-        int n = 0;
-        if (resLines.isArray())
-            for (auto& rl : *resLines.getArray())
-            {
-                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
-                if (! node.isValid()) continue;
-                node.setProperty (ids::lyricProposals, juce::JSON::toString (rl.getProperty ("proposals", var())), nullptr);
-                node.setProperty (ids::status, "proposed", nullptr);
-                ++n;
-            }
-        emitSnapshotInvalidated();
-        auto* d = new DynamicObject(); d->setProperty ("status", "proposed"); d->setProperty ("lineCount", n);
-        return okResult (cmdName, var (d));
-    };
-
-    logLine (cmdName, args, true, {}, false);
-
-    // Synchronous (harness / agent): block on generation + land inline.
-    if ((bool) args.getProperty ("wait", false))
-        return land (jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen));
-
-    // Async (GUI): generate off the message thread; land via callAsync, skipping if a
-    // cancel bumped the epoch in the meantime.
-    const int epoch = ++lyricGenEpoch_;   // capture; a later launch or cancel supersedes
-    std::thread ([this, mode, spec, lineIndex, afterIndex, regen, land, epoch]
-    {
-        auto result = jobManager.generateLyrics (mode, spec, lineIndex, afterIndex, regen);
-        juce::MessageManager::callAsync ([this, land, result, epoch]
-        {
-            if (epoch != lyricGenEpoch_) return;   // cancelled / superseded
-            land (result);
-        });
-    }).detach();
-
-    auto* d = new DynamicObject(); d->setProperty ("status", "generating");
-    return okResult (cmdName, var (d));
-}
-
-juce::var MoshOps::cmdCompleteLyrics (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    return runLyricGeneration ("complete_lyrics", "complete", trackId, -1, -1, args);
-}
-
-juce::var MoshOps::cmdFillLyricGap (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    return runLyricGeneration ("fill_lyric_gap", "fill", trackId, lineIndex, -1, args);
-}
-
-juce::var MoshOps::cmdSuggestNextLine (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int afterIndex = (int) args.getProperty ("afterIndex", -1);
-    return runLyricGeneration ("suggest_next_line", "next", trackId, -1, afterIndex, args);
-}
-
-juce::var MoshOps::cmdRegenerateLyric (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("regenerate_lyric", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("regenerate_lyric", "track has no lyric sheet");
-    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! node.isValid()) return errResult ("regenerate_lyric", "no line at index " + juce::String (lineIndex));
-    // Bump the line's regen counter (non-undoable) so the service draws a fresh sample.
-    node.setProperty (ids::lyricRegen, (int) node.getProperty (ids::lyricRegen, 0) + 1, nullptr);
-    return runLyricGeneration ("regenerate_lyric", "fill", trackId, lineIndex, -1, args);
-}
-
-juce::var MoshOps::cmdCancelLyricJob (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    ++lyricGenEpoch_;   // any in-flight async land for the prior epoch is skipped
-    logLine ("cancel_lyric_job", args, true, {}, false);
-    return okResult ("cancel_lyric_job");
-}
-
-juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    const int proposalIndex = (int) args.getProperty ("proposalIndex", 0);
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("accept_lyric_proposal", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("accept_lyric_proposal", "track has no lyric sheet");
-    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! node.isValid()) return errResult ("accept_lyric_proposal", "no line at index " + juce::String (lineIndex));
-    auto props = juce::JSON::parse (node.getProperty (ids::lyricProposals, "").toString());
-    if (! props.isArray() || proposalIndex < 0 || proposalIndex >= props.size())
-        return errResult ("accept_lyric_proposal", "no proposal at that index");
-    const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
-    if (! lyricTextIsCompleteForSing (chosen))
-        return errResult ("accept_lyric_proposal", "proposal has unresolved words");
-
-    beginTxn ("accept_lyric_proposal");
-    node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
-    node.setProperty (ids::status, "asserted", &undoManager());
-    node.removeProperty (ids::lyricProposals, nullptr);            // clear the ephemeral proposals
-    // Provenance (honest by construction): "mixed" only when a heard-kept word actually
-    // SURVIVES in the accepted text (review find: the blob alone proves what the take
-    // said, not what this proposal kept — a regenerated line that dropped his anchors
-    // must land "generated").
-    {
-        bool heardKept = false;
-        if (node.hasProperty (ids::lyricHeard))
-        {
-            auto tokens = juce::StringArray::fromTokens (chosen.toLowerCase(), " \t", {});
-            for (auto& t : tokens)
-                t = t.trimCharactersAtStart (".,!?'\"-").trimCharactersAtEnd (".,!?'\"-");
-            auto hb = juce::JSON::parse (node[ids::lyricHeard].toString());
-            if (auto* ws = hb.getProperty ("words", var()).getArray())
-                for (auto& w : *ws)
-                    if ((bool) w.getProperty ("kept", false)
-                        && tokens.contains (w.getProperty ("word", var()).toString()
-                                                .toLowerCase()
-                                                .trimCharactersAtStart (".,!?'\"-")
-                                                .trimCharactersAtEnd (".,!?'\"-")))
-                    { heardKept = true; break; }
-        }
-        node.setProperty (ids::lyricOrigin, heardKept ? "mixed" : "generated", &undoManager());
-    }
-    logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
-    emitSnapshotInvalidated();
-
-    // §7 style-RAG flywheel — auto-accumulate the accepted line into the PERSISTED
-    // cross-song voice corpus so future songs sound more like the artist. Fire-and-forget
-    // on a detached thread: styleCorpusAdd is NON-SPAWNING (isHealthy-gated) + best-effort,
-    // so accept NEVER blocks/fails on it and a service-down state is a silent no-op (keeps
-    // --selftest hermetic). NON-undoable by design: undo pulls the text from the sheet but
-    // not the corpus — acceptable, the corpus is a "lines I liked" accumulation (add_lines
-    // dedups + the near-verbatim guard handles redundancy). Mirrors cmdAnalyzeLyrics's
-    // detached-thread idiom.
-    if (chosen.trim().isNotEmpty())
-    {
-        const juce::String line = chosen;
-        std::thread ([this, line]
-        {
-            jobManager.styleCorpusAdd (juce::StringArray { line }, "accept");
-        }).detach();
-    }
-
-    auto* d = new DynamicObject(); d->setProperty ("text", chosen);
-    return okResult ("accept_lyric_proposal", var (d));
-}
-
-juce::var MoshOps::cmdAssertLyricLine (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("assert_lyric_line", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("assert_lyric_line", "track has no lyric sheet");
-    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! node.isValid()) return errResult ("assert_lyric_line", "no line at index " + juce::String (lineIndex));
-
-    const auto assertedText = args.hasProperty ("text")
-        ? args.getProperty ("text", var()).toString()
-        : node[ids::lyricText].toString();
-    if (! lyricTextIsCompleteForSing (assertedText))
-        return errResult ("assert_lyric_line", "line needs complete words before it can be asserted");
-
-    beginTxn ("assert_lyric_line");
-    node.setProperty (ids::lyricText, assertedText.trim(), &undoManager());
-    node.setProperty (ids::status, "asserted", &undoManager());
-    node.removeProperty (ids::lyricProposals, nullptr);
-    logLine ("assert_lyric_line", args, true, {}, true);
-    emitSnapshotInvalidated();
-
-    auto* d = new DynamicObject(); d->setProperty ("text", assertedText.trim());
-    return okResult ("assert_lyric_line", var (d));
-}
-
-juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    const int lineIndex = (int) args.getProperty ("lineIndex", -1);
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("reject_lyric_proposal", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("reject_lyric_proposal", "track has no lyric sheet");
-    auto node = mosh::LyricSheet::lines (sheet).getChildWithProperty (ids::lyricIndex, lineIndex);
-    if (! node.isValid()) return errResult ("reject_lyric_proposal", "no line at index " + juce::String (lineIndex));
-    node.removeProperty (ids::lyricProposals, nullptr);
-    node.setProperty (ids::status, node[ids::lyricText].toString().isNotEmpty()
-                                       || node[ids::lyricSeedText].toString().isNotEmpty() ? "seed" : "empty", nullptr);
-    logLine ("reject_lyric_proposal", args, true, {}, false);      // TASTE label (negative)
-    emitSnapshotInvalidated();
-    return okResult ("reject_lyric_proposal");
-}
-
-// LYR-L1 — precise per-line phonology for the flow visualizer. Service-backed (no LLM),
-// idempotent + read-only: the analysis is a recomputable JSON blob landed per line →
-// snapshot. NON-undoable; no epoch guard (landing a stale analysis is harmless — it just
-// re-marks the same content, and a missing line is skipped on re-lookup).
-juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("analyze_lyrics", "no track: " + trackId);
-    if (! t->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-        return errResult ("analyze_lyrics", "track has no lyric sheet");
-
-    const auto spec = lyricSpecForTrack (*t);
-
-    auto land = [this, trackId] (const juce::var& result) -> juce::var
-    {
-        auto* tt = findTrack (trackId);
-        auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
-        if (! sheet.isValid()) return errResult ("analyze_lyrics", "lyric sheet gone");
-        if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
-            return errResult ("analyze_lyrics", "lyric service unavailable (start the generative service)");
-        auto lines = mosh::LyricSheet::lines (sheet);
-        auto resLines = result.getProperty ("lines", var());
-        int n = 0;
-        if (resLines.isArray())
-            for (auto& rl : *resLines.getArray())
-            {
-                auto node = lines.getChildWithProperty (ids::lyricIndex, (int) rl.getProperty ("index", -1));
-                if (! node.isValid()) continue;
-                node.setProperty (ids::lyricAnalysis, juce::JSON::toString (rl.getProperty ("analysis", var())), nullptr);
-                ++n;
-            }
-        emitSnapshotInvalidated();
-        auto* d = new DynamicObject(); d->setProperty ("status", "analyzed"); d->setProperty ("lineCount", n);
-        return okResult ("analyze_lyrics", var (d));
-    };
-
-    logLine ("analyze_lyrics", args, true, {}, false);
-
-    if ((bool) args.getProperty ("wait", false))
-        return land (jobManager.analyzeLyrics (spec));
-
-    std::thread ([this, spec, land]
-    {
-        auto result = jobManager.analyzeLyrics (spec);
-        juce::MessageManager::callAsync ([land, result] { land (result); });
-    }).detach();
-
-    auto* d = new DynamicObject(); d->setProperty ("status", "analyzing");
-    return okResult ("analyze_lyrics", var (d));
-}
-
-// §7 — read-only corpus size ("N lines in your voice"). NON-SPAWNING (styleCorpusStats is
-// isHealthy-gated) → returns lines:-1 when the service is down (the UI shows nothing). Counts
-// only; the corpus content is never exposed (the backend-only safety wall).
-juce::var MoshOps::cmdGetLyricCorpusStats (const juce::var& args)
-{
-    const int lines = jobManager.styleCorpusStats();
-    auto* d = new DynamicObject(); d->setProperty ("lines", lines);
-    return okResult ("get_lyric_corpus_stats", var (d));
-}
-
-// LYR Phase 3 — audio "mumble take". A recorded vocal take → Basic Pitch note onsets (the
-// reliable RHYTHM) + Whisper confidence-gated words → a lyric constraint sheet on the clip's
-// OWN track, so the producer doesn't hand-type the flow; the L2/L3 loop fills the gaps.
-// Mirrors cmdTranscribeClip's async-on-the-snapshot-rail shape (clip-scoped, service-spawning).
-juce::var MoshOps::cmdBuildLyricsFromClip (const juce::var& args)
-{
-    const auto clipId = args.getProperty ("clipId", var()).toString();
-    const double confThreshold = (double) args.getProperty ("confThreshold", 0.6);
-
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
-    if (w == nullptr) return errResult ("build_lyrics_from_clip", "no wave clip with that id");
-    const auto srcFile = w->getCurrentSourceFile();
-    if (! srcFile.existsAsFile()) return errResult ("build_lyrics_from_clip", "clip has no readable source audio");
-
-    auto* track = dynamic_cast<te::AudioTrack*> (w->getTrack());
-    if (track == nullptr) return errResult ("build_lyrics_from_clip", "clip is not on an audio track");
-    const auto trackId = track->itemID.toString();
-    if (track->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-        return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
-
-    auto& edit = eng.edit();
-    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
-    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
-    auto* tsig = edit.tempoSequence.getNumTimeSigs() > 0 ? edit.tempoSequence.getTimeSig (0) : nullptr;
-    const int tsNum = tsig != nullptr ? tsig->numerator.get() : 4;
-    const int tsDen = tsig != nullptr ? tsig->denominator.get() : 4;
-
-    // Land the built spec as a MOSH_LYRICSHEET on the clip's OWN track in ONE undo txn —
-    // written via the state helpers directly (re-invoking create/set sub-commands would make
-    // N undo steps + emit nested logs/events). Always on the message thread.
-    auto land = [this, clipId, trackId] (const juce::var& spec) -> juce::var
-    {
-        auto* tt = findTrack (trackId);
-        if (tt == nullptr) return errResult ("build_lyrics_from_clip", "track gone");
-        if (tt->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-            return errResult ("build_lyrics_from_clip", "track already has a lyric sheet");
-
-        auto linesVar = spec.isObject() ? spec.getProperty ("lines", var()) : var();
-        if (! spec.isObject() || ! (bool) spec.getProperty ("ok", false) || ! linesVar.isArray() || linesVar.size() == 0)
-        {
-            const auto err = spec.isObject() ? spec.getProperty ("error", var()).toString() : juce::String();
-            const auto msg = err == "no_melody_detected" ? juce::String ("no melody detected in the take")
-                           : err.isNotEmpty() ? err : juce::String ("lyric service unavailable (start the generative service)");
-            emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
-                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
-                o->setProperty ("error", msg); return var (o); }());
-            return errResult ("build_lyrics_from_clip", msg);
-        }
-
-        beginTxn ("build_lyrics_from_clip");
-        const auto sheetId = juce::Uuid().toString();
-        auto sheet = mosh::LyricSheet::create (sheetId, spec.getProperty ("grid", "1/16").toString());
-        if (spec.getProperty ("topic", var()).toString().isNotEmpty())
-            sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
-        auto container = mosh::LyricSheet::lines (sheet);
-        for (auto& lv : *linesVar.getArray())
-        {
-            auto line = mosh::LyricLine::create (juce::Uuid().toString(),
-                                                 (int) lv.getProperty ("index", 0),
-                                                 lv.getProperty ("role", "verse").toString());
-            line.setProperty (ids::lyricSeedText,       lv.getProperty ("seedText", var()), nullptr);
-            line.setProperty (ids::lyricSyllableTarget, (int) lv.getProperty ("syllableTarget", 0), nullptr);
-            line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
-            line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
-            line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
-            line.setProperty (ids::status,              "seed", nullptr);
-            container.appendChild (line, nullptr);
-        }
-        tt->state.appendChild (sheet, &undoManager());
-
-        emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
-            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
-            o->setProperty ("lineCount", linesVar.size()); return var (o); }());
-        emitSnapshotInvalidated();
-
-        auto* d = new DynamicObject();
-        d->setProperty ("status", "done");
-        d->setProperty ("sheetId", sheetId);
-        d->setProperty ("trackId", trackId);
-        d->setProperty ("lineCount", linesVar.size());
-        return okResult ("build_lyrics_from_clip", var (d));
-    };
-
-    emit ("build_lyrics_status", [&] { auto* o = new DynamicObject();
-        o->setProperty ("clipId", clipId); o->setProperty ("state", "working"); return var (o); }());
-    logLine ("build_lyrics_from_clip", args, true, {}, false);
-
-    // Off the message thread (or inline for wait:true): notes (Basic Pitch) → words (Whisper,
-    // possibly empty) → mumble_spec. Absent notes (dead service / no Basic Pitch) ⇒ a
-    // no_melody_detected spec so `land` surfaces a friendly error.
-    auto fetchSpec = [this, srcFile, bpm, tsNum, tsDen, confThreshold] () -> juce::var
-    {
-        auto notesRes = jobManager.transcribe (srcFile, "mono");
-        auto notes = notesRes.isObject() ? notesRes.getProperty ("notes", var()) : var();
-        if (! notesRes.isObject() || ! (bool) notesRes.getProperty ("ok", false) || ! notes.isArray() || notes.size() == 0)
-        {
-            auto* e = new DynamicObject(); e->setProperty ("ok", false);
-            e->setProperty ("error", "no_melody_detected"); e->setProperty ("lines", var (Array<var>{}));
-            return var (e);
-        }
-        auto wordsRes = jobManager.transcribeWords (srcFile);
-        auto words = wordsRes.isObject() ? wordsRes.getProperty ("words", var()) : var();
-        if (! words.isArray()) words = var (Array<var>{});
-        return jobManager.mumbleSpec (notes, words, bpm, tsNum, tsDen, confThreshold);
-    };
-
-    if ((bool) args.getProperty ("wait", false))
-        return land (fetchSpec());
-
-    std::thread ([this, fetchSpec, land]
-    {
-        auto spec = fetchSpec();
-        juce::MessageManager::callAsync ([land, spec] { land (spec); });
-    }).detach();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("status", "started");
-    return okResult ("build_lyrics_from_clip", var (data));
-}
-
-// LYR Phase 2 — audio "mumble take" (gibberish → rhythmic SKELETON). Mirrors
-// cmdBuildLyricsFromClip, but the take is WORDLESS: skeletonSpec returns an all-gaps spec
-// (syllable grid + stress) and each line lands `proposed` — the producer confirms the grid
-// (confirm_skeleton) before the Phase-1 engine fills the words. Clip-scoped, service-spawning.
-juce::var MoshOps::cmdBuildSkeletonFromClip (const juce::var& args)
-{
-    const auto clipId = args.getProperty ("clipId", var()).toString();
-    const auto grid = args.getProperty ("grid", "1/16").toString();
-
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (clipId));
-    if (w == nullptr) return errResult ("build_skeleton_from_clip", "no wave clip with that id");
-    const auto srcFile = w->getCurrentSourceFile();
-    if (! srcFile.existsAsFile()) return errResult ("build_skeleton_from_clip", "clip has no readable source audio");
-
-    auto* track = dynamic_cast<te::AudioTrack*> (w->getTrack());
-    if (track == nullptr) return errResult ("build_skeleton_from_clip", "clip is not on an audio track");
-    const auto trackId = track->itemID.toString();
-    if (track->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-        return errResult ("build_skeleton_from_clip", "track already has a lyric sheet");
-
-    auto& edit = eng.edit();
-    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
-    const double bpm = tempo != nullptr ? tempo->getBpm() : 120.0;
-    auto* tsig = edit.tempoSequence.getNumTimeSigs() > 0 ? edit.tempoSequence.getTimeSig (0) : nullptr;
-    const int tsNum = tsig != nullptr ? tsig->numerator.get() : 4;
-    const int tsDen = tsig != nullptr ? tsig->denominator.get() : 4;
-
-    // Land the skeleton as a MOSH_LYRICSHEET on the clip's OWN track in ONE undo txn, each line
-    // `proposed` (the human-in-the-loop grid the producer confirms). Always on the message thread.
-    auto land = [this, clipId, trackId] (const juce::var& spec) -> juce::var
-    {
-        auto* tt = findTrack (trackId);
-        if (tt == nullptr) return errResult ("build_skeleton_from_clip", "track gone");
-        if (tt->state.getChildWithName (ids::MOSH_LYRICSHEET).isValid())
-            return errResult ("build_skeleton_from_clip", "track already has a lyric sheet");
-
-        auto linesVar = spec.isObject() ? spec.getProperty ("lines", var()) : var();
-        if (! spec.isObject() || ! (bool) spec.getProperty ("ok", false) || ! linesVar.isArray() || linesVar.size() == 0)
-        {
-            const auto err = spec.isObject() ? spec.getProperty ("error", var()).toString() : juce::String();
-            const auto msg = err == "no_melody_detected" ? juce::String ("no melody detected in the take")
-                           : err.isNotEmpty() ? err : juce::String ("skeleton service unavailable (start the generative service)");
-            emit ("skeleton_status", [&] { auto* o = new DynamicObject();
-                o->setProperty ("clipId", clipId); o->setProperty ("state", "error");
-                o->setProperty ("error", msg); return var (o); }());
-            return errResult ("build_skeleton_from_clip", msg);
-        }
-
-        beginTxn ("build_skeleton_from_clip");
-        const auto sheetId = juce::Uuid().toString();
-        auto sheet = mosh::LyricSheet::create (sheetId, spec.getProperty ("grid", "1/16").toString());
-        if (spec.getProperty ("topic", var()).toString().isNotEmpty())
-            sheet.setProperty (ids::lyricTopic, spec.getProperty ("topic", var()), nullptr);
-        auto container = mosh::LyricSheet::lines (sheet);
-        const auto scoresVar = spec.getProperty ("lineScores", var());  // Stage 1: aligned 1:1 with lines
-        const auto heardVar  = spec.getProperty ("lineHeard", var());   // extraction: aligned 1:1 with lines
-        int li = 0;
-        for (auto& lv : *linesVar.getArray())
-        {
-            auto line = mosh::LyricLine::create (juce::Uuid().toString(),
-                                                 (int) lv.getProperty ("index", 0),
-                                                 lv.getProperty ("role", "verse").toString());
-            line.setProperty (ids::lyricSeedText,       lv.getProperty ("seedText", var()), nullptr);
-            line.setProperty (ids::lyricSyllableTarget, (int) lv.getProperty ("syllableTarget", 0), nullptr);
-            line.setProperty (ids::lyricSyllableTol,    (int) lv.getProperty ("syllableTol", 1), nullptr);
-            line.setProperty (ids::lyricStress,         lv.getProperty ("stress", var()), nullptr);
-            line.setProperty (ids::lyricRhymeGroup,     lv.getProperty ("rhymeGroup", var()), nullptr);
-            // Lyric EXTRACTION (pipeline correction 2026-07-04): a line the producer REALLY
-            // sang lands VERBATIM — text + gapless seed + status "seed" (already done: the
-            // generation loop skips it and rhyme-anchors on it) + origin "sung". A partly-
-            // real line keeps the grid editor (status "skeleton") with his words as seed
-            // anchors, origin "partial". Wordless lines = the pre-correction behavior.
-            const auto sungText = lv.getProperty ("text", var()).toString();
-            const auto lvOrigin = lv.getProperty ("origin", var()).toString();
-            if (sungText.isNotEmpty() && lvOrigin == "sung")
-            {
-                line.setProperty (ids::lyricText,     sungText, nullptr);
-                line.setProperty (ids::lyricSeedText, sungText, nullptr);   // gapless ⇒ not fillable
-                line.setProperty (ids::status,        "seed", nullptr);
-                line.setProperty (ids::lyricOrigin,   "sung", nullptr);
-            }
-            else
-            {
-                line.setProperty (ids::status, "skeleton", nullptr);   // the grid-editor gate (distinct from L2 "proposed")
-                if (lvOrigin == "partial")
-                    line.setProperty (ids::lyricOrigin, "partial", nullptr);
-            }
-            // Phase-3 Stage 1: persist the render-ready score blob (articulation slots +
-            // melisma segments) with its line — the Stage-2 SoulX adapter authors the
-            // target score from this. Absent from older/degraded specs ⇒ simply no blob.
-            if (scoresVar.isArray() && li < scoresVar.size() && scoresVar[li].isObject())
-                line.setProperty (ids::lyricScore, juce::JSON::toString (scoresVar[li], true), nullptr);
-            // Everything the take was HEARD to say (kept AND rejected, with slot hints) —
-            // persisted for future splice boundaries + correction seeds; raw ASR is never
-            // discarded anymore.
-            if (heardVar.isArray() && li < heardVar.size() && heardVar[li].isObject())
-                line.setProperty (ids::lyricHeard, juce::JSON::toString (heardVar[li], true), nullptr);
-            ++li;
-            container.appendChild (line, nullptr);
-        }
-        tt->state.appendChild (sheet, &undoManager());
-
-        emit ("skeleton_status", [&] { auto* o = new DynamicObject();
-            o->setProperty ("clipId", clipId); o->setProperty ("state", "done");
-            o->setProperty ("lineCount", linesVar.size()); return var (o); }());
-        emitSnapshotInvalidated();
-
-        auto* d = new DynamicObject();
-        d->setProperty ("status", "done");
-        d->setProperty ("sheetId", sheetId);
-        d->setProperty ("trackId", trackId);
-        d->setProperty ("lineCount", linesVar.size());
-        return okResult ("build_skeleton_from_clip", var (d));
-    };
-
-    emit ("skeleton_status", [&] { auto* o = new DynamicObject();
-        o->setProperty ("clipId", clipId); o->setProperty ("state", "working"); return var (o); }());
-    logLine ("build_skeleton_from_clip", args, true, {}, false);
-
-    // The server orchestrates Basic-Pitch onsets (+ optional FCPE F0) then bins → one call.
-    // Absent any onset detector ⇒ a no_melody_detected spec so `land` surfaces a friendly error.
-    auto fetchSpec = [this, srcFile, bpm, tsNum, tsDen, grid] () -> juce::var
-    {
-        return jobManager.skeletonSpec (srcFile, bpm, tsNum, tsDen, grid);
-    };
-
-    if ((bool) args.getProperty ("wait", false))
-        return land (fetchSpec());
-
-    std::thread ([this, fetchSpec, land]
-    {
-        auto spec = fetchSpec();
-        juce::MessageManager::callAsync ([land, spec] { land (spec); });
-    }).detach();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("status", "started");
-    return okResult ("build_skeleton_from_clip", var (data));
-}
-
-// LYR Phase 2 — confirm the proposed flow grid: flip each `proposed` line → `seed` so the
-// Phase-1 engine (complete_lyrics / fill_lyric_gap) will fill it. The human-in-the-loop gate.
-juce::var MoshOps::cmdConfirmSkeleton (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    auto* t = findTrack (trackId);
-    if (t == nullptr) return errResult ("confirm_skeleton", "no track: " + trackId);
-    auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
-    if (! sheet.isValid()) return errResult ("confirm_skeleton", "track has no lyric sheet");
-
-    beginTxn ("confirm_skeleton");
-    auto lines = mosh::LyricSheet::lines (sheet);
-    int n = 0;
-    for (int i = 0; i < lines.getNumChildren(); ++i)
-    {
-        auto line = lines.getChild (i);
-        if (line[ids::status].toString() == "skeleton")
-        {
-            line.setProperty (ids::status, "seed", &undoManager());
-            ++n;
-        }
-    }
-    logLine ("confirm_skeleton", args, true, {}, false);
-    emitSnapshotInvalidated();
-    auto* d = new DynamicObject(); d->setProperty ("confirmed", n);
-    return okResult ("confirm_skeleton", var (d));
-}
-
-// ── AGT-MEM (Phase-B memory lane, M1): the native agent-memory store ────────────────
-// Pure file I/O via AgentMemoryStore.h — NO ValueTree/Edit mutation, NO snapshot change,
-// NO undo transaction (mirrors the training commands' non-undoable posture: no
-// beginTxn, logLine(..., /*undoable=*/false) — undo() therefore can never touch a
-// stored item, by construction, not by a special-cased guard). Global scope writes
-// preferences.jsonl / patterns/drums.jsonl / patterns/lyrics.jsonl under MOSH_AGENT_DIR
-// (else ~/Library/Mosh/agent/); project scope writes a sidecar JSON next to the current
-// edit file (<edit>.mosh-memory.json), copied on Save-As by cmdSaveAs below.
-juce::var MoshOps::cmdAgentMemoryWrite (const juce::var& args)
-{
-    const auto scope = args.getProperty ("scope", var()).toString();
-    if (scope != "global" && scope != "project")
-        return errResult ("agent_memory_write", "'scope' must be \"global\" or \"project\"");
-
-    const auto item = args.getProperty ("item", var());
-    const bool itemPresent = ! item.isVoid() && (item.isObject() || (item.isString() && item.toString().trim().isNotEmpty()));
-    if (! itemPresent)
-        return errResult ("agent_memory_write", "missing or invalid 'item' (must be a non-empty JSON object or string)");
-
-    const bool explicitFlag = (bool) args.getProperty ("explicit", false);
-
-    if (scope == "global")
-    {
-        const auto kind = args.getProperty ("kind", var()).toString();
-        if (! AgentMemoryStore::isValidGlobalKind (kind))
-            return errResult ("agent_memory_write",
-                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
-
-        const auto root = AgentMemoryStore::globalRoot();
-        AgentMemoryStore::ensureGlobalMeta (root);
-        const auto file = AgentMemoryStore::globalStoreFile (root, kind);
-
-        auto items = AgentMemoryStore::readJsonlFile (file);
-        const auto record = AgentMemoryStore::makeRecord (kind, explicitFlag, item);
-        String error;
-        if (! AgentMemoryStore::applyWrite (items, record, error))
-        {
-            logLine ("agent_memory_write", args, false, error, false);
-            return errResult ("agent_memory_write", error);
-        }
-        if (! AgentMemoryStore::writeJsonlFile (file, items))
-        {
-            const auto ioErr = "failed to write " + file.getFullPathName();
-            logLine ("agent_memory_write", args, false, ioErr, false);
-            return errResult ("agent_memory_write", ioErr);
-        }
-
-        logLine ("agent_memory_write", args, true, {}, false);
-        auto* d = new DynamicObject(); d->setProperty ("count", items.size());
-        return okResult ("agent_memory_write", var (d));
-    }
-
-    // scope == "project" — kind defaults to "note"; the project-scope kind vocabulary
-    // is open (unlike global's closed 3-kind set).
-    const auto kind = args.hasProperty ("kind") ? args.getProperty ("kind", var()).toString() : String ("note");
-    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
-    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
-    const auto record = AgentMemoryStore::makeRecord (kind, explicitFlag, item);
-    String error;
-    if (! AgentMemoryStore::applyWrite (notes, record, error))
-    {
-        logLine ("agent_memory_write", args, false, error, false);
-        return errResult ("agent_memory_write", error);
-    }
-    if (! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
-    {
-        const auto ioErr = "failed to write " + sidecar.getFullPathName();
-        logLine ("agent_memory_write", args, false, ioErr, false);
-        return errResult ("agent_memory_write", ioErr);
-    }
-
-    logLine ("agent_memory_write", args, true, {}, false);
-    auto* d = new DynamicObject(); d->setProperty ("count", notes.size());
-    return okResult ("agent_memory_write", var (d));
-}
-
-// Read-only — deliberately does NOT call logLine (mirrors cmdGetLyricCorpusStats /
-// cmdGetRhymes' read posture: mosh-log.jsonl records mutations, not lookups).
-juce::var MoshOps::cmdAgentMemoryRead (const juce::var& args)
-{
-    const auto scope = args.getProperty ("scope", var()).toString();
-    if (scope != "global" && scope != "project")
-        return errResult ("agent_memory_read", "'scope' must be \"global\" or \"project\"");
-
-    const int limit = (int) args.getProperty ("limit", 50);
-
-    if (scope == "global")
-    {
-        const auto kind = args.getProperty ("kind", var()).toString();
-        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
-            return errResult ("agent_memory_read",
-                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
-
-        const auto items = AgentMemoryStore::readGlobal (AgentMemoryStore::globalRoot(), kind, limit);
-        auto* d = new DynamicObject(); d->setProperty ("items", items);
-        return okResult ("agent_memory_read", var (d));
-    }
-
-    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
-    const auto items = AgentMemoryStore::selectForRead (AgentMemoryStore::readSidecarNotes (sidecar), limit);
-    auto* d = new DynamicObject(); d->setProperty ("items", items);
-    return okResult ("agent_memory_read", var (d));
-}
-
-// AGT-MEM (M3) — deletes ONE item by its exact `ts` (nextTs() makes it a unique id
-// within a process's lifetime — see AgentMemoryStore.h). Global scope: `kind`
-// selects WHICH FILE to search (all three when omitted); project scope: `kind`, if
-// given, is an extra safety check against the found item's own kind field (ts alone
-// already locates it). A mutation — logged, non-undoable, same posture as write.
-juce::var MoshOps::cmdAgentMemoryDelete (const juce::var& args)
-{
-    const auto scope = args.getProperty ("scope", var()).toString();
-    if (scope != "global" && scope != "project")
-        return errResult ("agent_memory_delete", "'scope' must be \"global\" or \"project\"");
-    if (! args.hasProperty ("ts"))
-        return errResult ("agent_memory_delete", "missing 'ts'");
-    const juce::int64 ts = (juce::int64) args.getProperty ("ts", var (0));
-    const auto kind = args.getProperty ("kind", var()).toString();
-
-    if (scope == "global")
-    {
-        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
-            return errResult ("agent_memory_delete",
-                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
-
-        const auto root = AgentMemoryStore::globalRoot();
-        const auto kindsToSearch = kind.isNotEmpty() ? StringArray { kind } : AgentMemoryStore::allGlobalKinds();
-        for (auto& k : kindsToSearch)
-        {
-            const auto file = AgentMemoryStore::globalStoreFile (root, k);
-            auto items = AgentMemoryStore::readJsonlFile (file);
-            if (! AgentMemoryStore::deleteByTsAndKind (items, ts, {}))
-                continue;
-            if (! AgentMemoryStore::writeJsonlFile (file, items))
-            {
-                const auto ioErr = "failed to write " + file.getFullPathName();
-                logLine ("agent_memory_delete", args, false, ioErr, false);
-                return errResult ("agent_memory_delete", ioErr);
-            }
-            logLine ("agent_memory_delete", args, true, {}, false);
-            auto* d = new DynamicObject(); d->setProperty ("count", items.size());
-            return okResult ("agent_memory_delete", var (d));
-        }
-        const auto notFound = "no item with ts " + String (ts) + " found";
-        logLine ("agent_memory_delete", args, false, notFound, false);
-        return errResult ("agent_memory_delete", notFound);
-    }
-
-    // scope == "project"
-    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
-    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
-    if (! AgentMemoryStore::deleteByTsAndKind (notes, ts, kind))
-    {
-        const auto notFound = "no item with ts " + String (ts) + " found";
-        logLine ("agent_memory_delete", args, false, notFound, false);
-        return errResult ("agent_memory_delete", notFound);
-    }
-    if (! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
-    {
-        const auto ioErr = "failed to write " + sidecar.getFullPathName();
-        logLine ("agent_memory_delete", args, false, ioErr, false);
-        return errResult ("agent_memory_delete", ioErr);
-    }
-    logLine ("agent_memory_delete", args, true, {}, false);
-    auto* d = new DynamicObject(); d->setProperty ("count", notes.size());
-    return okResult ("agent_memory_delete", var (d));
-}
-
-// AGT-MEM (M3) — clears a whole tier. Global scope: `kind` wipes just that ONE kind's
-// FILE (a global kind IS a file); omitted wipes all three. Project scope: `kind`, if
-// given, removes only notes carrying that kind field (leaving other kinds in the
-// sidecar untouched); omitted clears the whole notes array. A mutation — logged,
-// non-undoable, same posture as write/delete.
-juce::var MoshOps::cmdAgentMemoryClear (const juce::var& args)
-{
-    const auto scope = args.getProperty ("scope", var()).toString();
-    if (scope != "global" && scope != "project")
-        return errResult ("agent_memory_clear", "'scope' must be \"global\" or \"project\"");
-    const auto kind = args.getProperty ("kind", var()).toString();
-
-    if (scope == "global")
-    {
-        if (kind.isNotEmpty() && ! AgentMemoryStore::isValidGlobalKind (kind))
-            return errResult ("agent_memory_clear",
-                "'kind' must be one of \"preference\", \"drum_pattern\", \"lyric_framework\" for global scope");
-
-        const auto root = AgentMemoryStore::globalRoot();
-        const auto kindsToClear = kind.isNotEmpty() ? StringArray { kind } : AgentMemoryStore::allGlobalKinds();
-        int cleared = 0;
-        for (auto& k : kindsToClear)
-        {
-            const auto file = AgentMemoryStore::globalStoreFile (root, k);
-            const auto items = AgentMemoryStore::readJsonlFile (file);
-            cleared += items.size();
-            if (! AgentMemoryStore::writeJsonlFile (file, Array<var>()))
-            {
-                const auto ioErr = "failed to write " + file.getFullPathName();
-                logLine ("agent_memory_clear", args, false, ioErr, false);
-                return errResult ("agent_memory_clear", ioErr);
-            }
-        }
-        logLine ("agent_memory_clear", args, true, {}, false);
-        auto* d = new DynamicObject(); d->setProperty ("cleared", cleared);
-        return okResult ("agent_memory_clear", var (d));
-    }
-
-    // scope == "project"
-    const auto sidecar = AgentMemoryStore::sidecarFileFor (eng.editFile());
-    auto notes = AgentMemoryStore::readSidecarNotes (sidecar);
-    const int cleared = AgentMemoryStore::clearMatchingKind (notes, kind);
-    if (cleared > 0 && ! AgentMemoryStore::writeSidecarNotes (sidecar, notes))
-    {
-        const auto ioErr = "failed to write " + sidecar.getFullPathName();
-        logLine ("agent_memory_clear", args, false, ioErr, false);
-        return errResult ("agent_memory_clear", ioErr);
-    }
-    logLine ("agent_memory_clear", args, true, {}, false);
-    auto* d = new DynamicObject(); d->setProperty ("cleared", cleared);
-    return okResult ("agent_memory_clear", var (d));
-}
-
-// ── ANN-001: authored timeline annotations (mirror the sections CRUD; multiplayer-
-// broadcast so collaborators share comments). ───────────────────────────────────────
-juce::var MoshOps::cmdCreateAnnotation (const juce::var& args)
-{
-    const auto text   = args.getProperty ("text", var()).toString();
-    const double beat = (double) args.getProperty ("beat", 0.0);
-    const auto color  = args.getProperty ("color", var()).toString();
-    const auto author = args.getProperty ("author", var()).toString();
-    // Stable cross-peer id: reuse the caller's if supplied (the broadcast re-exec passes
-    // it back), else mint one. Broadcasting the RESOLVED id keeps both peers' ids equal so
-    // edit/move/remove address the same annotation.
-    auto annId = args.getProperty ("annotationId", var()).toString();
-    if (annId.isEmpty()) annId = juce::Uuid().toString();
-
-    beginTxn ("create_annotation");
-    auto state = eng.edit().state;
-    auto anns = state.getChildWithName (ids::MOSH_ANNOTATIONS);
-    if (! anns.isValid())
-    {
-        anns = juce::ValueTree (ids::MOSH_ANNOTATIONS);
-        state.appendChild (anns, &undoManager());
-    }
-    // Idempotent on the resolved id: a re-applied create (the only ADDITIVE op broadcast
-    // over MP) must not append a duplicate node.
-    if (! anns.getChildWithProperty (ids::id, annId).isValid())
-        anns.appendChild (mosh::Annotation::create (annId, text, beat, color, author), &undoManager());
-
-    auto* data = new DynamicObject(); data->setProperty ("annotationId", annId);
-    logLine ("create_annotation", args, true, {}, true);
-    emitSnapshotInvalidated();
-
-    // Broadcast with the RESOLVED id (the generic wrapper would re-mint on the peer).
-    if (mpSession_ != nullptr && mpSession_->active() && ! applyingRemote_)
-    {
-        auto* ba = new DynamicObject();
-        ba->setProperty ("annotationId", annId);
-        ba->setProperty ("text", text);
-        ba->setProperty ("beat", beat);
-        if (color.isNotEmpty())  ba->setProperty ("color", color);
-        if (author.isNotEmpty()) ba->setProperty ("author", author);
-        mpSession_->broadcastStructural ("create_annotation", var (ba));
-    }
-    return okResult ("create_annotation", var (data));
-}
-
-juce::var MoshOps::cmdEditAnnotation (const juce::var& args)
-{
-    const auto annId = args.getProperty ("annotationId", var()).toString();
-    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
-    auto node = anns.getChildWithProperty (ids::id, annId);
-    if (! node.isValid()) return errResult ("edit_annotation", "no annotation: " + annId);
-
-    beginTxn ("edit_annotation");
-    if (args.hasProperty ("text"))  node.setProperty (ids::annotationText, args.getProperty ("text", var()), &undoManager());
-    if (args.hasProperty ("color")) node.setProperty (ids::annotationColor, args.getProperty ("color", var()), &undoManager());
-    logLine ("edit_annotation", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("edit_annotation");
-}
-
-juce::var MoshOps::cmdMoveAnnotation (const juce::var& args)
-{
-    const auto annId = args.getProperty ("annotationId", var()).toString();
-    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
-    auto node = anns.getChildWithProperty (ids::id, annId);
-    if (! node.isValid()) return errResult ("move_annotation", "no annotation: " + annId);
-
-    beginTxn ("move_annotation");
-    node.setProperty (ids::annotationBeat, (double) args.getProperty ("beat", 0.0), &undoManager());
-    logLine ("move_annotation", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("move_annotation");
-}
-
-juce::var MoshOps::cmdRemoveAnnotation (const juce::var& args)
-{
-    const auto annId = args.getProperty ("annotationId", var()).toString();
-    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
-    auto node = anns.getChildWithProperty (ids::id, annId);
-    if (! node.isValid()) return errResult ("remove_annotation", "no annotation: " + annId);
-
-    beginTxn ("remove_annotation");
-    anns.removeChild (node, &undoManager());
-    logLine ("remove_annotation", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_annotation");
-}
-
-juce::var MoshOps::annotationsToVar()
-{
-    Array<var> out;
-    auto anns = eng.edit().state.getChildWithName (ids::MOSH_ANNOTATIONS);
-    if (anns.isValid())
-        for (int i = 0; i < anns.getNumChildren(); ++i)
-        {
-            auto a = anns.getChild (i);
-            auto* o = new DynamicObject();
-            o->setProperty ("id", a[ids::id].toString());
-            o->setProperty ("text", a[ids::annotationText].toString());
-            o->setProperty ("beat", (double) a[ids::annotationBeat]);
-            if (a.hasProperty (ids::annotationColor))  o->setProperty ("color", a[ids::annotationColor].toString());
-            if (a.hasProperty (ids::annotationAuthor)) o->setProperty ("author", a[ids::annotationAuthor].toString());
-            out.add (var (o));
-        }
-    return out;
-}
-
-// Shared wave-file insertion path used by both import_clip (path-based) and
-// import_clip_data (bytes-over-bridge). The caller guarantees `file` is a real,
-// already-validated audio file on disk. Opens one undo transaction, finds-or-
-// creates the target track, inserts the wave clip at `startSeconds`, drains the
-// post-insert AsyncUpdater headless (so itemIDs settle, no itemID assert), logs
-// the command as undoable and emits a snapshot invalidation.
-juce::var MoshOps::importWaveFileToTrack (const juce::String& command,
-                                          const juce::File& file,
-                                          const juce::String& clipName,
-                                          const juce::String& trackId,
-                                          double startSeconds,
-                                          const juce::var& logArgs)
-{
-    auto& edit = eng.edit();
-
-    // Validate the audio file BEFORE any mutation. We may auto-create a track
-    // below; doing that (undoable) creation first and only then discovering the
-    // file is invalid would leave an orphan track in a failed command's undo
-    // transaction (partial mutation). Validate up front so an invalid import is a
-    // clean no-op.
-    te::AudioFile audioFile (edit.engine, file);
-    if (! audioFile.isValid()) return errResult (command, "invalid audio file");
-
-    auto* track = trackId.isNotEmpty() ? findTrack (trackId) : nullptr;
-    if (track == nullptr)
-    {
-        auto tracks = te::getAudioTracks (edit);
-        track = tracks.isEmpty() ? nullptr : tracks.getFirst();
-    }
-
-    beginTxn (command);
-    if (track == nullptr)
-        track = createAudioTrack ({});
-    if (track == nullptr) return errResult (command, "no track");
-    ensureTrackMeter (*track);   // METER-001 — self-healing: covers both the auto-created and the resolved-existing case
-
-    const double len = audioFile.getLength();
-    auto name = clipName;
-    if (name.isEmpty()) name = file.getFileNameWithoutExtension();
-
-    auto clip = track->insertWaveClip (name, file,
-        { { tracktion::TimePosition::fromSeconds (startSeconds), tracktion::TimeDuration::fromSeconds (len) }, {} }, false);
-    if (clip == nullptr)
-    {
-        logLine (command, logArgs, false, "insert failed", true);
-        return errResult (command, "insertWaveClip failed");
-    }
-
-    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
-    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
-    // async engine work — the AUD-001 use-after-free class (see patches/0005).
-
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", clip->itemID.toString());
-    data->setProperty ("trackId", track->itemID.toString());
-    data->setProperty ("file", file.getFullPathName());
-    logLine (command, logArgs, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult (command, var (data));
-}
-
-juce::var MoshOps::cmdImportClip (const juce::var& args)
-{
-    const auto path = args.getProperty ("file", var()).toString();
-    if (path.isEmpty()) return errResult ("import_clip", "missing 'file'");
-
-    File file (path);
-    if (! file.existsAsFile()) return errResult ("import_clip", "file not found: " + path);
-
-    return importWaveFileToTrack ("import_clip", file,
-                                  args.getProperty ("name", var()).toString(),
-                                  args.getProperty ("trackId", var()).toString(),
-                                  (double) args.getProperty ("startSeconds", 0.0),
-                                  args);
-}
-
-juce::var MoshOps::cmdImportClipData (const juce::var& args)
-{
-    auto name = args.getProperty ("name", var()).toString();
-    const auto dataBase64 = args.getProperty ("dataBase64", var()).toString();
-    if (name.isEmpty())       return errResult ("import_clip_data", "missing 'name'");
-    if (dataBase64.isEmpty()) return errResult ("import_clip_data", "missing 'dataBase64'");
-
-    // Size guard: reject a pathological drop before decoding to avoid OOM.
-    // ~280 MB of base64 decodes to ~200 MB of audio.
-    if (dataBase64.length() > 280 * 1024 * 1024)
-        return errResult ("import_clip_data", "file too large");
-
-    // Decode base64 -> raw bytes. Guard against malformed input (no crash).
-    juce::MemoryOutputStream mos;
-    if (! juce::Base64::convertFromBase64 (mos, dataBase64))
-        return errResult ("import_clip_data", "invalid base64 data");
-
-    // Write the decoded bytes under sessionDir/imports/. Uniquify the destination so
-    // two drops sharing a display name (both "loop.wav") don't overwrite each other's
-    // on-disk source: an earlier imported clip still references the first file, so an
-    // in-place overwrite would silently alias it (and persist across save/reload).
-    auto importsDir = eng.sessionDir().getChildFile ("imports");
-    importsDir.createDirectory();
-    const juce::File named (importsDir.getChildFile (juce::File::createLegalFileName (name)));
-    auto file = importsDir.getNonexistentChildFile (named.getFileNameWithoutExtension(),
-                                                    named.getFileExtension(), false);
-    if (! file.replaceWithData (mos.getData(), mos.getDataSize()))
-        return errResult ("import_clip_data", "could not write the import file");
-
-    // Validate it is real audio BEFORE inserting; never leave a garbage file or
-    // insert a non-audio clip.
-    te::AudioFile af (eng.engine(), file);
-    if (! af.isValid())
-    {
-        file.deleteFile();
-        return errResult ("import_clip_data", "not a supported audio file");
-    }
-
-    return importWaveFileToTrack ("import_clip_data", file, name,
-                                  args.getProperty ("trackId", var()).toString(),
-                                  (double) args.getProperty ("start", 0.0),
-                                  args);
-}
-
-juce::var MoshOps::cmdAddTestTone (const juce::var& args)
-{
-    const double seconds = (double) args.getProperty ("seconds", 2.0);
-    const double freq = (double) args.getProperty ("freq", 220.0);
-    auto name = args.getProperty ("name", var()).toString();
-    if (name.isEmpty()) name = "tone-" + String ((int) freq);
-
-    auto file = eng.generateTestTone (seconds, freq, name);
-    if (! file.existsAsFile()) return errResult ("add_test_tone_clip", "tone generation failed");
-
-    auto* importArgs = new DynamicObject();
-    importArgs->setProperty ("file", file.getFullPathName());
-    importArgs->setProperty ("trackId", args.getProperty ("trackId", var()));
-    importArgs->setProperty ("name", name);
-    return cmdImportClip (var (importArgs));   // logs as import_clip
-}
-
-juce::var MoshOps::cmdSetTransport (const juce::var& args)
-{
-    auto& transport = eng.edit().getTransport();
-    const auto action = args.getProperty ("action", var()).toString();
-
-    // Play/record touch the audio device; skip them in no-audio (headless) mode.
-    if ((action == "play" || (action == "toggle" && ! transport.isPlaying())) && eng.hasAudio())
-    {
-        eng.ensurePlaybackContext();
-        transport.play (false);
-    }
-    else if (action == "stop" || (action == "toggle" && transport.isPlaying()))
-    {
-        transport.stop (false, false);
-    }
-    else if (action == "record" && eng.hasAudio())
-    {
-        // G2b — re-sync the live Edit's pre-roll to the stored project preference
-        // right before every record start, so a save/reload that swapped in a
-        // different Edit instance (or a countInBars change from another session)
-        // is always honored. transport.record() below is what actually consults
-        // it (te::Edit::getNumCountInBeats(), via TransportControl).
-        applyCountInToEdit();
-        eng.ensurePlaybackContext();
-        transport.record (false);
-    }
-
-    if (action == "to_end")
-        transport.setPosition (tracktion::TimePosition::fromSeconds (eng.edit().getLength().inSeconds()));
-    else if (action == "to_start")
-        transport.setPosition (tracktion::TimePosition());
-
-    if (args.hasProperty ("position"))
-        transport.setPosition (tracktion::TimePosition::fromSeconds ((double) args.getProperty ("position", 0.0)));
-
-    if (args.hasProperty ("loop"))
-        transport.looping = (bool) args.getProperty ("loop", false);
-
-    if (args.hasProperty ("loopStart") && args.hasProperty ("loopEnd"))
-        transport.setLoopRange ({ tracktion::TimePosition::fromSeconds ((double) args.getProperty ("loopStart", 0.0)),
-                                  tracktion::TimePosition::fromSeconds ((double) args.getProperty ("loopEnd", 0.0)) });
-
-    logLine ("set_transport", args, true, {}, false);          // transport is NOT undoable
-    emit ("transport", transportToVar());
-    return okResult ("set_transport", transportToVar());
-}
-
-juce::var MoshOps::cmdSetTempo (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    auto* tempo = edit.tempoSequence.getNumTempos() > 0 ? edit.tempoSequence.getTempo (0) : nullptr;
-    if (tempo == nullptr) return errResult ("set_tempo", "no tempo setting");
-
-    const double bpm = juce::jlimit (20.0, 999.0, (double) args.getProperty ("bpm", 120.0));
-    beginTxn ("set_tempo");
-    tempo->setBpm (bpm);
-    logLine ("set_tempo", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject(); data->setProperty ("bpm", tempo->getBpm());
-    return okResult ("set_tempo", var (data));
-}
-
-juce::var MoshOps::cmdSetTimeSignature (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    auto* ts = edit.tempoSequence.getTimeSig (0);
-    if (ts == nullptr) return errResult ("set_time_signature", "no time signature");
-
-    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
-    const int den = (int) args.getProperty ("denominator", 4);
-    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
-    bool denOk = false;
-    for (int d : validDen) if (d == den) denOk = true;
-    if (! denOk) return errResult ("set_time_signature", "denominator must be a power of two (1..32)");
-
-    beginTxn ("set_time_signature");
-    ts->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
-    logLine ("set_time_signature", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("numerator", ts->numerator.get());
-    data->setProperty ("denominator", ts->denominator.get());
-    return okResult ("set_time_signature", var (data));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SES-001 — the tempo MAP. te::TempoSequence natively supports multi-point tempo
-// and time-sig changes (insert/remove/toBeats/toTime; playback honors the map
-// with no clip-anchoring work). Mosh inserts STEP changes only: curve = 1.0 is
-// the engine's hold-then-jump form (the ramp branch in tracktion_core's
-// Sequence::Section build is gated on curve != +-1.0). Bezier ramps + audio warp
-// are deliberately deferred. set_tempo / set_time_signature keep editing point 0.
-// ─────────────────────────────────────────────────────────────────────────────
-juce::var MoshOps::cmdInsertTempoChange (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const double time = (double) args.getProperty ("time", -1.0);
-    if (time < 0.0) return errResult ("insert_tempo_change", "missing/negative 'time'");
-    const double bpm = (double) args.getProperty ("bpm", 0.0);
-    if (bpm < 20.0 || bpm > 999.0) return errResult ("insert_tempo_change", "bpm must be 20..999");
-
-    // Optional curve: shapes the ramp FROM the PREVIOUS point TO this one is NOT how
-    // the engine models it — curve lives on the setting that STARTS a span (this
-    // setting's curve shapes the ramp from HERE to the NEXT point). 1.0 (default) =
-    // step (hold-then-jump); values in (-1, 1) ramp: <0 log, 0 linear, >0 exponential.
-    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
-
-    beginTxn ("insert_tempo_change");
-    auto setting = edit.tempoSequence.insertTempo (tracktion::TimePosition::fromSeconds (time));
-    if (setting == nullptr) return errResult ("insert_tempo_change", "insertTempo failed");
-    setting->setBpm (bpm);
-    setting->setCurve ((float) curve);
-
-    logLine ("insert_tempo_change", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("time", setting->getStartTime().inSeconds());
-    data->setProperty ("bpm", setting->getBpm());
-    data->setProperty ("curve", (double) setting->getCurve());
-    data->setProperty ("count", edit.tempoSequence.getNumTempos());
-    return okResult ("insert_tempo_change", var (data));
-}
-
-juce::var MoshOps::cmdSetTempoCurve (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const int index = (int) args.getProperty ("index", -1);
-    if (index < 0 || index >= edit.tempoSequence.getNumTempos())
-        return errResult ("set_tempo_curve", "index must be 0..numTempos-1");
-    if (! args.hasProperty ("curve"))
-        return errResult ("set_tempo_curve", "missing 'curve'");
-    const double curve = juce::jlimit (-1.0, 1.0, (double) args.getProperty ("curve", 1.0));
-
-    // The curve on point N shapes the span FROM point N TO point N+1 (the engine's
-    // Section build gates the ramp subdivision on currTempo.curve != +-1).
-    beginTxn ("set_tempo_curve");
-    edit.tempoSequence.getTempo (index)->setCurve ((float) curve);
-    logLine ("set_tempo_curve", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("index", index);
-    data->setProperty ("curve", curve);
-    return okResult ("set_tempo_curve", var (data));
-}
-
-juce::var MoshOps::cmdRemoveTempoChange (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const int index = (int) args.getProperty ("index", -1);
-    // Index 0 is the edit's base tempo (the engine requires a first setting; it is
-    // edited via set_tempo, never removed).
-    if (index <= 0 || index >= edit.tempoSequence.getNumTempos())
-        return errResult ("remove_tempo_change", "index must be 1..numTempos-1");
-
-    beginTxn ("remove_tempo_change");
-    // remapEdit=false: Mosh's command surface is seconds-anchored, so removing a
-    // tempo point must not shift clip positions.
-    edit.tempoSequence.removeTempo (index, false);
-    logLine ("remove_tempo_change", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("count", edit.tempoSequence.getNumTempos());
-    return okResult ("remove_tempo_change", var (data));
-}
-
-juce::var MoshOps::cmdInsertTimeSigChange (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const double time = (double) args.getProperty ("time", -1.0);
-    if (time < 0.0) return errResult ("insert_time_sig_change", "missing/negative 'time'");
-    const int num = juce::jlimit (1, 32, (int) args.getProperty ("numerator", 4));
-    const int den = (int) args.getProperty ("denominator", 4);
-    static const int validDen[] = { 1, 2, 4, 8, 16, 32 };
-    bool denOk = false;
-    for (int d : validDen) if (d == den) denOk = true;
-    if (! denOk) return errResult ("insert_time_sig_change", "denominator must be a power of two (1..32)");
-
-    beginTxn ("insert_time_sig_change");
-    auto setting = edit.tempoSequence.insertTimeSig (tracktion::TimePosition::fromSeconds (time));
-    if (setting == nullptr) return errResult ("insert_time_sig_change", "insertTimeSig failed");
-    setting->setStringTimeSig (juce::String (num) + "/" + juce::String (den));
-
-    logLine ("insert_time_sig_change", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("numerator", setting->numerator.get());
-    data->setProperty ("denominator", setting->denominator.get());
-    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
-    return okResult ("insert_time_sig_change", var (data));
-}
-
-juce::var MoshOps::cmdRemoveTimeSigChange (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const int index = (int) args.getProperty ("index", -1);
-    if (index <= 0 || index >= edit.tempoSequence.getNumTimeSigs())
-        return errResult ("remove_time_sig_change", "index must be 1..numTimeSigs-1");
-
-    beginTxn ("remove_time_sig_change");
-    edit.tempoSequence.removeTimeSig (index);
-    logLine ("remove_time_sig_change", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("count", edit.tempoSequence.getNumTimeSigs());
-    return okResult ("remove_time_sig_change", var (data));
-}
-
-juce::var MoshOps::cmdSetMetronome (const juce::var& args)
-{
-    // The click track is a transport/monitoring preference (like loop), not a
-    // session edit — not undoable.
-    const bool on = (bool) args.getProperty ("enabled", false);
-    eng.edit().clickTrackEnabled = on;
-    logLine ("set_metronome", args, true, {}, false);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject(); data->setProperty ("metronome", on);
-    return okResult ("set_metronome", var (data));
-}
-
-// KEY-001 — the musical-key domains. These MUST stay byte-identical to the literal
-// arrays in ui/src/vendor/voice.js (NOTE_PC keys + SCALES keys); Moshi's voice snaps
-// every earcon to (tonic, mode), so a mismatch would make the host accept a key the
-// voice cannot sing. Validated by cmdSetKey; the snapshot defaults below match the
-// voice's neutral start (A4 tonic + SCALES.minor).
-namespace
-{
-    // voice.js NOTE_PC keys (enharmonic spellings included), in declaration order.
-    const char* const kNotePcNames[] = {
-        "C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb",
-        "G", "G#", "Ab", "A", "A#", "Bb", "B"
-    };
-    // voice.js SCALES keys.
-    const char* const kScaleNames[] = {
-        "major", "minor", "dorian", "mixolydian", "pentatonic", "chromatic"
-    };
-
-    bool isValidTonic (const juce::String& t)
-    {
-        for (auto* n : kNotePcNames) if (t == n) return true;
-        return false;
-    }
-    bool isValidMode (const juce::String& m)
-    {
-        for (auto* n : kScaleNames) if (m == n) return true;
-        return false;
-    }
-}
-
-const char* const MoshOps::kDefaultKeyTonic = "A";
-const char* const MoshOps::kDefaultKeyMode  = "minor";
-
-// PRJ-008 — the MOSH_PROJECT child of the Edit's own ValueTree (mirrors the
-// MOSH_RENDERLAYER parenting). Created empty on first access so it saves/reloads
-// with the .tracktionedit. Pure storage accessor: no undo manager, no logging.
-juce::ValueTree MoshOps::projectSettingsTree()
-{
-    auto state = eng.edit().state;
-    auto node = state.getChildWithName (ids::MOSH_PROJECT);
-    if (! node.isValid())
-    {
-        node = juce::ValueTree (ids::MOSH_PROJECT);
-        state.appendChild (node, nullptr);   // nullptr: not an undoable edit (preference)
-    }
-    return node;
-}
-
-juce::var MoshOps::projectSettingsToVar()
-{
-    // Project INTENT where stored; live device readout as the fallback (device values
-    // stay the live truth, project = intent). timeBase has no device analogue, so it
-    // defaults to "seconds". NON-mutating read (snapshot() is read-only by contract):
-    // getChildWithName returns an invalid tree when unset, whose hasProperty() is false,
-    // so the device-fallback below handles the absent case without writing the Edit tree.
-    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
-    auto& dm = eng.engine().getDeviceManager();
-
-    double sr = dm.getSampleRate();
-    if (sr < 7000.0) sr = 44100.0;
-    if (node.hasProperty (ids::projectSampleRate))
-        sr = (double) node.getProperty (ids::projectSampleRate);
-
-    int bd = dm.getBitDepth();
-    if (bd != 16 && bd != 24 && bd != 32) bd = 24;
-    if (node.hasProperty (ids::projectBitDepth))
-        bd = (int) node.getProperty (ids::projectBitDepth);
-
-    juce::String tb = node.hasProperty (ids::timeBase)
-                          ? node.getProperty (ids::timeBase).toString()
-                          : juce::String ("seconds");
-
-    // KEY-001 — the musical key, ALWAYS present so the UI never sees a missing field.
-    // Default A/minor (matches voice.js's neutral A4 tonic + SCALES.minor). Stored on
-    // the same MOSH_PROJECT node; falls back to the default where unset.
-    juce::String tonic = node.hasProperty (ids::musicalTonic)
-                             ? node.getProperty (ids::musicalTonic).toString()
-                             : juce::String (kDefaultKeyTonic);
-    juce::String keyMode = node.hasProperty (ids::musicalMode)
-                               ? node.getProperty (ids::musicalMode).toString()
-                               : juce::String (kDefaultKeyMode);
-
-    auto* key = new DynamicObject();
-    key->setProperty ("tonic", tonic);
-    key->setProperty ("mode", keyMode);
-
-    // G2b — count-in / pre-roll bars, ALWAYS present (default 0/off) so the UI
-    // never sees a missing field, mirroring the key default above.
-    const int countInBars = node.hasProperty (ids::countInBars)
-                                ? (int) node.getProperty (ids::countInBars) : 0;
-
-    auto* o = new DynamicObject();
-    o->setProperty ("sampleRate", sr);
-    o->setProperty ("bitDepth", bd);
-    o->setProperty ("timeBase", tb);
-    o->setProperty ("key", var (key));
-    o->setProperty ("countInBars", countInBars);
-    // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
-    // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
-    o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));
-    return var (o);
-}
-
-juce::var MoshOps::cmdSetProjectSettings (const juce::var& args)
-{
-    // Per-project format / time-base INTENT — a producer preference (the export/
-    // format default + the timeline display base), NOT a live device change. Stored
-    // on a MOSH_PROJECT child of the Edit tree so it persists with the session, and
-    // followed the cmdSetMetronome template exactly: no Tracktion transaction (no
-    // beginNewTransaction), logLine(..., false), emitSnapshotInvalidated. Works
-    // headless (no audio device required).
-    //
-    // Validate every supplied field before writing anything (partial patch: each
-    // field is optional, but a present field that fails validation is a hard error
-    // and leaves the stored settings untouched).
-    if (args.hasProperty ("sampleRate"))
-    {
-        const double sr = (double) args.getProperty ("sampleRate", 0.0);
-        if (sr < 7000.0)
-            return errResult ("set_project_settings", "sampleRate must be >= 7000");
-    }
-    if (args.hasProperty ("bitDepth"))
-    {
-        const int bd = (int) args.getProperty ("bitDepth", 0);
-        if (bd != 16 && bd != 24 && bd != 32)
-            return errResult ("set_project_settings", "bitDepth must be one of 16, 24, 32");
-    }
-    if (args.hasProperty ("timeBase"))
-    {
-        const auto tb = args.getProperty ("timeBase", var()).toString();
-        if (tb != "seconds" && tb != "barsBeats")
-            return errResult ("set_project_settings", "timeBase must be 'seconds' or 'barsBeats'");
-    }
-
-    auto node = projectSettingsTree();
-    if (args.hasProperty ("sampleRate"))
-        node.setProperty (ids::projectSampleRate, (double) args.getProperty ("sampleRate", 0.0), nullptr);
-    if (args.hasProperty ("bitDepth"))
-        node.setProperty (ids::projectBitDepth, (int) args.getProperty ("bitDepth", 0), nullptr);
-    if (args.hasProperty ("timeBase"))
-        node.setProperty (ids::timeBase, args.getProperty ("timeBase", var()).toString(), nullptr);
-
-    eng.markDirty();                                           // edit-state change → needs re-save (gap 1)
-    logLine ("set_project_settings", args, true, {}, false);   // preference — NOT undoable
-    emitSnapshotInvalidated();
-    return okResult ("set_project_settings", projectSettingsToVar());
-}
-
-juce::var MoshOps::cmdSetKey (const juce::var& args)
-{
-    // KEY-001 — the project's musical key (tonic + mode). Producer INTENT, stored on
-    // the same MOSH_PROJECT node as the format/time-base prefs, so it saves/reloads
-    // with the .tracktionedit. Followed the cmdSetProjectSettings template exactly:
-    // validate-then-write, NO Tracktion transaction (no beginNewTransaction),
-    // logLine(..., false) → NON-undoable preference, emitSnapshotInvalidated. Works
-    // headless (no audio device required).
-    //
-    // Validate against the voice.js NOTE_PC / SCALES domains BEFORE writing anything
-    // (a present-but-invalid field is a hard error that leaves storage untouched).
-    if (args.hasProperty ("tonic"))
-    {
-        const auto tonic = args.getProperty ("tonic", var()).toString();
-        if (! isValidTonic (tonic))
-            return errResult ("set_key", "tonic must be one of the voice.js NOTE_PC names (C..B incl. enharmonics)");
-    }
-    if (args.hasProperty ("mode"))
-    {
-        const auto m = args.getProperty ("mode", var()).toString();
-        if (! isValidMode (m))
-            return errResult ("set_key", "mode must be one of the voice.js SCALES (major|minor|dorian|mixolydian|pentatonic|chromatic)");
-    }
-
-    auto node = projectSettingsTree();
-    if (args.hasProperty ("tonic"))
-        node.setProperty (ids::musicalTonic, args.getProperty ("tonic", var()).toString(), nullptr);
-    if (args.hasProperty ("mode"))
-        node.setProperty (ids::musicalMode, args.getProperty ("mode", var()).toString(), nullptr);
-
-    eng.markDirty();                              // edit-state change → needs re-save (gap 1)
-    logLine ("set_key", args, true, {}, false);   // preference — NOT undoable
-    emitSnapshotInvalidated();
-    return okResult ("set_key", projectSettingsToVar());
-}
-
-// G2b — count-in / pre-roll bars. te::Edit::CountIn's none/oneBar/twoBar values
-// are 0/1/2 — exactly mosh::countin's {0,1,2} bars domain — so a validated bars
-// value casts straight across with no lookup table. Asserted here (rather than in
-// the engine-free state/CountIn.h) because only this translation unit can see the
-// real tracktion_engine enum.
-static_assert (static_cast<int> (te::Edit::CountIn::none)   == 0
-            && static_cast<int> (te::Edit::CountIn::oneBar) == 1
-            && static_cast<int> (te::Edit::CountIn::twoBar) == 2,
-               "mosh::countin's {0,1,2} bars domain assumes te::Edit::CountIn's "
-               "none/oneBar/twoBar == 0/1/2 — update the cast in applyCountInToEdit "
-               "if tracktion_engine ever renumbers this enum");
-
-void MoshOps::applyCountInToEdit()
-{
-    // Re-applies the STORED preference to the LIVE Edit's real pre-roll every time
-    // it's called (cmdSetCountIn, and cmdSetTransport's "record" branch) rather
-    // than only at load time — so recording always honors the CURRENT project
-    // setting regardless of when/how the Edit was loaded. Cheap (writes engine
-    // property storage; no audio device needed) and safe headless.
-    auto node = eng.edit().state.getChildWithName (ids::MOSH_PROJECT);
-    const int bars = node.hasProperty (ids::countInBars) ? (int) node.getProperty (ids::countInBars) : 0;
-    const int clamped = mosh::countin::isValidBars (bars) ? bars : 0;   // defensive: never feed the engine a bad value
-    eng.edit().setCountInMode (static_cast<te::Edit::CountIn> (clamped));
-}
-
-juce::var MoshOps::cmdSetCountIn (const juce::var& args)
-{
-    // G2b — count-in / pre-roll bars before recording. Producer INTENT, stored on
-    // the same MOSH_PROJECT node as timeBase/key, following the cmdSetKey template
-    // exactly: validate-then-write, NO Tracktion transaction (no
-    // beginNewTransaction), logLine(..., false) → NON-undoable preference,
-    // emitSnapshotInvalidated. Works headless (no audio device required).
-    //
-    // ENGINE-WIRED, not just stored: applyCountInToEdit() below pushes the value
-    // straight into tracktion_engine's own pre-roll (te::Edit::setCountInMode),
-    // which TransportControl's record-start logic already consults
-    // (Edit::getNumCountInBeats()) to roll the playhead back N beats and play an
-    // audible click through the pre-roll before capture actually begins — see
-    // tracktion_TransportControl.cpp's performRecord. No new recording machinery was
-    // needed; Mosh just exposes + persists the setting the engine already honors.
-    if (! args.hasProperty ("bars"))
-        return errResult ("set_count_in", "bars is required");
-
-    const int bars = (int) args.getProperty ("bars", 0);
-    if (! mosh::countin::isValidBars (bars))
-        return errResult ("set_count_in", mosh::countin::validationError());
-
-    auto node = projectSettingsTree();
-    node.setProperty (ids::countInBars, bars, nullptr);
-    applyCountInToEdit();                                  // immediate effect this session
-
-    eng.markDirty();                                        // edit-state change → needs re-save (gap 1)
-    logLine ("set_count_in", args, true, {}, false);        // preference — NOT undoable
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("countInBars", bars);
-    return okResult ("set_count_in", var (data));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MIX-008 — group (submix) tracks
-//
-// A te::FolderTrack created with asSubmix=true GENUINELY sums its children: the
-// graph builder routes every child through a SummingNode wrapped by the folder's
-// own plugin chain (createNodeForSubmixTrack; proven by the engine's nested-submix
-// test). insertNewFolderTrack(asSubmix=true) adds the default VolumeAndPan +
-// LevelMeter plugins, which is exactly what keeps isSubmixFolder() true — so the
-// group has a real fader and the summing is engine-owned, not a Mosh claim.
-// ─────────────────────────────────────────────────────────────────────────────
-te::FolderTrack* MoshOps::findGroupTrack (const juce::String& id)
-{
-    const auto itemId = te::EditItemID::fromString (id);
-    for (auto* t : te::getAllTracks (eng.edit()))
-        if (auto* ft = dynamic_cast<te::FolderTrack*> (t))
-            if (ft->itemID == itemId)
-                return ft;
-    return nullptr;
-}
-
-juce::var MoshOps::cmdCreateGroupTrack (const juce::var& args)
-{
-    auto& edit = eng.edit();
-
-    // Resolve the member tracks FIRST (cheap precondition, zero side effects on
-    // a malformed request). Unknown ids are skipped + reported, not fatal — an
-    // empty trackIds (or none) creates an empty group, which is valid.
-    juce::Array<te::AudioTrack*> members;
-    int unknown = 0;
-    const auto idsVar = args.getProperty ("trackIds", var());   // bind before getArray
-    if (auto* ids = idsVar.getArray())
-        for (auto& idv : *ids)
-        {
-            if (auto* t = findTrack (idv.toString()))
-            {
-                if (! members.contains (t))
-                    members.add (t);
-            }
-            else
-                ++unknown;
-        }
-
-    beginTxn ("create_group_track");
-
-    auto folder = edit.insertNewFolderTrack (te::TrackInsertPoint::getEndOfTracks (edit),
-                                             nullptr, /*asSubmix*/ true);
-    if (folder == nullptr)
-        return errResult ("create_group_track", "insertNewFolderTrack failed");
-
-    logicalid::ensureTrack (folder->state);   // MP-001 — stable cross-peer id for the submix
-
-    const auto name = args.getProperty ("name", var()).toString();
-    folder->setName (name.isNotEmpty() ? name : juce::String ("Group"));
-
-    // Move each member under the folder, preserving their relative order: the
-    // first child goes to the start of the folder, each next one after the last.
-    te::Track* preceding = nullptr;
-    for (auto* m : members)
-    {
-        edit.moveTrack (m, te::TrackInsertPoint (folder.get(), preceding));
-        preceding = m;
-    }
-
-    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
-    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
-    // async engine work — the AUD-001 use-after-free class (see patches/0005).
-
-    auto* data = new DynamicObject();
-    data->setProperty ("groupId", folder->itemID.toString());
-    data->setProperty ("moved", members.size());
-    if (unknown > 0) data->setProperty ("unknownTrackIds", unknown);
-    logLine ("create_group_track", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("create_group_track", var (data));
-}
 
 juce::var MoshOps::cmdMpSerializeTrack (const juce::var& args)
 {
@@ -3921,246 +1718,10 @@ juce::var MoshOps::cmdMpFetchMissingStems (const juce::var& args)
     return okResult ("mp_fetch_missing_stems", var (data));
 }
 
-juce::var MoshOps::cmdUngroupTrack (const juce::var& args)
-{
-    auto& edit = eng.edit();
-    const auto id = args.getProperty ("trackId", var()).toString();
-    auto* folder = findGroupTrack (id);
-    if (folder == nullptr) return errResult ("ungroup_track", "no group track: " + id);
-
-    // Collect the folder's direct children before mutating.
-    juce::Array<te::Track*> children;
-    for (auto* t : te::getAllTracks (edit))
-        if (t != nullptr && t->getParentTrack() == folder)
-            children.add (t);
-
-    beginTxn ("ungroup_track");
-
-    // Hoist each child to the top level right after the folder (order preserved),
-    // then delete the now-empty folder. One transaction = one undo step.
-    te::Track* preceding = folder;
-    for (auto* c : children)
-    {
-        edit.moveTrack (c, te::TrackInsertPoint (nullptr, preceding));
-        preceding = c;
-    }
-    edit.deleteTrack (folder);
-
-    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
-    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
-    // async engine work — the AUD-001 use-after-free class (see patches/0005).
-
-    auto* data = new DynamicObject();
-    data->setProperty ("hoisted", children.size());
-    logLine ("ungroup_track", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("ungroup_track", var (data));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RTG-001 / RTG-002 — per-track input choice + output routing
-//
-// Both ride engine machinery that already exists: the DeviceManager builds one
-// WaveInputDevice per stereo pair / mono channel (so "input 3-4" is a device),
-// and every AudioTrack owns a te::TrackOutput that can route to any hardware
-// out OR into another track (the graph sums feeders via a SummingNode — an
-// implicit bus, with cycle detection). Mosh adds only the choice surface.
-// ─────────────────────────────────────────────────────────────────────────────
-juce::var MoshOps::cmdListWaveInputs (const juce::var&)
-{
-    // Read-only audio-input enumeration (RTG-001) — modelled on cmdListMidiInputs:
-    // no transaction, no log line, no event. Headless the wave-input list is empty
-    // (devices exist only once CoreAudio is up) -> a well-formed empty array.
-    auto& dm = eng.engine().getDeviceManager();
-
-    Array<var> inputs;
-    for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
-        if (auto* wi = dm.getWaveInDevice (i))
-        {
-            auto* o = new DynamicObject();
-            o->setProperty ("deviceID", wi->getDeviceID());
-            o->setProperty ("name", wi->getName());
-            o->setProperty ("enabled", wi->isEnabled());
-            o->setProperty ("isStereoPair", wi->isStereoPair());
-            inputs.add (var (o));
-        }
-
-    auto* data = new DynamicObject();
-    data->setProperty ("inputs", inputs);
-    data->setProperty ("audioEnabled", eng.hasAudio());
-    return okResult ("list_wave_inputs", var (data));
-}
-
-juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_input", "no track");
-    const auto deviceID = args.getProperty ("deviceID", var()).toString();
-    if (deviceID.isEmpty()) return errResult ("set_track_input", "missing 'deviceID'");
-
-    // A monitoring/routing PREFERENCE (like arm_track / set_input_monitor): the
-    // engine binds input destinations without the undo manager, so no transaction.
-    // The CHOICE is stored on the track's own state tree (saves/reloads with the
-    // edit) and arm_track prefers it over first-match.
-    track->state.setProperty (ids::moshInputDevice, deviceID, nullptr);
-
-    // Live application: retarget the chosen wave instance to this track. Headless
-    // (no playback context) there are no instances -> graceful applied:false.
-    bool applied = false;
-    bool wasArmed = false;
-    te::InputDeviceInstance* chosen = nullptr;
-    for (auto* inst : eng.edit().getAllInputDevices())
-    {
-        if (inst == nullptr || inst->getInputDevice().isMidi()) continue;
-        if (te::isOnTargetTrack (*inst, *track, 0))
-        {
-            wasArmed = inst->isRecordingEnabled (track->itemID);
-            if (inst->getInputDevice().getDeviceID() != deviceID)
-            {
-                // Clear the old assignment; ignore the Result (a missing target
-                // is already the state we want).
-                [[maybe_unused]] auto r = inst->removeTarget (track->itemID, nullptr);
-            }
-        }
-        if (inst->getInputDevice().getDeviceID() == deviceID)
-            chosen = inst;
-    }
-    if (chosen != nullptr)
-    {
-        // setTarget returns tl::expected — check, never blind-deref.
-        if (auto r = chosen->setTarget (track->itemID, true, nullptr, 0))
-        {
-            if (wasArmed)
-                chosen->setRecordingEnabled (track->itemID, true);   // keep the arm across the swap
-            applied = true;
-        }
-        else
-        {
-            logLine ("set_track_input", args, false, r.error(), false);
-            return errResult ("set_track_input", r.error());
-        }
-    }
-
-    auto* data = new DynamicObject();
-    data->setProperty ("trackId", track->itemID.toString());
-    data->setProperty ("deviceID", deviceID);
-    data->setProperty ("applied", applied);
-    if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
-    logLine ("set_track_input", args, true, {}, false);   // preference — not undoable
-    emitSnapshotInvalidated();
-    return okResult ("set_track_input", var (data));
-}
-
-juce::var MoshOps::cmdListTrackOutputs (const juce::var&)
-{
-    // Read-only output enumeration (RTG-002): the hardware wave outs + every audio
-    // track as a candidate route-to-track destination (an implicit submix). No
-    // transaction, no log line. Headless: empty device list, tracks still listed.
-    auto& dm = eng.engine().getDeviceManager();
-
-    Array<var> outputs;
-    for (int i = 0; i < dm.getNumWaveOutDevices(); ++i)
-        if (auto* wo = dm.getWaveOutDevice (i))
-        {
-            auto* o = new DynamicObject();
-            o->setProperty ("deviceID", wo->getDeviceID());
-            o->setProperty ("name", wo->getName());
-            o->setProperty ("enabled", wo->isEnabled());
-            outputs.add (var (o));
-        }
-
-    Array<var> trackDests;
-    for (auto* t : te::getAudioTracks (eng.edit()))
-        if (t != nullptr)
-        {
-            auto* o = new DynamicObject();
-            o->setProperty ("id", t->itemID.toString());
-            o->setProperty ("name", t->getName());
-            trackDests.add (var (o));
-        }
-
-    auto* data = new DynamicObject();
-    data->setProperty ("outputs", outputs);
-    data->setProperty ("tracks", trackDests);
-    data->setProperty ("audioEnabled", eng.hasAudio());
-    return okResult ("list_track_outputs", var (data));
-}
-
-juce::var MoshOps::cmdSetTrackOutput (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_output", "no track");
-    auto& out = track->getOutput();
-
-    // Three destination forms: { destTrackId } routes into another track (implicit
-    // bus), { deviceID } routes to a hardware out, { output: "default" } resets.
-    // TrackOutput state is CachedValue-bound to the Edit's UndoManager -> undoable.
-    if (args.hasProperty ("destTrackId"))
-    {
-        const auto destId = args.getProperty ("destTrackId", var()).toString();
-        auto* dest = findTrack (destId);
-        if (dest == nullptr) return errResult ("set_track_output", "no destination track: " + destId);
-        if (dest == track)   return errResult ("set_track_output", "a track cannot output to itself");
-        // Cycle guard BEFORE applying: if the destination already feeds into this
-        // track (directly or transitively), routing track->dest would loop.
-        if (dest->getOutput().feedsInto (track))
-            return errResult ("set_track_output", "routing would create a cycle");
-
-        beginTxn ("set_track_output");
-        out.setOutputToTrack (dest);
-        logLine ("set_track_output", args, true, {}, true);
-        emitSnapshotInvalidated();
-        auto* data = new DynamicObject();
-        data->setProperty ("trackId", track->itemID.toString());
-        data->setProperty ("destTrackId", dest->itemID.toString());
-        return okResult ("set_track_output", var (data));
-    }
-
-    if (args.hasProperty ("deviceID"))
-    {
-        const auto deviceID = args.getProperty ("deviceID", var()).toString();
-        if (deviceID.isEmpty()) return errResult ("set_track_output", "empty 'deviceID'");
-        // With a live device manager, validate the id; headless the list is empty,
-        // so accept it as persisted intent (the graph resolves it when audio is up;
-        // a missing device falls back to silence + the UI shows the stored name).
-        if (eng.hasAudio())
-        {
-            auto& dm = eng.engine().getDeviceManager();
-            bool known = false;
-            for (int i = 0; i < dm.getNumWaveOutDevices(); ++i)
-                if (auto* wo = dm.getWaveOutDevice (i))
-                    if (wo->getDeviceID() == deviceID) { known = true; break; }
-            if (! known) return errResult ("set_track_output", "unknown output device: " + deviceID);
-        }
-        beginTxn ("set_track_output");
-        out.setOutputToDeviceID (deviceID);
-        logLine ("set_track_output", args, true, {}, true);
-        emitSnapshotInvalidated();
-        auto* data = new DynamicObject();
-        data->setProperty ("trackId", track->itemID.toString());
-        data->setProperty ("deviceID", deviceID);
-        return okResult ("set_track_output", var (data));
-    }
-
-    if (args.getProperty ("output", var()).toString() == "default")
-    {
-        beginTxn ("set_track_output");
-        out.setOutputToDefaultDevice (false /*isMidi*/);
-        logLine ("set_track_output", args, true, {}, true);
-        emitSnapshotInvalidated();
-        auto* data = new DynamicObject();
-        data->setProperty ("trackId", track->itemID.toString());
-        data->setProperty ("output", "default");
-        return okResult ("set_track_output", var (data));
-    }
-
-    return errResult ("set_track_output", "expected 'destTrackId', 'deviceID', or output:'default'");
-}
-
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
     const bool did = undoManager().undo();
-    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
+    if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("undo", args, did, did ? String() : String ("nothing to undo"), false);
     emitSnapshotInvalidated();
     return okResult ("undo", var (did));
@@ -4169,7 +1730,7 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
     const bool did = undoManager().redo();
-    if (did) eng.markDirty();               // edit content changed → needs re-save (gap 1)
+    if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("redo", args, did, did ? String() : String ("nothing to redo"), false);
     emitSnapshotInvalidated();
     return okResult ("redo", var (did));
@@ -4179,25 +1740,609 @@ juce::var MoshOps::cmdRedo (const juce::var& args)
 // while inBatch skips its own beginNewTransaction (see beginTxn), so the whole batch
 // is a single undo step. batch_end closes it. The agent ("Monster changes") brackets
 // its edits with these so one Undo reverts the entire batch.
+//
+// FS-B2a — TWO MODES, and the split is the safety property of the whole change:
+//   • NO transactionId  ⇒ the LEGACY path, byte-identical to the pre-FS-B2a behaviour.
+//     Every existing caller (runAgentBatch, cmdSketchBeatbox and cmdGenerateBeatRecipe's
+//     ownBatch pattern, the existing --selftest batch section) keeps working untouched.
+//   • WITH transactionId ⇒ the identified, manifest-validated, exactly-rollbackable
+//     transaction defined by docs/first-stranger-program/lanes/fs-b2.md.
 juce::var MoshOps::cmdBatchBegin (const juce::var& args)
 {
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+
+    if (txnId.isEmpty())
+    {
+        // ── LEGACY MODE (unchanged) ──
+        if (inBatch)
+            return errResult ("batch_begin", "a batch is already open");
+        const auto label = args.getProperty ("name", var ("agent edit")).toString();
+        undoManager().beginNewTransaction (label);
+        inBatch = true;
+        logLine ("batch_begin", args, true, {}, false);
+        return okResult ("batch_begin");
+    }
+
+    // ── TRANSACTIONAL MODE ──
+    // A crash left something unresolved: no further skill may run until T2's recovery has
+    // proved the pre- or post-transaction state. fs-b2.md is explicit that B2 "may not
+    // call a crash-interrupted edit clean merely because the in-memory inBatch flag
+    // disappeared".
+    if (! unresolvedTxnIds_.isEmpty())
+        return errResult ("batch_begin",
+                          agenttxn::codeUnresolvedRestart() + ": transaction "
+                          + unresolvedTxnIds_[0] + " from a previous run is unresolved; "
+                          "recover or discard the session before running a skill");
+
+    const auto name = args.getProperty ("name", var()).toString();
+    std::vector<agenttxn::ManifestEntry> manifest;
+    juce::String manifestError;
+    if (! agenttxn::parseManifest (args.getProperty ("commands", var()), manifest, manifestError))
+        return errResult ("batch_begin", agenttxn::codeManifestRejected() + ": " + manifestError);
+
+    const auto digest = agenttxn::manifestDigest (name, manifest);
+
+    // Idempotent retry: SAME id + semantically identical manifest returns the existing
+    // status. This is what makes a lost batch_begin response safe to retry.
+    if (txn_ != nullptr && txn_->id == txnId)
+    {
+        if (txn_->manifestDigest != digest)
+            return errResult ("batch_begin",
+                              agenttxn::codeIdentityConflict() + ": transaction " + txnId
+                              + " already exists with a different manifest");
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_begin", status);
+    }
+
+    if (txn_ != nullptr && txn_->isOpen())
+        return errResult ("batch_begin",
+                          agenttxn::codeAlreadyOpen() + ": transaction " + txn_->id
+                          + " is still " + txn_->status);
+
     if (inBatch)
         return errResult ("batch_begin", "a batch is already open");
-    const auto label = args.getProperty ("name", var ("agent edit")).toString();
-    undoManager().beginNewTransaction (label);
+
+    // Manifest PREFLIGHT against the engine-owned registry — before the Tracktion
+    // transaction opens, so a rejection mutates nothing and leaves no open transaction.
+    for (const auto& e : manifest)
+    {
+        juce::String reason;
+        if (mosh::txnsafe::classify (e.command, reason) != mosh::txnsafe::Class::Safe)
+            return errResult ("batch_begin",
+                              agenttxn::codeManifestRejected() + ": step "
+                              + juce::String (e.index) + " — " + reason);
+    }
+
+    auto record = std::make_unique<agenttxn::Record>();
+    record->id              = txnId;
+    record->name            = name;
+    record->label           = agenttxn::labelFor (txnId);
+    record->status          = agenttxn::statusOpen();
+    record->manifestDigest  = digest;
+    record->preFingerprint  = txnFingerprint();
+    record->revisionAtBegin = editRevision_;
+    for (const auto& e : manifest)
+    {
+        agenttxn::Entry entry;
+        entry.requestId = e.requestId;
+        entry.command   = e.command;
+        record->entries.push_back (entry);
+    }
+
+    // beginNewTransaction is LAZY (juce_UndoManager.cpp:223 only sets a flag; the
+    // ActionSet appears on the first perform), so an empty transaction leaves the undo
+    // stack completely untouched — which is what lets rollback distinguish "we own a
+    // non-empty head" from "there is nothing of ours to undo".
+    undoManager().beginNewTransaction (record->label);
     inBatch = true;
+    txn_ = std::move (record);
+
     logLine ("batch_begin", args, true, {}, false);
-    return okResult ("batch_begin");
+    appendTxnLedger (*txn_);
+    return okResult ("batch_begin", txnStatusVar (*txn_));
 }
 
 juce::var MoshOps::cmdBatchEnd (const juce::var& args)
 {
-    if (! inBatch)
-        return errResult ("batch_end", "no batch is open");
-    inBatch = false;
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+
+    if (txnId.isEmpty())
+    {
+        // ── LEGACY MODE (unchanged) ──
+        if (! inBatch)
+            return errResult ("batch_end", "no batch is open");
+        inBatch = false;
+        logLine ("batch_end", args, true, {}, false);
+        emitSnapshotInvalidated();
+        return okResult ("batch_end");
+    }
+
+    // ── TRANSACTIONAL MODE: batch_end IS the commit ──
+    if (txn_ == nullptr || txn_->id != txnId)
+        return errResult ("batch_end",
+                          agenttxn::codeUnknownTxn() + ": no transaction " + txnId
+                          + " — query batch_status rather than inferring from this failure");
+
+    // Idempotent: a lost commit RESPONSE is resolved by repeating the call (or by
+    // batch_status), never by a blind second mutation.
+    if (txn_->status == agenttxn::statusCommitted())
+    {
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_end", status);
+    }
+    if (! txn_->isOpen())
+        return errResult ("batch_end",
+                          agenttxn::codeUnknownTxn() + ": transaction " + txnId
+                          + " is " + txn_->status + " and cannot be committed");
+
+    if (txn_->anyFailed() || ! txn_->allResolved())
+    {
+        txn_->status      = agenttxn::statusFailed();
+        txn_->failureCode = agenttxn::codeIncomplete();
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeIncomplete() + ": " + juce::String (txn_->appliedCount())
+                          + " of " + juce::String ((int) txn_->entries.size())
+                          + " manifested commands applied; roll back instead of committing");
+    }
+
+    // Structural proof that this transaction — and nothing else — owns the edit's head.
+    const int  headActions = undoManager().getNumActionsInCurrentTransaction();
+    const auto headName    = undoManager().getUndoDescription();
+    if (headActions > 0 && headName != txn_->label)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeUndoHeadMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeUndoHeadMismatch() + ": the undo head is \"" + headName
+                          + "\", not this transaction; the edit state cannot be proven");
+    }
+    if (headActions == 0 && txnFingerprint() != txn_->preFingerprint)
+    {
+        // Nothing entered the undo system, yet the session changed — something mutated
+        // outside the one mutation path. Refuse rather than commit an unprovable edit.
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeFingerprintMismatch() + ": the session changed without "
+                          "entering the undo system; the edit state cannot be proven");
+    }
+    if (editRevision_ < txn_->revisionAtBegin)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_end",
+                          agenttxn::codeFingerprintMismatch() + ": edit revision went backwards");
+    }
+
+    inBatch        = false;
+    txn_->status   = agenttxn::statusCommitted();
+    txn_->failureCode.clear();
     logLine ("batch_end", args, true, {}, false);
+    appendTxnLedger (*txn_);
     emitSnapshotInvalidated();
-    return okResult ("batch_end");
+    return okResult ("batch_end", txnStatusVar (*txn_));
+}
+
+// The authoritative read. fs-b2.md: "The status is the authority after any rejected
+// promise, bridge disconnect, timeout, or duplicate call." Read-only — no transaction, no
+// mutation, and (following get_rhymes / get_lyric_corpus_stats) no JSONL line.
+juce::var MoshOps::cmdBatchStatus (const juce::var& args)
+{
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+    if (txnId.isEmpty())
+        return errResult ("batch_status", "missing 'transactionId'");
+
+    // A crash-orphaned id is NEVER reported as "nothing happened".
+    if (unresolvedTxnIds_.contains (txnId))
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("found", true);
+        o->setProperty ("transactionId", txnId);
+        o->setProperty ("status", agenttxn::statusNeedsRecovery());
+        o->setProperty ("failureCode", agenttxn::codeUnresolvedRestart());
+        o->setProperty ("canCommit", false);
+        o->setProperty ("canRollback", false);
+        o->setProperty ("revision", editRevision_);
+        return okResult ("batch_status", var (o));
+    }
+
+    if (txn_ == nullptr || txn_->id != txnId)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("found", false);
+        o->setProperty ("transactionId", txnId);
+        o->setProperty ("revision", editRevision_);
+        return okResult ("batch_status", var (o));
+    }
+
+    return okResult ("batch_status", txnStatusVar (*txn_));
+}
+
+// The ONLY automatic skill rollback. Never a generic undo: fs-b2.md requires it to prove
+// this transaction owns the UndoManager head, undo exactly that transaction, and verify
+// the pre-state fingerprint before it will report rolled_back.
+//
+// The head-ownership gate is not defensive decoration — it is the G14 empty-transaction
+// class. With zero actions in the current set, UndoManager::undo() reaches back and
+// destroys the PREVIOUS edit (juce_UndoManager.cpp:256 getCurrentSet()), so a rollback
+// that skipped this check would silently revert unrelated work.
+juce::var MoshOps::cmdBatchRollback (const juce::var& args)
+{
+    const auto txnId = args.getProperty ("transactionId", var()).toString().trim();
+    if (txnId.isEmpty())
+        return errResult ("batch_rollback", "missing 'transactionId'");
+
+    if (txn_ == nullptr || txn_->id != txnId)
+        return errResult ("batch_rollback",
+                          agenttxn::codeUnknownTxn() + ": no transaction " + txnId
+                          + " — performing no undo");
+
+    // Idempotent once rolled back.
+    if (txn_->status == agenttxn::statusRolledBack())
+    {
+        auto status = txnStatusVar (*txn_);
+        if (auto* o = status.getDynamicObject()) o->setProperty ("replayed", true);
+        return okResult ("batch_rollback", status);
+    }
+    if (txn_->status == agenttxn::statusCommitted())
+        return errResult ("batch_rollback",
+                          agenttxn::statusNeedsRecovery() + ": transaction " + txnId
+                          + " is already committed; performing no undo");
+    if (txn_->status == agenttxn::statusNeedsRecovery())
+        return errResult ("batch_rollback",
+                          agenttxn::statusNeedsRecovery() + ": transaction " + txnId
+                          + " needs human recovery; performing no undo");
+
+    const int  headActions = undoManager().getNumActionsInCurrentTransaction();
+    const auto headName    = undoManager().getUndoDescription();
+    const auto plan        = agenttxn::planRollback (headActions, headName, txn_->label);
+
+    if (plan == agenttxn::RollbackPlan::RefuseForeignHead)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeUndoHeadMismatch();
+        inBatch = false;
+        appendTxnLedger (*txn_);
+        return errResult ("batch_rollback",
+                          agenttxn::codeUndoHeadMismatch() + ": the undo head is \"" + headName
+                          + "\", not this transaction; performing no undo");
+    }
+
+    if (plan == agenttxn::RollbackPlan::UndoOurs)
+    {
+        undoManager().undo();
+        eng.markDirty();
+        ++editRevision_;
+        emitSnapshotInvalidated();
+    }
+    inBatch = false;
+
+    // Exactness check: the session must be back at the captured pre-state.
+    const auto now = txnFingerprint();
+    if (now != txn_->preFingerprint)
+    {
+        txn_->status      = agenttxn::statusNeedsRecovery();
+        txn_->failureCode = agenttxn::codeFingerprintMismatch();
+        appendTxnLedger (*txn_);
+        return errResult ("batch_rollback",
+                          agenttxn::codeFingerprintMismatch() + ": the undo did not restore the "
+                          "pre-transaction state; the edit needs human recovery");
+    }
+
+    txn_->status = agenttxn::statusRolledBack();
+    txn_->failureCode.clear();
+    logLine ("batch_rollback", args, true, {}, false);
+    appendTxnLedger (*txn_);
+    return okResult ("batch_rollback", txnStatusVar (*txn_));
+}
+
+// ── FS-B2a support ───────────────────────────────────────────────────────────────
+
+// The canonical semantic fingerprint of the session. Memoized on editRevision_, which
+// beginTxn/cmdUndo/cmdRedo/cmdBatchRollback bump on every Edit mutation.
+//
+// The memo is worth having: snapshot() is measured at ~330 ms / 3.7 MiB at 100 tracks
+// (see emitTrackPatch's note), and a two-command skill run asks for the fingerprint six to
+// eight times — at begin, at each ledger record, and at every batch_status the harness
+// consults. Without the memo that is a couple of seconds of message-thread time on a large
+// session, on the synchronous execute_command path.
+//
+// SOUNDNESS, stated because a stale fingerprint would silently weaken the exactness check:
+// the only writes that change the snapshot WITHOUT bumping editRevision_ are the handful of
+// non-undoable engine/device preferences that never call beginTxn (set_metronome,
+// set_input_monitor, arm_track, …). Every one of those is classified NonUndoable, so it can
+// never be a manifest step; and while a transaction is open the guard refuses it as an
+// untagged mutation. So no such write can land between a fingerprint being captured and the
+// same fingerprint being compared. If a future command mutates the Edit without going
+// through beginTxn, it MUST bump editRevision_ — that is the invariant this memo rests on.
+juce::String MoshOps::txnFingerprint()
+{
+    if (txnFingerprintRevision_ == editRevision_ && txnFingerprintCache_.isNotEmpty())
+        return txnFingerprintCache_;
+
+    txnFingerprintCache_    = agenttxn::fingerprint (snapshot());
+    txnFingerprintRevision_ = editRevision_;
+    return txnFingerprintCache_;
+}
+
+juce::var MoshOps::txnStatusVar (const agenttxn::Record& record)
+{
+    Array<var> entries;
+    for (int i = 0; i < (int) record.entries.size(); ++i)
+    {
+        const auto& e = record.entries[(size_t) i];
+        auto* eo = new DynamicObject();
+        eo->setProperty ("index", i);
+        eo->setProperty ("requestId", e.requestId);
+        eo->setProperty ("command", e.command);
+        eo->setProperty ("state", e.state);
+        // The RESULT envelope only. The command's args are deliberately never recorded
+        // here or in the ledger — they carry file paths, lyric text and track names.
+        if (! e.result.isVoid()) eo->setProperty ("result", e.result);
+        entries.add (var (eo));
+    }
+
+    auto* o = new DynamicObject();
+    o->setProperty ("found", true);
+    o->setProperty ("transactionId", record.id);
+    o->setProperty ("name", record.name);
+    o->setProperty ("status", record.status);
+    if (record.failureCode.isNotEmpty()) o->setProperty ("failureCode", record.failureCode);
+    o->setProperty ("revisionAtBegin", record.revisionAtBegin);
+    o->setProperty ("revision", editRevision_);
+    o->setProperty ("preFingerprint", record.preFingerprint);
+    o->setProperty ("fingerprint", txnFingerprint());
+    o->setProperty ("manifestCount", (int) record.entries.size());
+    o->setProperty ("applied", record.appliedCount());
+    o->setProperty ("canCommit", record.status == agenttxn::statusOpen()
+                                     && record.allResolved() && ! record.anyFailed());
+    o->setProperty ("canRollback", record.isOpen());
+    o->setProperty ("entries", entries);
+    return var (o);
+}
+
+void MoshOps::initTxnLedger()
+{
+    txnLedgerFile = eng.sessionDir().getChildFile (agenttxn::ledgerFileName());
+    if (! txnLedgerFile.existsAsFile())
+        return;
+
+    const auto lines = StringArray::fromLines (txnLedgerFile.loadFileAsString());
+    unresolvedTxnIds_ = agenttxn::unresolvedIdsIn (lines);
+}
+
+void MoshOps::appendTxnLedger (const agenttxn::Record& record)
+{
+    if (txnLedgerFile == File())
+        return;
+
+    const auto line = JSON::toString (
+        agenttxn::makeLedgerRecord (record.id, record.name, record.status, record.failureCode,
+                                    editRevision_, record.preFingerprint, txnFingerprint(),
+                                    record.appliedCount(), (int) record.entries.size()),
+        true);
+    txnLedgerFile.appendText (line + "\n");
+
+    // "Bounded" per fs-b2.md: a long session must not grow this without limit. Trim from
+    // the FRONT, and only whole lines, so the surviving tail stays parseable — and only
+    // once nothing is unresolved, so trimming can never erase the evidence of a crash.
+    static constexpr int kMaxLedgerLines = 500;
+    static constexpr int kKeepLedgerLines = 200;
+    if (unresolvedTxnIds_.isEmpty())
+    {
+        auto lines = StringArray::fromLines (txnLedgerFile.loadFileAsString());
+        while (lines.size() > 0 && lines[lines.size() - 1].trim().isEmpty())
+            lines.remove (lines.size() - 1);
+        if (lines.size() > kMaxLedgerLines)
+        {
+            lines.removeRange (0, lines.size() - kKeepLedgerLines);
+            txnLedgerFile.replaceWithText (lines.joinIntoString ("\n") + "\n");
+        }
+    }
+}
+
+// T2 coordination. fs-b2.md requires an unresolved transaction to block skills "until
+// T2's snapshot+journal recovery has proved either the complete pre-transaction or
+// complete post-transaction state". Those are exactly T2's two human-gated outcomes:
+//   recover_session  → the journal tail was replayed ⇒ the POST-transaction state stands;
+//   discard_recovery → the tail was dropped ⇒ the last SAVED (pre-transaction) state stands.
+// Either way the ambiguity is gone and a terminal record is written. Note the limit
+// honestly: this trusts T2's journal to be the faithful record of the crash tail — it is
+// the strongest proof available, not an independent one.
+// The guard. Runs on the OUTERMOST execute() only (see execute()'s DepthGuard).
+//
+// While a transaction is open this is the wall fs-b2.md asks for: "every mutation must
+// carry matching metadata and match the next manifest entry. Untagged UI mutations, relay
+// mutations, out-of-order calls, and extra calls are refused without mutation."
+//
+// FAIL-CLOSED: a command is admitted only if it is the manifest's next entry or is named
+// in readOnlyDuringTransaction(). Anything else is refused — including a brand-new command
+// nobody remembered to classify.
+bool MoshOps::txnPreDispatch (const juce::var& command, juce::var& early)
+{
+    const auto name = command.getProperty ("command", var()).toString();
+    const auto meta = command.getProperty ("transaction", var());
+    const bool hasMeta = meta.getDynamicObject() != nullptr;
+
+    pendingTxnIndex_ = -1;
+    pendingTxnEnvelopeDigest_.clear();
+
+    // The boundary commands validate their own ids; never intercept them.
+    if (name == "batch_begin" || name == "batch_end" || name == "batch_rollback"
+        || name == "batch_status")
+        return false;
+
+    const bool open = (txn_ != nullptr && txn_->isOpen());
+
+    if (! hasMeta)
+    {
+        if (! open)
+            return false;   // no transaction: ordinary behaviour, entirely unchanged
+
+        if (mosh::txnsafe::isReadOnlyDuringTransaction (name))
+            return false;   // reads stay available for the length of a skill run
+
+        // A foreign mutation — local UI, or a peer's op landing through applyingRemote_.
+        // Refused WITHOUT touching transaction state, exactly as the contract requires.
+        early = errResult (name,
+                           agenttxn::codeInProgress() + ": agent transaction " + txn_->id
+                           + " is open; this change was not applied");
+        return true;
+    }
+
+    // Metadata present. Resolve it against a transaction, whatever its status: a retry
+    // arriving after commit must still replay rather than double-apply.
+    const auto metaId    = meta.getProperty ("transactionId", var()).toString().trim();
+    const auto requestId = meta.getProperty ("requestId", var()).toString().trim();
+    const int  metaIndex = (int) meta.getProperty ("index", var (-1));
+
+    if (txn_ == nullptr || txn_->id != metaId)
+    {
+        early = errResult (name,
+                           agenttxn::codeUnknownTxn() + ": no transaction " + metaId
+                           + " — query batch_status");
+        return true;
+    }
+
+    auto* entry = txn_->findByRequestId (requestId);
+    if (entry == nullptr)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": requestId " + requestId
+                           + " is not in transaction " + metaId + "'s manifest");
+        return true;
+    }
+
+    const auto entryIndex = txn_->indexOfRequestId (requestId);
+    // The envelope's identity is command + args: a retry that quietly changed an argument
+    // must be rejected, not replayed.
+    auto* envelope = new DynamicObject();
+    envelope->setProperty ("command", name);
+    envelope->setProperty ("args", command.getProperty ("args", var()));
+    const auto digest = agenttxn::digestOf (var (envelope));
+
+    if (entry->state != agenttxn::entryPending())
+    {
+        // Already resolved: this is a RETRY after a lost response.
+        if (entry->envelopeDigest != digest)
+        {
+            early = errResult (name,
+                               agenttxn::codeEnvelopeConflict() + ": requestId " + requestId
+                               + " was already used with different content");
+            return true;
+        }
+        // Return the RECORDED result and apply nothing. This is what makes a command retry
+        // non-duplicating.
+        auto replay = entry->result;
+        if (auto* o = replay.getDynamicObject())
+            o->setProperty ("replayed", true);
+        early = replay;
+        return true;
+    }
+
+    if (! open)
+    {
+        early = errResult (name,
+                           agenttxn::codeUnknownTxn() + ": transaction " + metaId + " is "
+                           + txn_->status + "; no further commands may run");
+        return true;
+    }
+    if (entryIndex != txn_->nextIndex)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": expected manifest step "
+                           + juce::String (txn_->nextIndex) + ", got step "
+                           + juce::String (entryIndex));
+        return true;
+    }
+    if (metaIndex != entryIndex)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": envelope declares index "
+                           + juce::String (metaIndex) + " for manifest step "
+                           + juce::String (entryIndex));
+        return true;
+    }
+    if (entry->command != name)
+    {
+        early = errResult (name,
+                           agenttxn::codeManifestMismatch() + ": manifest step "
+                           + juce::String (entryIndex) + " is " + entry->command);
+        return true;
+    }
+
+    // Admitted. Hand the index/digest to txnPostDispatch, which records the outcome.
+    pendingTxnIndex_          = entryIndex;
+    pendingTxnEnvelopeDigest_ = digest;
+    return false;
+}
+
+void MoshOps::txnPostDispatch (const juce::var& result)
+{
+    if (pendingTxnIndex_ < 0 || txn_ == nullptr)
+        return;
+
+    const int index = pendingTxnIndex_;
+    const auto digest = pendingTxnEnvelopeDigest_;
+    pendingTxnIndex_ = -1;
+    pendingTxnEnvelopeDigest_.clear();
+
+    if (index >= (int) txn_->entries.size())
+        return;
+
+    auto& entry = txn_->entries[(size_t) index];
+    const bool ok = (bool) result.getProperty ("ok", false);
+    entry.state          = ok ? agenttxn::entryApplied() : agenttxn::entryFailed();
+    entry.envelopeDigest = digest;
+    entry.result         = result;
+    txn_->nextIndex      = index + 1;
+
+    if (! ok)
+    {
+        // A resolved command failure is the transaction's failure. It stays OPEN for
+        // rollback (canRollback), but no further manifested command may run.
+        txn_->status      = agenttxn::statusFailed();
+        txn_->failureCode = agenttxn::codeCommandFailed();
+        appendTxnLedger (*txn_);
+    }
+}
+
+void MoshOps::resolveUnresolvedTxns (bool provedPostState)
+{
+    // ONLY the startup set — ids orphaned by a PREVIOUS process, whose in-memory state is
+    // genuinely gone and for which the file on disk is therefore the whole truth.
+    //
+    // An in-process transaction is deliberately NOT resolvable this way, and the
+    // distinction is not pedantic: cmdDiscardRecovery drops the journal but does not
+    // reload the edit, so relabelling a live open transaction "rolled_back" would claim a
+    // restoration that never happened — the exact class of lie this whole contract exists
+    // to prevent. A live transaction resolves through batch_end or batch_rollback; a live
+    // needs_recovery one resolves through a human, which is what needs_recovery means.
+    if (unresolvedTxnIds_.isEmpty())
+        return;
+
+    const auto ids = unresolvedTxnIds_;
+    unresolvedTxnIds_.clear();   // cleared FIRST so appendTxnLedger may trim again
+
+    const auto terminal = provedPostState ? agenttxn::statusCommitted()
+                                          : agenttxn::statusRolledBack();
+    for (const auto& id : ids)
+    {
+        agenttxn::Record resolved;
+        resolved.id     = id;
+        resolved.name   = "(recovered)";
+        resolved.status = terminal;
+        appendTxnLedger (resolved);
+    }
 }
 
 juce::var MoshOps::cmdSave (const juce::var& args)
@@ -4245,1196 +2390,6 @@ juce::var MoshOps::cmdAddRenderLayer (const juce::var& args)
     logLine ("add_render_layer", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("add_render_layer", var (data));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stage 2 — arrangement editing
-// ─────────────────────────────────────────────────────────────────────────────
-juce::var MoshOps::cmdMoveClip (const juce::var& args)
-{
-    const auto id = args.getProperty ("clipId", var()).toString();
-    auto* clip = findClip (id);
-    if (clip == nullptr) return errResult ("move_clip", "no clip: " + id);
-
-    beginTxn ("move_clip");
-    const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", clip->getPosition().getStart().inSeconds()));
-    clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
-
-    // Optional move to another track.
-    if (args.hasProperty ("trackId"))
-        if (auto* dest = findTrack (args.getProperty ("trackId", var()).toString()))
-            if (dest != clip->getTrack())
-                clip->moveTo (*dest);
-
-    logLine ("move_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("move_clip");
-}
-
-juce::var MoshOps::cmdTrimClip (const juce::var& args)
-{
-    const auto id = args.getProperty ("clipId", var()).toString();
-    auto* clip = findClip (id);
-    if (clip == nullptr) return errResult ("trim_clip", "no clip: " + id);
-
-    auto pos = clip->getPosition();
-    const double start  = (double) args.getProperty ("start",  pos.getStart().inSeconds());
-    const double length = juce::jmax (0.01, (double) args.getProperty ("length", pos.getLength().inSeconds()));
-    const double offset = (double) args.getProperty ("offset", pos.getOffset().inSeconds());
-
-    // ARR-011 — opt-in ripple (default FALSE ⇒ the trim path below is byte-identical
-    // when the arg is absent). Captured BEFORE the trim: the neighbours downstream
-    // follow this clip's OLD end, and shift by however much that end moved.
-    const bool   ripple = (bool) args.getProperty ("ripple", false);
-    const double oldEnd = pos.getEnd().inSeconds();
-
-    beginTxn ("trim_clip");
-    clip->setPosition ({ { tracktion::TimePosition::fromSeconds (start),
-                           tracktion::TimeDuration::fromSeconds (length) },
-                         tracktion::TimeDuration::fromSeconds (offset) });
-
-    // Ripple scope = THIS clip's own track (the only track trim_clip touches — it is a
-    // single-clip command, so there is no cross-track set to ripple, unlike
-    // delete_time_range's trackIds). Shortening the clip (newEnd < oldEnd) pulls the
-    // next clips left; lengthening pushes them right by the same amount.
-    if (ripple)
-        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack()))
-            rippleShiftClipsAfter (*clipTrack, oldEnd,
-                                   clip->getPosition().getEnd().inSeconds() - oldEnd,
-                                   clip);
-
-    logLine ("trim_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    reactiveTouch (id);   // Phase 3 — a length/offset change re-bounces the source window
-    return okResult ("trim_clip");
-}
-
-juce::var MoshOps::cmdSplitClip (const juce::var& args)
-{
-    const auto id = args.getProperty ("clipId", var()).toString();
-    auto* clip = findClip (id);
-    if (clip == nullptr) return errResult ("split_clip", "no clip: " + id);
-    auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack());
-    if (clipTrack == nullptr) return errResult ("split_clip", "clip not on a clip track");
-
-    // Split-point normalization (r4 gate-miss fix plan P1): agents and utterances mix
-    // ABSOLUTE and CLIP-RELATIVE times ("split at 8s" on a clip spanning [4,12] can mean
-    // t=8 or start+8). Absolute wins when it lands strictly inside; otherwise a value
-    // that resolves inside as start+t is treated as clip-relative. Exact edges and
-    // truly-outside values error with the resolved point + range (previously Tracktion's
-    // splitClip silently no-opped and we returned ok with no newClipId).
-    const double reqAt = (double) args.getProperty ("time", 0.0);
-    const double cStart = clip->getPosition().getStart().inSeconds();
-    const double cEnd   = clip->getPosition().getEnd().inSeconds();
-    constexpr double kSplitEps = 1.0e-6;
-    const auto insideClip = [&] (double x) { return x > cStart + kSplitEps && x < cEnd - kSplitEps; };
-    double at = reqAt;
-    if (! insideClip (at))
-    {
-        if (const double rel = cStart + reqAt; insideClip (rel))
-            at = rel;
-        else
-            return errResult ("split_clip",
-                "split point outside clip: time " + juce::String (reqAt, 3)
-                + " (relative candidate " + juce::String (cStart + reqAt, 3)
-                + ") not strictly inside [" + juce::String (cStart, 3) + ", "
-                + juce::String (cEnd, 3) + "]");
-    }
-    beginTxn ("split_clip");
-    auto* newClip = clipTrack->splitClip (*clip, tracktion::TimePosition::fromSeconds (at));
-
-    auto* data = new DynamicObject();
-    if (newClip != nullptr) data->setProperty ("newClipId", newClip->itemID.toString());
-    logLine ("split_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("split_clip", var (data));
-}
-
-juce::var MoshOps::cmdRemoveClip (const juce::var& args)
-{
-    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
-    if (clip == nullptr) return errResult ("remove_clip", "no clip");
-    beginTxn ("remove_clip");
-    // Phase 2 — if this MIDI/drum clip owns a hidden beneath-render, remove the hidden audio with it
-    // (else it's orphaned on the track). The source mute goes away with the clip itself.
-    if (auto node = clip->state.getChildWithName (ids::MOSH_RENDERLAYER);
-        node.isValid() && (bool) node[kSourceMutedByLayer])
-        if (auto hiddenId = node[kLandedClipId].toString(); hiddenId.isNotEmpty())
-            if (auto* hidden = findClip (hiddenId); hidden != nullptr && hidden != clip)
-                hidden->removeFromParent();
-    clip->removeFromParent();
-    logLine ("remove_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("remove_clip");
-}
-
-juce::var MoshOps::cmdRenameClip (const juce::var& args)
-{
-    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
-    if (clip == nullptr) return errResult ("rename_clip", "no clip");
-    beginTxn ("rename_clip");
-    clip->setName (args.getProperty ("name", var()).toString());
-    logLine ("rename_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("rename_clip");
-}
-
-juce::var MoshOps::cmdSetClipMute (const juce::var& args)
-{
-    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
-    if (clip == nullptr) return errResult ("set_clip_mute", "no clip");
-    beginTxn ("set_clip_mute");
-    clip->setMuted ((bool) args.getProperty ("mute", false));
-    logLine ("set_clip_mute", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_clip_mute");
-}
-
-juce::var MoshOps::cmdSetClipGain (const juce::var& args)
-{
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_gain", "not an audio clip");
-    beginTxn ("set_clip_gain");
-    ac->setGainDB (juce::jlimit (-48.0f, 24.0f, (float) (double) args.getProperty ("gainDb", 0.0)));
-    logLine ("set_clip_gain", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_clip_gain");
-}
-
-// G4b — clip fades. String -> AudioFadeCurve::Type, default linear (mirrors the enum
-// tracktion_AudioFadeCurve.h ships: linear=1, convex=2, concave=3, sCurve=4).
-static te::AudioFadeCurve::Type fadeCurveFromName (const juce::String& name)
-{
-    if (name.equalsIgnoreCase ("convex"))  return te::AudioFadeCurve::convex;
-    if (name.equalsIgnoreCase ("concave")) return te::AudioFadeCurve::concave;
-    if (name.equalsIgnoreCase ("sCurve") || name.equalsIgnoreCase ("scurve")) return te::AudioFadeCurve::sCurve;
-    return te::AudioFadeCurve::linear;
-}
-
-juce::var MoshOps::cmdSetClipFade (const juce::var& args)
-{
-    // Clip-edge fades (reality-pack inv 30: "affect edges without moving clip boundaries").
-    // setFadeIn/setFadeOut (AudioClipBase.cpp) clamp to [0, clipLength] and rescale if
-    // fadeIn+fadeOut exceeds the clip length — no boundary move, ever. Audio-clip-only,
-    // mirrors set_clip_gain. Fades bind to the clip's own ValueTree via a plain
-    // CachedValue.referTo(state, id, um) — the SAME undo/persistence path as clip gain,
-    // so this is undoable + save/reload-durable with zero src/state schema change.
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_fade", "not an audio clip");
-    beginTxn ("set_clip_fade");
-    if (args.hasProperty ("fadeInSec"))
-        ac->setFadeIn  (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeInSec",  0.0))));
-    if (args.hasProperty ("fadeOutSec"))
-        ac->setFadeOut (tracktion::TimeDuration::fromSeconds (juce::jmax (0.0, (double) args.getProperty ("fadeOutSec", 0.0))));
-    if (args.hasProperty ("curveIn"))
-        ac->setFadeInType  (fadeCurveFromName (args.getProperty ("curveIn",  "linear").toString()));
-    if (args.hasProperty ("curveOut"))
-        ac->setFadeOutType (fadeCurveFromName (args.getProperty ("curveOut", "linear").toString()));
-    logLine ("set_clip_fade", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", ac->itemID.toString());
-    data->setProperty ("fadeInSec",  ac->getFadeIn().inSeconds());
-    data->setProperty ("fadeOutSec", ac->getFadeOut().inSeconds());
-    return okResult ("set_clip_fade", var (data));
-}
-
-// clip-ops wave — reverse / auto-crossfade / normalize. Mirrors cmdSetClipGain's
-// shape exactly: audio-clip-only (AudioClipBase), one CachedValue flip, undoable
-// via the clip's own ValueTree (no src/state schema change, free persistence).
-juce::var MoshOps::cmdSetClipReverse (const juce::var& args)
-{
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_reverse", "not an audio clip");
-    beginTxn ("set_clip_reverse");
-    ac->setIsReversed ((bool) args.getProperty ("reversed", false));
-    logLine ("set_clip_reverse", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_clip_reverse");
-}
-
-// Auto-crossfade only has an audible effect when this clip OVERLAPS a neighbor on
-// the same track (Tracktion auto-computes a triangular fade via getOverlappingClip);
-// Mosh otherwise leaves it off, so overlapping clips sum at full volume (see the
-// comment on cmdSetClipFade above). This just exposes the toggle.
-juce::var MoshOps::cmdSetClipCrossfade (const juce::var& args)
-{
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_crossfade", "not an audio clip");
-    beginTxn ("set_clip_crossfade");
-    ac->setAutoCrossfade ((bool) args.getProperty ("enabled", false));
-    logLine ("set_clip_crossfade", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_clip_crossfade");
-}
-
-// CLP-LOOP — clip loop region (reality-pack invariant 28: "a clip can loop a defined
-// sub-region of its source"). Audio-clip-only, mirrors cmdSetClipGain's shape exactly
-// (AudioClipBase cast, Clip-scoped MP lock, one transaction, undoable, free persistence
-// — loopStart/loopLength are CachedValues on the clip's own ValueTree, so no src/state
-// schema change and save/reload is free).
-//
-// EXACT tracktion API (tracktion_AudioClipBase.h:246-270, pinned clone 2877b621):
-//   void          setLoopRange (TimeRange)   — start/length in SECONDS
-//   TimePosition  getLoopStart() const
-//   TimeDuration  getLoopLength() const
-//   bool          isLooping() const          — getAutoTempo() ? loopLengthBeats > 0
-//                                                             : loopLength > 0
-//
-// ONE notion of "looping": there is no separate enabled flag in the engine — a clip
-// loops iff its loop LENGTH is > 0, which is exactly what `isLooping()` reports and
-// exactly what normalize_clip's `clipAudibleSourceSpan` (MoshOps.cpp, LOOPING branch)
-// already keys off. So `enabled:false` writes an EMPTY range rather than inventing a
-// second flag, and the snapshot's loopEnabled reads back through isLooping().
-//
-// Deliberately NOT AudioClipBase::disableLooping(): that helper also REWRITES the
-// clip's position/offset to bake the loop away (tracktion_AudioClipBase.cpp:921).
-// Toggling a loop off must not move or resize the clip.
-//
-// Tracktion clamps what it stores (setLoopRange: start ≤ sourceLength/speed, length ≤
-// 50× sourceLength/speed; auto-tempo clips route to setLoopRangeBeats), so the result
-// echoes the ACTUAL post-clamp values read back off the clip — never the raw request.
-juce::var MoshOps::cmdSetClipLoop (const juce::var& args)
-{
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_loop", "not an audio clip");
-
-    const bool enabled = (bool) args.getProperty ("enabled", false);
-
-    // Resolve + validate BEFORE opening the transaction (an errResult must never leave
-    // a half-open txn). Defaults when enabling without explicit bounds: keep any loop
-    // range already on the clip, else loop the clip's whole current length from 0.
-    const double curStart  = ac->getLoopStart().inSeconds();
-    const double curLength = ac->getLoopLength().inSeconds();
-    const double start  = juce::jmax (0.0, (double) args.getProperty ("start", curStart));
-    const double lengthDefault = curLength > 0.0 ? curLength : ac->getPosition().getLength().inSeconds();
-    const double length = juce::jmax (0.0, (double) args.getProperty ("length", lengthDefault));
-    if (enabled && ! (length > 0.0))
-        return errResult ("set_clip_loop", "loop length must be greater than 0 when enabled");
-
-    beginTxn ("set_clip_loop");
-    if (enabled)
-        ac->setLoopRange ({ tracktion::TimePosition::fromSeconds (start),
-                            tracktion::TimeDuration::fromSeconds (length) });
-    else
-        ac->setLoopRange ({});   // empty range ⇒ isLooping() false; position untouched
-
-    logLine ("set_clip_loop", args, true, {}, true);
-    emitSnapshotInvalidated();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", ac->itemID.toString());
-    data->setProperty ("loopEnabled", ac->isLooping());
-    data->setProperty ("loopStart",   ac->getLoopStart().inSeconds());
-    data->setProperty ("loopLength",  ac->getLoopLength().inSeconds());
-    return okResult ("set_clip_loop", var (data));
-}
-
-juce::var MoshOps::cmdNormalizeClip (const juce::var& args)
-{
-    // Non-destructive: reads the source's true peak sample via the SAME reader path
-    // get_clip_peaks uses (no re-render, no source-file mutation), then sets the
-    // clip's own gain — the identical AudioClipBase::setGainDB set_clip_gain uses —
-    // so the peak lands at targetDb. Undo restores the prior gain exactly like
-    // set_clip_gain. (newGainDb = targetDb - peakDb algebraically absorbs any gain
-    // already on the clip, so "set" vs "add a delta" converge to the same result.)
-    //
-    // Scans only the clip's AUDIBLE span (clipAudibleSourceSpan), not the whole
-    // source file: a clip trimmed to a quiet segment of a longer take must normalize
-    // against the peak that actually plays, not a transient elsewhere in the take
-    // that never sounds. Warped (auto-tempo) clips fall back to the whole file — see
-    // clipAudibleSourceSpan's WARPED CAVEAT.
-    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (wave == nullptr) return errResult ("normalize_clip", "no wave clip");
-
-    // A REVERSED clip's current source is a generated reversed proxy that may not exist
-    // yet (proxy generation is async, and never runs headless) — createReaderFor would
-    // return nullptr and normalize would spuriously fail. Peak level is reversal-
-    // invariant, so read the ORIGINAL file instead, over its WHOLE span (the audible-
-    // span offsets are mirrored under reversal; whole-file is the same conservative
-    // fallback the WARPED CAVEAT below already takes). Found by fam_clip_reverse_normalize.
-    const bool reversed = wave->getIsReversed();
-    auto file = reversed ? wave->getOriginalFile() : wave->getCurrentSourceFile();
-    juce::AudioFormatManager fm; fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
-    if (reader == nullptr) return errResult ("normalize_clip", "cannot read source");
-
-    const auto span = clipAudibleSourceSpan (*wave);
-    const float peakLinear = (reversed || span.lengthSec < 0.0)
-        ? findSourcePeak (*reader)
-        : findSourcePeak (*reader,
-                           (juce::int64) std::llround (span.startSec * reader->sampleRate),
-                           (juce::int64) std::llround ((span.startSec + span.lengthSec) * reader->sampleRate));
-    if (peakLinear <= 0.0f) return errResult ("normalize_clip", "clip is silent (peak 0) — nothing to normalize");
-
-    const double targetDb = args.hasProperty ("targetDb") ? (double) args.getProperty ("targetDb", 0.0) : 0.0;
-    const float peakDb = juce::Decibels::gainToDecibels (peakLinear);
-    const float newGainDb = juce::jlimit (-48.0f, 24.0f, (float) targetDb - peakDb);
-
-    beginTxn ("normalize_clip");
-    wave->setGainDB (newGainDb);
-    logLine ("normalize_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", wave->itemID.toString());
-    data->setProperty ("gainDb", (double) wave->getGainDB());
-    data->setProperty ("peakDb", (double) peakDb);
-    return okResult ("normalize_clip", var (data));
-}
-
-juce::var MoshOps::cmdRelinkClip (const juce::var& args)
-{
-    // gap 3 — relink-on-load: re-point a wave clip whose source went missing (a project
-    // moved off-machine, audio renamed, etc.) to a user-chosen file. Stores the ref
-    // relative iff the new file lives under the project dir (keeps a relinked-to-local
-    // file portable), else absolute. Undoable.
-    const auto id   = args.getProperty ("clipId", var()).toString();
-    const auto path = args.getProperty ("file", var()).toString();
-    if (path.isEmpty()) return errResult ("relink_clip", "missing 'file'");
-    File newFile (path);
-    if (! newFile.existsAsFile()) return errResult ("relink_clip", "file not found: " + path);
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (id));
-    if (w == nullptr) return errResult ("relink_clip", "wave clip not found: " + id);
-
-    beginTxn ("relink_clip");
-    // Relative ref iff the new file lives under the project dir (keeps a relinked-to-local
-    // file portable), else absolute. repointWaveClipSource stores the relative form against
-    // the edit file's PARENT dir — NOT setToDirectFileReference's edit-FILE-relative "../"
-    // form, which (when the edit isn't yet on disk) escapes the session dir and would hang a
-    // later offline export (the same mechanism PR #104 fixed for mp_commit_track).
-    const bool local = newFile.isAChildOf (eng.editFile().getParentDirectory());
-    repointWaveClipSource (*w, newFile, eng.editFile().getParentDirectory(), local);
-    logLine ("relink_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("relink_clip");
-}
-
-// Minimum normalized-autocorrelation peak (0..1) for a detected BPM to be trusted
-// over the map-tempo default. A pure tone / silence scores ~0 and falls back.
-static constexpr double kBpmDetectConfidence = 0.10;
-
-// Offline loop-BPM estimate from an audio file: build a coarse onset-energy
-// envelope (positive first-difference of per-hop RMS), autocorrelate it across a
-// musical tempo range, argmax. Pure + deterministic (no service) so it runs inside
-// --selftest. Returns {bpm, confidence}; confidence is the normalized autocorrelation
-// at the winning lag (0 == flat/no beat, up toward 1 == a strong periodic pulse).
-static std::pair<double, double> detectBpmFromFile (const juce::File& file)
-{
-    juce::AudioFormatManager fm; fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
-    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
-        return { 0.0, 0.0 };
-
-    const double sr = reader->sampleRate;
-    const int chans = (int) reader->numChannels;
-    // Analyse at most the first 30s — plenty for a loop, and it bounds the cost.
-    const juce::int64 maxSamples = (juce::int64) juce::jmin ((double) reader->lengthInSamples, sr * 30.0);
-    const int hop = juce::jmax (1, (int) std::llround (sr / 200.0)); // ~5ms hops → ~200 Hz envelope
-    const int nHops = (int) (maxSamples / hop);
-    if (nHops < 16) return { 0.0, 0.0 };
-
-    // Per-hop RMS energy.
-    std::vector<float> energy ((size_t) nHops, 0.0f);
-    juce::AudioBuffer<float> buf (juce::jmax (1, chans), hop);
-    for (int h = 0; h < nHops; ++h)
-    {
-        buf.clear();
-        reader->read (&buf, 0, hop, (juce::int64) h * hop, true, chans > 1);
-        double e = 0.0;
-        for (int c = 0; c < buf.getNumChannels(); ++c)
-        {
-            const float* p = buf.getReadPointer (c);
-            for (int i = 0; i < hop; ++i) e += (double) p[i] * (double) p[i];
-        }
-        energy[(size_t) h] = (float) std::sqrt (e / (double) juce::jmax (1, hop * juce::jmax (1, chans)));
-    }
-
-    // Onset function: positive first difference of the energy envelope, zero-meaned.
-    std::vector<float> onset ((size_t) nHops, 0.0f);
-    double mean = 0.0;
-    for (int h = 1; h < nHops; ++h)
-    {
-        const float d = energy[(size_t) h] - energy[(size_t) h - 1];
-        onset[(size_t) h] = d > 0.0f ? d : 0.0f;
-        mean += (double) onset[(size_t) h];
-    }
-    mean /= (double) juce::jmax (1, nHops - 1);
-    if (mean <= 1.0e-9) return { 0.0, 0.0 };  // silence / DC
-    double var0 = 0.0;
-    for (auto& v : onset) { v = (float) ((double) v - mean); var0 += (double) v * (double) v; }
-    var0 /= (double) nHops;
-    if (var0 <= 1.0e-12) return { 0.0, 0.0 };
-
-    const double hopRate = sr / (double) hop; // hops per second
-    auto autocorrAtLag = [&] (double lag) -> double
-    {
-        // Linear-interpolated autocorrelation at a fractional lag (in hops).
-        const int L = (int) std::floor (lag);
-        const double frac = lag - (double) L;
-        double acc = 0.0; int cnt = 0;
-        for (int i = 0; i + L + 1 < nHops; ++i)
-        {
-            const double shifted = (double) onset[(size_t) (i + L)] * (1.0 - frac)
-                                 + (double) onset[(size_t) (i + L + 1)] * frac;
-            acc += (double) onset[(size_t) i] * shifted;
-            ++cnt;
-        }
-        return cnt > 0 ? acc / (double) cnt : 0.0;
-    };
-
-    // Scan a musical tempo range; the reported tempo stays in [70,180].
-    double bestScore = -1.0e30, bestBpm = 0.0;
-    for (double bpm = 70.0; bpm <= 180.0 + 1.0e-6; bpm += 0.5)
-    {
-        const double lag = 60.0 / bpm * hopRate;
-        if (lag < 1.0 || lag >= (double) (nHops - 2)) continue;
-        const double s = autocorrAtLag (lag);
-        if (s > bestScore) { bestScore = s; bestBpm = bpm; }
-    }
-    if (bestBpm <= 0.0) return { 0.0, 0.0 };
-    return { bestBpm, juce::jlimit (0.0, 1.0, bestScore / var0) };
-}
-
-juce::var MoshOps::cmdSetClipWarp (const juce::var& args)
-{
-    // Audio warp (auto-tempo): the clip re-anchors in BEATS so its audio
-    // time-stretches to follow the tempo map. The position remap is IMMEDIATE
-    // (getMaximumLength reads the live tempoSequence), so a tempo change visibly
-    // re-lengths the clip in the next snapshot — fully headless-verifiable.
-    // Stretching uses the engine's vendored SoundTouch (TRACKTION_ENABLE_
-    // TIMESTRETCH_SOUNDTOUCH); free warp MARKERS are a deferred subsystem.
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("set_clip_warp", "not an audio clip");
-    if (! args.hasProperty ("autoTempo")) return errResult ("set_clip_warp", "missing 'autoTempo'");
-    const bool on = (bool) args.getProperty ("autoTempo", false);
-
-    beginTxn ("set_clip_warp");
-
-    if (on)
-    {
-        // Stretch mode: the requested name, validated against what this build
-        // compiles in (checkModeIsAvailable returns a usable fallback).
-        auto mode = te::TimeStretcher::defaultMode;
-        if (args.hasProperty ("mode"))
-            mode = te::TimeStretcher::getModeFromName (eng.engine(),
-                                                       args.getProperty ("mode", var()).toString());
-        mode = te::TimeStretcher::checkModeIsAvailable (mode);
-        ac->setTimeStretchMode (mode);
-
-        // Source BPM: explicit when given; else default to the map tempo at the
-        // clip's start, so enabling warp is a 1:1 no-op until the map changes.
-        // With detect:true (and no explicit sourceBpm) we estimate the loop's own
-        // BPM offline and lock it to the grid — the "easy" Ableton behaviour. This
-        // is GUARDED so the default (detect absent) path stays byte-identical.
-        double defaultBpm = eng.edit().tempoSequence.getBpmAt (ac->getPosition().getStart());
-        if (! args.hasProperty ("sourceBpm") && (bool) args.getProperty ("detect", false))
-            if (auto* wav = dynamic_cast<te::WaveAudioClip*> (ac))
-            {
-                const auto est = detectBpmFromFile (wav->getCurrentSourceFile());
-                if (est.first > 0.0 && est.second >= kBpmDetectConfidence) defaultBpm = est.first;
-            }
-        const double sourceBpm = juce::jlimit (20.0, 999.0,
-            (double) args.getProperty ("sourceBpm", defaultBpm));
-        auto info = ac->getAudioFile().getInfo();
-        ac->getLoopInfo().setBpm (sourceBpm, info);
-    }
-    ac->setAutoTempo (on);
-
-    logLine ("set_clip_warp", args, true, {}, true);
-    emitSnapshotInvalidated();
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", ac->itemID.toString());
-    data->setProperty ("autoTempo", ac->getAutoTempo());
-    data->setProperty ("stretchMode", te::TimeStretcher::getNameOfMode (ac->getTimeStretchMode()));
-    return okResult ("set_clip_warp", var (data));
-}
-
-juce::var MoshOps::cmdStretchClip (const juce::var& args)
-{
-    // Time-stretch a wave clip to a target WARPED length (seconds) or a bar count,
-    // by enabling auto-tempo and deriving the sourceBpm that makes it fit. Powers
-    // the drag-to-stretch gesture and the Inspector "Fit N bars / ×2 / ÷2" helpers.
-    // warpedLen = sourceLen × sourceBpm / projectBpm  ⇒  sourceBpm = projectBpm × target / sourceLen.
-    auto* ac = dynamic_cast<te::AudioClipBase*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (ac == nullptr) return errResult ("stretch_clip", "not an audio clip");
-    if (! args.hasProperty ("length") && ! args.hasProperty ("bars"))
-        return errResult ("stretch_clip", "missing 'length' or 'bars'");
-
-    const double sourceLen = ac->getAudioFile().getLength();
-    if (sourceLen <= 0.0) return errResult ("stretch_clip", "source has no length");
-
-    auto& tempoSeq = eng.edit().tempoSequence;
-    const auto startPos = ac->getPosition().getStart();
-    const double projectBpm = tempoSeq.getBpmAt (startPos);
-    if (projectBpm <= 0.0) return errResult ("stretch_clip", "invalid project tempo");
-
-    double sourceBpm = 0.0;
-    if (args.hasProperty ("bars"))
-    {
-        const double bars = (double) args.getProperty ("bars", 0.0);
-        if (bars <= 0.0) return errResult ("stretch_clip", "'bars' must be > 0");
-        const int beatsPerBar = juce::jmax (1, tempoSeq.getTimeSigAt (startPos).numerator.get());
-        // The source should span exactly bars×beatsPerBar beats.
-        sourceBpm = (bars * (double) beatsPerBar * 60.0) / sourceLen;
-    }
-    else
-    {
-        const double target = (double) args.getProperty ("length", sourceLen);
-        if (target <= 0.0) return errResult ("stretch_clip", "'length' must be > 0");
-        sourceBpm = projectBpm * target / sourceLen;
-    }
-    sourceBpm = juce::jlimit (20.0, 999.0, sourceBpm);
-    const double warpedLen = sourceLen * sourceBpm / projectBpm;
-
-    beginTxn ("stretch_clip");
-    ac->setTimeStretchMode (te::TimeStretcher::checkModeIsAvailable (te::TimeStretcher::defaultMode));
-    auto info = ac->getAudioFile().getInfo();
-    ac->getLoopInfo().setBpm (sourceBpm, info);
-    ac->setAutoTempo (true);
-    // Fill the target span explicitly so the clip visibly stretches to the dragged
-    // length (the whole source maps across warpedLen at this sourceBpm).
-    ac->setPosition ({ { startPos, tracktion::TimeDuration::fromSeconds (warpedLen) },
-                       ac->getPosition().getOffset() });
-
-    logLine ("stretch_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    reactiveTouch (ac->itemID.toString());
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", ac->itemID.toString());
-    data->setProperty ("sourceBpm", sourceBpm);
-    data->setProperty ("length", ac->getPosition().getLength().inSeconds());
-    return okResult ("stretch_clip", var (data));
-}
-
-juce::var MoshOps::cmdDetectClipBpm (const juce::var& args)
-{
-    // Read-only offline BPM estimate of a wave clip's source loop (no txn / log,
-    // mirrors get_clip_peaks). Feeds the Inspector "Detect BPM" affordance.
-    const auto id = args.getProperty ("clipId", var()).toString();
-    auto* wave = dynamic_cast<te::WaveAudioClip*> (findClip (id));
-    if (wave == nullptr) return errResult ("detect_clip_bpm", "no wave clip: " + id);
-
-    const auto est = detectBpmFromFile (wave->getCurrentSourceFile());
-    if (est.first <= 0.0) return errResult ("detect_clip_bpm", "cannot estimate BPM (unreadable or no pulse)");
-
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", id);
-    data->setProperty ("bpm", est.first);
-    data->setProperty ("confidence", est.second);
-    return okResult ("detect_clip_bpm", var (data));
-}
-
-juce::var MoshOps::cmdDuplicateClip (const juce::var& args)
-{
-    auto* clip = findClip (args.getProperty ("clipId", var()).toString());
-    if (clip == nullptr) return errResult ("duplicate_clip", "no clip");
-    auto* track = dynamic_cast<te::ClipTrack*> (clip->getTrack());
-    if (track == nullptr) return errResult ("duplicate_clip", "clip not on a clip track");
-
-    auto pos = clip->getPosition();
-    const double newStart = pos.getEnd().inSeconds();
-    const double len = pos.getLength().inSeconds();
-
-    beginTxn ("duplicate_clip");
-    te::Clip* dup = nullptr;
-    if (auto* w = dynamic_cast<te::WaveAudioClip*> (clip))
-    {
-        auto nc = track->insertWaveClip (clip->getName(), w->getCurrentSourceFile(),
-            { { tracktion::TimePosition::fromSeconds (newStart), pos.getLength() }, pos.getOffset() }, false);
-        if (nc != nullptr) { nc->setGainDB (w->getGainDB()); dup = nc.get(); }
-    }
-    else if (auto* m = dynamic_cast<te::MidiClip*> (clip))
-    {
-        auto nc = track->insertMIDIClip (clip->getName(),
-            { tracktion::TimePosition::fromSeconds (newStart),
-              tracktion::TimePosition::fromSeconds (newStart + len) }, nullptr);
-        if (nc != nullptr)
-        {
-            auto& src = m->getSequence();
-            auto& dst = nc->getSequence();
-            for (int i = 0; i < src.getNumNotes(); ++i)
-                if (auto* n = src.getNote (i))
-                    dst.addNote (n->getNoteNumber(), n->getStartBeat(), n->getLengthBeats(),
-                                 n->getVelocity(), 0, &undoManager());
-            dup = nc.get();
-        }
-    }
-    if (dup == nullptr) return errResult ("duplicate_clip", "could not duplicate this clip type");
-    dup->setMuted (clip->isMuted());
-
-    auto* data = new DynamicObject();
-    data->setProperty ("newClipId", dup->itemID.toString());
-    logLine ("duplicate_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("duplicate_clip", var (data));
-}
-
-// ARR-010: delete a time range [start, end] across one or more tracks as a
-// SINGLE undoable transaction. For each targeted track we split every clip that
-// straddles a bound (reusing ClipTrack::splitClip, the same primitive as
-// split_clip) and then remove every clip segment that ends up fully inside the
-// range (removeFromParent, the same primitive as remove_clip). Edge cases fall
-// out of the geometry: a clip entirely inside is removed whole; a clip
-// straddling only one bound is split once and the inside half removed (trim); a
-// clip fully outside is never touched; an empty track / no-overlap range is a
-// graceful no-op. trackIds defaults to every audio track.
-//
-// ARR-011 — the optional `ripple` flag (default FALSE, so the pre-existing lift/cut
-// behaviour above is byte-identical when the arg is absent). When true, after the
-// removal each targeted track's downstream clips slide LEFT by the range length to
-// close the gap, inside this same transaction.
-//
-// RIPPLE SCOPE = the tracks this command already targets (`targets`), not "every
-// track in the edit". That is the only choice consistent with the command's existing
-// contract: delete_time_range ALREADY scopes its removal to `trackIds` (defaulting to
-// all audio tracks), so rippling the same set keeps "what got cut" and "what got
-// closed up" identical. Rippling all tracks on a trackIds-scoped call would shift
-// clips on tracks the caller explicitly excluded — silently desyncing them from a
-// deletion they never participated in. Note the DEFAULT (no trackIds) is already
-// every audio track, so a whole-timeline ripple remains one call away.
-juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
-{
-    const double start = (double) args.getProperty ("start", 0.0);
-    const double end   = (double) args.getProperty ("end",   0.0);
-    if (! (start < end))
-        return errResult ("delete_time_range", "start must be less than end");
-
-    const bool ripple = (bool) args.getProperty ("ripple", false);
-
-    auto& edit = eng.edit();
-
-    // Resolve the target tracks. Bind the var array to a local before getArray()
-    // so the temporary stays alive while we read it.
-    juce::Array<te::AudioTrack*> targets;
-    const auto trackIdsVar = args.getProperty ("trackIds", var());
-    if (auto* ids = trackIdsVar.getArray())
-    {
-        for (auto& idv : *ids)
-            if (auto* t = findTrack (idv.toString()))
-                if (! targets.contains (t))
-                    targets.add (t);
-    }
-    else
-    {
-        for (auto* t : te::getAudioTracks (edit))
-            if (t != nullptr)
-                targets.add (t);
-    }
-
-    const auto rStart = tracktion::TimePosition::fromSeconds (start);
-    const auto rEnd   = tracktion::TimePosition::fromSeconds (end);
-
-    beginTxn ("delete_time_range");
-
-    int removed = 0, splits = 0;
-    bool structurallyChanged = false;
-
-    for (auto* track : targets)
-    {
-        if (track == nullptr) continue;
-        auto* clipTrack = dynamic_cast<te::ClipTrack*> (track);
-        if (clipTrack == nullptr) continue;
-
-        // Phase 1 — split at the range bounds so every clip aligns to start/end.
-        // Iterate a stable copy (split inserts a clip into the live list). Split at
-        // the LATER bound (end) first so splitting at start doesn't shift which
-        // clip the end falls inside; both splits use the same primitive as
-        // split_clip (ClipTrack::splitClip). We re-read each clip's live position
-        // before deciding (the bound must be strictly inside, mirroring split's own
-        // reduced(0.001s).contains guard).
-        for (const auto& bound : { rEnd, rStart })
-        {
-            juce::Array<te::Clip*> snap;
-            for (auto* c : clipTrack->getClips())
-                if (c != nullptr)
-                    snap.add (c);
-
-            for (auto* c : snap)
-            {
-                if (c == nullptr) continue;
-                const auto p = c->getPosition();
-                if (p.getStart() < bound && bound < p.getEnd())
-                {
-                    clipTrack->splitClip (*c, bound);
-                    ++splits;
-                    structurallyChanged = true;
-                }
-            }
-
-            // Deliberately NO message-loop pump: splitClip's position writes are
-            // synchronous ValueTree ops, visible immediately (AUD-001; patches/0005).
-        }
-
-        // Phase 2 — every clip now begins/ends on the range bounds. Remove the
-        // segment(s) lying fully inside [start, end] (removeFromParent, the same
-        // primitive as remove_clip). A clip entirely inside is caught here whole; a
-        // clip straddling only one bound has been split and its inside half lands
-        // fully inside; a clip fully outside never matches.
-        juce::Array<te::Clip*> toRemove;
-        for (auto* c : clipTrack->getClips())
-            if (c != nullptr)
-            {
-                const auto p = c->getPosition();
-                if (p.getStart() >= rStart - tracktion::TimeDuration::fromSeconds (0.0005)
-                    && p.getEnd() <= rEnd + tracktion::TimeDuration::fromSeconds (0.0005))
-                    toRemove.add (c);
-            }
-        for (auto* c : toRemove)
-            if (c != nullptr)
-            {
-                c->removeFromParent();
-                ++removed;
-                structurallyChanged = true;
-            }
-
-        // Phase 3 (ARR-011, opt-in) — close the gap. Every clip now starting at or
-        // after the range END slides LEFT by the range length. Phases 1+2 guarantee
-        // nothing straddles rEnd any more, so this is a clean translation: no clip is
-        // cut in half by the shift and the spacing downstream is preserved exactly.
-        if (ripple)
-            if (rippleShiftClipsAfter (*clipTrack, end, -(end - start)) > 0)
-                structurallyChanged = true;
-    }
-
-    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
-    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
-    // async engine work — the AUD-001 use-after-free class (see patches/0005).
-
-    auto* data = new DynamicObject();
-    data->setProperty ("removed", removed);
-    data->setProperty ("splits", splits);
-    data->setProperty ("tracks", targets.size());
-    data->setProperty ("ripple", ripple);
-    logLine ("delete_time_range", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("delete_time_range", var (data));
-}
-
-// Recreate a clip from a clipToVar-shaped descriptor on a target track at a
-// target time. This is the paste half of the UI-local copy/cut/paste clipboard
-// (the clipboard itself is view state and never crosses the bridge until here).
-// A genuine undoable edit: open a transaction and log undoable:true.
-juce::var MoshOps::cmdPasteClip (const juce::var& args)
-{
-    const auto trackId = args.getProperty ("trackId", var()).toString();
-    if (trackId.isEmpty()) return errResult ("paste_clip", "missing 'trackId'");
-
-    const auto clipVar = args.getProperty ("clip", var());
-    if (! clipVar.isObject()) return errResult ("paste_clip", "missing 'clip'");
-
-    const auto type = clipVar.getProperty ("type", var()).toString();
-    if (type != "wave" && type != "midi")
-        return errResult ("paste_clip", "unsupported clip type: " + type);
-
-    // Validate cheap per-type preconditions BEFORE any side effect (transaction /
-    // track auto-create) so a malformed descriptor errors out with zero side effects
-    // (no orphan track left behind, no empty transaction opened).
-    File waveSource;
-    if (type == "wave")
-    {
-        const auto sourcePath = clipVar.getProperty ("sourceFile", var()).toString();
-        if (sourcePath.isEmpty()) return errResult ("paste_clip", "wave clip missing 'sourceFile'");
-        waveSource = File (sourcePath);
-        if (! waveSource.existsAsFile()) return errResult ("paste_clip", "source file not found: " + sourcePath);
-    }
-
-    auto* track = findTrack (trackId);
-
-    beginTxn ("paste_clip");
-    // Match cmdImportClip/cmdAddMidiClip: create the track if it's missing.
-    if (track == nullptr)
-        track = createAudioTrack ({});
-    if (track == nullptr) return errResult ("paste_clip", "no track");
-
-    const double start  = (double) args.getProperty ("start", 0.0);
-    const double length = juce::jmax (0.0, (double) clipVar.getProperty ("length", 0.0));
-    const double offset = (double) clipVar.getProperty ("offset", 0.0);
-    auto name = clipVar.getProperty ("name", var()).toString();
-    if (name.isEmpty()) name = (type == "midi") ? "MIDI" : "clip";
-
-    te::Clip* pasted = nullptr;
-    if (type == "wave")
-    {
-        auto nc = track->insertWaveClip (name, waveSource,
-            { { tracktion::TimePosition::fromSeconds (start), tracktion::TimeDuration::fromSeconds (length) },
-              tracktion::TimeDuration::fromSeconds (offset) }, false);
-        if (nc == nullptr) return errResult ("paste_clip", "insertWaveClip failed");
-        nc->setGainDB ((float) (double) clipVar.getProperty ("gainDb", 0.0));
-        pasted = nc.get();
-    }
-    else // midi
-    {
-        auto nc = track->insertMIDIClip (name,
-            { tracktion::TimePosition::fromSeconds (start),
-              tracktion::TimePosition::fromSeconds (start + length) }, nullptr);
-        if (nc == nullptr) return errResult ("paste_clip", "insertMIDIClip failed");
-
-        auto& sequence = nc->getSequence();
-        // Bind the notes array to a local before getArray(): a pointer into a
-        // temporary var dangles (has bitten prior waves).
-        const auto notesVar = clipVar.getProperty ("notes", var());
-        if (notesVar.isArray())
-            for (auto& n : *notesVar.getArray())
-                sequence.addNote (juce::jlimit (0, 127, (int) n.getProperty ("pitch", 60)),
-                                  tracktion::BeatPosition::fromBeats ((double) n.getProperty ("start", 0.0)),
-                                  tracktion::BeatDuration::fromBeats (juce::jmax (0.0625, (double) n.getProperty ("length", 1.0))),
-                                  juce::jlimit (1, 127, (int) n.getProperty ("velocity", 100)), 0, &undoManager());
-        pasted = nc.get();
-    }
-
-    if (pasted == nullptr) return errResult ("paste_clip", "could not paste this clip type");
-    pasted->setMuted ((bool) clipVar.getProperty ("mute", false));
-
-    // Deliberately NO message-loop pump here: EditItemID assignment is synchronous
-    // (edit.createNewItemID() runs inline), and a mid-command pump re-enters queued
-    // async engine work — the AUD-001 use-after-free class (see patches/0005).
-
-    ensureTrackMeter (*track);   // METER-001 — self-healing: covers both the auto-created and the resolved-existing case
-
-    auto* data = new DynamicObject();
-    data->setProperty ("clipId", pasted->itemID.toString());
-    data->setProperty ("trackId", track->itemID.toString());
-    logLine ("paste_clip", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("paste_clip", var (data));
-}
-
-juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
-{
-    const auto id = args.getProperty ("trackId", var()).toString();
-    te::VolumeAndPanPlugin* vp = nullptr;
-    te::AudioTrack* audioTrack = nullptr;
-    if (auto* track = findTrack (id))
-        { audioTrack = track; vp = ensureVolumePlugin (*track); }
-    else if (auto* group = findGroupTrack (id))   // MIX-008: group fader (submix VolumeAndPan)
-        vp = group->getVolumePlugin();
-    if (vp == nullptr) return errResult ("set_track_volume", "no track");
-
-    beginTxn ("set_track_volume");
-    // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
-    undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
-    logLine ("set_track_volume", args, true, {}, true);
-    if (audioTrack != nullptr) emitTrackPatch (*audioTrack);   // scoped (group fader → full below)
-    else emitSnapshotInvalidated();
-    return okResult ("set_track_volume");
-}
-
-juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_pan", "no track");
-    auto* vp = ensureVolumePlugin (*track);
-    if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
-
-    beginTxn ("set_track_pan");
-    // G14 — route the pan change through the UndoManager (setPan alone bypasses it).
-    undoManager().perform (new SetFaderValueAction (*vp, true,
-        juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));
-    logLine ("set_track_pan", args, true, {}, true);
-    emitTrackPatch (*track);   // scoped — pan is purely track-local
-    return okResult ("set_track_pan");
-}
-
-juce::var MoshOps::cmdSetTrackMute (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_mute", "no track");
-    beginTxn ("set_track_mute");
-    // G14 class (found by the P6 undo matrix): te::Track::setMute writes its CachedValue
-    // with a NULL UndoManager, leaving this transaction EMPTY — undo then popped the
-    // PREVIOUS command's transaction (destroying the user's prior edit) while the mute
-    // stuck. A plain ValueTree write through the edit's UndoManager records correctly,
-    // and mute is a plain CachedValue<bool> (not an AutomatableParameter), so undo's
-    // CachedValue refresh is the complete story — no SetFaderValueAction-style replay
-    // needed here.
-    track->state.setProperty (te::IDs::mute, (bool) args.getProperty ("mute", false), &undoManager());
-    logLine ("set_track_mute", args, true, {}, true);
-    emitTrackPatch (*track);   // scoped — mute is purely track-local (unlike solo, which dims others)
-    return okResult ("set_track_mute");
-}
-
-juce::var MoshOps::cmdSetTrackSolo (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_track_solo", "no track");
-    beginTxn ("set_track_solo");
-    // Same G14-class fix as set_track_mute above (P6 undo matrix find).
-    track->state.setProperty (te::IDs::solo, (bool) args.getProperty ("solo", false), &undoManager());
-    logLine ("set_track_solo", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_track_solo");
-}
-
-juce::var MoshOps::cmdArmTrack (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("arm_track", "no track");
-    const bool armed = (bool) args.getProperty ("armed", false);
-
-    // Record-arm is a monitoring preference, NOT an undoable session edit: the engine
-    // binds the destination's `armed` flag with a nullptr UndoManager
-    // (tracktion_InputDevice.h: recordEnabled.referTo (state, IDs::armed, nullptr, false)),
-    // so a transaction here would be empty. Treat it like set_metronome / set_transport.
-
-    // getAllInputDevices() is empty headless / without a playback context, so there
-    // are no instances to operate on. Degrade gracefully: ok result, applied:false,
-    // never an error (mirrors cmdSetTransport skipping play/record when !hasAudio()).
-    bool applied = false;
-    auto inputs = eng.edit().getAllInputDevices();
-
-    // Find an instance already targeting this track at slot 0.
-    te::InputDeviceInstance* target = nullptr;
-    for (auto* inst : inputs)
-        if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
-        {
-            target = inst;
-            break;
-        }
-
-    // Arming a virgin track: assign an available input first, then enable
-    // (RecordingDemo does setTarget + setRecordingEnabled together). Disarming a track
-    // with no instance is a harmless no-op.
-    //
-    // CTL-001 — route MIDI to instrument tracks: an instrument track (one hosting a
-    // synth) should receive live MIDI from a controller, not a wave input, so a played
-    // note turns into audio. We therefore prefer a MIDI input instance when the track
-    // has an instrument, and a wave input otherwise. setTarget + setRecordingEnabled
-    // are identical calls for either device family. There is NO Tracktion "all MIDI
-    // inputs auto-route to the armed track" behaviour — each input must be explicitly
-    // targeted; we pick the FIRST matching input (multi-controller disambiguation is a
-    // later enhancement). Wave-only tracks are unchanged from the recording wave.
-    if (target == nullptr && armed)
-    {
-        const bool wantMidi = trackHasInstrument (*track);
-
-        // RTG-001 — honor an explicitly-chosen input first (set_track_input stores
-        // the WaveInputDevice deviceID on the track's state). Falls through to the
-        // family-preference passes below when no choice is stored / not present.
-        const auto chosenID = track->state.getProperty (ids::moshInputDevice, var()).toString();
-        if (chosenID.isNotEmpty())
-            for (auto* inst : inputs)
-                if (inst != nullptr && inst->getInputDevice().getDeviceID() == chosenID)
-                {
-                    if (auto r = inst->setTarget (track->itemID, true, nullptr, 0))
-                        target = inst;
-                    // A failed setTarget on the chosen device falls through to the
-                    // normal auto-assign rather than failing the arm outright.
-                    break;
-                }
-
-        auto matchesPreferred = [wantMidi] (te::InputDeviceInstance* inst)
-        {
-            const auto type = inst->getInputDevice().getDeviceType();
-            return wantMidi ? (type == te::InputDevice::physicalMidiDevice
-                                   || type == te::InputDevice::virtualMidiDevice)
-                            : (type == te::InputDevice::waveDevice);
-        };
-
-        // First pass: the preferred device family (MIDI for instrument tracks, wave
-        // otherwise). Fallback pass: the other family, so arming still does something
-        // sensible if e.g. only a wave input is present (or only MIDI, no synth yet).
-        for (int pass = 0; pass < 2 && target == nullptr; ++pass)
-            for (auto* inst : inputs)
-            {
-                if (inst == nullptr) continue;
-                const bool preferred = matchesPreferred (inst);
-                if (pass == 0 ? ! preferred : preferred)
-                    continue;     // pass 0: preferred only; pass 1: the other family only
-                if (! (inst->getInputDevice().getDeviceType() == te::InputDevice::waveDevice
-                       || inst->getInputDevice().isMidi()))
-                    continue;     // ignore track-wave/track-midi internal device types
-
-                // setTarget returns tl::expected — check the error, never blind-deref.
-                // Pass nullptr (no UndoManager): arming is a non-undoable preference, so
-                // the target assignment stays off the Edit undo stack too (it still
-                // persists in the input-device ValueTree and saves with the Edit).
-                if (auto r = inst->setTarget (track->itemID, true, nullptr, 0))
-                {
-                    target = inst;
-                    break;
-                }
-                else
-                {
-                    // Genuine assignment failure (a live device rejected the target):
-                    // log exactly once and surface as an error — never a misleading ok.
-                    logLine ("arm_track", args, false, r.error(), false);
-                    return errResult ("arm_track", r.error());
-                }
-            }
-    }
-
-    if (target != nullptr)
-    {
-        target->setRecordingEnabled (track->itemID, armed);
-        applied = true;
-    }
-
-    logLine ("arm_track", args, true, {}, false);
-    emitSnapshotInvalidated();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("trackId", track->itemID.toString());
-    data->setProperty ("armed", armed);
-    data->setProperty ("applied", applied);
-    if (! applied)
-        data->setProperty ("reason", "no input device");
-    return okResult ("arm_track", var (data));
-}
-
-juce::var MoshOps::cmdStopRecording (const juce::var& args)
-{
-    // Wave B — record-to-take landing (TRA-002 wave, MID-001 MIDI, ARE-003 latency).
-    //
-    // Stopping a recording is a RECORDING-LIFECYCLE action, NOT an undoable session
-    // edit: Tracktion lands the take's clip(s) on the armed track(s) via its own async
-    // clip-add path (the recording context's stopRecording produces a Clip::Array), and
-    // the user undoes the *take* via remove_clip if they reject it. So this is a
-    // non-undoable transport op (no beginNewTransaction; logged undoable:false) — the
-    // same posture as set_transport / arm_track.
-    //
-    // discardRecordings=false KEEPS the takes (the canonical RecordingDemo stop overload
-    // transport.stop(discardRecordings, clearDevices)); discardRecordings=true throws the
-    // captured audio/MIDI away and lands nothing. clearDevices stays false so the
-    // playback graph survives for the next take.
-    const bool discard = (bool) args.getProperty ("discardRecordings", false);
-
-    auto& transport = eng.edit().getTransport();
-
-    // Graceful degradation (mirrors cmdArmTrack / the cmdSetTransport record guard):
-    // headless / no audio device → no playback context → no armed inputs → nothing can
-    // have been captured. NEVER an error: ok result, applied:false, clips:[], reason.
-    auto reportNoOp = [&] (const char* reason) -> juce::var
-    {
-        logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
-        emit ("transport", transportToVar());
-        emitSnapshotInvalidated();
-        auto* data = new DynamicObject();
-        data->setProperty ("applied", false);
-        data->setProperty ("discarded", discard);
-        data->setProperty ("clips", Array<var>());
-        data->setProperty ("reason", reason);
-        return okResult ("stop_recording", var (data));
-    };
-
-    if (! eng.hasAudio())
-        return reportNoOp ("no audio device");
-
-    auto* context = transport.getCurrentPlaybackContext();
-    if (context == nullptr)
-        return reportNoOp ("no playback context");
-
-    if (! transport.isRecording())
-        return reportNoOp ("not recording");
-
-    // Snapshot the clip ids already present on every armed track BEFORE stopping, so the
-    // newly-landed take(s) are exactly the post-stop set minus this set. A single track
-    // can be targeted by multiple input instances (wave + MIDI), and several tracks can
-    // be armed at once, so we collect across ALL armed inputs (key the set per track id).
-    // Bind the input array to a local before iterating (no dangling temporary).
-    juce::Array<te::AudioTrack*> armedTracks;
-    {
-        auto inputs = eng.edit().getAllInputDevices();
-        auto allTracks = te::getAudioTracks (eng.edit());
-        for (auto* inst : inputs)
-            if (inst != nullptr)
-                for (auto* t : allTracks)
-                    if (t != nullptr
-                        && te::isOnTargetTrack (*inst, *t, 0)
-                        && inst->isRecordingEnabled (t->itemID)
-                        && ! armedTracks.contains (t))
-                        armedTracks.add (t);
-    }
-
-    juce::HashMap<juce::String, int> beforeIds;     // clip itemID -> 1 (membership set)
-    for (auto* t : armedTracks)
-        for (auto* c : t->getClips())
-            if (c != nullptr)
-                beforeIds.set (c->itemID.toString(), 1);
-
-    // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
-    // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
-    // playbackContext->stopRecording() -> applyRecording()), so the take clips exist in
-    // track.getClips() right after this returns.
-    transport.stop (discard, false);
-
-    // Belt-and-suspenders: pump the message loop so any queued ValueTree/Selectable
-    // settling + itemID assignment completes before we diff the clips. Headless there is
-    // no GUI dispatch between commands, so we pump explicitly (mirrors createAudioTrack).
-    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-        for (int i = 0; i < 4; ++i)
-            mm->runDispatchLoopUntil (1);
-
-    // Diff: any clip on an armed track not in the before-set is a freshly-landed take.
-    // This detects BOTH wave takes (WaveAudioClip) and MIDI takes (MidiClip, sequence
-    // already finalized on stop) — clipToVar serializes either kind (notes for MIDI).
-    // ARE-003: the landed clip's start is auto-adjusted by record latency inside
-    // Tracktion; we just read it back via clipToVar (no app-side alignment).
-    Array<var> landed;
-    if (! discard)
-        for (auto* t : armedTracks)
-            for (auto* c : t->getClips())
-                if (c != nullptr && ! beforeIds.contains (c->itemID.toString()))
-                    landed.add (clipToVar (*c));
-
-    logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
-    emit ("transport", transportToVar());
-    emitSnapshotInvalidated();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("applied", true);
-    data->setProperty ("discarded", discard);
-    data->setProperty ("clips", landed);
-    if (landed.isEmpty() && ! discard)
-        data->setProperty ("reason", "no take captured (no live input)");
-    return okResult ("stop_recording", var (data));
-}
-
-juce::var MoshOps::cmdSetInputMonitor (const juce::var& args)
-{
-    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
-    if (track == nullptr) return errResult ("set_input_monitor", "no track");
-
-    // Accept either { mode: "off"|"automatic"|"on" } or legacy { monitor: bool }.
-    juce::String modeStr;
-    if (args.hasProperty ("mode"))
-        modeStr = args.getProperty ("mode", var()).toString();
-    else if (args.hasProperty ("monitor"))
-        modeStr = ((bool) args.getProperty ("monitor", false)) ? "on" : "off";
-    else
-        modeStr = "automatic";
-
-    te::InputDevice::MonitorMode mode;
-    if (modeStr == "off")            mode = te::InputDevice::MonitorMode::off;
-    else if (modeStr == "automatic") mode = te::InputDevice::MonitorMode::automatic;
-    else if (modeStr == "on")        mode = te::InputDevice::MonitorMode::on;
-    else return errResult ("set_input_monitor", "bad mode: " + modeStr);
-
-    // Input monitoring is a device preference, NOT an undoable Edit change: setMonitorMode
-    // writes the field + saveProps() (global engine props, not the Edit value tree), so a
-    // transaction would be empty. Treat it like set_metronome.
-
-    // Monitor mode is a property of the shared InputDevice (the *device*, not the
-    // instance) — two tracks fed by the same physical input share one monitor mode.
-    // Headless getAllInputDevices() is empty → no-op, applied:false (never an error).
-    bool applied = false;
-    for (auto* inst : eng.edit().getAllInputDevices())
-        if (inst != nullptr && te::isOnTargetTrack (*inst, *track, 0))
-        {
-            inst->getInputDevice().setMonitorMode (mode);
-            applied = true;
-            break;
-        }
-
-    logLine ("set_input_monitor", args, true, {}, false);
-    emitSnapshotInvalidated();
-
-    auto* data = new DynamicObject();
-    data->setProperty ("trackId", track->itemID.toString());
-    data->setProperty ("mode", modeStr);
-    data->setProperty ("applied", applied);
-    if (! applied)
-        data->setProperty ("reason", "no input device");
-    return okResult ("set_input_monitor", var (data));
 }
 
 juce::var MoshOps::cmdSetMasterVolume (const juce::var& args)
@@ -11318,62 +8273,6 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     return var (o);
 }
 
-// ── take lanes (audio) — expose Tracktion's native take tree ──────────────────
-juce::var MoshOps::cmdListTakes (const juce::var& args)
-{
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (w == nullptr) return errResult ("list_takes", "no wave clip");
-    auto descs = w->getTakeDescriptions();
-    juce::Array<juce::var> takes;
-    for (int i = 0; i < descs.size(); ++i)
-    {
-        auto* t = new juce::DynamicObject();
-        t->setProperty ("index", i);
-        t->setProperty ("description", descs[i]);
-        t->setProperty ("isCurrent", i == w->getCurrentTake());
-        takes.add (juce::var (t));
-    }
-    auto* o = new juce::DynamicObject();
-    o->setProperty ("clipId", w->itemID.toString());
-    o->setProperty ("numTakes", w->getNumTakes (false));
-    o->setProperty ("currentTakeIndex", w->getCurrentTake());
-    o->setProperty ("takes", takes);
-    return okResult ("list_takes", juce::var (o));   // read-only: no transaction / log
-}
-
-juce::var MoshOps::cmdSetCurrentTake (const juce::var& args)
-{
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (w == nullptr) return errResult ("set_current_take", "no wave clip");
-    const int n = w->getNumTakes (false);
-    if (n <= 0) return errResult ("set_current_take", "no takes");
-    const int idx = juce::jlimit (0, n - 1, (int) args.getProperty ("takeIndex", 0));
-    beginTxn ("set_current_take");
-    w->setCurrentTake (idx);
-    logLine ("set_current_take", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("set_current_take");
-}
-
-juce::var MoshOps::cmdKeepTake (const juce::var& args)
-{
-    auto* w = dynamic_cast<te::WaveAudioClip*> (findClip (args.getProperty ("clipId", var()).toString()));
-    if (w == nullptr) return errResult ("keep_take", "no wave clip");
-    if (! w->hasAnyTakes()) return errResult ("keep_take", "no takes to keep");
-    beginTxn ("keep_take");
-    w->deleteAllUnusedTakes (false);   // keep the current take; preserve source files → undo-safe
-    logLine ("keep_take", args, true, {}, true);
-    emitSnapshotInvalidated();
-    return okResult ("keep_take");
-}
-
-juce::var MoshOps::cmdMarkTake (const juce::var& args)
-{
-    logLine ("mark_take", args, true, {}, false);
-    emit ("controller_event", args);
-    return okResult ("mark_take");
-}
-
 juce::var MoshOps::clipToVar (te::Clip& c)
 {
     auto pos = c.getPosition();
@@ -12010,6 +8909,9 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
 
     pendingRecovery_.clear();
     if (recovered > 0) { eng.markDirty(); eng.save(); }   // persist recovered work (also truncates)
+    // FS-B2a — the journal tail was replayed, so the POST-transaction state stands: a
+    // crash-orphaned agent transaction is no longer ambiguous and skills are unblocked.
+    resolveUnresolvedTxns (/*provedPostState=*/true);
     emitSnapshotInvalidated();
     logLine ("recover_session", args, true, {}, false);
 
@@ -12023,6 +8925,8 @@ juce::var MoshOps::cmdDiscardRecovery (const juce::var& args)
 {
     pendingRecovery_.clear();
     recoveryJournalFile.deleteFile();
+    // FS-B2a — the tail was dropped, so the last SAVED (pre-transaction) state stands.
+    resolveUnresolvedTxns (/*provedPostState=*/false);
     logLine ("discard_recovery", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("discard_recovery");
