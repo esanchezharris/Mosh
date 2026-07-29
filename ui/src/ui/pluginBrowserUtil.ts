@@ -107,6 +107,26 @@ export function buildPluginRows(args: {
   return rows;
 }
 
+/**
+ * Dispatch the right load command for an entry — built-ins and installed plugins
+ * load via different commands with different arg shapes — and record the entry in
+ * the recents list. No-op (returns false) when no track is selected. Shared by the
+ * classic modal (PluginBrowser.tsx) and the v2 picker (v2/PluginBrowser.tsx) so the
+ * command dispatch cannot drift between shells; callers keep their own UI reactions
+ * (refresh recents state, close-on-load).
+ */
+export function loadPluginEntry(
+  entry: PluginEntry,
+  trackId: string | null,
+  exec: (command: string, args?: Record<string, unknown>) => unknown,
+): boolean {
+  if (!trackId) return false;
+  if (entry.loadKind === "builtin") void exec("load_builtin", { trackId, type: entry.loadKey });
+  else void exec("load_plugin", { trackId, pluginId: entry.loadKey });
+  addPluginRecent(entry.uid);
+  return true;
+}
+
 /** Window math: which row indices to mount for a given scroll position. */
 export function visibleRange(
   scrollTop: number, viewportH: number, rowH: number, count: number, overscan = 6,
