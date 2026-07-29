@@ -96,6 +96,16 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         del os.environ["LYRICS_BENCH_TORCH_PY"]
 
+# Every case below injects `run_backend`, so no interpreter is ever executed —
+# but `score_pairs` resolves one BEFORE calling the backend and bails when there
+# is none. Without an explicit `python=`, these cases silently depended on the
+# dev machine happening to have a torch venv: on a runner without one they
+# crashed (available path) or passed for the wrong reason (unavailable path,
+# which bailed at resolution and never reached the backend it claims to test).
+# Passing a stub path makes them hermetic. It is never executed. (The constant
+# itself is defined once, above, alongside the MOSH_VENVS_DIR/LYRICS_BENCH_TORCH_PY
+# pinning — a second assignment here would silently shadow that one.)
+
 # ---- unavailable degrades honestly ----
 with tempfile.TemporaryDirectory() as td:
     out = torchjudge.score_pairs([(ITEM, "stacking all")], kind="emb",

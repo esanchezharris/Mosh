@@ -1,0 +1,449 @@
+/* ─────────────────────────────── BODY ────────────────────────────────────── */
+.v2-body {
+  display: grid;
+  /* symmetric push-docks: [ left | center | right ]. The flanks' widths track the dock
+     open-state vars, so opening a dock fills its OWN gutter and pushes the center — it
+     never overlaps the (capped, centered) work area. */
+  grid-template-columns: var(--v2-left-w) minmax(0, 1fr) var(--v2-right-w);
+  gap: 18px;
+  padding: 16px 22px 18px;   /* generous cream margins — panels float on the page */
+  min-height: 0;
+  transition: grid-template-columns 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) { .v2-body { transition: none; } }
+.v2-main {
+  display: grid;
+  grid-template-rows: auto 1fr auto;  /* navigator · arrangement · composer */
+  gap: var(--v2-gap);
+  min-width: 0; min-height: 0;
+}
+.v2-stage {
+  position: relative;
+  /* a SMALL centered work area: capped width + centered in the flexible middle column, so
+     comfortable margins show on both sides and the docks slide into them. */
+  width: 100%; max-width: var(--v2-stage-max); justify-self: center;
+  background: var(--v2-surface);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius);
+  box-shadow: var(--v2-glow);
+  overflow: hidden;
+  min-height: 0;
+  /* shrink-wrap to content (set per track-count in TrackLaneList): a stretched grid item
+     clamped by max-height caps + top-aligns, so sparse sessions reveal cream below and the
+     panel grows lane-by-lane until it hits the available height, then scrolls internally.
+     Fallback height covers the loading/empty placeholder. */
+  max-height: var(--v2-stage-h, calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + 4 * var(--v2-lane-h)));
+}
+
+/* ── section navigator — its OWN panel above the arrangement (concept-style separation,
+     a cream gap shows between it and the dark timeline). Shares the timeline x-axis, so it
+     MUST cap + center identically to the stage or the ribbon/ruler fall out of alignment. ── */
+.v2-nav {
+  display: flex; align-items: stretch; height: var(--v2-ribbon-h);
+  width: 100%; max-width: var(--v2-stage-max); justify-self: center;
+  background: var(--v2-surface); border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm); box-shadow: var(--v2-glow); overflow: hidden;
+}
+.v2-nav-gutter {
+  flex: 0 0 var(--v2-head-w); display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 10px; border-right: 1px solid var(--v2-line); background: var(--v2-surface-2);
+}
+.v2-nav-clip { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+
+/* ── song navigator (overview minimap) — full song mapped to the strip; click to jump ── */
+.v2-songnav { position: relative; height: 100%; width: 100%; cursor: pointer; }
+.v2-songnav:hover { background: var(--v2-surface-sunken); }
+.v2-songnav-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 6px; border-left: 1px solid var(--v2-line); pointer-events: none; }
+.v2-songnav-tick:first-of-type { border-left: none; }
+.v2-songnav-bar { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); }
+.v2-songnav-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--v2-playhead); pointer-events: none; z-index: 2; }
+.v2-songnav-peer { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--peer-color, #ff69a8); pointer-events: none; opacity: 0.85; }
+.v2-songnav-peer-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--peer-color, #ff69a8); }
+.v2-songnav-peer.recording { opacity: 1; }
+
+/* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
+.v2-tl-scroll { position: absolute; inset: 0; overflow: auto; }
+.v2-tl {
+  display: grid;
+  grid-template-columns: var(--v2-head-w) max-content;
+  position: relative;        /* anchors the absolute playhead overlay */
+  min-width: 100%;
+}
+/* corner cells stick in BOTH axes (over headers + over ruler/ribbon) */
+.v2-corner {
+  position: sticky; left: 0;
+  background: var(--v2-surface-2);
+  border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line);
+}
+.v2-corner-ribbon { top: 0; z-index: 7; height: var(--v2-ribbon-h); display: flex; align-items: center; justify-content: flex-end; }
+.v2-zoom { display: flex; align-items: center; gap: 3px; padding: 0 8px; }
+.v2-zoom button {
+  font: inherit; font-size: var(--v2-fs-xs); padding: 3px 7px; border-radius: 6px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+.v2-zoom button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* The ruler sits BELOW the ribbon, so both sticky rows must not pin at the same offset —
+   otherwise they overlap on scroll. (PR #183 flattened these to 0 when the ribbon left.) */
+.v2-corner-tempo { top: var(--v2-ribbon-h); z-index: 7; height: var(--v2-tempo-h); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+.v2-corner-label { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); letter-spacing: 0.1em; }
+.v2-corner-ruler { top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 7; height: var(--v2-ruler-h); }
+/* The annotation row sits below ribbon+tempo+ruler — its own offset, or it pins on top of
+   the ruler on scroll (same class of bug PR #183 caused when the ribbon's offset flattened). */
+.v2-corner-ann { top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h)); z-index: 7; height: var(--v2-ann-h); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+/* content header cells stick to the top only (scroll horizontally with the lanes) */
+.v2-ribbon-cell { position: sticky; top: 0; z-index: 4; }
+.v2-tempo-cell { position: sticky; top: var(--v2-ribbon-h); z-index: 4; }
+.v2-ruler-cell { position: sticky; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h)); z-index: 4; }
+.v2-ann-cell { position: sticky; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h)); z-index: 4; }
+
+/* section ribbon */
+.v2-ribbon {
+  position: relative; height: var(--v2-ribbon-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+}
+.v2-seg {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 12px;
+  border-left: 1px solid var(--v2-line); font-size: var(--v2-fs-sm); letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--v2-dim); white-space: nowrap; overflow: hidden; cursor: pointer;
+}
+.v2-seg:hover { color: var(--v2-text); }
+.v2-seg.editing { color: var(--v2-text); cursor: text; background: var(--v2-surface-sunken); }
+.v2-seg-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; opacity: 0.7; }
+.v2-seg-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* inline rename — borrows the ribbon's type so the swap is seamless */
+.v2-seg-input {
+  flex: 1 1 auto; min-width: 0; width: 100%; background: transparent; border: none; outline: none;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: var(--v2-text); padding: 0;
+}
+/* remove ✕ — revealed on hover so the ribbon stays clean */
+.v2-seg-rm {
+  flex: 0 0 auto; margin-left: 6px; width: 16px; height: 16px; border-radius: var(--v2-radius-xs);
+  display: grid; place-items: center; font-size: 12px; line-height: 1; border: none; cursor: pointer;
+  background: transparent; color: var(--v2-faint); opacity: 0; transition: opacity 90ms linear, color 90ms linear;
+}
+.v2-seg:hover .v2-seg-rm, .v2-seg:focus-within .v2-seg-rm,
+.v2-seg-rm:focus-visible { opacity: 1; }
+.v2-seg-rm:hover { color: var(--v2-accent); background: var(--v2-surface-2); }
+.v2-seg.editing .v2-seg-rm { display: none; }
+/* ghost "add section" chip, parked just after the last section (scrolls with content) */
+.v2-seg-add {
+  position: absolute; top: 0; bottom: 0; z-index: 2; width: 30px; display: grid; place-items: center;
+  border: none; border-left: 1px dashed var(--v2-line); background: transparent;
+  color: var(--v2-faint); font-size: var(--v2-fs-lg); line-height: 1; cursor: pointer; transition: color 90ms linear, background 90ms linear;
+}
+.v2-seg-add:hover { color: var(--v2-accent); background: var(--v2-surface-sunken); }
+
+/* tempo lane — thin, quiet, and empty most of the time. It reads as a rail rather than a
+   panel so a constant-tempo project (every project until someone adds a change) costs the
+   arrangement almost no vertical room. */
+.v2-tempolane {
+  position: relative; height: var(--v2-tempo-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+  cursor: copy;
+}
+.v2-tempo-pt {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 3px;
+  padding-left: 4px; border-left: 2px solid var(--v2-accent); white-space: nowrap;
+}
+/* The base tempo is the engine's floor — removeTempo() no-ops on index 0 — so it is drawn
+   as an anchor, not an editable marker, and carries no remove control. */
+.v2-tempo-pt.base { border-left-color: var(--v2-line); }
+.v2-tempo-bpm { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-dim); }
+.v2-tempo-pt.base .v2-tempo-bpm { color: var(--v2-faint); }
+.v2-tempo-rm {
+  border: 0; background: none; padding: 0 3px; cursor: pointer; line-height: 1;
+  color: var(--v2-faint); font-size: var(--v2-fs-xs); opacity: 0; transition: opacity 90ms linear;
+}
+.v2-tempo-pt:hover .v2-tempo-rm, .v2-tempo-rm:focus-visible { opacity: 1; }
+.v2-tempo-rm:hover { color: var(--v2-danger, var(--v2-accent)); }
+.v2-tempo-input {
+  position: absolute; top: 1px; width: 58px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
+
+/* annotation lane — authored comment pins, beat-anchored (time.ts's piecewise map, not
+   geom.ts's flat one) so a note holds its musical spot across a tempo change. Thin like the
+   tempo lane: a marker only exists where someone left a note. */
+.v2-annlane {
+  position: relative; height: var(--v2-ann-h);
+  background: var(--v2-surface-2); border-bottom: 1px solid var(--v2-line);
+  cursor: copy;
+}
+.v2-ann-pin {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 3px;
+  max-width: 220px; padding: 0 2px; white-space: nowrap; cursor: grab;
+}
+.v2-ann-pin.editing { cursor: text; }
+.v2-ann-flag { font-size: var(--v2-fs-sm); line-height: 1; }
+.v2-ann-text {
+  font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-dim);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.v2-ann-rm {
+  border: 0; background: none; padding: 0 3px; cursor: pointer; line-height: 1;
+  color: var(--v2-faint); font-size: var(--v2-fs-xs); opacity: 0; transition: opacity 90ms linear;
+}
+.v2-ann-pin:hover .v2-ann-rm, .v2-ann-rm:focus-visible { opacity: 1; }
+.v2-ann-rm:hover { color: var(--v2-danger, var(--v2-accent)); }
+.v2-ann-edit-input {
+  width: 160px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
+.v2-ann-draft-input {
+  position: absolute; top: 1px; width: 160px; font-family: var(--font-mono); font-size: var(--v2-fs-xs);
+  background: var(--v2-surface-sunken); color: var(--v2-text);
+  border: 1px solid var(--v2-accent); border-radius: var(--v2-radius-sm); padding: 0 4px;
+}
+
+/* bar ruler */
+.v2-ruler {
+  position: relative; height: var(--v2-ruler-h);
+  background: var(--v2-surface-sunken); border-bottom: 1px solid var(--v2-line); cursor: pointer;
+}
+.v2-ruler-bar { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--v2-line); }
+.v2-ruler-num { position: absolute; top: 5px; font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); transform: translateX(4px); }
+.v2-ruler-num.cur { color: var(--v2-playhead); }
+
+/* track lane header */
+.v2-lane-row { height: var(--v2-lane-h); }
+.v2-lhead {
+  position: sticky; left: 0; z-index: 3;
+  height: var(--v2-lane-h); display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: var(--v2-surface-2); border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line);
+  /* Zero the OTHER two sides explicitly. The add-track row is a <button>, and a button's UA default
+     border is `2px outset` — a 3D bevel that paints top/left LIGHT and bottom/right dark. Against
+     this near-black panel that surfaced as two stray white lines on exactly the top and left, and
+     nowhere else. The plain <div> headers never showed it because their UA default is `0 none`.
+     Zeroed here, on the class that owns the border model, rather than on the one row — otherwise it
+     comes back the next time a header renders as a button. */
+  border-top: 0; border-left: 0;
+  cursor: pointer; transition: background 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
+}
+.v2-lhead:hover { background: rgba(255, 255, 255, 0.028); }
+.v2-lhead.sel {
+  background: color-mix(in srgb, var(--v2-accent) 4.5%, transparent);
+  border-right-color: var(--v2-line-strong);
+  box-shadow: inset 3px 0 0 var(--v2-accent), inset 0 0 0 1px color-mix(in srgb, var(--v2-accent) 8%, transparent);
+}
+.v2-licon {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: var(--v2-radius-sm); display: grid; place-items: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  border: 1px solid var(--v2-line); color: var(--v2-accent); font-size: var(--v2-fs-md);
+  transition: box-shadow 90ms linear, color 120ms linear, border-color 120ms linear, background 120ms linear;
+}
+/* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
+   lime glow on the track icon + a faint inner glow on the lane, so each track lights up
+   with its own audio while playing — alongside Moshi reacting to the master spectrum. */
+/* The track icon used to bloom up to 22px with the signal — glow AS the level meter.
+   Removed: level is already carried twice, by TrackMeterBar (TrackLaneList.tsx) and by
+   the crisp 2px inset edge on the lane below, so the halo added no information and put
+   a pulsing light source next to every track name. */
+.v2-lhead.sel .v2-licon { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--v2-text); }
+/* The 2px inset edge stays — it is a crisp, readable level indication. The 38px inset
+   wash that rode along with it is gone: it lit the whole lane interior behind the clips,
+   which is exactly the haze this pass removes. */
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 85%), transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .v2-lane[data-track-id] { box-shadow: none; transition: none; }   /* .v2-licon no longer carries a level shadow */
+}
+.v2-lmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.v2-lrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.v2-lname { display: block; font-size: var(--v2-fs-base); color: var(--v2-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* `.v2-ltype` (the uppercase AUDIO/DRUM pill) lived here. Removed: it restated what
+   `.v2-licon` already shows, and `flex: 0 0 auto` meant it could not shrink — so in a
+   168px header it took its ~45px first and the track NAME absorbed the whole shortfall,
+   truncating to "Ser…". The icon carries the type. */
+.v2-lpreset { display: block; font-size: var(--v2-fs-sm); color: var(--v2-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-ms { display: flex; flex-direction: column; gap: 4px; }
+.v2-ms button {
+  width: 22px; height: 20px; border-radius: 7px; font-size: var(--v2-fs-xs); font-weight: 700;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+}
+/* C6 — the initial glyph sits on a bright accent fill, which is exactly what --on-accent
+   names ("stays dark in BOTH themes"). #1a1206 was a bespoke near-black doing the same job. */
+.v2-ms button.on.m { background: var(--mute, #ffb454); color: var(--on-accent); border-color: transparent; }
+.v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+
+/* UI-REACH remove_track — hover/focus-revealed like the tempo lane's own point-remove
+   button (.v2-tempo-rm). Deliberately position:absolute, NOT a flex sibling: a first
+   pass added it as a normal flex item and it silently ate into `.v2-lmeta`'s (the name
+   column) share of the fixed-width header — caught by v2-shell.spec.ts's own
+   track-name-column floor (60px; a live measurement dropped to 49px). `.v2-lhead` is
+   already `position: sticky`, so this overlays the METER's own footprint exactly
+   (right: 42px = the 12px header padding + the 22px M/S column + the 8px gap between
+   them; width: 20px = the meter's own width) — reusing real estate a producer isn't
+   watching in the split-second they're hovering to delete a track, rather than
+   permanently narrowing the one thing this whole header exists to show: the name. */
+.v2-lhead-rm {
+  position: absolute; top: 50%; right: 42px; transform: translateY(-50%);
+  width: 20px; height: 20px; border-radius: var(--v2-radius-xs); border: none; z-index: 1;
+  background: transparent; color: var(--v2-faint); font-size: var(--v2-fs-md); line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity 90ms linear, color 90ms linear, background 90ms linear;
+}
+.v2-lhead:hover .v2-lhead-rm, .v2-lhead-rm:focus-visible { opacity: 1; background: var(--v2-surface-2); }
+.v2-lhead-rm:hover { color: var(--status-danger-text); background: color-mix(in srgb, var(--status-danger) 16%, transparent); }
+
+/* Per-track peak meter (Wave 9 telemetry, METER-001 v2 surface) — sizing-only, sits
+   beside Mute/Solo. The bars/gradient/clip-glow themselves are the shared .meter rules
+   in ui/mosh.css (loaded globally); this just narrows the footprint for the compact
+   64px-tall v2 header row. */
+.v2-meter { flex: 0 0 auto; width: 20px; }
+.v2-meter .meter { gap: 3px; }
+/* The unlit part of each bar is hidden by a mask that OVERLAYS the level gradient, so it
+   has to be opaque and dark. mosh.css paints it `var(--ink-deep)` — the classic shell's
+   ground, which is cream (#e7e4db) in the light theme; inside v2 the header stays dark in
+   both themes, so the mask was painting a bright patch and advertising the unlit portion
+   instead of hiding it. Use --v2-ink, not --v2-surface/-2: those are deliberately
+   TRANSLUCENT in the dark theme (rgba(…,0.74)) and would let the gradient ghost through.
+   --v2-ink is opaque in both themes and reads as a recessed meter trough. */
+.v2-shell .v2-meter .mmask { background: var(--v2-ink); }
+
+/* lane content. `transition` folded in from a second bare `.v2-lane` rule that used to sit
+   above; the reduced-motion override is `.v2-lane[data-track-id]` (0,2,0) so it still wins
+   on specificity from wherever it sits. */
+.v2-lane {
+  position: relative; height: var(--v2-lane-h);
+  border-bottom: 1px solid var(--v2-line);
+  transition: box-shadow 90ms linear;
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(var(--beat-px, 40px) - 1px), var(--v2-line) calc(var(--beat-px, 40px) - 1px), var(--v2-line) var(--beat-px, 40px));
+}
+/* Once a tempo map exists the gradient is wrong by construction (it can only repeat at one
+   interval), so it is switched off and LaneGrid draws the real lines instead. */
+.v2-lane.v2-lane-mapped { background: none; }
+.v2-lanegrid { position: absolute; inset: 0; pointer-events: none; }
+.v2-gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--v2-line); }
+.v2-gl.bar { opacity: 1; }
+.v2-gl.beat { opacity: 0.45; }
+.v2-clip {
+  position: absolute; top: 10px; bottom: 10px; border-radius: var(--v2-radius-md); overflow: hidden;
+  background: var(--v2-clip-block); border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35); cursor: grab; min-width: 4px;
+}
+.v2-clip:active { cursor: grabbing; }
+/* #48 — selection raises the clip so a fully-overlapped clip (selected via marquee or
+   the inspector) becomes reachable by pointer instead of being buried forever. */
+.v2-clip.sel { outline: 2px solid var(--v2-accent); outline-offset: -1px; z-index: 1; }
+.v2-trim { position: absolute; top: 0; bottom: 0; cursor: ew-resize; }
+.v2-trim.l { left: 0; }
+.v2-trim.r { right: 0; }
+
+/* clip context menu (portal) */
+.v2-clipmenu {
+  position: fixed; z-index: 90; min-width: 170px;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: 11px;
+  box-shadow: var(--v2-shadow); padding: 5px; backdrop-filter: blur(20px);
+}
+.v2-clipmenu button {
+  display: block; width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--v2-text); font: inherit; font-size: var(--v2-fs-base); padding: 8px 10px; border-radius: 7px; cursor: pointer;
+}
+.v2-clipmenu button:hover { background: var(--v2-accent-soft); }
+.v2-clipmenu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 16%, transparent); color: var(--status-danger-text); }
+/* Guest degradation — an AI-menu action with no transcribe venv on this Mac. Stays
+   visible + hoverable (its title tooltip is the discoverability path) rather than
+   vanishing outright. Literal fallback (not just var(--v2-faint)): .v2-clipmenu is
+   portaled to document.body, OUTSIDE .v2-shell's scope for the --v2-* custom
+   properties, so an unresolved var() here would silently no-op the dimming (a
+   pre-existing characteristic of every portaled v2 popover, not new to this rule). */
+.v2-clipmenu button:disabled { color: var(--v2-faint, rgba(240, 239, 233, 0.4)); cursor: not-allowed; }
+.v2-clipmenu button:disabled:hover { background: transparent; }
+.v2-clipmenu-sep { height: 1px; background: var(--v2-line); margin: 4px 4px; }
+/* Through the tokens, not past them. These three carried hardcoded near-blacks while
+   --v2-clip-midi / --v2-clip-drum sat unused in both theme blocks. */
+.v2-clip.wave { background: var(--v2-clip-wave); }
+.v2-clip.midi { background: var(--v2-clip-midi); border-color: rgba(255, 255, 255, 0.16); }
+.v2-clip.drum { background: var(--v2-clip-drum); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.v2-clip-label { position: absolute; left: 8px; top: 5px; font-size: var(--v2-fs-xs); color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); pointer-events: none; }
+/* Phase 2 — a re-imagined render plays beneath this (muted) MIDI clip. */
+.v2-clip-badge.reimagine { position: absolute; right: 5px; top: 4px; font-size: var(--v2-fs-sm); line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+/* Warp indicator (≈) — this wave clip time-stretches to the project tempo. Mirrors the
+   .reimagine glyph treatment, parked in the one free corner (bottom-right: label owns
+   top-left, reimagine top-right, working bottom-left) so it never collides with a sibling. */
+.v2-clip-badge.warp { position: absolute; right: 5px; bottom: 3px; font-size: var(--v2-fs-sm); line-height: 1; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+/* An audio→MIDI/lyrics/flow build is in flight for this source clip (guest-degradation
+   pass — v2 previously gave zero feedback for any of these three async actions). */
+.v2-clip-badge.working {
+  position: absolute; left: 4px; bottom: 3px; z-index: 5;
+  background: var(--v2-accent); color: var(--v2-accent-ink); font-size: var(--v2-fs-2xs); font-weight: 700;
+  letter-spacing: 0.03em; padding: 1px 6px; border-radius: var(--v2-radius-pill); pointer-events: none;
+  animation: v2-blink 1100ms ease-in-out infinite;
+}
+.v2-clip canvas { display: block; width: 100%; height: 100%; }
+
+/* playhead overlay */
+.v2-playhead-line {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--v2-playhead);
+  z-index: 7; pointer-events: none;
+}
+.v2-playhead-line::before {
+  content: ""; position: absolute; top: 0; left: -4px; border: 5px solid transparent;
+  border-top-color: var(--v2-playhead); border-bottom: none;
+}
+
+/* time-range band (UIREACH-TIMERANGE) — a shift-drag on the ruler draws this cross-lane
+   span; delete_time_range's only shipped-UI home. Sits below the playhead (z 7) so a
+   moving playhead still reads clearly over a drawn span, above lane content so the
+   highlight is visible over clips. pointer-events:none on the band itself so clicking a
+   clip underneath still works — only the floating toolbar re-enables them. */
+.v2-timerange-band {
+  position: absolute; top: 0; bottom: 0; z-index: 6; pointer-events: none;
+  background: color-mix(in srgb, var(--v2-accent) 10%, transparent);
+  border-left: 1px solid var(--v2-accent); border-right: 1px solid var(--v2-accent);
+}
+.v2-timerange-toolbar {
+  position: absolute; top: calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + 6px);
+  left: 0; z-index: 8; display: flex; align-items: center; gap: 4px; padding: 4px;
+  white-space: nowrap; pointer-events: auto;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong); border-radius: var(--v2-radius-sm);
+  box-shadow: var(--v2-shadow);
+}
+.v2-timerange-toolbar button {
+  font: inherit; font-size: var(--v2-fs-xs); padding: 5px 9px; border-radius: var(--v2-radius-xs); line-height: 1;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim); cursor: pointer;
+  white-space: nowrap;
+}
+.v2-timerange-toolbar button:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-timerange-toolbar button[data-testid="v2-timerange-loop"][aria-pressed="true"] {
+  background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
+}
+/* the ripple action gets a distinct warn tint — it is the one that reflows the whole
+   project downstream, and the two buttons must not read as visually interchangeable. */
+.v2-timerange-toolbar button[data-testid="v2-timerange-delete-ripple"] {
+  color: var(--status-danger-text); border-color: color-mix(in srgb, var(--status-danger) 40%, var(--v2-line));
+}
+.v2-timerange-toolbar button[data-testid="v2-timerange-delete-ripple"]:hover {
+  background: color-mix(in srgb, var(--status-danger) 16%, transparent);
+}
+.v2-timerange-toolbar .v2-timerange-clear {
+  padding: 5px; display: grid; place-items: center; color: var(--v2-faint);
+}
+.v2-timerange-toolbar .v2-timerange-clear:hover { color: var(--v2-text); }
+
+.v2-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--v2-faint); font-size: var(--v2-fs-base); }
+
+/* #47 — zero-track empty state keeps a REAL add-track affordance (the footer row it
+   used to rely on lives inside the track list, which doesn't render here). */
+.v2-stage-empty { display: grid; place-items: center; align-content: center; gap: 12px; }
+.v2-stage-empty .v2-empty { position: static; inset: auto; }
+.v2-empty-add {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border: 1px dashed var(--v2-ground-line-strong); border-radius: var(--v2-radius-sm);
+  background: transparent; color: var(--v2-ground-dim); font: inherit; font-size: var(--v2-fs-base);
+}
+.v2-empty-add:hover { color: var(--v2-accent-ink); border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+
+/* trailing add-track row — the "one more track" of room. The header cell is sticky-left
+   (always visible like the real headers); the lane cell is the droppable blackspace. */
+.v2-lhead-add {
+  cursor: pointer; color: var(--v2-faint); background: var(--v2-surface-2);
+  border-bottom-color: transparent; gap: 10px;
+}
+.v2-lhead-add:hover { color: var(--v2-accent); }
+.v2-lhead-add .v2-licon { background: transparent; border-style: dashed; color: inherit; }
+.v2-lhead-add:hover .v2-licon { border-color: var(--v2-accent); }
+.v2-lane.v2-lane-add { background: transparent; border-bottom: none; }
+.v2-lane.v2-lane-add:hover { background: var(--v2-accent-soft); }   /* hint: droppable */
+

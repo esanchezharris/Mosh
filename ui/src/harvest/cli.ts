@@ -13,7 +13,7 @@
 import { appendFileSync, mkdirSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { harvest } from "./harvester";
+import { harvest, harvestUnservedAsks } from "./harvester";
 import { collectFresh, formatLiveReport, liveReport } from "./liveHarvest";
 import { replay } from "./verifier";
 import type { CommandCall } from "./tupleSchema";
@@ -52,9 +52,18 @@ async function cmdHarvest(argv: string[]): Promise<number> {
   }
   const tuples = await harvest(text, { logPath });
 
+  // FS-B2a — asks that reached Moshi and produced NO command. Not tuples (there is no
+  // trajectory to imitate), so they are printed alongside the rollup rather than mixed
+  // into the corpus: each one names a skill the current catalog does not have.
+  const unserved = harvestUnservedAsks(text);
+
   // --report: just the clean / engine-fail / contract-fail rollup (no tuple output).
   if ("--report" in flags) {
     console.log(formatLiveReport(liveReport(tuples)));
+    if (unserved.length > 0) {
+      console.log(`unserved asks (${unserved.length}) — produced no command:`);
+      for (const a of unserved) console.log(`  ? [${a.source}] "${a.utterance}"`);
+    }
     return 0;
   }
 

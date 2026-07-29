@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import type { Snapshot } from "../types";
 import { runAgentBatch, undoAgentBatch } from "./executor";
 import { runSkill, type SkillHarnessDeps } from "./skillHarness";
+import type { TxnMeta } from "./skillTransaction";
 import {
   ADD_VOCAL_WITH_LYRICS_SKILL,
   ARRANGE_BEAT_SKILL,
@@ -19,6 +20,7 @@ import {
 
 const mockDeps: SkillHarnessDeps = {
   snapshot: () => mockSnapshot<Snapshot>(),
+  exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t),
   runBatch: runAgentBatch,
   rollbackBatch: undoAgentBatch,
 };
@@ -51,9 +53,12 @@ describe("skill harness", () => {
     const seen: string[] = [];
     const deps: SkillHarnessDeps = {
       ...mockDeps,
-      runBatch: async (label, calls) => {
-        seen.push(...calls.map((call) => call.command));
-        return runAgentBatch(label, calls);
+      // The manifested commands now go through `exec` one at a time (each carrying its
+      // transaction envelope), not through a single runBatch call — so the sequence probe
+      // records the TAGGED calls, which is exactly the manifest order the engine enforced.
+      exec: async (c: string, a: Record<string, unknown>, t?: TxnMeta) => {
+        if (t) seen.push(c);
+        return useStore.getState().exec(c, a, t);
       },
     };
 
@@ -95,9 +100,12 @@ describe("skill harness", () => {
     const seen: string[] = [];
     const deps: SkillHarnessDeps = {
       ...mockDeps,
-      runBatch: async (label, calls) => {
-        seen.push(...calls.map((call) => call.command));
-        return runAgentBatch(label, calls);
+      // The manifested commands now go through `exec` one at a time (each carrying its
+      // transaction envelope), not through a single runBatch call — so the sequence probe
+      // records the TAGGED calls, which is exactly the manifest order the engine enforced.
+      exec: async (c: string, a: Record<string, unknown>, t?: TxnMeta) => {
+        if (t) seen.push(c);
+        return useStore.getState().exec(c, a, t);
       },
     };
     const result = await runSkill(
@@ -127,6 +135,7 @@ describe("skill harness", () => {
 
     const result = await runSkill(SET_TRACK_LEVEL_SKILL, rawSlots, {
       snapshot,
+      exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t),
       runBatch,
       rollbackBatch,
     });
@@ -146,7 +155,7 @@ describe("skill harness", () => {
     const result = await runSkill(
       SET_TRACK_LEVEL_SKILL,
       { trackId: "missing-track", db: -6 },
-      { snapshot, runBatch, rollbackBatch },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch },
     );
 
     expect(result.ok).toBe(false);
@@ -172,7 +181,7 @@ describe("skill harness", () => {
     const result = await runSkill(
       invalidTemplate,
       { trackId: track.id, db: -6 },
-      { snapshot, runBatch, rollbackBatch: vi.fn() },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch: vi.fn() },
     );
 
     expect(result.ok).toBe(false);
@@ -195,7 +204,7 @@ describe("skill harness", () => {
     const result = await runSkill(
       SET_TRACK_LEVEL_SKILL,
       { trackId: group.id, db: -6, mute: true },
-      { snapshot, runBatch, rollbackBatch: async () => false },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch: async () => false },
     );
 
     expect(result.ok).toBe(false);
@@ -267,9 +276,12 @@ describe("workflow skill catalog", () => {
     const seen: string[] = [];
     const deps: SkillHarnessDeps = {
       ...mockDeps,
-      runBatch: async (label, calls) => {
-        seen.push(...calls.map((call) => call.command));
-        return runAgentBatch(label, calls);
+      // The manifested commands now go through `exec` one at a time (each carrying its
+      // transaction envelope), not through a single runBatch call — so the sequence probe
+      // records the TAGGED calls, which is exactly the manifest order the engine enforced.
+      exec: async (c: string, a: Record<string, unknown>, t?: TxnMeta) => {
+        if (t) seen.push(c);
+        return useStore.getState().exec(c, a, t);
       },
     };
 
@@ -297,7 +309,7 @@ describe("workflow skill catalog", () => {
     const result = await runSkill(
       BUILD_DRUM_PATTERN_SKILL,
       { trackId: waveTrack.id, pattern: "kick: x..." },
-      { snapshot, runBatch, rollbackBatch: vi.fn() },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch: vi.fn() },
     );
 
     expect(result.ok).toBe(false);
@@ -402,7 +414,7 @@ describe("workflow skill catalog", () => {
     const result = await runSkill(
       WARP_LOOP_TO_GRID_SKILL,
       { clipId: clip.id, bars: 4 },
-      { snapshot, runBatch, rollbackBatch: vi.fn() },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch: vi.fn() },
     );
 
     expect(result.ok).toBe(false);
@@ -420,9 +432,12 @@ describe("workflow skill catalog", () => {
     const seen: string[] = [];
     const deps: SkillHarnessDeps = {
       ...mockDeps,
-      runBatch: async (label, calls) => {
-        seen.push(...calls.map((call) => call.command));
-        return runAgentBatch(label, calls);
+      // The manifested commands now go through `exec` one at a time (each carrying its
+      // transaction envelope), not through a single runBatch call — so the sequence probe
+      // records the TAGGED calls, which is exactly the manifest order the engine enforced.
+      exec: async (c: string, a: Record<string, unknown>, t?: TxnMeta) => {
+        if (t) seen.push(c);
+        return useStore.getState().exec(c, a, t);
       },
     };
 
@@ -450,7 +465,7 @@ describe("workflow skill catalog", () => {
     const result = await runSkill(
       AUTOMATE_PARAMETER_SKILL,
       { trackId: track.id, index: 0, paramIndex: 0, value: 0.5 },
-      { snapshot, runBatch, rollbackBatch: vi.fn() },
+      { snapshot, exec: (c: string, a: Record<string, unknown>, t?: TxnMeta) => useStore.getState().exec(c, a, t), runBatch, rollbackBatch: vi.fn() },
     );
 
     expect(result.ok).toBe(false);

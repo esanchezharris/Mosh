@@ -1,0 +1,209 @@
+/* ───────────────────────────── SIDE PUSH-DOCKS ──────────────────────────── */
+/* Symmetric collapsible docks, each in its OWN grid column (left = browser, right = agent
+   rail). Collapsed → a thin vertical pull-tab; open → a full panel that fills its column.
+   Because each dock owns its gutter, opening one PUSHES the centered work area and never
+   overlaps it. Width animates via the .v2-body grid-template-columns transition. */
+.v2-dock { position: relative; display: flex; min-width: 0; min-height: 0; }
+
+/* the panel (open state) — fills the dock column */
+.v2-dock-panel {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong);
+  border-radius: var(--v2-radius); box-shadow: var(--v2-shadow);
+}
+.v2-dock-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 0; }
+.v2-dock-headcopy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.v2-dock-title {
+  font-size: var(--v2-fs-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--v2-text);
+}
+.v2-dock-subtitle {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--v2-faint);
+}
+.v2-dock-tabs { display: flex; gap: 4px; flex: 1 1 auto; }
+.v2-dock-tabs button {
+  font: inherit; font-size: 12px; padding: 6px 14px; border-radius: 9px; cursor: pointer;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+}
+.v2-dock-tabs button.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-dock-close {
+  flex: 0 0 auto; height: 30px; border-radius: var(--v2-radius-md); cursor: pointer; font-size: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 10px;
+}
+.v2-dock-close:hover { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-dock-close-label { font-size: var(--v2-fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
+.v2-dock-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: auto; padding: 8px 12px 12px; }
+.v2-dock-body .modal-list { flex: 1 1 auto; min-height: 0; }
+.v2-dock-body [role="tabpanel"] { display: flex; flex-direction: column; min-height: 0; }
+/* the right dock frames the agent rail; the rail fills the column */
+.v2-dock-right .v2-rail { flex: 1 1 auto; min-width: 0; }
+
+/* the pull-tab (collapsed state) — fills the thin rail; vertical label, symmetric per side */
+.v2-dock-tab {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  cursor: pointer; color: var(--v2-dim); padding: 16px 0;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line-strong);
+  border-radius: var(--v2-radius); box-shadow: var(--v2-glow);
+  transition: color 140ms, border-color 140ms, background 140ms;
+}
+.v2-dock-tab:hover { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-dock-tab:focus-visible { outline: 2px solid var(--v2-accent); outline-offset: 2px; }
+.v2-dock-tab-icon { display: grid; place-items: center; }
+.v2-dock-tab-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-size: var(--v2-fs-xs); letter-spacing: 0.2em; text-transform: uppercase; }
+/* the agent tab carries the minimized Moshi — pale-bodied so it reads on the dark tab */
+.v2-dock-tab-mosh .v2-mark { --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface-2); --v2-mark-rim: rgba(0, 0, 0, 0.28); }
+
+/* ── browser dock contents — the reused SampleBrowser (Sounds) ships classic light form
+     controls that clash with the dark dock; restyle them to the v2 surface language here.
+     (The Plugins tab uses its own .v2-pb-* classes and is untouched.) ── */
+.v2-dock-body .pop-head { font-size: var(--v2-fs-sm); letter-spacing: 0.16em; text-transform: uppercase; color: var(--v2-dim); margin: 2px 0 9px; }
+.v2-dock-body .pop-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.v2-dock-body .pop-note { flex: 1 1 auto; min-width: 0; font-size: var(--v2-fs-sm); color: var(--v2-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.v2-dock-body .sb-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.v2-dock-body .sb-heading,
+.v2-dock-body .sb-location-copy,
+.v2-dock-body .sb-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.v2-dock-body .sb-title,
+.v2-pdock-title {
+  color: var(--v2-text);
+  font-size: var(--v2-fs-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.v2-dock-body .sb-subtitle,
+.v2-pdock-subtitle {
+  color: var(--v2-faint);
+  font-size: 12px;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.v2-dock-body .sb-location { align-items: flex-start; }
+.v2-dock-body .sb-location-label,
+.v2-dock-body .sb-search-label {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.v2-dock-body .sb-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.v2-shell .v2-dock-body .btn {
+  appearance: none; font: inherit; font-size: 12px; padding: 5px 11px; border-radius: var(--v2-radius-md); cursor: pointer; flex: 0 0 auto;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-dim);
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.v2-shell .v2-dock-body .btn:hover:not(:disabled) { color: var(--v2-text); border-color: var(--v2-line-strong); }
+.v2-shell .v2-dock-body .btn:disabled { opacity: 0.38; cursor: default; }
+.v2-shell .v2-dock-body .sb-search {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: var(--v2-fs-base); padding: 8px 12px; margin-bottom: 12px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: var(--v2-radius-sm); color: var(--v2-text);
+  transition: border-color 120ms;
+}
+.v2-shell .v2-dock-body .sb-search::placeholder { color: var(--v2-faint); }
+.v2-shell .v2-dock-body .sb-search:focus { outline: none; border-color: var(--v2-accent); }
+.v2-dock-body .plugin-group { margin-bottom: 12px; }
+.v2-dock-body .pg-label { font-size: var(--v2-fs-xs); letter-spacing: var(--v2-tracking-caps); text-transform: uppercase; color: var(--v2-faint); margin: 4px 2px 6px; }
+.v2-dock-body .sb-section .pg-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.v2-dock-body .sb-section-count {
+  color: var(--v2-faint);
+  font-variant-numeric: tabular-nums;
+}
+.v2-shell .v2-dock-body .plugin-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  padding: 7px 9px; margin: 0 0 4px; border-radius: 9px; text-align: left; cursor: pointer;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text); font: inherit; font-size: 12px;
+  transition: border-color 120ms, background 120ms;
+}
+.v2-shell .v2-dock-body .plugin-row:hover { border-color: var(--v2-line-strong); background: var(--v2-surface-2); }
+.v2-dock-body .sb-row-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--v2-radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--v2-accent);
+  flex: 0 0 auto;
+}
+.v2-dock-body .sb-row-title {
+  color: var(--v2-text);
+  font-size: 12px;
+}
+.v2-dock-body .sb-row-meta {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v2-dock-body .sb-row-affordance {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-sm);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.v2-dock-body .plugin-row .pr-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-dock-body .pr-folder { color: var(--v2-accent); font-size: var(--v2-fs-xs); margin-right: 2px; }
+.v2-shell .v2-dock-body .cb-import {
+  flex: 0 0 auto; padding: 4px 10px; font-size: var(--v2-fs-sm); border-radius: 7px; opacity: 0; transition: opacity 110ms, background 120ms, color 120ms;
+  background: var(--v2-accent-soft); border: 1px solid transparent; color: var(--v2-accent);
+}
+.v2-dock-body .plugin-row:hover .cb-import, .v2-dock-body .cb-import:focus, .v2-dock-body .cb-import:focus-visible { opacity: 1; }
+.v2-shell .v2-dock-body .cb-import:hover { background: var(--v2-accent); color: var(--v2-accent-ink); }
+/* Beatbox → beat (sketch_beatbox) — a secondary, rarer action than Import, so it reads
+   neutral rather than accent-colored (Import stays the visually primary affordance) but
+   shares the same hover-reveal treatment so both are equally keyboard-focus-reachable. */
+.v2-shell .v2-dock-body .cb-sketch {
+  /* radius scale (shellTokens.test.ts): a NEW button, not a normalization of an existing
+     off-scale one (.sb-audition's 6px below is legacy debt, not a value to match), so
+     it goes straight on the scale — --v2-radius-xs, not another off-scale literal. */
+  flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--v2-radius-xs); opacity: 0; transition: opacity 110ms, background 120ms, color 120ms;
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line); color: var(--v2-dim); padding: 0;
+}
+.v2-dock-body .plugin-row:hover .cb-sketch, .v2-dock-body .cb-sketch:focus, .v2-dock-body .cb-sketch:focus-visible { opacity: 1; }
+.v2-shell .v2-dock-body .cb-sketch:hover { color: var(--v2-accent); border-color: var(--v2-accent); }
+/* In-flight transduction pill (mirrors .v2-clip-badge.working's look, inline rather than
+   absolute — this sits in a browser ROW, not over a clip canvas). */
+.v2-dock-body .sb-row-status {
+  flex: 0 0 auto; font-size: var(--v2-fs-2xs); font-weight: 700; letter-spacing: 0.03em;
+  padding: 1px 6px; border-radius: var(--v2-radius-pill); color: var(--v2-accent-ink);
+  background: var(--v2-accent); animation: v2-blink 1100ms ease-in-out infinite;
+}
+.v2-shell .v2-dock-body .sb-audition {
+  flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; cursor: pointer; font-size: var(--v2-fs-2xs);
+  background: var(--v2-surface-2); border: 1px solid var(--v2-line); color: var(--v2-dim); padding: 0;
+}
+.v2-shell .v2-dock-body .sb-audition:hover, .v2-shell .v2-dock-body .sb-audition[aria-pressed="true"] { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-dock-body .sb-thumb { flex: 0 0 auto; color: var(--v2-accent); opacity: 0.85; }
+.v2-dock-body .rack-empty { color: var(--v2-faint); font-size: 12px; padding: 10px 2px; }
+.v2-shell .v2-dock-body .modal-list { max-height: none !important; overflow: auto; }
+
+/* error + drop overlay (reuse legacy semantics, restyled) */

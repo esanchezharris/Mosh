@@ -125,6 +125,36 @@ TEST_CASE ("crash report formatter redacts breadcrumbs to command names only", "
     REQUIRE_FALSE (report.contains ("\""));
 }
 
+// FS-B2a — a NEW class of payload now lives in the command log's args: the user's own
+// words, carried on an agent turn's batch_begin marker (turn provenance for skill
+// mining). It is local-only by design. This pins the boundary: even if a future change
+// fed the formatter a breadcrumb built from a whole log line, the utterance must not
+// survive into a crash report — the report stays command NAMES only.
+TEST_CASE ("crash report never leaks a turn utterance", "[telemetry][redaction]")
+{
+    CrashContext ctx;
+    ctx.signalName   = "SIGSEGV";
+    ctx.appVersion   = "1.2.3";
+    ctx.osVersion    = "macOS 15.1";
+    ctx.timestampIso = "2026-07-28T12:00:00Z";
+
+    ctx.breadcrumbCommandNames.add (
+        "batch_begin {\"name\":\"darker hook\",\"turn_id\":\"t-1\","
+        "\"utterance\":\"make the hook sound like my unreleased demo\",\"source\":\"voice\"}");
+    ctx.breadcrumbCommandNames.add ("create_track {\"name\":\"Lead\"}");
+
+    const auto report = formatCrashReport (ctx);
+
+    REQUIRE (report.contains ("batch_begin"));   // the name still renders …
+    REQUIRE (report.contains ("create_track"));
+    REQUIRE_FALSE (report.contains ("utterance"));            // … none of the ask does
+    REQUIRE_FALSE (report.contains ("make the hook"));
+    REQUIRE_FALSE (report.contains ("unreleased"));
+    REQUIRE_FALSE (report.contains ("turn_id"));
+    REQUIRE_FALSE (report.contains ("source"));
+    REQUIRE_FALSE (report.contains ("voice"));
+}
+
 TEST_CASE ("formatCrashReport degrades gracefully with no backtrace/breadcrumbs", "[telemetry]")
 {
     CrashContext ctx;

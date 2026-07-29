@@ -1,0 +1,110 @@
+/* ─────────────────────────────── COMPOSER ────────────────────────────────── */
+.v2-composer {
+  position: relative;
+  justify-self: center; width: min(860px, 100%);   /* narrow + centered under the arrangement
+     (grid items ignore margin:auto — center via justify-self) */
+  display: flex; align-items: stretch; gap: 12px; padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(33, 33, 36, 0.98), rgba(24, 24, 27, 0.98));
+  border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
+  box-shadow: var(--v2-glow);
+}
+.v2-composer-side { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
+/* Moshi face at the composer's left (the concept's personality cue). The composer is a
+   dark panel, so the mark flips to light petals + dark face regardless of theme. */
+.v2-composer-face { flex: 0 0 auto; --v2-mark-fill: var(--v2-text); --v2-mark-face: var(--v2-surface); --v2-mark-rim: rgba(0, 0, 0, 0.28); }
+.v2-composer .spark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: var(--v2-radius-sm); display: grid; place-items: center; background: var(--v2-accent-soft); color: var(--v2-accent); font-size: 16px; }
+.v2-composer-plus { flex: 0 0 auto; position: relative; }
+.v2-shell .v2-composer-plus .fo-trigger {
+  width: 38px; height: 38px; border-radius: var(--v2-radius-lg); display: grid; place-items: center;
+  background: var(--v2-surface-sunken); color: var(--v2-accent); border: 1px solid var(--v2-line); cursor: pointer;
+}
+.v2-shell .v2-composer-plus .fo-trigger:hover { border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+.v2-shell .v2-composer-plus .fo-trigger svg { flex: 0 0 auto; }
+/* The reused AgentComposer renders its own input/form; let it fill the bar. */
+.v2-composer .v2-composer-host { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.v2-composer-copy { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 2px; }
+.v2-composer-kicker {
+  flex: 0 0 auto;
+  color: var(--v2-text);
+  font-size: var(--v2-fs-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.v2-composer-hint {
+  min-width: 0;
+  color: var(--v2-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v2-shell .agent-composer { gap: 6px; }
+.v2-shell .agent-say {
+  bottom: calc(100% + 8px);
+  color: var(--v2-text);
+  background: var(--v2-surface-2);
+  border-color: var(--v2-line-strong);
+}
+.v2-shell .agent-input {
+  background: var(--v2-surface-sunken);
+  border-color: var(--v2-line-strong);
+  border-radius: var(--v2-radius-lg);
+  padding: 4px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+/* Was a hardcoded rgba(204, 255, 54, 0.42) — the old lime, written as a literal, so it
+   survived the accent-reservation pass untouched and would have stayed lime through the
+   move to chartreuse while every token around it changed. Two corrections in one:
+   it is a token now, and it is the NEUTRAL one. Plain focus is the field having the
+   caret, not the machine working; `.agent-input.listening` on the next line is the
+   agentic state and keeps the accent. */
+.v2-shell .agent-input:focus-within { border-color: color-mix(in srgb, var(--v2-accent) 42%, transparent); }
+.v2-shell .agent-input.listening { border-color: var(--v2-accent); box-shadow: 0 0 0 1px var(--v2-accent-soft); }
+.v2-shell .agent-mic,
+.v2-shell .agent-send {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+.v2-shell .agent-mic {
+  color: var(--v2-dim);
+}
+.v2-shell .agent-mic:hover:not(:disabled) {
+  color: var(--v2-text);
+  background: var(--v2-surface-2);
+}
+.v2-shell .agent-input input {
+  color: var(--v2-text);
+  font-size: var(--v2-fs-base);
+  padding: 4px 2px;
+}
+.v2-shell .agent-input input::placeholder { color: var(--v2-faint); }
+.v2-shell .agent-send {
+  background: var(--v2-accent-soft);
+  border: 1px solid transparent;
+  color: var(--v2-accent);
+  transition: background 120ms linear, color 120ms linear, border-color 120ms linear;
+}
+.v2-shell .agent-send:hover:not(:disabled) {
+  background: var(--v2-accent);
+  border-color: transparent;
+  color: var(--v2-accent-ink);
+}
+.v2-shell .agent-send:disabled {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--v2-faint);
+}
+.v2-shell .fo-pop.pop { width: min(320px, calc(100vw - 32px)); }
+.v2-shell .fo-back { display: grid; place-items: center; }
+.v2-shell .fo-options { gap: 8px; }
+.v2-shell .fo-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.v2-shell .fo-action svg { flex: 0 0 auto; }
+@media (max-width: 1100px) {
+  .v2-composer-hint { display: none; }
+}
+
