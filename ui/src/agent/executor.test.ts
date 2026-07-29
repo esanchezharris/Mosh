@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
-  runAgentBatch, isDestructiveCommand, screenDestructive,
+  runAgentBatch, logAgentTurn, isDestructiveCommand, screenDestructive,
   MAX_DESTRUCTIVE_PER_BATCH, DESTRUCTIVE_BLOCK_REASON,
 } from "./executor";
 import type { AgentCommandCall } from "./executor";
@@ -91,7 +91,11 @@ describe("agent command contract — catalog args must match the seam", () => {
     spy.mockRestore();
   });
 
-  it("defaults the marker's utterance to the label and source to brain_chat", async () => {
+  // FS-B2a (H2) — this used to assert the OPPOSITE (utterance defaulted to the label).
+  // The label is Moshi's own text, so filling it in made a synthesized caption
+  // indistinguishable from a real ask, and the skill-mining lane this provenance
+  // exists for would have learned trigger phrases from the model's own output.
+  it("OMITS the marker's utterance when no transcript was threaded (never fakes it from the label)", async () => {
     const seen: { command: string; args: Record<string, unknown> }[] = [];
     const orig = useStore.getState().exec;
     const spy = vi
@@ -104,8 +108,72 @@ describe("agent command contract — catalog args must match the seam", () => {
     await runAgentBatch("just a label", [{ command: "create_track", args: {} }]);
 
     const begin = seen.find((c) => c.command === "batch_begin")!;
-    expect(begin.args.utterance).toBe("just a label");
+    expect("utterance" in begin.args).toBe(false); // absent, NOT "" and NOT the label
+    expect(begin.args.utterance).toBeUndefined();
+    expect(begin.args.name).toBe("just a label"); // the undo label is still carried
     expect(begin.args.source).toBe("brain_chat");
+
+    spy.mockRestore();
+  });
+
+  // FS-B2a (H3) — an ask that produced no runnable command is the single most
+  // valuable row for real-session skill mining: it names a skill we do not have.
+  it("records the ask as an empty turn marker when every call is rejected", async () => {
+    const seen: { command: string; args: Record<string, unknown> }[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push({ command, args: args ?? {} });
+        return orig(command, args);
+      });
+
+    // Not in the curated catalog → validateCommand rejects → nothing reaches the seam.
+    const cs = await runAgentBatch("teleport the drums", [{ command: "no_such_command", args: {} }], {
+      utterance: "teleport the drums to mars",
+      source: "brain_chat",
+    });
+
+    expect(cs.applied).toBe(0);
+    expect(seen.map((c) => c.command)).toEqual(["batch_begin", "batch_end"]);
+    expect(seen[0].args.utterance).toBe("teleport the drums to mars");
+    expect(typeof seen[0].args.turn_id).toBe("string");
+
+    spy.mockRestore();
+  });
+
+  it("emits NO turn marker when there were no calls at all (a non-turn is not an ask)", async () => {
+    const seen: string[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push(command);
+        return orig(command, args);
+      });
+
+    await runAgentBatch("nothing", [], { utterance: "hi", source: "brain_chat" });
+
+    expect(seen).toEqual([]);
+
+    spy.mockRestore();
+  });
+
+  it("logAgentTurn writes a standalone begin/end pair carrying the ask", async () => {
+    const seen: { command: string; args: Record<string, unknown> }[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push({ command, args: args ?? {} });
+        return orig(command, args);
+      });
+
+    await logAgentTurn("no idea what you mean", { utterance: "make it sound purple", source: "brain_chat" });
+
+    expect(seen.map((c) => c.command)).toEqual(["batch_begin", "batch_end"]);
+    expect(seen[0].args.utterance).toBe("make it sound purple");
+    expect(seen[0].args.source).toBe("brain_chat");
 
     spy.mockRestore();
   });

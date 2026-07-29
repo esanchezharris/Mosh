@@ -76,6 +76,12 @@ master chain, the tempo map and the key**. Measured costs:
 the Phase-B loop lane owns enriching the snapshot (master, buses, tempoMap,
 key) and these ~5 tasks should flip largely on visibility alone.
 
+> **Resolved 2026-07-28.** The two session renderers were unified into
+> `ui/src/agent/sessionRender.ts`; the single-shot path now sees master state,
+> the key, the tempo map and buses. The numbers above stand as the pre-fix
+> record. Post-fix measurement:
+> `docs/agent-bench/REPORT_2026-07-28-session-render.md`.
+
 ### 3. Reactive failures — explicit errors single-shot can't answer
 
 After the shape fixes, the remaining compose-drums failures are all

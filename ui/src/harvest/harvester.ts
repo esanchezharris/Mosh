@@ -137,12 +137,11 @@ export async function harvest(
         // its commands are never merged into this turn.
         open = {
           turnId,
-          utterance:
-            typeof ln.args.utterance === "string"
-              ? ln.args.utterance
-              : typeof ln.args.name === "string"
-                ? ln.args.name
-                : "",
+          // FS-B2a (H2) — NO fallback to args.name. The name is the undo-transaction
+          // label, which is Moshi's OWN text; substituting it here would re-fabricate
+          // the ask one layer below the executor and train the model on its own words.
+          // An absent utterance stays empty, and emptiness is filtered out below.
+          utterance: typeof ln.args.utterance === "string" ? ln.args.utterance : "",
           source: asSource(ln.args.source),
           ts: ln.ts,
           seqBegin: ln.seq,
@@ -225,25 +224,68 @@ export async function harvest(
     if (best) best.taste.push({ kind: t.kind, clipId: t.clipId, seq: t.seq });
   }
 
-  return turns.map((turn, i) => ({
-    schemaVersion: TUPLE_SCHEMA_VERSION,
-    kind: "imitation",
-    turnId: turn.turnId,
-    utterance: turn.utterance,
-    source: turn.source,
-    ts: turn.ts,
-    seq: { begin: turn.seqBegin, end: turn.seqEnd },
-    snapshotBefore: turn.snapshotBefore,
-    snapshotAfter: turn.snapshotAfter,
-    commands: turn.commands,
-    outcome: {
-      appliedClean: turn.appliedClean,
-      replayClean: turn.replayClean,
-      undone: undone.has(i),
-      taste: turn.taste,
-    },
-    provenance: { logPath, harvestedAt },
-  }));
+  // FS-B2a (H3) — a turn that ran zero commands is an ASK WE COULD NOT SERVE, not a
+  // trajectory. It is recorded in the log on purpose (it names a missing skill — see
+  // harvestUnservedAsks below) but it must never enter the imitation corpus, or the
+  // model learns "for this ask, do nothing". Filtered by index so `undone` still lines
+  // up with the turn it was computed for.
+  return turns
+    .map((turn, i) => ({ turn, i }))
+    .filter(({ turn }) => turn.commands.length > 0)
+    .map(({ turn, i }) => ({
+      schemaVersion: TUPLE_SCHEMA_VERSION,
+      kind: "imitation" as const,
+      turnId: turn.turnId,
+      utterance: turn.utterance,
+      source: turn.source,
+      ts: turn.ts,
+      seq: { begin: turn.seqBegin, end: turn.seqEnd },
+      snapshotBefore: turn.snapshotBefore,
+      snapshotAfter: turn.snapshotAfter,
+      commands: turn.commands,
+      outcome: {
+        appliedClean: turn.appliedClean,
+        replayClean: turn.replayClean,
+        undone: undone.has(i),
+        taste: turn.taste,
+      },
+      provenance: { logPath, harvestedAt },
+    }));
+}
+
+/** An ask that reached Moshi but produced no command — the marker pair with nothing
+ *  between it. These are the missing-skill signals FS-B2 mines: what producers ask
+ *  for that the current skill set cannot serve. Deliberately NOT tuples (there is no
+ *  trajectory to imitate) and deliberately not derived from `args.name` — an ask with
+ *  no recorded utterance carries no information and is skipped. */
+export type UnservedAsk = { turnId: string; utterance: string; source: TurnSource; ts: number };
+
+export function harvestUnservedAsks(text: string): UnservedAsk[] {
+  const lines = parseLog(text);
+  const out: UnservedAsk[] = [];
+  let open: { turnId: string; utterance: string; source: TurnSource; ts: number } | null = null;
+  let commandsSinceBegin = 0;
+
+  for (const ln of lines) {
+    if (ln.command === "batch_begin") {
+      const turnId = typeof ln.args.turn_id === "string" ? ln.args.turn_id : null;
+      open = turnId
+        ? {
+            turnId,
+            utterance: typeof ln.args.utterance === "string" ? ln.args.utterance : "",
+            source: asSource(ln.args.source),
+            ts: ln.ts,
+          }
+        : null;
+      commandsSinceBegin = 0;
+    } else if (ln.command === "batch_end") {
+      if (open && commandsSinceBegin === 0 && open.utterance) out.push(open);
+      open = null;
+    } else if (open) {
+      commandsSinceBegin++;
+    }
+  }
+  return out;
 }
 
 export async function harvestControllerEvents(

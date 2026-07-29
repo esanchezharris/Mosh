@@ -3,8 +3,8 @@
 **Trunk:** `main` is the only development trunk (per
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
 the full v0 DAW slice plus the post-v0 work merged through 2026-07-16: the DAW-parity
-conformance scoreboard (`docs/FEATURE_AUDIT.md`), the tracktion itemID
-patch (`patches/`), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
+conformance scoreboard (`docs/FEATURE_AUDIT.md`), the pinned Tracktion/JUCE
+patches (`patches/` 0001–0005), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
 **DAWN recording pad** (#239/#267), **2-player multiplayer** (PR #74), **always-on voice**
 (PR #71), the DAW project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`),
 the from-scratch **v2 UI shell** (default; classic preserved in `AppLegacy.tsx`),
@@ -14,8 +14,8 @@ behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleto
 the re-imagine overhaul (in-place apply + reactive re-render), the real-recipes
 beat generator (`generate_beat_recipe`), `add_drum_pattern` (DRM-002), and the additive
 **Windows + NVIDIA/CUDA port** (refreshed 2026-07-07, FIT-010 #245; the Windows build
-itself is the owner's step). For the live status read `docs/CURRENT_STATUS.md` and
-`docs/STATUS_HANDOFF_2026-07-11.md`.
+itself is the owner's step). For the live status read `docs/CURRENT_STATUS.md`
+(the one rolling status doc).
 
 **Mission:** keep the DAW correct and verified — intensive testing, verification,
 and hardening. New features land additively (snapshot/events stay
@@ -48,7 +48,8 @@ MOSH_NO_AUDIO=1 "$APP" --selftest-undo   # focused undo battery
 Run it 3× for determinism and paste the tallies in the PR/commit — the LOCAL
 battery is THE merge gate. **CI is best-effort signal only:** GitHub Actions were
 removed 2026-06-15, re-added 2026-07-07 as a PR gate (`.github/workflows/ci.yml` +
-`linux-ci.yml`, #243/#244), and Actions billing died 2026-07-11 — so never treat a
+`linux-ci.yml`, #243/#244), and Actions billing died 2026-07-11 (recovered
+2026-07-27 — a red hosted check is a real failure again) — but never treat a
 green (or absent) hosted check as the merge authority; the local gate
 (`scripts/auto-loop/gate.sh`) is.
 
@@ -64,8 +65,9 @@ green (or absent) hosted check as the merge authority; the local gate
 - Tutorial/source media is processed locally only, never redistributed.
 
 ## Other branches
-- **`design-lab`** — Emilio + Claude's design playground (own worktree at
-  `~/Documents/ClaudeMosh-lab`). Not program code; do not touch.
+- **`design-lab`** — Emilio + Claude's design playground (branch only; its old
+  worktree at `~/Documents/ClaudeMosh-lab` no longer exists). Not program code;
+  do not touch.
 - **iOS companion** — the former park seat (`codex/ios-companion-park` +
   `~/Documents/ClaudeMosh-ios`) is GONE: the work landed on `main` and the seat
   was cleaned up in the 2026-07-09 consolidation (history preserved as the

@@ -5,6 +5,72 @@
 
 using namespace mosh;
 
+namespace
+{
+/** A port the OS has just told us is free.
+
+    Binding a listener on port 0 makes the kernel pick an unused ephemeral port;
+    getBoundPort() reports which one. We close it immediately and hand that number
+    to startPairing. A listening socket that never accepted a connection leaves no
+    TIME_WAIT entry, so the rebind that follows succeeds. Returns 0 if even the
+    probe cannot bind. */
+int probeFreePort()
+{
+    juce::StreamingSocket probe;
+    if (! probe.createListener (0, {}))
+        return 0;
+
+    const int bound = probe.getBoundPort();
+    probe.close();
+    return bound;
+}
+
+/** startPairing() on a port that is free RIGHT NOW, retrying if we lose the race.
+
+    These cases used to hardcode 47874-47879. Whenever one of those was already
+    held — a concurrent CI job, another checkout running the same suite, a
+    lingering socket — startPairing failed and the test reported it as a bare
+    `REQUIRE((bool) ...getProperty ("ok", false))` against `false`, which reads
+    exactly like a product regression. That took the linux-x64 job down on
+    2026-07-28 and then passed on a plain re-run with no code change.
+
+    We deliberately do NOT pass port 0 through to startPairing: isRestrictedPort()
+    refuses everything below 1024, including 0, and that guard is production
+    behaviour worth keeping honest. Resolving a concrete free port first keeps the
+    server under test on exactly the path it takes in production.
+
+    A port can still be taken in the window between probing and binding it, so on
+    failure we just probe again — the kernel hands out a different ephemeral port
+    each time, so a repeated collision is vanishingly unlikely. `boundPort` reports
+    which port won, for the one case that needs a second server to collide with it
+    on purpose. */
+juce::var startPairingOnFreePort (RemoteCompanionServer& server, int* boundPort = nullptr)
+{
+    juce::var result;
+
+    for (int attempt = 0; attempt < 16; ++attempt)
+    {
+        const int candidate = probeFreePort();
+        if (candidate <= 0 || RemoteCompanionProtocol::isRestrictedPort (candidate))
+            continue;
+
+        auto* args = new juce::DynamicObject();
+        args->setProperty ("port", candidate);
+        result = server.startPairing (juce::var (args));
+
+        if ((bool) result.getProperty ("ok", false))
+        {
+            if (boundPort != nullptr)
+                *boundPort = candidate;
+
+            return result;
+        }
+    }
+
+    return result; // the caller's REQUIRE reports the last failure
+}
+} // namespace
+
 TEST_CASE ("remote companion pairing requires an unexpired token", "[remote][pairing]")
 {
     RemoteCompanionProtocol protocol;
@@ -70,9 +136,7 @@ TEST_CASE ("remote companion server rejects unauthenticated commands and routes 
         return juce::var (result);
     });
 
-    auto* startArgs = new juce::DynamicObject();
-    startArgs->setProperty ("port", 47874);
-    auto pairingResult = server.startPairing (juce::var (startArgs));
+    auto pairingResult = startPairingOnFreePort (server);
     REQUIRE ((bool) pairingResult.getProperty ("ok", false));
     auto pairing = pairingResult.getProperty ("data", {}).getProperty ("pairing", {});
     const auto token = pairing.getProperty ("token", {}).toString();
@@ -129,9 +193,7 @@ TEST_CASE ("remote companion server accepts standard Base64 phone take chunks", 
         return juce::var (result);
     });
 
-    auto* startArgs = new juce::DynamicObject();
-    startArgs->setProperty ("port", 47878);
-    auto pairingResult = server.startPairing (juce::var (startArgs));
+    auto pairingResult = startPairingOnFreePort (server);
     REQUIRE ((bool) pairingResult.getProperty ("ok", false));
     const auto token = pairingResult.getProperty ("data", {})
                            .getProperty ("pairing", {})
@@ -179,9 +241,7 @@ TEST_CASE ("remote health status does not expose pairing secrets", "[remote][ser
     root.deleteRecursively();
 
     RemoteCompanionServer server (root);
-    auto* startArgs = new juce::DynamicObject();
-    startArgs->setProperty ("port", 47875);
-    auto pairingResult = server.startPairing (juce::var (startArgs));
+    auto pairingResult = startPairingOnFreePort (server);
     REQUIRE ((bool) pairingResult.getProperty ("ok", false));
 
     auto health = server.handleTestRequest ("GET", "/health", juce::var());
@@ -203,9 +263,7 @@ TEST_CASE ("remote pairing exposes a Safari web companion URL through trusted st
     root.deleteRecursively();
 
     RemoteCompanionServer server (root);
-    auto* startArgs = new juce::DynamicObject();
-    startArgs->setProperty ("port", 47877);
-    auto pairingResult = server.startPairing (juce::var (startArgs));
+    auto pairingResult = startPairingOnFreePort (server);
     REQUIRE ((bool) pairingResult.getProperty ("ok", false));
 
     auto pairing = pairingResult.getProperty ("data", {}).getProperty ("pairing", {});
@@ -254,20 +312,24 @@ TEST_CASE ("companion bind failure surfaces a diagnostic port + errno detail", "
     // message that names the port (and, on a real errno, the "Address already in use"
     // cause) rather than a bare "could not start" — the observability fix for the
     // PR #267 misdiagnosis, where a silent generic failure looked like a code bug.
+    // This case needs a COLLISION, so the shared port is the point — but it still must
+    // not be a fixed number, or the first server is the one that fails to bind and the
+    // test proves nothing. Let the first server take a free port, then aim the second at
+    // whatever it got.
     RemoteCompanionServer first (root);
-    auto* firstArgs = new juce::DynamicObject();
-    firstArgs->setProperty ("port", 47879);
-    auto firstResult = first.startPairing (juce::var (firstArgs));
+    int sharedPort = 0;
+    auto firstResult = startPairingOnFreePort (first, &sharedPort);
     REQUIRE ((bool) firstResult.getProperty ("ok", false));
+    REQUIRE (sharedPort > 0);
 
     RemoteCompanionServer second (root.getSiblingFile ("mosh-remote-bind-test-2"));
     auto* secondArgs = new juce::DynamicObject();
-    secondArgs->setProperty ("port", 47879);
+    secondArgs->setProperty ("port", sharedPort);
     auto secondResult = second.startPairing (juce::var (secondArgs));
     REQUIRE_FALSE ((bool) secondResult.getProperty ("ok", true));
     const auto error = secondResult.getProperty ("error", {}).toString();
     INFO ("bind error: " << error);
-    REQUIRE (error.contains ("47879"));
+    REQUIRE (error.contains (juce::String (sharedPort)));
     // The self-probe re-binds the same port and surfaces the ACCURATE cause (JUCE's
     // createListener has already clobbered errno by this point). "in use" is EADDRINUSE's
     // strerror text on macOS/Linux ("Address already in use").
@@ -286,9 +348,7 @@ TEST_CASE ("monitoring endpoints require auth and persist reports", "[remote][mo
     root.deleteRecursively();
 
     RemoteCompanionServer server (root);
-    auto* startArgs = new juce::DynamicObject();
-    startArgs->setProperty ("port", 47876);
-    auto pairingResult = server.startPairing (juce::var (startArgs));
+    auto pairingResult = startPairingOnFreePort (server);
     REQUIRE ((bool) pairingResult.getProperty ("ok", false));
     auto pairing = pairingResult.getProperty ("data", {}).getProperty ("pairing", {});
     const auto token = pairing.getProperty ("token", {}).toString();
