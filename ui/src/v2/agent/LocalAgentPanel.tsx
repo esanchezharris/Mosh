@@ -50,16 +50,16 @@ export function LocalAgentPanel() {
       return;
     }
     if (worker === "Arranger") {
-      const started = await runArranger(exec, snapshot, selectedTrackId, timeRange);
-      if (!started) {
+      const result = await runArranger(exec, snapshot, selectedTrackId, timeRange);
+      if (result === "missing-target") {
         setNotice("Select a track, then shift-drag a smaller region over one of its clips.");
         return;
       }
-      clearRange(null);
+      if (result === "started") clearRange(null);
       return;
     }
-    const started = await runGenerator(exec, snapshot, selectedClipId, stableAudio);
-    if (!started) setNotice("Select a clip first.");
+    const result = await runGenerator(exec, snapshot, selectedClipId, stableAudio);
+    if (result === "missing-target") setNotice("Select a clip first.");
   };
 
   return (

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV2 } from "./helpers";
+import { bootV2, openV2ArrangementTools } from "./helpers";
 
 // The annotation lane — create_annotation / edit_annotation / move_annotation /
 // remove_annotation reaching a mouse-only v2 user for the first time. v2 rendered NO
@@ -16,6 +16,7 @@ import { bootV2 } from "./helpers";
 
 test("the seeded note renders and can be removed with the mouse", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const lane = page.getByTestId("v2-annotation-lane");
   await expect(lane).toBeVisible();
   // bridge.mock seeds one annotation ("tighten this transition" at beat 24).
@@ -28,6 +29,7 @@ test("the seeded note renders and can be removed with the mouse", async ({ page 
 
 test("a new note can be created by clicking empty lane space", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const lane = page.getByTestId("v2-annotation-lane");
   const seeded = page.getByTestId("v2-annotation");
   const seededBox = (await seeded.boundingBox())!;
@@ -51,6 +53,7 @@ test("a new note can be created by clicking empty lane space", async ({ page }) 
 
 test("pressing Escape abandons a draft note without creating one", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const lane = page.getByTestId("v2-annotation-lane");
   const box = (await lane.boundingBox())!;
   await page.mouse.move(box.x + box.width - 40, box.y + box.height / 2);
@@ -67,6 +70,7 @@ test("pressing Escape abandons a draft note without creating one", async ({ page
 
 test("double-clicking a note edits its text inline with the mouse", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const pin = page.getByTestId("v2-annotation").first();
   await pin.dblclick();
 
@@ -82,6 +86,7 @@ test("double-clicking a note edits its text inline with the mouse", async ({ pag
 
 test("dragging a note moves it, and the move survives a tempo change (piecewise, not flat)", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   // First, insert a real tempo change via the tempo lane's own mouse gesture — this is what
   // makes flat-vs-piecewise a real, observable difference rather than a coincidence.
   const tempoLane = page.getByTestId("v2-tempo-lane");

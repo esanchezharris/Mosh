@@ -66,7 +66,7 @@ export const useShell = create<ShellState>((set) => ({
   activityOpen: false,
   browserOpen: false,
   browserTab: "sounds",
-  arrangementToolsOpen: true,
+  arrangementToolsOpen: false,
   rightOpen: true,
   railTab: "track",
   sessionPickerDismissed: false,

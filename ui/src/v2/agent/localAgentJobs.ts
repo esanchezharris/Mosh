@@ -13,6 +13,7 @@ export type LocalAgentJobView = {
 };
 
 type Exec = (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+export type LocalAgentRunResult = "started" | "missing-target" | "failed";
 
 const DRUMMER_PATTERN =
   "kick: X...x...X...x...; snare: ....X.......X...; hat: x.x.x.x.x.x.x.x.";
@@ -93,18 +94,19 @@ export async function runArranger(
   snapshot: Snapshot | null,
   selectedTrackId: string | null,
   range: { start: number; end: number } | null,
-): Promise<boolean> {
+): Promise<LocalAgentRunResult> {
   const target = sectionTargetFor(snapshot?.tracks ?? [], selectedTrackId, range);
-  if (!target) return false;
+  if (!target) return "missing-target";
 
   const create = await exec("create_render_layer", target);
-  if (!create.ok) return true;
-  await exec("set_render_param", {
+  if (!create.ok) return "failed";
+  const configure = await exec("set_render_param", {
     clipId: target.clipId,
     prompt: "a tasteful variation that keeps the groove and musical identity",
   });
-  await exec("render_layer", { clipId: target.clipId });
-  return true;
+  if (!configure.ok) return "failed";
+  const render = await exec("render_layer", { clipId: target.clipId });
+  return render.ok ? "started" : "failed";
 }
 
 export async function runGenerator(
@@ -112,9 +114,9 @@ export async function runGenerator(
   snapshot: Snapshot | null,
   selectedClipId: string | null,
   stableAudioAvailable: boolean,
-): Promise<boolean> {
+): Promise<LocalAgentRunResult> {
   const clip = selectedClip(snapshot, selectedClipId);
-  if (!clip) return false;
+  if (!clip) return "missing-target";
 
   if (!clip.renderLayer) {
     const create = await exec("create_render_layer", {
@@ -123,8 +125,8 @@ export async function runGenerator(
       mode: "reimagine",
       ...(stableAudioAvailable ? { modelVariant: "sa3-medium" } : {}),
     });
-    if (!create.ok) return true;
+    if (!create.ok) return "failed";
   }
-  await exec("render_layer", { clipId: clip.id });
-  return true;
+  const render = await exec("render_layer", { clipId: clip.id });
+  return render.ok ? "started" : "failed";
 }

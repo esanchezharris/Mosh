@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV2 } from "./helpers";
+import { bootV2, openV2ArrangementTools } from "./helpers";
 
 // The song-structure ribbon, mounted as the timeline's TOP ROW.
 //
@@ -10,6 +10,7 @@ import { bootV2 } from "./helpers";
 
 test("the ribbon renders the song's sections over the timeline", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   await expect(page.getByTestId("v2-section-ribbon")).toBeVisible();
   await expect(page.getByTestId("v2-section")).toHaveCount(3); // mock seeds Intro/Verse/Hook
   // SongNav must still be there — the ribbon replaces nothing.
@@ -21,6 +22,7 @@ test("ribbon, ruler and lanes share one x-axis", async ({ page }) => {
   // ribbon/ruler fall out of alignment". Three rows of one CSS grid; if they ever
   // disagree, section boundaries stop meaning anything against the clips.
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
   const [ribbon, ruler, lane] = [await box(".v2-ribbon"), await box(".v2-ruler-cell"), await box(".v2-lane")];
   expect(Math.abs(ribbon.x - lane.x), "ribbon is not aligned with the lanes").toBeLessThanOrEqual(1);
@@ -32,6 +34,7 @@ test("the two sticky rows stack instead of overlapping", async ({ page }) => {
   // PR #183 flattened both `top` offsets to 0 when the ribbon left the layout. With the
   // ribbon back, a shared offset would pin them on top of each other on scroll.
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const offsets = await page.evaluate(() => ({
     ribbon: getComputedStyle(document.querySelector(".v2-ribbon-cell")!).top,
     ruler: getComputedStyle(document.querySelector(".v2-ruler-cell")!).top,
@@ -42,6 +45,7 @@ test("the two sticky rows stack instead of overlapping", async ({ page }) => {
 
 test("+ adds a section and opens it for renaming", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   await page.getByTestId("v2-section-add").click();
   await expect(page.getByTestId("v2-section")).toHaveCount(4);
   const input = page.getByTestId("v2-section-rename");
@@ -53,6 +57,7 @@ test("+ adds a section and opens it for renaming", async ({ page }) => {
 
 test("a section can be removed", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   await page.getByTestId("v2-section").first().hover(); // ✕ is hover-revealed
   await page.getByTestId("v2-section-remove").first().click();
   await expect(page.getByTestId("v2-section")).toHaveCount(2);
@@ -60,6 +65,7 @@ test("a section can be removed", async ({ page }) => {
 
 test("dragging a section moves it, snapped to the bar", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const seg = page.getByTestId("v2-section").first();
   const before = Number(await seg.getAttribute("data-start-beat"));
   const b = (await seg.boundingBox())!;

@@ -163,8 +163,8 @@ describe("Graphite local workers", () => {
 
   it("Arranger creates, steers, and renders the selected sub-region", async () => {
     const { exec, calls } = recordingExec();
-    const started = await runArranger(exec, snapshotWithClips(), "audio", { start: 2, end: 4 });
-    expect(started).toBe(true);
+    const result = await runArranger(exec, snapshotWithClips(), "audio", { start: 2, end: 4 });
+    expect(result).toBe("started");
     expect(calls.map((call) => call.command)).toEqual([
       "create_render_layer",
       "set_render_param",
@@ -176,8 +176,8 @@ describe("Graphite local workers", () => {
 
   it("Generator attaches and runs the existing re-imagine flow", async () => {
     const { exec, calls } = recordingExec();
-    const started = await runGenerator(exec, snapshotWithClips(), "take", true);
-    expect(started).toBe(true);
+    const result = await runGenerator(exec, snapshotWithClips(), "take", true);
+    expect(result).toBe("started");
     expect(calls).toEqual([
       {
         command: "create_render_layer",
@@ -190,5 +190,36 @@ describe("Graphite local workers", () => {
       },
       { command: "render_layer", args: { clipId: "take" } },
     ]);
+  });
+
+  it("Arranger stops on a failed layer creation instead of reporting success", async () => {
+    const exec = vi.fn(async (command: string): Promise<CommandResult> => ({
+      ok: false,
+      command,
+      error: "layer unavailable",
+    }));
+
+    const result = await runArranger(exec, snapshotWithClips(), "audio", { start: 2, end: 4 });
+
+    expect(result).toBe("failed");
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith("create_render_layer", {
+      clipId: "take",
+      regionStart: 2,
+      regionEnd: 4,
+    });
+  });
+
+  it("Generator stops on a failed layer creation instead of rendering a missing layer", async () => {
+    const exec = vi.fn(async (command: string): Promise<CommandResult> => ({
+      ok: false,
+      command,
+      error: "layer unavailable",
+    }));
+
+    const result = await runGenerator(exec, snapshotWithClips(), "take", true);
+
+    expect(result).toBe("failed");
+    expect(exec).toHaveBeenCalledTimes(1);
   });
 });

@@ -39,7 +39,7 @@ describe("v2 shellState — browser drawer", () => {
   });
 
   it("reveals the dense arrangement tools only on request", () => {
-    expect(useShell.getState().arrangementToolsOpen).toBe(false);
+    expect(useShell.getInitialState().arrangementToolsOpen).toBe(false);
     useShell.getState().toggleArrangementTools();
     expect(useShell.getState().arrangementToolsOpen).toBe(true);
   });

@@ -21,9 +21,10 @@ async function openBrowser(page: Page): Promise<void> {
 }
 
 async function openArrangementTools(page: Page): Promise<void> {
-  if (await page.getByTestId("v2-songnav").count()) return;
+  if (await page.getByTestId("v2-songnav").isVisible()) return;
   await page.getByTestId("v2-overflow").click();
   await page.getByRole("menuitem", { name: "Show arrangement tools" }).click();
+  await expect(page.getByTestId("v2-songnav")).toBeVisible();
 }
 
 async function openAgent(page: Page): Promise<void> {
@@ -51,6 +52,20 @@ test("defaults to the Graphite shell when nothing is persisted", async ({ page }
   await expect(shell).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect.poll(() => shell.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(11, 12, 14)");
+});
+
+test("dense arrangement tools stay closed until requested", async ({ page }) => {
+  await bootV2(page);
+  await expect(page.getByTestId("v2-section-ribbon")).toHaveCount(0);
+  await expect(page.getByTestId("v2-tempo-lane")).toHaveCount(0);
+  await expect(page.getByTestId("v2-annotation-lane")).toHaveCount(0);
+  await expect(page.getByTestId("v2-songnav")).toBeHidden();
+
+  await openArrangementTools(page);
+
+  await expect(page.getByTestId("v2-section-ribbon")).toBeVisible();
+  await expect(page.getByTestId("v2-tempo-lane")).toBeVisible();
+  await expect(page.getByTestId("v2-annotation-lane")).toBeVisible();
 });
 
 test("left browser drawer: overflow opens it, tabs switch, close dismisses", async ({ page }) => {

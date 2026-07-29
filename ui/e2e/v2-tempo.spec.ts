@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { bootV2 } from "./helpers";
+import { bootV2, openV2ArrangementTools } from "./helpers";
 
 // The tempo lane — insert_tempo_change / remove_tempo_change reaching the mouse.
 //
@@ -10,6 +10,7 @@ import { bootV2 } from "./helpers";
 
 test("a tempo change can be created and removed with the mouse", async ({ page }) => {
   await bootV2(page);
+  await openV2ArrangementTools(page);
   const lane = page.getByTestId("v2-tempo-lane");
   await expect(lane).toBeVisible();
   // The base tempo renders as an anchor with no remove control — removeTempo() no-ops on
@@ -43,6 +44,7 @@ test("the lane grid re-spaces across a tempo change instead of drifting from the
   // repeating-linear-gradient, which has ONE period and cannot represent an uneven grid.
   // Once a tempo change exists the lane must switch to real positioned lines.
   await bootV2(page);
+  await openV2ArrangementTools(page);
   await expect(page.locator(".v2-lane-mapped")).toHaveCount(0); // flat project keeps the gradient
 
   const lane = page.getByTestId("v2-tempo-lane");

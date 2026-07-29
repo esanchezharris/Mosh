@@ -63,6 +63,13 @@ export async function bootV2(page: Page, opts: { theme?: "dark" | "light" } = {}
   await expect(page.getByTestId("v2-timeline")).toBeVisible();
 }
 
+export async function openV2ArrangementTools(page: Page): Promise<void> {
+  if (await page.getByTestId("v2-section-ribbon").isVisible()) return;
+  await page.getByTestId("v2-overflow").click();
+  await page.getByRole("menuitem", { name: "Show arrangement tools" }).click();
+  await expect(page.getByTestId("v2-section-ribbon")).toBeVisible();
+}
+
 /** File → <action> through the in-WebView File menu (same runAction dispatch the native
  *  menu + keyboard use). */
 export async function fileMenu(page: Page, action: string): Promise<void> {
