@@ -5,7 +5,7 @@
 import type { Snapshot } from "../types";
 import { useStore } from "../store";
 import { Meter } from "./Meter";
-import { GenDrawer } from "./Dock";
+import { GenDrawer } from "./GenDrawer";
 
 export function Inspector({ snapshot }: { snapshot: Snapshot }) {
   const selectedTrackId = useStore((s) => s.selectedTrackId);

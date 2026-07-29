@@ -10,20 +10,53 @@ import {
 function snapshotWithClips(): Snapshot {
   return {
     schemaVersion: 1,
-    session: { tempo: 120 },
+    session: {
+      sampleRate: 48_000,
+      tempo: 120,
+      key: { tonic: "C", mode: "major" },
+      editFile: "",
+    },
     tracks: [
       {
         id: "drums",
+        index: 0,
+        name: "Drums",
         type: "drum",
-        clips: [{ id: "beat", name: "Beat", type: "midi", start: 0, length: 8 }],
+        clips: [{
+          id: "beat",
+          name: "Beat",
+          type: "midi",
+          start: 0,
+          length: 8,
+          offset: 0,
+          hasRenderLayer: false,
+        }],
       },
       {
         id: "audio",
+        index: 1,
+        name: "Audio",
         type: "audio",
-        clips: [{ id: "take", name: "Take", type: "wave", start: 0, length: 8 }],
+        clips: [{
+          id: "take",
+          name: "Take",
+          type: "wave",
+          start: 0,
+          length: 8,
+          offset: 0,
+          hasRenderLayer: false,
+        }],
       },
     ],
-  } as unknown as Snapshot;
+    transport: {
+      playing: false,
+      recording: false,
+      position: 0,
+      looping: false,
+      loopStart: 0,
+      loopEnd: 0,
+    },
+  };
 }
 
 function recordingExec() {

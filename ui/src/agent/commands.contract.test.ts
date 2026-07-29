@@ -1,6 +1,6 @@
 // DURABLE catalog ⇄ backend contract guard.
 //
-// Parses the C++ command seam (src/moshops/MoshOps.cpp) and asserts that EVERY
+// Parses the C++ command seam (src/moshops/MoshOps*.cpp, concatenated) and asserts that EVERY
 // argument the agent catalog (AGENT_COMMANDS) declares is actually read by the
 // command's handler. This catches the whole class of "voiced command silently
 // no-ops because the catalog declares an arg key the backend never reads" bugs
@@ -16,7 +16,7 @@
 //                (no args["key"] style anywhere in the file)
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { AGENT_COMMANDS, AGENT_COMMAND_MAP } from "./commands";
@@ -30,8 +30,18 @@ import {
 } from "./skills";
 
 const here = dirname(fileURLToPath(import.meta.url)); // ui/src/agent
-const CPP_PATH = resolve(here, "../../../src/moshops/MoshOps.cpp");
-const src = readFileSync(CPP_PATH, "utf8");
+const MOSHOPS_DIR = resolve(here, "../../../src/moshops");
+
+// Glob-aware (wave0 guards-first): the command seam may split into multiple
+// MoshOps*.cpp translation units. Read them ALL — MoshOps.cpp first, then the
+// rest alphabetically — and run the existing parsers over the concatenation.
+// Today the glob matches exactly one file, so behaviour is identical.
+const CPP_FILES = readdirSync(MOSHOPS_DIR)
+  .filter((f) => /^MoshOps.*\.cpp$/.test(f))
+  .sort((a, b) =>
+    a === "MoshOps.cpp" ? -1 : b === "MoshOps.cpp" ? 1 : a.localeCompare(b),
+  );
+const src = CPP_FILES.map((f) => readFileSync(resolve(MOSHOPS_DIR, f), "utf8")).join("\n");
 
 // command name → handler function (from the dispatch table). The handler is the
 // cmdXxx(args) call — either bare after `return`, or nested inside a wrapper such as
@@ -50,7 +60,9 @@ const dispatch = parseDispatch(src);
 // Slice a handler's source span: from its definition to the next function
 // definition (or EOF). This can only ever ATTRIBUTE EXTRA keys (a false pass),
 // never drop a real read — so the guard never fails spuriously on brace/string
-// edge cases.
+// edge cases. The span-slice survives the multi-file concatenation above for
+// the same reason: at worst the last handler of one file attributes the next
+// file's leading non-handler text (extra keys), it never drops a real read.
 function handlerArgKeys(handler: string): Set<string> | null {
   const sig = src.indexOf(`MoshOps::${handler} (`);
   if (sig < 0) return null;

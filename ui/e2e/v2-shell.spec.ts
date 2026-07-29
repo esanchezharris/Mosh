@@ -791,7 +791,14 @@ test("the track-name column is wide enough to read a name", async ({ page }) => 
 
   // A name long enough that the column width is what decides legibility.
   await page.evaluate(async () => {
-    const st = (window as any).__moshStore.getState();
+    const st = (window as unknown as {
+      __moshStore: {
+        getState: () => {
+          snapshot: { tracks: { id: string }[] };
+          exec: (command: string, args: Record<string, unknown>) => Promise<unknown>;
+        };
+      };
+    }).__moshStore.getState();
     await st.exec("rename_track", { trackId: st.snapshot.tracks[0].id, name: "Serum Lead Stack" });
   });
 

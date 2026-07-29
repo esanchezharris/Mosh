@@ -151,13 +151,23 @@
 .v2-shell .v2-skel-confirm,        /* mumble -> skeleton confirm strip */
 .v2-shell .v2-flow-syl.ok,         /* lyric flow: syllables hitting the grid */
 .v2-shell .v2-flow-rhyme.st-perfect, /* lyric flow: a perfect rhyme grade */
-.v2-shell .v2-clip-badge.working { /* a clip mid-render — transcribing / lyrics / flow */
+.v2-shell .v2-clip-badge.working, /* a clip mid-render — transcribing / lyrics / flow */
+.v2-shell .gen {                  /* the GENERATIVE drawer (classic Dock.tsx, mounted by v2's Inspector) */
   --v2-accent: var(--v2-accent-agentic);
   --v2-accent-ink: var(--v2-accent-agentic-ink);
   --v2-accent-soft: var(--v2-accent-agentic-soft);
   --accent: var(--v2-accent-agentic);
   --accent-ink: var(--v2-accent-agentic-ink);
   --accent-soft: var(--v2-accent-agentic-soft);
+  /* The classic family too — see the bridge note in 00-tokens.css. Without these the
+     generative drawer's SA3 engine badge, its "ready" status pill and its quality
+     readout paint near-white, because --lime resolved on .v2-shell and a nested
+     --v2-accent override cannot reach it. This is the whole reason .gen is listed. */
+  --lime: var(--v2-accent-agentic);
+  --lime-glow: var(--v2-accent-agentic);
+  --lime-dim: color-mix(in srgb, var(--v2-accent-agentic) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--v2-accent-agentic) 12%, transparent);
+  --lime-text: var(--v2-accent-agentic);
 }
 
 /* ══ NOT AGENTIC, but nested inside an agentic scope ═══════════════════════════
@@ -185,4 +195,13 @@
   --accent: var(--v2-accent-neutral);
   --accent-ink: var(--v2-accent-neutral-ink);
   --accent-soft: var(--v2-accent-neutral-soft);
+  /* The classic family too. .agent-mic and .fo-trigger are classic components that
+     paint from --lime directly (mosh.css .agent-mic.on), so re-pinning only the v2
+     accent would leave them limed inside an agentic scope — the same half-fix the
+     LIVE dot shipped with the first time round. */
+  --lime: var(--v2-accent-neutral);
+  --lime-glow: var(--v2-accent-neutral);
+  --lime-dim: color-mix(in srgb, var(--v2-accent-neutral) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--v2-accent-neutral) 12%, transparent);
+  --lime-text: var(--v2-accent-neutral);
 }

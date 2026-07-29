@@ -32,6 +32,7 @@ const AGENTIC_SELECTORS: Record<string, string> = {
   ".v2-shell .v2-flow-syl.ok": "lyric flow: syllables hitting the grid, computed by the flow model",
   ".v2-shell .v2-flow-rhyme.st-perfect": "lyric flow: a perfect rhyme grade, computed by the rhyme model",
   ".v2-shell .v2-clip-badge.working": "a clip mid-render — transcribing / lyrics / flow in flight. Lives in the arrangement partition, which is why the agentic set is semantic and not file-based.",
+  ".v2-shell .gen": "the GENERATIVE drawer (classic Dock.tsx, mounted by v2's Inspector): SA3 engine badge, render status, quality readout, progress. The agentic set was decided as 'generative + Moshi'; this is the generative half, and it was missing — it had been painting lime by ACCIDENT, via the classic --lime that .v2-shell never re-pinned, rather than by the rule.",
 };
 
 // Non-agentic things that sit INSIDE an agentic scope and would otherwise inherit the lime.
@@ -70,8 +71,42 @@ describe("accent reservation — the scan is real", () => {
 describe("accent reservation — the token families", () => {
   it("defines both families and derives --v2-accent from the neutral", () => {
     expect(code).toMatch(/--v2-accent-neutral:\s*#f2f2f4/);
-    expect(code).toMatch(/--v2-accent-agentic:\s*#ccff23/);
+    expect(code).toMatch(/--v2-accent-agentic:\s*#b8e62e/);
     expect(code).toMatch(/--v2-accent:\s*var\(--v2-accent-neutral\)/);
+  });
+
+  it("no rule hardcodes a colour from the agentic family", () => {
+    // A literal cannot be re-pinned and does not follow a token change. `.agent-input:
+    // focus-within` carried `rgba(204, 255, 54, 0.42)` — the old lime, written out — so it
+    // sat through the entire reservation pass untouched and would have stayed lime while
+    // every token around it moved to chartreuse. The accent must be changeable in ONE
+    // place; anything painted with a green literal is a second place nobody will find.
+    //
+    // Scoped to the agentic hue (green-dominant). Neutrals, reds, ambers and the violet
+    // clip ink are not this rule's business.
+    const offenders: string[] = [];
+    for (const r of rules) {
+      // The token declaration blocks are exactly where a literal belongs.
+      if (/--v2-accent-agentic|--v2-accent-neutral/.test(r.body)) continue;
+      // A var() fallback never paints while the token is defined.
+      const body = r.body.replace(/var\(--[\w-]+\s*,\s*[^)]*\)/g, "var(X)");
+      const lits: string[] = [];
+      for (const m of body.matchAll(/#([0-9a-fA-F]{6})\b/g)) {
+        const [red, green, blue] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+        if (green > 150 && green - red > 25 && green - blue > 60) lits.push(m[0]);
+      }
+      for (const m of body.matchAll(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g)) {
+        const [red, green, blue] = [+m[1], +m[2], +m[3]];
+        if (green > 150 && green - red > 25 && green - blue > 60) lits.push(m[0]);
+      }
+      if (lits.length) offenders.push(`${r.selector}  ->  ${lits.join(", ")}`);
+    }
+    expect(
+      offenders,
+      "these paint an agentic-family colour as a LITERAL. It cannot be re-pinned for a " +
+        "scope and it will not follow a change to --v2-accent-agentic. Use the token:\n  " +
+        offenders.join("\n  "),
+    ).toEqual([]);
   });
 
   it("never re-declares --v2-accent in the light block", () => {

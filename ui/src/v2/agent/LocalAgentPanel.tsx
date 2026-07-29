@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import moshIconUrl from "../assets/MoshIcon32.png";
 import { useStore } from "../../store";
 import { AgentComposer } from "../../ui/AgentComposer";
-import { GenDrawer } from "../../ui/Dock";
+import { GenDrawer } from "../../ui/GenDrawer";
 import { resolveSa3Available } from "../../ui/engineBadge";
 import { useTaskStore } from "../../agent/loop/taskStore";
 import { AgentDrawer } from "./AgentDrawer";
@@ -73,7 +73,11 @@ export function LocalAgentPanel() {
           </div>
           {jobs.length > 0 && <span className="v2-agent-count">{jobs.length}</span>}
           {hasTask && (
-            <button className="v2-agent-task-toggle" onClick={() => setDrawerOpen(!drawerOpen)}>
+            <button
+              className="v2-agent-task-toggle"
+              data-testid="agent-drawer-toggle"
+              onClick={() => setDrawerOpen(!drawerOpen)}
+            >
               {drawerOpen ? "Hide task" : "Last task"}
             </button>
           )}

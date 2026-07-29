@@ -9,7 +9,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { useShell, type InspectorTab } from "../shellState";
-import { Rack, GenDrawer } from "../../ui/Dock";
+import { Rack } from "../../ui/Rack";
+import { GenDrawer } from "../../ui/GenDrawer";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";

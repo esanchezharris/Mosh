@@ -81,3 +81,4 @@ rubber stamp.
 ## Status log
 
 - 2026-07-28 — accepted (owner approved the program plan).
+- 2026-07-29 — implemented in #489, **queued for owner merge**. `tests/golden/lock_scopes.tsv` carries all 209 rows (77 Unguarded / 56 Track / 38 Clip / 38 SessionGlobal); a hostile reviewer verified every row against a mechanical re-implementation of `classify()` with zero mismatches. RED-proofs landed: a flipped row fails naming the command; a bogus extractor path trips the >150 floor. The stale CLAUDE.md gotcha this RFC identified ("unclassified means unguarded") is corrected in #505.
