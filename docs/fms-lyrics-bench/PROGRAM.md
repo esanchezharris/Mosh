@@ -949,3 +949,32 @@ numbers and hashes only.
   remaining 9.3% is genuine pool miss (the truth is not phonology-reachable
   from the anchor) and is the only part a better POOL, not a better model,
   could fix.
+- **2026-07-29 — DEEP POOL IS STRICTLY WORSE; my "pool is the last lever" claim
+  is FALSIFIED.** Swept pool depth 200 -> 1000 on the frozen 150 (witness:
+  `poolMax` 1000, poolSize mean 989, offMenu still 0 — a real run, see the
+  cache-key note below):
+
+  | | depth 200 | depth 1000 |
+  |---|---|---|
+  | exact | **.433** | .413 |
+  | topk | **.540** | .507 |
+  | truth ABSENT from pool | .093 | **.000** |
+  | recall@40 (palette size) | **.800** | .633 |
+  | rhyme_perfect (oracle .300) | .293 | .200 |
+
+  The truncation diagnosis was right — at depth 1000 the artist's word is in
+  the pool 100% of the time — and it does not help: the truth now competes with
+  ~5x more candidates, the ordering degrades at EVERY depth, and palette-40
+  coverage collapses .800 -> .633. So the 200-cap and the 40-word palette knee
+  are both load-bearing, and pool depth is already near a local optimum. The
+  last 9.3% is reachable only by making everything else worse.
+  Taken with the three reranking negatives, the MECHANISM is converged: the
+  remaining headroom is the human loop (palette + choose), not ranking,
+  selecting, or pool depth.
+  **Process note that nearly cost a false negative:** the first depth-1000 run
+  came back byte-identical because `runner.py` keys per-item cache on
+  `(arm, version, item, armConfig)` and the depth lived only in the arm body —
+  it replayed depth-200 answers in seconds. Caught by reading `poolSize`, not
+  the scores. Knob now folds into `arm_config` when set (default byte-identical,
+  RED-proved both ways with `MOSH_INFILL_CACHE_ONLY=1`); trap added to
+  CLAUDE.md.
