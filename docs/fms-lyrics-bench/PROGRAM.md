@@ -772,3 +772,16 @@ numbers and hashes only.
   iters.** If it clears .413/.45, the routing-bar conversation reopens with a
   LOCAL guaranteed-rhyme arm as the candidate — an owner decision, flagged
   ahead of time.
+- **2026-07-28 — Palette DEFAULT ON (owner's ear call).** `MOSH_RHYME_PALETTE`
+  inverts to an opt-out (`=0` app-wide; spec-explicit still wins). The
+  measured basis: shipped-loop rhyme_perfect .642→.887. Also: I4's scaled
+  train relaunched at tuned settings — the first launch used batch 4 /
+  seq 1024 (15GB of 64GB, prompts p99 ≈ 240 tokens ⇒ 3-4× padding waste);
+  batch 16 / seq 384 / 1,500 iters sees MORE data and finishes in ~¼ the
+  wall-clock. **Training locality (owner asked):** yes, all training is local
+  (MLX on this Mac's GPU). CUDA rental would be ~10-20× faster per step BUT
+  the program's own r5-derived rule stands: the SHIPPED adapter must train
+  against the 4-bit MLX base it serves on (precision-matched, never fused) —
+  so remote CUDA buys recipe search only, and the final adapter always pays
+  the MLX retrain. At current sizes (~1h tuned) local is the simpler honest
+  path; revisit if sweeps start dominating wall-clock.
