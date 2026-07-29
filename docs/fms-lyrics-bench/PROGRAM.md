@@ -867,3 +867,20 @@ numbers and hashes only.
   trained arm emits an odd token. Proposed next lever (NOT taken, owner
   decision): the C1-C3 combo lane, but as a two-candidate CHOICE — a
   different, easier task than the pool reranking M6 closed negative.
+- **2026-07-29 — SELECTOR PROBE: NEGATIVE. Base logprob cannot choose between
+  two candidates — but the user can.** On the 39 frozen-150 items where
+  exactly one champion is right, length-normalized teacher-forced logprob under
+  the UNCONSTRAINED base model picked the winner 21/39 = **.538** (two-sided
+  binomial vs chance p = .749) — **identical to the trivial policy "always
+  trust the trained arm"** (also 21/39), i.e. the signal adds nothing over a
+  constant. This EXTENDS M6 rather than repeating it: M6 killed pointwise
+  ranking over a ~40-word pool; this kills it at the strictly easier 2-way
+  choice. Two failures at different difficulties is strong evidence that base
+  likelihood does not encode which word the artist wrote. Raw 39-item dump read
+  by hand (scratchpad/selector_probe.py prints per item).
+  **Product consequence (the useful half):** the oracle-of-2 headroom (.553 vs
+  .433) is real and needs no new model if the SELECTOR IS THE USER — agree
+  (35% of items, 84.6% precise) -> present one word; disagree (65%) -> present
+  both as a two-way choice instead of guessing. That is the
+  progressive-disclosure doctrine applied to generation, and it is buildable
+  from arms that already exist. NOT built; owner decision.
