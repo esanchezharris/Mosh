@@ -122,3 +122,67 @@
 .v2-agent-say { font-size: 12px; color: var(--v2-text); font-style: italic; }
 .v2-composer-face-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
 .v2-composer-face-btn:hover { outline: 2px solid var(--v2-accent-soft); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ACCENT RESERVATION — the agentic set.
+
+   These are the ONLY selectors in the shell allowed to reach the lime. Everything
+   else paints --v2-accent, which resolves to the near-white neutral (00-tokens.css).
+   Mirrored, with reasons, by AGENTIC_SELECTORS in ui/src/v2/accentReservation.test.ts;
+   the guard fails if any other rule re-points the accent at the agentic family.
+
+   Each entry is a CONTAINER, so descendants inherit — scope, don't rewrite. Where a
+   container would leak onto something non-agentic, the exclusion block below re-pins
+   the neutral.
+
+   Why --accent/-ink/-soft are re-stated as well, and not just --v2-accent: a var()
+   inside a custom property resolves on the element that DECLARES it, not where it is
+   used. `--accent: var(--v2-accent)` is declared on .v2-shell, so it was already
+   resolved to the neutral there, and a nested --v2-accent override does NOT reach it.
+   Miss this and every `var(--accent)` consumer inside an agentic subtree silently
+   stays near-white.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods, hands-free, the GL mount */
+.v2-shell .v2-mosh-status,         /* his status wave + narration line */
+.v2-shell .v2-pill,                /* the topbar "AI ACTIVE" pill (its only user) */
+.v2-shell .agent-input.listening,  /* push-to-talk recognizer is live */
+.v2-shell .agent-send,             /* the "Ask Moshi" submit */
+.v2-shell .v2-agent-drawer,        /* drawer title while .live, step chips, the spinner */
+.v2-shell .v2-skel-confirm,        /* mumble -> skeleton confirm strip */
+.v2-shell .v2-flow-syl.ok,         /* lyric flow: syllables hitting the grid */
+.v2-shell .v2-flow-rhyme.st-perfect, /* lyric flow: a perfect rhyme grade */
+.v2-shell .v2-clip-badge.working { /* a clip mid-render — transcribing / lyrics / flow */
+  --v2-accent: var(--v2-accent-agentic);
+  --v2-accent-ink: var(--v2-accent-agentic-ink);
+  --v2-accent-soft: var(--v2-accent-agentic-soft);
+  --accent: var(--v2-accent-agentic);
+  --accent-ink: var(--v2-accent-agentic-ink);
+  --accent-soft: var(--v2-accent-agentic-soft);
+}
+
+/* ══ NOT AGENTIC, but nested inside an agentic scope ═══════════════════════════
+   Each of these inherits the lime by accident unless it re-pins the neutral. This is
+   the exact bug the first mockup shipped: the multiplayer LIVE dot stayed lime because
+   it sits inside the Mosh card. Presence is "live"; it is NOT agentic — the owner
+   scoped it out explicitly.
+
+   The .v2-live / .fo-trigger / .v2-composer-face-btn entries are DEFENSIVE: they are
+   not reachable by the scopes above as written, and are kept so that widening a scope
+   to .v2-mosh-card / .v2-composer cannot silently re-lime them. Do not "clean them
+   up" — that removal IS the bug.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.v2-shell .v2-live,
+.v2-shell .v2-live .led,
+.v2-shell .v2-agent-btn,                    /* the drawer's generic utility buttons: Undo task, close */
+.v2-shell .agent-mic,
+.v2-shell .v2-skel-confirm .v2-btn,
+.v2-shell .v2-flow-dot.on,
+.v2-shell .v2-composer-face-btn,
+.v2-shell .v2-composer-plus .fo-trigger {   /* the File menu "+" — app chrome, not the agent */
+  --v2-accent: var(--v2-accent-neutral);
+  --v2-accent-ink: var(--v2-accent-neutral-ink);
+  --v2-accent-soft: var(--v2-accent-neutral-soft);
+  --accent: var(--v2-accent-neutral);
+  --accent-ink: var(--v2-accent-neutral-ink);
+  --accent-soft: var(--v2-accent-neutral-soft);
+}
