@@ -1,0 +1,225 @@
+/* ─────────────────────────────── TOP BAR ─────────────────────────────────── */
+.v2-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  height: var(--v2-topbar-h);
+  padding: 0 4px;
+  margin: 12px 14px 0;
+}
+.v2-brand { justify-self: start; display: flex; align-items: center; gap: 11px; min-width: 0; }
+.v2-mark { flex: 0 0 auto; display: block; }
+.v2-center { justify-self: center; display: flex; align-items: center; gap: 12px; }
+.v2-top-right { justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.v2-proj { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v2-proj-name {
+  font-family: var(--font-display);
+  font-size: var(--v2-fs-lg); letter-spacing: 0.01em; color: var(--v2-ground-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.v2-proj-meta { display: flex; align-items: center; gap: 8px; font-size: var(--v2-fs-sm); color: var(--v2-ground-dim); }
+.v2-chip {
+  appearance: none; background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line);
+  color: var(--v2-ground-dim); font: inherit; font-size: var(--v2-fs-sm); padding: 2px 8px; border-radius: var(--v2-radius-pill);
+  cursor: pointer; line-height: 1.6;
+}
+.v2-chip:hover { color: var(--v2-ground-text); border-color: var(--v2-ground-line-strong); }
+.v2-chip-num { width: 52px; text-align: center; -moz-appearance: textfield; }
+.v2-chip-num::-webkit-outer-spin-button, .v2-chip-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.v2-chip-sel { background: var(--v2-ground-card); }
+.v2-timesig { display: inline-flex; align-items: center; gap: 2px; }
+.v2-timesig .v2-chip-num { width: 34px; }
+.v2-timesig-slash { color: var(--v2-ground-dim); opacity: 0.7; }
+.v2-chip-toggle[data-on="true"] { color: var(--v2-accent, #b6ff3c); border-color: var(--v2-accent, #b6ff3c); }
+
+/* the transport is a dark floating PILL; the readout is a light time CARD — both on cream */
+.v2-transport {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px; border-radius: var(--v2-radius-pill);
+  background: var(--v2-surface); border: 1px solid var(--v2-line); box-shadow: var(--v2-shadow);
+}
+.v2-tbtn {
+  appearance: none; width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-text); font-size: var(--v2-fs-base); cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1), background 140ms, color 140ms, box-shadow 140ms;
+}
+.v2-tbtn:hover { transform: translateY(-1px); border-color: var(--v2-line-strong); }
+.v2-tbtn:active { transform: scale(0.94); }
+.v2-tbtn.play[data-on="true"], .v2-tbtn.play:hover {
+  background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent;
+  box-shadow: 0 0 22px var(--v2-accent-soft);
+}
+.v2-tbtn.play { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+.v2-tbtn.rec[data-on="true"] { color: var(--v2-rec); border-color: var(--v2-rec); box-shadow: 0 0 18px color-mix(in srgb, var(--status-danger-glow) 30%, transparent); }
+.v2-tbtn.rec[data-armed="true"]:not([data-on="true"]) { color: var(--v2-rec); border-color: color-mix(in srgb, var(--v2-rec) 55%, transparent); }
+.v2-tbtn .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; }
+
+.v2-readout {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 7px 14px; border-radius: 14px;
+  background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line);
+}
+.v2-time { font-family: var(--font-mono); font-size: var(--v2-fs-xl); letter-spacing: 0.04em; color: var(--v2-ground-text); line-height: 1; }
+.v2-bars { display: flex; align-items: center; gap: 8px; font-size: var(--v2-fs-xs); letter-spacing: 0.12em; color: var(--v2-ground-dim); text-transform: uppercase; }
+.v2-loop-on { color: var(--v2-accent); }
+
+.v2-spacer { flex: 1 1 auto; }
+.v2-pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: var(--v2-radius-pill);
+  background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line); font-size: var(--v2-fs-sm); color: var(--v2-ground-dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.v2-pill .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+.v2-pill .led.busy { animation: v2-blink 1s infinite; }
+@keyframes v2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.v2-btn {
+  appearance: none; display: inline-flex; align-items: center; gap: 7px;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text);
+  font: inherit; font-size: var(--v2-fs-base); padding: 8px 14px; border-radius: 11px; cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1), background 140ms, border-color 140ms;
+}
+.v2-btn:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--v2-line-strong); }
+.v2-btn:active:not(:disabled) { transform: scale(0.96); }
+.v2-btn:disabled { opacity: 0.38; cursor: default; }
+.v2-btn.primary { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; font-weight: 700; }
+.v2-btn.icon { padding: 8px 10px; }
+
+/* reused classic tool popovers (training/log/remote/help/multiplayer) — subtle ghost
+   icons in the v2 topbar so every feature keeps a home without loud chrome. */
+.v2-tools { display: flex; align-items: center; gap: 1px; }
+.v2-shell .v2-tools .btn {
+  background: transparent; border: 1px solid transparent; color: var(--v2-dim);
+  border-radius: 9px; padding: 6px 8px; font-size: var(--v2-fs-base); line-height: 1; cursor: pointer;
+}
+.v2-shell .v2-tools .btn:hover, .v2-shell .v2-tools .btn.on { color: var(--v2-text); background: var(--v2-surface-sunken); border-color: var(--v2-line); }
+
+/* topbar chrome floats on the cream ground — light pills + ground-toned ghost icons */
+.v2-topbar .v2-btn { background: var(--v2-ground-card); border-color: var(--v2-ground-line); color: var(--v2-ground-text); }
+.v2-topbar .v2-btn:hover { border-color: var(--v2-ground-line-strong); }
+.v2-invite-btn { font-weight: 700; }
+.v2-invite-btn svg { flex: 0 0 auto; }
+.v2-topbar .v2-tools .btn { color: var(--v2-ground-dim); padding: 7px 8px; }
+.v2-topbar .v2-tools .btn:hover, .v2-topbar .v2-tools .btn.on { color: var(--v2-ground-text); background: var(--v2-ground-card); border-color: var(--v2-ground-line); }
+/* the reused classic tool popovers carry wide text labels ("Multiplayer", "iPhone",
+   "LoRA") that would blow out the topbar grid — compact them to single glyphs in v2
+   only (scoped to .v2-topbar, so the classic cluster keeps its labels). */
+.v2-topbar .v2-tools .mp-pop > .btn,
+.v2-topbar .v2-tools .training-pop > .btn,
+.v2-topbar .v2-tools .remote-pop > .btn { font-size: 0; }
+.v2-topbar .v2-tools .mp-pop > .btn::after { content: "👥"; font-size: var(--v2-fs-base); }
+.v2-topbar .v2-tools .training-pop > .btn::after { content: "✦"; font-size: 14px; }
+.v2-topbar .v2-tools .remote-pop > .btn::after { content: "📱"; font-size: var(--v2-fs-base); }
+/* classic sizes the training popover by putting width on the WRAP (.training-pop) — in
+   v2's flex topbar that stretches the cluster, so reset the wrap and size the popover. */
+.v2-topbar .v2-tools .training-pop { width: auto; max-height: none; overflow: visible; }
+.v2-topbar .v2-tools .training-pop .pop { width: min(94vw, 380px); max-height: min(80vh, 620px); overflow: auto; }
+
+/* collaborator avatar cluster — overlapped initials circles, tinted by peer color */
+.v2-avatars { display: flex; align-items: center; }
+.v2-avatar {
+  width: 30px; height: 30px; border-radius: 50%; margin-left: -8px;
+  /* The initial sits on a bright per-peer fill — the case --on-accent names. */
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--on-accent);
+  border: 2px solid var(--v2-ground); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.v2-avatar:first-child { margin-left: 0; }
+.v2-avatar.more { background: var(--v2-ground-card); color: var(--v2-ground-text); }
+
+/* overflow menu */
+.v2-menu-wrap { position: relative; }
+.v2-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 248px;
+  padding: 8px;
+  background: var(--v2-surface-2);
+  border: 1px solid var(--v2-line-strong);
+  border-radius: 14px;
+  box-shadow: var(--v2-shadow);
+  backdrop-filter: blur(20px);
+}
+.v2-menu-tools {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--v2-line);
+  margin-bottom: 8px;
+}
+.v2-menu-tools .pop-wrap { min-width: 0; }
+.v2-menu-tools .btn {
+  width: 100%;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+  background: var(--v2-surface-sunken);
+  border: 1px solid var(--v2-line);
+  color: var(--v2-dim);
+  border-radius: var(--v2-radius-sm);
+}
+.v2-menu-tools .btn:hover,
+.v2-menu-tools .btn.on {
+  color: var(--v2-text);
+  border-color: var(--v2-accent);
+  background: rgba(255, 255, 255, 0.03);
+}
+.v2-menu-tools .pop {
+  right: 0;
+  left: auto;
+}
+/* AGT-MEM (M3) discovery — `.v2-menu-tools .btn` above (a plain descendant selector,
+   meant only to size the 5 tool-TRIGGER buttons in the grid) also matches every button
+   INSIDE an opened popover's content, since .pop is itself a descendant of .pop-wrap,
+   which is a descendant of .v2-menu-tools. Forced every popover button (Refresh, Clear,
+   Copy path, per-item Forget, …) to width:100%/height:38px of its flex row, collapsing
+   any adjacent flex-1 text to 0 width — invisible content, not a color bug. Pre-existing
+   (reproduces on the unmodified CommandLogTool's Refresh button too), surfaced by the
+   memory panel's denser button-next-to-text rows. Scoped reset, more specific than the
+   rule above by one compound selector so it wins regardless of source order. */
+.v2-menu-tools .pop .btn {
+  width: auto;
+  height: auto;
+}
+.v2-menu {
+  position: static;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+.v2-menu button {
+  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px;
+  background: transparent; border: none; color: var(--v2-text); font: inherit; font-size: var(--v2-fs-base);
+  padding: 9px 10px; border-radius: var(--v2-radius-md); cursor: pointer; text-align: left;
+}
+.v2-menu button:hover { background: var(--v2-accent-soft); }
+.v2-menu .v2-menu-sep { height: 1px; background: var(--v2-line); margin: 5px 4px; }
+.v2-menu kbd { color: var(--v2-faint); font-family: var(--font-mono); font-size: var(--v2-fs-sm); }
+
+/* Fixed-position variant: the panel is placed against the trigger's client rect (see
+   AddTrackMenu) so it escapes the timeline's overflow clipping. `right: auto` undoes the
+   base panel's right-anchoring; `top: auto` is REQUIRED — the base rule sets
+   `top: calc(100% + 8px)`, which would otherwise win when the panel flips upward and
+   supplies `bottom` instead of `top`. Both come from the inline style. */
+.v2-menu-panel-fixed { position: fixed; right: auto; top: auto; }
+
+/* Rich menu rows: an icon plus a label over a hint, rather than a single label line. */
+.v2-menu-rich button { justify-content: flex-start; gap: 10px; padding: 8px; }
+.v2-menu-rich .v2-licon { width: 30px; height: 30px; border-radius: 9px; }
+.v2-menu-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v2-menu-label { font-size: var(--v2-fs-base); color: var(--v2-text); }
+.v2-menu-hint { font-size: var(--v2-fs-sm); color: var(--v2-faint); }
+
+/* The add-track wrapper must not generate a box: the "row" trigger is a sticky-left grid
+   child of .v2-tl and the "empty" trigger is a flex child of .v2-stage-empty — in both
+   cases an intervening div would take over the layout slot. */
+.v2-addtrack { display: contents; }
+

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { readShellCss } from "./cssSource";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(here, "shell.css"), "utf8");
+const css = readShellCss();
 // Structural assertions (does a SELECTOR exist / is it declared twice) must not read
 // prose. The comments in shell.css deliberately quote the selectors they warn about.
 const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, "");
