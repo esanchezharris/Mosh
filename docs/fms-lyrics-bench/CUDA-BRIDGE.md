@@ -75,3 +75,25 @@ result in PROGRAM.md when it happens.
 Conventions pinned by tests: MLX `y += scale·(x@lora_a)@lora_b`, lora_a (in,r);
 PEFT alpha/r must equal serve scale (refused otherwise); tensors transpose in
 conversion; mlx `--num-layers N` = LAST N layers → PEFT `layers_to_transform`.
+
+## 2026-07-29 — the twin as specified above is VOID (encoding asymmetry)
+
+The first twin run exposed that the two stacks never trained the same task:
+mlx_lm's `CompletionsDataset` re-wraps the `{"prompt","completion"}` row in a
+SECOND user/assistant chat turn (`datasets.py::CompletionsDataset.process`
+calls `apply_chat_template`), while `_cuda_train_fim.py` deliberately trains
+the raw concatenation. Both believed they were serve-parity; only the raw
+stream is. Empirically the double-wrapped recipe transfers to serve
+(fim-v1/fim-v2 ≈ .393 exact) and the raw recipe anti-transfers (.173, below
+base .253) despite a faithful conversion (bridged adapter reproduces its own
+CUDA val loss under MLX: 1.296 vs 1.394; base control 10.75; probe:
+`scratchpad/probe_raw_loss.py` pattern — separate-encode p/c, mask to
+completion).
+
+Consequences, until amended: (1) the ±.02 twin bar applies only once the CUDA
+trainer reproduces mlx_lm's encoding byte-for-byte (wrap + mask to the
+assistant boundary + its EOS handling); (2) do NOT "fix" the MLX side to raw —
+raw is the recipe that measured worse; (3) `mlx_lm.lora --test` measures the
+double-wrapped stream and cannot validate a raw-trained adapter; (4) the CUDA
+trainer must save a checkpoint at every eval block (the first run's val
+minimum was mid-run and unrecoverable).
