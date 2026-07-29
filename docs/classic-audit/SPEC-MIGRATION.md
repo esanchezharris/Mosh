@@ -11,7 +11,9 @@ Boot helpers ([`ui/e2e/helpers.ts`](../../ui/e2e/helpers.ts)):
 
 Census at the audit commit (45 spec files): **18 specs use `boot()`**, **2 use
 `bootRedesign()`** (`redesign-shell.spec.ts`, plus one call in `templates.spec.ts`), and
-**26 boot v2** — 23 via `bootV2()` plus 3 via a direct `goto("/?shell=v2")`
+**27 boot v2** — 23 via `bootV2()` plus 4 via a direct `goto("/?shell=v2")`
+(the 4th is `drum-pattern.spec.ts:61`, whose DRM-002 mouse-only grid test boots v2 directly —
+that spec is dual classic+v2)
 (`agent-loop`, `agent-memory`, `session-lifecycle`).
 
 ## 1. Classic-booted specs — the migration bill
@@ -67,7 +69,7 @@ module-graph diff (INVENTORY §1):
   TopBar). `export-run` → `ui/ExportControls.tsx` (shared). **Zero resolve into a
   classic-only or effective-classic-only module.** The ledger survives a sever untouched.
 - **Nuance 1 — a stale row label, not a stale selector:** the row "Automation point editing
-  *(classic shell)*" (REACHABILITY.md:43) points at `testid:open-automation`, which lives in
+  *(classic shell)*" (REACHABILITY.md:42) points at `testid:open-automation`, which lives in
   the shared `Rack` (`ui/Dock.tsx:51`) — mounted by v2's FX tab (`v2/inspector/Inspector.tsx:66`)
   — and `AutomationPanel` is mounted in `v2/AppV2.tsx:90`. The capability is v2-reachable
   today; only the row's "(classic shell)" annotation and its `polish.spec.ts` (classic boot)
