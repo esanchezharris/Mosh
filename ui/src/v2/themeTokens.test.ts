@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readShellCss } from "./cssSource";
 
 // THE RULE, enforced:
 //
@@ -21,7 +22,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mosh = readFileSync(join(here, "../ui/mosh.css"), "utf8");
-const shell = readFileSync(join(here, "shell.css"), "utf8");
+const shell = readShellCss();
 
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 const moshCode = stripComments(mosh);

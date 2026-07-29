@@ -1,0 +1,151 @@
+/* ── plugin picker — the shared search box + windowed list. v2 has no plugin MODAL:
+     the FX rack's "+ Plugin" opens the left browser drawer's Plugins tab (.v2-pdock).
+     The master-bus rack's compact picker (.v2-master-picker below) reuses the row/
+     search primitives (.v2-pb-search, .v2-pb-add, .v2-pb-kind, .v2-pb-copy, .v2-pb-name,
+     .v2-pb-meta) directly, in normal (non-windowed) flow instead of .v2-pb-row's absolute
+     positioning — the master rack never has enough entries to need virtualization. ── */
+.v2-pb-search { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0;
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: var(--v2-radius-sm); padding: 0 10px; height: 40px; }
+.v2-pb-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.v2-pb-search-label {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.v2-pb-search input { flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none; color: var(--v2-text); font: inherit; font-size: var(--v2-fs-base); }
+.v2-pdock-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  /* AUD-SCAN — the controls group grew by the Audio Units opt-in, and with `min-width: 0`
+     on the copy the title/subtitle collapsed to a ~10-character column in the narrow left
+     drawer. Let the row wrap and give the copy a real flex basis so the controls drop to
+     their own line instead of crushing it. */
+  flex-wrap: wrap;
+}
+.v2-pdock-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+/* AUD-SCAN — the AudioUnit opt-in that sits beside Rescan. Quiet by default (this is a
+   set-once preference, not a primary control) and it brightens once ticked. */
+.v2-pdock-au {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  color: var(--v2-faint); font-size: var(--v2-fs-sm); cursor: pointer; white-space: nowrap;
+}
+.v2-pdock-au:hover { color: var(--v2-dim); }
+.v2-pdock-au:has(input:checked) { color: var(--v2-accent); }
+.v2-pdock-au input { accent-color: var(--v2-accent); cursor: pointer; margin: 0; }
+.v2-pdock-au:has(input:disabled) { opacity: 0.5; cursor: default; }
+
+.v2-pdock-selected {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: var(--v2-radius-pill);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+/* FIT-003 — live rescan progress line (indeterminate: a running count + elapsed
+   time, not a determinate "X of N" bar — see ScanProgress.h for why). */
+.v2-pdock-scan-status {
+  font-size: var(--v2-fs-sm);
+  color: var(--v2-faint);
+  padding: 2px 2px 2px;
+}
+
+/* the windowed, vendor-grouped list */
+.v2-pb-list { flex: 1 1 auto; min-width: 0; overflow-y: auto; position: relative; }
+.v2-pb-listhead { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; font-size: var(--v2-fs-sm); letter-spacing: var(--v2-tracking-caps); text-transform: uppercase; color: var(--v2-dim);
+  /* Opaque on purpose — this is a `position: sticky` header and rows scroll UNDER it, so
+     a translucent surface token (--v2-surface/-2 are rgba() in the dark theme) would let
+     them show through. The value is correct in both themes because the plugin browser is
+     a dark v2 panel in both. */
+  background: #161618; border-bottom: 1px solid var(--v2-line); }
+/* The `[data-theme="light"] .v2-pb-listhead { background: #f4f7fd }` override that used to
+   sit here was the canonical form of the bug this pass exists to kill: a per-element light
+   rule on a surface that does NOT flip. It painted a near-white bar in the light theme and
+   left --v2-dim text — which is near-WHITE in light — sitting on it, inside a dark panel. */
+.v2-pb-listhead-label { color: var(--v2-text); font-size: var(--v2-fs-sm); }
+.v2-pb-listhead-note { color: var(--v2-faint); font-size: var(--v2-fs-sm); letter-spacing: normal; text-transform: none; }
+.v2-pb-listhead-count { color: var(--v2-faint); font-size: var(--v2-fs-xs); font-variant-numeric: tabular-nums; text-align: right; }
+.v2-pb-empty { padding: 40px 16px; color: var(--v2-faint); font-size: var(--v2-fs-base); text-align: center; }
+.v2-pb-vlist { width: 100%; }
+
+.v2-pb-group { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
+  padding: 0 16px 4px; font-size: var(--v2-fs-xs); letter-spacing: var(--v2-tracking-caps); text-transform: uppercase; color: var(--v2-faint); }
+.v2-pb-group-label { color: var(--v2-faint); }
+.v2-pb-group-count { color: var(--v2-line-strong); }
+
+.v2-pb-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 0 8px 0 16px; }
+.v2-pb-add { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--v2-text); cursor: pointer; text-align: left; font: inherit; }
+.v2-pb-add:hover:not(:disabled) { background: var(--v2-surface-2); border-color: var(--v2-line); }
+.v2-pb-add:disabled { cursor: default; opacity: 0.6; }
+.v2-pb-copy { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; gap: 2px; }
+.v2-pb-kind { flex: 0 0 auto; width: 34px; text-align: center; font-size: var(--v2-fs-2xs); font-weight: 700; letter-spacing: 0.06em;
+  padding: 3px 0; border-radius: 5px; }
+.v2-pb-kind.inst { color: var(--v2-accent); background: var(--v2-accent-soft); }
+.v2-pb-kind.fx { color: var(--v2-blue); background: rgba(154, 160, 180, 0.14); }
+.v2-pb-name { flex: 0 1 auto; font-size: var(--v2-fs-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-pb-meta { flex: 1 1 auto; color: var(--v2-faint); font-size: var(--v2-fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-pb-action-label {
+  flex: 0 0 auto;
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.v2-pb-star { flex: 0 0 auto; width: 30px; height: 30px; border: none; background: transparent; color: var(--v2-faint);
+  font-size: 14px; cursor: pointer; opacity: 0; transition: opacity 90ms linear, color 90ms linear; }
+.v2-pb-star-label {
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.v2-pb-row:hover .v2-pb-star, .v2-pb-row:focus-within .v2-pb-star,
+.v2-pb-star:focus-visible, .v2-pb-star.on { opacity: 1; }
+.v2-pb-star.on { color: var(--v2-accent); }
+.v2-pb-star:hover { color: var(--v2-accent); }
+@media (prefers-reduced-motion: reduce) {
+  .v2-pb-star { transition: none; }
+}
+
+/* ── compact plugin dock — the picker laid out for the narrow left drawer: the wide rail
+     collapses to a horizontal chip row above the shared list (same collections + list). ── */
+.v2-pdock { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.v2-pdock-search { flex: 0 0 auto; }
+.v2-pdock-chips { flex: 0 0 auto; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+.v2-pdock-chips::-webkit-scrollbar { height: 6px; }
+.v2-pdock-chips::-webkit-scrollbar-thumb { background: var(--v2-line-strong); border-radius: 3px; }
+.v2-pdock-chip {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;
+  border-radius: var(--v2-radius-pill); background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-dim); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.v2-pdock-chip-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.v2-pdock-chip-group-label {
+  color: var(--v2-faint);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.v2-pdock-chip:hover { color: var(--v2-text); }
+.v2-pdock-chip.on { background: var(--v2-accent-soft); color: var(--v2-text); border-color: transparent; box-shadow: inset 0 0 0 1px var(--v2-accent); }
+.v2-pdock-chip-count { color: var(--v2-faint); font-size: var(--v2-fs-sm); font-variant-numeric: tabular-nums; }
+.v2-pdock .v2-pb-list { flex: 1 1 auto; min-height: 0; }
+/* the list rows in the dock sit on the drawer's own surface (no separate panel bg) */
+.v2-pdock .v2-pb-listhead { background: var(--v2-surface-2); }
+
