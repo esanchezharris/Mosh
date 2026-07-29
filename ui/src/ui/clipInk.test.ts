@@ -3,7 +3,7 @@
 // WHY THIS EXISTS. The v2 accent pass retired the lime from ~120 selectors and put three
 // CSS guards behind that rule. Every one of them reads the STYLESHEET. The single most
 // visible colour in the arrangement — the waveform — was a string literal inside a
-// `ctx.fillStyle =` in Arrange.tsx, so it was invisible to all three, and the wave clip
+// `ctx.fillStyle =` in the renderers, so it was invisible to all three, and the wave clip
 // went on painting rgba(204,255,35) long after that green had been reserved for agentic
 // surfaces. It was found by sampling pixels out of a live canvas, not by any test.
 //
@@ -11,7 +11,7 @@
 // must exist on both sides of the bridge (classic :root, and the .v2-shell re-pin).
 //
 // SCOPE, stated so a green run is not over-read: this covers the three clip renderers in
-// Arrange.tsx. It does not police every canvas in the app — Moshi's character GL, the
+// the clip renderers. It does not police every canvas in the app — Moshi's character GL, the
 // presence meter's FFT and the sample-browser thumb all draw colours of their own. Those
 // are separate surfaces with separate arguments; widening this file to them without
 // making that argument would be scope, not safety.
@@ -23,12 +23,12 @@ import { dirname, join } from "node:path";
 import { readShellCss } from "../v2/cssSource";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const arrange = readFileSync(join(here, "Arrange.tsx"), "utf8");
+const arrange = readFileSync(join(here, "clipRenderers.tsx"), "utf8");
 const mosh = readFileSync(join(here, "mosh.css"), "utf8");
 const shell = readShellCss();
 
 /** The clip renderers, sliced out by their own export statements so the scan cannot
- *  silently widen to the whole file (or narrow to nothing) if Arrange.tsx is reordered. */
+ *  silently widen to the whole file (or narrow to nothing) if the renderers are reordered. */
 const RENDERERS = ["ClipWave", "ClipMidi", "ClipDrumGrid"] as const;
 
 function bodyOf(name: string): string {
