@@ -46,6 +46,15 @@ def main():
         task_type="CAUSAL_LM", bias="none")
     model = get_peft_model(model, lcfg)
     model.print_trainable_parameters()
+    # Gradient checkpointing is NOT optional at this size: 28GB of bf16
+    # weights + ~15GB of full activations for one 14B backward filled a 48GB
+    # card even at micro-batch 8 (attempt 5). Recompute-in-backward drops the
+    # activation term ~10x for ~30% slower steps. use_cache must be off, and
+    # PEFT needs input grads enabled for checkpointing to reach the adapters.
+    model.config.use_cache = False
+    model.enable_input_require_grads()
+    model.gradient_checkpointing_enable()
+    print("gradient checkpointing ON", flush=True)
 
     def rows_of(path):
         return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
