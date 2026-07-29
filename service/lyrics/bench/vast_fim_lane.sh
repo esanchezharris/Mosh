@@ -124,6 +124,11 @@ INSTANCE_ID=$(echo "$CREATE" | python3 -c \
   "import json,sys;print(json.load(sys.stdin)['new_contract'])")
 log "instance $INSTANCE_ID created (TTL backstop ${TTL_HOURS}h)"
 
+# Account keys are NOT auto-attached unless marked default (none is) — both
+# 2026-07-28 failures were this. Attach explicitly, per instance.
+vastai attach ssh "$INSTANCE_ID" "$(cat "${VAST_SSH_KEY}.pub")" >/dev/null
+log "ssh key attached to the instance"
+
 # ── wait for ssh ─────────────────────────────────────────────────────────────────
 for i in $(seq 1 60); do
   ST=$(vastai show instance "$INSTANCE_ID" --raw | python3 -c "
