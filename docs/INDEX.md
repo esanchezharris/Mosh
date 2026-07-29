@@ -12,6 +12,9 @@ The map of Mosh's documentation. **New here? Read [`../ARCHITECTURE.md`](../ARCH
   significant architectural choice at a conceptual level, with rationale and the rejected
   alternative, for red-teaming. The source of truth for *why it's built this way*. (Map vs.
   rationale — two different lenses; both current.)
+- [`rfc/`](rfc/) — the **append-only go-forward decision log**: ARCHITECTURE_REVIEW.md is the
+  frozen v0 record; architectural decisions made after it get an RFC here (problem, options,
+  decision, mandatory verification plan). Ledger: [`rfc/INDEX.md`](rfc/INDEX.md).
 
 ## Status / what's done
 
