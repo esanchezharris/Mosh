@@ -85,6 +85,17 @@ def main():
 
     train = rows_of(f"{cfg['data']}/train.jsonl")
     valid = rows_of(f"{cfg['data']}/valid.jsonl")
+    # Validation is a CHECKPOINT-SELECTION signal, not a published metric, so
+    # it is capped: the v3 mint's 2,722-row valid set evaluated every 100 steps
+    # would have spent ~126 min of rented GPU on val against ~122 min of actual
+    # training (measured, attempt 8 first block) and pushed the run past its
+    # TTL. A 512-row head is enough to rank checkpoints (the mint's stage 2
+    # already shuffled with a fixed seed, so the head is an unbiased sample and
+    # is identical across runs). Val losses are therefore comparable WITHIN a
+    # data version, never across mints.
+    val_max = int(cfg.get("valMax", 512))
+    if val_max > 0:
+        valid = valid[:val_max]
     max_len = int(cfg.get("maxLength", 384))
 
     def encode(rows):

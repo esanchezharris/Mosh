@@ -171,7 +171,11 @@ import fim_bridge
 recipe = fim_bridge.cuda_recipe(json.load(open("/root/adapter_config.json")))
 cfg = {"base": "/root/base-bf16", "data": "/root/data", "out": "/root/peft-out",
        "recipe": recipe, "iters": int(sys.argv[1]), "batch": int(sys.argv[2]),
-       "lr": float(sys.argv[3]), "seed": 20260728, "maxLength": 384}
+       "lr": float(sys.argv[3]), "seed": 20260728, "maxLength": 384,
+       # Explicit so the cap is recorded in the run's config, not implied by a
+       # default: val is checkpoint selection, and an uncapped 2.7k-row valid
+       # set cost more GPU than the training it was selecting over.
+       "valMax": 512}
 sys.exit(subprocess.call(["python", "/root/_cuda_train_fim.py", json.dumps(cfg)]))
 PYEOF
 scp -q -P "$SSH_PORT" $SSH_OPTS \
