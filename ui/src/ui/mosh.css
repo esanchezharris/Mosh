@@ -98,6 +98,9 @@
      byte-identical — the point of the token is that v2 can re-pin the LEVEL colour without
      inheriting whatever the brand accent happens to be. */
   --meter-safe: var(--lime);
+  /* The lit drum step's keyline — the same value as --pr-note-edge, tokenised for the same
+     reason: a nested scope must be able to move it with the fill it belongs to. */
+  --step-on-edge: #97c01a;
 
   --clip-ink-wave: rgba(204, 255, 35, 0.5);
   --clip-ink-midi: rgba(180, 108, 255, 1);
@@ -1115,7 +1118,12 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .dr-cell.beat { margin-left: 7px; }
 .dr-row .dr-steps .dr-cell:first-child { margin-left: 0; }
 .dr-cell:hover { border-color: var(--lime-dim); }
-.dr-cell.on { background: var(--lime); border-color: #97c01a; }
+/* --step-on-edge, not the literal. This is the same #97c01a as --pr-note-edge above, and
+   for the same reason (a darker keyline of the accent fill) — but the piano-roll one is a
+   token and this one was not, so when .v2-shell re-pinned --lime the cell's FILL went
+   neutral and its RING stayed olive: one control, two palettes. A literal beside a bridged
+   token is the shape of that bug, and limeBridge.test.ts now fails on it. */
+.dr-cell.on { background: var(--lime); border-color: var(--step-on-edge); }
 
 /* DRM-002 — the pattern field: write the whole grid as text, one undoable step. */
 .dr-pattern { display: flex; flex-direction: column; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--ink-line); }

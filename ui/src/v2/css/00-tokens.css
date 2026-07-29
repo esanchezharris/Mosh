@@ -125,6 +125,8 @@
      It rode on --lime only because the brand colour was green. Pointed at the shell's own
      semantic ok green, so the level ramp keeps three legible stops. */
   --meter-safe: var(--status-ok);
+  /* Moves WITH the fill it outlines, exactly as --pr-note-edge does further down. */
+  --step-on-edge: color-mix(in srgb, var(--v2-accent) 68%, #000);
   --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
   /* ── clips: ONE body, the ink carries the type ────────────────────────────────
      These four were a decorative set, not a system. --v2-clip-midi and --v2-clip-drum
