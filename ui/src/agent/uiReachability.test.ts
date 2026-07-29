@@ -157,6 +157,15 @@ describe("UI reachability — a mouse-only user can get to every command (UI-REA
       expect(files.length).toBeLessThan(unstopped.filter((f) => !f.startsWith(join(SRC, "agent")) && !f.endsWith("bridge.mock.ts")).length);
   });
 
+  it("classic's Arrange.tsx stays OUT of the v2 module graph (the structural exit is a ratchet)", () => {
+    // The clip renderers moved to ui/clipRenderers.tsx precisely so this file left the graph.
+    // With CLASSIC_ONLY_MODULES empty, one new v2 import of Arrange.tsx would silently drag
+    // the whole ~800-line classic subtree back into the searched surface — the false-positive
+    // class that once hid remove_track being unreachable. Re-importing it is a reviewed
+    // decision: either extract the helper you need, or declare a boundary AND move this line.
+    expect(graph, "a v2 module imports ui/Arrange.tsx again").not.toContain(join(SRC, "ui", "Arrange.tsx"));
+  });
+
   it("every catalog command is reachable, or declared with a reason", () => {
     const undeclared = catalog.filter(
       (c) => !isReachable(c) && !(c in AGENT_ONLY_COMMANDS) && !(c in UI_REACH_GAPS),
