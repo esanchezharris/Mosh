@@ -281,15 +281,16 @@ def _style_exemplars(spec: dict, k: int = 3) -> List[str]:
 # ── the LLM backend (L3): prompt → validate → re-prompt with the SPECIFIC failure ──
 
 def _palette_enabled(spec: dict) -> bool:
-    """The 2026-07-28 promotion flag (`prompt-rhyme-menu-fp`, exact .413 /
+    """The 2026-07-28 promotion (`prompt-rhyme-menu-fp`, exact .413 /
     owner-acceptable top-1 .75 on the frozen bench slice — the best measured
-    configuration). Spec-explicit `rhymePalette` wins either way; otherwise the
-    env lever `MOSH_RHYME_PALETTE=1` turns it on app-wide. Default OFF: the
-    shipped prompt stays byte-identical until the flag is thrown."""
+    configuration). **Default ON since the owner's call of 2026-07-28**, on the
+    strength of the shipped-loop A/B (rhyme_perfect .642→.887, nothing
+    degraded). Spec-explicit `rhymePalette` wins either way; the env lever
+    inverted into an opt-OUT: `MOSH_RHYME_PALETTE=0` turns it off app-wide."""
     v = spec.get("rhymePalette")
     if v is not None:
         return bool(v)
-    return os.environ.get("MOSH_RHYME_PALETTE") == "1"
+    return os.environ.get("MOSH_RHYME_PALETTE") != "0"
 
 
 def _rhyme_palette(anchor: str, strict: str) -> List[str]:

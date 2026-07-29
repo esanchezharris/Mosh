@@ -233,20 +233,20 @@ try:
                 return core._build_messages(_pl, sp, "day", 3, 2, "perfect",
                                             None)[1]["content"]
 
-            off = _user({})
-            check("palette flag OFF by default — prompt byte-free of the palette",
-                  _sentinel not in off and "way, say" not in off, off[-120:])
-            on = _user({"rhymePalette": True})
-            check("palette flag ON — the freq-ranked words, in order, in full",
+            on = _user({})
+            check("palette ON BY DEFAULT (owner call 2026-07-28) — freq-ranked "
+                  "words, in order, in full",
                   "way, say, play, stay, gray" in on, on[-160:])
             check("palette shows the WRITER's words, never the junk the alpha "
                   "cap kept", "ba, bb" not in on)
-            os.environ["MOSH_RHYME_PALETTE"] = "1"
+            check("spec-explicit False opts a request out",
+                  _sentinel not in _user({"rhymePalette": False}))
+            os.environ["MOSH_RHYME_PALETTE"] = "0"
             try:
-                check("env lever turns the palette on app-wide",
-                      _sentinel in _user({}))
-                check("spec-explicit False overrides the env lever",
-                      _sentinel not in _user({"rhymePalette": False}))
+                check("env lever MOSH_RHYME_PALETTE=0 opts OUT app-wide",
+                      _sentinel not in _user({}))
+                check("spec-explicit True overrides the opt-out lever",
+                      _sentinel in _user({"rhymePalette": True}))
             finally:
                 del os.environ["MOSH_RHYME_PALETTE"]
             _fixed_line = {**_pl, "seedText": "ends on flame",
