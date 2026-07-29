@@ -10,21 +10,13 @@ import type {
   PluginCounts, ServiceCapabilities,
 } from "./types";
 import { versionBannerError } from "./types";
-import { isTrackPatch, applyTrackPatch } from "./snapshotPatch";
 import type { RemoteStatus } from "./bridge";
 import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
 import type { ChangeSet } from "./agent/executor";
-// Collaborator video (redesign). The store routes inbound WebRTC signaling + presence
-// changes into the video room; the room couples back to the seam only via mp_send_signal.
-import { useVideo } from "./webrtc/useVideo";
-import type { SignalMessage } from "./webrtc/signal";
 // Schema-driven settings (UI-local, localStorage-backed). The store mirrors a few
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
 // while the SettingsPanel and these mutators both write through the single source.
 import { useSettings } from "./settings/store";
-// Which shell is active — the v2 shell also surfaces collaborator video, so the
-// webrtc_signal gate must honor it (not just the legacy redesignShell flag).
-import { isV2Active } from "./v2/shellFlag";
 // AGT-MEM (M3) — drops the cached agent-memory pools on a project switch.
 import { invalidateMemoryHydration } from "./agent/memory/hydrate";
 // AGT-MEM (M3, item 5) — mirrors every exec() call into the in-session ring buffer
@@ -32,9 +24,17 @@ import { invalidateMemoryHydration } from "./agent/memory/hydrate";
 import { recordSessionCommand } from "./agent/memory/sessionLog";
 // MP-001 — multiplayer presence + the commit-on-move trigger (pure helpers).
 import {
-  deriveActiveTrackId, computeSyncActions, pruneOfflineLocks,
+  deriveActiveTrackId, computeSyncActions,
   type MpSession, type PeerInfo, type PeerSelection, type PeerPresence,
 } from "./multiplayer/sync";
+// Per-rail "mosh_event" handler bodies (verbatim motion from init(); the dispatch
+// order + conditions stay in init() below, which is load-bearing).
+import {
+  onSnapshotInvalidated, onTransport, onLevels, onSpectrum, onPluginScanProgress,
+  onTranscribeStatus, onBuildLyricsStatus, onSkeletonStatus, onSketchStatus,
+  onLayerRenderProgress, onLayerStatus, onMpState, onWebrtcSignal,
+  onPeerSelection, onPeerPresence, onMpCommitDone,
+} from "./store/events";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -45,7 +45,7 @@ export type Spectrum = { bands: number[]; level: number; flux: number };
 // only delete_time_range sends {start,end} across the bridge when invoked.
 export type TimeRange = { start: number; end: number };
 
-type State = {
+export type State = {
   snapshot: Snapshot | null;
   connected: boolean;
   lastError: string | null;
@@ -398,212 +398,44 @@ export const useStore = create<State>((set, get) => ({
   invalidateMemory: () => invalidateMemoryHydration(),
 
   init: () => {
+    // Thin dispatcher over the per-rail handlers in store/events.ts (verbatim body
+    // motion). The order + conditions here are load-bearing and must not change:
+    // transport / levels / spectrum are the 30 Hz telemetry rails that deliberately
+    // bypass the snapshot.
     onEvent("mosh_event", (raw) => {
       const ev = raw as MoshEvent;
       if (ev.type === "snapshot_invalidated") {
-        // Scoped patch: splice one changed track in place, skipping the full O(project) re-pull.
-        if (isTrackPatch(ev.payload)) {
-          const snap = get().snapshot;
-          const patched = snap ? applyTrackPatch(snap, ev.payload) : null;
-          if (patched) { set({ snapshot: patched }); return; }
-        }
-        void get().refresh();   // full invalidation (or a scoped target not in the snapshot → resync)
+        onSnapshotInvalidated(ev, set, get);
       } else if (ev.type === "transport") {
-        // Targeted set — does NOT touch the snapshot (so the tree doesn't churn).
-        set({ transport: ev.payload as Transport });
+        onTransport(ev, set);
       } else if (ev.type === "levels") {
-        // Targeted set (no snapshot refetch) — same lightweight path as transport.
-        const p = ev.payload as { tracks: { id: string; l: number; r: number }[]; master: Level };
-        const tracks: Record<string, Level> = {};
-        for (const t of p.tracks ?? []) tracks[t.id] = { l: t.l, r: t.r };
-        set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
+        onLevels(ev, set);
       } else if (ev.type === "spectrum") {
-        // Master Goertzel feed (Moshi reactivity) — targeted set, no snapshot refetch.
-        const p = ev.payload as Partial<Spectrum>;
-        set({ spectrum: { bands: p.bands ?? [], level: p.level ?? 0, flux: p.flux ?? 0 } });
+        onSpectrum(ev, set);
       } else if (ev.type === "plugin_scan_progress") {
-        // INS-005 — async (AU) rescan lifecycle. On done, refresh the catalog list.
-        // FIT-003 — the backend now emits periodic samples with a live running `count`
-        // + `elapsedMs` (decimated ~2/s) for the whole sweep, not just start/done; both
-        // fields are optional so this stays compatible with any older {format,done}-only
-        // sender (e.g. a stale mock).
-        const p = ev.payload as { format: string; done: boolean; count?: number; elapsedMs?: number };
-        if (p.done) {
-          set({ scanProgress: null });
-          void get().refreshPluginList();
-        } else {
-          set({ scanProgress: { format: p.format, done: false, count: p.count, elapsedMs: p.elapsedMs } });
-        }
+        onPluginScanProgress(ev, set, get);
       } else if (ev.type === "transcribe_status") {
-        // Audio→MIDI status for a SOURCE clip: working | done | error. On done the
-        // backend's snapshot_invalidated (from add_midi_clip) reveals the new track.
-        const p = ev.payload as { clipId: string; state: string; error?: string };
-        set((s) => {
-          const next = { ...s.transcribing };
-          if (p.state === "working") next[p.clipId] = true;
-          else delete next[p.clipId];
-          return { transcribing: next };
-        });
-        if (p.state === "error") set({ lastError: p.error ?? "transcription failed" });
+        onTranscribeStatus(ev, set);
       } else if (ev.type === "build_lyrics_status") {
-        // Mumble-take status for a SOURCE clip: working | done | error. On done the
-        // backend's snapshot_invalidated reveals the new lyric sheet (Inspector → Lyrics).
-        const p = ev.payload as { clipId: string; state: string; error?: string };
-        set((s) => {
-          const next = { ...s.buildingLyrics };
-          if (p.state === "working") next[p.clipId] = true;
-          else delete next[p.clipId];
-          return { buildingLyrics: next };
-        });
-        if (p.state === "error") set({ lastError: p.error ?? "could not build lyrics from the take" });
+        onBuildLyricsStatus(ev, set);
       } else if (ev.type === "skeleton_status") {
-        // Mumble→skeleton status for a SOURCE clip: working | done | error. Mirrors
-        // build_lyrics_status above — was previously unhandled, so "Build flow from this
-        // take" showed no spinner and swallowed its error silently (guest-degradation
-        // pass: a venv-less guest Mac hits this constantly). On done the backend's
-        // snapshot_invalidated reveals the new lyric sheet (Inspector → Lyrics).
-        const p = ev.payload as { clipId: string; state: string; error?: string };
-        set((s) => {
-          const next = { ...s.buildingSkeleton };
-          if (p.state === "working") next[p.clipId] = true;
-          else delete next[p.clipId];
-          return { buildingSkeleton: next };
-        });
-        if (p.state === "error") set({ lastError: p.error ?? "could not build a flow from the take" });
+        onSkeletonStatus(ev, set);
       } else if (ev.type === "sketch_status") {
-        // Sketch Phase 0 (beatbox → drum) status for a SOURCE FILE PATH: working | done |
-        // error. Keyed by file, not clipId — sketch_beatbox lands a brand-new track+clip,
-        // so there is no existing clip to key against (mirrors transcribe_status/
-        // skeleton_status otherwise). The command is install-gated and does NOT degrade
-        // gracefully (service/server.py's /sketch returns a 503 "sketch_unavailable (run
-        // service/sketch/setup-sketch.sh)" when the venv is absent) — surface that exact,
-        // honest message rather than swallowing it or leaving the UI hung. On done the
-        // backend's snapshot_invalidated (from add_midi_clip) reveals the new drum track.
-        const p = ev.payload as { file: string; state: string; error?: string };
-        set((s) => {
-          const next = { ...s.sketchingBeatbox };
-          if (p.state === "working") next[p.file] = true;
-          else delete next[p.file];
-          return { sketchingBeatbox: next };
-        });
-        if (p.state === "error") set({ lastError: p.error ?? "could not sketch a beat from that take" });
+        onSketchStatus(ev, set);
       } else if (ev.type === "layer_render_progress") {
-        const p = ev.payload as { clipId: string; progress: number };
-        set((s) => ({ renderProgress: { ...s.renderProgress, [p.clipId]: p.progress } }));
+        onLayerRenderProgress(ev, set);
       } else if (ev.type === "layer_status") {
-        const p = ev.payload as { clipId?: string; qa?: RenderQA; status?: string };
-        if (p?.clipId) {
-          // A render resolves here (ready / error / cache-hit — anything but the "rendering"
-          // submit tick). Clear its progress entry (the leak: it was only ever spread-added)
-          // and land the quality readout.
-          const terminal = p.status !== "rendering";
-          set((s) => {
-            const patch: Partial<State> = {};
-            if (p.qa) patch.qaByClip = { ...s.qaByClip, [p.clipId!]: p.qa as RenderQA };
-            if (terminal && p.clipId! in s.renderProgress) {
-              const renderProgress = { ...s.renderProgress };
-              delete renderProgress[p.clipId!];
-              patch.renderProgress = renderProgress;
-            }
-            return patch;
-          });
-        }
-        void get().refresh();
+        onLayerStatus(ev, set, get);
       } else if (ev.type === "mp_state") {
-        // MP-001 — session + roster + lock table (the native poll loop pushes the
-        // relay's {peers, locks} here). Targeted set, no snapshot refetch.
-        const p = ev.payload as {
-          active: boolean; roomCode?: string | null; selfPeer?: string | null;
-          peers?: Record<string, Partial<PeerInfo>>; locks?: Record<string, string>;
-        };
-        const peers: Record<string, PeerInfo> = {};
-        for (const [id, v] of Object.entries(p.peers ?? {}))
-          peers[id] = { name: v.name ?? id, color: v.color ?? "#888888", online: v.online ?? true };
-        set((s) => {
-          const peerPresence: Record<string, PeerPresence> = {};
-          if (p.active) {
-            for (const [peerId, presence] of Object.entries(s.peerPresence))
-              if (peers[peerId]?.online) peerPresence[peerId] = presence;
-          }
-          return {
-            mp: { active: p.active, roomCode: p.roomCode ?? null, selfPeer: p.selfPeer ?? null, connected: p.active },
-            peers,
-            peerPresence,
-            // Drop a lock whose owner has dropped/gone offline so no stale read-only
-            // badge survives the owner (defense-in-depth with the relay's lease GC).
-            locksByLogicalId: pruneOfflineLocks(p.locks ?? {}, peers, p.selfPeer ?? null),
-          };
-        });
-        // Keep the video room's peer set in lockstep with presence (open links to new
-        // collaborators, drop departed ones); tear it down entirely when the session ends.
-        if (p.active) useVideo.getState().syncPeers(Object.keys(peers));
-        else useVideo.getState().teardown();
+        onMpState(ev, set);
       } else if (ev.type === "webrtc_signal") {
-        // Inbound SDP/ICE from a peer (relayed point-to-point) → the video room. Video is
-        // surfaced by the redesign AND the v2 shells; a shell with no video UI must NOT
-        // silently negotiate / hold a peer connection (prime directive: flag-off == unchanged).
-        if (Boolean(useSettings.getState().get("redesignShell")) || isV2Active()) {
-          const p = ev.payload as { from?: string; payload?: SignalMessage };
-          if (p?.from && p.payload) useVideo.getState().onSignal(p.from, p.payload);
-        }
+        onWebrtcSignal(ev);
       } else if (ev.type === "peer_selection") {
-        // The other peer's current track/clip selection (the highlight we draw).
-        const p = ev.payload as { peerId: string; trackId?: string | null; clipId?: string | null };
-        set((s) => ({
-          peerSelection: { ...s.peerSelection, [p.peerId]: { trackId: p.trackId ?? null, clipId: p.clipId ?? null } },
-        }));
+        onPeerSelection(ev, set);
       } else if (ev.type === "peer_presence") {
-        const p = ev.payload as { peerId?: string; position?: number; playing?: boolean; recording?: boolean };
-        const peerId = p.peerId;
-        if (!peerId) return;
-        set((s) => {
-          if (peerId === s.mp.selfPeer) return {};
-          return {
-            peerPresence: {
-              ...s.peerPresence,
-              [peerId]: {
-                position: Number(p.position ?? 0),
-                playing: Boolean(p.playing),
-                recording: Boolean(p.recording),
-                updatedAtMs: Date.now(),
-              },
-            },
-          };
-        });
+        onPeerPresence(ev, set);
       } else if (ev.type === "mp_commit_done") {
-        // PR-2 adversarial-review BLOCKER: previously had NO frontend consumer at all
-        // (dropped silently by the lack of an else-if branch here) — a failed stem
-        // upload (commit-on-move via syncActiveTrack, or a manual commit) left a
-        // track's audio sourceMissing for the peer with no visible signal to the
-        // producer that anything went wrong. Surface it: clear the "uploading"
-        // marker either way; on failure, keep a "failed — retry" entry (cleared by a
-        // later successful commit of the same logicalId, in syncActiveTrack/
-        // retryFailedCommit above) AND raise the shared lastError toast + a console
-        // warning (belt-and-suspenders — the error bar can be dismissed/missed).
-        const p = ev.payload as { logicalId?: string; ok?: boolean; error?: string };
-        const lid = p.logicalId;
-        if (!lid) return;
-        if (p.ok) {
-          set((s) => {
-            const pendingCommits = { ...s.pendingCommits };
-            const failedCommits = { ...s.failedCommits };
-            delete pendingCommits[lid];
-            delete failedCommits[lid];
-            return { pendingCommits, failedCommits };
-          });
-        } else {
-          const message = p.error || "stem upload failed — the peer may not receive this track's audio";
-          console.warn("[mp] mp_commit_done: commit failed for", lid, "-", message);
-          set((s) => {
-            const pendingCommits = { ...s.pendingCommits };
-            delete pendingCommits[lid];
-            return {
-              pendingCommits,
-              failedCommits: { ...s.failedCommits, [lid]: message },
-              lastError: message,
-            };
-          });
-        }
+        onMpCommitDone(ev, set);
       }
     });
     // Keep the mirrored settings fields in sync with the schema-driven settings
