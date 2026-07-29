@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   builtinEntry, installedEntry, matchEntry, buildPluginRows, visibleRange,
+  loadPluginEntry, loadPluginRecents,
   type PluginRow,
 } from "./pluginBrowserUtil";
 import type { AvailablePlugin, BuiltinPlugin } from "../types";
@@ -95,5 +96,28 @@ describe("visibleRange", () => {
   it("clamps at both ends", () => {
     expect(visibleRange(0, 400, 40, 5, 6)).toEqual({ start: 0, end: 5 });
     expect(visibleRange(0, 400, 0, 100)).toEqual({ start: 0, end: 0 });
+  });
+});
+
+describe("loadPluginEntry", () => {
+  it("dispatches load_builtin vs load_plugin with the right arg shape and records recents", () => {
+    localStorage.clear();
+    const calls: Array<[string, Record<string, unknown> | undefined]> = [];
+    const exec = (command: string, args?: Record<string, unknown>) => { calls.push([command, args]); };
+    expect(loadPluginEntry(builtinEntry(bi("sampler", "Sampler", "Instrument", true)), "t1", exec)).toBe(true);
+    expect(loadPluginEntry(installedEntry(vst("abc", "Serum", "Xfer", true)), "t1", exec)).toBe(true);
+    expect(calls).toEqual([
+      ["load_builtin", { trackId: "t1", type: "sampler" }],
+      ["load_plugin", { trackId: "t1", pluginId: "abc" }],
+    ]);
+    expect(loadPluginRecents()).toEqual(["v:abc", "b:sampler"]); // newest first
+  });
+
+  it("is a full no-op (returns false, no command, no recent) without a selected track", () => {
+    localStorage.clear();
+    const exec = vi.fn();
+    expect(loadPluginEntry(builtinEntry(bi("comp", "Compressor", "Dynamics")), null, exec)).toBe(false);
+    expect(exec).not.toHaveBeenCalled();
+    expect(loadPluginRecents()).toEqual([]);
   });
 });

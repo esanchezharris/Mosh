@@ -8,7 +8,11 @@ to audio first), with an optional real-time RAVE neural insert behind a build ga
 character (**Moshi**) and 2-player multiplayer ride on the same command spine.
 
 > **macOS / Apple Silicon (arm64) is canonical.** A Windows + NVIDIA/CUDA build is an additive,
-> platform-guarded port (in-tree, built but **not yet verified on hardware**); no Linux path. The
+> platform-guarded port — the full PC gate (native + CUDA + packaging + e2e) ran green on hardware
+> on 2026-07-16 ([worklog note](docs/worklog/2026-07-16-full-pc-gate-run-remotely-over-ssh-native-cuda-packaging-e2e.md)).
+> Linux (x86_64) is an exploratory CI spike only: the headless test target + the Python service are
+> CI-tracked ([`.github/workflows/linux-ci.yml`](.github/workflows/linux-ci.yml)); the GUI app is
+> **not a supported target** ([spike note](docs/2026-07-07-linux-build-spike.md)). The
 > unified-memory MLX generative service is why the Mac stays the load-bearing target.
 
 ## What it's made of

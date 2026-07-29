@@ -25,7 +25,8 @@ vi.mock("../bridge", async () => {
   return { ...actual, onEvent: vi.fn(() => () => {}) };
 });
 // Heavy sibling panels pull the classic Dock / lyrics / drum-window stores.
-vi.mock("../ui/Dock", () => ({ Rack: () => null, GenDrawer: () => null }));
+vi.mock("../ui/Rack", () => ({ Rack: () => null }));
+vi.mock("../ui/GenDrawer", () => ({ GenDrawer: () => null }));
 vi.mock("./inspector/LyricPanel", () => ({ LyricPanel: () => null }));
 vi.mock("../ui/dock/useFloatingWindow", () => ({ useDrumWindow: { getState: () => ({ open: () => {} }) } }));
 vi.mock("../ui/Meter", () => ({ Meter: () => null, MasterMeter: () => null }));
