@@ -92,6 +92,8 @@ def dequantize_checkpoint(in_dir: str, out_dir: str,
     cfg["torch_dtype"] = dtype
 
     n_deq = n_pass = 0
+    weight_map: Dict[str, str] = {}
+    total_size = 0
     for shard in sorted(glob.glob(os.path.join(in_dir, "*.safetensors"))):
         tensors = load_file(shard)
         out: Dict[str, np.ndarray] = {}
@@ -108,24 +110,31 @@ def dequantize_checkpoint(in_dir: str, out_dir: str,
             else:
                 out[name] = t
                 n_pass += 1
-        save_file(out, os.path.join(out_dir, os.path.basename(shard)))
+        shard_name = os.path.basename(shard)
+        for name, t in out.items():
+            weight_map[name] = shard_name
+            total_size += t.nbytes
+        save_file(out, os.path.join(out_dir, shard_name))
 
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=1, sort_keys=True)
     for aux in ("tokenizer.json", "tokenizer_config.json", "vocab.json",
-                "merges.txt", "special_tokens_map.json", "generation_config.json",
-                "model.safetensors.index.json"):
+                "merges.txt", "special_tokens_map.json", "generation_config.json"):
         src = os.path.join(in_dir, aux)
         if os.path.exists(src):
             shutil.copy(src, os.path.join(out_dir, aux))
-    # The index (if present) maps names→shards; names are unchanged, so it
-    # stays valid — but its byte totals are stale after dequant. Drop it and
-    # let transformers glob the shards instead.
-    idx = os.path.join(out_dir, "model.safetensors.index.json")
-    if os.path.exists(idx):
-        os.remove(idx)
+    # A sharded checkpoint REQUIRES its index — transformers does not glob
+    # shards (the $0.08 lesson of attempt 3: OSError at from_pretrained).
+    # The source index is stale after dequant (scales/biases entries, old byte
+    # totals), so it is REBUILT from what was actually written, never copied.
+    if len(glob.glob(os.path.join(out_dir, "*.safetensors"))) > 1:
+        with open(os.path.join(out_dir, "model.safetensors.index.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"metadata": {"total_size": total_size},
+                       "weight_map": weight_map}, f, indent=1, sort_keys=True)
     return {"ok": True, "dequantized": n_deq, "passthrough": n_pass,
-            "dtype": dtype, "groupSize": group, "out": out_dir}
+            "dtype": dtype, "groupSize": group, "out": out_dir,
+            "shards": len(set(weight_map.values()))}
 
 
 # ── adapter conversion ───────────────────────────────────────────────────────────

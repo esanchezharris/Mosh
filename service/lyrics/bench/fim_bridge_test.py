@@ -76,6 +76,44 @@ with tempfile.TemporaryDirectory() as td:
     check("checkpoint: quantization block removed from config",
           "quantization" not in cfg and cfg.get("torch_dtype") == "float32")
 
+# TWO-shard fixture: attempt 3 died at from_pretrained because the index was
+# deleted on the false claim that transformers globs shards. A one-shard
+# fixture cannot carry that failure — sharded checkpoints REQUIRE the index,
+# rebuilt (not copied: the source index maps scales/biases that no longer
+# exist).
+with tempfile.TemporaryDirectory() as td:
+    src = os.path.join(td, "src")
+    os.makedirs(src)
+    save_file({"model.layers.0.self_attn.q_proj.weight": q2,
+               "model.layers.0.self_attn.q_proj.scales": sc,
+               "model.layers.0.self_attn.q_proj.biases": bi},
+              os.path.join(src, "model-00001-of-00002.safetensors"))
+    save_file({"model.norm.weight": np.ones(4, dtype=np.float32)},
+              os.path.join(src, "model-00002-of-00002.safetensors"))
+    json.dump({"quantization": {"bits": 4, "group_size": 8},
+               "weight_map": {"model.layers.0.self_attn.q_proj.scales":
+                              "model-00001-of-00002.safetensors"}},
+              open(os.path.join(src, "model.safetensors.index.json"), "w"))
+    json.dump({"quantization": {"bits": 4, "group_size": 8},
+               "model_type": "qwen2"},
+              open(os.path.join(src, "config.json"), "w"))
+    rep2 = fim_bridge.dequantize_checkpoint(src, os.path.join(td, "out"),
+                                            dtype="float32")
+    idx_p = os.path.join(td, "out", "model.safetensors.index.json")
+    check("sharded: the index EXISTS in the output (transformers requires it)",
+          os.path.exists(idx_p), str(rep2))
+    idx = json.load(open(idx_p))
+    check("sharded: weight_map points each tensor at its ACTUAL shard, "
+          "no scales/biases entries",
+          idx["weight_map"] == {
+              "model.layers.0.self_attn.q_proj.weight":
+                  "model-00001-of-00002.safetensors",
+              "model.norm.weight": "model-00002-of-00002.safetensors"},
+          str(idx["weight_map"]))
+    check("sharded: total_size matches the written tensors",
+          idx["metadata"]["total_size"] == 16 * 4 + 4 * 4,
+          str(idx["metadata"]))
+
 # ── recipe export ───────────────────────────────────────────────────────────────
 MLX_CFG = {"lora_parameters": {"rank": 8, "scale": 20.0, "dropout": 0.0},
            "num_layers": 16, "model": "mlx-community/Qwen2.5-14B-Instruct-4bit"}
