@@ -44,15 +44,40 @@
   --v2-text: #ededee;
   --v2-dim: rgba(232, 232, 234, 0.56);
   --v2-faint: rgba(220, 220, 224, 0.34);
-  --v2-accent: #ccff36;             /* lime — play / active / live / selection */
-  --v2-accent-ink: #0a0f04;         /* text on the lime fill */
-  --v2-accent-soft: rgba(204, 255, 54, 0.13);
+  /* ── ACCENT RESERVATION — two families, one switch ────────────────────────────
+     The lime used to be the colour of "on": play, selection, solo, zoom, loop,
+     faders, every hover. 120+ selectors reached it, so it carried no information —
+     and the genuinely agentic surfaces (Moshi, a clip mid-render, the AI-active
+     pill) wore exactly the same green as a mute button.
+
+     Now there are two families. --v2-accent-neutral is ordinary "active / on /
+     selected" for the whole shell. --v2-accent-agentic is the lime, and it is legal
+     ONLY on the surfaces listed in the agentic block in 95-fms-agent.css, mirrored
+     with reasons by ui/src/v2/accentReservation.test.ts.
+
+     Consumers are untouched: everything still paints with --v2-accent{,-ink,-soft}.
+     An agentic container re-points those three at the agentic family, so its subtree
+     inherits the lime and nothing else in the shell can reach it.
+
+     Near-white was chosen over a muted-cool alternative from rendered pixels: it has
+     no hue competition with the purple MIDI clips, and it leaves the lime as the only
+     hue in the chrome — which is the entire point of reserving it. ── */
+  --v2-accent-neutral: #f2f2f4;
+  --v2-accent-neutral-ink: #0a0a0b;
+  --v2-accent-neutral-soft: rgba(242, 242, 244, 0.10);
+  --v2-accent-agentic: #ccff36;
+  --v2-accent-agentic-ink: #0a0f04;
+  --v2-accent-agentic-soft: rgba(204, 255, 54, 0.13);
+
+  --v2-accent: var(--v2-accent-neutral);
+  --v2-accent-ink: var(--v2-accent-neutral-ink);
+  --v2-accent-soft: var(--v2-accent-neutral-soft);
   --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
   --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
   --v2-clip-midi: rgba(196, 202, 220, 0.82);
   --v2-clip-drum: rgba(204, 255, 54, 0.7);
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
-  --v2-playhead: #ccff36;           /* lime scrub line (matches the classic shell) */
+  --v2-playhead: var(--v2-accent-neutral); /* the scrub line is transport, not agentic — bound to the family so an agentic scope can never re-lime it */
   --v2-rec: #ff3b5c;
   --v2-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -200,15 +225,19 @@
   --v2-text: #f0efe9;
   --v2-dim: rgba(240, 239, 233, 0.58);
   --v2-faint: rgba(236, 234, 226, 0.34);
-  --v2-accent: #c2f53f;
-  --v2-accent-ink: #16210a;
-  --v2-accent-soft: rgba(194, 245, 63, 0.16);
+  /* Only the AGENTIC family flips per theme. v2 keeps dark panels on a cream page in
+     both themes, so the near-white neutral is correct in both and needs no light twin —
+     --v2-accent/-ink/-soft stay DERIVED from the neutral in the base block, and must not
+     be re-declared here or the reservation switch stops working in light. */
+  --v2-accent-agentic: #c2f53f;
+  --v2-accent-agentic-ink: #16210a;
+  --v2-accent-agentic-soft: rgba(194, 245, 63, 0.16);
   --v2-blue: #a7adba;
   --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
   --v2-clip-midi: rgba(196, 202, 220, 0.82);
   --v2-clip-drum: rgba(194, 245, 63, 0.7);
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
-  --v2-playhead: #c2f53f;
+  /* --v2-playhead is derived from --v2-accent-neutral in the base block; the scrub line does not flip. */
   --v2-shadow: 0 22px 50px rgba(70, 56, 28, 0.18);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   /* chrome sitting directly on the cream page (NOT inside a dark panel) */
