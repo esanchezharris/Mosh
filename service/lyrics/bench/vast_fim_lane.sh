@@ -47,6 +47,11 @@ done
   echo "need --data --serve-config --out" >&2; exit 2; }
 
 export PATH="$HOME/.local/bin:$PATH"
+# The account-registered key (vastai show ssh-keys) — the default identity
+# is NOT registered, and "Permission denied (publickey)" cost the first run.
+VAST_SSH_KEY="${VAST_SSH_KEY:-$HOME/.ssh/mosh_vast}"
+[ -f "$VAST_SSH_KEY" ] || { echo "no ssh key at $VAST_SSH_KEY" >&2; exit 2; }
+SSH_OPTS="-i $VAST_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 INSTANCE_ID=""
 T0=$(date +%s)
@@ -59,13 +64,16 @@ destroy() {
   set +e
   if [ -n "$INSTANCE_ID" ]; then
     log "G1: destroying instance $INSTANCE_ID (driver exit rc=$rc)"
-    vastai destroy instance "$INSTANCE_ID" >/dev/null 2>&1
+    # --yes is LOAD-BEARING: without it the CLI prompts, reads EOF as
+    # "Aborted", and exits 0 — the 2026-07-28 first run left the box
+    # billing behind a swallowed prompt. Errors go to the log, never /dev/null.
+    vastai destroy instance "$INSTANCE_ID" --yes 2>&1 | tail -1
     # G4: destroy is async — poll until the account is actually empty.
     for i in $(seq 1 30); do
       left=$(vastai show instances --raw 2>/dev/null | python3 -c \
         "import json,sys;print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
       [ "$left" = "0" ] && break
-      [ $((i % 5)) -eq 0 ] && vastai destroy instance "$INSTANCE_ID" >/dev/null 2>&1
+      [ $((i % 5)) -eq 0 ] && vastai destroy instance "$INSTANCE_ID" --yes 2>&1 | tail -1
       sleep 10
     done
     if [ "$left" = "0" ]; then
@@ -129,8 +137,8 @@ print(d.get('actual_status') or '?', d.get('ssh_host') or '', d.get('ssh_port') 
   sleep 10
 done
 [ "$STATUS" = "running" ] || { log "instance never reached running"; exit 5; }
-SSH="ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o ConnectTimeout=15 root@$SSH_HOST"
-for i in $(seq 1 30); do $SSH true 2>/dev/null && break; sleep 10; done
+SSH="ssh -p $SSH_PORT $SSH_OPTS -o ConnectTimeout=15 root@$SSH_HOST"
+for i in $(seq 1 60); do $SSH true 2>/dev/null && break; sleep 10; done
 $SSH true || { log "ssh never came up"; exit 5; }
 log "ssh up: $SSH_HOST:$SSH_PORT"
 
@@ -161,13 +169,13 @@ cfg = {"base": "/root/base-bf16", "data": "/root/data", "out": "/root/peft-out",
        "lr": float(sys.argv[3]), "seed": 20260728, "maxLength": 384}
 sys.exit(subprocess.call(["python", "/root/_cuda_train_fim.py", json.dumps(cfg)]))
 PYEOF
-scp -q -P "$SSH_PORT" -o StrictHostKeyChecking=no \
+scp -q -P "$SSH_PORT" $SSH_OPTS \
   "$HERE/fim_bridge.py" "$HERE/_cuda_train_fim.py" "$SERVE_CFG" \
   "$STAGE/vast_dequant.py" "$STAGE/vast_train.py" \
   "root@$SSH_HOST:/root/"
 rm -rf "$STAGE"
 $SSH "mkdir -p /root/data"
-scp -q -P "$SSH_PORT" -o StrictHostKeyChecking=no \
+scp -q -P "$SSH_PORT" $SSH_OPTS \
   "$DATA/train.jsonl" "$DATA/valid.jsonl" "root@$SSH_HOST:/root/data/"
 $SSH "wc -l /root/data/train.jsonl /root/data/valid.jsonl"
 
@@ -183,7 +191,7 @@ $SSH "cd /root && python vast_train.py $ITERS $BATCH $LR"
 
 log "6/6 fetch the adapter"
 mkdir -p "$OUT"
-scp -q -P "$SSH_PORT" -o StrictHostKeyChecking=no \
+scp -q -P "$SSH_PORT" $SSH_OPTS \
   "root@$SSH_HOST:/root/peft-out/adapter_model.safetensors" \
   "root@$SSH_HOST:/root/peft-out/adapter_config.json" "$OUT/"
 log "adapter at $OUT — the trap now destroys the box"
