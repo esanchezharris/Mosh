@@ -1028,3 +1028,31 @@ numbers and hashes only.
   change — and the one measurement that would change this conclusion is the
   queued keep-rate sitting, since `exact` is a diagnostic by the program's own
   decision record.
+- **2026-07-29 — KEEP-RATE SITTING SCORED: the Goodhart alarm FIRED on the
+  trained arm.** Owner judged the queued 77 (log now 163 lines, 81 accept /
+  82 reject; label coverage 86 -> 105 items), which finally makes the
+  denominators comparable:
+
+  | arm | acceptFit (keep-rate) | coverage | byTruth | byLABEL | unjudged |
+  |---|---|---|---|---|---|
+  | prompt-rhyme-menu-fp | **.750** | 99% | 62 | 86 | 2 |
+  | trained fim-v2-ckpt1000 | **.700** | 100% | 65 | 85 | 0 |
+  | bridged-cuda-v4-best (3x data) | .771 | 79% | 62 | 56 | 32 |
+
+  `goodhart_alarm` on the trained arm: **ALARM** — dExact **+.02** while
+  dAccept **-.05**. Exact and keep-rate moved in OPPOSITE directions, which is
+  exactly the shape the accept-set exists to expose (better at reproducing the
+  held-out token without being better at writing).
+  Tested before concluding: paired on the 148 items both arms have judged,
+  trained .696 vs prompt .750, delta -.054, discordant 18/26, **McNemar
+  p = .291 — NOT significant** (CI +/-.087). So the honest reading is NOT
+  "the prompt arm wins keep-rate"; it is that the two are indistinguishable on
+  the PRIMARY metric just as they are on exact, and the +.02 exact edge the I4
+  lane was chasing has **no evidence of being a writing gain**. v4-best's .771
+  is not comparable yet (32 unjudged, still a self-selected denominator).
+  **Consequence for the program:** every I4 result now rests on a diagnostic
+  that the primary metric declines to confirm. Combined with saturation
+  (3x data: no gain) and the three reranking negatives, the case for further
+  FIM-LoRA training is empty; the case for the product change (palette /
+  two-way choice, whose ceilings ARE measured: palette-40 .800, oracle-of-2
+  .553) is the only lane with evidence behind it. Owner decision, flagged.
