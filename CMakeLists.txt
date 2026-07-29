@@ -160,6 +160,12 @@ if (MOSH_BUILD_APP)
         src/app/selftest/SelfTest.Ch03_automation_plugins_master.cpp
         src/app/selftest/SelfTest.Ch04_generative_layer.cpp
         src/app/selftest/SelfTest.Ch05_export_drums_recording.cpp
+        src/app/selftest/SelfTest.Ch06_settings_project_safety.cpp
+        src/app/selftest/SelfTest.Ch07_project_meta_recovery.cpp
+        src/app/selftest/SelfTest.Ch08_arrangement_editing_routing.cpp
+        src/app/selftest/SelfTest.Ch09_tempo_warp_brain.cpp
+        src/app/selftest/SelfTest.Ch10_multiplayer.cpp
+        src/app/selftest/SelfTest.Ch11_sections_memory_matrix.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.

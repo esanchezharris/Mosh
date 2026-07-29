@@ -1,11 +1,11 @@
 #pragma once
 
-// ── SelfTest chapter TUs (RFC 002 — selftest chapter split, A-PR5) ─────────────
-// runSelfTest's leading run of sections (Stage 1 .. MON-003, ~50% of the section
-// sequence) moved verbatim into per-chapter TUs under src/app/selftest/. Each
-// chapter is a leading-prefix slice cut ONLY at section() starts, in exact
-// pre-split order; runSelfTest calls them in sequence and then continues with
-// the untouched inline remainder.
+// ── SelfTest chapter TUs (RFC 002 — selftest chapter split, A-PR5 + A-PR6) ────
+// runSelfTest's ENTIRE section sequence now lives in per-chapter TUs under
+// src/app/selftest/ (A-PR5 moved chapters 1-5, the leading ~50%; A-PR6 moved the
+// remainder as chapters 6-11). Each chapter is a contiguous slice cut ONLY at
+// top-level section() starts, in exact pre-split order; runSelfTest is now just
+// the prelude, the chapter calls in sequence, and the tally/return epilogue.
 
 #include <juce_core/juce_core.h>
 
@@ -18,6 +18,12 @@ void runChapter02_hosting_session_editing (selftest::SelfTestCtx& ctx);
 void runChapter03_automation_plugins_master (selftest::SelfTestCtx& ctx);
 void runChapter04_generative_layer        (selftest::SelfTestCtx& ctx);
 void runChapter05_export_drums_recording  (selftest::SelfTestCtx& ctx);
+void runChapter06_settings_project_safety (selftest::SelfTestCtx& ctx);
+void runChapter07_project_meta_recovery   (selftest::SelfTestCtx& ctx);
+void runChapter08_arrangement_editing_routing (selftest::SelfTestCtx& ctx);
+void runChapter09_tempo_warp_brain        (selftest::SelfTestCtx& ctx);
+void runChapter10_multiplayer             (selftest::SelfTestCtx& ctx);
+void runChapter11_sections_memory_matrix  (selftest::SelfTestCtx& ctx);
 
 // The harness hosts a REAL external plugin to exercise VST3 hosting, but it must NEVER
 // host an arbitrary user-installed plugin. Many installed plugins destabilise the HOST
