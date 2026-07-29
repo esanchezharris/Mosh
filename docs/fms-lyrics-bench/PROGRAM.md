@@ -923,3 +923,29 @@ numbers and hashes only.
   pool-to-surface gap. The lever is recall (how many/which candidates reach the
   surface), and since no scorer can order them, the disambiguator has to be the
   USER. Running k=20 to measure where recall saturates.
+- **2026-07-29 — The recall curve, and why the 40-word palette is the right
+  product shape.** Read from `armMeta.poolRanking` already in the run
+  artifacts (the full teacher-forced ordering over the 200-word pool — present
+  on 150/150 rows, so no re-run was needed; note `--k 20` does NOT work for
+  this, since `ctx.k` is not in the local cache key and a k-sweep silently
+  replays the cached 5-candidate response). Champion fim-v2-ckpt1000,
+  frozen 150:
+
+  | candidates shown | contains the artist's word |
+  |---|---|
+  | 1 (autofill) | .433 |
+  | 3 | .500 |
+  | 5 | .540 |
+  | 10 | .620 |
+  | 20 | .707 |
+  | **40 (shipped palette size)** | **.800** |
+  | 200 (whole pool) | .907 |
+
+  So the shipped 40-word palette contains the artist's own choice **80%** of
+  the time, against .433 for autofilling the top pick. Combined with the three
+  reranking negatives, the design conclusion is not "rank better" but "show the
+  palette and let the human choose" — which is what the palette promotion
+  already does, now with a measured ceiling instead of an intuition. The
+  remaining 9.3% is genuine pool miss (the truth is not phonology-reachable
+  from the anchor) and is the only part a better POOL, not a better model,
+  could fix.
