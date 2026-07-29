@@ -107,39 +107,6 @@ namespace mosh
         const float valueBefore;
     };
 
-    // Maps a clip's PLAYED span — position offset/length, or the loop range for a
-    // looping clip — onto a [startSec, lengthSec) window in SOURCE-FILE seconds: the
-    // samples that actually sound when the clip plays, as opposed to the whole
-    // (possibly much longer) source file it was trimmed from. Mirrors the arithmetic
-    // in the (private) non-auto-tempo branch of te::AudioClipBase::getReferencedItems
-    // — sourceSec = clipTimeSec * getSpeedRatio() — which is the same formula
-    // Tracktion itself uses to report a clip's "used" file range for export/reference
-    // purposes, just not exposed as a public helper.
-    //
-    // WARPED CAVEAT: auto-tempo (warp-locked) clips are deliberately NOT mapped —
-    // lengthSec is returned negative to mean "unmapped, scan the whole file", which
-    // callers should treat as a fallback. This matches Tracktion's own
-    // getReferencedItems, which ALSO falls back to the whole source file for
-    // auto-tempo clips (see the `if (getAutoTempo())` branch that resets
-    // firstTimeUsed/lengthUsed to the full file): the elastique-driven mapping from
-    // edit time to source time isn't a simple linear scale, so there's no cheap exact
-    // window to compute here either. A precise warped-clip mapping is a documented
-    // follow-up, not attempted in this pass.
-    struct ClipSourceSpan { double startSec = 0.0; double lengthSec = -1.0; };
-
-    inline ClipSourceSpan clipAudibleSourceSpan (te::AudioClipBase& ac)
-    {
-        if (ac.getAutoTempo())
-            return {};   // warped — see the WARPED CAVEAT above; caller scans the whole file
-
-        const double speed = ac.getSpeedRatio();
-        if (ac.isLooping())
-            return { ac.getLoopStart().inSeconds() * speed, ac.getLoopLength().inSeconds() * speed };
-
-        auto pos = ac.getPosition();
-        return { pos.getOffset().inSeconds() * speed, pos.getLength().inSeconds() * speed };
-    }
-
     // ── RFC 001 (A-PR3) — promoted from MoshOps.cpp's anonymous namespace ─────
     // Same promotion rule as A-PR2: each entry is referenced by BOTH a moved
     // domain TU and code that remains in MoshOps.cpp (or, for isSerumPlugin/
