@@ -795,3 +795,32 @@ numbers and hashes only.
   runbook: bridge adapters are sweep evidence, not shippable, until a
   CUDA-vs-MLX twin pair agrees within ±.02 once. 5/5 sabotages RED. Use when
   sweeps dominate; single runs stay local (~1h tuned).
+- **2026-07-29 — Vast lane LANDED (6 attempts, ~$1.13 total) + the twin turned
+  out to be two different tasks.** Attempt 6 trained 1500 iters on an A6000
+  ($0.66, 91m; G1 trap-destroy + G4 assert-empty both fired, account verified
+  `[]` independently). The bridged adapter evals **exact .173 / topk .353**
+  on the frozen 150 — BELOW base (.253/.407), rhyme_fit still 1.0. Diagnosis,
+  each step measured: (1) the conversion is FAITHFUL — bridged adapter
+  reproduces the CUDA trainer's own masked loss under MLX (1.296 vs 1.394
+  endpoint; base control 10.75); (2) root cause of the stack divergence:
+  **mlx_lm's `CompletionsDataset` re-wraps the already-templated prompt in a
+  second user/assistant turn** — so every MLX-trained adapter (fim-v1 .393,
+  fim-v2) trains on a double-templated stream, while `_cuda_train_fim.py`
+  trained the raw serve-parity stream. The two stacks never trained the same
+  task; the CUDA-vs-MLX loss gap (1.39 vs 0.64) and the ±.02 twin bar are
+  void as constituted. (3) Truncation ruled out (4/18,422 affected);
+  marginal-collapse ruled out (123/150 distinct picks). OPEN: why the
+  serve-parity encoding anti-transfers (below base) while the double-wrapped
+  one transfers (+.14) — suspicion is the dangling-space prefill boundary,
+  unproven. Recipe decision is empirical regardless: **CUDA must reproduce
+  mlx_lm's encoding byte-for-byte for the twin to mean anything**; trainer
+  change staged, one more ~$0.66 run pending owner. Also: the CUDA trainer
+  saved no intermediate checkpoints (val minimum was step 1100, endpoint
+  drifted +.04 in epoch 2) — next run checkpoints every eval block.
+- **2026-07-29 — fim-v2@500 (MLX, v2 data): exact .393 / topk .520 /
+  rhyme_perfect .293** on the frozen 150 — ties fim-v1's exact at a third of
+  the iterations, on the v2-guard mint. rhyme_perfect FALLING while exact
+  holds is the model preferring the artist's actual (often slant) word over
+  formally-perfect menu words — the human-taste direction the program bets
+  on. Endpoint (1500) lands ~10h out; 1000-ckpt eval armed. Bar to beat for
+  the routing conversation: .413 exact / .45.
