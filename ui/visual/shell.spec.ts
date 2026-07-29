@@ -17,6 +17,7 @@ const THEMES: Theme[] = ["dark", "light"];
 for (const theme of THEMES) {
   test.describe(`v2 shell — ${theme}`, () => {
     test(`rest — ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width: 2000, height: 1250 });
       await bootShell(page, theme);
       await shot(page, "shell-rest", theme);
     });
@@ -30,7 +31,8 @@ for (const theme of THEMES) {
 
     test(`left browser open — ${theme}`, async ({ page }) => {
       await bootShell(page, theme);
-      await page.getByTestId("v2-browser-pull").click();
+      await page.getByTestId("v2-overflow").click();
+      await page.getByRole("menuitem", { name: "Sounds & plugins" }).click();
       await page.getByTestId("v2-browser-drawer").waitFor();
       await shot(page, "shell-browser", theme);
     });
@@ -61,6 +63,7 @@ for (const theme of THEMES) {
     // spec already relies on. `agenticLoop` must be on for that path to exist.
     test(`agent drawer open — ${theme}`, async ({ page }) => {
       await bootShell(page, theme, { agenticLoop: true });
+      await page.getByTestId("v2-agent-trigger").click();
       await page.getByTestId("agent-input").fill("build me a lofi sketch");
       await page.getByTestId("agent-send").click();
       await page.getByTestId("agent-drawer").waitFor();
@@ -70,5 +73,66 @@ for (const theme of THEMES) {
       await expect(page.getByTestId("agent-undo-task")).toBeVisible({ timeout: 20_000 });
       await shot(page, "shell-agent", theme);
     });
+  });
+}
+
+test("Graphite shell — three local jobs at 2000x1250", async ({ page }) => {
+  await page.setViewportSize({ width: 2000, height: 1250 });
+  await bootShell(page, "dark");
+  await page.evaluate(() => {
+    type RenderClip = {
+      id: string;
+      name: string;
+      renderLayer?: Record<string, unknown>;
+    };
+    type DevSnapshot = {
+      tracks: Array<{ clips: RenderClip[] }>;
+    };
+    type DevStore = {
+      getState: () => { snapshot: DevSnapshot };
+      setState: (state: object) => void;
+    };
+    const store = (window as unknown as { __moshStore?: DevStore }).__moshStore;
+    if (!store) throw new Error("Missing dev store");
+    const snapshot = store.getState().snapshot;
+    const progress: Record<string, number> = {};
+    let active = 0;
+    const tracks = snapshot.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => {
+        if (active >= 3) return clip;
+        const arranged = active === 1;
+        progress[clip.id] = [0.62, 0.34, 0.81][active];
+        active += 1;
+        return {
+          ...clip,
+          renderLayer: {
+            id: `visual-job-${active}`,
+            status: "rendering",
+            adapter: "fake",
+            mode: "reimagine",
+            seed: active,
+            userKept: false,
+            hasArtifact: false,
+            ...(arranged ? { regionStart: 1, regionEnd: 3 } : {}),
+          },
+        };
+      }),
+    }));
+    store.setState({ snapshot: { ...snapshot, tracks }, renderProgress: progress });
+  });
+  await expect(page.locator(".v2-agent-job")).toHaveCount(3);
+  await expect(page.getByTestId("v2-status-jobs")).toContainText("3 AI jobs running");
+  await shot(page, "shell-three-jobs", "dark");
+});
+
+for (const size of [
+  { name: "compact", width: 1280, height: 768 },
+  { name: "narrow", width: 820, height: 768 },
+]) {
+  test(`Graphite shell — ${size.name} window`, async ({ page }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await bootShell(page, "dark");
+    await shot(page, `shell-${size.name}`, "dark");
   });
 }

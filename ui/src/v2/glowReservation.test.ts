@@ -22,10 +22,7 @@ const css = readShellCss();
 const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 // selector -> why this one may still glow.
-const GLOW_ALLOWED: Record<string, string> = {
-  ".v2-pill .led": "the topbar AI ACTIVE indicator — the one place a soft halo means 'a model is running'",
-  ".v2-shell .agent-input.listening": "the push-to-talk ring while the recognizer is live (a 1px ring, kept for completeness)",
-};
+const GLOW_ALLOWED: Record<string, string> = {};
 
 const rules: { selector: string; body: string }[] = [];
 for (const m of code.matchAll(/([^{}]+)\{([^{}]+)\}/g)) {
@@ -71,10 +68,9 @@ describe("glow reservation — the scan is real", () => {
     expect(rules.length, "rule scan collapsed — every assertion below would pass on nothing").toBeGreaterThan(200);
   });
 
-  it("the glow detector still matches something", () => {
-    // If GLOW ever stops matching, "no unauthorised glow" becomes trivially true.
+  it("the shell currently ships no colored glow", () => {
     const hits = rules.filter((r) => isGlow(r.body));
-    expect(hits.length, "the glow detector matched nothing at all — it has drifted from the CSS").toBeGreaterThan(0);
+    expect(hits).toEqual([]);
   });
 });
 
@@ -108,7 +104,7 @@ describe("glow reservation — only agentic surfaces may glow", () => {
         else offenders.push(`${sel}  ->  ${r.body.trim().slice(0, 80)}`);
       }
     }
-    expect(allowed, "no allowlisted glow matched — the allowlist or the regex has drifted").toBeGreaterThanOrEqual(1);
+    expect(allowed).toBe(Object.keys(GLOW_ALLOWED).length);
     expect(
       offenders,
       `these selectors glow without being on the allowlist. Glow is reserved for surfaces ` +

@@ -15,7 +15,8 @@ test.beforeEach(async ({ page }) => {
     }));
   });
   await page.goto("/?shell=v2");
-  await expect(page.getByTestId("v2-composer")).toBeVisible();
+  await page.getByTestId("v2-agent-trigger").click();
+  await expect(page.getByTestId("v2-agent-panel")).toBeVisible();
 });
 
 test("a lofi ask runs as a two-step task in the drawer and one Undo reverts it", async ({ page }) => {

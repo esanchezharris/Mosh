@@ -67,6 +67,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const transcribing = useStore((s) => !!s.transcribing[clip.id]);
   const buildingLyrics = useStore((s) => !!s.buildingLyrics[clip.id]);
   const buildingSkeleton = useStore((s) => !!s.buildingSkeleton[clip.id]);
+  const renderProgress = useStore((s) => s.renderProgress[clip.id]);
   const pxToSec = (px: number) => px / pxPerSec;
   const secToPx = (s: number) => s * pxPerSec;
   const bs = beatSeconds(meterOf(snapshot)); // seconds per beat (renderers map beats→px)
@@ -102,6 +103,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   // fallback for an empty/ambiguous clip — matches the legacy detection.
   const drumClip = clip.type === "midi" && (isDrumClip(clip.notes) || trackType === "drum");
   const kind = clip.type === "wave" ? "wave" : clip.type === "midi" ? (drumClip ? "drum" : "midi") : "block";
+  const rendering = clip.renderLayer?.status === "queued" || clip.renderLayer?.status === "rendering";
 
   const selectClip = (additive: boolean) => { select([clip.id], additive); setSelectedClip(clip.id); };
   const edgeGrab = liveFeel().edgeGrabPx;
@@ -211,7 +213,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   return (
     <div
-      className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
+      className={`v2-clip ${kind}${selected ? " sel" : ""}${rendering ? " agentic" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
       style={{ left, width }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
       data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
@@ -232,6 +234,11 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       {transcribing && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-transcribing">transcribing…</span>}
       {buildingLyrics && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-lyrics">lyrics…</span>}
       {buildingSkeleton && <span className="v2-clip-badge working" role="status" aria-live="polite" data-testid="clip-building-skeleton">flow…</span>}
+      {rendering && (
+        <span className="v2-clip-agent-progress" aria-hidden>
+          <span style={{ width: `${Math.round((renderProgress ?? 0) * 100)}%` }} />
+        </span>
+      )}
       {/* edge cursor affordance — pointerdown bubbles up to the clip handler, which
           classifies the edge by position (move tool trims). */}
       <div className="v2-trim l" style={{ width: edgeGrab }} />

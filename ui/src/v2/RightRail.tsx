@@ -1,16 +1,8 @@
-// The right rail: the MOSH card (the live WebGL character + a status line) and the
-// COLLABORATORS card (peers + invite). It's a symmetric push-dock — collapsed it's a
-// vertical pull-tab carrying the minimized Moshi mark (so the character is always present),
-// open it expands its column. Moshi self-wires from the store, so the card just frames him.
-// The status line narrates the agent's last move (agentUtter.say) with a transport/render
-// fallback ladder. Video tiles land in the collaborators slice.
-
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import moshIconUrl from "./assets/MoshIcon32.png";
 import { useStore } from "../store";
 import { useShell } from "./shellState";
-import { Moshi } from "../ui/Moshi";
-import { MoshMark } from "./MoshMark";
-import { IconCamera, IconCameraOff, IconChevronLeft, IconSpark, IconUsers } from "../ui/icons";
+import { IconCamera, IconCameraOff, IconChevronLeft, IconUsers } from "../ui/icons";
 import { useVideo } from "../webrtc/useVideo";
 import { VideoTile } from "../ui/VideoTile";
 import { PresenceMeter } from "./PresenceMeter";
@@ -19,60 +11,81 @@ import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
 import type { Plugin } from "../types";
+import { LocalAgentPanel } from "./agent/LocalAgentPanel";
+import { deriveLocalAgentJobs } from "./agent/localAgentJobs";
 
 export function RightRail() {
   const open = useShell((s) => s.rightOpen);
   const setOpen = useShell((s) => s.setRightOpen);
   const toggle = useShell((s) => s.toggleRight);
+  const tab = useShell((s) => s.railTab);
+  const setTab = useShell((s) => s.setRailTab);
+  const snapshot = useStore((s) => s.snapshot);
+  const renderProgress = useStore((s) => s.renderProgress);
+  const agentBusy = useStore((s) => s.agentBusy);
+  const jobs = useMemo(
+    () => deriveLocalAgentJobs(snapshot, renderProgress, agentBusy),
+    [snapshot, renderProgress, agentBusy],
+  );
+  const previousJobCount = useRef(0);
+
+  useEffect(() => {
+    if (jobs.length > previousJobCount.current) {
+      setOpen(true);
+      setTab("agent");
+    }
+    previousJobCount.current = jobs.length;
+  }, [jobs.length, setOpen, setTab]);
 
   return (
     <div className={`v2-dock v2-dock-right${open ? " open" : ""}`} data-testid="v2-right-dock">
       {open ? (
         <aside className="v2-rail" data-testid="v2-rail">
-          <MoshCard onCollapse={() => setOpen(false)} />
-          <Inspector />
-          <MasterCard />
-          <CollaboratorsCard />
+          <div className="v2-rail-top">
+            <div className="v2-rail-tabs" role="tablist" aria-label="Right inspector">
+              {(["clip", "track", "agent"] as const).map((railTab) => (
+                <button
+                  key={railTab}
+                  role="tab"
+                  aria-selected={tab === railTab}
+                  className={tab === railTab ? "on" : ""}
+                  data-testid={`v2-rail-tab-${railTab}`}
+                  onClick={() => setTab(railTab)}
+                >
+                  {railTab.charAt(0).toUpperCase() + railTab.slice(1)}
+                  {railTab === "agent" && jobs.length > 0 && <span className="v2-rail-job-count">{jobs.length}</span>}
+                </button>
+              ))}
+            </div>
+            <button
+              className="v2-rail-collapse"
+              data-testid="v2-rail-collapse"
+              aria-label="Hide inspector"
+              title="Hide"
+              onClick={() => setOpen(false)}
+            >
+              <IconChevronLeft size={14} />
+            </button>
+          </div>
+          <div className="v2-rail-content">
+            {tab === "clip" && <Inspector scope="clip" />}
+            {tab === "track" && (
+              <>
+                <Inspector scope="track" />
+                <MasterCard />
+                <CollaboratorsCard />
+              </>
+            )}
+            {tab === "agent" && <LocalAgentPanel />}
+          </div>
         </aside>
       ) : (
-        /* the pull-tab — the minimized Moshi keeps the character present even when parked */
         <button className="v2-dock-tab v2-dock-tab-mosh" data-testid="v2-right-pull" aria-expanded={false}
-          aria-label="Open agent panel" title="Mosh — agent · inspector · collaborators" onClick={toggle}>
-          <MoshMark size={30} />
-          <span className="v2-dock-tab-label">MOSH</span>
+          aria-label="Open inspector" title="Clip, track, and agent inspector" onClick={toggle}>
+          <img src={moshIconUrl} alt="" className="v2-rail-pull-icon" />
+          <span className="v2-dock-tab-label">Inspector</span>
         </button>
       )}
-    </div>
-  );
-}
-
-function MoshCard({ onCollapse }: { onCollapse: () => void }) {
-  return (
-    <section className="v2-card v2-mosh-card" data-testid="v2-mosh-card">
-      <div className="v2-card-head">
-        <span>Mosh</span>
-        <span className="v2-mosh-head-r">
-          <span className="v2-live"><span className="led" /> Live</span>
-          <button className="v2-rail-collapse" data-testid="v2-rail-collapse" aria-label="Hide agent panel"
-            title="Hide" onClick={onCollapse}><IconChevronLeft size={14} /></button>
-        </span>
-      </div>
-      <div className="v2-mosh-stage"><Moshi /></div>
-      <MoshStatusLine />
-    </section>
-  );
-}
-
-function MoshStatusLine() {
-  const say = useStore((s) => s.agentUtter?.say);
-  const recording = useStore((s) => s.transport.recording);
-  const playing = useStore((s) => s.transport.playing);
-  const rendering = useStore((s) => Object.keys(s.renderProgress).length > 0);
-  const text = say || (recording ? "recording…" : rendering ? "rendering…" : playing ? "listening" : "ready when you are");
-  return (
-    <div className="v2-mosh-status" role="status" aria-live="polite" data-testid="v2-mosh-status">
-      <span className="wave" aria-hidden><IconSpark size={13} /></span>
-      <span>{text}</span>
     </div>
   );
 }

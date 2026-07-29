@@ -62,9 +62,9 @@ describe("headW", () => {
       getPropertyValue: (p: string) => (p === "--v2-head-w" ? val : ""),
     } as unknown as CSSStyleDeclaration);
 
-  it("falls back to the css token value (200) when no .v2-shell is mounted", async () => {
+  it("falls back to the css token value (278) when no .v2-shell is mounted", async () => {
     const { headW } = await import("./geom");
-    expect(headW()).toBe(200);
+    expect(headW()).toBe(278);
   });
 
   it("reads --v2-head-w from the mounted shell", async () => {
@@ -85,7 +85,7 @@ describe("headW", () => {
 
   it("does NOT cache the fallback — a later read picks up the real token", async () => {
     const { headW } = await import("./geom");
-    expect(headW()).toBe(200); // pre-mount render
+    expect(headW()).toBe(278); // pre-mount render
     mount();
     mockToken("240px");
     expect(headW()).toBe(240);

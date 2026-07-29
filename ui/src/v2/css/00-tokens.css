@@ -13,7 +13,7 @@
      alongside removing the redundant type pill and slimming the meter/gaps; the name
      column now gets ~76px. MUST move in lockstep with HEAD_W_FALLBACK in
      timeline/geom.ts (and its test), which mirrors this token for pre-mount renders. */
-  --v2-head-w: 200px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
+  --v2-head-w: 278px; /* read at runtime by timeline/geom.ts headW(); its fallback mirrors this */
   /* 64 -> 72. Breathing room, bought where it is actually free.
      Two ceilings were measured before landing this, and both are lower than they look:
        - at 80px the arrangement stops shrink-wrapping to its tracks in a 1280x720 window.
@@ -25,19 +25,19 @@
          culprit; it is cumulative, which is why they are not here.
      So: taller lanes yes, taller chrome no. --v2-head-w stays 200 for the same reason, and
      because moving it drags geom.ts's HEAD_W_FALLBACK with it (now guarded in geom.test.ts). */
-  --v2-lane-h: 72px;
+  --v2-lane-h: 78px;
   --v2-ribbon-h: 40px;
   --v2-tempo-h: 22px;
-  --v2-ruler-h: 24px;
+  --v2-ruler-h: 44px;
   --v2-ann-h: 22px;
-  --v2-topbar-h: 64px;   /* header row height — tokenized so it's reservable (PR-2.7) */
-  --v2-radius: 16px;
-  --v2-radius-sm: 10px;
-  --v2-gap: 14px;
-  --v2-rail-w: 286px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
-  --v2-browser-w: 340px;    /* the LEFT dock when expanded (samples · plugins) */
-  --v2-tab-w: 46px;         /* a collapsed dock — just its vertical pull-tab rail */
-  --v2-stage-max: 1000px;   /* the centered work area cap (arrangement · nav · composer) */
+  --v2-topbar-h: 124px;   /* header row height — tokenized so it's reservable (PR-2.7) */
+  --v2-radius: 10px;
+  --v2-radius-sm: 8px;
+  --v2-gap: 0px;
+  --v2-rail-w: 334px;       /* the RIGHT dock when expanded (agent · inspector · collaborators) */
+  --v2-browser-w: 320px;    /* the LEFT dock when expanded (samples · plugins) */
+  --v2-tab-w: 0px;         /* a collapsed dock — just its vertical pull-tab rail */
+  --v2-stage-max: none;     /* the centered work area cap (arrangement · nav · composer) */
   /* live dock widths — flipped by data-left-open / data-right-open on .v2-shell (below) */
   --v2-left-w: var(--v2-tab-w);
   --v2-right-w: var(--v2-rail-w);
@@ -51,11 +51,11 @@
      to do with the work, and every panel edge sits on a slightly different value, so
      nothing lines up tonally. A single value lets the hairlines and surfaces do the
      separating. */
-  --v2-bg: #0c0c0c;
-  --v2-ink: #0a0a0a;
-  --v2-surface: rgba(24, 24, 25, 0.64);
-  --v2-surface-2: rgba(33, 33, 35, 0.74);
-  --v2-surface-sunken: rgba(12, 12, 13, 0.62);
+  --v2-bg: #0b0c0e;
+  --v2-ink: #08090b;
+  --v2-surface: #0f1012;
+  --v2-surface-2: #141518;
+  --v2-surface-sunken: #0b0c0e;
   --v2-line: rgba(255, 255, 255, 0.09);
   --v2-line-strong: rgba(255, 255, 255, 0.18);
   --v2-text: #ededee;
@@ -82,7 +82,7 @@
   --v2-accent-neutral: #f2f2f4;
   --v2-accent-neutral-ink: #0a0a0b;
   --v2-accent-neutral-soft: rgba(242, 242, 244, 0.10);
-  --v2-accent-agentic: #ccff36;
+  --v2-accent-agentic: #ccff23;
   --v2-accent-agentic-ink: #0a0f04;
   --v2-accent-agentic-soft: rgba(204, 255, 54, 0.13);
 
@@ -92,7 +92,7 @@
   --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
   --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
   --v2-clip-midi: rgba(196, 202, 220, 0.82);
-  --v2-clip-drum: rgba(204, 255, 54, 0.7);
+  --v2-clip-drum: rgba(111, 123, 112, 0.78);
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
   --v2-playhead: var(--v2-accent-neutral); /* the scrub line is transport, not agentic — bound to the family so an agentic scope can never re-lime it */
   --v2-rec: #ff3b5c;
@@ -150,7 +150,7 @@
   /* ── ground: the page the chrome floats on (logo, transport pill, time card, invite/⋯,
        avatars). In the dark hero the ground IS dark, so these alias the dark surfaces; the
        light/cream theme overrides them — page goes cream, panels stay dark. ── */
-  --v2-ground: #0c0c0c;
+  --v2-ground: #0b0c0e;
   --v2-ground-text: var(--v2-text);
   --v2-ground-dim: var(--v2-dim);
   --v2-ground-card: var(--v2-surface-2);
@@ -217,7 +217,7 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
-.v2-shell > * { min-width: 1120px; flex: none; }
+.v2-shell > * { min-width: 760px; flex: none; }
 .v2-shell > .v2-body { flex: 1; min-height: 0; }
 
 /* dock open-state → live column widths (the .v2-body grid reads these). Collapsed = a thin
@@ -232,14 +232,14 @@
      keep the dark surface/text tokens and override only the page bg + the ground set
      (the chrome that sits directly on the cream). ── */
 [data-theme="light"] .v2-shell {
-  --v2-bg: #f1ebde;   /* flat, matching the dark ground — see the base block */
-  --v2-ink: #0c0c0c;
+  --v2-bg: #0b0c0e;   /* flat, matching the dark ground — see the base block */
+  --v2-ink: #08090b;
   /* #54 — the errbar sits on the CREAM ground here; the dark theme's pale-pink
      danger text (#ffb3c1) is near-invisible on it. Deep red on the rose wash. */
   --status-danger-text: #8c1228;
-  --v2-surface: #1b1b1d;
-  --v2-surface-2: #242427;
-  --v2-surface-sunken: #141416;
+  --v2-surface: #0f1012;
+  --v2-surface-2: #141518;
+  --v2-surface-sunken: #0b0c0e;
   --v2-line: rgba(255, 255, 255, 0.09);
   --v2-line-strong: rgba(255, 255, 255, 0.2);
   --v2-text: #f0efe9;
@@ -249,13 +249,13 @@
      both themes, so the near-white neutral is correct in both and needs no light twin —
      --v2-accent/-ink/-soft stay DERIVED from the neutral in the base block, and must not
      be re-declared here or the reservation switch stops working in light. */
-  --v2-accent-agentic: #c2f53f;
+  --v2-accent-agentic: #ccff23;
   --v2-accent-agentic-ink: #16210a;
-  --v2-accent-agentic-soft: rgba(194, 245, 63, 0.16);
+  --v2-accent-agentic-soft: rgba(204, 255, 35, 0.16);
   --v2-blue: #a7adba;
   --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
   --v2-clip-midi: rgba(196, 202, 220, 0.82);
-  --v2-clip-drum: rgba(194, 245, 63, 0.7);
+  --v2-clip-drum: rgba(111, 123, 112, 0.78);
   --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
   /* --v2-playhead is derived from --v2-accent-neutral in the base block; the scrub line does not flip. */
   --v2-shadow: 0 18px 44px -14px rgba(70, 56, 28, 0.24);
@@ -316,4 +316,3 @@
    Drums tab would not render cream cells on a dark panel. The `[data-theme="light"]
    .v2-shell` re-pin above now does the same thing for EVERY classic component in the
    subtree, so keeping this would be a second source of truth for one of them.) */
-

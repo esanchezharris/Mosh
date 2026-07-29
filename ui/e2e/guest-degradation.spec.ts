@@ -80,7 +80,7 @@ test("Build flow from this take shows a working badge, then clears on completion
 test("transform target picker shows a preview badge when no real RAVE model is installed", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").nth(2).click();
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-transform").click();
   await expect(gen.getByTestId("xform-target")).toBeVisible();
@@ -92,7 +92,7 @@ test("transform target picker shows a preview badge when no real RAVE model is i
 test("transform target picker hides the preview badge once a real RAVE model is reported", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").nth(2).click();
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-transform").click();
   await expect(gen.getByTestId("xform-target")).toBeVisible();

@@ -267,7 +267,7 @@ test("sing mode: build a flow → + Sing → guide render → accept", async ({ 
   await page.getByTestId("lyric-accept-0-0").click();
 
   // The Gen tab offers "+ Sing" only once the track carries a lyric sheet.
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   const singBtn = gen.getByTestId("gen-create-sing");
   await expect(singBtn).toBeVisible();
@@ -289,7 +289,7 @@ test("sing mode: build a flow → + Sing → guide render → accept", async ({ 
 test("sing without a sheet is not offered (+ Sing hidden)", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").nth(0).click();
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   await expect(gen.getByTestId("gen-create")).toBeVisible();
   await expect(gen.getByTestId("gen-create-sing")).toHaveCount(0);
@@ -305,7 +305,7 @@ test("sing on a typed sheet (no take flow): 0-coverage copy + Render disabled", 
   await page.getByTestId("lyric-panel").getByText("Lyrics", { exact: true }).click();
   await page.getByTestId("lyric-assert-0").click();
 
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
   await expect(gen.getByTestId("sing-flow")).toContainText("0/1");
@@ -331,7 +331,7 @@ test("sing partial flow: a hand-added line shows as skipped, scored lines still 
   await page.getByTestId("lyric-accept-1-0").click();
   await page.getByTestId("lyric-add-line").click();              // typed-later line — no take flow
 
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-rail-tab-agent").click();
   const gen = page.getByTestId("generative");
   await gen.getByTestId("gen-create-sing").click();
   // Merged fixture: 2 fillable + the extraction-parity sung line (scored) + the

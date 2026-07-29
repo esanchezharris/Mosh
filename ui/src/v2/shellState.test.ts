@@ -5,7 +5,7 @@ import { useShell } from "./shellState";
 // the left browser drawer's open/tab state in particular.
 describe("v2 shellState — browser drawer", () => {
   beforeEach(() => {
-    useShell.setState({ browserOpen: false, browserTab: "sounds" });
+    useShell.setState({ browserOpen: false, browserTab: "sounds", arrangementToolsOpen: false });
   });
 
   it("defaults to closed on the Sounds tab", () => {
@@ -37,11 +37,17 @@ describe("v2 shellState — browser drawer", () => {
     expect(useShell.getState().browserOpen).toBe(true);
     expect(useShell.getState().browserTab).toBe("sounds");
   });
+
+  it("reveals the dense arrangement tools only on request", () => {
+    expect(useShell.getState().arrangementToolsOpen).toBe(false);
+    useShell.getState().toggleArrangementTools();
+    expect(useShell.getState().arrangementToolsOpen).toBe(true);
+  });
 });
 
 describe("v2 shellState — right dock (agent rail)", () => {
   beforeEach(() => {
-    useShell.setState({ rightOpen: true });
+    useShell.setState({ rightOpen: true, railTab: "track", selectedClipId: null });
   });
 
   it("defaults to open (the agent is present by default)", () => {
@@ -60,6 +66,22 @@ describe("v2 shellState — right dock (agent rail)", () => {
     expect(useShell.getState().rightOpen).toBe(false);
     useShell.getState().setRightOpen(true);
     expect(useShell.getState().rightOpen).toBe(true);
+  });
+
+  it("opens a requested Clip, Track, or Agent tab", () => {
+    useShell.getState().setRightOpen(false);
+    useShell.getState().openRailTab("agent");
+    expect(useShell.getState().rightOpen).toBe(true);
+    expect(useShell.getState().railTab).toBe("agent");
+    useShell.getState().setRailTab("track");
+    expect(useShell.getState().railTab).toBe("track");
+  });
+
+  it("selecting a clip opens the Clip tab", () => {
+    useShell.getState().setSelectedClip("clip-1");
+    expect(useShell.getState().selectedClipId).toBe("clip-1");
+    expect(useShell.getState().rightOpen).toBe(true);
+    expect(useShell.getState().railTab).toBe("clip");
   });
 });
 

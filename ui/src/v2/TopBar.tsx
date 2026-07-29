@@ -4,7 +4,8 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import moshIconUrl from "./assets/MoshIcon32.png";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
@@ -16,8 +17,11 @@ import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "../ui/RecentProjectList";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { FileOptions } from "../ui/FileOptions";
 import type { Snapshot } from "../types";
-import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
+import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers, IconWaveform } from "../ui/icons";
+import { useShell } from "./shellState";
+import { deriveLocalAgentJobs } from "./agent/localAgentJobs";
 
 function projectName(editFile: string): string {
   const base = editFile.split("/").pop() ?? "";
@@ -30,14 +34,19 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const peerCount = useStore((s) => Object.keys(s.peers).length);
+  const renderProgress = useStore((s) => s.renderProgress);
+  const openRailTab = useShell((s) => s.openRailTab);
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
   const bbs = secondsToBBSMap(map, t.position);
-  const barLen = barSeconds(meter);
-  const loopBars = Math.max(1, Math.round((t.loopEnd - t.loopStart) / barLen));
-  const totalBars = Math.max(1, Math.round((snapshot.session.length ?? 0) / barLen));
+  const loopBars = Math.max(1, Math.round((t.loopEnd - t.loopStart) / barSeconds(meter)));
   const key = snapshot.session.key ?? DEFAULT_KEY;
+  const jobs = useMemo(
+    () => deriveLocalAgentJobs(snapshot, renderProgress, agentBusy),
+    [snapshot, renderProgress, agentBusy],
+  );
 
   // CONF-RECORD-ARM — the Record button used to toggle set_transport{action:"record"}
   // with nothing armed, so a mouse-only user (no keyboard/agent arm step) recorded
@@ -56,51 +65,36 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
 
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
-      <div className="v2-brand">
-        <div className="v2-proj">
+      <div className="v2-project-row">
+        <div className="v2-brand">
+          <img className="v2-app-icon" src={moshIconUrl} alt="Mosh" />
+          <span className="v2-wordmark">mosh</span>
+          <span className="v2-project-slash">/</span>
           <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
-          <div className="v2-proj-meta">
-            <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
-              onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
-              {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
-            </select>
-            <select className="v2-chip" aria-label="Key mode" value={key.mode}
-              onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
-              {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
-              key={`bpm-${Math.round(snapshot.session.tempo)}`}
-              defaultValue={Math.round(snapshot.session.tempo)}
-              onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            <span className="v2-timesig" title="Time signature">
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
-                key={`ts-num-${meter.num}`}
-                defaultValue={meter.num}
-                onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-              <span className="v2-timesig-slash">/</span>
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
-                key={`ts-den-${meter.den}`}
-                defaultValue={meter.den}
-                onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            </span>
-            <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
-              data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
-              onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}>♩</button>
-            <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
-              title="Count-in before recording — an audible click plays through the pre-roll"
-              onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
-              <option value={0}>Count-in: Off</option>
-              <option value={1}>Count-in: 1 bar</option>
-              <option value={2}>Count-in: 2 bars</option>
-            </select>
-          </div>
+          <span className="v2-project-chevron" aria-hidden>⌄</span>
+        </div>
+        <div className="v2-project-actions">
+          <button
+            className={`v2-agent-trigger${jobs.length > 0 ? " busy" : ""}`}
+            data-testid="v2-agent-trigger"
+            onClick={() => openRailTab("agent")}
+          >
+            <IconSpark size={15} />
+            <span>Agents</span>
+            {jobs.length > 0 && <span className="v2-agent-trigger-count">{jobs.length}</span>}
+          </button>
+          <MultiplayerLauncher
+            className="v2-btn v2-invite-btn"
+            testId="v2-share"
+            ariaLabel={mpActive ? "Multiplayer session — view room code" : "Create or join a multiplayer session"}
+            label={<><IconUsers size={15} /><span>Share</span></>}
+          />
+          <FileOptions snapshot={snapshot} />
+          <OverflowMenu />
         </div>
       </div>
 
-      <div className="v2-center">
+      <div className="v2-transport-row">
         <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
           <button className="v2-tbtn" title="To start" aria-label="To start"
             onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconSkipStart size={15} /></button>
@@ -114,32 +108,89 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         </div>
 
         <div className="v2-readout">
-          <span className="v2-time" data-testid="v2-time">{bbs}</span>
-          <span className="v2-bars">
-            <span>{t.looping ? loopBars : totalBars} bars</span>
-            <span className={t.looping ? "v2-loop-on" : ""}>{t.looping ? "loop" : "—"}</span>
+          <label className="v2-readout-cell">
+            <span>Position</span>
+            <strong className="v2-time" data-testid="v2-time">{bbs}</strong>
+          </label>
+          <label className="v2-readout-cell">
+            <span>Tempo</span>
+            <input className="v2-readout-input" type="number" aria-label="Tempo" min={20} max={300}
+              key={`bpm-${Math.round(snapshot.session.tempo)}`}
+              defaultValue={Math.round(snapshot.session.tempo)}
+              onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          </label>
+          <label className="v2-readout-cell">
+            <span>Meter</span>
+            <span className="v2-readout-meter">
+              <input className="v2-readout-input" type="number" aria-label="Time signature numerator" min={1} max={32}
+                key={`ts-num-${meter.num}`}
+                defaultValue={meter.num}
+                onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              <span>/</span>
+              <input className="v2-readout-input" type="number" aria-label="Time signature denominator" min={1} max={32}
+                key={`ts-den-${meter.den}`}
+                defaultValue={meter.den}
+                onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              {t.looping && (
+                <>
+                  <span>{loopBars} bars</span>
+                  <span className="v2-loop-on">loop</span>
+                </>
+              )}
+            </span>
+          </label>
+        </div>
+
+        <div className="v2-session-controls">
+          <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
+            data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
+            onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}><IconWaveform size={14} /></button>
+          <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
+            title="Count-in before recording"
+            onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+            <option value={0}>Count-in off</option>
+            <option value={1}>1 bar</option>
+            <option value={2}>2 bars</option>
+          </select>
+          <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
+            onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
+            {TONICS.map((tonic) => <option key={tonic} value={tonic}>{tonic}</option>)}
+          </select>
+          <select className="v2-chip" aria-label="Key mode" value={key.mode}
+            onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
+            {MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+          </select>
+        </div>
+
+        <div className="v2-live-cluster">
+          <span className="v2-live-label">Live</span>
+          <AvatarCluster />
+          <LocalAgentAvatars jobs={jobs.map((job) => job.worker)} />
+          <span className="v2-live-count">
+            {jobs.length > 0
+              ? `${Math.max(1, peerCount + 1)} + ${jobs.length} agents`
+              : `${Math.max(1, peerCount + 1)} live`}
           </span>
         </div>
       </div>
-
-      <div className="v2-top-right">
-        <span className="v2-pill" title="Moshi is in the session">
-          <span className={`led${agentBusy ? " busy" : ""}`} />
-          AI {agentBusy ? "working" : "active"}
-        </span>
-
-        <AvatarCluster />
-
-        <MultiplayerLauncher
-          className="v2-btn v2-invite-btn"
-          testId="v2-share"
-          ariaLabel={mpActive ? "Multiplayer session — view room code" : "Create or join a multiplayer session"}
-          label={<><IconUsers size={15} /><span>{mpActive ? "Shared" : "Invite"}</span></>}
-        />
-
-        <OverflowMenu />
-      </div>
     </header>
+  );
+}
+
+function LocalAgentAvatars({ jobs }: { jobs: string[] }) {
+  const workers = [...new Set(jobs)];
+  if (workers.length === 0) return null;
+  return (
+    <div className="v2-agent-avatars" aria-label={`${workers.length} local agents`}>
+      {workers.slice(0, 3).map((worker) => (
+        <span className="v2-agent-avatar" title={worker} key={worker}>
+          <img src={moshIconUrl} alt="" />
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -183,6 +234,9 @@ function OverflowMenu() {
   const handsFreeOn = useStore((s) => s.handsFreeOn);
   const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
+  const openBrowserTab = useShell((s) => s.openBrowserTab);
+  const arrangementToolsOpen = useShell((s) => s.arrangementToolsOpen);
+  const toggleArrangementTools = useShell((s) => s.toggleArrangementTools);
   const item = (label: string, fn: () => void, kbd?: string) => (
     <button role="menuitem" onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
   );
@@ -245,6 +299,9 @@ function OverflowMenu() {
               <div className="v2-menu-sep" />
               {item("Undo", () => void exec("undo"), "⌘Z")}
               {item("Redo", () => void exec("redo"), "⇧⌘Z")}
+              <div className="v2-menu-sep" />
+              {item("Sounds & plugins", () => openBrowserTab("sounds"))}
+              {item(arrangementToolsOpen ? "Hide arrangement tools" : "Show arrangement tools", toggleArrangementTools)}
               <div className="v2-menu-sep" />
               {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
               {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}

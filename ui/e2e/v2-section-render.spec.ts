@@ -61,7 +61,7 @@ async function selectKeys(page: Page): Promise<void> {
 /** In v2 the generative drawer is a tab of the right-hand Inspector, not a bottom dock —
  *  a producer opens it the same way. */
 async function openGenTab(page: Page): Promise<void> {
-  await page.getByRole("tab", { name: "Gen" }).click();
+  await page.getByTestId("v2-rail-tab-agent").click();
 }
 
 test("a span inside a clip offers Re-imagine section; one covering the whole clip does not", async ({ page }) => {

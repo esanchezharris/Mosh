@@ -18,7 +18,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   use: {
-    baseURL: "http://localhost:5191",
+    baseURL: "http://127.0.0.1:5191",
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -33,8 +33,8 @@ export default defineConfig({
     },
   }],
   webServer: {
-    command: "npx vite --port 5191 --strictPort",
-    url: "http://localhost:5191",
+    command: "npx vite --host 127.0.0.1 --port 5191 --strictPort",
+    url: "http://127.0.0.1:5191",
     reuseExistingServer: false,
     timeout: 120_000,
     stdout: "ignore",

@@ -46,7 +46,7 @@ describe("v2 stylesheet reconstruction is not vacuous", () => {
     for (const f of PARTITION_FILES) {
       expect(css.length, `partition contributed nothing: ${f}`).toBeGreaterThan(0);
     }
-    expect(PARTITION_FILES.length).toBe(11);
+    expect(PARTITION_FILES.length).toBe(12);
   });
 });
 

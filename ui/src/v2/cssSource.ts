@@ -32,6 +32,7 @@ export const PARTITION_FILES = [
   "80-plugin-picker.css",
   "90-focus-rings.css",
   "95-fms-agent.css",
+  "96-graphite-shell.css",
 ] as const;
 
 // The pre-split sheet was 105_061 bytes. A floor well under that still catches

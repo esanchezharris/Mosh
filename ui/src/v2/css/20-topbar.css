@@ -71,7 +71,7 @@
   background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line); font-size: var(--v2-fs-sm); color: var(--v2-ground-dim);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
-.v2-pill .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
+.v2-pill .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); }
 .v2-pill .led.busy { animation: v2-blink 1s infinite; }
 @keyframes v2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
@@ -221,4 +221,3 @@
    child of .v2-tl and the "empty" trigger is a flex child of .v2-stage-empty — in both
    cases an intervening div would take over the layout slot. */
 .v2-addtrack { display: contents; }
-

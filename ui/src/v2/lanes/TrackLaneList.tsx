@@ -55,6 +55,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   const exec = useStore((s) => s.exec);
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
+  const arrangementToolsOpen = useShell((s) => s.arrangementToolsOpen);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The navigator is a whole-song OVERVIEW (SongNav) — clicking it seeks and brings that
   // spot into view in the (zoomed) timeline below. Not synced to the timeline's scroll.
@@ -161,34 +162,28 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
           sparse sessions show cream below it; once the tracks would overflow the available
           height it caps there and scrolls internally (the prompt bar stays put). */}
       <div
-        className="v2-stage"
-        style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
+        className={`v2-stage${arrangementToolsOpen ? " arrangement-tools" : ""}`}
+        style={{ "--v2-stage-h": `calc(${arrangementToolsOpen ? "var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ann-h) + " : ""}var(--v2-ruler-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
           <div className="v2-tl">
-            {/* Song-structure ribbon — the timeline's top row, above the ruler.
-                NOT the nav strip: PR #183 removed it from there because a ribbon sitting
-                beside the whole-song navigator "was misread as section editing", and
-                SongNav replaced it with plain bar numbers. Inside the timeline it reads as
-                what it is — a structure lane over the same x-axis as the clips. SongNav is
-                untouched. */}
-            <div className="v2-corner v2-corner-ribbon" />
-            <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
-            {/* tempo row — sits between structure and bars, because it is what maps one to
-                the other. Its own row rather than markers in the ruler: the ruler's plain
-                click already means "seek", and click-to-add-a-tempo-change on the same
-                element would have to fight it. */}
-            <div className="v2-corner v2-corner-tempo"><span className="v2-corner-label">BPM</span></div>
-            <div className="v2-tempo-cell"><TempoRibbon snapshot={snapshot} width={contentW} /></div>
+            {arrangementToolsOpen && (
+              <>
+                <div className="v2-corner v2-corner-ribbon" />
+                <div className="v2-ribbon-cell"><SectionRibbon snapshot={snapshot} width={contentW} /></div>
+                <div className="v2-corner v2-corner-tempo"><span className="v2-corner-label">BPM</span></div>
+                <div className="v2-tempo-cell"><TempoRibbon snapshot={snapshot} width={contentW} /></div>
+              </>
+            )}
             {/* ruler row */}
             <div className="v2-corner v2-corner-ruler" />
             <div className="v2-ruler-cell"><BarRuler snapshot={snapshot} width={contentW} /></div>
-            {/* annotation lane — authored comment pins, beat-anchored (time.ts's piecewise
-                map, not geom.ts's flat one) so a note holds its musical spot across a tempo
-                change. Its own row after the ruler: a pin marks a POINT in time, same axis
-                as the clips just below it. */}
-            <div className="v2-corner v2-corner-ann"><span className="v2-corner-label">NOTE</span></div>
-            <div className="v2-ann-cell"><AnnotationLane snapshot={snapshot} width={contentW} /></div>
+            {arrangementToolsOpen && (
+              <>
+                <div className="v2-corner v2-corner-ann"><span className="v2-corner-label">NOTE</span></div>
+                <div className="v2-ann-cell"><AnnotationLane snapshot={snapshot} width={contentW} /></div>
+              </>
+            )}
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>
@@ -359,6 +354,7 @@ function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const openRailTab = useShell((s) => s.openRailTab);
   // Only show the preset line when it actually says something. It used to fall back to
   // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
   // it cost the name column a line of vertical space to say nothing.
@@ -381,9 +377,13 @@ function TrackLaneHeader({ track }: { track: Track }) {
       tabIndex={0}
       aria-label={`Select track ${track.name}`}
       aria-pressed={sel}
-      onClick={() => setSelectedTrack(track.id)}
+      onClick={() => { setSelectedTrack(track.id); openRailTab("track"); }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedTrack(track.id); }
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setSelectedTrack(track.id);
+          openRailTab("track");
+        }
       }}
       data-testid="v2-track-header"
       data-track-id={track.id}
@@ -409,6 +409,12 @@ function TrackLaneHeader({ track }: { track: Track }) {
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
+        <button
+          className={`r${track.armed ? " on" : ""}`}
+          aria-label="Record arm"
+          aria-pressed={!!track.armed} title="Record arm"
+          onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
+        >R</button>
       </span>
       <button
         className="v2-lhead-rm"

@@ -269,7 +269,7 @@ test.describe("L11 · scale smoke", () => {
 });
 
 test.describe("L7 · viewport floor", () => {
-  test("below the shell's min width the layout scrolls instead of self-destructing (#52)", async ({ page }) => {
+  test("below the old shell floor the responsive layout keeps controls separate (#52)", async ({ page }) => {
     await bootV2(page);
     await page.setViewportSize({ width: 900, height: 700 });
     const m = await page.evaluate(() => {
@@ -278,9 +278,9 @@ test.describe("L7 · viewport floor", () => {
       const transport = document.querySelector('[class*="transport"]')!.getBoundingClientRect();
       const ox = Math.min(name.right, transport.right) - Math.max(name.x, transport.x);
       const oy = Math.min(name.bottom, transport.bottom) - Math.max(name.y, transport.y);
-      return { canScrollX: shell.scrollWidth > shell.clientWidth, overlap: ox > 8 && oy > 8 };
+      return { fits: shell.scrollWidth <= shell.clientWidth + 2, overlap: ox > 8 && oy > 8 };
     });
-    expect(m.overlap).toBe(false);     // controls never pile on each other…
-    expect(m.canScrollX).toBe(true);   // …because the shell keeps a floor and scrolls
+    expect(m.overlap).toBe(false);
+    expect(m.fits).toBe(true);
   });
 });

@@ -22,9 +22,9 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, ""); // comments off — they disc
 
 // selector -> why it is allowed the lime. A selector with no entry is a guard failure.
 const AGENTIC_SELECTORS: Record<string, string> = {
-  ".v2-shell .v2-mosh-stage": "Moshi himself — all moods, hands-free, the live GL mount. The agent IS the character.",
-  ".v2-shell .v2-mosh-status": "his status wave and narration line — reads out what the agent is doing",
-  ".v2-shell .v2-pill": "the topbar AI ACTIVE pill; .v2-pill has no other user in the shell",
+  ".v2-shell .v2-agent-trigger.busy": "the Agents control while at least one real local job is running",
+  ".v2-shell .v2-agent-orchestrator.busy": "the local orchestrator card while it has derived active jobs",
+  ".v2-shell .v2-clip.agentic": "the exact arrangement region currently being changed by a render job",
   ".v2-shell .agent-input.listening": "the push-to-talk recognizer is live — the machine is listening right now",
   ".v2-shell .agent-send": "the Ask Moshi submit — the act of handing work to the agent",
   ".v2-shell .v2-agent-drawer": "the drawer while .live: title, step chips, spinner — a task in flight",
@@ -61,7 +61,7 @@ describe("accent reservation — the scan is real", () => {
 
   it("found the landmark selectors the reservation depends on", () => {
     const all = rules.flatMap(selectorsOf).join(" | ");
-    for (const s of [".v2-clip-badge.working", ".v2-live", ".v2-agent-btn", ".v2-pill"]) {
+    for (const s of [".v2-clip-badge.working", ".v2-live", ".v2-agent-btn", ".v2-agent-trigger.busy"]) {
       expect(all, `missing landmark selector ${s} — wrong or truncated stylesheet`).toContain(s);
     }
   });
@@ -70,7 +70,7 @@ describe("accent reservation — the scan is real", () => {
 describe("accent reservation — the token families", () => {
   it("defines both families and derives --v2-accent from the neutral", () => {
     expect(code).toMatch(/--v2-accent-neutral:\s*#f2f2f4/);
-    expect(code).toMatch(/--v2-accent-agentic:\s*#ccff36/);
+    expect(code).toMatch(/--v2-accent-agentic:\s*#ccff23/);
     expect(code).toMatch(/--v2-accent:\s*var\(--v2-accent-neutral\)/);
   });
 

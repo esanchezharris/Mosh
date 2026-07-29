@@ -4,6 +4,7 @@
 // automation, plugin browser, agent change-log) are mounted once here and opened only
 // via progressive disclosure (inspector / right-click) in later slices.
 
+import { useEffect } from "react";
 import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { isNative } from "../bridge";
@@ -13,8 +14,8 @@ import { useFileDrop } from "../hooks/useFileDrop";
 import { TopBar } from "./TopBar";
 import { TrackLaneList } from "./lanes/TrackLaneList";
 import { RightRail } from "./RightRail";
-import { Composer } from "./Composer";
 import { LeftDrawer } from "./LeftDrawer";
+import { StatusStrip } from "./StatusStrip";
 import { PianoRoll } from "../ui/PianoRoll";
 import { RecoveryNotice } from "../ui/RecoveryNotice";
 import { AudioDeviceNotice } from "../ui/AudioDeviceNotice";
@@ -35,6 +36,18 @@ export function AppV2() {
   const displayError = lastError ? formatPeerError(lastError, peers) : null;
   const leftOpen = useShell((s) => s.browserOpen);  // LEFT push-dock (browser)
   const rightOpen = useShell((s) => s.rightOpen);   // RIGHT push-dock (agent rail)
+  const arrangementToolsOpen = useShell((s) => s.arrangementToolsOpen);
+  const setRightOpen = useShell((s) => s.setRightOpen);
+
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 900px)");
+    if (narrow.matches) setRightOpen(false);
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setRightOpen(false);
+    };
+    narrow.addEventListener("change", onChange);
+    return () => narrow.removeEventListener("change", onChange);
+  }, [setRightOpen]);
 
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
@@ -71,7 +84,7 @@ export function AppV2() {
           (maximized Moshi · inspector · collaborators). */}
       <div className="v2-body">
         <LeftDrawer />
-        <div className="v2-main">
+        <div className={`v2-main${arrangementToolsOpen ? " arrangement-tools" : ""}`}>
           {snapshot
             ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
             : (
@@ -80,10 +93,10 @@ export function AppV2() {
                 <div className="v2-stage"><div className="v2-empty">Loading session…</div></div>
               </>
             )}
-          <Composer />
         </div>
         <RightRail />
       </div>
+      <StatusStrip />
 
       {/* floating / modal surfaces — opened via disclosure */}
       <PianoRoll />

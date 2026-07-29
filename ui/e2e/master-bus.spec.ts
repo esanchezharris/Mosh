@@ -43,6 +43,7 @@ test("master plugin chain: add a builtin, see the row, remove it", async ({ page
 test("sends surface: + Bus exists in the Mix tab and creates a send slider", async ({ page }) => {
   // Select a track (click its lane header) so the Inspector shows the Mix tab surface.
   await page.locator(".v2-clip").first().click();
+  await page.getByTestId("v2-rail-tab-track").click();
   await page.getByTestId("v2-insp-tab-mix").click();
   await expect(page.getByTestId("v2-sends")).toBeVisible();
   await page.getByTestId("v2-add-bus").click();

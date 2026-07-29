@@ -46,6 +46,7 @@ test("canonical arrangement flow → command trace artifact", async ({ page }) =
   await expect(page.getByTestId("v2-track-add")).toHaveAttribute("aria-expanded", "false");
 
   // Mixer: master fader + a bus with a send.
+  await page.getByTestId("v2-rail-tab-track").click();
   await page.getByTestId("v2-master-volume").fill("-4");
   await page.getByTestId("v2-insp-tab-mix").click();
   await page.getByTestId("v2-add-bus").click();

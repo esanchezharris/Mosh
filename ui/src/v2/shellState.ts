@@ -9,6 +9,7 @@ import { create } from "zustand";
 export type InspectorTab = "mix" | "fx" | "gen" | "lyrics" | "midi" | "takes" | "warp" | "clip";
 export type SectionZoom = "8b" | "16b" | "full";
 export type BrowserTab = "sounds" | "plugins";
+export type RailTab = "clip" | "track" | "agent";
 
 // UIREACH-TIMERANGE — a time-span selection, drawn by shift-dragging the bar ruler.
 // UI-local like every other selection concept in this codebase (never mirrored to the
@@ -24,7 +25,9 @@ interface ShellState {
   activityOpen: boolean;
   browserOpen: boolean;            // LEFT push-dock (sounds + plugins), pull-tab toggled
   browserTab: BrowserTab;
+  arrangementToolsOpen: boolean;
   rightOpen: boolean;              // RIGHT push-dock (agent · inspector · collaborators); default open
+  railTab: RailTab;
   // Session picker, shown once per app LAUNCH. Module-scope zustand means this lives
   // exactly as long as the React app does — deliberately NOT persisted to localStorage,
   // because a remembered "don't show me again" would silently restore the very behaviour
@@ -45,7 +48,10 @@ interface ShellState {
   setBrowserOpen: (b: boolean) => void;
   toggleBrowser: () => void;
   openBrowserTab: (t: BrowserTab) => void;  // open the drawer ON a tab (used by "+ plugin")
+  toggleArrangementTools: () => void;
   setRightOpen: (b: boolean) => void;
+  setRailTab: (t: RailTab) => void;
+  openRailTab: (t: RailTab) => void;
   dismissSessionPicker: () => void;
   toggleRight: () => void;
   setTimeRange: (r: TimeRangeSel | null) => void;
@@ -60,14 +66,18 @@ export const useShell = create<ShellState>((set) => ({
   activityOpen: false,
   browserOpen: false,
   browserTab: "sounds",
+  arrangementToolsOpen: true,
   rightOpen: true,
+  railTab: "track",
   sessionPickerDismissed: false,
   timeRange: null,
   timeRangeDragging: false,
 
   // Selecting a clip opens the inspector; deselecting leaves it as-is (the user can
   // pin/close it explicitly). Track selection is NOT here — route it through useStore.
-  setSelectedClip: (id) => set(id ? { selectedClipId: id, inspectorOpen: true } : { selectedClipId: null }),
+  setSelectedClip: (id) => set(id
+    ? { selectedClipId: id, inspectorOpen: true, railTab: "clip", rightOpen: true }
+    : { selectedClipId: null }),
   setInspectorTab: (t) => set({ inspectorTab: t }),
   setInspectorOpen: (b) => set({ inspectorOpen: b }),
   setSectionZoom: (z) => set({ sectionZoom: z }),
@@ -75,7 +85,10 @@ export const useShell = create<ShellState>((set) => ({
   setBrowserOpen: (b) => set({ browserOpen: b }),
   toggleBrowser: () => set((s) => ({ browserOpen: !s.browserOpen })),
   openBrowserTab: (t) => set({ browserOpen: true, browserTab: t }),
+  toggleArrangementTools: () => set((s) => ({ arrangementToolsOpen: !s.arrangementToolsOpen })),
   setRightOpen: (b) => set({ rightOpen: b }),
+  setRailTab: (t) => set({ railTab: t }),
+  openRailTab: (t) => set({ railTab: t, rightOpen: true }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
   dismissSessionPicker: () => set({ sessionPickerDismissed: true }),
   setTimeRange: (r) => set({ timeRange: r }),

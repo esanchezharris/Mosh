@@ -15,7 +15,8 @@ test.beforeEach(async ({ page }) => {
     }));
   });
   await page.goto("/?shell=v2");
-  await expect(page.getByTestId("v2-composer")).toBeVisible();
+  await page.getByTestId("v2-agent-trigger").click();
+  await expect(page.getByTestId("v2-agent-panel")).toBeVisible();
 });
 
 async function openMemoryPanel(page: import("@playwright/test").Page) {
@@ -107,7 +108,7 @@ test("the memory panel is unreachable when the agentMemory setting is off", asyn
     }));
   });
   await page.goto("/?shell=v2");
-  await expect(page.getByTestId("v2-composer")).toBeVisible();
+  await expect(page.getByTestId("v2-agent-trigger")).toBeVisible();
 
   await page.getByLabel("More tools").click();
   await expect(page.getByLabel("What Moshi remembers")).toHaveCount(0);

@@ -40,8 +40,8 @@ test("fade in/out sliders + curve selects round-trip through the snapshot", asyn
 
   // Round-trip: leave the tab and come back — the values must have survived the
   // command → mock state → snapshot → control cycle, not just local input state.
-  await page.getByTestId("v2-insp-tab-mix").click();
-  await page.getByTestId("v2-insp-tab-clip").click();
+  await page.getByTestId("v2-rail-tab-track").click();
+  await page.getByTestId("v2-rail-tab-clip").click();
   await expect(page.getByTestId("v2-clip-fadein")).toHaveValue("0.5");
   await expect(page.getByTestId("v2-clip-fadeout")).toHaveValue("1");
   await expect(page.getByTestId("v2-clip-fadeout-curve")).toHaveValue("sCurve");
@@ -53,8 +53,8 @@ test("reverse toggles and survives a tab round-trip", async ({ page }) => {
   await expect(rev).toBeVisible();
   const before = await rev.getAttribute("aria-pressed");
   await rev.click();
-  await page.getByTestId("v2-insp-tab-mix").click();
-  await page.getByTestId("v2-insp-tab-clip").click();
+  await page.getByTestId("v2-rail-tab-track").click();
+  await page.getByTestId("v2-rail-tab-clip").click();
   const after = await page.getByTestId("v2-clip-reverse").getAttribute("aria-pressed");
   expect(after).not.toBe(before);
 });
@@ -75,8 +75,8 @@ test("loop region: toggle discloses start/length and round-trips", async ({ page
   await page.getByTestId("v2-clip-loop").click();
   await expect(page.getByTestId("v2-clip-loop-start")).toBeVisible();
   await page.getByTestId("v2-clip-loop-length").fill("1");
-  await page.getByTestId("v2-insp-tab-mix").click();
-  await page.getByTestId("v2-insp-tab-clip").click();
+  await page.getByTestId("v2-rail-tab-track").click();
+  await page.getByTestId("v2-rail-tab-clip").click();
   await expect(page.getByTestId("v2-clip-loop")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("v2-clip-loop-length")).toHaveValue("1");
 });

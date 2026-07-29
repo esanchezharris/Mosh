@@ -60,8 +60,7 @@ test.describe("v2 multiplayer — discoverable Create/Join", () => {
 
     await modal.getByRole("button", { name: "Close" }).click();
     await expect(page.getByTestId("mp-launcher-modal")).toHaveCount(0);
-    // the pill now reads "Shared" — reopening re-surfaces the SAME code
-    await expect(page.getByTestId("v2-share")).toContainText("Shared");
+    await expect(page.getByTestId("v2-share")).toContainText("Share");
     await page.getByTestId("v2-share").click();
     await expect(page.getByTestId("mp-launcher-modal").getByLabel("Room code (share to invite)")).toHaveValue(code);
   });

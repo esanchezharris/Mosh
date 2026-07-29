@@ -15,6 +15,22 @@ async function bootV2(page: Page): Promise<void> {
   await expect(page.getByTestId("v2-timeline")).toBeVisible();
 }
 
+async function openBrowser(page: Page): Promise<void> {
+  await page.getByTestId("v2-overflow").click();
+  await page.getByRole("menuitem", { name: "Sounds & plugins" }).click();
+}
+
+async function openArrangementTools(page: Page): Promise<void> {
+  if (await page.getByTestId("v2-songnav").count()) return;
+  await page.getByTestId("v2-overflow").click();
+  await page.getByRole("menuitem", { name: "Show arrangement tools" }).click();
+}
+
+async function openAgent(page: Page): Promise<void> {
+  await page.getByTestId("v2-agent-trigger").click();
+  await expect(page.getByTestId("v2-agent-panel")).toBeVisible();
+}
+
 // Drive multiplayer presence directly (the in-memory mock has no relay) via the dev-only
 // store handle, so we can exercise the "collaborators present" layout mode.
 async function enterPeersMode(page: Page): Promise<void> {
@@ -27,21 +43,21 @@ async function enterPeersMode(page: Page): Promise<void> {
   });
 }
 
-test("defaults to the cream (light) theme when nothing is persisted", async ({ page }) => {
+test("defaults to the Graphite shell when nothing is persisted", async ({ page }) => {
   // No theme override here (bootV2 pins dark) — exercise the shipped default.
   await page.addInitScript(() => { window.localStorage.clear(); });
   await page.goto("/?shell=v2");
-  await expect(page.getByTestId("v2-shell")).toBeVisible();
+  const shell = page.getByTestId("v2-shell");
+  await expect(shell).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect.poll(() => shell.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(11, 12, 14)");
 });
 
-test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", async ({ page }) => {
+test("left browser drawer: overflow opens it, tabs switch, close dismisses", async ({ page }) => {
   await bootV2(page);
-  // parked: only the pull-tab is present, no tab buttons mounted
-  await expect(page.getByTestId("v2-browser-pull")).toBeVisible();
   await expect(page.getByTestId("v2-browser-tab-sounds")).toHaveCount(0);
   // open → Sounds tab shows the sample browser list
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   await expect(page.getByTestId("v2-browser-tab-sounds")).toBeVisible();
   await expect(page.getByTestId("v2-browser-drawer").getByTestId("content-browser")).toBeVisible();
   // switch to Plugins → the compact plugin dock appears (the shared picker; sample browser unmounts)
@@ -61,7 +77,7 @@ test("left browser drawer: pull-tab opens it, tabs switch, close dismisses", asy
 // modal already did). This proves the dock's new Rescan control round-trips cleanly.
 test("plugins dock: rescan control exists and completes without error", async ({ page }) => {
   await bootV2(page);
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   await page.getByTestId("v2-browser-tab-plugins").click();
   const dock = page.getByTestId("v2-plugin-dock");
   const rescanBtn = dock.getByTestId("v2-pb-rescan");
@@ -83,7 +99,7 @@ test("plugins dock: rescan control exists and completes without error", async ({
 // hears that results vanished instead of getting silence.
 test("plugins dock: the empty / no-results message is an aria-live region", async ({ page }) => {
   await bootV2(page);
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   await page.getByTestId("v2-browser-tab-plugins").click();
   const dock = page.getByTestId("v2-plugin-dock");
   await dock.getByTestId("v2-pb-search").fill("zzzznomatch");
@@ -93,38 +109,38 @@ test("plugins dock: the empty / no-results message is an aria-live region", asyn
   await expect(empty).toHaveAttribute("aria-live", "polite");
 });
 
-test("right agent dock: collapses to a Moshi pull-tab and re-expands", async ({ page }) => {
+test("right inspector dock: collapses to a branded pull-tab and re-expands", async ({ page }) => {
   await bootV2(page);
-  // open by default → the agent rail (the live WebGL Moshi) is mounted
   await expect(page.getByTestId("v2-rail")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
-  // collapse → the rail unmounts, a pull-tab carrying the minimized Moshi mark takes its place
+  await expect(page.getByTestId("v2-rail-tab-track")).toHaveAttribute("aria-selected", "true");
   await page.getByTestId("v2-rail-collapse").click();
   await expect(page.getByTestId("v2-rail")).toHaveCount(0);
   const pull = page.getByTestId("v2-right-pull");
   await expect(pull).toBeVisible();
-  await expect(pull.locator("svg.v2-mark")).toBeVisible(); // the minimized Moshi stays present
-  // re-expand → the maximized agent (canvas) is back
+  await expect(pull.locator("img")).toBeVisible();
   await pull.click();
   await expect(page.getByTestId("v2-rail")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
+  await expect(page.getByTestId("v2-rail-tab-track")).toBeVisible();
 });
 
-test("boots the v2 shell with topbar, tracks, composer and the always-on rail", async ({ page }) => {
+test("boots the Graphite shell with topbar, tracks, tabbed rail, and status strip", async ({ page }) => {
   await bootV2(page);
   await expect(page.getByTestId("v2-topbar")).toBeVisible();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(3);
-  await expect(page.getByTestId("v2-composer")).toBeVisible();
-  // the agent lives "maximized" in the right dock — the live WebGL Moshi
+  await expect(page.getByTestId("v2-composer")).toHaveCount(0);
   await expect(page.getByTestId("v2-rail")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible();
+  await expect(page.getByTestId("v2-rail-tab-clip")).toBeVisible();
+  await expect(page.getByTestId("v2-rail-tab-track")).toBeVisible();
+  await expect(page.getByTestId("v2-rail-tab-agent")).toBeVisible();
+  await expect(page.getByTestId("v2-status-strip")).toBeVisible();
 });
 
-test("the decorative glyph in the Mosh status live region is aria-hidden", async ({ page }) => {
+test("idle Graphite state shows no agent job count or animated job treatment", async ({ page }) => {
   await bootV2(page);
-  // role=status/aria-live=polite re-announces on every status change — the leading ⩘ is
-  // purely decorative, so it must be hidden from screen readers (matches ChangeToast).
-  await expect(page.locator('[data-testid="v2-mosh-status"] .wave')).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByTestId("v2-agent-trigger")).not.toContainText(/\d/);
+  await expect(page.locator(".v2-agent-trigger-count")).toHaveCount(0);
+  await expect(page.locator(".v2-clip.agentic")).toHaveCount(0);
+  await expect(page.getByTestId("v2-status-jobs")).toHaveCount(0);
 });
 
 test("the topbar overflow menu exposes its items as role=menuitem (a11y)", async ({ page }) => {
@@ -158,7 +174,7 @@ test("top-right primary controls stay visible and secondary tools move into over
     if (!viewport) throw new Error("missing viewport");
 
     const controls = [
-      page.locator(".v2-pill").first(),
+      page.getByTestId("v2-agent-trigger"),
       page.getByTestId("v2-share"),
       page.getByTestId("v2-overflow"),
     ];
@@ -226,7 +242,7 @@ test("keyboard focus shows a visible focus ring (:focus-visible)", async ({ page
 test("hover-only plugin-dock favorite star reveals on keyboard focus (a11y)", async ({ page }) => {
   await bootV2(page);
   // open the plugin dock (same path the drawer test uses)
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   await page.getByTestId("v2-browser-tab-plugins").click();
   await expect(page.getByTestId("v2-plugin-dock")).toBeVisible();
   // an unfavorited star is opacity:0 (revealed only on row hover) — focusing it must reveal it,
@@ -242,7 +258,7 @@ test("hover-only plugin-dock favorite star reveals on keyboard focus (a11y)", as
 
 test("sample browser keeps import actions keyboard reachable", async ({ page }) => {
   await bootV2(page);
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   const row = page.getByTestId("sample-row").first();
   await expect(row).toBeVisible();
   const importButton = row.getByRole("button", { name: "Import" });
@@ -266,7 +282,7 @@ test("beatbox -> beat: the sample browser is the entry point, and it lands a pla
   await bootV2(page);
   const before = await page.getByTestId("v2-track-header").count();
 
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   const row = page.getByTestId("sample-row").first();
   await expect(row).toBeVisible();
   const sketchButton = row.getByTestId("sample-sketch-beatbox");
@@ -295,7 +311,7 @@ test("beatbox -> beat: the sample browser is the entry point, and it lands a pla
 test("beatbox -> beat: an out-of-range bpm keeps the confirm button disabled — the engine's " +
      "own 20..300 rejection never has to surface as an error toast", async ({ page }) => {
   await bootV2(page);
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   await page.getByTestId("sample-row").first().getByTestId("sample-sketch-beatbox").click();
   const dialog = page.getByTestId("sketch-beatbox-dialog");
   const bpmInput = dialog.getByTestId("sketch-bpm-input");
@@ -316,7 +332,7 @@ test("beatbox -> beat: an out-of-range bpm keeps the confirm button disabled —
 
 test("beatbox -> beat: the entry point is keyboard reachable, matching Import's affordance", async ({ page }) => {
   await bootV2(page);
-  await page.getByTestId("v2-browser-pull").click();
+  await openBrowser(page);
   const row = page.getByTestId("sample-row").first();
   const sketchButton = row.getByTestId("sample-sketch-beatbox");
   await sketchButton.focus();
@@ -342,7 +358,7 @@ test("the track header is keyboard-focusable and Enter selects it (a11y)", async
   await expect(page.getByTestId("v2-inspector")).toContainText(`Inspector · ${name}`);
 });
 
-test("the selected track-header tint is the NEUTRAL accent, identical in both themes", async ({ page }) => {
+test("the selected track-header tint stays neutral and identical in both themes", async ({ page }) => {
   // This used to assert the tint differed per theme, because --v2-accent flipped
   // (#ccff36 dark / #c2f53f light) and selection was painted with it.
   //
@@ -374,35 +390,19 @@ test("the selected track-header tint is the NEUTRAL accent, identical in both th
   // The neutral does not flip, so the two themes now agree.
   expect(lightBg).toBe(darkBg);
 
-  // Resolve both candidate tints in the page so this compares engine output to engine
-  // output rather than hand-computed rgba strings.
-  const { neutralTint, limeTint } = await page.evaluate(() => {
-    const mix = (c: string) => {
-      const d = document.createElement("div");
-      d.style.backgroundColor = `color-mix(in srgb, ${c} 4.5%, transparent)`;
-      document.body.appendChild(d);
-      const v = getComputedStyle(d).backgroundColor;
-      d.remove();
-      return v;
-    };
-    return { neutralTint: mix("#f2f2f4"), limeTint: mix("#ccff36") };
-  });
-
-  // Anti-vacuity: if the two candidates ever resolved to the same string the assertions
-  // below would be trivially satisfiable.
-  expect(neutralTint).not.toBe(limeTint);
-  expect(darkBg, "selection tint is not the neutral accent").toBe(neutralTint);
-  expect(darkBg, "selection has reclaimed the agentic lime — see accentReservation.test.ts").not.toBe(limeTint);
+  expect(darkBg).toBe("rgb(23, 24, 28)");
+  expect(darkBg).not.toContain("204, 255, 35");
 });
 
-test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
+test("the Track rail reveals Mix/FX and the Agent rail owns generation", async ({ page }) => {
   await bootV2(page);
   await page.getByTestId("v2-track-header").first().click();
   await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
   await page.getByTestId("v2-insp-tab-fx").click();
   await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="rack"]')).toBeVisible();
-  await page.getByTestId("v2-insp-tab-gen").click();
-  await expect(page.locator('[data-testid="v2-insp-body"] [data-testid="generative"]')).toBeVisible();
+  await page.getByTestId("v2-clip").first().click();
+  await openAgent(page);
+  await expect(page.getByTestId("v2-agent-generator").getByTestId("generative")).toBeVisible();
 });
 
 test("the inspector tablist carries an accessible name (a11y, matches sibling v2 tablists)", async ({ page }) => {
@@ -448,9 +448,8 @@ test("generative runs on a MIDI/drum track (auto-bounce → hidden audio beneath
   // The seeded Drums track is a MIDI drum clip (no wave clip) — generative still offers
   // create/render (the native backend auto-bounces it to audio first), and the result lands
   // as HIDDEN audio beneath the muted MIDI: Reset, never Accept.
-  await page.getByTestId("v2-track-header").first().click();
-  await expect(page.getByTestId("v2-inspector")).toBeVisible(); // always-on rail
-  await page.getByTestId("v2-insp-tab-gen").click();
+  await page.getByTestId("v2-clip").first().click();
+  await openAgent(page);
   const gen = page.getByTestId("generative");
   await expect(gen).toBeVisible();
   await expect(gen.getByTestId("gen-create")).toBeVisible(); // create offered on a non-wave clip
@@ -509,21 +508,21 @@ test("the in-flight clip badge honors prefers-reduced-motion (no blink)", async 
     .toBe("none");
 });
 
-test("the arrangement shrink-wraps to its tracks; the add-track row creates a track", async ({ page }) => {
+test("the arrangement fills the window and the add-track row creates a track", async ({ page }) => {
   await bootV2(page);
-  // sparse session: the stage is content-sized (shorter than the body) so cream shows below it
   const sb = await page.locator(".v2-stage").boundingBox();
+  const nb = await page.locator(".v2-nav").boundingBox();
   const bb = await page.locator(".v2-body").boundingBox();
-  if (!sb || !bb) throw new Error("no bounds");
-  expect(sb.height).toBeLessThan(bb.height - 100);
-  // the trailing "+ New track" row opens the kind menu; picking Audio adds a track
-  // (and the panel grows by a lane)
+  if (!sb || !nb || !bb) throw new Error("no bounds");
+  expect(Math.abs(sb.height + nb.height - bb.height)).toBeLessThanOrEqual(1);
   const before = await page.getByTestId("v2-track-header").count();
-  const h0 = sb.height;
   await page.getByTestId("v2-track-add").click();
   await page.getByTestId("v2-track-add-audio").click();
   await expect(page.getByTestId("v2-track-header")).toHaveCount(before + 1);
-  await expect.poll(async () => (await page.locator(".v2-stage").boundingBox())?.height ?? 0).toBeGreaterThan(h0);
+  await expect.poll(async () => {
+    const after = await page.locator(".v2-stage").boundingBox();
+    return after ? Math.abs(after.height + nb.height - bb.height) : Number.POSITIVE_INFINITY;
+  }).toBeLessThanOrEqual(1);
 });
 
 // TRK-KIND — the v2 shell shipped able to create ONLY audio tracks, so a mouse-only user
@@ -588,6 +587,7 @@ test("the add-track menu closes on Escape without creating anything", async ({ p
 
 test("the agent toast appears on a command and self-dismisses", async ({ page }) => {
   await bootV2(page);
+  await openAgent(page);
   await page.getByTestId("agent-input").fill("play");
   await page.getByTestId("agent-send").click();
   await expect(page.getByTestId("v2-change-toast")).toBeVisible();
@@ -633,12 +633,11 @@ test("plugin picker: + Plugin opens the dock — collections, vendor filter, sea
   await expect(dock).toBeVisible();
 });
 
-test("with collaborators present, the right rail shows the agent + camera/invite + peer tile", async ({ page }) => {
+test("with collaborators present, the Track rail shows camera, invite, and peer presence", async ({ page }) => {
   await bootV2(page);
   await enterPeersMode(page);
   await expect(page.getByTestId("v2-rail")).toBeVisible();
-  await expect(page.getByTestId("v2-mosh-card")).toBeVisible();
-  await expect(page.locator('[data-testid="v2-mosh-card"] canvas')).toBeVisible(); // Moshi GL in the rail
+  await page.getByTestId("v2-rail-tab-track").click();
   await expect(page.getByTestId("v2-camera-toggle")).toBeVisible();
   await expect(page.getByTestId("v2-invite")).toBeVisible();
   await expect(page.getByTestId("v2-collab-peer")).toBeVisible(); // Ava
@@ -646,6 +645,7 @@ test("with collaborators present, the right rail shows the agent + camera/invite
 
 test("the right rail is always present; peers add collaborator tiles", async ({ page }) => {
   await bootV2(page);
+  await page.getByTestId("v2-rail-tab-track").click();
   // the rail is always on — even alone (the collaborators card shows just the invite cue)
   await expect(page.getByTestId("v2-rail")).toBeVisible();
   await expect(page.getByTestId("v2-collab-empty")).toBeVisible();
@@ -663,6 +663,7 @@ test("the right rail is always present; peers add collaborator tiles", async ({ 
 
 test("song navigator: shows bar numbers and click jumps the playhead", async ({ page }) => {
   await bootV2(page);
+  await openArrangementTools(page);
   const nav = page.getByTestId("v2-songnav");
   await expect(nav).toBeVisible();
   // bar-number ticks across the whole song; the first one is bar 1
@@ -693,6 +694,7 @@ test("the empty-arrangement placeholder is announced as a live region (role=stat
 
 test("the timeline zoom segmented control is grouped with an accessible name (a11y)", async ({ page }) => {
   await bootV2(page);
+  await openArrangementTools(page);
   // the 8b/16b/Full buttons are mutually-exclusive aria-pressed toggles — group them so a
   // screen reader announces them as one control, not three unrelated buttons (matches the
   // role=group pattern the lyric proposals panel already uses).

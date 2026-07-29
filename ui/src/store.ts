@@ -936,6 +936,6 @@ export const useStore = create<State>((set, get) => ({
 
 // Dev-only: expose the store so Playwright e2e can drive state the in-memory mock can't
 // reproduce — notably multiplayer presence (no relay in dev). Stripped from prod builds.
-if (import.meta.env.DEV && typeof window !== "undefined") {
+if ((import.meta.env.DEV || import.meta.env.VITE_MOSH_E2E_MOCK === "1") && typeof window !== "undefined") {
   (window as unknown as { __moshStore?: typeof useStore }).__moshStore = useStore;
 }

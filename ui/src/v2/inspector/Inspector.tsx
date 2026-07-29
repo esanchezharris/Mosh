@@ -18,7 +18,7 @@ import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOu
 import { meterAt, snapStep, tempoMapFrom } from "../../time";
 import type { Clip, Track } from "../../types";
 
-export function Inspector() {
+export function Inspector({ scope = "all" }: { scope?: "all" | "clip" | "track" }) {
   const snapshot = useStore((s) => s.snapshot);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const selectedClipId = useShell((s) => s.selectedClipId);
@@ -40,17 +40,33 @@ export function Inspector() {
   const isWave = clip?.type === "wave";
   const hasTakes = (clip?.numTakes ?? 0) > 1;
 
-  const tabs: { id: InspectorTab; label: string }[] = [
+  const trackTabs: { id: InspectorTab; label: string }[] = [
     { id: "mix", label: "Mix" },
     { id: "fx", label: "FX" },
-    { id: "gen", label: "Gen" },
     { id: "lyrics", label: "Lyrics" },
+  ];
+  const clipTabs: { id: InspectorTab; label: string }[] = [
     ...(clip ? [{ id: "clip" as const, label: "Clip" }] : []),
     ...(isMidi ? [{ id: "midi" as const, label: "MIDI" }] : []),
     ...(isWave ? [{ id: "warp" as const, label: "Warp" }] : []),
     ...(hasTakes ? [{ id: "takes" as const, label: "Takes" }] : []),
   ];
-  const active = tabs.some((t) => t.id === tab) ? tab : "mix";
+  const tabs = scope === "clip"
+    ? clipTabs
+    : scope === "track"
+      ? trackTabs
+      : [...trackTabs.slice(0, 2), { id: "gen" as const, label: "Gen" }, ...trackTabs.slice(2), ...clipTabs];
+  const fallback: InspectorTab = scope === "clip" ? "clip" : "mix";
+  const active = tabs.some((candidate) => candidate.id === tab) ? tab : fallback;
+
+  if (scope === "clip" && !clip) {
+    return (
+      <section className="v2-card v2-inspector v2-inspector-empty" data-testid="v2-inspector">
+        <div className="v2-card-head"><span>Clip</span></div>
+        <div className="v2-insp-empty">Select a clip to inspect it.</div>
+      </section>
+    );
+  }
 
   return (
     <section className="v2-card v2-inspector" data-testid="v2-inspector">
