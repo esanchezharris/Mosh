@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "multiplayer/LockManager.h"
+#include <map>
 #include <set>
 
 using namespace mosh;
@@ -176,17 +177,34 @@ TEST_CASE ("classify: sketch_beatbox fails closed to session-global by design", 
 
 namespace
 {
-    // Extracts every command name from MoshOps.cpp's dispatch table: lines of
+    // Extracts every command name from the MoshOps dispatch table: lines of
     // the exact, consistently-used shape `if (name == "xxx")  return ...;`
-    // (180 such lines currently; the only other `name ==` occurrences in the
-    // file are an unrelated recipe-command allow-list and a plugin-name
-    // comparison, neither of which has "return" on the same line, so they are
-    // correctly excluded by the filter below).
-    juce::StringArray extractDispatchedCommands (const juce::File& moshOpsCpp)
+    // (the only other `name ==` occurrences in the seam are an unrelated
+    // recipe-command allow-list and a plugin-name comparison, neither of which
+    // has "return" on the same line, so they are correctly excluded by the
+    // filter below).
+    //
+    // Glob-aware (wave0 guards-first): the seam may split into multiple
+    // MoshOps*.cpp translation units — enumerate src/moshops/ for all of them,
+    // sort by filename for determinism, and extract from the concatenation.
+    // Today the glob matches exactly one file (MoshOps.cpp), so this is a no-op.
+    juce::StringArray extractDispatchedCommands (const juce::File& moshOpsDir)
     {
+        juce::Array<juce::File> found;
+        moshOpsDir.findChildFiles (found, juce::File::findFiles, false, "MoshOps*.cpp");
+
+        juce::StringArray fileNames;
+        for (auto& f : found)
+            fileNames.add (f.getFileName());
+        fileNames.sort (false);
+
+        juce::String concatenated;
+        for (auto& fn : fileNames)
+            concatenated << moshOpsDir.getChildFile (fn).loadFileAsString() << "\n";
+
         juce::StringArray out;
         juce::StringArray lines;
-        lines.addLines (moshOpsCpp.loadFileAsString());
+        lines.addLines (concatenated);
         for (auto& line : lines)
         {
             auto trimmed = line.trim();
@@ -200,6 +218,18 @@ namespace
                 out.addIfNotAlreadyThere (name);
         }
         return out;
+    }
+
+    juce::String scopeName (LockManager::Scope s)
+    {
+        switch (s)
+        {
+            case LockManager::Scope::Unguarded:     return "Unguarded";
+            case LockManager::Scope::Track:         return "Track";
+            case LockManager::Scope::Clip:          return "Clip";
+            case LockManager::Scope::SessionGlobal: return "SessionGlobal";
+        }
+        return "<unknown-scope>";
     }
 
     // Commands dispatched by MoshOps that are DELIBERATELY left unclassified
@@ -259,10 +289,10 @@ TEST_CASE ("classify: every MoshOps-dispatched command is classified or explicit
     // (tests/CMakeLists.txt) -- test_training.cpp already relies on the same
     // repo-root-relative resolution to shell out to service/training.
     auto repoRoot = juce::File::getCurrentWorkingDirectory();
-    auto moshOpsCpp = repoRoot.getChildFile ("src/moshops/MoshOps.cpp");
-    REQUIRE (moshOpsCpp.existsAsFile());
+    auto moshOpsDir = repoRoot.getChildFile ("src/moshops");
+    REQUIRE (moshOpsDir.isDirectory());
 
-    auto dispatched = extractDispatchedCommands (moshOpsCpp);
+    auto dispatched = extractDispatchedCommands (moshOpsDir);
     // Sanity floor on the extraction itself, so a regex/parse regression (e.g. the
     // dispatch table changing shape) fails loudly here instead of silently
     // passing with zero commands checked.
@@ -280,4 +310,83 @@ TEST_CASE ("classify: every MoshOps-dispatched command is classified or explicit
         "reason: " + drifted.joinIntoString (", ");
     INFO (driftMsg.toStdString());
     REQUIRE (drifted.isEmpty());
+}
+
+// ── Wave0 guards-first: golden lock-scope ledger ────────────────────────────────
+//
+// tests/golden/lock_scopes.tsv pins LockManager::classify()'s verdict for EVERY
+// dispatched command ("command<TAB>scope", sorted by command). It is both a
+// drift guard (a command whose scope silently changes fails here, naming the
+// command and both scopes) and the human-reviewable lock-scope AUDIT: the TSV
+// is the one place to read what every command's concurrency posture is today.
+// When a scope legitimately changes, the failure output prints
+// "command: expected X, actual Y" for every mismatch so the ledger can be
+// corrected in one pass.
+
+TEST_CASE ("golden lock-scope ledger: lock_scopes.tsv matches classify() for every dispatched command", "[multiplayer][lock]")
+{
+    // Same repo-root resolution as the AL-011 drift guard above: WORKING_DIRECTORY
+    // is pinned to the repo root for the MoshTests ctest entry (tests/CMakeLists.txt).
+    auto repoRoot = juce::File::getCurrentWorkingDirectory();
+    auto tsvFile  = repoRoot.getChildFile ("tests/golden/lock_scopes.tsv");
+    REQUIRE (tsvFile.existsAsFile());
+
+    auto moshOpsDir = repoRoot.getChildFile ("src/moshops");
+    auto dispatched = extractDispatchedCommands (moshOpsDir);
+    REQUIRE (dispatched.size() > 150);   // same extraction sanity floor as AL-011
+
+    // Parse the ledger: one "command<TAB>scope" row per line ('#' = comment).
+    std::map<juce::String, juce::String> ledger;
+    juce::StringArray dupes;
+    juce::StringArray lines;
+    lines.addLines (tsvFile.loadFileAsString());
+    for (auto& line : lines)
+    {
+        auto trimmed = line.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith ("#"))
+            continue;
+        auto cmd   = trimmed.upToFirstOccurrenceOf ("\t", false, false).trim();
+        auto scope = trimmed.fromFirstOccurrenceOf ("\t", false, false).trim();
+        if (ledger.count (cmd) > 0)
+            dupes.add (cmd);
+        ledger[cmd] = scope;
+    }
+
+    juce::String dupeMsg = "duplicate lock_scopes.tsv row(s): " + dupes.joinIntoString (", ");
+    INFO (dupeMsg.toStdString());
+    REQUIRE (dupes.isEmpty());
+
+    // (a) every dispatched command has exactly one ledger row.
+    juce::StringArray missing;
+    for (auto& name : dispatched)
+        if (ledger.count (name) == 0)
+            missing.add (name);
+    juce::String missingMsg = "dispatched command(s) missing from tests/golden/lock_scopes.tsv "
+        "-- add a \"command<TAB>scope\" row for each: " + missing.joinIntoString (", ");
+    INFO (missingMsg.toStdString());
+    REQUIRE (missing.isEmpty());
+
+    // (b) every ledger row's command is actually dispatched (no stale rows).
+    juce::StringArray stale;
+    for (auto& [cmd, scope] : ledger)
+        if (! dispatched.contains (cmd))
+            stale.add (cmd);
+    juce::String staleMsg = "lock_scopes.tsv row(s) whose command is no longer dispatched "
+        "by MoshOps -- remove them: " + stale.joinIntoString (", ");
+    INFO (staleMsg.toStdString());
+    REQUIRE (stale.isEmpty());
+
+    // (c) classify() agrees with every row. ALL mismatches are printed at once
+    // ("command: expected X, actual Y") so the ledger can be fixed in one pass.
+    juce::StringArray mismatches;
+    for (auto& [cmd, scope] : ledger)
+    {
+        auto actual = scopeName (LockManager::classify (cmd));
+        if (actual != scope)
+            mismatches.add (cmd + ": expected " + scope + ", actual " + actual);
+    }
+    juce::String mismatchMsg = "lock-scope ledger mismatch(es):\n"
+        + mismatches.joinIntoString ("\n");
+    INFO (mismatchMsg.toStdString());
+    REQUIRE (mismatches.isEmpty());
 }
