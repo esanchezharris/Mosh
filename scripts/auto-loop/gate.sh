@@ -210,17 +210,23 @@ gate_native() {
   run_parity_checks
   runbook_advisory
 
-  # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step).
-  # Over a symlinked ui/node_modules (new-worktree.sh's cheap-lane speedup) npm reifies
-  # the link away into a partial local install and the build dies mid-ninja with a
-  # missing vite/esbuild — three real gate failures on 2026-07-29 (PRs #489, #490, #503),
-  # each healed by hand the same way. So the native lane de-symlinks unconditionally and
-  # does a real install BEFORE the build; the cheap lane keeps the symlink (its npm use
-  # is read-only). ensure_node_modules can't cover this: its lockfile-drift check passes
-  # a healthy symlink straight through, and healthy-symlink is exactly the broken case here.
+  # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step), and
+  # it only survives a REAL, COMPLETE local ui/node_modules. Two ways it isn't one:
+  #   - a symlink (new-worktree.sh's cheap-lane speedup): npm reifies the link away into a
+  #     partial install and ninja dies on a missing vite/esbuild — PRs #489, #490, #503;
+  #   - absent entirely: new-worktree.sh skips the symlink when the main seat's
+  #     ui/package-lock.json differs from the worktree's, which happens whenever the seat is
+  #     behind origin/main — and a stale seat is the NORMAL state, since merge-one.sh only
+  #     fetches it. Then CMake's npm install builds the partial tree itself — PR #512.
+  # So: de-symlink if needed, then install whenever the deps aren't demonstrably in sync.
+  # (The first version of this guard only handled the symlink case and #512 walked straight
+  # through the hole. The cheap lane keeps the symlink — its npm use is read-only.)
   if [ -L "$WT/ui/node_modules" ]; then
     al_log "native lane: ui/node_modules is a symlink — replacing with a real local install"
     rm -f "$WT/ui/node_modules"
+  fi
+  if [ ! -d "$WT/ui/node_modules" ] || deps_need_install "$WT/ui"; then
+    al_log "native lane: ui/node_modules absent or drifted — installing before the build"
     run_step "npm_ci_native" bash -c 'cd ui && (npm ci --no-audit --no-fund || npm install --no-audit --no-fund)' || return
     deps_write_stamp "$WT/ui"
   fi
