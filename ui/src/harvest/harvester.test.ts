@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { harvest, harvestControllerEvents, parseLog } from "./harvester";
+import { harvest, harvestControllerEvents, harvestUnservedAsks, parseLog } from "./harvester";
 
 // Build a synthetic mosh-log.jsonl exercising: turn grouping, an interleaved
 // manual command, an undo that reverts a turn, a render+taste flow, and a legacy
@@ -161,5 +161,59 @@ describe("harvest", () => {
     expect(records[0].snapshotBefore.transport.playing).toBe(false);
     expect(records[0].snapshotAfter.transport.playing).toBe(true);
     expect(records[0].provenance.logPath).toBe("/tmp/mosh-log.jsonl");
+  });
+});
+
+// ─── FS-B2a — turn provenance: no fabricated asks, unserved asks kept apart ───
+describe("FS-B2a — the ask is honest and unserved asks are separated", () => {
+  const seqLine = (() => {
+    let seq = 0;
+    let ts = 5000;
+    return (command: string, args: Record<string, unknown>, ok = true, undoable = true) =>
+      JSON.stringify({ ts: ts++, seq: ++seq, command, args, ok, undoable });
+  })();
+
+  // A marker with NO utterance key (the executor omits it when no transcript reached
+  // it) alongside a `name` that WOULD be a tempting fallback — plus a served turn and
+  // an unserved one.
+  const log =
+    [
+      seqLine("batch_begin", { name: "mute the drums", turn_id: "n1", source: "voice" }, true, false),
+      seqLine("create_track", { name: "NoUtterance" }),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { name: "add a pad", turn_id: "n2", utterance: "add a warm pad", source: "brain_chat" }, true, false),
+      seqLine("create_track", { name: "Pad" }),
+      seqLine("batch_end", {}, true, false),
+      seqLine("batch_begin", { name: "no idea what you mean", turn_id: "n3", utterance: "make it sound purple", source: "brain_chat" }, true, false),
+      seqLine("batch_end", {}, true, false),
+    ].join("\n") + "\n";
+
+  it("never substitutes the transaction label for a missing utterance", async () => {
+    const tuples = await harvest(log);
+    const t = tuples.find((x) => x.turnId === "n1")!;
+    expect(t).toBeTruthy();
+    expect(t.utterance).toBe(""); // empty, NOT "mute the drums" (Moshi's own label)
+  });
+
+  it("keeps a zero-command turn out of the imitation corpus", async () => {
+    const tuples = await harvest(log);
+    expect(tuples.map((t) => t.turnId)).toEqual(["n1", "n2"]); // n3 ran nothing
+    expect(tuples.every((t) => t.commands.length > 0)).toBe(true);
+  });
+
+  it("surfaces the zero-command turn as an unserved ask instead", () => {
+    const asks = harvestUnservedAsks(log);
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ turnId: "n3", utterance: "make it sound purple", source: "brain_chat" });
+  });
+
+  it("does not report a served turn, or an unserved one with no recorded ask, as unserved", () => {
+    const noAsk =
+      [
+        seqLine("batch_begin", { name: "label only", turn_id: "n4", source: "voice" }, true, false),
+        seqLine("batch_end", {}, true, false),
+      ].join("\n") + "\n";
+    expect(harvestUnservedAsks(noAsk)).toEqual([]);
+    expect(harvestUnservedAsks(buildLog())).toEqual([]);
   });
 });

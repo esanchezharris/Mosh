@@ -1,12 +1,21 @@
 // Presentational clip-content renderers, shared by BOTH shells: classic's Arrange and
 // v2's ClipView draw clip bodies through these exact components, so wave peaks, MIDI
-// note blocks and drum step-grids look identical everywhere. Extracted verbatim from
-// ui/Arrange.tsx so the v2 module graph no longer imports classic's arrangement view
-// just to reach them (that import made the whole classic subtree look reachable to the
-// UI-REACH probe). Pure drawing: no `exec(`, no store access, no command dispatch.
+// note blocks and drum step-grids look identical everywhere. Extracted from ui/Arrange.tsx
+// so the v2 module graph no longer imports classic's arrangement view just to reach them
+// (that import made the whole classic subtree look reachable to the UI-REACH probe).
+//
+// Extracted from the CURRENT bodies, not the ones this PR was written against. Between
+// authoring and merge, main tokenised the canvas ink (--clip-ink-*, read through inkOf()
+// off the canvas's own computed style, with useThemeKey() forcing a repaint on a theme
+// flip). Moving the pre-tokenisation copies would have silently reinstated the hardcoded
+// lime that the accent-reservation pass had just retired — the extraction is mechanical,
+// but only against the right source.
+//
+// Pure drawing: no `exec(`, no store access beyond the theme subscription, no dispatch.
 
 import { memo, useEffect, useRef } from "react";
 import { type Peaks } from "../store";
+import { useSettings } from "../settings/store";
 import { DRUM_LANES, laneIndexForPitch } from "./drumGrid";
 import type { MidiNote } from "../types";
 
@@ -22,13 +31,36 @@ function prepCanvas(cv: HTMLCanvasElement | null): { ctx: CanvasRenderingContext
   return { ctx, w, h };
 }
 
+/* ── clip ink ────────────────────────────────────────────────────────────────────
+   These three colours used to be string literals inside the draw calls below. That put
+   the single most visible colour in the arrangement — the waveform — outside the token
+   system entirely, where no CSS guard could see it: the v2 accent pass retired the lime
+   everywhere it could reach, and the wave clip kept painting rgba(204,255,35) because
+   that value was never in a stylesheet.
+
+   Read off the CANVAS's own computed style, not :root, so the ink follows whatever scope
+   the clip is mounted in — .v2-shell re-pins these, classic keeps mosh.css's :root — and
+   one renderer serves both shells. The literal fallback is the pre-token value, so a
+   missing token degrades to today's rendering rather than to transparent.
+   ------------------------------------------------------------------------------- */
+function inkOf(el: Element | null, token: string, fallback: string): string {
+  if (!el) return fallback;
+  return getComputedStyle(el).getPropertyValue(token).trim() || fallback;
+}
+
+/** The theme, purely as a repaint trigger. A canvas does not re-run its draw when a CSS
+ *  custom property changes, so without this a theme flip would leave every clip painted
+ *  in the outgoing theme's ink until something else invalidated it. */
+const useThemeKey = () => useSettings((s) => String(s.get("theme") ?? ""));
+
 export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks; width: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeKey = useThemeKey();
   useEffect(() => {
     if (!peaks) return;
     const prep = prepCanvas(ref.current); if (!prep) return;
     const { ctx, w, h } = prep;
-    ctx.fillStyle = "rgba(204,255,35,0.5)";
+    ctx.fillStyle = inkOf(ref.current, "--clip-ink-wave", "rgba(204,255,35,0.5)");
     const mid = h / 2, n = peaks.length;
     for (let x = 0; x < w; x++) {
       const p = peaks[Math.min(n - 1, Math.floor((x / w) * n))];
@@ -36,7 +68,7 @@ export const ClipWave = memo(function ClipWave({ peaks, width }: { peaks?: Peaks
       const top = mid + p[0] * mid * 0.92, bot = mid + p[1] * mid * 0.92;
       ctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
-  }, [peaks, width]);
+  }, [peaks, width, themeKey]);
   return <canvas ref={ref} />;
 });
 
@@ -55,6 +87,7 @@ export function isDrumClip(notes?: MidiNote[]): boolean {
 export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeKey = useThemeKey();
   useEffect(() => {
     const prep = prepCanvas(ref.current); if (!prep) return;
     const { ctx, h } = prep;
@@ -68,7 +101,7 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
     const span = Math.max(1, hi - lo);
     const rowH = Math.max(2, Math.min(7, (h - 2) / span));
 
-    ctx.fillStyle = "rgba(180,108,255,1)";   // violet — matches the .clip.midi identity
+    ctx.fillStyle = inkOf(ref.current, "--clip-ink-midi", "rgba(180,108,255,1)");
     for (const n of ns) {
       const x = secToPx(n.start * bs);
       const wpx = Math.max(2, secToPx(n.length * bs) - 1);
@@ -77,7 +110,7 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
       ctx.fillRect(x, y, wpx, rowH);
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, bs, secToPx]);
+  }, [notes, width, bs, secToPx, themeKey]);
   return <canvas ref={ref} />;
 });
 
@@ -86,6 +119,7 @@ export const ClipMidi = memo(function ClipMidi({ notes, width, bs, secToPx }:
 export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secToPx }:
   { notes?: MidiNote[]; width: number; bs: number; secToPx: (s: number) => number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeKey = useThemeKey();
   useEffect(() => {
     const prep = prepCanvas(ref.current); if (!prep) return;
     const { ctx, w, h } = prep;
@@ -93,7 +127,8 @@ export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secTo
 
     const lanes = DRUM_LANES.length;
     const laneH = h / lanes;
-    ctx.fillStyle = "rgba(180,108,255,0.14)";                // faint lane separators
+    const step = inkOf(ref.current, "--clip-ink-drum", "rgba(180,108,255,1)");
+    ctx.fillStyle = inkOf(ref.current, "--clip-ink-drum-lane", "rgba(180,108,255,0.14)"); // separators
     for (let l = 1; l < lanes; l++) ctx.fillRect(0, Math.round(l * laneH), w, 1);
 
     for (const n of ns) {
@@ -101,10 +136,10 @@ export const ClipDrumGrid = memo(function ClipDrumGrid({ notes, width, bs, secTo
       const cell = Math.max(3, Math.min(secToPx(n.length * bs), laneH - 2));
       const y = Math.max(0, laneIndexForPitch(n.pitch)) * laneH + 1;
       ctx.globalAlpha = 0.5 + 0.5 * (Math.min(127, Math.max(1, n.velocity)) / 127);
-      ctx.fillStyle = "rgba(180,108,255,1)";
+      ctx.fillStyle = step;
       ctx.fillRect(x, y, cell, Math.max(2, laneH - 3));
     }
     ctx.globalAlpha = 1;
-  }, [notes, width, bs, secToPx]);
+  }, [notes, width, bs, secToPx, themeKey]);
   return <canvas ref={ref} />;
 });

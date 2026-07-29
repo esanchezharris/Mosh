@@ -23,7 +23,11 @@ import { pickFiles, pickSaveFile } from "../bridge";
 import { useStore } from "../store";
 import { runAction } from "../menuActions";
 import { tempoMapFrom, gridLines, meterAt, beatSeconds, snapStep } from "../time";
+// The clip-content renderers now live in clipRenderers.tsx (shared with v2, whose
+// module graph must not reach classic's arrangement view). Re-exported so existing
+// importers of ./Arrange keep working.
 import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "./clipRenderers";
+export { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "./clipRenderers";
 import { commitClipDrag } from "./clipDrag";
 import { useDrumWindow } from "./dock/useFloatingWindow";
 import { deriveTakeLanes } from "./takeLanes";

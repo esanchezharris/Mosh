@@ -52,7 +52,13 @@
   padding: 4px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-.v2-shell .agent-input:focus-within { border-color: rgba(204, 255, 54, 0.42); }
+/* Was a hardcoded rgba(204, 255, 54, 0.42) — the old lime, written as a literal, so it
+   survived the accent-reservation pass untouched and would have stayed lime through the
+   move to chartreuse while every token around it changed. Two corrections in one:
+   it is a token now, and it is the NEUTRAL one. Plain focus is the field having the
+   caret, not the machine working; `.agent-input.listening` on the next line is the
+   agentic state and keeps the accent. */
+.v2-shell .agent-input:focus-within { border-color: color-mix(in srgb, var(--v2-accent) 42%, transparent); }
 .v2-shell .agent-input.listening { border-color: var(--v2-accent); box-shadow: 0 0 0 1px var(--v2-accent-soft); }
 .v2-shell .agent-mic,
 .v2-shell .agent-send {
