@@ -56,9 +56,9 @@
 .v2-songnav-tick { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 6px; border-left: 1px solid var(--v2-line); pointer-events: none; }
 .v2-songnav-tick:first-of-type { border-left: none; }
 .v2-songnav-bar { font-family: var(--font-mono); font-size: var(--v2-fs-xs); color: var(--v2-faint); }
-.v2-songnav-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--v2-playhead); box-shadow: 0 0 8px var(--v2-playhead); pointer-events: none; z-index: 2; }
+.v2-songnav-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--v2-playhead); pointer-events: none; z-index: 2; }
 .v2-songnav-peer { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--peer-color, #ff69a8); pointer-events: none; opacity: 0.85; }
-.v2-songnav-peer-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--peer-color, #ff69a8); box-shadow: 0 0 6px var(--peer-color, #ff69a8); }
+.v2-songnav-peer-dot { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--peer-color, #ff69a8); }
 .v2-songnav-peer.recording { opacity: 1; }
 
 /* ── timeline (sticky-header grid: ribbon + ruler stick top, headers stick left) ── */
@@ -236,11 +236,17 @@
 /* Shell reactivity (#10): --lvl (0..1, set imperatively from per-track levels) drives a
    lime glow on the track icon + a faint inner glow on the lane, so each track lights up
    with its own audio while playing — alongside Moshi reacting to the master spectrum. */
-.v2-lhead .v2-licon { box-shadow: 0 0 calc(var(--lvl, 0) * 22px) color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 90%), transparent); }
+/* The track icon used to bloom up to 22px with the signal — glow AS the level meter.
+   Removed: level is already carried twice, by TrackMeterBar (TrackLaneList.tsx) and by
+   the crisp 2px inset edge on the lane below, so the halo added no information and put
+   a pulsing light source next to every track name. */
 .v2-lhead.sel .v2-licon { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--v2-text); }
-.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 85%), transparent), inset 0 0 38px color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 13%), transparent); }
+/* The 2px inset edge stays — it is a crisp, readable level indication. The 38px inset
+   wash that rode along with it is gone: it lit the whole lane interior behind the clips,
+   which is exactly the haze this pass removes. */
+.v2-lane[data-track-id] { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) calc(var(--lvl, 0) * 85%), transparent); }
 @media (prefers-reduced-motion: reduce) {
-  .v2-lhead .v2-licon, .v2-lane[data-track-id] { box-shadow: none; transition: none; }
+  .v2-lane[data-track-id] { box-shadow: none; transition: none; }   /* .v2-licon no longer carries a level shadow */
 }
 .v2-lmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .v2-lrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -368,7 +374,7 @@
 /* playhead overlay */
 .v2-playhead-line {
   position: absolute; top: 0; bottom: 0; width: 2px; background: var(--v2-playhead);
-  box-shadow: 0 0 10px var(--v2-playhead); z-index: 7; pointer-events: none;
+  z-index: 7; pointer-events: none;
 }
 .v2-playhead-line::before {
   content: ""; position: absolute; top: 0; left: -4px; border: 5px solid transparent;
