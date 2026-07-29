@@ -785,3 +785,13 @@ numbers and hashes only.
   so remote CUDA buys recipe search only, and the final adapter always pays
   the MLX retrain. At current sizes (~1h tuned) local is the simpler honest
   path; revisit if sweeps start dominating wall-clock.
+- **2026-07-28 — CUDA↔MLX bridge LINED UP (owner ask): `fim_bridge.py` +
+  `_cuda_train_fim.py` + [CUDA-BRIDGE.md](CUDA-BRIDGE.md).** The design answer
+  to "why not train elsewhere and convert": an adapter is coupled to the exact
+  base function it trained against, so the bridge trains CUDA LoRAs against
+  the DEQUANTIZED MLX base (numpy-only dequantizer, verified vs mx.dequantize
+  at 2.4e-7, hand-computed nibble fixture) and converts home with the
+  scale/rank identities REFUSED on mismatch. Twin-run acceptance bar in the
+  runbook: bridge adapters are sweep evidence, not shippable, until a
+  CUDA-vs-MLX twin pair agrees within ±.02 once. 5/5 sabotages RED. Use when
+  sweeps dominate; single runs stay local (~1h tuned).
