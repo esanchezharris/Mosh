@@ -31,8 +31,16 @@ than retried away (#499).
 ## What is queued for the owner (byte-proven, gated, hostile-reviewed)
 
 `MoshOps.cpp` **12,049 → 2,453 LOC** across three motion PRs (#501, #502, #506) on top of the
-guards PR (#489), plus the SelfTest split (#507 scaffolding, #508 chapters 1/2) and the manifest
-corrections (#505). Merge order matters and is recorded on each PR.
+guards PR (#489), and `SelfTest.cpp` **9,738 → 116 LOC** across the scaffolding + two chapter PRs
+(#507, #508, #510) — `runSelfTest` is now a spine of 11 `runChapterNN(ctx)` calls, its 94 sections
+in eleven TUs, in unchanged order. Plus the manifest corrections (#505), the clipRenderers probe
+change and its ratchet (#497, #500), and this close-out (#509). Merge order matters and is recorded
+on each PR.
+
+A detail worth keeping: the second chapter PR needed **zero** new context promotions. The six the
+first one added (engine/ops handles, the event-sink capture, `tid`, `trackById`) turned out to
+cover every cross-chapter reference in the remaining half — which is the strongest evidence that
+the cut points follow real seams in the harness rather than arbitrary line counts.
 
 ## The doctrine that made it safe
 
