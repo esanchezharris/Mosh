@@ -35,6 +35,12 @@ TEST_CASE ("classify: reads / transport / mp commands are unguarded", "[multipla
     REQUIRE (LockManager::classify ("agent_memory_write") == Scope::Unguarded);
     REQUIRE (LockManager::classify ("agent_memory_delete") == Scope::Unguarded);
     REQUIRE (LockManager::classify ("agent_memory_clear")  == Scope::Unguarded);
+    // FS-B2a: batch_status is a pure read of transaction state; batch_rollback undoes
+    // exactly the caller's own agent transaction (gated on undo-head ownership + a
+    // pre-state fingerprint), so neither contends for a track — same posture as
+    // undo/redo and batch_begin/batch_end above.
+    REQUIRE (LockManager::classify ("batch_status")   == Scope::Unguarded);
+    REQUIRE (LockManager::classify ("batch_rollback") == Scope::Unguarded);
 }
 
 TEST_CASE ("classify: single-track mutations are track-scoped", "[multiplayer][lock]")

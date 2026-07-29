@@ -62,6 +62,41 @@ function newTurnId(): string {
   return `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// FS-B2a (H2) — the turn marker's args. `utterance` is OMITTED (key absent, never
+// empty-string) when no real transcript reached us. It used to fall back to `label`,
+// but the label is Moshi's OWN output (reply.say, a fast-path caption, "voice") — so
+// a miner could not tell a real ask from a synthesized one, and the skill lane this
+// provenance exists for would learn its trigger phrases from the model's own words.
+// Absent is honest; fabricated is not. `name` stays the undo-transaction label.
+function turnMarkerArgs(label: string, meta: TurnMeta): Record<string, unknown> {
+  const args: Record<string, unknown> = {
+    name: label,
+    turn_id: newTurnId(),
+    source: meta.source ?? "brain_chat",
+  };
+  if (meta.utterance) args.utterance = meta.utterance;
+  return args;
+}
+
+// FS-B2a (H3) — record an ask that produced NO commands: the brain planned nothing,
+// every call failed validation, the destructive screen blocked the lot, or a section
+// rework resolved empty. Those turns used to leave no trace at all, yet they are the
+// highest-value rows for skill mining — an ask we could not serve names a missing
+// skill. Emits the SAME batch_begin/batch_end pair with nothing between, so the
+// harvester needs no new shape. Safe for undo: UndoManager::beginNewTransaction only
+// sets a flag; no ActionSet exists until a perform(), so an empty pair adds nothing
+// to the undo stack. Best-effort — a marker failure must never surface to the user.
+export async function logAgentTurn(label: string, meta: TurnMeta): Promise<void> {
+  const { exec } = useStore.getState();
+  try {
+    const begin = await exec("batch_begin", turnMarkerArgs(label, meta));
+    if (!begin.ok) return;
+    await exec("batch_end", {});
+  } catch {
+    /* provenance is never worth breaking a turn over */
+  }
+}
+
 function changeSet(label: string, entries: readonly ChangeEntry[]): ChangeSet {
   return {
     label,
@@ -114,13 +149,16 @@ export async function runAgentBatch(
     });
   }
 
+  // FS-B2a (H3) — nothing survived validation/screening, so no batch runs; still
+  // record the ask, or this turn (a missing-skill signal) vanishes from the log.
+  // Memory pseudo-commands don't count: they are intercepted above and deliberately
+  // run OUTSIDE any transaction, so a "remember X" turn was SERVED — marking it
+  // unserved would both lie and open a batch that turn must never have (AGT-MEM M3).
+  const seamCalls = calls.filter((c) => !MEMORY_COMMANDS.has(c.command)).length;
+  if (allowed.length === 0 && seamCalls > 0) await logAgentTurn(label, meta);
+
   if (allowed.length > 0) {
-    const begin = await exec("batch_begin", {
-      name: label, // still the undo-transaction label
-      turn_id: newTurnId(),
-      utterance: meta.utterance ?? label,
-      source: meta.source ?? "brain_chat",
-    });
+    const begin = await exec("batch_begin", turnMarkerArgs(label, meta));
     if (!begin.ok)
       throw new AgentBatchBoundaryError(
         "begin",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readShellCss } from "../v2/cssSource";
 
 // The MIDI editor is mounted by BOTH shells (AppLegacy and AppV2), so it cannot read
 // either palette directly. Everything it paints goes through the --pr-* family: defined
@@ -20,7 +21,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mosh = readFileSync(join(here, "mosh.css"), "utf8");
-const shell = readFileSync(join(here, "../v2/shell.css"), "utf8");
+const shell = readShellCss();
 
 const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
 const moshCode = stripComments(mosh);

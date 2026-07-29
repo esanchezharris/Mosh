@@ -17,9 +17,11 @@ service/sft/r5_train_additions.jsonl and consumed by curate_dataset.py: one JSON
 object per line, {"messages":[{system},{user},{assistant}]}. The command CATALOG
 segment of the system prompt is parsed LIVE out of ui/src/agent/commands.ts
 (AGENT_COMMANDS) — never hand-copied — so this builder can't invent a command name
-or silently drift from the real agent catalog; the PREAMBLE/rules/session-render
-segments mirror ui/src/agent/brainCore.ts's PREAMBLE / DEFAULT_RULES /
-compactSnapshot (the persona/format contract, stable, kept in sync by hand).
+or silently drift from the real agent catalog; the PREAMBLE/rules segments mirror
+ui/src/agent/brainCore.ts's PREAMBLE / DEFAULT_RULES by hand, and the session
+render mirrors ui/src/agent/sessionRender.ts's renderSession — that last one's
+byte-parity is TEST-ENFORCED (ui/src/agent/sessionRender.parity.test.ts), because
+"kept in sync by hand" is how it fell out of sync in the first place.
 
 Deterministic: no RNG, no wall-clock, no network, no I/O other than reading
 commands.ts and (optionally) writing --out. Running it twice byte-diffs identical.
@@ -160,7 +162,7 @@ def command_catalog_prompt(commands: list[Command]) -> str:
 
 
 # ── system-prompt scaffold — mirrors ui/src/agent/brainCore.ts PREAMBLE /
-#    DEFAULT_RULES / compactSnapshot verbatim (the persona/format contract) ────
+#    DEFAULT_RULES and ui/src/agent/sessionRender.ts renderSession verbatim ────
 
 INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"]
 
@@ -185,10 +187,20 @@ DEFAULT_RULES = "\n".join([
 
 
 def render_session(track_id: str, track_name: str, clip_id: str, tempo: int = 120) -> str:
-    """Mirrors ui/src/agent/brainCore.ts compactSnapshot() for a one-track,
-    one-MIDI-clip session — the shape these add_note-population rows target."""
+    """Mirrors ui/src/agent/sessionRender.ts renderSession() for a one-track,
+    one-MIDI-clip session — the shape these add_note-population rows target.
+
+    Byte-parity with the TypeScript is enforced by
+    ui/src/agent/sessionRender.parity.test.ts (vitest, shells out to python3).
+    The master line is unconditional there, and this fixture has no key, no
+    tempo map and no buses, so those lines are absent by construction."""
     track_line = f'  "{track_id}" "{track_name}" 0dB clips:["{clip_id}":midi@0s]'
-    return f"tempo {tempo} BPM, 4/4\nsections: (none)\ntracks:\n{track_line}"
+    return (
+        f"tempo {tempo} BPM, 4/4\n"
+        "master: 0dB pan 0 chain:[empty]\n"
+        "sections: (none)\n"
+        f"tracks:\n{track_line}"
+    )
 
 
 def build_system_prompt(commands: list[Command], track_id: str, track_name: str, clip_id: str) -> str:

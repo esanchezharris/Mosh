@@ -15,7 +15,8 @@ import type { CommandResult, Clip, Snapshot, Track } from "../../types";
 
 // Keep the render scoped to the Warp tab — stub the tabs that pull the classic Dock
 // (Rack/GenDrawer), the Lyrics panel, and the drum-window store.
-vi.mock("../../ui/Dock", () => ({ Rack: () => null, GenDrawer: () => null }));
+vi.mock("../../ui/Rack", () => ({ Rack: () => null }));
+vi.mock("../../ui/GenDrawer", () => ({ GenDrawer: () => null }));
 vi.mock("./LyricPanel", () => ({ LyricPanel: () => null }));
 vi.mock("../../ui/dock/useFloatingWindow", () => ({
   useDrumWindow: { getState: () => ({ open: () => {} }) },

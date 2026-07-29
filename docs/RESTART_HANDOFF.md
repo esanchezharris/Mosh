@@ -1,5 +1,9 @@
 # RESTART HANDOFF — real recipes as the generation substrate
 
+> **Historical handoff (2026-07-01) — canonical deep context for the recipe
+> substrate; NOT a status doc.** Current state lives in
+> [`CURRENT_STATUS.md`](CURRENT_STATUS.md).
+
 **For the next agent (Codex) picking up this work. Read this top-to-bottom first.**
 
 Status as of **2026-07-01 (reconciliation pass)**: **Phase 0 is MERGED TO MAIN** (via #190). The

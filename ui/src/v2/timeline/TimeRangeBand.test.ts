@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TimeRangeBand } from "./TimeRangeBand";
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
+import { headW } from "./geom";
 
 vi.mock("../../bridge", async () => {
   const actual = await vi.importActual<typeof import("../../bridge")>("../../bridge");
@@ -67,8 +68,11 @@ describe("TimeRangeBand", () => {
     useShell.setState({ timeRange: { start: 4, end: 6 }, timeRangeDragging: false });
     render();
     const el = band() as HTMLElement;
-    // headW() falls back to its jsdom default (no .v2-shell in this host) + start*pxPerSec.
-    expect(el.style.left).toBe(`${200 + 4 * 100}px`);
+    // The band's origin is headW() + start*pxPerSec. Ask headW() for the value rather than
+    // hardcoding it: in jsdom there is no .v2-shell, so it returns the fallback, and that
+    // fallback tracks --v2-head-w. Hardcoding the number here made this test a SECOND place
+    // the density token had to be updated by hand, which is the drift geom.test.ts now guards.
+    expect(el.style.left).toBe(`${headW() + 4 * 100}px`);
     expect(el.style.width).toBe(`${(6 - 4) * 100}px`);
   });
 

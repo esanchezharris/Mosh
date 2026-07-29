@@ -22,8 +22,10 @@ export type HandsFreeDeps = {
   isBusy: () => boolean;
   /** Bracket each dispatch with the shared busy flag so two utterances can't interleave. */
   setBusy: (b: boolean) => void;
-  /** Run a matched action (wraps handleFast with its FastDeps). */
-  dispatch: (action: FastAction) => Promise<void>;
+  /** Run a matched action (wraps handleFast with its FastDeps). `text` is the exact
+      transcript that matched — threaded so the turn marker in mosh-log.jsonl carries
+      what was actually SAID rather than the action's caption (FS-B2a H2). */
+  dispatch: (action: FastAction, text: string) => Promise<void>;
   /** Build a CONTINUOUS voice source for these callbacks (null = no speech backend). */
   makeSource: (cb: VoiceCallbacks) => VoiceInput | null;
   /** Reflect the hot-mic indicator. */
@@ -67,7 +69,7 @@ export function createHandsFree(deps: HandsFreeDeps): HandsFree {
     if (!action) { deps.onUnknown?.(text); return; } // unknown — flash a caption, NEVER the brain
     deps.setBusy(true);
     try {
-      await deps.dispatch(action);
+      await deps.dispatch(action, text);
     } catch {
       /* a failed command must not wedge the listener */
     } finally {

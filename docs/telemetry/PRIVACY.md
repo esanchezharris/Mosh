@@ -121,6 +121,31 @@ directly and never pass through `WebBridge.cpp` — by design, those are test
 harnesses, not real user sessions, so they never populate breadcrumbs or
 counters.
 
+### The local command log now contains your own words (FS-B2a)
+
+`~/Library/Mosh/session/mosh-log.jsonl` records every command with its full
+`args`. Since FS-B2a, an **agent turn** opens with a `batch_begin` whose args
+carry the utterance that triggered it — what you typed or said — so that a
+turn's edits can be traced back to the ask. That is a genuine escalation in what
+the file holds, and it is bounded on purpose:
+
+- **The file never leaves the machine.** Nothing in `src/telemetry/` reads it.
+  Breadcrumbs are populated from the live command *name* at the `WebBridge`
+  chokepoint, not by parsing this log, so the three redaction passes above sit
+  upstream of it and the utterance can't reach a crash report. Pinned by
+  `tests/test_telemetry.cpp`'s `"crash report never leaks a turn utterance"`.
+- **`get_command_log`** — the in-app command-log window — projects only
+  `{ts, seq, command, ok, undoable, error}` and **drops `args` entirely**, so
+  the utterance never reaches that surface either. Pinned in `--selftest`
+  (`get_command_log projects NO args`).
+- **Only asks addressed to Moshi are recorded** — typed, hold-to-talk, or a
+  hands-free phrase that matched a command. Hands-free speech that *didn't*
+  match is dropped without being written anywhere; an always-on mic never
+  transcribes ambient conversation into this file.
+- **Direct manipulation carries no ask.** A clip drag or a fader move writes a
+  line with no `utterance` and no `turn_id` — the key is **absent**, not empty —
+  so the log stays honest about which edits were agent-driven.
+
 ## The opt-in gate
 
 The entire opt-in state is **one flag file**: `~/Library/Mosh/telemetry.optin`.

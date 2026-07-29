@@ -31,7 +31,15 @@ _DEFAULT_TS_PATH = Path(__file__).resolve().parents[2] / "ui" / "src" / "agent" 
 
 _ARRAY_START_RE = re.compile(r"export const AGENT_COMMANDS\s*:\s*AgentCommand\[\]\s*=\s*")
 _COMMAND_RE = re.compile(r'command\s*:\s*"([a-z][a-z0-9_]*)"')
-_DESC_RE = re.compile(r'desc\s*:\s*(".*?"|\'.*?\')', re.DOTALL)
+# Escape-aware: a non-greedy `".*?"` stops at the first quote even when it is
+# backslash-escaped, which silently TRUNCATED any desc containing \" (e.g.
+# compile_render's `Compile a loose instruction (\"make it lo-fi\"…)`). A parser
+# that drops data is a second catalog wearing a projection's clothes — see
+# contract_test.py.
+_DESC_RE = re.compile(
+    r'desc\s*:\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|`(?:[^`\\]|\\.)*`)',
+    re.DOTALL,
+)
 _ARGS_KEY_RE = re.compile(r"args\s*:\s*")
 _CALL_RE = re.compile(r"^([SNB])\(")
 
