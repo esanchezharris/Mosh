@@ -22,21 +22,55 @@ export default defineConfig({
     toHaveScreenshot: { animations: "disabled" },
   },
   use: {
-    baseURL: "http://127.0.0.1:6008",
     viewport: { width: 1400, height: 1000 },
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    // REBUILD Storybook from current source each run, then serve it statically. A fresh
-    // build (not a reused HMR dev server) is what makes this a trustworthy no-op gate:
-    // with `storybook dev` + reuseExistingServer, a token change slipped through as a
-    // false green. Static serve needs no extra dep (python http.server).
-    command: "(lsof -ti:6008 | xargs kill -9 2>/dev/null || true) && npm run build-storybook -- --quiet && python3 -m http.server 6008 --bind 127.0.0.1 --directory storybook-static",
-    url: "http://127.0.0.1:6008/iframe.html",
-    reuseExistingServer: false,
-    timeout: 300_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  projects: [
+    {
+      // The design SYSTEM — tokens and atoms, in isolation. Storybook's comparative
+      // advantage: one screenshot covers dozens of states.
+      name: "chromium",
+      testMatch: /visual\/(tokens|consumers)\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:6008" },
+    },
+    {
+      // The PRODUCT — the assembled shell. Composition, density and hierarchy only exist
+      // here, and Storybook cannot render them: build-storybook is a production build, so
+      // the dev mock is off and AppV2 falls back to "Running outside the engine". See
+      // shellFixture.ts.
+      name: "shell",
+      testMatch: /visual\/shell\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:6009" },
+    },
+  ],
+  webServer: [
+    {
+      // REBUILD Storybook from current source each run, then serve it statically. A fresh
+      // build (not a reused HMR dev server) is what makes this a trustworthy no-op gate:
+      // with `storybook dev` + reuseExistingServer, a token change slipped through as a
+      // false green. Static serve needs no extra dep (python http.server).
+      command: "(lsof -ti:6008 | xargs kill -9 2>/dev/null || true) && npm run build-storybook -- --quiet && python3 -m http.server 6008 --bind 127.0.0.1 --directory storybook-static",
+      url: "http://127.0.0.1:6008/iframe.html",
+      reuseExistingServer: false,
+      timeout: 300_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // A PRODUCTION Vite build with the mock switched on explicitly, served by `vite preview`.
+      // Production, not `npm run dev`, for the reason recorded above: a dev server with HMR is
+      // this repo's known false-green vector. It also exercises the real dead-code path, so the
+      // bundle being screenshotted is shaped like the one that ships.
+      //
+      // Port 6009 with --strictPort on purpose. 5173 is the documented foreign-dev-server trap,
+      // 5191 belongs to playwright.isolated.config.ts, 6008 is Storybook above. Strict means a
+      // collision fails loudly instead of quietly screenshotting another worktree's bundle.
+      command: "(lsof -ti:6009 | xargs kill -9 2>/dev/null || true) && VITE_MOSH_E2E_MOCK=1 npm run build && VITE_MOSH_E2E_MOCK=1 npx vite preview --host 127.0.0.1 --port 6009 --strictPort",
+      url: "http://127.0.0.1:6009/",
+      reuseExistingServer: false,
+      timeout: 300_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+  ],
 });

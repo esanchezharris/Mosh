@@ -4,16 +4,19 @@
 // AU machine stays smooth. All sectioning/grouping lives in the pure pluginBrowserUtil
 // (unit-tested); this component is just glue.
 //
-// The list/filters are factored into PluginBrowserContent so the SAME surface backs
-// both the classic modal (below) and the v2 left-drawer Plugins tab — one source of the
-// load/filter/window behavior, one place it can drift.
+// The list/filters are factored into PluginBrowserContent, which backs ONLY this
+// classic modal — the v2 shell has its own picker surface (v2/PluginBrowser.tsx).
+// What the two shells actually share lives in pluginBrowserUtil (entry shapes,
+// sectioning/windowing, favorites/recents, loadPluginEntry) — that's the one
+// place the load/filter behavior can drift.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../store";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
+import { useElementHeight } from "../hooks/useElementHeight";
 import {
   builtinEntry, installedEntry, buildPluginRows, visibleRange,
-  loadFavorites, toggleFavorite, loadPluginRecents, addPluginRecent,
+  loadFavorites, toggleFavorite, loadPluginRecents, loadPluginEntry,
   type PluginEntry, type PluginKind,
 } from "./pluginBrowserUtil";
 
@@ -34,20 +37,10 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
   const [favorites, setFavorites] = useState<string[]>(() => loadFavorites());
   const [recents, setRecents] = useState<string[]>(() => loadPluginRecents());
   const [scrollTop, setScrollTop] = useState(0);
-  const [viewportH, setViewportH] = useState(420);
-  const listRef = useRef<HTMLDivElement>(null);
+  // Scroll-viewport height, tracked so the window math stays accurate on resize.
+  const { ref: listRef, height: viewportH } = useElementHeight<HTMLDivElement>(420);
 
   useEffect(() => { ensureCatalog(); }, [ensureCatalog]);
-
-  // Track the scroll-viewport height so the window math stays accurate on resize.
-  useEffect(() => {
-    const el = listRef.current; if (!el) return;
-    const update = () => setViewportH(el.clientHeight);
-    update();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(update); ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const bEntries = useMemo(() => builtins.map(builtinEntry), [builtins]);
   const iEntries = useMemo(() => plugins.map(installedEntry), [plugins]);
@@ -60,10 +53,7 @@ export function PluginBrowserContent({ onLoaded }: { onLoaded?: () => void }) {
   const favSet = new Set(favorites);
 
   const load = (e: PluginEntry) => {
-    if (!selectedTrackId) return;
-    if (e.loadKind === "builtin") void exec("load_builtin", { trackId: selectedTrackId, type: e.loadKey });
-    else void exec("load_plugin", { trackId: selectedTrackId, pluginId: e.loadKey });
-    addPluginRecent(e.uid);
+    if (!loadPluginEntry(e, selectedTrackId, exec)) return;
     setRecents(loadPluginRecents());
     onLoaded?.();
   };
