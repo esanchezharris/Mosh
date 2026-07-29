@@ -149,6 +149,10 @@ if (MOSH_BUILD_APP)
         src/app/MenuController.cpp
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
+        # RFC 002 — selftest chapter split scaffolding: shared harness plumbing
+        # (SelfTestCtx) + the self-contained non-runSelfTest CLI modes.
+        src/app/selftest/SelfTestSupport.cpp
+        src/app/selftest/SelfTest.Modes.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
