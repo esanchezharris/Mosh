@@ -22,6 +22,8 @@ assign_sample	Track
 audition_file	Unguarded
 batch_begin	Unguarded
 batch_end	Unguarded
+batch_rollback	Unguarded
+batch_status	Unguarded
 block_plugin	Unguarded
 bounce_layer_to_clip	Clip
 build_lyrics_from_clip	Clip

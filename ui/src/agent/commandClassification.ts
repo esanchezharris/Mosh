@@ -41,6 +41,14 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   // ── executor/undo plumbing — owned by the harness, never the model ────────────
   batch_begin: "the executor opens/closes the agent's own undo batches — the model never manages transactions",
   batch_end: "the executor opens/closes the agent's own undo batches — the model never manages transactions",
+  // FS-B2a — the skill harness's transaction plumbing. These are NOT producer actions and
+  // must never reach the model: batch_status is the authoritative read the harness consults
+  // after an ambiguous outcome, and batch_rollback is the only automatic skill rollback
+  // (gated on undo-head ownership + a pre-state fingerprint). A mouse-only producer's undo
+  // affordance is the ordinary Undo, which is unaffected. Being outside AGENT_COMMANDS is
+  // also why uiReachability.test.ts does not apply to them and UI_REACH_GAPS stays 0.
+  batch_status: "read-only agent-transaction status — the harness's authority after a lost response, not a producer control",
+  batch_rollback: "the harness's exact rollback of its own identified transaction — the producer's affordance is ordinary Undo",
   get_command_log: "read-only log inspector (CommandLog panel + taste distillation), not a musical tool",
 
   // ── metering — UI-local presentation config ───────────────────────────────────

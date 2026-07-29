@@ -15,7 +15,8 @@ import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import type { CommandResult, Clip, Snapshot, Track } from "../../types";
 
-vi.mock("../../ui/Dock", () => ({ Rack: () => null, GenDrawer: () => null }));
+vi.mock("../../ui/Rack", () => ({ Rack: () => null }));
+vi.mock("../../ui/GenDrawer", () => ({ GenDrawer: () => null }));
 vi.mock("./LyricPanel", () => ({ LyricPanel: () => null }));
 vi.mock("../../ui/dock/useFloatingWindow", () => ({
   useDrumWindow: { getState: () => ({ open: () => {} }) },

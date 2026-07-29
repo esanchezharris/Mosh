@@ -18,7 +18,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GenDrawer } from "./Dock";
+import { GenDrawer } from "./GenDrawer";
 import { useStore } from "../store";
 import type { Clip, RenderLayer, Track } from "../types";
 

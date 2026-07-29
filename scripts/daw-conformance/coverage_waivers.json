@@ -55,11 +55,6 @@
     "expires": "2026-09-01"
   },
   {
-    "command": "discard_recovery",
-    "reason": "A2 crash-recovery affordance; RecoveryNotice vitest covers the mock only. real coverage gap \u2014 P3 target: add to a conformance EXTRA family or a selftest section.",
-    "expires": "2026-08-15"
-  },
-  {
     "command": "fill_lyric_gap",
     "reason": "service-spawning by design (kept OUT of the hermetic surfaces; proven by service-side Python goldens + HTTP smokes + mock-backed vitest/e2e). P5 reachability lane will map the UI affordance; renew or cover on expiry.",
     "expires": "2026-09-01"

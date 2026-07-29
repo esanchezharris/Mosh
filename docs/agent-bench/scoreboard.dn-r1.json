@@ -1,0 +1,148 @@
+{
+  "tag": "dn-r1",
+  "model": "claude-sonnet-5",
+  "base": "claude-cli(subscription)",
+  "runner": "single",
+  "bin": "/Users/emiliosanchez-harris/Mosh/build-macos-arm64-release/Mosh_artefacts/Release/Mosh.app/Contents/MacOS/Mosh",
+  "maxSteps": 8,
+  "ranAt": "2026-07-28T20:59:24.245Z",
+  "success": 0.6666666666666666,
+  "passed": 2,
+  "total": 3,
+  "stepEffMean": 1,
+  "cmdErrRateMean": 0.3333333333333333,
+  "invalidRateMean": 0,
+  "wrongDefers": 0,
+  "deferCorrect": null,
+  "byCat": {
+    "master": {
+      "pass": 2,
+      "total": 3
+    }
+  },
+  "usage": {
+    "promptTokens": 198533,
+    "completionTokens": 1676,
+    "calls": 3
+  },
+  "rows": [
+    {
+      "id": "master-glue",
+      "category": "master",
+      "ask": "put a gentle compressor on the master bus to glue the mix",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterChainContains",
+              "nameIncludes": "comp"
+            },
+            "pass": true,
+            "note": "master ~\"comp\" present"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "load_master_builtin"
+      ],
+      "results": [
+        {
+          "command": "load_master_builtin",
+          "ok": true
+        }
+      ],
+      "wallMs": 15001,
+      "renders": []
+    },
+    {
+      "id": "master-eq-before-comp",
+      "category": "master",
+      "ask": "add an EQ on the master before the compressor",
+      "score": {
+        "success": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterChainContains",
+              "nameIncludes": "eq"
+            },
+            "pass": false,
+            "note": "master ~\"eq\" missing (chain: Compressor)"
+          },
+          {
+            "check": {
+              "kind": "masterChainOrder",
+              "first": "eq",
+              "then": "comp"
+            },
+            "pass": false,
+            "note": "master chain missing \"eq\""
+          }
+        ],
+        "stepEff": null,
+        "cmdErrRate": 1,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "load_master_builtin"
+      ],
+      "results": [
+        {
+          "command": "load_master_builtin",
+          "ok": false,
+          "error": "unknown builtin: eq"
+        }
+      ],
+      "wallMs": 19077,
+      "renders": []
+    },
+    {
+      "id": "master-trim",
+      "category": "master",
+      "ask": "the whole mix is running hot — pull the master down a couple dB",
+      "score": {
+        "success": true,
+        "checks": [
+          {
+            "check": {
+              "kind": "masterDelta",
+              "field": "volumeDb",
+              "dir": "down",
+              "min": 1,
+              "max": 6
+            },
+            "pass": true,
+            "note": "master volumeDb moved down 2.0"
+          }
+        ],
+        "stepEff": 1,
+        "cmdErrRate": 0,
+        "invalidRate": 0,
+        "wrongDefer": false,
+        "deferCorrect": null
+      },
+      "steps": 1,
+      "commands": [
+        "set_master_volume"
+      ],
+      "results": [
+        {
+          "command": "set_master_volume",
+          "ok": true
+        }
+      ],
+      "wallMs": 10050,
+      "renders": []
+    }
+  ]
+}

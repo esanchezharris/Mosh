@@ -8,6 +8,8 @@
 #include <set>
 #include <vector>
 #include "engine/MoshEngine.h"
+#include "moshops/AgentTxn.h"
+#include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
@@ -184,6 +186,11 @@ private:
     juce::var cmdRedo           (const juce::var& args);
     juce::var cmdBatchBegin     (const juce::var& args);   // group N agent edits into ONE undo step
     juce::var cmdBatchEnd       (const juce::var& args);
+    // FS-B2a — the agent batch-TRANSACTION contract (docs/first-stranger-program/lanes/
+    // fs-b2.md). batch_status is the authoritative read after any ambiguous outcome;
+    // batch_rollback is the ONLY automatic skill rollback (never a generic undo).
+    juce::var cmdBatchStatus    (const juce::var& args);
+    juce::var cmdBatchRollback  (const juce::var& args);
     juce::var cmdSave           (const juce::var& args);
     juce::var cmdReload         (const juce::var& args);
     juce::var cmdAddRenderLayer (const juce::var& args);
@@ -684,7 +691,17 @@ private:
     // Agent "Monster changes": inside a batch (batch_begin..batch_end) every command
     // coalesces into the ONE transaction batch_begin opened, so the whole batch undoes
     // as a single step. Outside a batch this is identical to the old per-command call.
-    void beginTxn (const juce::String& name) { eng.markDirty(); if (! inBatch) undoManager().beginNewTransaction (name); }
+    //
+    // FS-B2a: this is also the single chokepoint every mutating command already passes
+    // through, so it is where editRevision_ is bumped. A monotonic per-process mutation
+    // counter is what lets batch_status report revisionAtBegin/revision and lets commit
+    // refuse a transaction whose edit moved in a way the ledger cannot account for.
+    void beginTxn (const juce::String& name)
+    {
+        eng.markDirty();
+        ++editRevision_;
+        if (! inBatch) undoManager().beginNewTransaction (name);
+    }
 
     /** The JUCE device manager under Tracktion's wrapper — the object the device
         picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice
@@ -745,6 +762,46 @@ private:
     juce::var  cmdDiscardRecovery (const juce::var& args);
     bool        wasPlaying = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
+
+    // ── FS-B2a — the agent batch-transaction contract ────────────────────────────
+    // `inBatch` above keeps its EXACT prior meaning (undo coalescing) and is still set
+    // and cleared by the internal composites' ownBatch pattern (cmdSketchBeatbox,
+    // cmdGenerateBeatRecipe). An open agent transaction implies inBatch; the converse is
+    // false — which is precisely why those composites keep working untouched.
+    //
+    // txn_ holds the MOST RECENT transaction whatever its status (not only an open one),
+    // so a lost batch_end/batch_rollback response and a post-commit command retry can
+    // both be answered BY ID rather than inferred from a rejected promise.
+    std::unique_ptr<agenttxn::Record> txn_;
+    // Ids whose last ledger record was non-terminal when this process started: a crash
+    // left them unresolved, so every further skill is blocked until T2's recovery proves
+    // the pre- or post-transaction state (recover_session / discard_recovery).
+    juce::StringArray unresolvedTxnIds_;
+    juce::File        txnLedgerFile;
+    juce::int64       editRevision_ = 0;   // bumped by beginTxn / cmdUndo / cmdRedo
+    int               execDepth_    = 0;   // the guard governs the OUTERMOST execute only
+    // Set by txnPreDispatch when it admits a manifested command, consumed by
+    // txnPostDispatch to record that command's outcome against its manifest entry.
+    int               pendingTxnIndex_ = -1;
+    juce::String      pendingTxnEnvelopeDigest_;
+    // Fingerprint memo, keyed on editRevision_ — snapshot() is ~330 ms at 100 tracks and a
+    // skill run asks for the fingerprint 6–8 times. See txnFingerprint() for why this is
+    // sound (and the one invariant it rests on).
+    juce::String      txnFingerprintCache_;
+    juce::int64       txnFingerprintRevision_ = -1;
+
+    void         initTxnLedger();
+    void         appendTxnLedger (const agenttxn::Record&);
+    juce::String txnFingerprint();
+    juce::var    txnStatusVar (const agenttxn::Record&);
+    /** The transaction guard. Returns true when it produced `early` and dispatch must be
+        skipped entirely (a refusal, or a replayed result) — no mutation, no journal. */
+    bool         txnPreDispatch (const juce::var& command, juce::var& early);
+    void         txnPostDispatch (const juce::var& result);
+    /** Called by recover_session / discard_recovery: T2's human-gated resolution of a
+        crash-interrupted transaction. `provedPostState` = the journal tail was replayed. */
+    void         resolveUnresolvedTxns (bool provedPostState);
+
     double      lastPresenceBroadcastMs = 0.0;
 
     // FIT-003 — live running-count progress for an in-flight async plugin rescan
