@@ -89,11 +89,64 @@
   --v2-accent: var(--v2-accent-neutral);
   --v2-accent-ink: var(--v2-accent-neutral-ink);
   --v2-accent-soft: var(--v2-accent-neutral-soft);
+
+  /* ── the classic --lime family, bridged into this subtree ─────────────────────
+     The reservation above only reaches v2's OWN components. v2 also mounts ~15
+     components out of ui/src/ui — the plugin rack, the generative drawer, the drum
+     window, the automation panel, the piano roll, the sample browser, every topbar
+     tool popover, the multiplayer panel, both level meters — and those paint from
+     mosh.css's --lime, which .v2-shell had never re-pinned. So a dozen classic
+     surfaces kept the old bright green after the accent went near-white: lit drum
+     steps, the automation curve, the pairing code, plugin-card dots, the meter
+     gradient, the piano roll's scale-lock root row.
+
+     Bridged HERE rather than by rewriting 109 declarations in mosh.css, because the
+     classic shell must stay untouched: e2e/templates.spec.ts asserts an exact --lime
+     per skin read off document.documentElement, and .v2-shell is a <div> inside
+     <html> — a re-pin at this scope is structurally invisible to that assertion, and
+     to the classic shell generally.
+
+     SAME CASCADE RULE as --accent above, and the same way to get it wrong: a var()
+     inside a custom property resolves on the element that DECLARES it. These resolve
+     to the neutral HERE, so an agentic scope must re-declare the --lime family too,
+     not just re-point --v2-accent. See the agentic block in 95-fms-agent.css. */
+  --lime: var(--v2-accent-neutral);
+  --lime-glow: var(--v2-accent-neutral);
+  --lime-dim: color-mix(in srgb, var(--v2-accent-neutral) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--v2-accent-neutral) 12%, transparent);
+  --lime-text: var(--v2-accent-neutral);
+  /* --auto-line and --focus-ring are lime-derived in mosh.css; they follow it here.
+     Both are declared in the BASE block rather than the light one because the neutral
+     does not flip per theme (v2 keeps dark panels in both) — themeTokens.test.ts reads
+     the base block as well as the light one, so this still counts as "accounted for". */
+  --auto-line: var(--v2-accent-neutral);
+  --focus-ring: var(--v2-accent-neutral);
+  /* NOT bridged to the neutral: the peak meter's safe zone is semantic, not decorative.
+     It rode on --lime only because the brand colour was green. Pointed at the shell's own
+     semantic ok green, so the level ramp keeps three legible stops. */
+  --meter-safe: var(--status-ok);
   --v2-blue: #9aa0b4;               /* desaturated slate — track icons only */
-  --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
-  --v2-clip-midi: rgba(196, 202, 220, 0.82);
-  --v2-clip-drum: rgba(204, 255, 54, 0.7);
-  --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
+  /* ── clips: ONE body, the ink carries the type ────────────────────────────────
+     These four were a decorative set, not a system. --v2-clip-midi and --v2-clip-drum
+     were DEAD — declared in both theme blocks and consumed by nothing but the Storybook
+     swatch page, while the rules below painted hardcoded near-blacks; so "change the
+     drum clip colour" would have moved a swatch and nothing on screen. Meanwhile
+     --v2-clip-wave was a light grey-blue gradient against those near-blacks, which made
+     the one audio clip in a session read as belonging to a different application — it
+     differed from its neighbours on TWO axes at once, body and ink.
+
+     Now: every clip gets the same near-black body, and what a clip IS shows in the ink
+     the canvas paints (waveform / note blocks / step grid) — shapes that are already far
+     more distinguishable than a background tint was. The tokens below are live. */
+  --v2-clip-wave: rgba(25, 25, 27, 0.62);
+  --v2-clip-midi: rgba(26, 26, 28, 0.66);
+  --v2-clip-drum: rgba(24, 24, 26, 0.60);
+  --v2-clip-block: rgba(25, 25, 27, 0.62);
+  /* Canvas ink (see mosh.css's :root block for the mechanism). The wave was the last
+     lime left in the arrangement, and it survived the accent pass only because it lived
+     in a JS string literal rather than a stylesheet. Slate, so audio reads as audio and
+     the violet keeps meaning "notes". */
+  --clip-ink-wave: rgba(196, 202, 220, 0.62);
   --v2-playhead: var(--v2-accent-neutral); /* the scrub line is transport, not agentic — bound to the family so an agentic scope can never re-lime it */
   --v2-rec: #ff3b5c;
   /* Negative spread. A 50px blur at zero spread puts a wide, soft halo around every
@@ -253,10 +306,15 @@
   --v2-accent-agentic-ink: #16210a;
   --v2-accent-agentic-soft: rgba(194, 245, 63, 0.16);
   --v2-blue: #a7adba;
-  --v2-clip-wave: linear-gradient(180deg, rgba(78, 82, 96, 0.92), rgba(54, 57, 68, 0.82));
-  --v2-clip-midi: rgba(196, 202, 220, 0.82);
-  --v2-clip-drum: rgba(194, 245, 63, 0.7);
-  --v2-clip-block: linear-gradient(180deg, rgba(70, 72, 84, 0.9), rgba(50, 52, 62, 0.8));
+  /* Clip bodies and ink do NOT flip: v2 keeps dark panels on the cream page, so the lane
+     ground is the same in both themes. Restated rather than inherited because
+     themeTokens.test.ts reads this block, and because a future light-specific clip value
+     belongs here — not in an element rule. */
+  --v2-clip-wave: rgba(25, 25, 27, 0.62);
+  --v2-clip-midi: rgba(26, 26, 28, 0.66);
+  --v2-clip-drum: rgba(24, 24, 26, 0.60);
+  --v2-clip-block: rgba(25, 25, 27, 0.62);
+  --clip-ink-wave: rgba(196, 202, 220, 0.62);
   /* --v2-playhead is derived from --v2-accent-neutral in the base block; the scrub line does not flip. */
   --v2-shadow: 0 18px 44px -14px rgba(70, 56, 28, 0.24);
   --v2-glow: 0 0 0 1px var(--v2-line), inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -293,11 +351,10 @@
   --bone: #f6f2eb;
   --mist: #e5e5e1;
   --bone-dim: rgba(246, 242, 235, 0.55);
-  --lime-dim: rgba(204, 255, 35, 0.42);
-  --lime-faint: rgba(204, 255, 35, 0.12);
-  --lime-text: var(--lime);
-  --auto-line: var(--lime);
-  --focus-ring: var(--lime);
+  /* The --lime family used to be re-pinned here, to its BRIGHT dark-theme values, so
+     mosh.css's light-theme olive would not apply on v2's dark panels. It is now bridged
+     to the near-white neutral in the BASE block above, which is theme-independent for
+     the same reason --v2-accent is — so re-declaring it here would only undo that. */
   /* --danger/-deep/-line are NOT re-pinned here: see the .error-bar exception below. */
 }
 

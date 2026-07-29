@@ -32,6 +32,7 @@ const AGENTIC_SELECTORS: Record<string, string> = {
   ".v2-shell .v2-flow-syl.ok": "lyric flow: syllables hitting the grid, computed by the flow model",
   ".v2-shell .v2-flow-rhyme.st-perfect": "lyric flow: a perfect rhyme grade, computed by the rhyme model",
   ".v2-shell .v2-clip-badge.working": "a clip mid-render — transcribing / lyrics / flow in flight. Lives in the arrangement partition, which is why the agentic set is semantic and not file-based.",
+  ".v2-shell .gen": "the GENERATIVE drawer (classic Dock.tsx, mounted by v2's Inspector): SA3 engine badge, render status, quality readout, progress. The agentic set was decided as 'generative + Moshi'; this is the generative half, and it was missing — it had been painting lime by ACCIDENT, via the classic --lime that .v2-shell never re-pinned, rather than by the rule.",
 };
 
 // Non-agentic things that sit INSIDE an agentic scope and would otherwise inherit the lime.

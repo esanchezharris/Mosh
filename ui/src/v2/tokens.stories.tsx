@@ -9,7 +9,11 @@ const COLOR_TOKENS = [
   "--v2-ink", "--v2-surface", "--v2-surface-2", "--v2-surface-sunken",
   "--v2-line", "--v2-line-strong", "--v2-text", "--v2-dim", "--v2-faint",
   "--v2-accent", "--v2-accent-ink", "--v2-accent-soft", "--v2-blue",
-  "--v2-clip-midi", "--v2-clip-drum", "--v2-playhead", "--v2-rec",
+  // The clip set, complete. --v2-clip-wave and the canvas ink were missing, which is part
+  // of why the wave clip drifted unnoticed: the one swatch page that would have shown it
+  // sitting apart from its neighbours did not list it.
+  "--v2-clip-wave", "--v2-clip-midi", "--v2-clip-drum", "--v2-clip-block", "--clip-ink-wave",
+  "--v2-playhead", "--v2-rec",
   "--v2-ground", "--v2-ground-text", "--v2-ground-dim", "--v2-ground-card",
   "--v2-ground-line", "--v2-ground-line-strong",
 ];

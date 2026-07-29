@@ -88,6 +88,22 @@
   --auto-line: var(--lime);      /* automation curve stroke */
   --focus-ring: var(--lime);     /* keyboard focus ring */
 
+  /* ── clip ink — what the three clip canvases PAINT WITH ──────────────────────
+     Read at draw time by ClipWave / ClipMidi / ClipDrumGrid (ui/Arrange.tsx), off the
+     canvas's own computed style, so a nested scope such as .v2-shell can re-pin them.
+     These values are the literals those renderers used to hardcode, so the classic
+     shell is unchanged by their extraction; the point of tokenising was to make the
+     arrangement's most visible colour reachable by the stylesheet and by a guard. */
+  /* The safe end of the peak-meter ramp. var(--lime) here keeps the classic shell
+     byte-identical — the point of the token is that v2 can re-pin the LEVEL colour without
+     inheriting whatever the brand accent happens to be. */
+  --meter-safe: var(--lime);
+
+  --clip-ink-wave: rgba(204, 255, 35, 0.5);
+  --clip-ink-midi: rgba(180, 108, 255, 1);
+  --clip-ink-drum: rgba(180, 108, 255, 1);
+  --clip-ink-drum-lane: rgba(180, 108, 255, 0.14);
+
   --font-display: "NanumSquareRound", "Archivo Black", "Helvetica Neue", "Arial Black", sans-serif;
   --font-body: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -523,7 +539,13 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .meter { display: flex; flex-direction: column; gap: 2px; }
 .meter .mbar {
   position: relative; height: 3px; border-radius: 2px; overflow: hidden;
-  background: linear-gradient(90deg, var(--lime) 0%, var(--lime) 60%, var(--warn) 84%, var(--rec) 100%);
+  /* --meter-safe, NOT --lime. The safe end of this ramp is SEMANTIC — it means "signal
+     present and not near clipping", the same class of meaning as --warn and --rec beside
+     it — and it only ever used --lime because the brand colour happened to be green. Once
+     .v2-shell re-pinned --lime to a near-white neutral, riding on it turned a three-stop
+     level ramp into white->amber->red, which reads as "no level information until it is
+     already hot". A meter is the last place to lose a colour code. */
+  background: linear-gradient(90deg, var(--meter-safe) 0%, var(--meter-safe) 60%, var(--warn) 84%, var(--rec) 100%);
 }
 .meter .mmask { position: absolute; top: 0; right: 0; bottom: 0; width: 100%; background: var(--ink-deep); }
 .meter.meter-clip .mbar { box-shadow: 0 0 5px var(--rec); }
@@ -1185,8 +1207,13 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 .auto-canvas { display: block; }
 .auto-grid { stroke: var(--ink-line-soft); stroke-width: 1; }
 .auto-grid.mid { stroke: var(--ink-line); }
-.auto-line { stroke: var(--lime); stroke-width: 2; }
-.auto-dot { fill: var(--lime); stroke: var(--ink); stroke-width: 1.5; cursor: grab; }
+/* --auto-line, not --lime. The token has existed since the element-rules-to-tokens pass
+   and has a light-theme value (#7c9a10) and a v2 re-pin, but nothing ever consumed it —
+   these two rules kept reading --lime directly, so the automation curve rendered bright
+   lime on the cream light theme, which is exactly the case the olive was added for. Three
+   places maintained a token that did nothing. */
+.auto-line { stroke: var(--auto-line); stroke-width: 2; }
+.auto-dot { fill: var(--auto-line); stroke: var(--ink); stroke-width: 1.5; cursor: grab; }
 .auto-dot:hover { fill: var(--lime-glow); }
 .auto-foot { padding: 7px 14px; border-top: 1px solid var(--ink-line); font-size: 10px; color: var(--bone-dim); }
 
