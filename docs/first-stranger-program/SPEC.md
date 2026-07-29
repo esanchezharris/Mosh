@@ -142,7 +142,13 @@ different design.*
     `packaging_check.py` enforces is now legally true, not merely present.
   - Key rotation is deliberately NOT done: superseded, because public builds now ship
     proxy-only and carry no provider key to extract (see §1.5 and CLAUDE.md).
-- **O5. Arena harvest hour** — *mostly done, and the "~38 candidates" figure is wrong.*
+- **O5. Arena harvest hour — OWNED BY THE UI THREAD. Other threads: hands off.**
+  The arena, `FS-ST1`/`FS-ST2` and the v3 shell are somebody else's lane. Enumerating this
+  as an owner blocker is fine; acting on it from an agent/ship-kit thread is not, and that
+  happened on 2026-07-28. The counts below are a *snapshot* — read the arena itself, and
+  note `.arena-verdicts.json` carries stale rows for candidates no longer on the wall, so
+  it must be cross-referenced against `.arena-generated.json` or the unjudged count is wrong
+  (it read as 2; the wall actually had 4 unjudged and 4 stale rows).
   `~/Library/Mosh/work/arena/.arena-verdicts.json` (dot-prefixed — an earlier probe missed it)
   holds **6** candidates, **4 already `promoted`** by the owner. Two remain unjudged:
   `seed-shell-obsidian` and `kimi_l_55ko`. Judge on merit — the "fits the script" criterion died

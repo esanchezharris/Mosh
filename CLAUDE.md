@@ -111,13 +111,21 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   reference instead — `set -a; . ui/.env.local; set +a` then `--key "$OPENAI_API_KEY"`, the
   same way `MOSH_BRAIN_ENV=ui/.env.local ./run-mosh.sh release` already works. That costs
   nothing, blocks nothing, and is not a hardening opinion.
-- **FMS is owned by a separate lane — do not write claims about its state.** The live
-  programme is `docs/fms-lyrics-bench/PROGRAM.md`, worked in its own branch/worktree
-  (`claude/fms-lyric-pilot-harness-e1820f` as of 2026-07-28). Read it, link to it, but do
-  not restate its HALT rule, owner asks, or scores anywhere else — a copy in SPEC.md or a
-  status board goes stale the moment that lane moves, and then two documents disagree about
-  what the owner owes. (A bullet exactly like that was written into SPEC §3 and backed out
-  the same day.)
+- **SEVERAL AGENT THREADS RUN AT ONCE. Check who owns a lane before you touch it — being
+  listed in SPEC.md does not make it yours.** This bit twice on 2026-07-28, the second time
+  immediately after being warned:
+  - **FMS** — the live programme is `docs/fms-lyrics-bench/PROGRAM.md`, worked in its own
+    branch (`claude/fms-lyric-pilot-harness-e1820f`). A bullet restating its HALT rule was
+    written into SPEC §3 and backed out the same day.
+  - **UI / design taste** — the arena (`~/Library/Mosh/work/arena`), `FS-ST1`/`FS-ST2`, and
+    the v3 shell (`ui/src/v3`) belong to the UI thread. An agent/ship-kit thread rendered
+    arena candidates and opened browser tabs for O5 before asking whose work it was.
+
+  The trap is that SPEC §3's owner list (**O1–O6**) spans every lane, so "how do I close my
+  blockers?" pulls in work that belongs to somebody else's thread. Enumerating a blocker is
+  fine; *acting* on one needs an ownership check first. Read it, link to it, hand it back —
+  do not restate its state elsewhere, because the copy goes stale the moment that lane moves
+  and then two documents disagree about what the owner owes.
 - **macOS / Apple Silicon (arm64) + MLX is canonical** — unified-memory zero-copy is the load-bearing neural advantage on the Mac.
 - **PC port (Windows + NVIDIA/CUDA):** parallel target, one codebase. Build with the `windows-x64-debug`/`-release` CMake presets (Visual Studio 17 2022 generator, WebView2-backed WebView, AU hosting off, VST3 only). The generative tier runs Stable Audio 3 under PyTorch/CUDA via `service/adapters/stable_audio3_cuda.py`, auto-selected by `stable_audio3_adapter` when MLX is absent (point `MOSH_SERVICE_PYTHON` at the CUDA venv + `MOSH_SA3_MODEL_DIR` at the weights — `service/setup-sa3-cuda.ps1` validates). Build/run/verify/**package** on Windows: `run-mosh.ps1` (`-Build`/`-Smoke`/`-Package`), `service/setup-feature-venv.ps1`, `scripts/verify-pc-build.ps1`. Native voice is stubbed (browser Web Speech works); menu renders in-window; companion pairs via manual QR/URL (mDNS macOS-only). Platform matrix in [ARCHITECTURE.md](ARCHITECTURE.md); the per-feature Windows-parity **decision record** is [docs/WINDOWS_PARITY.md](docs/WINDOWS_PARITY.md) and the build runbook is [docs/WINDOWS_RUNBOOK.md](docs/WINDOWS_RUNBOOK.md).
 - **Spine first:** MoshOps + snapshot/events is the highest-leverage early work — UI and both neural tiers are clients of it.
