@@ -1,0 +1,11 @@
+{"command":"create_track","args":{"name":"Golden Fixture"},"capture":{"T1":"trackId"}}
+{"command":"batch_begin","args":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","name":"add_vocal_with_lyrics","commands":[{"index":0,"requestId":"add_vocal_with_lyrics-rollback-jsonl-01","command":"create_lyric_sheet"},{"index":1,"requestId":"add_vocal_with_lyrics-rollback-jsonl-02","command":"set_lyric_line"},{"index":2,"requestId":"add_vocal_with_lyrics-rollback-jsonl-03","command":"set_lyric_line"},{"index":3,"requestId":"add_vocal_with_lyrics-rollback-jsonl-04","command":"set_lyric_constraint"},{"index":4,"requestId":"add_vocal_with_lyrics-rollback-jsonl-05","command":"set_lyric_constraint"}]}}
+{"command":"batch_status","args":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00"}}
+{"command":"create_lyric_sheet","args":{"trackId":"${T1}"},"transaction":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","requestId":"add_vocal_with_lyrics-rollback-jsonl-01","index":0}}
+{"command":"set_lyric_line","args":{"trackId":"${T1}","lineIndex":0,"seedText":"a second verse"},"transaction":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","requestId":"add_vocal_with_lyrics-rollback-jsonl-02","index":1}}
+{"command":"set_lyric_line","args":{"trackId":"${T1}","lineIndex":0,"role":"verse"},"transaction":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","requestId":"add_vocal_with_lyrics-rollback-jsonl-03","index":2}}
+{"command":"set_lyric_constraint","args":{"trackId":"${T1}","topic":"leaving"},"transaction":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","requestId":"add_vocal_with_lyrics-rollback-jsonl-04","index":3}}
+{"command":"set_lyric_constraint","args":{"trackId":"no-such-track-id","mood":"calm"},"transaction":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00","requestId":"add_vocal_with_lyrics-rollback-jsonl-05","index":4}}
+{"command":"batch_status","args":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00"}}
+{"command":"batch_rollback","args":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00"}}
+{"command":"batch_status","args":{"transactionId":"add_vocal_with_lyrics-rollback-jsonl-00"}}

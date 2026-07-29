@@ -90,7 +90,15 @@ export type State = {
   clipboard: { clip: Clip; sourceTrackId: string } | null;
 
   refresh: () => Promise<void>;
-  exec: (command: string, args?: Record<string, unknown>) => Promise<CommandResult>;
+  // FS-B2a — the optional third argument is the agent-transaction envelope. It rides
+  // BESIDE command/args (never inside args) all the way to MoshOps::executeImpl, which
+  // reads it off the command object; WebBridge passes args[0] whole, so the sibling field
+  // survives untouched. Omitted by every existing caller ⇒ behaviour unchanged.
+  exec: (
+    command: string,
+    args?: Record<string, unknown>,
+    transaction?: { transactionId: string; requestId: string; index: number },
+  ) => Promise<CommandResult>;
   // AGT-MEM (M3) — satisfies menuActions.ts's ActionStore.invalidateMemory: drops
   // the cached agent-memory pools so a project switch never leaks a stale project's
   // notes into the newly-opened one's prompts.
@@ -263,8 +271,10 @@ export const useStore = create<State>((set, get, api) => ({
     }
   },
 
-  exec: async (command, args = {}) => {
-    const res = await executeCommand<CommandResult>({ command, args });
+  exec: async (command, args = {}, transaction) => {
+    const res = await executeCommand<CommandResult>(
+      transaction ? { command, args, transaction } : { command, args },
+    );
     recordSessionCommand(command, args, res.ok);
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
