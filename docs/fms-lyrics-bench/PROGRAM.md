@@ -824,3 +824,29 @@ numbers and hashes only.
   formally-perfect menu words — the human-taste direction the program bets
   on. Endpoint (1500) lands ~10h out; 1000-ckpt eval armed. Bar to beat for
   the routing conversation: .413 exact / .45.
+- **2026-07-29 — THE ORACLE MEASUREMENT: the `rhyme_perfect >= .60` half of the
+  draft bar is unachievable BY CONSTRUCTION.** Ran the `oracle` arm (the
+  artist's own words as the candidate) on the frozen 150: `exact` 1.000 —
+  which self-verifies that the candidate IS the ground truth — and
+  **`rhyme_perfect` 0.300**. So the draft bar asked any passing arm to be
+  TWICE as formally-perfect as the humans it imitates. Since exceeding the
+  truth's perfection rate requires *not* choosing the truth, the bar's two
+  halves are in direct contradiction: measured across 22 arm/adapter runs,
+  r(exact, rhyme_perfect) = **-0.619**, no arm has ever cleared both halves,
+  and the arms that clear `perfect >= .60` (rhyme-floor-fp .940, product-llm
+  .887, local-constrained-endword .627) sit at exact .113/.087/.173. This is
+  the sitting-5 finding ("93% formally perfect, 29% works") given a number.
+  **New diagnostic proposed: rhyme-perfection CALIBRATION ERROR**
+  (`arm_perfect - 0.300`), i.e. distance from human practice rather than
+  distance from a textbook. Every FIM-LoRA adapter lands at -0.007..-0.013
+  (human-calibrated); every prompt-side arm is +0.089..+0.231 (over-perfect);
+  the floors are +0.587..+0.640. The trained arms did not get "worse at
+  rhyming" — they learned the artist's real slant-rhyme rate. Owner decision
+  flagged, NOT taken: replace the `rhyme_perfect >= .60` clause with a
+  calibration band (e.g. |err| <= .05) or drop it and let keep-rate decide.
+- **2026-07-29 — Palette promotion RE-VALIDATED against the new lens.** The
+  A/B on `product-llm` (frozen 150): palette OFF exact .053 / perfect .642;
+  palette ON exact **.087** / perfect .887. It raised BOTH, including the
+  artist-matching metric, so default-ON stands. Caveat recorded: it also moved
+  the shipped loop further from human calibration (+.342 -> +.587 error), which
+  is where the trained lane's advantage lives.
