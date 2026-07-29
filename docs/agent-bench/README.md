@@ -66,10 +66,14 @@ Needs a Mosh binary (`--bin`, or auto-discovered newest of the build trees /
 
 ## Reading results honestly
 
-- **compactSnapshot blind spots**: the brain's session rendering currently
-  omits buses, the master chain, the tempo map and the key — master/tempo-map
-  task failures can be VISIBILITY failures, not model failures. Call this out
-  when comparing models; the fix belongs to the Phase-B harness lane.
+- **Session-render blind spots — CLOSED 2026-07-28**: the single-shot prompt
+  used to omit buses, the master chain, the tempo map and the key, so
+  master/tempo-map failures could be VISIBILITY failures rather than model
+  failures. Both prompt paths now render through `ui/src/agent/sessionRender.ts`.
+  Historical scoreboards taken before this date are NOT comparable to later ones
+  on the `master` and tempo-map tasks — check the run date before putting two
+  numbers side by side. Post-fix measurement:
+  `REPORT_2026-07-28-session-render.md`.
 - Mock-vs-real drift: if a task behaves differently across substrates, the real
   engine is the truth and the mock gets a parity fix (see the BUILTINS drift
   the bench caught on day one).

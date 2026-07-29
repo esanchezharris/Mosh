@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { buildLoopSystemPrompt, richSessionBlock, renderTaskContext, LOOP_RULES } from "./loopPrompt";
+import { buildLoopSystemPrompt, renderTaskContext, LOOP_RULES } from "./loopPrompt";
+import { renderSession } from "../sessionRender";
 import { systemPrompt } from "../brainCore";
 import type { Snapshot } from "../../types";
 
@@ -17,15 +18,18 @@ const SNAP: Snapshot = {
       clips: [{ id: "101", name: "beat", type: "midi", start: 0, length: 4, offset: 0, hasRenderLayer: false }] },
   ],
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
-  master: { volumeDb: -3, pan: 0, plugins: [{ index: 0, name: "Compressor", enabled: true }] },
+  // a real snapshot's master plugins always carry `type` + `builtin` (MoshOps
+  // pluginToVar) — the chain renders the TYPE for builtins, since that is the
+  // string load_master_builtin takes. See sessionRender.test.ts.
+  master: { volumeDb: -3, pan: 0, plugins: [{ index: 0, name: "Compressor", type: "compressor", builtin: true, enabled: true }] },
   buses: [{ bus: 1, name: "Reverb", trackId: "9" }],
 } as unknown as Snapshot;
 
-describe("richSessionBlock — the Phase-A visibility fix", () => {
-  const block = richSessionBlock(SNAP);
+describe("renderSession — the Phase-A visibility fix", () => {
+  const block = renderSession(SNAP);
 
   it("shows the master fader (the −3dB default nobody could see), pan and chain", () => {
-    expect(block).toContain("master: -3dB pan 0 chain:[Compressor]");
+    expect(block).toContain("master: -3dB pan 0 chain:[compressor]");
   });
 
   it("shows the tempo map WITH the indices remove_tempo_change takes", () => {
@@ -122,6 +126,43 @@ describe("renderTaskContext", () => {
 });
 
 describe("legacy prompt byte-stability pin", () => {
+  // The pin below moves whenever the prompt changes at all. THIS test says WHAT
+  // the single-shot prompt must contain — the master line whose absence made
+  // master-trim unsolvable single-shot, and the key it was also dropping.
+  it("the shipped single-shot prompt SHOWS master state and the session key", () => {
+    const fixture = {
+      schemaVersion: 1,
+      session: { sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, metronome: false, key: { tonic: "C", mode: "major" }, length: 16, editFile: "" },
+      tracks: [
+        { id: "17", index: 0, name: "Drums", type: "audio", volumeDb: 0, mute: false, solo: false,
+          clips: [{ id: "101", name: "beat", type: "midi", start: 0, length: 4, offset: 0, hasRenderLayer: false }] },
+      ],
+      transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+      master: { volumeDb: 0, pan: 0 },
+    } as unknown as Snapshot;
+    const p = systemPrompt(fixture);
+    expect(p).toContain("master: 0dB pan 0 chain:[empty]");
+    expect(p).toContain("key: C major");
+    // and the compact renderer's contract still holds — quoted ids
+    expect(p).toContain('"17" "Drums"');
+    expect(p).toContain('"101":midi@0s');
+
+    // The FULL rendered block for this fixture. Pinning the whole thing (not just
+    // `toContain`) is what makes the pin comment's "exactly two added lines"
+    // claim checkable: the old compact render was these same lines minus `key:`
+    // and `master:`.
+    expect(renderSession(fixture)).toBe(
+      [
+        "tempo 120 BPM, 4/4",
+        "key: C major",
+        "master: 0dB pan 0 chain:[empty]",
+        "sections: (none)",
+        "tracks:",
+        '  "17" "Drums" 0dB clips:["101":midi@0s]',
+      ].join("\n"),
+    );
+  });
+
   // The SHIPPED single-shot prompt (SFT/gepa/bench surface) must never move as
   // a side effect of loop work. An INTENTIONAL prompt change updates this hash
   // consciously — that is the point of the pin.
@@ -137,13 +178,18 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-07-26, consciously: `unfreeze_layer` was added to the agent catalog (the
-    // thaw for freeze_layer, which had none), and freeze_layer's own description was
-    // corrected — it used to say "commit the rendered audio", which described a label it
-    // wrote rather than what it does. The catalog is rendered into this prompt, so both
-    // edits move the hash. Nothing about the prompt's SHAPE changed.
-    // Previous pin: a5b1847f7e5c7f100cc2365878dd336891d43e4f4631b0a081d65143a114cb8c
-    expect(hash).toBe("70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e");
+    // Moved 2026-07-28, consciously: the two session renderers were unified. The
+    // single-shot path used to render via brainCore's compactSnapshot, which showed
+    // NO master state — so a model asked to "pull the master down a couple dB" could
+    // not see that the fader defaults to -3dB and guessed an absolute value that
+    // graded as moving UP (MoshAgentBench master-trim: 0/10 single, 5/5 loop, same
+    // models). Both paths now use ../sessionRender.ts. For THIS fixture the diff is
+    // exactly two added lines — "key: C major" and "master: 0dB pan 0 chain:[empty]";
+    // richer sessions also gain the tempo map, buses and per-track pan/sends. The
+    // "exactly two added lines" claim is not just prose: the test above pins the
+    // fixture's FULL rendered block.
+    // Previous pin: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
+    expect(hash).toBe("a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

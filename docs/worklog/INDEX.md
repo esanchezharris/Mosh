@@ -6,7 +6,7 @@ to load every session. **Nothing was edited** — each note is verbatim, one fil
 CLAUDE.md keeps the standing rules (prime directives, stage gates, and the gotchas that still bite).
 This is the history: *why* a thing is the way it is, and what it cost to learn.
 
-50 notes, 2026-06-18 → 2026-07-26.
+52 notes, 2026-06-18 → 2026-07-26.
 
 | date | note |
 |---|---|
@@ -17,11 +17,13 @@ This is the history: *why* a thing is the way it is, and what it cost to learn.
 | 2026-07-24 | [FMS lyrics-first program — I1: infill bench (corpus + masks + metrics + arms + baselines) (2026-07-24).](2026-07-24-fms-lyrics-first-program-i1-infill-bench-corpus-arms-baselin.md) |
 | 2026-07-19 | [TASTE-002 — taste-label spigot restored for the in-place workflow (2026-07-19).](2026-07-19-taste-002-taste-label-spigot-restored-for-the-in-place-workf.md) |
 | 2026-07-19 | [AGENTIC PASS — memory lane M1–M4 SHIPPED + subscription bench lanes (2026-07-19, same branch/PR #441).](2026-07-19-agentic-pass-memory-lane-m1-m4-shipped-subscription-bench-la.md) |
+| 2026-07-19 | [AUD-001 — root cause found: a `ReverseRenderJob` use-after-free, not the message-loop pumps](2026-07-19-aud-001-root-cause-reverserenderjob-uaf.md) |
 | 2026-07-18 | [AGENTIC PASS Phase A — audit closure + MoshAgentBench + baseline (2026-07-18, branch `claude/agentic-interaction-research-9e0e44`).](2026-07-18-agentic-pass-phase-a-audit-closure-moshagentbench-baseline-2.md) |
 | 2026-07-18 | [SLF-CONC-001 — `--selftest` made hermetic against a CONCURRENT selftest, and a GUI data-loss regression found on the way (2026-07-18)](2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md) |
 | 2026-07-18 | [AUD-001 — the intermittent `--selftest` crash: reproduced and diagnosed](2026-07-18-selftest-sigsegv-reproduction-and-diagnosis.md) |
 | 2026-07-18 | [METER-001 — v2 track/master level meters + a real coverage bug fixed (2026-07-18)](2026-07-18-meter-001-v2-track-master-level-meters-a-real-coverage-bug-f.md) |
 | 2026-07-18 | [Arrangement/editing throughput window — 18 PRs, #410–#427 (2026-07-18)](2026-07-18-arrangement-editing-throughput-window-18-prs-410-427.md) |
+| 2026-07-18 | [DAW-PARITY program — the parity claim is now enforced, not remembered (2026-07-18)](2026-07-18-daw-parity-program-parity-claim-enforced-p0-p8.md) |
 | 2026-07-17 | [Playtest-prep push — 8 PRs landed ahead of the remote two-Mac playtest (2026-07-17, #345–#350, #353, #354-pending)](2026-07-17-playtest-prep-push-8-prs-landed-ahead-of-the-remote-two-mac-.md) |
 | 2026-07-17 | [Ableton-style "easy warp" landed (2026-07-17)](2026-07-17-ableton-style-easy-warp-landed.md) |
 | 2026-07-16 | [Repo renamed `zeke431/Mosh` + checkout moved OUT of iCloud (2026-07-16)](2026-07-16-repo-renamed-zeke431-mosh-checkout-moved-out-of-icloud.md) |

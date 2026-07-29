@@ -2,13 +2,13 @@
 """Command-coverage ledger — the structural guarantee that "shipped but untested" cannot
 silently recur (DAW-parity program, P1).
 
-Extracts the FULL MoshOps dispatch list from src/moshops/MoshOps.cpp (the same regex
-technique ui/src/agent/commands.contract.test.ts already uses on the same file) and
+Extracts the FULL MoshOps dispatch list from src/moshops/MoshOps*.cpp (the same regex
+technique ui/src/agent/commands.contract.test.ts already uses on the same seam) and
 requires every command to appear, quoted, in at least one test surface:
 
   conformance  scripts/daw-conformance/conformance.py (state-level families)
   verify       scripts/verify-hardware/*.py           (rendered-audio checks)
-  selftest     src/app/SelfTest.cpp                   (hermetic native harness)
+  selftest     src/app/SelfTest*.cpp + src/app/selftest/*.cpp (hermetic native harness)
   e2e          ui/e2e/*.ts                            (UI reachability specs)
 
 A command exercised nowhere must carry a waiver in coverage_waivers.json:
@@ -28,20 +28,35 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SELF = Path(__file__).resolve().parent
-DISPATCH = REPO / "src" / "moshops" / "MoshOps.cpp"
 WAIVERS = SELF / "coverage_waivers.json"
+
+
+def _dispatch_sources():
+    """Glob-aware (wave0 guards-first): the dispatch seam may split into multiple
+    MoshOps*.cpp translation units. Sorted for determinism; today the glob
+    matches exactly one file (MoshOps.cpp), so output is identical."""
+    return sorted((REPO / "src" / "moshops").glob("MoshOps*.cpp"))
+
+
+def _selftest_sources():
+    """Same treatment for the selftest surface: SelfTest*.cpp plus an optional
+    src/app/selftest/ split directory (globbing a missing dir yields nothing)."""
+    return sorted(list((REPO / "src" / "app").glob("SelfTest*.cpp"))
+                  + list((REPO / "src" / "app" / "selftest").glob("*.cpp")))
+
 
 SURFACES = {
     "conformance": lambda: [SELF / "conformance.py"],
     "verify": lambda: sorted((REPO / "scripts" / "verify-hardware").glob("*.py")),
-    "selftest": lambda: [REPO / "src" / "app" / "SelfTest.cpp"],
+    "selftest": _selftest_sources,
     "e2e": lambda: sorted((REPO / "ui" / "e2e").glob("*.ts")),
 }
 
 
 def dispatch_commands():
     """Every command name the MoshOps dispatch chain answers to."""
-    text = DISPATCH.read_text(encoding="utf-8", errors="replace")
+    text = "\n".join(p.read_text(encoding="utf-8", errors="replace")
+                     for p in _dispatch_sources())
     return sorted(set(re.findall(r'if \(name == "([a-z_0-9]+)"', text)))
 
 

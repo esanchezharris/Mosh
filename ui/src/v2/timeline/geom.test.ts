@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { beatToSec, secToBeat, beatsPerBar, contentSeconds } from "./geom";
 import type { Snapshot } from "../../types";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readShellCss } from "../cssSource";
 
 // Minimal snapshot stub for the pure geometry helpers.
 const snap = (over: Partial<Snapshot["session"]> = {}, rest: Partial<Snapshot> = {}): Snapshot =>
@@ -58,7 +62,7 @@ describe("headW", () => {
       getPropertyValue: (p: string) => (p === "--v2-head-w" ? val : ""),
     } as unknown as CSSStyleDeclaration);
 
-  it("falls back to the shell.css value (200) when no .v2-shell is mounted", async () => {
+  it("falls back to the css token value (200) when no .v2-shell is mounted", async () => {
     const { headW } = await import("./geom");
     expect(headW()).toBe(200);
   });
@@ -85,5 +89,40 @@ describe("headW", () => {
     mount();
     mockToken("240px");
     expect(headW()).toBe(240);
+  });
+});
+
+// The CSS token and the JS fallback have to agree, and until now nothing checked that.
+// 00-tokens.css says --v2-head-w "MUST move in lockstep with HEAD_W_FALLBACK in
+// timeline/geom.ts" — but that was a comment, and a comment is a claim about the code
+// rather than a constraint on it. Drift here is genuinely nasty: headW() only falls back
+// when .v2-shell is not mounted yet, so a stale fallback shows up as a one-frame playhead
+// jump on load and as silently wrong geometry in every jsdom test, neither of which reads
+// as "someone changed a token".
+//
+// Parsed out of the source rather than exported, so geom.ts keeps its current public API
+// and the guard cannot be satisfied by editing a test-only accessor.
+describe("--v2-head-w and HEAD_W_FALLBACK stay in lockstep", () => {
+  const geomSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "geom.ts"), "utf8");
+  const shellCss = readShellCss();
+
+  it("parses both sides (otherwise the comparison below is vacuous)", () => {
+    expect(geomSrc.length, "geom.ts read as empty").toBeGreaterThan(500);
+    expect(shellCss.length, "stylesheet read as empty").toBeGreaterThan(60_000);
+  });
+
+  it("the fallback equals the token", () => {
+    const fallback = geomSrc.match(/const HEAD_W_FALLBACK\s*=\s*(\d+)/);
+    expect(fallback, "HEAD_W_FALLBACK not found in geom.ts — renamed?").toBeTruthy();
+
+    // the BASE .v2-shell block, not a theme override
+    const token = shellCss.match(/--v2-head-w:\s*(\d+)px/);
+    expect(token, "--v2-head-w not found in the stylesheet").toBeTruthy();
+
+    expect(
+      Number(fallback![1]),
+      "HEAD_W_FALLBACK has drifted from --v2-head-w. Both must move together, or the " +
+        "pre-mount render positions the playhead at the wrong origin.",
+    ).toBe(Number(token![1]));
   });
 });
