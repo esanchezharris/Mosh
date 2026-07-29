@@ -884,3 +884,25 @@ numbers and hashes only.
   both as a two-way choice instead of guessing. That is the
   progressive-disclosure doctrine applied to generation, and it is buildable
   from arms that already exist. NOT built; owner decision.
+- **2026-07-29 — The trained arm's keep-rate is UNMEASURED; its `acceptFit
+  1.000` is near-vacuous.** Scored the champions against the 86 owner accept
+  labels. Headline looks like a win (prompt-rhyme-menu-fp .750 @ 99% coverage
+  vs trained fim-v2-ckpt1000 **1.000 @ 49%**), and the Goodhart alarm reads
+  "ok" (+.02 exact, +.25 accept) — but the denominators are not comparable and
+  the alarm therefore cannot fire meaningfully. Decomposition:
+
+  | arm | judged by EXACT match | judged by OWNER label | unjudged |
+  |---|---|---|---|
+  | prompt-rhyme-menu-fp | 62 | **86** | 2 |
+  | trained fim-v2-ckpt1000 | 65 | **8** | **77** |
+
+  The accept pass was run over the PROMPT arm's outputs, so its labels cover
+  the prompt arm's words; the trained arm picks different words, which fall out
+  of the denominator. What remains is overwhelmingly its own exact matches,
+  which `accept_score` auto-scores 1 — i.e. "on the items it already got right,
+  it is right". Do NOT quote acceptFit 1.0 as a keep-rate result.
+  **Fix is queued, not guessed:** `sit --run
+  2026-07-29T17-45-31-local-constrained-endword-fp-dev` serves exactly the 77
+  unjudged trained-arm words (0 excluded by the norming sequencing rule).
+  Until that sitting happens, every claim in tonight's I4 work rests on
+  `exact`, which the program's own decision record calls a diagnostic.
