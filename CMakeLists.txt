@@ -153,6 +153,13 @@ if (MOSH_BUILD_APP)
         # (SelfTestCtx) + the self-contained non-runSelfTest CLI modes.
         src/app/selftest/SelfTestSupport.cpp
         src/app/selftest/SelfTest.Modes.cpp
+        # RFC 002 A-PR5 — runSelfTest chapters 1-5 (Stage 1 .. MON-003), moved
+        # verbatim by prefix-motion; runSelfTest calls them in sequence.
+        src/app/selftest/SelfTest.Ch01_commands_arrangement.cpp
+        src/app/selftest/SelfTest.Ch02_hosting_session_editing.cpp
+        src/app/selftest/SelfTest.Ch03_automation_plugins_master.cpp
+        src/app/selftest/SelfTest.Ch04_generative_layer.cpp
+        src/app/selftest/SelfTest.Ch05_export_drums_recording.cpp
         src/webview/WebBridge.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.

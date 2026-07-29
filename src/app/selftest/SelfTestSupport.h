@@ -9,8 +9,10 @@
 
 #include <juce_core/juce_core.h>
 
+#include <functional>
 #include <initializer_list>
 #include <utility>
+#include <vector>
 
 namespace mosh
 {
@@ -30,6 +32,26 @@ namespace selftest
         double activeSectionStartedMs = 0.0;
         int activeSectionStartChecks = 0;
         int activeSectionStartFailures = 0;
+
+        // ── A-PR5 (chapter motion) ────────────────────────────────────────────
+        // runSelfTest's own parameters. Every moved section uses `eng`/`ops`, and
+        // the RFC's chapter signature is runChapterNN(SelfTestCtx&) only — so the
+        // chapters rebind these in their preamble (auto& eng = *ctx.eng; ...),
+        // keeping the section bodies byte-verbatim. Set by runSelfTest before the
+        // first chapter call.
+        MoshEngine* eng = nullptr;
+        MoshOps* ops = nullptr;
+
+        // Cross-chapter locals, promoted EXACTLY as the compiler enumerated them
+        // at the A-PR5 cut points (each was a runSelfTest local declared in one
+        // chapter and read in a later chapter and/or the inline remainder; the
+        // declaring chapter assigns it, every later consumer rebinds a reference
+        // in its preamble so the section bodies stay byte-verbatim):
+        std::vector<juce::String> eventTypes;                      // Ch01 event sink -> Ch02, Ch05, remainder
+        juce::var lastEvent;                                       // Ch01 event sink -> remainder (scoped-invalidation payload)
+        std::function<bool (const juce::String&)> hadEvent;        // Ch01 -> Ch05
+        juce::String tid;                                          // Ch01 (Stage 2 track id) -> Ch02
+        std::function<juce::var (const juce::String&)> trackById;  // Ch02 -> Ch03, Ch04, Ch05, remainder
     };
 
     /** The process-wide harness state. Every TU's shims bind to this one instance,
