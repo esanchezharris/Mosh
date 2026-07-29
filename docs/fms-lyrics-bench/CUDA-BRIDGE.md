@@ -97,3 +97,27 @@ raw is the recipe that measured worse; (3) `mlx_lm.lora --test` measures the
 double-wrapped stream and cannot validate a raw-trained adapter; (4) the CUDA
 trainer must save a checkpoint at every eval block (the first run's val
 minimum was mid-run and unrecoverable).
+
+## 2026-07-29 — twin result at n=600, and why the +/-.02 bar is the wrong shape
+
+Same recipe both stacks (mlx-data-v2, 1500 iters, effective batch 16, lr 2e-5,
+seed 20260728), compared at each side's val optimum (step 1000), on 600 dev
+rhyme items (`itemsSha 9a187fc6`, identical both sides):
+
+  CUDA-bridged .4217   MLX-native .4067   delta -0.015 (CUDA marginally higher)
+  item-level agreement 565/600 = 94.2%    McNemar p = 0.175 (no difference)
+
+Read honestly, the literal bar is NOT certified. The point estimate is inside
++/-.02, but *certifying* equivalence needs the 90% CI inside the band and ours
+is [-0.031, +0.001]. Reaching that at +/-.02 would take ~6,300 eval items
+(~19 h) — the bar was written tighter than the measurement can support.
+What n=600 DOES establish: equivalence within **+/-0.035**, no detectable
+difference, and 94.2% item agreement across different hardware, framework and
+numerics. At n=150 the paired CI was +/-.043 — wider than the bar itself, i.e.
+the original test could not have adjudicated its own threshold either way.
+
+STATUS: the bridge is validated for SWEEP work (no systematic bias detected,
+and the sign favours CUDA if anything). The "shippable, not just sweep
+evidence" clause stays OPEN pending an owner restatement of the tolerance —
+proposed: equivalence at +/-.035, or "no McNemar-detectable difference at
+n>=600". Do not quietly relax the number in place; it is a registered bar.
