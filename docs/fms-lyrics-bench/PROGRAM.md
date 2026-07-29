@@ -978,3 +978,23 @@ numbers and hashes only.
   the scores. Knob now folds into `arm_config` when set (default byte-identical,
   RED-proved both ways with `MOSH_INFILL_CACHE_ONLY=1`); trap added to
   CLAUDE.md.
+- **2026-07-29 — Pool depth 200 is a MEASURED interior optimum, not a
+  convention.** Full sweep on the frozen 150 with fim-v2-ckpt1000 (witness
+  `poolSize` tracked depth on every run — 100/200/400/989 — and offMenu stayed
+  0 throughout):
+
+  | depth | exact | topk | recall@40 | truth absent | perfect (oracle .300) |
+  |---|---|---|---|---|---|
+  | 100 | .420 | .520 | .693 | .260 | .413 |
+  | **200** | **.433** | **.540** | **.800** | .093 | **.293** |
+  | 400 | .427 | .533 | .720 | .040 | .267 |
+  | 1000 | .413 | .507 | .633 | **.000** | .200 |
+
+  200 wins on FOUR independent axes simultaneously — exact, top-5, palette
+  recall@40, and rhyme-perfection calibration (shallower overshoots to
+  over-perfect .413, deeper undershoots to .200). The mechanism is legible:
+  depth monotonically FIXES pool membership (absent .260 -> .000) while
+  monotonically DEGRADING rankability, and the product peaks at 200. So the
+  incumbent cap — apparently picked by convention — is now empirically the
+  right number with the curve measured on both sides, and pool depth is closed
+  as a lever.
