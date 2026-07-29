@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -646,7 +647,16 @@ def _local_constrained_endword(item: dict, ctx: ArmContext, *,
     if ctx.local is None:
         return _unavailable_arm("no local backend configured")
 
-    pool = _rhyme_menu(item, ctx, max_n=200, rank=pool_rank)
+    # Pool depth is a SWEEP KNOB, default byte-identical to the historical 200.
+    # Measured 2026-07-29: all 14 frozen-150 items whose truth is outside the
+    # pool are there purely by truncation (full-list ranks 237..860) — none is
+    # syllable-filtered, stopword-filtered, or a non-rhyme. So the lexicon
+    # reaches the artist's word 100% of the time and the cap is the only thing
+    # hiding it. Deeper is NOT automatically better: it also widens what the
+    # decode may wander into, and the prompt-side knee sits at 40. Changing the
+    # depth changes poolSha, so a sweep re-keys the cache instead of replaying.
+    pool_max = int(os.environ.get("LYRICS_BENCH_POOL_MAX") or 200)
+    pool = _rhyme_menu(item, ctx, max_n=pool_max, rank=pool_rank)
     if not pool:
         return _unavailable_arm("no phonology-valid pool for this partner",
                                 status="no-pool")
