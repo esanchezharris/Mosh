@@ -787,3 +787,39 @@ test("the track-name column is wide enough to read a name", async ({ page }) => 
   // The full name stays recoverable even when the column does truncate it.
   await expect(page.locator(".v2-lname").first()).toHaveAttribute("title", "Serum Lead Stack");
 });
+
+// A <button> whose UA border is never reset renders `2px outset`, and `outset` is a 3D
+// bevel: the browser paints the top/left edges LIGHTENED and bottom/right darkened. On the
+// v2 shell's near-black panels that showed up as two stray white lines on the top and left
+// of the add-track row — and nowhere else, which is what made it read as a rendering glitch
+// rather than a style bug. Nothing in a designed UI ever wants a bevel border, so assert the
+// whole shell is free of them instead of pinning the one element that regressed.
+test("no element in the shell carries a UA bevel border", async ({ page }) => {
+  await bootV2(page);
+
+  const found = await page.evaluate(() => {
+    const BEVEL = new Set(["outset", "inset", "groove", "ridge"]);
+    const sides = ["Top", "Right", "Bottom", "Left"] as const;
+    const els = [...document.querySelectorAll(".v2-shell, .v2-shell *")];
+    const bad: { cls: string; testid: string | null; sides: string[] }[] = [];
+    for (const el of els) {
+      const cs = getComputedStyle(el);
+      const hit = sides.filter((s) => BEVEL.has(cs[`border${s}Style` as never] as string));
+      if (hit.length) {
+        bad.push({
+          cls: String((el as HTMLElement).className).slice(0, 60),
+          testid: el.getAttribute("data-testid"),
+          sides: hit.map((s) => s.toLowerCase()),
+        });
+      }
+    }
+    return { scanned: els.length, bad };
+  });
+
+  // Anti-vacuity: if the query matched nothing, "no bevels found" would be meaningless.
+  expect(found.scanned, "shell query matched nothing — this guard would pass on an empty page").toBeGreaterThan(120);
+  expect(
+    found.bad,
+    `bevel border(s) leaked from UA defaults: ${JSON.stringify(found.bad)}`,
+  ).toEqual([]);
+});

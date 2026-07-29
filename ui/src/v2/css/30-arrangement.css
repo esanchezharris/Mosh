@@ -212,6 +212,13 @@
   position: sticky; left: 0; z-index: 3;
   height: var(--v2-lane-h); display: flex; align-items: center; gap: 8px; padding: 0 12px;
   background: var(--v2-surface-2); border-right: 1px solid var(--v2-line); border-bottom: 1px solid var(--v2-line);
+  /* Zero the OTHER two sides explicitly. The add-track row is a <button>, and a button's UA default
+     border is `2px outset` — a 3D bevel that paints top/left LIGHT and bottom/right dark. Against
+     this near-black panel that surfaced as two stray white lines on exactly the top and left, and
+     nowhere else. The plain <div> headers never showed it because their UA default is `0 none`.
+     Zeroed here, on the class that owns the border model, rather than on the one row — otherwise it
+     comes back the next time a header renders as a button. */
+  border-top: 0; border-left: 0;
   cursor: pointer; transition: background 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
 }
 .v2-lhead:hover { background: rgba(255, 255, 255, 0.028); }
