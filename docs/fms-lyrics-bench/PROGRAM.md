@@ -906,3 +906,20 @@ numbers and hashes only.
   unjudged trained-arm words (0 excluded by the norming sequencing rule).
   Until that sitting happens, every claim in tonight's I4 work rests on
   `exact`, which the program's own decision record calls a diagnostic.
+- **2026-07-29 — Reranking is EXHAUSTED (third independent negative); the
+  bottleneck is RECALL, not ranking.** Reranked the champion's own recorded
+  top-5 on the frozen 150 using corpus frequency — free, no new inference:
+  as-generated .433, **freq-desc .300**, freq-with-generation-order tiebreak
+  .300, order+log-freq blend .433. Frequency reranking actively HURTS. The
+  position histogram says why: truth at rank 1 in 65 items, ranks 2-5 in only
+  16, **absent entirely in 69/150 (46%)**. When the truth is in the list at
+  all, generation order already ranks it first ~80% of the time — there is
+  almost nothing left for a reranker to win. That is now three independent
+  negatives from different directions (M6 pool rerank; the 2-way selector
+  probe; frequency rerank), which together retire "rank the candidates better"
+  as a lever.
+  **Reframe:** the freq-ranked POOL contains the truth 89.3% of the time but
+  the arm surfaces it in top-5 only 54% of the time — a ~35-point
+  pool-to-surface gap. The lever is recall (how many/which candidates reach the
+  surface), and since no scorer can order them, the disambiguator has to be the
+  USER. Running k=20 to measure where recall saturates.
