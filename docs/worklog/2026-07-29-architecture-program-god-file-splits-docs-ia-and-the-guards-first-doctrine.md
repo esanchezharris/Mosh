@@ -5,7 +5,7 @@ implement in isolated worktrees → hostile review → local gate → merge or r
 Method vocabulary is Ousterhout's (deep modules: small interfaces hiding large implementations);
 the go-forward decisions live in [`docs/rfc/`](../rfc/INDEX.md), which this program also created.
 
-## What landed on main (14 PRs)
+## What landed on main (13 PRs, plus this note)
 
 **Docs information architecture** — one obvious place per kind of truth. `docs/CURRENT_STATUS.md`
 is now the single rolling status doc (#492); `docs/PROGRESS.md` is retired with a pointer, and the
