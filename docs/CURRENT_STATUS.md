@@ -20,8 +20,10 @@ that matter and calls out what is current versus historical.
    companion boundary.
 2. `CLAUDE.md` is the run manifest: prime directives, stage gates, current build
    posture, and deferred work.
-3. `docs/PROGRESS.md` is the detailed chronological status log. It is the best
-   place to check the newest landed work and verification counts.
+3. `docs/worklog/INDEX.md` is the chronological ledger — the best place to check
+   the newest landed work and verification counts. `docs/PROGRESS.md` is retired
+   (2026-07-28): it holds the 2026-06-08 → 2026-07-17 milestone history and
+   takes no new entries.
 4. `docs/FEATURE_AUDIT.md` is the DAW-parity scoreboard, regenerated from a live
    conformance run (`scripts/daw-conformance/`) against the real command surface
    (134/152 in-scope eval rows pass). It supersedes the 2026-06-09 baseline audit,
