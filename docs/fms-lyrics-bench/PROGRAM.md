@@ -1083,3 +1083,40 @@ numbers and hashes only.
   .500. What would make a second proposer real is an end-word-FILL mode in the
   product (the bench's task shape), where agreement regains meaning. That is a
   different feature, not this one.
+- **2026-07-29 — RE-RANKED ON KEEP-RATE: the order INVERTS, but the clean version
+  of the test is confounded and still owed.** Owner ask: score the arms on
+  keep-rate instead of `exact` and see whether the ranking reorders. It does —
+  with two corrections to the metric on the way.
+  (a) **Raw `acceptFit` is unusable for ranking**: it ordered the arms almost
+  exactly by COVERAGE (llm-constrained .986 @ 47%, local-unconstrained .971 @
+  23%, vs prompt-rhyme-menu-fp .750 @ 99% and fim-v2-ckpt1000 .700 @ 100%).
+  Cause: `accept_score` auto-scores an exact match 1, and a sparsely-labelled
+  arm's denominator is mostly its own exact matches, so its keep-rate is
+  forced toward 1.0.
+  (b) The sharp instrument is **keep-rate GIVEN A MISS** — of the words an arm
+  got wrong, the fraction the owner would keep. `exact` is out of the
+  numerator entirely. Across the 13 arms with >=30 judged misses:
+  **Spearman(exact, keep|miss) = -0.407.** Trained adapters cluster at the
+  bottom (mean .490, range .426-.531); prompt-side and the NO-ADAPTER base arm
+  cluster at the top (mean .582, range .545-.633). The `exact` champion
+  (fim-v2-ckpt1000, .433) ranks **11th of 13** on taste (.471), and the base
+  arm at exact .253 beats every trained adapter on taste (.581) — i.e.
+  fine-tuning bought ~+.18 exact and appears to have cost ~-.11 taste.
+  Paired on the 66 items both arms missed and the owner judged:
+  prompt .636 vs trained .424, discordant 19/5, **McNemar p = 0.007** — the
+  first significant arm difference of the whole program, and it runs OPPOSITE
+  to exact. (Note the earlier unconditional test read p=.291: exact matches
+  auto-scoring 1 diluted the very effect the accept-set exists to catch.)
+  **THE CONFOUND, which blocks the causal claim:** arm identity is perfectly
+  confounded with sitting identity. The prompt arm's words were judged in
+  sitting 1 (86 labels, **57% accept**) and the trained arm's in sitting 2
+  (77 labels, **42% accept**). That 15-point session gap is essentially the
+  whole effect, so "the trained arm's words are less keepable" cannot be
+  separated from "the second sitting was harsher" (fatigue, anchoring on words
+  already seen, or just a different evening).
+  **The fix already exists in-repo:** `mixpairs.mint_mixed(..., arm_frac=)`
+  mints BLIND arm-vs-arm pairs. One interleaved sitting — both arms' words for
+  the same item, shuffled, arm hidden — converts a confounded p=.007 into a
+  clean measurement. Until that runs, treat the inversion as STRONGLY
+  SUGGESTIVE, not established; it is consistent with the Goodhart alarm but
+  not independent of it.
