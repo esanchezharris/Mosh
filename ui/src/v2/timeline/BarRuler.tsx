@@ -26,6 +26,7 @@ import { useShell } from "../shellState";
 import type { Snapshot } from "../../types";
 import { tempoMapFrom, snapTimeMap, gridLines, type TempoMap } from "../../time";
 import { contentSeconds } from "./geom";
+import { usePointerScrub } from "./usePointerScrub";
 
 const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).setPointerCapture(id); } catch { /* no-op */ } };
 const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
@@ -52,6 +53,13 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   // Anchor of an in-progress range drag (seconds, already bar-snapped). null between
   // gestures, and while a plain (non-shift) press is just seeking.
   const anchor = useRef<number | null>(null);
+  const scrub = usePointerScrub((position) => {
+    void exec("set_transport", { position });
+  });
+  const positionAt = (element: HTMLDivElement, clientX: number) => {
+    const rect = element.getBoundingClientRect();
+    return Math.max(0, (clientX - rect.left) / pxPerSec);
+  };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -63,20 +71,24 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
       capturePointer(e.currentTarget, e.pointerId);
       return;
     }
-    // Plain press: seek immediately, exactly like classic's onRulerDown — deciding at
-    // pointerdown means there is no click-vs-drag race to referee afterwards.
-    const sec = Math.max(0, (e.clientX - rect.left) / pxPerSec);
-    void exec("set_transport", { position: sec });
+    scrub.begin(e.currentTarget, e.pointerId, positionAt(e.currentTarget, e.clientX));
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (anchor.current == null || e.buttons === 0) return; // stray hover after a lost/cancelled capture
-    const rect = e.currentTarget.getBoundingClientRect();
-    const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
-    setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
+    if (anchor.current != null) {
+      if (e.buttons === 0) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
+      setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
+      return;
+    }
+    scrub.move(
+      e.pointerId,
+      positionAt(e.currentTarget, e.clientX),
+    );
   };
 
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+  const endRangeDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     if (anchor.current == null) return;
     anchor.current = null;
     setTimeRangeDragging(false);
@@ -86,13 +98,28 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
     const r = useShell.getState().timeRange;
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
   };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (anchor.current != null) {
+      endRangeDrag(e);
+      return;
+    }
+    scrub.end(e.currentTarget, e.pointerId, positionAt(e.currentTarget, e.clientX));
+  };
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (anchor.current != null) {
+      endRangeDrag(e);
+      return;
+    }
+    scrub.cancel(e.currentTarget, e.pointerId);
+  };
 
   return (
     <div
       className="v2-ruler" style={{ width }} data-testid="v2-ruler"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-      onPointerUp={endDrag} onPointerCancel={endDrag}
-      title="Click to seek — shift-drag to select a time range"
+      onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onPointerCancel}
+      title="Click or drag to scrub — shift-drag to select a time range"
     >
       {bars.map((b, i) => (
         <div key={b.label} className="v2-ruler-bar" style={{ left: b.sec * pxPerSec }}>
