@@ -6,6 +6,7 @@ vi.mock("./executor", () => ({ runAgentBatch: runAgentBatchMock }));
 import {
   DirectCapabilityRouteError,
   executeDirectSafeCapabilities,
+  isDirectSafeCall,
   prepareSupervisorCapabilities,
   recordCapabilityToolResult,
 } from "./capabilityRuntime";
@@ -46,5 +47,11 @@ describe("capability runtime", () => {
     await expect(executeDirectSafeCapabilities("edit", [{ command: "remove_track", args: { trackId: "7" } }]))
       .rejects.toBeInstanceOf(DirectCapabilityRouteError);
     expect(runAgentBatchMock).not.toHaveBeenCalledWith("edit", expect.anything(), expect.anything());
+  });
+
+  it("rejects recording and clip-loop arguments from the direct dispatcher", () => {
+    expect(isDirectSafeCall({ command: "set_transport", args: { action: "record" } })).toBe(false);
+    expect(isDirectSafeCall({ command: "set_clip_loop", args: { clipId: "7", enabled: true } })).toBe(false);
+    expect(isDirectSafeCall({ command: "set_transport", args: { action: "to_start" } })).toBe(true);
   });
 });

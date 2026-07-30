@@ -41,14 +41,16 @@ export type Capability = {
   readonly safety: CapabilitySafety;
 };
 
-/** Commands that can be sent directly only through the validated MoshOps executor.
- * `set_transport` covers play/stop/locate, and `set_clip_loop` covers loop toggles. */
-export const DIRECT_SAFE_COMMAND_IDS = [
-  "set_clip_loop",
+/** Always-present controls. Every item is argument-checked before direct execution. */
+export const DIRECT_CONTROL_COMMAND_IDS = [
   "set_transport",
   "set_metronome",
   "undo",
   "redo",
+] as const;
+
+/** Read-only capabilities are direct-safe but retrieved only when their vocabulary matches. */
+export const DIRECT_READ_ONLY_COMMAND_IDS = [
   "detect_clip_bpm",
   "list_takes",
   "list_track_outputs",
@@ -56,6 +58,11 @@ export const DIRECT_SAFE_COMMAND_IDS = [
   "list_plugins",
   "get_rhymes",
   "analyze_lyrics",
+] as const;
+
+export const DIRECT_SAFE_COMMAND_IDS = [
+  ...DIRECT_CONTROL_COMMAND_IDS,
+  ...DIRECT_READ_ONLY_COMMAND_IDS,
 ] as const;
 
 const DIRECT_SAFE_IDS = new Set<string>(DIRECT_SAFE_COMMAND_IDS);
@@ -133,9 +140,9 @@ function scoreCapability(queryTokens: ReadonlySet<string>, capability: Capabilit
 export function retrieveCapabilities(query: string, options: CapabilityRetrievalOptions = {}): readonly Capability[] {
   const limit = Math.max(DIRECT_SAFE_COMMAND_IDS.length, Math.floor(options.limit ?? DEFAULT_CAPABILITY_LIMIT));
   const queryTokens = new Set(tokens(query));
-  const direct = CAPABILITY_INDEX.filter((capability) => capability.safety === "direct-safe");
+  const direct = CAPABILITY_INDEX.filter((capability) => DIRECT_CONTROL_COMMAND_IDS.includes(capability.id as typeof DIRECT_CONTROL_COMMAND_IDS[number]));
   const matched = CAPABILITY_INDEX
-    .filter((capability) => capability.safety === "supervisor")
+    .filter((capability) => !DIRECT_CONTROL_COMMAND_IDS.includes(capability.id as typeof DIRECT_CONTROL_COMMAND_IDS[number]))
     .map((capability) => ({ capability, score: scoreCapability(queryTokens, capability) }))
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) => right.score - left.score || left.capability.id.localeCompare(right.capability.id));

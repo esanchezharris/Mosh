@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AGENT_COMMANDS, commandCatalogPrompt } from "./commands";
 import {
   CAPABILITY_INDEX,
-  DIRECT_SAFE_COMMAND_IDS,
+  DIRECT_CONTROL_COMMAND_IDS,
   capabilityCatalogPrompt,
   retrieveCapabilities,
   supervisorCapabilitySchemas,
@@ -15,11 +15,15 @@ describe("capability retrieval", () => {
     expect(CAPABILITY_INDEX.every((capability) => capability.inputSchema.type === "object")).toBe(true);
   });
 
-  it("always includes direct-safe commands and excludes unrelated unsafe commands", () => {
+  it("always includes only the named tiny control baseline", () => {
     const capabilities = retrieveCapabilities("turn on the metronome");
     const ids = new Set(capabilities.map((capability) => capability.id));
 
-    for (const id of DIRECT_SAFE_COMMAND_IDS) expect(ids.has(id)).toBe(true);
+    expect(DIRECT_CONTROL_COMMAND_IDS).toEqual(["set_transport", "set_metronome", "undo", "redo"]);
+    expect(ids).toEqual(new Set(DIRECT_CONTROL_COMMAND_IDS));
+    expect(ids.has("list_plugins")).toBe(false);
+    expect(ids.has("detect_clip_bpm")).toBe(false);
+    expect(ids.has("set_clip_loop")).toBe(false);
     expect(ids.has("remove_track")).toBe(false);
     expect(ids.has("render_layer")).toBe(false);
     expect(ids.has("build_skeleton_from_clip")).toBe(false);
@@ -30,8 +34,15 @@ describe("capability retrieval", () => {
     const second = retrieveCapabilities("make a drum pattern with kick and snare", { limit: 14 });
 
     expect(first).toEqual(second);
-    expect(first).toHaveLength(14);
+    expect(first.length).toBeLessThanOrEqual(14);
     expect(first.map((capability) => capability.id)).toContain("add_drum_pattern");
+  });
+
+  it("retrieves a representative read-only capability only for its matching query", () => {
+    const ids = new Set(retrieveCapabilities("list the available plugins").map((capability) => capability.id));
+
+    expect(ids.has("list_plugins")).toBe(true);
+    expect(ids.has("analyze_lyrics")).toBe(false);
   });
 
   it("renders a materially smaller supervisor catalog than the benchmark renderer", () => {

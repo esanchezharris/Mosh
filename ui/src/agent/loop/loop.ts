@@ -37,7 +37,7 @@ export const DEFAULT_LOOP_BUDGETS: LoopBudgets = {
   softWallMs: 180_000,
 };
 
-export type LoopOutcome = "done" | "need_user" | "budget" | "error" | "aborted";
+export type LoopOutcome = "done" | "need_user" | "budget" | "unavailable" | "error" | "aborted";
 
 export type LoopProgressEvent =
   | { kind: "phase"; phase: "planning" | "stepping" | "repairing" | "finalizing" }
@@ -106,6 +106,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
       return null;
     }
   };
+  const failedOutcome = (): LoopOutcome => error?.includes("brain unavailable") ? "unavailable" : "error";
 
   // ── PLANNING ────────────────────────────────────────────────────────────────
   progress({ kind: "phase", phase: "planning" });
@@ -114,7 +115,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
   // `lastStatus` drives the bare-commands incremental mode; a plan supersedes it.
   let lastStatus: LoopReply["status"] | "plan" = "done";
   let doneAfterStep = false;
-  if (!first) outcome = "error";
+  if (!first) outcome = failedOutcome();
   else {
     say = first.say ?? say;
     if (first.status === "need_user" || first.parseFailed) outcome = "need_user";
@@ -150,7 +151,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
       progress({ kind: "phase", phase: "repairing" });
       plannerCalls++;
       const r = await callModel("repair");
-      if (!r) { outcome = "error"; break; }
+      if (!r) { outcome = failedOutcome(); break; }
       say = r.say ?? say;
       if (r.status === "need_user") { outcome = "need_user"; break; }
       if (!r.commands?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
@@ -169,7 +170,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
         if (stepCalls >= b.maxStepCalls) { outcome = "budget"; break; }
         stepCalls++;
         const r = await callModel("compile", step.goal);
-        if (!r) { outcome = "error"; break; }
+        if (!r) { outcome = failedOutcome(); break; }
         say = r.say ?? say;
         if (r.status === "need_user") { outcome = "need_user"; break; }
         if (!r.commands?.length) { outcome = r.status === "done" ? "done" : "error"; break; }
@@ -183,7 +184,7 @@ export async function runAgentLoop(task: { ask: string }, deps: LoopDeps): Promi
       if (stepCalls >= b.maxStepCalls) { outcome = "budget"; break; }
       stepCalls++;
       const r = await callModel("continue");
-      if (!r) { outcome = "error"; break; }
+      if (!r) { outcome = failedOutcome(); break; }
       say = r.say ?? say;
       if (r.status === "need_user") { outcome = "need_user"; break; }
       if (!r.commands?.length) { outcome = "done"; break; } // "done" or nothing more to do

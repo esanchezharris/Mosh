@@ -5,16 +5,14 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useStore } from "../store";
-import { createBrain, type Brain } from "../agent/brain";
-import { runAgentBatch, logAgentTurn } from "../agent/executor";
+import { logAgentTurn, runAgentBatch } from "../agent/executor";
+import { AgentHostUnavailableError } from "../agent/agentHost";
+import { emitCapabilityTelemetry, executeDirectSafeCapabilities, isDirectSafeCall, recordCapabilityToolResult, requestCapabilitySupervisor } from "../agent/capabilityRuntime";
 import { matchFastPath } from "../agent/fastPath";
 import { handleFast } from "../agent/performer";
 import { writePreference } from "../agent/memory/writePreference";
-import { resolveSectionRework, planSectionRework } from "../agent/sectionScope";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
-import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
-import { routeAsk } from "../agent/loop/router";
 import { IconArrowUp, IconMic } from "./icons";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
@@ -47,10 +45,14 @@ function useHandsFree(onUnknown: (text: string) => void): { pauseForPushToTalk: 
       setBusy: (b) => useStore.getState().setAgentBusy(b),
       dispatch: async (action, heard) => {
         const s = useStore.getState();
+        if (action.kind === "commands" && !action.commands.every(isDirectSafeCall)) {
+          s.pushAgentUtter("UHOH", "that needs the agent host");
+          return;
+        }
         await handleFast(action, {
           // FS-B2a (H2) — the matched transcript IS threaded now, so a hands-free turn's
           // marker carries what was actually said instead of the action's own caption.
-          runBatch: async (label, cmds) => { s.setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: heard, source: "voice" })); },
+          runBatch: async (label, cmds) => { s.setAgentChangeSet(await executeDirectSafeCapabilities(label, cmds, { utterance: heard, source: "voice" })); },
           enterRecord: s.enterRecord, stopRecord: s.stopRecord, keepTake: s.keepTake, navTake: s.navTake,
           utter: (intent, say) => { s.pushAgentUtter(intent, say); },
           // AGT-MEM (M3) — same "remember" flow as the composer below, no local
@@ -121,9 +123,6 @@ export function AgentComposer() {
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
 
-  const brainRef = useRef<Brain | null>(null);
-  if (!brainRef.current) brainRef.current = createBrain(() => useStore.getState().snapshot);
-
   // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
   // acknowledgement so an always-on mic isn't a silent black box.
   const sayTimer = useRef<number | undefined>(undefined);
@@ -146,26 +145,6 @@ export function AgentComposer() {
     try {
       const st = useStore.getState();
 
-      // Section scope FIRST: "rework the hook" → a render bounded to that section's beat
-      // range. Deterministic (no LLM arithmetic). It runs BEFORE the fast path because a
-      // named-section rework like "redo the hook" would otherwise be stolen by the fast
-      // path's global "redo" (undo-history) rule. It claims a turn ONLY when the utterance
-      // is a rework verb that names an existing section, so bare "redo"/"undo" still fall
-      // through to the fast path untouched.
-      const rework = resolveSectionRework(text, st.snapshot);
-      if (rework) {
-        if (rework.kind === "empty") {
-          // FS-B2a (H3) — an ask we could not serve is a missing-skill signal; record it.
-          await logAgentTurn(rework.reason, { utterance: text, source: "section_scope" });
-          setSay(rework.reason); pushAgentUtter("HUH", rework.reason);
-          return;
-        }
-        const label = `rework the ${rework.section.name}`;
-        setAgentChangeSet(await runAgentBatch(label, planSectionRework(rework), { utterance: text, source: "section_scope" }));
-        setSay(`reworking the ${rework.section.name}`); pushAgentUtter("ACK_WORKING", `reworking the ${rework.section.name}`);
-        return;
-      }
-
       // Deterministic fast path: an unambiguous, state-valid phrase runs locally (no API).
       // Anything ambiguous returns null and falls through to the LLM brain.
       const fast = matchFastPath(text, {
@@ -174,9 +153,9 @@ export function AgentComposer() {
         timeSigNum: st.snapshot?.session?.timeSigNumerator ?? 4,
         tracks: (st.snapshot?.tracks ?? []).map((t) => ({ id: t.id, name: t.name, mute: t.mute, solo: t.solo })),
       });
-      if (fast) {
+      if (fast && (fast.kind !== "commands" || fast.commands.every(isDirectSafeCall))) {
         await handleFast(fast, {
-          runBatch: async (label, cmds) => { setAgentChangeSet(await runAgentBatch(label, cmds, { utterance: text, source: "fastpath" })); },
+          runBatch: async (label, cmds) => { setAgentChangeSet(await executeDirectSafeCapabilities(label, cmds, { utterance: text, source: "fastpath" })); },
           enterRecord: st.enterRecord, stopRecord: st.stopRecord, keepTake: st.keepTake, navTake: st.navTake,
           utter: (intent, say) => { setSay(say ?? null); pushAgentUtter(intent, say); },
           // AGT-MEM (M3) — writes explicit:true (a user, not the model, asked for
@@ -191,35 +170,38 @@ export function AgentComposer() {
         return;
       }
 
-      // The agentic loop (flag-gated, default OFF; gated off in multiplayer):
-      // the ROUTER sends multi-step-shaped asks — sequential clauses, creative
-      // builds, vague-taste work — into the loop (plan, act, observe, repair,
-      // ONE undo unit, live in the v2 drawer); short single-move asks stay on
-      // the cheap single-shot path below. Section-scope and the fast path keep
-      // their precedence above; hands-free still never reaches an LLM.
-      if (loopAllowed() && routeAsk(text) === "loop") {
-        await runLoopTask(text, {
-          say: (t) => setSay(t),
-          utter: (intent, s) => pushAgentUtter(intent, s),
-        });
-        return;
-      }
-
-      const reply = await brainRef.current!.send(text);
-      setSay(reply.say ?? null);
-      pushAgentUtter(reply.intent ?? "ACK_GOT_IT", reply.say);
-      if (reply.commands && reply.commands.length > 0) {
-        const cs = await runAgentBatch(reply.say || text, reply.commands, { utterance: text, source: "brain_chat" });
+      const snapshot = st.snapshot;
+      const supervised = await requestCapabilitySupervisor(text, {
+        playing: snapshot?.transport.playing,
+        recording: snapshot?.transport.recording,
+        metronomeEnabled: snapshot?.session.metronome,
+        tempo: snapshot?.session.tempo,
+        timelinePosition: snapshot?.transport.position,
+        loopStart: snapshot?.transport.loopStart,
+        loopEnd: snapshot?.transport.loopEnd,
+        timeSignature: snapshot ? `${snapshot.session.timeSigNumerator}/${snapshot.session.timeSigDenominator}` : undefined,
+      });
+      setSay(supervised.plan.say || null);
+      pushAgentUtter(supervised.plan.intent || "ACK_GOT_IT", supervised.plan.say);
+      if (supervised.calls.length > 0) {
+        const cs = await runAgentBatch(supervised.plan.say || text, supervised.calls, { utterance: text, source: "supervisor" });
         setAgentChangeSet(cs);
+        emitCapabilityTelemetry(recordCapabilityToolResult(supervised.telemetry, cs.entries.every((entry) => entry.ok), 0, supervised.telemetry.latencyMs));
       } else {
         // FS-B2a (H3) — the brain answered but planned nothing. Without this the ask
         // leaves no trace, and "what people asked for that we couldn't do" is exactly
         // what real-session skill mining needs most.
-        await logAgentTurn(reply.say || text, { utterance: text, source: "brain_chat" });
+        await logAgentTurn(supervised.plan.say || text, { utterance: text, source: "supervisor" });
+        emitCapabilityTelemetry(recordCapabilityToolResult(supervised.telemetry, true, 0, supervised.telemetry.latencyMs));
       }
-    } catch {
-      setSay("hmm — that broke");
-      pushAgentUtter("UHOH");
+    } catch (error) {
+      if (error instanceof AgentHostUnavailableError) {
+        setSay("brain unavailable");
+        pushAgentUtter("UHOH", "brain unavailable");
+      } else {
+        setSay("hmm — that broke");
+        pushAgentUtter("UHOH");
+      }
     } finally {
       setAgentBusy(false);
     }

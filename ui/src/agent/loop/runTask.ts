@@ -62,6 +62,7 @@ const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string 
   done: { intent: "DONE" },
   need_user: { intent: "HUH" },
   budget: { intent: "UHOH", fallback: "ran out of road — want me to keep going?" },
+  unavailable: { intent: "UHOH", fallback: "brain unavailable" },
   error: { intent: "UHOH", fallback: "hmm — that broke partway" },
   aborted: { intent: "IDLE_MURMUR", fallback: "stopped — kept what's done" },
 };
