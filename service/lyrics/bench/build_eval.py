@@ -78,6 +78,44 @@ def match_golden(songs: List[dict], spec: dict) -> Tuple[set, dict]:
     return golden, report
 
 
+# ── junk-text gate (owner catch, 2026-07-30) ────────────────────────────────────
+# Scraped lyric pages carry two failure modes the rhyme benchmark cannot survive:
+#   * TRANSCRIPTION HOLES — '???' where the transcriber could not hear the word.
+#     A masked item built beside one asks the model to rhyme with a hole.
+#   * NON-ENGLISH lyrics. The phonology engine is an English lexicon; a Turkish or
+#     Spanish bar yields OOV phones, a meaningless rhyme partner and an
+#     unguessable answer. Measured on the 26,097-song corpus: 102 songs (0.4%)
+#     with '???', 152 (0.6%) with heavy non-ASCII.
+# Both are QUARANTINED rather than dropped, so the count stays visible in the
+# split report instead of quietly shrinking the corpus.
+_QMARK_RUN = re.compile(r"\?{3,}")
+
+
+def _song_text(song: dict) -> str:
+    return "\n".join(l for sec in song.get("sections", []) or []
+                      for l in (sec.get("lines") or []))
+
+
+def is_junk_text(song: dict, *, non_ascii_max: float = 0.02) -> str:
+    """'' when the song is usable, else a short reason code.
+
+    `non_ascii_max` is a RATE, not a count: a long English song legitimately
+    carries a few accented names or curly quotes, while a Turkish lyric is
+    non-ASCII throughout. 2% over the whole song separates them without
+    punishing 'Beyoncé'.
+    """
+    text = _song_text(song)
+    # NO length rule here on purpose: short songs were never reported as a problem,
+    # and a speculative min-length quarantined every fixture in build_eval_test.
+    # Only the two DEFECTS the owner actually found are gated.
+    if _QMARK_RUN.search(text):
+        return "transcription-holes"
+    non_ascii = sum(1 for c in text if ord(c) > 127)
+    if non_ascii / max(1, len(text)) > non_ascii_max:
+        return "non-english"
+    return ""
+
+
 def assign_splits(songs: List[dict], golden_spec: dict, *, salt: str,
                   dev_frac: float = 0.1,
                   near_dup_threshold: float = NEAR_DUP_THRESHOLD) -> Tuple[Dict[str, str], dict]:
@@ -107,6 +145,7 @@ def assign_splits(songs: List[dict], golden_spec: dict, *, salt: str,
 
     splits: Dict[str, str] = {}
     quarantined: List[str] = []
+    junk: Dict[str, int] = {}
     for s in songs:
         sid = s["songId"]
         if sid in drops:
@@ -116,6 +155,12 @@ def assign_splits(songs: List[dict], golden_spec: dict, *, salt: str,
         elif dedup.containment(dedup.shingles(s), pool) >= near_dup_threshold:
             splits[sid] = "quarantined"
             quarantined.append(sid)
+        elif is_junk_text(s):
+            # '???' transcription holes and non-English lyrics — see is_junk_text.
+            # Quarantined (not dropped) so the reason stays countable in the report.
+            splits[sid] = "quarantined"
+            quarantined.append(sid)
+            junk[is_junk_text(s)] = junk.get(is_junk_text(s), 0) + 1
         elif _hash_frac(salt, sid) < dev_frac:
             splits[sid] = "dev"
         else:
@@ -124,7 +169,8 @@ def assign_splits(songs: List[dict], golden_spec: dict, *, salt: str,
     counts: Dict[str, int] = {}
     for sp in splits.values():
         counts[sp] = counts.get(sp, 0) + 1
-    report = {"quarantined": sorted(quarantined), "counts": counts, **unmatched}
+    report = {"quarantined": sorted(quarantined), "counts": counts,
+              "junkText": junk, **unmatched}
     return splits, report
 
 

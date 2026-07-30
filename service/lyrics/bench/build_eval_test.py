@@ -190,5 +190,28 @@ c_diff = dedup.containment(dedup.shingles(other), dedup.build_pool_index([g1]))
 check("dedup: remix containment high, unrelated containment low",
       c_same >= 0.5 > c_diff, f"remix={c_same:.2f} unrelated={c_diff:.2f}")
 
+
+# ---- junk-text gate (owner catch 2026-07-30) ----------------------------------------
+# Two DEFECTS only, both reported from real data: '???' transcription holes and
+# non-English lyrics. The fixture must carry each defect AND the near-miss it must not
+# catch, or the gate is vacuous — an English bar with accented names ('Beyoncé') has to
+# survive, which is why the non-ASCII test is a RATE and not a count.
+_en = "i keep the paper in the basket and i never had to ask it " * 6
+_song = lambda t: {"sections": [{"kind": "verse", "lines": t.split("\n")}]}
+check("junk: a clean English song passes",
+      build_eval.is_junk_text(_song(_en)) == "",
+      repr(build_eval.is_junk_text(_song(_en))))
+check("junk: '???' transcription holes are caught",
+      build_eval.is_junk_text(_song(_en + "\nand then ??? happened")) == "transcription-holes")
+check("junk: non-English lyrics are caught",
+      build_eval.is_junk_text(_song("çünkü gökyüzü çok güzel ve şarkı söylüyorum " * 8))
+      == "non-english")
+check("junk: NEAR-MISS — English with accented names survives (rate, not count)",
+      build_eval.is_junk_text(_song(_en + "\nBeyoncé and Café up in Zürich with Zoë")) == "",
+      repr(build_eval.is_junk_text(_song(_en + "\nBeyoncé and Café up in Zürich with Zoë"))))
+check("junk: NO length rule — a short clean song is not junk",
+      build_eval.is_junk_text(_song("two short lines here")) == "")
+
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
