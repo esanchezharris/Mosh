@@ -8,7 +8,11 @@ import {
   RepairJobSchema,
   type SupervisorPlan,
 } from "../src/contracts.js";
-import type { RealtimeSecretAdapter, SupervisorModelAdapter } from "../src/openai.js";
+import {
+  createHostedTraceRunner,
+  type RealtimeSecretAdapter,
+  type SupervisorModelAdapter,
+} from "../src/openai.js";
 import { FileAgentSession, PlaytestStore } from "../src/persistence.js";
 import { startAgentHost } from "../src/server.js";
 import { AgentHostService } from "../src/service.js";
@@ -93,6 +97,29 @@ const validPlan: SupervisorPlan = {
   needsClarification: false,
   selectedCapabilityIds: ["set_loop"],
 };
+
+class ConcurrentSessionSupervisor implements SupervisorModelAdapter {
+  active = 0;
+  maximumActive = 0;
+
+  async run(input: string, session: Session): Promise<unknown> {
+    this.active += 1;
+    this.maximumActive = Math.max(this.maximumActive, this.active);
+    const message = (JSON.parse(input) as { message: string }).message;
+    try {
+      await session.addItems([
+        { role: "user", content: message } as AgentInputItem,
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await session.addItems([
+        { role: "assistant", content: `reply:${message}` } as unknown as AgentInputItem,
+      ]);
+      return { ...validPlan, say: `reply:${message}` };
+    } finally {
+      this.active -= 1;
+    }
+  }
+}
 
 describe("local server security and health", () => {
   it("binds only to loopback, reports readiness, and rejects missing or wrong auth", async () => {
@@ -209,6 +236,13 @@ describe("contracts and persistence", () => {
 });
 
 describe("supervisor and OpenAI boundaries", () => {
+  it("constructs the real hosted-trace runner with sensitive payload capture disabled", () => {
+    const runner = createHostedTraceRunner();
+    expect(runner.config.tracingDisabled).toBe(false);
+    expect(runner.config.traceIncludeSensitiveData).toBe(false);
+    expect(runner.config.workflowName).toBe("mosh-owner-playtest-supervisor");
+  });
+
   it("keeps local report APIs usable while returning a typed OpenAI unavailable response", async () => {
     const host = await fixture();
     const playtest = await createPlaytest(host.origin);
@@ -247,20 +281,33 @@ describe("supervisor and OpenAI boundaries", () => {
     });
   });
 
-  it("supplies only scrubbed allowlisted context to hosted tracing/model input", async () => {
+  it("builds a typed allowlisted trace DTO that drops bypass-named artifacts", async () => {
     const supervisor = new FakeSupervisor(validPlan);
     const host = await fixture({ supervisor });
     const playtest = await createPlaytest(host.origin);
     const turn = validTurn(playtest.id);
+    turn.capabilitySchemas[0]!.inputSchema = {
+      type: "object",
+      properties: { start: { type: "number" } },
+      preview: "data:image/png;base64,c2NyZWVuc2hvdA==",
+    } as never;
     turn.stateDigest = {
       playing: false,
       apiKey: "sk-primary-should-never-trace",
       screenshotData: "binary-image",
+      preview: "data:image/png;base64,c2NyZWVuc2hvdA==",
+      payload: "RIFF raw audio bytes",
+      document: "private project content",
     } as never;
     turn.recentResults = [{
+      ok: true,
+      commandId: "set_loop",
       status: "ok",
       authorization: "Bearer launch-secret",
-      text: "token sk-example123456789",
+      message: "token sk-example123456789",
+      preview: "data:image/png;base64,c2NyZWVuc2hvdA==",
+      payload: "RIFF raw audio bytes",
+      document: "private project content",
     }] as never;
     expect((await post(host.origin, "/v1/supervisor/turns", turn)).status).toBe(200);
     const traced = supervisor.inputs[0]!;
@@ -268,9 +315,46 @@ describe("supervisor and OpenAI boundaries", () => {
     expect(traced).not.toContain("binary-image");
     expect(traced).not.toContain("launch-secret");
     expect(traced).not.toContain("sk-example123456789");
+    expect(traced).not.toContain("c2NyZWVuc2hvdA");
+    expect(traced).not.toContain("raw audio bytes");
+    expect(traced).not.toContain("private project content");
     expect(traced).toContain("[REDACTED]");
+    expect(JSON.parse(traced)).toMatchObject({
+      version: 1,
+      state: { playing: false },
+      recentResults: [{ ok: true, commandId: "set_loop", status: "ok" }],
+      allowedCapabilityIds: ["set_loop"],
+    });
     expect(supervisor.traces).toEqual([{ playtest_id: playtest.id }]);
     expect(supervisor.sessions).toEqual([playtest.id]);
+  });
+
+  it("serializes parallel turns so transcript and SDK-session updates are not lost", async () => {
+    const supervisor = new ConcurrentSessionSupervisor();
+    const host = await fixture({ supervisor });
+    const playtest = await createPlaytest(host.origin);
+    const first = validTurn(playtest.id);
+    first.message = "first turn";
+    const second = validTurn(playtest.id);
+    second.message = "second turn";
+
+    const responses = await Promise.all([
+      post(host.origin, "/v1/supervisor/turns", first),
+      post(host.origin, "/v1/supervisor/turns", second),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(supervisor.maximumActive).toBe(1);
+
+    const transcript = await host.service.store.loadTranscript(playtest.id) as Array<{ text: string }>;
+    expect(transcript).toHaveLength(4);
+    expect(transcript.map((entry) => entry.text).sort()).toEqual([
+      "first turn",
+      "reply:first turn",
+      "second turn",
+      "reply:second turn",
+    ].sort());
+    const sdkItems = await new FileAgentSession(host.service.store, playtest.id).getItems();
+    expect(sdkItems).toHaveLength(4);
   });
 
   it("returns only ephemeral client-secret fields from an injected adapter", async () => {
@@ -293,6 +377,20 @@ describe("supervisor and OpenAI boundaries", () => {
 });
 
 describe("event streaming", () => {
+  it("serializes parallel event appends with unique contiguous sequence numbers", async () => {
+    const host = await fixture();
+    const playtest = await createPlaytest(host.origin);
+    await Promise.all(Array.from({ length: 40 }, (_, index) =>
+      host.service.emit(playtest.id, "test.parallel", { index })
+    ));
+    const events = await host.service.store.loadEvents(playtest.id);
+    expect(events).toHaveLength(41);
+    expect(events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 41 }, (_, index) => index + 1),
+    );
+    expect(new Set(events.map((event) => event.sequence)).size).toBe(41);
+  });
+
   it("replays persisted SSE events after the supplied Last-Event-ID", async () => {
     const host = await fixture();
     const playtest = await createPlaytest(host.origin);

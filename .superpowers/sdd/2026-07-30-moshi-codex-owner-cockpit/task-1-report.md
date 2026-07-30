@@ -144,3 +144,80 @@ No blocking concerns. Per the task instruction, no live OpenAI call was made.
 The production Agents SDK and Realtime adapters are compile-checked against
 version `0.14.1` and exercised through injected fakes; credentialed hosted trace
 delivery and Realtime minting remain intentionally outside this Task 1 run.
+
+## Fix Round 1: Important Review Findings
+
+### Findings resolved
+
+1. Hosted tracing still uses the SDK trace exporter, but its production
+   `Runner` now sets `traceIncludeSensitiveData: false`. The configuration is
+   created through an exported factory so the real construction seam is
+   directly testable without an OpenAI request.
+2. The prior arbitrary-JSON blacklist was removed. Supervisor model/trace input
+   is now a typed `SupervisorTraceDto` assembled from explicit allowlists:
+   bounded text conversation fields, known state digest fields, known MoshOps
+   result-envelope fields, and recognized JSON Schema keywords. Unknown values
+   are omitted regardless of their key name. Credential-shaped text in allowed
+   strings remains redacted.
+3. `AgentHostService` now maintains a keyed serial mutation queue per playtest.
+   Supervisor transcript and SDK-session updates, record/event mutations, and
+   public event appends for the same playtest cannot interleave. Internal
+   lifecycle methods use an unlocked event helper while already holding the
+   playtest queue, avoiding nested-lock deadlock.
+
+### Files amended
+
+- `service/agent-host/src/openai.ts`
+- `service/agent-host/src/service.ts`
+- `service/agent-host/test/agent-host.test.ts`
+- `.superpowers/sdd/2026-07-30-moshi-codex-owner-cockpit/task-1-report.md`
+
+### Covering tests
+
+Amended test file: `service/agent-host/test/agent-host.test.ts`
+
+- `constructs the real hosted-trace runner with sensitive payload capture disabled`
+  checks the actual production `Runner.config` values.
+- `builds a typed allowlisted trace DTO that drops bypass-named artifacts`
+  proves a base64 screenshot under `preview`, raw audio under `payload`, and
+  project content under `document` are absent from the adapter input while
+  allowlisted state and result fields remain.
+- `serializes parallel turns so transcript and SDK-session updates are not lost`
+  issues concurrent HTTP turns, observes adapter concurrency of exactly one,
+  and verifies four durable transcript entries plus four SDK-session items.
+- `serializes parallel event appends with unique contiguous sequence numbers`
+  appends 40 events concurrently and verifies 41 total persisted events
+  including creation, with unique contiguous sequences 1 through 41.
+
+### Exact verification commands and outcomes
+
+- `npm run build`
+  - Exit 0; strict TypeScript compile produced no diagnostics.
+- `npx vitest run -t 'hosted-trace|typed allowlisted'`
+  - Exit 0; 2 passed, 12 skipped, 0 failed.
+- `npx vitest run -t 'serializes parallel'`
+  - Exit 0; 2 passed, 12 skipped, 0 failed.
+- `npm test`
+  - Exit 0; 1 test file passed, 14 tests passed, 0 failed.
+- `npm run test:startup`
+  - Exit 0; `127.0.0.1`, dynamic port, health 200, unauthenticated 401,
+    authenticated 201, and no OpenAI configuration or calls.
+
+Pre-commit command transcript:
+`/Users/emiliosanchez-harris/Mosh/.omo/evidence/task-1-agent-host/fix-round-1-precommit.log`
+
+### Fix self-review
+
+- Confirmed `traceIncludeSensitiveData` has no remaining `true` assignment.
+- Confirmed the arbitrary-key blacklist and recursive passthrough scrubber were
+  removed.
+- Confirmed all existing same-playtest event writes route through the keyed
+  queue exactly once.
+- Confirmed the change does not address deferred Minor findings or touch
+  UI/native/Codex integration files.
+
+### Fix concerns
+
+No blocking concerns. Serialization is intentionally process-local because the
+owner host is a single local process; running two hosts against the same data
+directory is outside the supported launch contract.
