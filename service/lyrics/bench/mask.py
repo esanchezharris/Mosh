@@ -20,7 +20,10 @@ from typing import Dict, List, Optional
 # end. v1 minted 32.2% such items on the real dev split, so a third of the
 # rhyme benchmark was function-word completion rather than rhyme craft.
 # The version is part of every itemId, so v1 runs can never mix with v2 items.
-POLICY_VERSION = "v2"
+POLICY_VERSION = "v3"   # v3 = the ad-lib wall (parenthesised targets and
+                        # partners refused). Bumping this re-keys every itemId
+                        # BY DESIGN, so v2 runs can never silently mix with v3
+                        # items — the frozen slice and every arm re-baseline.
 
 _WORD_RE = re.compile(r"[A-Za-z']+")
 _BLANK = "____"

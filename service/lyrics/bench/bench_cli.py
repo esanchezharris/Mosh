@@ -45,7 +45,7 @@ API_ARMS = ("llm-zeroshot", "llm-constrained", "prompt-rhyme-menu",
              "prompt-rhyme-menu-fp100", "prompt-rhyme-menu-fp24",
              "local-rerank-fp40",   # dual-wired: cached-chat replay + local scorer
              "xenc-rerank-fp40",    # cached-chat replay + torch cross-encoder
-             "nbest-rerank", "fusion-rerank")
+             "nbest-rerank", "fusion-rerank", "prompt-device-fp")
 
 # Arms that run on LOCAL weights. Deliberately NOT in API_ARMS: they cost no
 # money, so the budget guard must not fire on them. The guard they need instead

@@ -53,6 +53,8 @@ _ARM_BEHAVIOUR_VERSIONS = {
     # the same commit that changes the arm, or the sweep silently re-serves the
     # previous behaviour.
     "oracle": "v1", "freq-floor": "v1", "llm-zeroshot": "v1",
+    # DEVICE-1 — device-first reasoning over the 40-word palette.
+    "prompt-device-fp": "v1",
     "llm-constrained": "v1", "product-llm": "v2",
     "rhyme-floor": "v2", "prompt-rhyme-menu": "v1", "nbest-rerank": "v1",
     "fusion-rerank": "v2",

@@ -576,5 +576,63 @@ for name in ("rhyme-floor", "prompt-rhyme-menu", "nbest-rerank",
           name in arms.ARMS and arms.ARM_VERSIONS.get(name),
           str(arms.ARM_VERSIONS.get(name)))
 
+
+# ── DEVICE-1: the device-reasoning arm ──────────────────────────────────────────
+# The arm asks for a communicative MOVE before the fills. What has to hold:
+#   * the device instruction actually reaches the model (else it is
+#     prompt-rhyme-menu-fp wearing a new name and the comparison is a lie);
+#   * the 40-word palette still ships, so the pair isolates REASONING only;
+#   * device/why land in meta as telemetry, never as scored fields;
+#   * a reply with NO device still yields its fills — the reasoning is a prompt
+#     device, not a parsing requirement;
+#   * the held-out answer never appears in the prompt (blindness).
+_dev_seen = {}
+
+
+def _dev_spy(messages, **kw):
+    _dev_seen["messages"] = messages
+    _dev_seen["kw"] = kw
+    return {"ok": True, "provider": "spy", "model": "spy-1",
+            "content": '{"device":"pun","why":"plays on rain/pain","fills":["main","vain","chain"]}'}
+
+
+_dev_res = arms.ARMS["prompt-device-fp"](RHYME_ITEM, ctx(chat=_dev_spy))
+_dev_sys = _dev_seen["messages"][0]["content"].lower()
+_dev_user = _dev_seen["messages"][1]["content"]
+check("device: the DEVICE instruction reaches the model",
+      "device" in _dev_sys and "pun" in _dev_sys and "punchline" in _dev_sys,
+      _dev_sys[:90])
+check("device: the rhyme palette still ships (isolates reasoning, not the menu)",
+      "genuinely rhyme here" in _dev_user, _dev_user[-120:])
+check("device: fills are parsed and capped like every other arm",
+      [c["text"] for c in _dev_res["candidates"]] == ["main", "vain", "chain"],
+      str([c["text"] for c in _dev_res["candidates"]]))
+check("device: device+why recorded in meta as telemetry",
+      _dev_res["meta"]["device"] == "pun"
+      and "rain/pain" in (_dev_res["meta"]["why"] or ""), str(_dev_res["meta"])[:140])
+# Blindness here is NOT "the answer never appears" — the palette is built from the
+# PARTNER and is allowed to contain the true word (finding it is the skill). The real
+# property is that the prompt cannot MOVE when the hidden answer moves.
+import copy as _copy  # noqa: E402
+_other = _copy.deepcopy(RHYME_ITEM)
+_other["target"]["text"] = "chain"          # a different true answer, same partner
+arms.ARMS["prompt-device-fp"](_other, ctx(chat=_dev_spy))
+_dev_user_other = _dev_seen["messages"][1]["content"]
+check("device: BLINDNESS — the prompt is byte-identical when the ANSWER changes",
+      _dev_user_other == _dev_user,
+      f"differs by {sum(1 for a, b in zip(_dev_user, _dev_user_other) if a != b)} chars")
+
+
+def _dev_spy_nodevice(messages, **kw):
+    return {"ok": True, "provider": "spy", "model": "spy-1",
+            "content": '{"fills":["main","vain"]}'}
+
+
+_nd = arms.ARMS["prompt-device-fp"](RHYME_ITEM, ctx(chat=_dev_spy_nodevice))
+check("device: a reply with NO device still yields its fills",
+      [c["text"] for c in _nd["candidates"]] == ["main", "vain"]
+      and _nd["meta"]["device"] is None, str(_nd["meta"])[:120])
+
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)

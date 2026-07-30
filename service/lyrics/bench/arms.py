@@ -386,6 +386,92 @@ def arm_prompt_rhyme_menu_fp100(item: dict, ctx: ArmContext) -> dict:
     return _prompt_rhyme_menu(item, ctx, rank="freq", menu_n=100, show_n=100)
 
 
+# ── DEVICE-1: reason about the bar's MOVE, then write it ─────────────────────────
+# The evidence-backed lever, and the first arm that is not a search over rhymes.
+# Three independent results say the missing ingredient is the DEVICE, not recall or
+# ranking:
+#   * the ORACLE measurement — the artist's own end words are only 30% formally
+#     perfect rhymes, so human bars land for reasons other than rhyme quality, which
+#     is the one thing every previous arm optimises;
+#   * M6's pointwise rerankers AND the 2-way logprob selector both sit at chance —
+#     likelihood does not encode "what makes this bar work";
+#   * the blind sitting — when the model misses the artist's word only ~1/3 of its
+#     fills are keepable, i.e. the misses are semantically EMPTY, not mispronounced.
+# So this arm makes the model commit to a communicative move first (pun, reference,
+# slang idiom, punchline, image, callback, flex) and only then write fills that land
+# that move on a rhyming end word. The palette stays at the measured-best 40 so the
+# ONLY variable against `prompt-rhyme-menu-fp` is the reasoning step.
+#
+# PRE-REGISTERED EXPECTATION (2026-07-30, before running): `exact` is NOT expected to
+# rise and may fall — naming a device pushes the model toward its own best line rather
+# than the artist's specific token, and this program has now measured twice that exact
+# and keep-rate can move in opposite directions. The target is KEEP-RATE (owner ear).
+# A rise in exact would be a bonus; a fall with keep-rate up is still a win. Judge it
+# on the blind sitting, not on this row.
+_DEVICE_SYSTEM = (
+    "You are a skilled rap lyricist finishing someone else's bar. "
+    "Work in two steps. FIRST decide what this bar is DOING — its move. "
+    "Pick one: pun (double meaning), reference (person/place/brand/song), "
+    "slang (an idiom a native speaker would actually say), punchline (the joke "
+    "lands on the last word), image (one concrete picture), callback (echoes an "
+    "earlier line), flex (a boast that earns the rhyme), or other. "
+    "THEN write fills that make that move land ON the rhyming end word — the "
+    "rhyme should be the payoff, not the goal. "
+    "Reply ONLY with JSON: {\"device\": \"...\", \"why\": \"one short line\", "
+    "\"fills\": [\"...\", ...]} — up to %d fills, best first. "
+    "Authentic register: slang and explicit language are fine. "
+    "A fill that merely rhymes but says nothing is a FAILURE."
+)
+
+
+def _parse_device(resp: dict) -> tuple:
+    """(device, why) from the response — TELEMETRY, never a scored field.
+
+    Recorded so the analysis can ask which moves the owner actually keeps, which
+    is the question this arm exists to open. A missing device is not an error:
+    the fills stand on their own and are scored the same way as every other arm's.
+    """
+    if not resp.get("ok"):
+        return None, None
+    content = resp.get("content") or ""
+    m = re.search(r"\{.*\}", content, re.S)
+    for text in (content, m.group(0) if m else None):
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except Exception:  # noqa: BLE001 — try the salvaged object next
+            continue
+        if isinstance(data, dict):
+            d, w = data.get("device"), data.get("why")
+            return ((str(d).strip().lower()[:32] if d else None),
+                    (str(w).strip()[:200] if w else None))
+    return None, None
+
+
+@register("prompt-device-fp", "v1")
+def arm_prompt_device_fp(item: dict, ctx: ArmContext) -> dict:
+    """Device-first reasoning over the measured-best 40-word palette.
+
+    Same context block, same constraint block, same palette as
+    `prompt-rhyme-menu-fp` — the reasoning step is the only difference, so the
+    pair isolates it.
+    """
+    menu = _rhyme_menu(item, ctx, max_n=40, rank="freq")
+    prompt = _context_block(item) + "\n" + _constraint_block(item)
+    if menu:
+        ordered = sorted(menu, key=lambda w: (-ctx.freq.get(w, 0), w))[:40]
+        prompt += ("\nWords that genuinely rhyme here (you may use one, or any "
+                   "other word that rhymes as well): " + ", ".join(ordered))
+    messages = [{"role": "system", "content": _DEVICE_SYSTEM % ctx.k},
+                {"role": "user", "content": prompt}]
+    resp = ctx.cached_chat(messages, max_tokens=400, temperature=0.9)
+    device, why = _parse_device(resp)
+    return {"candidates": _dedupe_cap(_parse_fills(resp), ctx.k),
+            "meta": {"provider": resp.get("provider"), "model": resp.get("model"),
+                     "menu": menu, "device": device, "why": why}}
+
+
 @register("prompt-rhyme-menu-fp200", "v1")
 def arm_prompt_rhyme_menu_fp200(item: dict, ctx: ArmContext) -> dict:
     """The coverage play: the full 200-word freq pool in the prompt — the same
