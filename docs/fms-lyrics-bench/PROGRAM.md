@@ -1170,3 +1170,40 @@ numbers and hashes only.
   exact-regression with an untested taste hypothesis — not a win, not yet dead.
   Next probe if taste does not save it: a slang-ONLY device menu, which is the
   one condition the data supports.
+- **2026-07-30 — DEVICE-1 v1 VERDICT WITHDRAWN: it measured my prompt's format,
+  not the hypothesis. v2 reverses the sign.** Owner spotted it in the sitting
+  within seconds — a bar rendered as "Label don't know i got my gun while we at
+  the Label don't know i got my gun while we at the movies", i.e. a whole-clause
+  fill substituted into the gap. v1's system prompt ("write fills that make that
+  move land ON the rhyming end word") read as *write the line*: the arm answered
+  with multi-word clauses on **17%** of items vs the control's 5%, and a clause
+  can never equal a one-word truth. Fixed in the PROMPT only (a post-filter on
+  the treatment's fills would hand it a cleanup the control never gets); arm
+  version bumped v1->v2 so no cached v1 answer can replay; gap-only contract
+  pinned by a test.
+
+  | | exact | topk | multi-word fills |
+  |---|---|---|---|
+  | control prompt-rhyme-menu-fp | .413 | **.520** | 5% |
+  | **prompt-device-fp v2** | **.460** | .467 | **2%** |
+  | prompt-device-fp v1 (VOID) | .327 | .487 | 17% |
+
+  Paired: device-only-right 19, control-only-right 12, **McNemar p = .281 — NOT
+  significant**, so .460 is the board's best exact but not a claim. oracle-of-2
+  .540. Real signature worth keeping: the device arm is better at RANK 1 and
+  worse at rank 5 (.460/.467 vs .413/.520) — committing to a move makes it
+  decisive, sharpening the top pick while weakening its alternatives.
+  **Also retracted: the "only slang helps, cleverness hurts" story.** That was
+  the format bug penalising exactly the devices that produce longer fills. On
+  v2 every device is neutral-to-positive (pun +.000, slang +.045, image +.167
+  on n=18 = noise, flex +.067, punchline +.000). No reliable per-device pattern
+  survives.
+  **Process lesson, recorded because it nearly stuck:** exact FELL and my
+  pre-registration had named a fall as expected — so a defect wore the costume
+  of a finding. A pre-registration protects against dismissing an inconvenient
+  result; it does not license skipping the output-shape check. I also never read
+  the arm's raw fills before reporting, in a project whose own rule is that every
+  real bug here was caught by a human reading actual output. Every sweep now
+  carries a FORMAT WITNESS (multi-word-fill rate) next to its score.
+  Clean 47-pair sitting re-minted and served (over-long fills filtered for BOTH
+  arms, blindness audited: no leaks).
