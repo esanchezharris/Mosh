@@ -77,12 +77,14 @@ export function createTaskExecutor(label: string, meta: TaskMeta = {}, deps: Tas
 
   async function ensureOpen(): Promise<void> {
     if (opened) return;
-    const args = {
+    // FS-B2a (H2) — `utterance` is omitted when no real transcript reached us, never
+    // faked from `label` (which is Moshi's own text). See executor.ts's turnMarkerArgs.
+    const args: Record<string, unknown> = {
       name: label,
       turn_id: newTurnId(),
-      utterance: meta.utterance ?? label,
       source: meta.source ?? "agent_loop",
     };
+    if (meta.utterance) args.utterance = meta.utterance;
     let begin = await exec("batch_begin", args);
     if (!begin.ok && /already open/i.test(begin.error ?? "")) {
       await exec("batch_end", {}); // heal the zombie, then retry once

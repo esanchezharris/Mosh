@@ -1,0 +1,258 @@
+/* ── Finish-My-Song · L1 flow visualizer (precise phonology read) ─────────────────
+   The dictionary stress contour as per-word dots (● stressed · unstressed), the precise
+   syllable count vs target, and the rhyme grade vs the group anchor. Sits under each
+   line's editor; distinct from the live local meter (an instant estimate). */
+.v2-flow-viz {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0 1px;
+  padding-left: 2px;
+  font-size: var(--v2-fs-sm);
+  color: var(--v2-dim);
+}
+.v2-flow-stress { display: inline-flex; gap: 7px; align-items: center; }
+.v2-flow-word { display: inline-flex; gap: 1px; }
+.v2-flow-word[data-in-dict="false"] { opacity: 0.55; } /* heuristic estimate, not the dict */
+.v2-flow-dot { color: var(--v2-faint); line-height: 1; font-size: var(--v2-fs-2xs); }
+.v2-flow-dot.on { color: var(--v2-accent); } /* a stressed syllable */
+.v2-flow-empty { color: var(--v2-faint); }
+.v2-flow-syl { font-variant-numeric: tabular-nums; color: var(--v2-dim); }
+.v2-flow-syl.ok { color: var(--v2-accent); }
+.v2-flow-syl.off { color: var(--v2-rec); }
+.v2-flow-rhyme {
+  padding: 1px 6px;
+  border-radius: var(--v2-radius-pill);
+  border: 1px solid var(--v2-line);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.02em;
+}
+.v2-flow-rhyme.st-perfect { color: var(--v2-accent); border-color: var(--v2-accent-soft); }
+.v2-flow-rhyme.st-slant   { color: var(--status-warn); }
+.v2-flow-rhyme.st-anchor  { color: var(--v2-text); }
+.v2-flow-rhyme.st-none    { color: var(--v2-rec); border-color: color-mix(in srgb, var(--status-danger) 40%, transparent); }
+.v2-flow-rhyme.st-free    { color: var(--v2-faint); }
+
+/* §7 style-RAG opt-in — "Sound like me": bias generation toward the artist's own voice. */
+.v2-lyric-stylebias {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: var(--v2-fs-sm);
+  color: var(--v2-dim);
+  cursor: pointer;
+}
+.v2-lyric-stylebias input { accent-color: var(--v2-accent); }
+.v2-lyric-corpus {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--v2-radius-pill);
+  background: var(--v2-accent-soft);
+  color: var(--v2-accent);
+  font-size: var(--v2-fs-xs);
+  letter-spacing: 0.02em;
+}
+
+/* §7/§9 — the inline ghost: a greyed next-bar suggestion, Tab to accept / Esc to dismiss. */
+.v2-lyric-ghost-line { opacity: 0.92; }
+.v2-lyric-ghost-text {
+  flex: 1 1 auto; min-width: 0;
+  font-style: italic;
+  color: var(--v2-faint);
+  background: transparent;
+  border: 1px dashed var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+}
+.v2-lyric-ghost-text:focus { outline: none; border-color: var(--v2-accent-soft); color: var(--v2-dim); }
+.v2-lyric-ghost-hint { font-size: var(--v2-fs-xs); color: var(--v2-faint); letter-spacing: 0.02em; white-space: nowrap; }
+
+/* Roadmap §2 — the mumble->skeleton grid editor: confirm the syllable grid from a hummed take. */
+.v2-skel-confirm {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  margin: 4px 0 6px; padding: 6px 8px;
+  border: 1px dashed var(--v2-accent-soft); border-radius: var(--v2-radius-sm);
+  background: var(--v2-accent-soft); color: var(--v2-dim); font-size: var(--v2-fs-sm);
+}
+.v2-skel-grid { display: inline-flex; gap: 3px; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.v2-skel-pip { color: var(--v2-accent); font-size: var(--v2-fs-2xs); line-height: 1; }
+.v2-skel-count { font-variant-numeric: tabular-nums; color: var(--v2-dim); font-size: var(--v2-fs-sm); white-space: nowrap; }
+
+/* ── agent drawer (Phase B4) — docks above the composer; progressive disclosure ──
+   Token-routed colors only, so the cream/[data-theme] override pair styles both
+   themes (the flat-black-overlay lesson: never hardcode a panel color). */
+.v2-composer-stack { justify-self: center; width: min(860px, 100%); display: flex; flex-direction: column; gap: 8px; }
+.v2-composer-stack .v2-composer { justify-self: auto; width: 100%; }
+.v2-agent-drawer {
+  border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
+  background: var(--v2-surface); box-shadow: var(--v2-glow);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  animation: v2AgentDrawerIn 160ms ease-out;
+}
+@keyframes v2AgentDrawerIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.v2-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v2-agent-head-title { font-size: 12px; font-weight: 600; color: var(--v2-text); }
+.v2-agent-drawer.live .v2-agent-head-title { color: var(--v2-accent); }
+.v2-agent-head-actions { display: flex; gap: 6px; }
+.v2-agent-btn {
+  font-size: var(--v2-fs-sm); padding: 3px 10px; border-radius: var(--v2-radius-md); cursor: pointer;
+  background: var(--v2-surface-sunken); color: var(--v2-text); border: 1px solid var(--v2-line);
+}
+.v2-agent-btn:hover { border-color: var(--v2-accent); background: var(--v2-accent-soft); }
+.v2-agent-btn.stop { color: var(--v2-accent); border-color: var(--v2-accent); }
+.v2-agent-turn-ask { font-size: var(--v2-fs-sm); color: var(--v2-text-dim, var(--v2-text)); opacity: 0.75; }
+.v2-agent-plan { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: var(--v2-fs-sm); color: var(--v2-text); opacity: 0.85; }
+.v2-agent-plan-step.done { opacity: 0.45; text-decoration: line-through; }
+.v2-agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-agent-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  font-size: var(--v2-fs-sm); padding: 3px 9px; border-radius: var(--v2-radius-pill);
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); color: var(--v2-text);
+}
+.v2-agent-chip .v2-agent-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v2-agent-chip.ok .v2-agent-chip-state { color: var(--v2-accent); }
+.v2-agent-chip.error { border-color: color-mix(in srgb, #d33 55%, var(--v2-line)); }
+.v2-agent-chip.error .v2-agent-chip-state { color: #d33; }
+.v2-agent-spin {
+  width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  border: 1.5px solid var(--v2-line); border-top-color: var(--v2-accent);
+  animation: v2AgentSpin 700ms linear infinite;
+}
+@keyframes v2AgentSpin { to { transform: rotate(360deg); } }
+.v2-agent-say { font-size: 12px; color: var(--v2-text); font-style: italic; }
+.v2-composer-face-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; place-items: center; border-radius: 50%; }
+.v2-composer-face-btn:hover { outline: 2px solid var(--v2-accent-soft); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ACCENT RESERVATION — the agentic set.
+
+   These are the ONLY selectors in the shell allowed to reach the lime. Everything
+   else paints --v2-accent, which resolves to the near-white neutral (00-tokens.css).
+   Mirrored, with reasons, by AGENTIC_SELECTORS in ui/src/v2/accentReservation.test.ts;
+   the guard fails if any other rule re-points the accent at the agentic family.
+
+   Each entry is a CONTAINER, so descendants inherit — scope, don't rewrite. Where a
+   container would leak onto something non-agentic, the exclusion block below re-pins
+   the neutral.
+
+   Why --accent/-ink/-soft are re-stated as well, and not just --v2-accent: a var()
+   inside a custom property resolves on the element that DECLARES it, not where it is
+   used. `--accent: var(--v2-accent)` is declared on .v2-shell, so it was already
+   resolved to the neutral there, and a nested --v2-accent override does NOT reach it.
+   Miss this and every `var(--accent)` consumer inside an agentic subtree silently
+   stays near-white.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.v2-shell .v2-mosh-stage,          /* Moshi himself — all moods, hands-free, the GL mount */
+.v2-shell .v2-mosh-status,         /* his status wave + narration line */
+.v2-shell .v2-pill,                /* the topbar "AI ACTIVE" pill (its only user) */
+.v2-shell .agent-input.listening,  /* push-to-talk recognizer is live */
+.v2-shell .agent-send,             /* the "Ask Moshi" submit */
+.v2-shell .v2-agent-drawer,        /* drawer title while .live, step chips, the spinner */
+.v2-shell .v2-skel-confirm,        /* mumble -> skeleton confirm strip */
+.v2-shell .v2-flow-syl.ok,         /* lyric flow: syllables hitting the grid */
+.v2-shell .v2-flow-rhyme.st-perfect, /* lyric flow: a perfect rhyme grade */
+.v2-shell .v2-clip-badge.working, /* a clip mid-render — transcribing / lyrics / flow */
+.v2-shell .gen {                  /* the GENERATIVE drawer (classic Dock.tsx, mounted by v2's Inspector) */
+  --v2-accent: var(--v2-accent-agentic);
+  --v2-accent-ink: var(--v2-accent-agentic-ink);
+  --v2-accent-soft: var(--v2-accent-agentic-soft);
+  --accent: var(--v2-accent-agentic);
+  --accent-ink: var(--v2-accent-agentic-ink);
+  --accent-soft: var(--v2-accent-agentic-soft);
+  /* The classic family too — see the bridge note in 00-tokens.css. Without these the
+     generative drawer's SA3 engine badge, its "ready" status pill and its quality
+     readout paint near-white, because --lime resolved on .v2-shell and a nested
+     --v2-accent override cannot reach it. This is the whole reason .gen is listed. */
+  --lime: var(--v2-accent-agentic);
+  --lime-glow: var(--v2-accent-agentic);
+  --lime-dim: color-mix(in srgb, var(--v2-accent-agentic) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--v2-accent-agentic) 12%, transparent);
+  --lime-text: var(--v2-accent-agentic);
+}
+
+/* ══ NOT AGENTIC, but nested inside an agentic scope ═══════════════════════════
+   Each of these inherits the lime by accident unless it re-pins the neutral. This is
+   the exact bug the first mockup shipped: the multiplayer LIVE dot stayed lime because
+   it sits inside the Mosh card. Presence is "live"; it is NOT agentic — the owner
+   scoped it out explicitly.
+
+   The .v2-live / .fo-trigger / .v2-composer-face-btn entries are DEFENSIVE: they are
+   not reachable by the scopes above as written, and are kept so that widening a scope
+   to .v2-mosh-card / .v2-composer cannot silently re-lime them. Do not "clean them
+   up" — that removal IS the bug.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.v2-shell .v2-live,
+.v2-shell .v2-live .led,
+.v2-shell .v2-agent-btn,                    /* the drawer's generic utility buttons: Undo task, close */
+.v2-shell .agent-mic,
+.v2-shell .v2-skel-confirm .v2-btn,
+.v2-shell .v2-flow-dot.on,
+.v2-shell .v2-composer-face-btn,
+.v2-shell .v2-composer-plus .fo-trigger {   /* the File menu "+" — app chrome, not the agent */
+  --v2-accent: var(--v2-accent-neutral);
+  --v2-accent-ink: var(--v2-accent-neutral-ink);
+  --v2-accent-soft: var(--v2-accent-neutral-soft);
+  --accent: var(--v2-accent-neutral);
+  --accent-ink: var(--v2-accent-neutral-ink);
+  --accent-soft: var(--v2-accent-neutral-soft);
+  /* The classic family too. .agent-mic and .fo-trigger are classic components that
+     paint from --lime directly (mosh.css .agent-mic.on), so re-pinning only the v2
+     accent would leave them limed inside an agentic scope — the same half-fix the
+     LIVE dot shipped with the first time round. */
+  --lime: var(--v2-accent-neutral);
+  --lime-glow: var(--v2-accent-neutral);
+  --lime-dim: color-mix(in srgb, var(--v2-accent-neutral) 42%, transparent);
+  --lime-faint: color-mix(in srgb, var(--v2-accent-neutral) 12%, transparent);
+  --lime-text: var(--v2-accent-neutral);
+}
+
+/* SURF-1 — the per-line rhyme palette. 40 words is a MEASURED interior maximum
+   (24→.387, 40→.413, 100→.320, 200→.267 exact — past 40 it's choice overload), and a
+   40-word palette holds the word the original artist used 80% of the time. So the
+   layout has one job: make 40 scannable at a glance. A wrapping chip cloud does that;
+   the default <ul> would be a 40-row vertical scroll in a narrow inspector, which is
+   how a measured win becomes an unusable one. Capped height so a palette can never
+   push the bar it belongs to off screen. */
+.v2-lyric-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 6px;
+  /* Sized so all 40 fit WITHOUT scrolling at inspector width (~8 wrapped rows, measured
+     in the CSS harness): the 80%-recall claim assumes the writer can see the whole
+     palette, and a cap that clips mid-row quietly turns 40 shown into ~35 seen. Still a
+     cap, so a pathological pool can never push the bar it belongs to off screen. */
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--v2-radius-sm);
+  /* --v2-surface-sunken, NOT a made-up token: an undefined var inside color-mix()
+     invalidates the whole declaration, so the background silently vanishes while tsc
+     and the DOM tests stay green. Caught by looking at it. */
+  background: var(--v2-surface-sunken);
+}
+.v2-lyric-palette li { display: contents; }
+.v2-lyric-palette .v2-rhyme {
+  padding: 2px 7px;
+  border-radius: var(--v2-radius-pill);
+  border: 1px solid var(--v2-line);
+  background: transparent;
+  color: var(--v2-text);
+  font-size: var(--v2-fs-xs);
+  cursor: pointer;
+}
+.v2-lyric-palette .v2-rhyme:hover {
+  border-color: var(--v2-accent);
+  color: var(--v2-accent);
+}
+/* Rhyme grade is a hint, not a ranking — three independent negatives showed nothing
+   orders these 40 better than the writer does, so grade only tints. */
+.v2-lyric-palette .v2-rhyme.st-perfect { border-color: var(--v2-accent-soft); }
+.v2-lyric-palette .v2-rhyme.st-slant   { color: var(--status-warn); }
+.v2-lyric-palette .v2-rhyme-syl {
+  margin-left: 4px;
+  color: var(--v2-faint);
+  font-variant-numeric: tabular-nums;
+}

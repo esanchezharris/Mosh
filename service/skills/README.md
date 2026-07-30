@@ -26,6 +26,7 @@ corpus and the real MoshOps command catalog.
 | `mine.py` | Reads the corpus, clusters recurring task→command patterns, emits `library.jsonl`. |
 | `router.py` | Given a task string + a snapshot, selects skill(s), fills slots, checks preconditions, expands the template into a MoshOps command sequence. |
 | `library.jsonl` | The mined v1 skill library (36 skills as of this writing — regenerate with `python3 mine.py`). |
+| `contract_test.py` | The catalog-boundary guard: `moshops_catalog.py` must be a *faithful* projection of `commands.ts` (it wasn't — an escape-unaware `desc` regex truncated 2 of 124), and the **shipped** `library.jsonl` must validate against it (nothing checked that before). |
 | `*_test.py` | The gate — `cd service/skills && python3 -m pytest -q`. |
 
 ## The schema
@@ -244,7 +245,13 @@ command the real agent-catalog validator would reject.
   revive" note on the RL/GRPO loop and SFT r5. Mining is corpus statistics;
   routing is regex + lookup.
 - Not a replacement for `ui/src/agent/commands.ts`/`skills.ts` — this reads
-  the former as ground truth and doesn't touch either.
+  the former as ground truth and doesn't touch either. That separation is now
+  a tested invariant, not a convention: see
+  [`docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md`](../../docs/first-stranger-program/SKILL_CATALOG_BOUNDARY.md)
+  for why the mined library and `skills.ts` are deliberately NOT merged (zero
+  skill-name overlap; 5 of 40 shared commands; different artifact kinds), and
+  `contract_test.py` + `ui/src/agent/skillCatalogBoundary.test.ts` for the
+  guards that fail when they drift.
 
 ## Running the gate
 

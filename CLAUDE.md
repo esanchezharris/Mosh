@@ -22,7 +22,7 @@
 - [x] **VERIFY before relying:** resolved against the **pinned `tracktion_engine` clone** (`2877b621`); documented file-based fallbacks taken (new-clip landing, render-to-file). See `docs/ENGINE_API_NOTES.md`.
 - [x] **macOS / Apple Silicon (arm64) + MLX is canonical; Windows + NVIDIA/CUDA is an additive port.** Every platform fork is `#if`/`if(WIN32)`-guarded so the macOS path stays behaviour-equivalent (proven: the macOS `--selftest` passes unchanged after the port). The generative tier swaps MLX→PyTorch/CUDA behind the same adapter contract. **Linux (x86_64) is an exploratory spike** (FIT-011): the headless `MoshTests` target + the cross-platform Python service build and are CI-tracked on `ubuntu-latest` (`.github/workflows/linux-ci.yml`); the full GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is compiled informationally in CI but is **not yet a supported target**. This Mac (arm64 macOS) can't build for Linux, so the config is only statically checked here — the first CI run is the real verdict. See `docs/2026-07-07-linux-build-spike.md`.
 - [x] **Gate discipline:** never advanced past a failing gate; reported against concrete gates (all six PASSED).
-- [x] **Always leave an artifact:** `docs/PROGRESS.md` + per-gate commits + this manifest kept current.
+- [x] **Always leave an artifact:** a `docs/worklog/` note + per-gate commits + this manifest kept current. *(`docs/PROGRESS.md` retired 2026-07-28 — history only.)*
 
 ---
 
@@ -84,7 +84,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 ## Standing policy
 
 - **macOS / Apple Silicon (arm64) + MLX is canonical** — unified-memory zero-copy is the load-bearing neural advantage on the Mac.
-- **PC port (Windows + NVIDIA/CUDA):** parallel target, one codebase. Build with the `windows-x64-debug`/`-release` CMake presets (Visual Studio 17 2022 generator, WebView2-backed WebView, AU hosting off, VST3 only). The generative tier runs Stable Audio 3 under PyTorch/CUDA via `service/adapters/stable_audio3_cuda.py`, auto-selected by `stable_audio3_adapter` when MLX is absent (point `MOSH_SERVICE_PYTHON` at the CUDA venv + `MOSH_SA3_MODEL_DIR` at the weights — `service/setup-sa3-cuda.ps1` validates). Build/run/verify/**package** on Windows: `run-mosh.ps1` (`-Build`/`-Smoke`/`-Package`), `service/setup-feature-venv.ps1`, `scripts/verify-pc-build.ps1`. Native voice is stubbed (browser Web Speech works); menu renders in-window; companion pairs via manual QR/URL (mDNS macOS-only). Platform matrix in [ARCHITECTURE.md](ARCHITECTURE.md); the per-feature Windows-parity **decision record** is [docs/WINDOWS_PARITY.md](docs/WINDOWS_PARITY.md) and the build runbook is [docs/WINDOWS_RUNBOOK.md](docs/WINDOWS_RUNBOOK.md).
+- **PC port (Windows + NVIDIA/CUDA):** parallel target, one codebase — SA3 swaps MLX→PyTorch/CUDA behind the same adapter contract. Details live elsewhere on purpose: platform matrix in [ARCHITECTURE.md](ARCHITECTURE.md) §Platforms, the per-feature **decision record** in [docs/WINDOWS_PARITY.md](docs/WINDOWS_PARITY.md), and the build/run/verify/package runbook in [docs/WINDOWS_RUNBOOK.md](docs/WINDOWS_RUNBOOK.md).
 - **Spine first:** MoshOps + snapshot/events is the highest-leverage early work — UI and both neural tiers are clients of it.
 - **The swappability gate (Stage 2)** is non-negotiable: rebuild the React bundle, zero backend change.
 - **FakeAdapter before SA3** (Stage 5) — prove orchestration with the stub.
@@ -156,11 +156,14 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   with "generative service unavailable" — including pre-existing ones, which reads as if your
   change broke nine things.
   ([UI-REACH close-out](docs/worklog/2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md))
-- **A new MoshOps command needs THREE registrations, not one.** Dispatch alone builds and passes
+- **A new MoshOps command needs FOUR registrations, not one.** Dispatch alone builds and passes
   `--selftest`; the drift guards live elsewhere. `test_multiplayer_lock_manager.cpp` (AL-011)
-  fails if it has no lock scope — unclassified means **unguarded** in a session — and
-  `commands.contract.test.ts` fails if it is in neither the agent catalog nor
-  `commandClassification.ts`. Both are Catch2/vitest, so a native-only gate run will miss them.
+  fails if it has no lock scope — an unclassified command fails **closed** to `SessionGlobal`
+  (guarded-until-classified; this line used to claim "unguarded", which the code at
+  `LockManager.cpp:108` contradicts) — its golden ledger (`tests/golden/lock_scopes.tsv`,
+  landing with #489) needs the command's row, and `commands.contract.test.ts` fails if it is in
+  neither the agent catalog nor `commandClassification.ts`. All are Catch2/vitest, so a
+  native-only gate run will miss them.
 - **A written reason is a claim about the code, and it ages.** Nine of the sixteen `UI_REACH_GAPS`
   entries turned out to describe an assumption, not the tree — a "missing drag gesture" whose whole
   surface was absent, a "kit picker" with one kit and no enumeration, two commands that did nothing
@@ -180,7 +183,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 
 ## Working notes → [`docs/worklog/`](docs/worklog/INDEX.md)
 
-41 dated session notes (2026-06-18 → 2026-07-18) live in **[`docs/worklog/`](docs/worklog/INDEX.md)**,
+Dated session notes live in **[`docs/worklog/`](docs/worklog/INDEX.md)** — INDEX.md is the table, and its count/links are guard-enforced (`ui/src/docs/worklogIndex.test.ts`) —
 one file per note, moved verbatim. They were inlined here until they reached ~112 KB — about 28k
 tokens of context spent before any work started.
 

@@ -44,6 +44,10 @@ describe("runAgentBatch — remember_preference interception (single-shot)", () 
     });
     await runAgentBatch("remember", [{ command: "remember_preference", args: { text: "x" } }]);
     useStore.setState({ exec: orig });
+    // Also the FS-B2a (H3) boundary: the unserved-ask marker must NOT fire here. This
+    // turn produced no seam command but it WAS served — the preference got written —
+    // so it is not a missing-skill signal, and a marker would give it the transaction
+    // AGT-MEM M3 says it must never have.
     expect(seen).not.toContain("batch_begin");
     expect(seen).not.toContain("batch_end");
     // agent_memory_write/read happen OUTSIDE store.exec (writePreference takes its
@@ -118,3 +122,4 @@ describe("loop/taskExec.ts — remember_preference interception (the agentic loo
     expect(items.map((i) => i.item)).toEqual(["the hook needs punch"]);
   });
 });
+

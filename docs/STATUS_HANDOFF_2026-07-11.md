@@ -1,5 +1,9 @@
 # Mosh — Status & Handoff (2026-07-11)
 
+> **Frozen dated snapshot — audited 2026-07-11, not updated since.** Current
+> state lives in [`CURRENT_STATUS.md`](CURRENT_STATUS.md) (the one rolling
+> status doc).
+
 *A ground-truth snapshot for starting an informed conversation (esp. in web chat) without re-deriving
 context or accepting stale assumptions. Audited against git/GitHub + the live repo on 2026-07-11.
 Where a number came from a prior session's gate run rather than a rebuild in this audit, it says so.*

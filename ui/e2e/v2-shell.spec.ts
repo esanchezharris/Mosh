@@ -342,8 +342,19 @@ test("the track header is keyboard-focusable and Enter selects it (a11y)", async
   await expect(page.getByTestId("v2-inspector")).toContainText(`Inspector · ${name}`);
 });
 
-test("the selected track-header tint tracks the --v2-accent token across themes", async ({ page }) => {
-  // Light (shipped default): select a header, read its tint.
+test("the selected track-header tint is the NEUTRAL accent, identical in both themes", async ({ page }) => {
+  // This used to assert the tint differed per theme, because --v2-accent flipped
+  // (#ccff36 dark / #c2f53f light) and selection was painted with it.
+  //
+  // Selection is no longer accent-bearing. Under the accent reservation the lime is
+  // reserved for generative and Moshi surfaces, and --v2-accent resolves to the
+  // near-white neutral for everything else — one value that does NOT flip, because v2
+  // keeps dark panels on a cream page in both themes (--v2-surface-2 is #242427 in
+  // light), so the same tint reads correctly on both.
+  //
+  // So the theme-divergence assertion is inverted, and a STRICTER one replaces it: the
+  // tint must not be lime-derived at all. That is the invariant worth guarding — it is
+  // what stops selection quietly reclaiming the accent.
   await page.goto("/?shell=v2");
   await expect(page.getByTestId("v2-shell")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -351,7 +362,6 @@ test("the selected track-header tint tracks the --v2-accent token across themes"
   await header.click();
   const lightBg = await header.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  // Dark: persist the dark theme + reload, re-select, read its tint.
   await page.evaluate(() => window.localStorage.setItem(
     "mosh.settings",
     JSON.stringify({ version: 2, template: null, values: { theme: "dark" }, keyOverrides: {} }),
@@ -361,19 +371,28 @@ test("the selected track-header tint tracks the --v2-accent token across themes"
   await header.click();
   const darkBg = await header.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  // The tint now differs by theme — before this polish both hardcoded the dark lime
-  // rgba(204,255,54,0.045); now each mixes its own --v2-accent (dark #ccff36 / light #c2f53f).
-  expect(lightBg).not.toBe(darkBg);
-  // Dark control is byte-identical to the token-derived dark-lime tint (unchanged from today).
-  const canonicalDarkTint = await page.evaluate(() => {
-    const d = document.createElement("div");
-    d.style.backgroundColor = "color-mix(in srgb, #ccff36 4.5%, transparent)";
-    document.body.appendChild(d);
-    const v = getComputedStyle(d).backgroundColor;
-    d.remove();
-    return v;
+  // The neutral does not flip, so the two themes now agree.
+  expect(lightBg).toBe(darkBg);
+
+  // Resolve both candidate tints in the page so this compares engine output to engine
+  // output rather than hand-computed rgba strings.
+  const { neutralTint, limeTint } = await page.evaluate(() => {
+    const mix = (c: string) => {
+      const d = document.createElement("div");
+      d.style.backgroundColor = `color-mix(in srgb, ${c} 4.5%, transparent)`;
+      document.body.appendChild(d);
+      const v = getComputedStyle(d).backgroundColor;
+      d.remove();
+      return v;
+    };
+    return { neutralTint: mix("#f2f2f4"), limeTint: mix("#ccff36") };
   });
-  expect(darkBg).toBe(canonicalDarkTint);
+
+  // Anti-vacuity: if the two candidates ever resolved to the same string the assertions
+  // below would be trivially satisfiable.
+  expect(neutralTint).not.toBe(limeTint);
+  expect(darkBg, "selection tint is not the neutral accent").toBe(neutralTint);
+  expect(darkBg, "selection has reclaimed the agentic lime — see accentReservation.test.ts").not.toBe(limeTint);
 });
 
 test("the rail inspector reveals Mix/FX/Gen for the selected track", async ({ page }) => {
@@ -786,4 +805,40 @@ test("the track-name column is wide enough to read a name", async ({ page }) => 
 
   // The full name stays recoverable even when the column does truncate it.
   await expect(page.locator(".v2-lname").first()).toHaveAttribute("title", "Serum Lead Stack");
+});
+
+// A <button> whose UA border is never reset renders `2px outset`, and `outset` is a 3D
+// bevel: the browser paints the top/left edges LIGHTENED and bottom/right darkened. On the
+// v2 shell's near-black panels that showed up as two stray white lines on the top and left
+// of the add-track row — and nowhere else, which is what made it read as a rendering glitch
+// rather than a style bug. Nothing in a designed UI ever wants a bevel border, so assert the
+// whole shell is free of them instead of pinning the one element that regressed.
+test("no element in the shell carries a UA bevel border", async ({ page }) => {
+  await bootV2(page);
+
+  const found = await page.evaluate(() => {
+    const BEVEL = new Set(["outset", "inset", "groove", "ridge"]);
+    const sides = ["Top", "Right", "Bottom", "Left"] as const;
+    const els = [...document.querySelectorAll(".v2-shell, .v2-shell *")];
+    const bad: { cls: string; testid: string | null; sides: string[] }[] = [];
+    for (const el of els) {
+      const cs = getComputedStyle(el);
+      const hit = sides.filter((s) => BEVEL.has(cs[`border${s}Style` as never] as string));
+      if (hit.length) {
+        bad.push({
+          cls: String((el as HTMLElement).className).slice(0, 60),
+          testid: el.getAttribute("data-testid"),
+          sides: hit.map((s) => s.toLowerCase()),
+        });
+      }
+    }
+    return { scanned: els.length, bad };
+  });
+
+  // Anti-vacuity: if the query matched nothing, "no bevels found" would be meaningless.
+  expect(found.scanned, "shell query matched nothing — this guard would pass on an empty page").toBeGreaterThan(120);
+  expect(
+    found.bad,
+    `bevel border(s) leaked from UA defaults: ${JSON.stringify(found.bad)}`,
+  ).toEqual([]);
 });

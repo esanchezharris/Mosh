@@ -5,28 +5,13 @@
 
 import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
 import { retrieveCards, knowledgePromptSection } from "./knowledge";
+import { renderSession } from "./sessionRender";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
 
 export type BrainReply = { say?: string; intent?: string; commands?: AgentCommandCall[] };
 
 export const INTENTS = ["ACK_GOT_IT", "ACK_WORKING", "DONE", "HUH", "NUH", "UHOH", "GREET", "IDLE_MURMUR"];
-
-function compactSnapshot(s: Snapshot): string {
-  const tracks = (s.tracks ?? [])
-    .map((t) => {
-      // ids are QUOTED so the model copies them as JSON strings — an unquoted
-      // numeric-looking id (e.g. 17) gets emitted as the number 17, which fails
-      // the string-typed trackId/clipId validation and the command is dropped.
-      const clips = (t.clips ?? []).map((c) => `"${c.id}":${c.type}@${c.start}s`).join(", ");
-      return `  "${t.id}" "${t.name}" ${t.volumeDb ?? 0}dB${t.mute ? " muted" : ""}${t.solo ? " solo" : ""} clips:[${clips}]`;
-    })
-    .join("\n");
-  const sections = (s.sections ?? [])
-    .map((x) => `${x.id} "${x.name}" beats ${x.startBeat}-${x.endBeat}`)
-    .join("; ");
-  return `tempo ${s.session?.tempo ?? 120} BPM, ${s.session?.timeSigNumerator ?? 4}/${s.session?.timeSigDenominator ?? 4}\nsections: ${sections || "(none)"}\ntracks:\n${tracks || "  (none)"}`;
-}
 
 // The fixed persona/format preamble. Not optimized — it defines the reply contract.
 const PREAMBLE = [
@@ -55,7 +40,10 @@ export const DEFAULT_RULES = [
  *  PREAMBLE + catalog + [knowledge] + [memory] + rules + session — the order
  *  systemPrompt has always used, with the producer-knowledge block inserted next to
  *  the catalog and the M2 memory block (preferences/patterns/project notes) right
- *  after it. `catalog` swaps the command catalog (the small-model-mode eval arm);
+ *  after it. The SESSION block is rendered by the shared ./sessionRender.ts — the
+ *  same renderer the loop path uses (unified 2026-07-28; the old compactSnapshot
+ *  showed no master state, which made master-trim unsolvable single-shot).
+ *  `catalog` swaps the command catalog (the small-model-mode eval arm);
  *  omitted = the full catalog. `knowledge` is a pre-rendered producer-knowledge
  *  block; `memory` is a pre-rendered memory block (retrieveContext() in
  *  agent/memory/retrieveContext.ts) — BOTH omitted or empty ⇒ not inserted, so every
@@ -71,7 +59,7 @@ export function buildSystemPrompt(
   const parts = [PREAMBLE, catalog ?? commandCatalogPrompt()];
   if (knowledge) parts.push(knowledge);
   if (memory) parts.push(memory);
-  parts.push(rules, "Current session:", snap ? compactSnapshot(snap) : "(empty session)");
+  parts.push(rules, "Current session:", snap ? renderSession(snap) : "(empty session)");
   return parts.join("\n");
 }
 
