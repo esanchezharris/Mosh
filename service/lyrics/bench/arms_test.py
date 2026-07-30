@@ -599,6 +599,10 @@ def _dev_spy(messages, **kw):
 _dev_res = arms.ARMS["prompt-device-fp"](RHYME_ITEM, ctx(chat=_dev_spy))
 _dev_sys = _dev_seen["messages"][0]["content"].lower()
 _dev_user = _dev_seen["messages"][1]["content"]
+check("device: the GAP-ONLY contract is stated (v1 omitted it and the arm "
+      "answered with whole clauses on 17% of items, so `exact` scored format)",
+      "only the missing word" in _dev_sys and "never the whole line" in _dev_sys,
+      _dev_sys[-170:])
 check("device: the DEVICE instruction reaches the model",
       "device" in _dev_sys and "pun" in _dev_sys and "punchline" in _dev_sys,
       _dev_sys[:90])

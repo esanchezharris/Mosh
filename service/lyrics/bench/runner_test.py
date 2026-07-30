@@ -54,7 +54,7 @@ _ARM_BEHAVIOUR_VERSIONS = {
     # previous behaviour.
     "oracle": "v1", "freq-floor": "v1", "llm-zeroshot": "v1",
     # DEVICE-1 — device-first reasoning over the 40-word palette.
-    "prompt-device-fp": "v1",
+    "prompt-device-fp": "v2",
     "llm-constrained": "v1", "product-llm": "v2",
     "rhyme-floor": "v2", "prompt-rhyme-menu": "v1", "nbest-rerank": "v1",
     "fusion-rerank": "v2",

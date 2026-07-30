@@ -415,10 +415,17 @@ _DEVICE_SYSTEM = (
     "slang (an idiom a native speaker would actually say), punchline (the joke "
     "lands on the last word), image (one concrete picture), callback (echoes an "
     "earlier line), flex (a boast that earns the rhyme), or other. "
-    "THEN write fills that make that move land ON the rhyming end word — the "
-    "rhyme should be the payoff, not the goal. "
+    "THEN choose the word that makes that move land. "
+    # This clause is LOAD-BEARING and was missing in v1: without it the model
+    # answers with whole clauses ('Slow down like Lord Jamar') on 17% of items
+    # against the control's 5%. Those cannot equal a one-word truth, so `exact`
+    # scored the FORMAT rather than the reasoning — and substituting a clause
+    # into the gap renders a duplicated, unreadable bar in the owner sitting.
+    "A fill is ONLY the missing word(s) that replace the ____ — exactly as many "
+    "words as the gap, never the whole line, never a longer phrase. "
+    "Do not restate any part of the line. "
     "Reply ONLY with JSON: {\"device\": \"...\", \"why\": \"one short line\", "
-    "\"fills\": [\"...\", ...]} — up to %d fills, best first. "
+    "\"fills\": [\"...\", ...]} — up to %d fills, best first, each a gap filler. "
     "Authentic register: slang and explicit language are fine. "
     "A fill that merely rhymes but says nothing is a FAILURE."
 )
@@ -449,7 +456,7 @@ def _parse_device(resp: dict) -> tuple:
     return None, None
 
 
-@register("prompt-device-fp", "v1")
+@register("prompt-device-fp", "v2")
 def arm_prompt_device_fp(item: dict, ctx: ArmContext) -> dict:
     """Device-first reasoning over the measured-best 40-word palette.
 
