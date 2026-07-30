@@ -1207,3 +1207,27 @@ numbers and hashes only.
   carries a FORMAT WITNESS (multi-word-fill rate) next to its score.
   Clean 47-pair sitting re-minted and served (over-long fills filtered for BOTH
   arms, blindness audited: no leaks).
+- **2026-07-30 — JUNK-TEXT GATE shipped; data quality is now a CLOSED lever.**
+  Owner found Turkish lyrics and `???` transcription holes while judging a
+  sitting. `build_eval.is_junk_text` quarantines both beside the near-duplicate
+  gate: **192 songs of 26,097** (99 transcription-holes, 93 non-english), counts
+  visible in `report.junkText`. The non-ASCII test is a RATE (2% of chars) so an
+  English bar naming 'Beyoncé' survives — pinned by a near-miss fixture; both
+  rules RED-proved. A speculative min-length rule I added unprompted was removed
+  after it quarantined every test fixture.
+  **Result, and it is the point:** control `exact` .413 -> **.420** (one item in
+  150). With the ad-lib wall's .413 -> .413 before it, THREE data-quality
+  interventions have now moved the board by a single item, while the oracle's
+  `rhyme_perfect` holds at .300/.313/.320 across three disjoint item sets. Data
+  quality was genuinely broken twice and was never the bottleneck — future work
+  should not re-litigate it.
+  **Era restriction — measured and declined.** The corpus is already 2015+ (no
+  2000s material; the Nas songs are his 2022-23 work). Era does not predict
+  score: control .423 on 2015-19 vs .403 on 2020+, and the device arm is BETTER
+  on the older half (.513 vs .403); neither significant. Cutting to 2020+ would
+  halve the corpus to fix nothing measurable. Legitimate as a PRODUCT call about
+  matching the user's register; not a benchmark fix.
+  **Checkpoint written** for cold handoff + audit:
+  [CHECKPOINT-2026-07-30.md](CHECKPOINT-2026-07-30.md) — board with
+  reproduce-commands, the six closed lanes with their evidence, and a section
+  telling an auditor exactly where this agent was wrong and how to check it.
