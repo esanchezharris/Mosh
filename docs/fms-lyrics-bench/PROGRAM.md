@@ -1120,3 +1120,53 @@ numbers and hashes only.
   clean measurement. Until that runs, treat the inversion as STRONGLY
   SUGGESTIVE, not established; it is consistent with the Goodhart alarm but
   not independent of it.
+
+## v3 — the ad-lib wall (POLICY_VERSION v3, itemsSha b90febf9)
+
+- **2026-07-30 — AD-LIB WALL SHIPPED, and it did NOT lift the scores.** Owner
+  catch: parenthesised text is an ad-lib — a separate vocal layer of doubles,
+  echoes and breath, not written to the rhyme scheme. v2's frozen 150 carried
+  16.7% paren-touched contexts and 5.3% (8 items) whose BLANK was itself an
+  ad-lib — unanswerable ('(____)' wanting the echo 'Box'; '(Woo-____)' wanting
+  'woo' against 'bah'). `mask.is_adlib_token` now refuses a parenthesised
+  target and `_last_non_adlib_index` stops an ad-lib neighbour donating a
+  partner; a LEADING ad-lib on a line whose real bar ending sits outside it is
+  still minted. v3 rebuild: 41,824 dev rhyme items, **zero** ad-lib targets
+  (1,182 removed), parens still in 8.6% of contexts by design. 3 sabotages
+  RED-proved.
+  **The honest half:** `prompt-rhyme-menu-fp` scores **.413 on clean v3 —
+  identical to its v2 .413**. So the contamination was real but was NOT what
+  made the board look weak. New brackets: oracle exact 1.000 /
+  rhyme_perfect **.313** (the human perfect-rhyme rate survives the cleanup —
+  it was .300), rhyme-floor-fp .107.
+- **2026-07-30 — DEVICE-REASONING ARM: significantly WORSE on exact, and the
+  breakdown says only SLANG helps.** `prompt-device-fp` makes the model name a
+  move (pun/reference/slang/punchline/image/callback/flex) before writing fills,
+  over the same 40-word palette as the control, so the pair isolates reasoning.
+  Result on v3: **exact .327 vs .413**, topk .487 vs .520, McNemar
+  **p = .035 — SIGNIFICANT** (10 device-only-right vs 23 control-only-right).
+  oracle-of-2 .480 (less complementary than the trained adapter's .553).
+  Per-device, against the CONTROL's score on the very same items — so this is
+  not just item difficulty:
+
+  | device | n | device | control (same items) | delta |
+  |---|---|---|---|---|
+  | **slang** | 33 | **.455** | .424 | **+.030** |
+  | pun | 35 | .400 | .514 | -.114 |
+  | flex | 27 | .296 | .444 | -.148 |
+  | image | 24 | .167 | .292 | -.125 |
+  | punchline | 16 | .250 | .438 | -.188 |
+  | reference | 12 | .250 | .250 | .000 |
+
+  Every "clever" device loses; only the IDIOMATIC one holds. Reading: rap end
+  words are overwhelmingly idiomatic, so committing to wit pulls the model off
+  what the artist actually said, while committing to idiom keeps it aligned.
+  **Verdict deferred by pre-registration, not by preference:** exact was named
+  in advance as the wrong judge for this arm (a punchline that isn't the
+  artist's word can still be a keepable bar), and keep-rate is the target. A
+  blind arm-vs-arm sitting is minted and served — 58 pairs where both arms
+  missed and chose different words, arm identity whitelisted out of the page
+  (audited: 0 occurrences). Until it is scored, DEVICE-1 is a significant
+  exact-regression with an untested taste hypothesis — not a win, not yet dead.
+  Next probe if taste does not save it: a slang-ONLY device menu, which is the
+  one condition the data supports.
