@@ -1,9 +1,9 @@
 // Moshi's brain — turns a chat turn into a behaviour + (optionally) a list of real
-// edits. It feeds the LLM a persona, the curated command catalog, and a compact
-// snapshot, and asks for ONE JSON object: { intent, say?, commands? }. If the proxy
-// is unreachable (no keys yet), it falls back to a tiny demo mock so the loop still
-// works in the preview. The pure prompt + parse logic lives in brainCore.ts (so the
-// offline benchmark can score the exact prompt without pulling the bridge/window).
+// edits. It feeds the LLM a persona, retrieved capabilities, and a compact snapshot,
+// and asks for ONE JSON object: { intent, say?, commands? }. Provider failures are
+// explicit in production; the dev/e2e mock surface alone may use the demo brain.
+// The pure prompt + parse logic lives in brainCore.ts (so the offline benchmark can
+// score the exact prompt without pulling the bridge/window).
 //
 // WP-11 best-of-n (flag `bestOfNServing`, default OFF): after the single-shot reply
 // parses, taste-classified command batches escalate through the native relay (the
@@ -26,9 +26,9 @@
 // is now non-empty for every flag-on session, not just ones with existing content —
 // an intentional M3 change from M2's "only when pools are non-empty" gate.
 
-import { archivePair, brainChat, escalateCandidates } from "../bridge";
+import { archivePair, brainChat, demoBrainAvailable, escalateCandidates } from "../bridge";
 import { mockBrainReply } from "./brainMock";
-import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
+import { supervisorSystemPrompt, parseReply, type BrainReply } from "./brainCore";
 import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
 import { ensureMemoryHydrated, poolsNonEmpty } from "./memory/hydrate";
@@ -65,10 +65,10 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
     async send(text: string): Promise<BrainReply> {
       const snap = getSnapshot();
       history.push({ role: "user", content: text });
-      // Pass the turn text so systemPrompt injects the few relevant producer-knowledge
-      // cards next to the command catalog (WHY/WHEN for the controls this request touches).
+      // The interactive path receives the retrieved production catalog; the full
+      // catalog remains available through brainCore.systemPrompt for benchmarks.
       const memory = await memorySectionFor(text);
-      const messages = [{ role: "system", content: systemPrompt(snap, text, memory) }, ...history.slice(-8)];
+      const messages = [{ role: "system", content: supervisorSystemPrompt(snap, text, memory) }, ...history.slice(-8)];
       try {
         const { content } = await brainChat(messages);
         const reply = parseReply(content);
@@ -104,8 +104,8 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         });
         return chosen;
       } catch {
-        // proxy unreachable / no key yet → demo mock so the loop still works
-        return mockBrainReply(text, snap);
+        if (demoBrainAvailable()) return mockBrainReply(text, snap);
+        return { intent: "UHOH", say: "brain unavailable", commands: [] };
       }
     },
     clear() { history.length = 0; },

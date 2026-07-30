@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { systemPrompt, buildSystemPrompt, DEFAULT_RULES, parseReply } from "./brainCore";
+import { systemPrompt, supervisorSystemPrompt, buildSystemPrompt, DEFAULT_RULES, parseReply } from "./brainCore";
 import { validateCommand } from "./commands";
 import type { Snapshot } from "../types";
 
@@ -26,6 +26,20 @@ describe("systemPrompt id quoting", () => {
 
   it("states that ids are strings in the rules", () => {
     expect(systemPrompt(snap).toLowerCase()).toContain("string id");
+  });
+});
+
+describe("supervisorSystemPrompt capability catalog", () => {
+  it("keeps the legacy full catalog for benchmark callers", () => {
+    expect(systemPrompt(snap)).toContain("remove_track(trackId)");
+  });
+
+  it("uses a bounded production catalog for a single turn", () => {
+    const prompt = supervisorSystemPrompt(snap, "turn on the metronome");
+
+    expect(prompt).toContain("set_metronome(enabled:boolean)");
+    expect(prompt).not.toContain("remove_track(trackId)");
+    expect(prompt.length).toBeLessThan(systemPrompt(snap).length / 2);
   });
 });
 

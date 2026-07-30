@@ -4,6 +4,7 @@
 // master/key blind spot that cost master-trim 0/10 single-shot).
 
 import { commandCatalogPrompt } from "../commands";
+import { capabilityCatalogPrompt, retrieveCapabilities } from "../capability";
 import { retrieveCards, knowledgePromptSection } from "../knowledge";
 import { INTENTS } from "../brainCore";
 import { renderSession } from "../sessionRender";
@@ -33,7 +34,7 @@ export const LOOP_RULES = [
   "- Stay in character. Never mention JSON, models, commands, or that you're an AI.",
 ].join("\n");
 
-/** System prompt for every loop call: loop preamble + full catalog +
+/** System prompt for every loop call: loop preamble + a retrieved catalog +
  *  [knowledge for the ask] + [memory] + loop rules + the RICH session. Rebuilt fresh
  *  each step (the session block is the observation) — `memory` is computed ONCE per
  *  TASK by the app-side glue (runTask.ts) before the loop starts (hydration/ranking
@@ -41,7 +42,10 @@ export const LOOP_RULES = [
  *  byte-identical to the pre-M2 shape (same guarantee as buildSystemPrompt). */
 export function buildLoopSystemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
-  const parts = [LOOP_PREAMBLE, commandCatalogPrompt()];
+  // The query-less form is an explicit legacy/benchmark renderer. The runtime
+  // always supplies its task text and therefore receives bounded capabilities.
+  const catalog = query ? capabilityCatalogPrompt(retrieveCapabilities(query)) : commandCatalogPrompt();
+  const parts = [LOOP_PREAMBLE, catalog];
   if (knowledge) parts.push(knowledge);
   if (memory) parts.push(memory);
   parts.push(LOOP_RULES, "Current session:", snap ? renderSession(snap) : "(empty session)");

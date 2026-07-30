@@ -1,9 +1,9 @@
 // The app-side glue for an agentic task: composer text in → the loop runs over
 // the TASK-scoped executor (one undo unit), progress streams into the task
 // store (the drawer renders it), Moshi utters only at the beats (ACK_WORKING on
-// start, DONE/HUH/UHOH at the end — no per-step creature spam), and the brain
-// transport degrades to the deterministic loop mock when the proxy is
-// unreachable (preview/e2e), exactly like the single-shot brain does.
+// start, DONE/HUH/UHOH at the end — no per-step creature spam), and provider
+// failure is explicit in production. The deterministic loop mock is limited to the
+// existing dev/e2e surface, exactly like the single-shot brain.
 //
 // Loop tasks deliberately do NOT set agentChangeSet — the drawer carries the
 // per-step detail, so the ChangeToast stays quiet for them by construction.
@@ -21,7 +21,7 @@
 // off, so it's the ONLY case where every step's prompt stays byte-identical to the
 // pre-M2 shape.
 
-import { archivePair, brainChat } from "../../bridge";
+import { archivePair, brainChat, demoBrainAvailable } from "../../bridge";
 import { useSettings } from "../../settings/store";
 import { useStore } from "../../store";
 import { runAgentLoop, type ChatMessage, type LoopRun } from "./loop";
@@ -66,11 +66,12 @@ const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string 
   aborted: { intent: "IDLE_MURMUR", fallback: "stopped — kept what's done" },
 };
 
-async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
+export async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   try {
     return await brainChat(messages);
   } catch {
-    return mockLoopChat(messages); // proxy unreachable → the deterministic demo loop
+    if (demoBrainAvailable()) return mockLoopChat(messages);
+    throw new Error("brain unavailable");
   }
 }
 

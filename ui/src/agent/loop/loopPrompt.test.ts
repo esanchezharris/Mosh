@@ -62,6 +62,14 @@ describe("buildLoopSystemPrompt", () => {
     expect(buildLoopSystemPrompt(SNAP, "put a compressor on the master bus")).toContain("Producer knowledge");
     expect(buildLoopSystemPrompt(SNAP)).not.toContain("Producer knowledge");
   });
+
+  it("uses bounded capability schemas whenever the runtime supplies a task", () => {
+    const prompt = buildLoopSystemPrompt(SNAP, "turn on the metronome");
+
+    expect(prompt).toContain("set_metronome(enabled:boolean)");
+    expect(prompt).not.toContain("remove_track(trackId)");
+    expect(prompt.length).toBeLessThan(buildLoopSystemPrompt(SNAP).length / 2);
+  });
 });
 
 describe("buildLoopSystemPrompt: M2 memory param — byte-stability + the one-section diff", () => {
