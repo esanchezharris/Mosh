@@ -1056,3 +1056,30 @@ numbers and hashes only.
   FIM-LoRA training is empty; the case for the product change (palette /
   two-way choice, whose ceilings ARE measured: palette-40 .800, oracle-of-2
   .553) is the only lane with evidence behind it. Owner decision, flagged.
+- **2026-07-29 — SECOND PROPOSER: NOT BUILT. The agreement signal is an artifact
+  of the end-word task and does not exist in the product's line-writing shape.**
+  Owner approved option (1) (API-only pair `llm-constrained` +
+  `prompt-rhyme-menu-fp`, measured oracle-of-2 .500 / agreement precision .796).
+  Checked the premise against the PRODUCT's own pair before building — the two
+  `product-llm` palette A/B runs, same loop, palette off vs on, per-item:
+
+  | | bench pair (end-word fill) | product pair (whole lines) |
+  |---|---|---|
+  | agree on top-1 | 35% | **11%** |
+  | agreement precision | **.846** | **.250** |
+  | oracle-of-2 vs best single | .553 vs .433 | .113 vs .087 |
+
+  They disagree on **134/150** items. The confidence signal came from filling
+  ONE masked end word out of a constrained menu — a small answer space where
+  coincidence is informative. Free-form line writing has an enormous answer
+  space, so two proposers essentially never coincide and coincidence means
+  little. "Agree -> one, disagree -> both" therefore has nothing to key on in
+  the shipped loop; a second proposer would double per-line API cost to take
+  the proposal list 3 -> 6, and the menu-size ablation says more options past
+  the knee HURTS (40 .413, 100 .320).
+  **Dominance argument that closes it:** the natural home for a two-way
+  end-word choice is exactly where SURF-1's palette already sits, and the
+  palette wins outright — 40 words at .800 recall vs a two-proposer choice at
+  .500. What would make a second proposer real is an end-word-FILL mode in the
+  product (the bench's task shape), where agreement regains meaning. That is a
+  different feature, not this one.
