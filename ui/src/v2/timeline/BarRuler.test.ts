@@ -66,17 +66,17 @@ describe("BarRuler — shift-drag time-range gesture", () => {
   const ruler = () => host.querySelector('[data-testid="v2-ruler"]') as HTMLElement;
 
   // clientX in PX-per-second units; rect.left is 0 under jsdom's default zero DOMRect.
-  const down = (sec: number, shiftKey: boolean) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: sec * PX, shiftKey, buttons: 1 }));
+  const down = (sec: number, shiftKey: boolean, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: sec * PX, shiftKey, buttons: 1 }));
   });
-  const move = (sec: number) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: sec * PX, buttons: 1 }));
+  const move = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: sec * PX, buttons: 1 }));
   });
-  const up = (sec: number) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: sec * PX }));
+  const up = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, clientX: sec * PX }));
   });
-  const cancel = (sec: number) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 1, clientX: sec * PX }));
+  const cancel = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId, clientX: sec * PX }));
   });
   const flushFrame = () => act(() => {
     const pending = frames.splice(0);
@@ -162,6 +162,23 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     expect(useShell.getState().timeRangeDragging).toBe(false);
     expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 }); // survives release
     expect(exec, "a shift-drag must never also fire a seek").not.toHaveBeenCalled();
+  });
+
+  it("keeps a shift range owned by its initiating pointer", () => {
+    down(4, true, 1);
+    down(2, false, 2);
+    move(8, 2);
+    up(8, 2);
+
+    expect(useShell.getState().timeRangeDragging).toBe(true);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 4 });
+    expect(exec).not.toHaveBeenCalled();
+
+    move(6, 1);
+    up(6, 1);
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("dragging backwards (end before start chronologically) still yields start <= end", () => {

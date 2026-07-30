@@ -213,9 +213,24 @@ samples:
   `timeline-fix-v2/mosh-log-after-native-qa.jsonl`
   (`d2f49aa68ffa61e20331a5592d54dcd78509550ee633b71fe9595798eca0bab3`).
 
-The exact commit SHA, full native gate, review lanes, debugging audit, and PR
-are pending. Evidence above must be rebound after the final commit if code
-changes.
+The first implementation commit was
+`82227fdd28b50b41e0c2c85ad25688c4f0c4109a`. Its native gate passed:
+selftest `2214/2214` ×3 deterministically with zero JUCE assertions, Catch2
+100%, `verify.py` 29/29, Vitest 2,191 passed plus one skipped, and zero
+conformance failures. The gate log is
+`timeline-fix-v2/native-gate-82227fdd.log`
+(`34c308327ac9a5e84a61626cf731990304b2f1a9d2002cb598be2036b83bb553`).
+
+The first code-quality lane then found two real lifecycle defects: a final
+pointer-up could duplicate an endpoint already committed by the last animation
+frame, and a Shift-range was not owned by its initiating pointer. Focused RED
+tests reproduced both failures. The hardening follow-up deduplicates committed
+positions, isolates range and scrub pointers, tolerates DOMs without pointer
+capture APIs, and adds lost-capture, unmount, same-endpoint, and multi-pointer
+regressions. The final immutable-SHA manifest, rerun hashes, five review
+verdicts, debugging audit, and PR handoff live under the final `timeline-fix-v3`
+evidence directory and in the PR body; they are generated only after the final
+commit so they cannot falsely attest to a mutable tree.
 
 ## T0 capability ledger
 

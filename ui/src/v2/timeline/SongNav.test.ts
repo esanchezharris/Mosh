@@ -19,15 +19,16 @@ describe("SongNav — pointer scrubbing", () => {
   let onScrub: ReturnType<typeof vi.fn>;
   let frames: Array<{ id: number; cb: FrameRequestCallback }>;
   let nextFrameId: number;
+  let mounted: boolean;
 
   const nav = () => host.querySelector('[data-testid="v2-songnav"]') as HTMLElement;
   const render = () => act(() => {
     root.render(React.createElement(SongNav, { snapshot: snap(), onScrub }));
   });
-  const pointer = (type: string, clientX: number, buttons = 1) => act(() => {
+  const pointer = (type: string, clientX: number, buttons = 1, pointerId = 7) => act(() => {
     nav().dispatchEvent(new PointerEvent(type, {
       bubbles: true,
-      pointerId: 7,
+      pointerId,
       clientX,
       buttons,
     }));
@@ -53,6 +54,7 @@ describe("SongNav — pointer scrubbing", () => {
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
+    mounted = true;
     onScrub = vi.fn();
     useStore.setState({
       transport: { playing: false, recording: false, position: 0 },
@@ -74,7 +76,7 @@ describe("SongNav — pointer scrubbing", () => {
   });
 
   afterEach(() => {
-    act(() => root.unmount());
+    if (mounted) act(() => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
   });
@@ -111,6 +113,17 @@ describe("SongNav — pointer scrubbing", () => {
     expect(release).toHaveBeenCalledWith(7);
   });
 
+  it("does not repeat an endpoint already committed by the last frame", () => {
+    pointer("pointerdown", 300);
+    pointer("pointermove", 700, 0);
+    flushFrame();
+    expect(onScrub).toHaveBeenCalledTimes(2);
+    expect(onScrub).toHaveBeenLastCalledWith(27);
+
+    pointer("pointerup", 700, 0);
+    expect(onScrub).toHaveBeenCalledTimes(2);
+  });
+
   it("pointer cancellation drops the queued position and ignores later moves", () => {
     pointer("pointerdown", 300);
     pointer("pointermove", 700);
@@ -121,5 +134,36 @@ describe("SongNav — pointer scrubbing", () => {
 
     expect(onScrub).toHaveBeenCalledTimes(1);
     expect(onScrub).toHaveBeenLastCalledWith(9);
+  });
+
+  it("lost pointer capture cancels queued work and later movement", () => {
+    pointer("pointerdown", 300);
+    pointer("pointermove", 700);
+    pointer("lostpointercapture", 700, 0);
+    flushFrame();
+    pointer("pointermove", 800);
+    flushFrame();
+
+    expect(onScrub).toHaveBeenCalledTimes(1);
+    expect(onScrub).toHaveBeenLastCalledWith(9);
+  });
+
+  it("unmount cancels queued work and releases an active pointer", () => {
+    const element = nav();
+    const release = vi.fn();
+    Object.defineProperty(element, "releasePointerCapture", {
+      configurable: true,
+      value: release,
+    });
+
+    pointer("pointerdown", 300);
+    pointer("pointermove", 700);
+    act(() => root.unmount());
+    mounted = false;
+    flushFrame();
+
+    expect(onScrub).toHaveBeenCalledTimes(1);
+    expect(onScrub).toHaveBeenLastCalledWith(9);
+    expect(release).toHaveBeenCalledWith(7);
   });
 });

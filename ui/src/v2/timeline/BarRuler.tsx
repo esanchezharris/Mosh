@@ -53,6 +53,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   // Anchor of an in-progress range drag (seconds, already bar-snapped). null between
   // gestures, and while a plain (non-shift) press is just seeking.
   const anchor = useRef<number | null>(null);
+  const rangePointer = useRef<number | null>(null);
   const scrub = usePointerScrub((position) => {
     void exec("set_transport", { position });
   });
@@ -62,10 +63,12 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (rangePointer.current != null || scrub.isActive()) return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (e.shiftKey) {
       const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
       anchor.current = sec;
+      rangePointer.current = e.pointerId;
       setTimeRangeDragging(true);
       setTimeRange({ start: sec, end: sec });
       capturePointer(e.currentTarget, e.pointerId);
@@ -76,7 +79,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (anchor.current != null) {
-      if (e.buttons === 0) return;
+      if (rangePointer.current !== e.pointerId) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
       setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
@@ -89,14 +92,16 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   };
 
   const endRangeDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (anchor.current == null) return;
+    if (anchor.current == null || rangePointer.current !== e.pointerId) return false;
     anchor.current = null;
+    rangePointer.current = null;
     setTimeRangeDragging(false);
     releasePointer(e.currentTarget, e.pointerId);
     // A shift-press with no real movement leaves a zero-width span — treat it as no
     // selection at all, matching classic's identical range-tool idiom.
     const r = useShell.getState().timeRange;
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
+    return true;
   };
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (anchor.current != null) {
