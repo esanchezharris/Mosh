@@ -201,6 +201,50 @@ def _word_item(song, si, li, line, tokens, lines, pron, freq) -> Optional[dict]:
     return item
 
 
+_PAREN_RE = re.compile(r"\([^)]*\)")
+
+
+def paren_spans(line: str) -> List[tuple]:
+    """Character spans of parenthesised runs — the ad-lib layer of a lyric sheet."""
+    return [m.span() for m in _PAREN_RE.finditer(line or "")]
+
+
+def is_adlib_token(line: str, token_index: int) -> bool:
+    """True when token `token_index` of `line` sits inside parentheses.
+
+    Ad-libs are a SEPARATE vocal layer: doubles, echoes and breath ("(Box)",
+    "(Woo-woo)", "(not far)"). They are not written to the rhyme scheme and
+    usually do not follow it, so an item whose answer is an ad-lib asks the
+    model to reproduce something no rhyme constraint predicts — and asks it to
+    rhyme with a partner the artist never rhymed against.
+
+    Measured on the frozen-v2 150 before this filter: 8 items (5.3%) had the
+    blank itself inside an ad-lib, every one of them unanswerable —
+    'I'm stuck inside a box (____)' wanting 'Box' (a pure echo), '(Woo-____)'
+    wanting 'woo' against the partner 'bah', '(not ____)' wanting 'far' against
+    'godfather'. They capped every arm's ceiling at ~.947 while looking like
+    model failures. (Owner call, 2026-07-30.)
+    """
+    spans = [m.span() for m in _WORD_RE.finditer(line or "")]
+    if not (0 <= token_index < len(spans)):
+        return False
+    s, e = spans[token_index]
+    return any(ps <= s and e <= pe for ps, pe in paren_spans(line))
+
+
+def _last_non_adlib_index(line: str, tokens: List[str]) -> Optional[int]:
+    """Index of the line's last token that is NOT an ad-lib, or None.
+
+    Used for RHYME PARTNERS as well as targets: a neighbour like '(Wop, wop)'
+    would otherwise donate 'wop' as a rhyme anchor, inventing a constraint the
+    artist never wrote to.
+    """
+    for i in range(len(tokens) - 1, -1, -1):
+        if not is_adlib_token(line, i):
+            return i
+    return None
+
+
 def _is_junk_rhyme_end(word: str) -> bool:
     """A rhyme item only tests RHYME if both ends are real words.
 
@@ -223,13 +267,25 @@ def _rhyme_item(song, si, li, line, tokens, lines, pron) -> Optional[dict]:
     target = tokens[idx]
     if _is_junk_rhyme_end(target):
         return None
+    # v3 — the ad-lib wall. A parenthesised end word is a double/echo/breath, not
+    # a bar ending, so the item would ask for something no rhyme constraint can
+    # predict. Refuse it outright rather than mint an unanswerable item.
+    if is_adlib_token(line, idx):
+        return None
     partners = []
     for lj in range(max(0, li - 3), min(len(lines), li + 4)):
         if lj == li:
             continue
         other = tokenize(lines[lj])
-        if other:
-            partners.append((abs(lj - li), other[-1]))
+        if not other:
+            continue
+        # …and the same wall on the PARTNER side: take the neighbour's last
+        # non-ad-lib word, so '(Wop, wop, wop)' cannot donate 'wop' as the
+        # rhyme anchor for a bar the artist wrote against something else.
+        pj = _last_non_adlib_index(lines[lj], other)
+        if pj is None:
+            continue
+        partners.append((abs(lj - li), other[pj]))
     partner = _best_rhyme_partner(pron, target, partners)
     if not partner:
         return None

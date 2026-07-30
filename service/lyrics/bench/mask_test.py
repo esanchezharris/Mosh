@@ -185,5 +185,51 @@ check("phonesSource: lexicon word flagged, OOV flagged none",
 check("every item carries song identity + licenseTier + views",
       all(i["songId"] and "licenseTier" in i and "views" in i for i in ALL))
 
+
+# ---- v3: the ad-lib wall ------------------------------------------------------------
+# Ad-libs are a separate vocal layer (doubles, echoes, breath) that is not written to the
+# rhyme scheme. Before this filter the frozen-v2 150 carried 8 unanswerable items (5.3%)
+# whose ANSWER was an ad-lib — '(Box)' echoing "box", '(Woo-woo)' against partner 'bah'.
+#
+# FIXTURE ADEQUACY IS THE WHOLE DIFFICULTY HERE. A first version of this fixture used
+# ad-lib endings that rhymed with nothing, so those items were already refused for having
+# no rhyme partner and BOTH sabotages below passed — a vacuous guard that looked green.
+# So every ad-lib ending here RHYMES with a real neighbour, i.e. each one WOULD mint an
+# item if the wall were absent:
+#   'sole' (parenthesised) is a perfect rhyme for the real 'whole';
+#   'shine' (a pure ad-lib line) is a perfect rhyme for the real 'line', and is that
+#   line's ONLY rhyming neighbour — so if ad-lib lines can donate partners, 'line'
+#   mints an item with partner 'shine'.
+ADLIB_SONG = {
+    "songId": "fx:adlib", "source": "test", "artist": "T", "title": "A",
+    "genre": "rap", "views": 1, "licenseTier": "train-ok", "hash": "sha1:adlib",
+    "sections": [{"kind": "verse", "label": "Verse 1", "lines": [
+        "we out here counting up the gold",       # 0 real ending: gold
+        "i keep the paper in the whole",          # 1 real ending: whole (rhymes gold)
+        "i had to let it go (sole)",              # 2 TRAILING ECHO, rhymes 'whole'
+        "(shine)",                                # 3 pure ad-lib line, rhymes 'line'
+        "everybody stepping on the line",         # 4 real, but its ONLY rhyming
+                                                  #   neighbour is the ad-lib 'shine'
+    ]}],
+}
+ADLIB_ITEMS = [i for i in mask.items_for_song(ADLIB_SONG, PRON, FREQ)
+               if i["granularity"] == "rhyme"]
+_ends = {i["target"]["text"].lower() for i in ADLIB_ITEMS}
+_partners = {(i["constraints"]["rhymeWith"] or "").lower() for i in ADLIB_ITEMS}
+
+check("adlib: a parenthesised END WORD mints no rhyme item (target wall)",
+      "sole" not in _ends and "shine" not in _ends, str(sorted(_ends)))
+check("adlib: an ad-lib line never donates the rhyme PARTNER (partner wall)",
+      "shine" not in _partners and "sole" not in _partners, str(sorted(_partners)))
+# Adequacy: with the walls removed these must APPEAR, or the two checks above are
+# passing on an empty tree rather than on suppression.
+check("adlib: FIXTURE ADEQUACY — the clean rhyme pair still mints items",
+      _ends == {"gold", "whole"}, str(sorted(_ends)))
+check("adlib: is_adlib_token discriminates trailing echo from leading ad-lib",
+      mask.is_adlib_token("i had to let it go (sole)", 6)
+      and not mask.is_adlib_token("(ay, ay) every single story getting told", 6),
+      f"trailing={mask.is_adlib_token('i had to let it go (sole)', 6)} "
+      f"leading={mask.is_adlib_token('(ay, ay) every single story getting told', 6)}")
+
 print(f"\n{len(fails)} failing" if fails else "\nall green")
 sys.exit(1 if fails else 0)
