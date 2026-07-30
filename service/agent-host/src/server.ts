@@ -1,0 +1,161 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { z } from "zod";
+import { AgentHostService, OpenAIUnavailableError } from "./service.js";
+
+const createPlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
+const closePlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
+const routeId = z.uuid();
+
+export interface AgentHostServerOptions {
+  service: AgentHostService;
+  capability?: string;
+  port?: number;
+}
+
+function sendJson(response: ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(`${JSON.stringify(value)}\n`);
+}
+
+async function readBody(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.length;
+    if (length > 1_000_000) throw new Error("Request body exceeds 1 MB");
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
+function authorized(request: IncomingMessage, capability: string): boolean {
+  const header = request.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return false;
+  const candidate = Buffer.from(header.slice(7));
+  const expected = Buffer.from(capability);
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+function errorStatus(error: unknown): number {
+  if (error instanceof OpenAIUnavailableError) return 503;
+  if (error instanceof z.ZodError || error instanceof SyntaxError) return 400;
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") return 404;
+  return 500;
+}
+
+function errorBody(error: unknown): unknown {
+  if (error instanceof OpenAIUnavailableError) {
+    return { error: { code: error.code, message: error.message, retryable: true } };
+  }
+  if (error instanceof z.ZodError) {
+    return { error: { code: "invalid_request", message: "Request validation failed", issues: error.issues } };
+  }
+  const status = errorStatus(error);
+  return {
+    error: {
+      code: status === 404 ? "not_found" : status === 400 ? "invalid_request" : "internal_error",
+      message: status === 500 ? "Internal server error" : (error as Error).message,
+    },
+  };
+}
+
+export async function startAgentHost(options: AgentHostServerOptions) {
+  const capability = options.capability ?? randomBytes(32).toString("base64url");
+  await options.service.initialize();
+  const server = createNodeServer(async (request, response) => {
+    try {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (url.pathname === "/health" && request.method === "GET") {
+        sendJson(response, 200, { status: "ready", version: 1 });
+        return;
+      }
+      if (url.pathname.startsWith("/v1/") && !authorized(request, capability)) {
+        sendJson(response, 401, { error: { code: "unauthorized", message: "Bearer capability required" } });
+        return;
+      }
+
+      if (url.pathname === "/v1/playtests" && request.method === "POST") {
+        sendJson(response, 201, await options.service.createPlaytest(createPlaytestInput.parse(await readBody(request))));
+        return;
+      }
+      const closeMatch = url.pathname.match(/^\/v1\/playtests\/([^/]+)\/close$/);
+      if (closeMatch && request.method === "POST") {
+        const body = closePlaytestInput.parse(await readBody(request));
+        sendJson(response, 200, await options.service.closePlaytest(routeId.parse(closeMatch[1]), body.retainTranscript));
+        return;
+      }
+      if (url.pathname === "/v1/supervisor/turns" && request.method === "POST") {
+        sendJson(response, 200, await options.service.supervisorTurn(await readBody(request)));
+        return;
+      }
+      if (url.pathname === "/v1/realtime/client-secret" && request.method === "POST") {
+        await readBody(request);
+        sendJson(response, 200, await options.service.mintRealtimeSecret());
+        return;
+      }
+      if (url.pathname === "/v1/reports" && request.method === "POST") {
+        sendJson(response, 201, await options.service.createReport(await readBody(request)));
+        return;
+      }
+      const approveMatch = url.pathname.match(/^\/v1\/reports\/([^/]+)\/approve$/);
+      if (approveMatch && request.method === "POST") {
+        await readBody(request);
+        sendJson(response, 200, await options.service.approveReport(routeId.parse(approveMatch[1])));
+        return;
+      }
+      const repairsMatch = url.pathname.match(/^\/v1\/reports\/([^/]+)\/repairs$/);
+      if (repairsMatch && request.method === "POST") {
+        await readBody(request);
+        sendJson(response, 201, await options.service.createRepair(routeId.parse(repairsMatch[1])));
+        return;
+      }
+      const eventsMatch = url.pathname.match(/^\/v1\/playtests\/([^/]+)\/events$/);
+      if (eventsMatch && request.method === "GET") {
+        const playtestId = routeId.parse(eventsMatch[1]);
+        await options.service.store.loadSession(playtestId);
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+        const lastId = request.headers["last-event-id"];
+        const events = await options.service.store.loadEvents(playtestId);
+        const lastIndex = typeof lastId === "string" ? events.findIndex((event) => event.id === lastId) : -1;
+        for (const event of events.slice(lastIndex + 1)) {
+          response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        }
+        const listener = (event: unknown) => {
+          const audit = event as { id: string; type: string };
+          response.write(`id: ${audit.id}\nevent: ${audit.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        };
+        options.service.events.on(playtestId, listener);
+        request.on("close", () => options.service.events.off(playtestId, listener));
+        return;
+      }
+      sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
+    } catch (error) {
+      sendJson(response, errorStatus(error), errorBody(error));
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port ?? 0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    server,
+    capability,
+    host: address.address,
+    port: address.port,
+    origin: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
