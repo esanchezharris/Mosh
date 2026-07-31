@@ -29,6 +29,16 @@ TEST_CASE ("MOSH_RENDERLAYER round-trips through XML (01 §6)", "[stage1][render
     REQUIRE (back.getChildWithName (ids::PARAMS).getChildWithName (ids::COLORS).getNumChildren() == 1);
 }
 
+TEST_CASE ("legacy Monster-created render layers remain readable", "[stage1][renderlayer][compat]")
+{
+    auto legacy = RenderLayer::create ("rl-legacy", "clip-42", 0.0, 4.0, "fake");
+    legacy.setProperty (ids::createdBy, "monster", nullptr);
+
+    auto back = RenderLayer::roundTripViaXml (legacy);
+
+    REQUIRE (back[ids::createdBy].toString() == "monster");
+}
+
 TEST_CASE ("full cache fingerprint is sensitive to route/variant/seed (05 §5)", "[stage1][cache]")
 {
     auto v = RenderLayer::create ("rl-1", "clip-42", 0.0, 4.0, "stable_audio3");

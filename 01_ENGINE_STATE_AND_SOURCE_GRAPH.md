@@ -104,7 +104,7 @@ MOSH_RENDERLAYER
     cacheKey            // hash(sourceFingerprint)
     cacheArtifact       // path/ref to the rendered WAV (a take id, or file)
     status              // "empty" | "queued" | "rendering" | "ready" | "error" | "dirty"
-    createdBy           // "user" | (future) "monster"
+    createdBy           // "user" | "moshi"; legacy "monster" values remain readable
     userKept            // false until accepted/committed
 ```
 

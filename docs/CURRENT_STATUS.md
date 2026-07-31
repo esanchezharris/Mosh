@@ -58,31 +58,18 @@ neural insert was removed (2026-06-21); the only real-time neural path is an
 optional RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default
 build).
 
-## Current Status (as of 2026-07-29)
+## Current Status (as of 2026-07-30)
 
-- **Trunk:** `origin/main` @ `c703a855` (merge of #490, 2026-07-29 early AM)
-  [measured: `git log --oneline origin/main`]. The two most recent landed
-  campaigns: the **v2 deslop pass** (#479, #481–#485, merged 2026-07-28) — CSS
-  partials + shell baselines groundwork, bevel-border removal, accent
-  reservation, bloom removal, density (64→72px lanes) — and the
-  **architecture-improvement program** below [measured: merge commits on
-  `origin/main`].
-- **The architecture-improvement program is the active push.** Wave 0 landed
-  2026-07-28: #486 (worklog INDEX repair + RED-proven guard) and #487
-  (`docs/rfc/` decision-log scaffold, RFCs 001–004) are MERGED; #489
-  (glob-aware god-file guards + the 209-row lock-scope golden ledger) passed
-  the full native gate (selftest ×3 deterministic) and awaits **owner merge**
-  (`needs-owner-merge` label). Wave 1 landed 2026-07-28/29: #490 (PROGRESS
-  retirement), #491 (PluginBrowser dedupe), #493 (store event-rail
-  extraction), #494 (Rack/GenDrawer out of Dock.tsx), #495 (classic-shell
-  audit — owner decision pending, feeds RFC 005), and this status
-  consolidation (#492). Follow-on PRs (clipRenderers probe change #497 —
-  owner-merge; store slices #498; RFC 005 draft) are in the queue
-  [measured: `gh pr view` per PR].
-- **Open PRs: 25** [measured 2026-07-29: `gh pr list --state open | jq
-  length`]. The bulk are the reviewed First-Stranger / fix backlog awaiting
-  merge (#462–#478 range) plus the program's owner-merge PRs and three
-  long-running WIP drafts (#322/#358/#363).
+- **Trunk:** `origin/main` @ `364cb6fe` (merge of #519, 2026-07-30)
+  [measured: `git log -1 origin/main`].
+- **The Vocal Map Playtest Program is the active push.** Work advances through
+  one fully gated, owner-merged serial PR at a time. Architecture-improvement
+  and First-Stranger branches remain preserved but are not active program
+  seats.
+- **Open PRs: 22** [measured 2026-07-30: `gh pr list --state open | jq
+  length`]. Open First-Stranger PRs #471, #473, #475, and the combined #478
+  are preserved but paused; none is a dependency of the Vocal Map serial train
+  and none should merge without a new owner disposition.
 - **MoshOps dispatch table: 209 command entries** in `src/moshops/MoshOps.cpp`
   [measured: `grep -c 'if (name == "' src/moshops/MoshOps.cpp`]. Selftest check
   counts are deliberately **not** quoted here: they are environment-dependent
@@ -128,11 +115,13 @@ build).
   and stack freeze is 2026-08-27.
 - [`first-stranger-program/`](first-stranger-program/) — paused and superseded
   on 2026-07-30. Its tracked `STOP` sentinel keeps the automation inert while
-  the backlog, status board, lane plans, ledger, and evidence remain preserved.
+  the backlog, status board, lane plans, ledger, evidence, and open PRs remain
+  preserved. Existing PRs #471, #473, #475, and #478 are paused pending an
+  explicit owner close, park, or rebase decision.
 - [`fms-lyrics-bench/`](fms-lyrics-bench/) — the FMS lyrics-first benchmark
   program (charter + machine-regenerated scoreboard).
-- The architecture-improvement waves (this docs consolidation is Wave 1's
-  status lane; decision RFCs land under `docs/rfc/` via #487).
+- The architecture-improvement waves are a preserved, inactive queue; accepted
+  decisions remain under `docs/rfc/`.
 
 ## Architecture Sources
 
