@@ -326,9 +326,12 @@ Report JSON: {stop:<true if STOP printed>, items:<the ready array, verbatim>}.`,
   if (halts.length) break
 }
 
-// DASHBOARD — always refresh the owner-blocker view on the way out.
-phase('Dashboard')
-await dashboard()
+if (await stopRequested()) {
+  log('STOP sentinel present — preserving the historical dashboard without refresh.')
+} else {
+  phase('Dashboard')
+  await dashboard()
+}
 
 log(`stranger-loop done. planned=${planned} merged(safe)=${merges} routed(owner)=${ownerRoutes} rejected=${rejectedIds.length} dryRuns=${dryRuns} cycles=${cycle} halts=${halts.join(',') || 'none'}`)
 return { planned, mergedSafe: mergedIds, routedOwner: ownerIds, rejected: rejectedIds, dryRuns, cycles: cycle, baseline, halts, dryRun: cfg.dryRun, planOnly: cfg.planOnly }

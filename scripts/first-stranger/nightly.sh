@@ -74,6 +74,10 @@ log "invoking claude (headless, --dangerously-skip-permissions) …"
 "$CLAUDE_BIN" -p "$PROMPT" --dangerously-skip-permissions >>"$LOG" 2>&1
 rc=$?
 log "claude exited rc=$rc"
-bash "$REPO/scripts/first-stranger/status.sh" >>"$LOG" 2>&1 || true   # belt: refresh dashboard
+if [ -e "$STOP1" ] || [ -e "$STOP2" ]; then
+  log "STOP sentinel present — preserving dashboard without refresh."
+else
+  bash "$REPO/scripts/first-stranger/status.sh" >>"$LOG" 2>&1 || true
+fi
 log "nightly done (rc=$rc). log: $LOG"
 exit $rc

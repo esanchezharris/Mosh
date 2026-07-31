@@ -69,9 +69,19 @@ required_check_state() {
 wait_for_required_check() {
   local pr="$1" waited=0 st
   while [ "$waited" -lt "$AL_CHECK_TIMEOUT_S" ]; do
+    if al_stop_requested; then
+      printf 'STOP sentinel present — not merging\n'
+      return 2
+    fi
     st="$(required_check_state "$pr")"
     case "$st" in
-      SUCCESS) return 0 ;;
+      SUCCESS)
+        if al_stop_requested; then
+          printf 'STOP sentinel present — not merging\n'
+          return 2
+        fi
+        return 0
+        ;;
       FAILURE) printf 'required check "%s*" failed on PR #%s\n' "$AL_REQUIRED_CHECK_PREFIX" "$pr"; return 1 ;;
       *)       sleep "$AL_CHECK_POLL_S"; waited=$(( waited + AL_CHECK_POLL_S )) ;;
     esac
@@ -128,7 +138,16 @@ cmd_prepare() {
   fi
 
   # Push the rebased branch so the PR reflects exactly what we gate.
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not pushing"}'
+    return
+  fi
   git -C "$wt" push --force-with-lease >/dev/null 2>&1 || al_warn "push --force-with-lease failed for $(branch_of "$slug")"
+
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not gating"}'
+    return
+  fi
 
   # THE GATE (authoritative: ×3 selftest + verify.py run here for native).
   local gate_json gate_rc
@@ -171,20 +190,33 @@ cmd_finalize() {
     return
   fi
 
-  local mlog; mlog="$(mktemp)"
-  gh pr ready "$pr" >/dev/null 2>&1 || true   # a draft PR can't be merged
-
   # main REQUIRES the cheap gate and enforces protection on admins, so --admin is
   # not an escape hatch any more — wait for the real signal, fail-closed.
-  local wlog; wlog="$(wait_for_required_check "$pr")"
-  if [ $? -ne 0 ]; then
+  local wlog wrc; wlog="$(wait_for_required_check "$pr")"; wrc=$?
+  if [ "$wrc" -ne 0 ]; then
+    if al_stop_requested; then
+      jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+      return
+    fi
     jq -nc --arg r "$wlog" '{merged:false,phase:"finalize",reason:$r}'
-    rm -f "$mlog"; return
+    return
+  fi
+
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not readying"}'
+    return
+  fi
+  gh pr ready "$pr" >/dev/null 2>&1 || true   # a draft PR can't be merged
+
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+    return
   fi
 
   # NOT --delete-branch: the branch is checked out in a worktree, so gh's delete step
   # returns non-zero even though the MERGE succeeded (a false failure). We delete it
   # ourselves after removing the worktree, below.
+  local mlog; mlog="$(mktemp)"
   gh pr merge "$pr" --squash >"$mlog" 2>&1
   local mrc=$?
   if [ "$mrc" -ne 0 ]; then
@@ -224,10 +256,26 @@ cmd_reject() {
     return
   fi
   ensure_label "needs-human" "B60205"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   ensure_label "$sublabel" "FBCA04"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   gh pr edit "$pr" --add-label "needs-human" --add-label "$sublabel" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not commenting"}'
+    return
+  fi
   gh pr comment "$pr" --body "Auto-loop held this PR for a human: **$sublabel**. $reason" >/dev/null 2>&1 || true
 
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not writing ledger"}'
+    return
+  fi
   ledger_append "### $(al_now) — PR #$pr: $br  [REJECTED ⛔ $sublabel]
 - **Branch:** $br → PR #$pr
 - **Reason:** $reason
@@ -250,23 +298,47 @@ cmd_route_owner() {
     return
   fi
   ensure_label "needs-owner-merge" "5319E7"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   ensure_label "program:$lane" "0E8A16"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not readying"}'
+    return
+  fi
   gh pr ready "$pr" >/dev/null 2>&1 || true   # undraft → the owner can merge it
   local labels=(--add-label "needs-owner-merge" --add-label "program:$lane")
   local caution=""
   if [ "$flagged" = "1" ]; then
+    if al_stop_requested; then
+      jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+      return
+    fi
     ensure_label "review-flagged" "D93F0B"
     labels+=(--add-label "review-flagged")
     caution="⚠️ **The hostile review flagged concerns — read them before merging.**
 "
   fi
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   gh pr edit "$pr" "${labels[@]}" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not commenting"}'
+    return
+  fi
   gh pr comment "$pr" --body "${caution}**Ready for owner merge** — high-stakes lane (\`$lane\`); the stranger-loop never auto-merges these.
 - **Gate:** $gsum
 - **Review:** $note
 
 This PR is gated + reviewed. Merge it when you're satisfied." >/dev/null 2>&1 || true
 
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not writing ledger"}'
+    return
+  fi
   ledger_append "### $(al_now) — PR #$pr: $br  [AWAITING-OWNER 🔒 program:$lane]
 - **Branch:** $br → PR #$pr
 - **Gate:** $gsum

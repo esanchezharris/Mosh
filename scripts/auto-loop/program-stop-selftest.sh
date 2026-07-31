@@ -9,15 +9,33 @@ SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/mosh-program-stop.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 FAKE_ROOT="$SANDBOX/repo"
+FAKE_REMOTE="$SANDBOX/origin.git"
 PROGRAM_STOP="$FAKE_ROOT/docs/first-stranger-program/STOP"
 GH_MARKER="$SANDBOX/gh-invoked"
+GH_MODE="$SANDBOX/gh-mode"
 mkdir -p "$FAKE_ROOT/docs/first-stranger-program" "$SANDBOX/bin"
 git init -q "$FAKE_ROOT"
+git init --bare -q "$FAKE_REMOTE"
+git -C "$FAKE_ROOT" config user.email "program-stop-selftest@invalid"
+git -C "$FAKE_ROOT" config user.name "program-stop-selftest"
+touch "$FAKE_ROOT/.seed"
+git -C "$FAKE_ROOT" add .seed
+git -C "$FAKE_ROOT" commit -qm seed
+git -C "$FAKE_ROOT" remote add origin "$FAKE_REMOTE"
+git -C "$FAKE_ROOT" push -q origin HEAD:main
 touch "$PROGRAM_STOP"
 
 cat >"$SANDBOX/bin/gh" <<EOF
 #!/usr/bin/env bash
-touch "$GH_MARKER"
+mode="\$(cat "$GH_MODE" 2>/dev/null || true)"
+if [ "\${1:-} \${2:-}" = "pr checks" ]; then
+  [ "\$mode" = "stop-on-check" ] && touch "$PROGRAM_STOP"
+  printf '[{"name":"cheap gate","state":"SUCCESS"}]\n'
+  exit 0
+fi
+printf '%s\n' "\$*" >>"$GH_MARKER"
+[ "\$mode" = "stop-on-mutation" ] && touch "$PROGRAM_STOP"
+[ "\$mode" = "stop-on-ready" ] && [ "\${1:-} \${2:-}" = "pr ready" ] && touch "$PROGRAM_STOP"
 exit 97
 EOF
 chmod +x "$SANDBOX/bin/gh"
@@ -45,5 +63,48 @@ if [ -e "$GH_MARKER" ]; then
   printf 'program-stop-selftest: FAIL (a stopped path invoked gh)\n' >&2
   exit 1
 fi
+
+rm -f "$PROGRAM_STOP"
+printf 'stop-on-check\n' >"$GH_MODE"
+BASE_SHA="$(git -C "$FAKE_ROOT" rev-parse HEAD)"
+MIDFLIGHT_OUT="$(PATH="$SANDBOX/bin:$PATH" AL_ROOT="$FAKE_ROOT" \
+  AL_PROGRAM_STOP="$PROGRAM_STOP" AL_CHECK_TIMEOUT_S=2 AL_CHECK_POLL_S=1 \
+  "$MERGE_ONE" finalize lane 1 "$BASE_SHA")"
+if ! printf '%s\n' "$MIDFLIGHT_OUT" | jq -e \
+    '.phase == "finalize" and .stopped == true and (.reason | startswith("STOP sentinel present"))' \
+    >/dev/null; then
+  printf 'program-stop-selftest: FAIL (mid-flight finalize returned %s)\n' "$MIDFLIGHT_OUT" >&2
+  exit 1
+fi
+if [ -e "$GH_MARKER" ]; then
+  printf 'program-stop-selftest: FAIL (mid-flight STOP allowed gh mutation: %s)\n' \
+    "$(tr '\n' ',' <"$GH_MARKER")" >&2
+  exit 1
+fi
+
+expect_one_mutation_then_stop() {
+  local phase="$1" mode="$2"
+  shift 2
+  rm -f "$PROGRAM_STOP" "$GH_MARKER"
+  printf '%s\n' "$mode" >"$GH_MODE"
+  local out
+  out="$(PATH="$SANDBOX/bin:$PATH" AL_ROOT="$FAKE_ROOT" AL_PROGRAM_STOP="$PROGRAM_STOP" \
+    AL_CHECK_TIMEOUT_S=2 AL_CHECK_POLL_S=1 "$MERGE_ONE" "$@")"
+  if ! printf '%s\n' "$out" | jq -e --arg phase "$phase" \
+      '.phase == $phase and .stopped == true and (.reason | startswith("STOP sentinel present"))' \
+      >/dev/null; then
+    printf 'program-stop-selftest: FAIL (%s mid-mutation returned %s)\n' "$phase" "$out" >&2
+    exit 1
+  fi
+  if [ "$(wc -l <"$GH_MARKER" | tr -d ' ')" != "1" ]; then
+    printf 'program-stop-selftest: FAIL (%s continued after STOP: %s)\n' \
+      "$phase" "$(tr '\n' ',' <"$GH_MARKER")" >&2
+    exit 1
+  fi
+}
+
+expect_one_mutation_then_stop finalize stop-on-ready finalize lane 1 "$BASE_SHA"
+expect_one_mutation_then_stop reject stop-on-mutation reject lane 1 held "program stopped"
+expect_one_mutation_then_stop route-owner stop-on-mutation route-owner lane 1 T "gate pass" "review pass" 0
 
 printf 'program-stop-selftest: PASS\n'
