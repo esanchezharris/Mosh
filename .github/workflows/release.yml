@@ -196,11 +196,14 @@ jobs:
 
       # ── optional: bundle a brain key (opt-in only — see the header note) ──────
       - name: Bundle a brain key (optional, only if configured)
-        if: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 != '' }}
         env:
           BRAIN_ENV_BASE64: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 }}
         run: |
           set -euo pipefail
+          if [ -z "$BRAIN_ENV_BASE64" ]; then
+            echo "optional release brain key is not configured; continuing without one"
+            exit 0
+          fi
           printf '%s' "$BRAIN_ENV_BASE64" | base64 --decode > ui/.env.local
           echo "wrote ui/.env.local from MOSH_RELEASE_BRAIN_ENV_BASE64 — run-mosh.sh release will bundle it"
 
