@@ -6,8 +6,9 @@ flipping it: Settings → Moshi → "Agentic loop (experimental)".
 ## Setup
 
 1. Flip the flag ON (v2 shell; the loop is auto-disabled in multiplayer).
-2. Configure a brain provider or proxy. A packaged app without one reports setup
-   failure and performs no steps; the deterministic script exists only in Vite/e2e.
+2. Configure `MOSH_BRAIN_PROXY_URL` plus `MOSH_BRAIN_PROXY_APIKEY`, or a direct
+   provider. A packaged app without either reports setup failure and performs no
+   steps; the deterministic script exists only in Vite/e2e.
 
 ## What to drive (20 minutes)
 

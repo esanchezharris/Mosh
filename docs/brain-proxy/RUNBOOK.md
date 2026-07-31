@@ -173,29 +173,21 @@ launch in a fresh session inherits no shell env at all — same reason `bundle_b
 exists in the first place (see its comment in `run-mosh.sh`, "a Finder/Dock
 double-click ... inherits NO shell env").
 
-**Known gap — a small follow-up outside this change's scope:** `run-mosh.sh`'s
-`bundle_brain_key()` (around line 213) writes `Contents/Resources/brain.env` from a
-**hardcoded whitelist** of var names (`MOSHI_BRAIN_PROVIDER`, `OPENAI_*`,
-`DEEPSEEK_*`, `XAI_*`) — it does not yet know about `MOSH_BRAIN_PROXY_URL` /
-`MOSH_BRAIN_PROXY_APIKEY`, so a plain `run-mosh.sh deploy` today will NOT bundle them
-even if they're in `ui/.env.local`. `run-mosh.sh` was deliberately left untouched by
-this change (it's outside this workstream's file allowlist). Closing the loop for a
-Dock-launch-durable proxy-only bundle needs one small edit: add
-`MOSH_BRAIN_PROXY_URL` and `MOSH_BRAIN_PROXY_APIKEY` to the `for v in ...` list in
-`bundle_brain_key()`. Until that lands, the bundled `brain.env` keeps shipping the
-four provider secrets (today's status quo, not a regression from this change) —
-proxy mode still works for any launch that inherits the shell export, which is
-sufficient to verify the whole path before doing that follow-up.
+Both `run-mosh.sh` and `run-mosh.ps1` now bundle `MOSH_BRAIN_PROXY_URL` and
+`MOSH_BRAIN_PROXY_APIKEY`; `service/scripts/bundle_completeness_test.py` keeps their
+brain-configuration key lists identical. A proxy-only `ui/.env.local` therefore
+survives a Dock/Finder launch on macOS and a double-click launch on Windows without
+putting any provider key in the package.
 
-Once `bundle_brain_key()` carries the two proxy vars (that follow-up) and you
-confirm the proxy path end to end:
+After confirming the proxy path end to end:
 
 > **The packaged app's `brain.env` no longer needs to contain a single provider key.**
 > `BrainProxy::chat()` tries the proxy first; provider keys live only in Supabase
 > secrets, server-side, never inside anything you ship. Once you've confirmed the
 > proxy path works end to end (`--brain-smoke` below, or the in-app brain UI), you can
-> delete the four `<PROVIDER>_*` lines from the `brain.env` your deploy script writes
-> — a build that ships without them is the actual fix landing.
+> leave the direct-provider `*_API_KEY` fields blank or remove them from
+> `ui/.env.local` before packaging. The resulting `brain.env` contains only the proxy
+> URL/publishable key plus any non-secret routing fields.
 
 Smoke it from the built app:
 ```sh

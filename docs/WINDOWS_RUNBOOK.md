@@ -73,13 +73,15 @@ cd ui ; npm ci ; npm test ; npm run test:e2e ; cd ..
 
 This builds Release and stages `dist\Mosh\` — `Mosh.exe` + `ui\` + `drumkits\` + exe-adjacent
 DLLs + `service\` (the same subtree the macOS `deploy` bundles) + a `brain.env` written from
-your `ui\.env.local` keys (owner-only ACL). It then zips it to `dist\Mosh-win-x64.zip`.
+your non-empty `ui\.env.local` proxy/provider fields (owner-only ACL). It then zips it to
+`dist\Mosh-win-x64.zip`.
 
 - The folder is portable: copy it anywhere and run `Mosh.exe`. The bundled `brain.env` (read
   by the BrainProxy Windows fallback next to the exe) means Moshi has a brain on any launch —
   including a double-click that inherits no shell environment.
-- **Security:** `brain.env` holds your provider key in cleartext. Anyone with the folder/zip
-  can read it. Keep a provider spend-limit set; don't post it publicly.
+- Prefer proxy-only packaging with `MOSH_BRAIN_PROXY_URL` and its publishable/anon
+  `MOSH_BRAIN_PROXY_APIKEY`; leave direct-provider API keys blank. If provider keys are
+  included, `brain.env` holds them in cleartext and anyone with the folder/zip can read them.
 
 ## 4. Real generative / FMS features (per-feature venvs)
 
