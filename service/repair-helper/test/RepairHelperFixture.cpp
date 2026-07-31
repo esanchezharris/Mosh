@@ -85,11 +85,16 @@ int main (int argc, char** argv)
 {
     const std::string embeddedSha = MOSH_REPAIR_FIXTURE_SHA;
     bool receivedSha = false;
+    bool receivedCheckpoint = false;
     for (int index = 1; index + 1 < argc; ++index)
+    {
         if (std::string (argv[index]) == "--mosh-repair-source-sha"
             && argv[index + 1] == embeddedSha)
             receivedSha = true;
-    if (! receivedSha) return 6;
+        if (std::string (argv[index]) == "--mosh-owner-checkpoint")
+            receivedCheckpoint = true;
+    }
+    if (! receivedSha && ! receivedCheckpoint) return 6;
     for (int descriptor = 3; descriptor < getdtablesize(); ++descriptor)
     {
         char path[PATH_MAX] {};

@@ -29,25 +29,38 @@ WORKTREE="$FIXTURE/worktree"
 APP="$WORKTREE/build/Mosh.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
+PRIOR_APP="$FIXTURE/PriorMosh.app"
+PRIOR_CONTENTS="$PRIOR_APP/Contents"
+PRIOR_MACOS="$PRIOR_CONTENTS/MacOS"
 HELPER="$FIXTURE/MoshRepairHelper"
 CALLER="$FIXTURE/MoshCaller"
 MARKER="$FIXTURE/launched.txt"
 RACE_MARKER="$FIXTURE/race-launched.txt"
+PRIOR_MARKER="$FIXTURE/prior-launched.txt"
 STATUS="$FIXTURE/worker-status.txt"
 CHECKPOINT="$(mktemp "$FIXTURE/checkpoint.XXXXXX.tracktionedit")"
 SHA="0123456789abcdef0123456789abcdef01234567"
 
 mkdir -p "$MACOS"
+mkdir -p "$PRIOR_MACOS"
 plutil -create xml1 "$CONTENTS/Info.plist"
 plutil -insert CFBundleIdentifier -string studio.mosh.app "$CONTENTS/Info.plist"
 plutil -insert CFBundleExecutable -string Mosh "$CONTENTS/Info.plist"
 plutil -insert CFBundlePackageType -string APPL "$CONTENTS/Info.plist"
+plutil -create xml1 "$PRIOR_CONTENTS/Info.plist"
+plutil -insert CFBundleIdentifier -string studio.mosh.app "$PRIOR_CONTENTS/Info.plist"
+plutil -insert CFBundleExecutable -string Mosh "$PRIOR_CONTENTS/Info.plist"
+plutil -insert CFBundlePackageType -string APPL "$PRIOR_CONTENTS/Info.plist"
 
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_CALLER "$SOURCE" -o "$CALLER"
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
   "-DMOSH_REPAIR_FIXTURE_MARKER=\"$MARKER\"" \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
   "$SOURCE" -o "$MACOS/Mosh"
+xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
+  "-DMOSH_REPAIR_FIXTURE_MARKER=\"$PRIOR_MARKER\"" \
+  "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
+  "$SOURCE" -o "$PRIOR_MACOS/Mosh"
 xcrun clang++ -std=c++20 "$HELPER_SOURCE" \
   -framework CoreFoundation -framework Security -o "$HELPER"
 
@@ -59,10 +72,15 @@ codesign --force --options runtime --timestamp \
   --identifier studio.mosh.app --sign "$IDENTITY" "$MACOS/Mosh"
 codesign --force --options runtime --timestamp \
   --identifier studio.mosh.app --sign "$IDENTITY" "$APP"
+codesign --force --options runtime --timestamp \
+  --identifier studio.mosh.app --sign "$IDENTITY" "$PRIOR_MACOS/Mosh"
+codesign --force --options runtime --timestamp \
+  --identifier studio.mosh.app --sign "$IDENTITY" "$PRIOR_APP"
 
 codesign --verify --strict --verbose=2 "$CALLER"
 codesign --verify --strict --verbose=2 "$HELPER"
 codesign --verify --deep --strict --verbose=2 "$APP"
+codesign --verify --deep --strict --verbose=2 "$PRIOR_APP"
 
 if "$HELPER" probe "$$" >/dev/null 2>&1; then
   echo "Unsigned caller was accepted." >&2
@@ -118,15 +136,15 @@ MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
     "$HELPER" handoff-repair \
       "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ \
     __SECOND_HANDOFF__ \
-    "$HELPER" handoff-repair \
-      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ &
+    "$HELPER" handoff-prior \
+      "$CHECKPOINT" "$PRIOR_APP" __CALLER_PID__ &
 RACE_CALLER_PID=$!
 
 for _ in {1..350}; do
-  [[ -s "$RACE_MARKER" ]] && break
+  [[ -s "$RACE_MARKER" || -s "$PRIOR_MARKER" ]] && break
   sleep 0.1
 done
-[[ -s "$RACE_MARKER" ]] || {
+[[ -s "$RACE_MARKER" || -s "$PRIOR_MARKER" ]] || {
   echo "Concurrent signed handoff did not launch a target." >&2
   [[ -s "$STATUS" ]] && sed 's/^/worker exit: /' "$STATUS" >&2
   exit 8
@@ -135,7 +153,11 @@ if kill -0 "$RACE_CALLER_PID" 2>/dev/null; then
   echo "Concurrent handoff caller remained alive." >&2
   exit 9
 fi
-[[ "$(wc -l < "$RACE_MARKER" | tr -d ' ')" == "1" ]] || {
+REPAIR_LAUNCHES=0
+PRIOR_LAUNCHES=0
+[[ ! -f "$RACE_MARKER" ]] || REPAIR_LAUNCHES="$(wc -l < "$RACE_MARKER" | tr -d ' ')"
+[[ ! -f "$PRIOR_MARKER" ]] || PRIOR_LAUNCHES="$(wc -l < "$PRIOR_MARKER" | tr -d ' ')"
+[[ "$((REPAIR_LAUNCHES + PRIOR_LAUNCHES))" == "1" ]] || {
   echo "Concurrent handoff launched more than one target." >&2
   exit 10
 }
