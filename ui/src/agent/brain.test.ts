@@ -51,3 +51,21 @@ describe("createBrain injects producer knowledge for the user's turn", () => {
     expect(systemOfLastCall()).not.toContain("Producer knowledge");
   });
 });
+
+describe("createBrain provider failures", () => {
+  beforeEach(() => {
+    brainChatMock.mockReset();
+  });
+
+  it("does not execute demo commands when the provider is unavailable", async () => {
+    brainChatMock.mockRejectedValue(new Error("no brain provider configured"));
+    const brain = createBrain(() => snap);
+
+    const reply = await brain.send("add a bass track");
+
+    expect(reply).toEqual({
+      intent: "UHOH",
+      say: "can't reach my brain — check setup and try again",
+    });
+  });
+});

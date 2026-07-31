@@ -1,10 +1,3 @@
-// Moshi's brain — turns a chat turn into a behaviour + (optionally) a list of real
-// edits. It feeds the LLM a persona, the curated command catalog, and a compact
-// snapshot, and asks for ONE JSON object: { intent, say?, commands? }. If the proxy
-// is unreachable (no keys yet), it falls back to a tiny demo mock so the loop still
-// works in the preview. The pure prompt + parse logic lives in brainCore.ts (so the
-// offline benchmark can score the exact prompt without pulling the bridge/window).
-//
 // WP-11 best-of-n (flag `bestOfNServing`, default OFF): after the single-shot reply
 // parses, taste-classified command batches escalate through the native relay (the
 // service draws + ranks more candidates; any failure keeps the single-shot reply),
@@ -27,7 +20,6 @@
 // an intentional M3 change from M2's "only when pools are non-empty" gate.
 
 import { archivePair, brainChat, escalateCandidates } from "../bridge";
-import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
 import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
@@ -104,8 +96,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         });
         return chosen;
       } catch {
-        // proxy unreachable / no key yet → demo mock so the loop still works
-        return mockBrainReply(text, snap);
+        return { intent: "UHOH", say: "can't reach my brain — check setup and try again" };
       }
     },
     clear() { history.length = 0; },
