@@ -21,6 +21,10 @@ CLASS="${1:?usage: gate.sh <cheap|native> <worktree> [base]}"
 WT="${2:?worktree required}"
 BASE="${3:-origin/main}"
 WT="$(cd "$WT" && pwd)"
+HEAD_SHA="$(git -C "$WT" rev-parse HEAD 2>/dev/null || printf unknown)"
+BASE_SHA="$(git -C "$WT" rev-parse "$BASE" 2>/dev/null || printf unknown)"
+TREE_CLEAN=true
+[ -z "$(git -C "$WT" status --porcelain 2>/dev/null)" ] || TREE_CLEAN=false
 
 al_load_cache_env
 SESS_BASE="$(unique_session "gate")"
@@ -321,7 +325,10 @@ finish() {
     --argjson steps "$steps" --argjson selftest "$SELFTEST_NS" \
     --argjson selftest_failed "$SELFTEST_FMAX" --argjson asserts "$SELFTEST_AMAX" \
     --arg session "$SESS_BASE" --arg port "$PORT" \
+    --arg head_sha "$HEAD_SHA" --arg base_ref "$BASE" --arg base_sha "$BASE_SHA" \
+    --argjson tree_clean "$TREE_CLEAN" \
     '{pass:$pass, class:$class, session:$session, port:$port,
+      head_sha:$head_sha, base_ref:$base_ref, base_sha:$base_sha, tree_clean:$tree_clean,
       selftest:$selftest, selftest_failed:$selftest_failed, asserts:$asserts,
       steps:$steps}'
 }

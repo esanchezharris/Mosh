@@ -11,7 +11,7 @@ const outputDir = mkdtempSync(join(tmpdir(), "mosh-production-boundary-"));
 afterAll(() => rmSync(outputDir, { recursive: true, force: true }));
 
 describe("production build mock boundary", () => {
-  it("rejects the legacy e2e mock flag instead of compiling demo commands", () => {
+  it("rejects the legacy e2e mock flag before producing a production artifact", () => {
     const result = spawnSync(
       process.execPath,
       [join(uiDir, "node_modules/vite/bin/vite.js"), "build", "--outDir", outputDir],

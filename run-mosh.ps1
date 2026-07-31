@@ -71,6 +71,7 @@ if (-not $env:MOSH_SERVICE_SCRIPT) { $env:MOSH_SERVICE_SCRIPT = Join-Path $Root 
 # --- report which providers are configured (names only, never values) -------------
 if (Test-Path $envFile) { Write-Host "env: $envFile" } else { Write-Host "env: shell only (no $envFile)" }
 $haveAny = $false
+if ($env:MOSH_BRAIN_PROXY_URL) { Write-Host "  - brain proxy: configured"; $haveAny = $true }
 foreach ($p in @("DEEPSEEK", "OPENAI", "XAI")) {
     if (Get-Item -Path "env:${p}_API_KEY" -ErrorAction SilentlyContinue) {
         Write-Host "  - ${p}: key present"; $haveAny = $true
@@ -147,10 +148,11 @@ function Copy-ServiceBundle {
 
 function Write-BundledBrainKey {
     param([string]$BrainFile)   # <dist>\brain.env
-    # Same 9 keys + format as run-mosh.sh's bundle_brain_key: one KEY=value line per
+    # Same keys + format as run-mosh.sh's bundle_brain_key: one KEY=value line per
     # NON-EMPTY var, from the ui\.env.local values already loaded into the environment.
     $keys = @(
         "MOSHI_BRAIN_PROVIDER",
+        "MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY",
         "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_API_KEY",
         "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_API_KEY",
         "XAI_BASE_URL", "XAI_MODEL", "XAI_API_KEY"

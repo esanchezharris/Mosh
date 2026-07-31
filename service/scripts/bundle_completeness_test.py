@@ -85,6 +85,22 @@ def _ps1_whitelist():
     return files, set(_array("$dirs"))
 
 
+def _shell_brain_keys():
+    src = open(RUN_MOSH, encoding="utf-8").read()
+    start = src.index("bundle_brain_key()")
+    body = src[start:]
+    match = re.search(r"for v in (.*?); do", body, re.S)
+    return set(match.group(1).replace("\\", " ").split()) if match else set()
+
+
+def _ps1_brain_keys():
+    src = open(RUN_MOSH_PS1, encoding="utf-8").read()
+    start = src.index("function Write-BundledBrainKey")
+    body = src[start:]
+    match = re.search(r"\$keys\s*=\s*@\((.*?)\)", body, re.S)
+    return set(re.findall(r'"([^"]+)"', match.group(1))) if match else set()
+
+
 def _top_level_modules() -> set:
     """Top-level service/*.py module names (excluding tests + server itself)."""
     return {f[:-3] for f in os.listdir(SERVICE)
@@ -201,6 +217,13 @@ if os.path.isfile(RUN_MOSH_PS1):
     check("run-mosh.ps1 dir whitelist == run-mosh.sh",
           ps1_dirs == bundled_dirs,
           f"ps1-only={sorted(ps1_dirs - bundled_dirs)} sh-only={sorted(bundled_dirs - ps1_dirs)}")
+    shell_brain_keys = _shell_brain_keys()
+    ps1_brain_keys = _ps1_brain_keys()
+    check("macOS brain bundle includes proxy configuration",
+          {"MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY"} <= shell_brain_keys)
+    check("run-mosh.ps1 brain bundle keys == run-mosh.sh",
+          ps1_brain_keys == shell_brain_keys,
+          f"ps1-only={sorted(ps1_brain_keys - shell_brain_keys)} sh-only={sorted(shell_brain_keys - ps1_brain_keys)}")
 else:
     check("run-mosh.ps1 exists (Windows packaging whitelist mirror)", False, "run-mosh.ps1 missing")
 

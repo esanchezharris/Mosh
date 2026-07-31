@@ -4,9 +4,9 @@
 // UI runs fully interactive in a plain browser (Vite dev) with no JUCE WebView.
 //
 // This exists ONLY to make the UI iterable with real DOM/CSS introspection — it
-// is NOT the engine and ships nowhere: bridge.ts wires it in solely under
-// import.meta.env.DEV when the real native backend is absent. A production
-// `vite build` (the bundle staged into Mosh.app) strips it entirely.
+// is NOT the engine: bridge.ts enables it only in Vite development or explicit
+// e2e mode when the real native backend is absent. Optimized e2e builds write to
+// dist-e2e; production dist keeps MOCK_ENABLED false.
 //
 // Fidelity rule: the mock speaks the contract, not the engine. It returns the
 // same { ok, command, data } envelopes, emits snapshot_invalidated on structural

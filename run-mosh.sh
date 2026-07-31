@@ -155,6 +155,7 @@ fi
 # --- report which providers are configured (names only, never values) -------------
 if [ -f "$ENV_FILE" ]; then echo "env: ${ENV_FILE#$ROOT/}"; else echo "env: shell only (no $ENV_FILE)"; fi
 have_any=0
+if [ -n "${MOSH_BRAIN_PROXY_URL:-}" ]; then echo "  • brain proxy: configured"; have_any=1; fi
 for p in DEEPSEEK OPENAI XAI; do
   k="${p}_API_KEY"
   if [ -n "${!k:-}" ]; then echo "  • $p: key present"; have_any=1; fi
