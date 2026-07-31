@@ -67,10 +67,10 @@ build).
   and First-Stranger branches remain preserved but are not active program
   seats.
 - **Open PRs: 22** [measured 2026-07-30: `gh pr list --state open | jq
-  length`]. Open First-Stranger PRs #471, #473, #475, and the combined #478
-  are preserved but paused; none is a dependency of the Vocal Map serial train
-  and none should merge without a new owner disposition.
-- **MoshOps dispatch table: 209 command entries** in `src/moshops/MoshOps.cpp`
+  length`]. The pre-existing queue is preserved but outside the active serial
+  seat; [`vocal-map-program/STATUS.md`](vocal-map-program/STATUS.md) records the
+  explicit pause/park disposition and fresh-gate rule for overlapping work.
+- **MoshOps dispatch table: 212 command entries** in `src/moshops/MoshOps.cpp`
   [measured: `grep -c 'if (name == "' src/moshops/MoshOps.cpp`]. Selftest check
   counts are deliberately **not** quoted here: they are environment-dependent
   (a dev Mac with SA3/RAVE/whisper weights, hermetic CI, and a Release bundle

@@ -15,6 +15,11 @@ PROG="$REPO/docs/first-stranger-program"
 BL="$PROG/backlog.jsonl"
 CODEX_BIN="${CODEX_BIN:-codex}"
 
+if [ -e "$REPO/docs/auto-loop/STOP" ] || [ -e "$PROG/STOP" ]; then
+  echo "codex-lane.sh: STOP sentinel present — First-Stranger is paused." >&2
+  exit 1
+fi
+
 LANE=""; EXEC=0
 for a in "$@"; do case "$a" in
   --exec) EXEC=1 ;;

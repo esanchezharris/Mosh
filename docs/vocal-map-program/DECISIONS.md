@@ -65,3 +65,15 @@ gate and owner merge before the next starts. No automation or agent merges.
 Open First-Stranger PRs #471, #473, #475, and #478 remain preserved but paused.
 They are not dependencies of the Vocal Map train and require an explicit owner
 close, park, or rebase decision before any merge.
+
+## VM-D011 — 2026-07-30 — Existing queue
+
+Pre-existing PRs #322, #462, #472, #507, #508, #510, and #514 are parked outside
+the active serial seat. Any owner exception requires rebasing onto current trunk
+and rerunning the full gate; broad Mac compatibility remains outside the
+September surface.
+
+VM-001 necessarily edits the shared automation rulebook to make the
+First-Stranger pause fail closed. This satisfies only the program-STOP portion
+of historical backlog item AL-028. Its remaining hardening requirements stay
+`needs-human`, and the loop remains unarmed.

@@ -17,6 +17,11 @@ BL="${AL_BACKLOG_JSONL:-$PROG/backlog.jsonl}"
 OUT="$PROG/STATUS.md"
 NOW="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
+if [ -e "$ROOT/docs/auto-loop/STOP" ] || [ -e "$PROG/STOP" ]; then
+  echo "status.sh: STOP sentinel present — preserving the paused dashboard."
+  exit 0
+fi
+
 [ -f "$BL" ] || { echo "status.sh: no backlog at $BL" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "status.sh: jq required" >&2; exit 1; }
 

@@ -35,18 +35,25 @@
 Only one row may be `in progress`. The owner merges each fully gated PR before
 the next row starts.
 
-## Superseded First-Stranger PRs
+## Pre-existing PR disposition
 
-The First-Stranger evidence and open implementation work remain preserved, but
-they are not active Vocal Map dependencies and must not merge without a new
-owner disposition.
+The following open work remains preserved, but it is outside the active serial
+seat. None may merge into `main` during the Vocal Map train without an explicit
+owner exception, a rebase onto the then-current trunk, and a fresh full gate.
 
 | PR | Preserved work | State |
 | --- | --- | --- |
+| #322 | Finish-My-Song WIP checkpoint | parked; outside September surface |
+| #462 | Universal 2 / Intel compatibility | parked; broad Mac compatibility is excluded |
+| #472 | agent vocabulary expansion | parked; re-evaluate after VM-001 |
 | #471 | FS-T2 plugin-crash safe mode | paused |
 | #473 | FS-K3 opt-in crash reporting | paused |
 | #475 | FS-K4 packaging/BOM gate | paused |
 | #478 | combined First-Stranger ship-kit and brain work | paused |
+| #507 | selftest chapter scaffold | parked; regenerate stack after VM-001 |
+| #508 | selftest chapters 1/2 | parked with #507 |
+| #510 | selftest chapters 2/2 | parked with #507/#508 |
+| #514 | Graphite v2 shell | parked; rebase after VM-001 before continuation |
 
 ## Current risks
 
@@ -58,3 +65,6 @@ owner disposition.
   deterministic contracts and lab shell land.
 - RunPod, R2, and Keychain capability integration remain future serial seats;
   no keys belong in this repository.
+- VM-001 closes only the program-STOP subset of historical backlog item AL-028;
+  the remaining stranger-loop hardening stays `needs-human` and the loop must
+  not be armed.

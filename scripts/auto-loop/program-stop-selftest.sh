@@ -107,4 +107,55 @@ expect_one_mutation_then_stop finalize stop-on-ready finalize lane 1 "$BASE_SHA"
 expect_one_mutation_then_stop reject stop-on-mutation reject lane 1 held "program stopped"
 expect_one_mutation_then_stop route-owner stop-on-mutation route-owner lane 1 T "gate pass" "review pass" 0
 
+CONTROL_ROOT="$SANDBOX/control-root"
+mkdir -p "$CONTROL_ROOT/scripts/first-stranger" "$CONTROL_ROOT/docs/first-stranger-program"
+git init -q "$CONTROL_ROOT"
+cp "$SELF_DIR/../first-stranger/codex-lane.sh" "$CONTROL_ROOT/scripts/first-stranger/"
+cp "$SELF_DIR/../first-stranger/status.sh" "$CONTROL_ROOT/scripts/first-stranger/"
+cp "$SELF_DIR/../first-stranger/nightly.sh" "$CONTROL_ROOT/scripts/first-stranger/"
+cp "$SELF_DIR/../first-stranger/install-launchd.sh" "$CONTROL_ROOT/scripts/first-stranger/"
+touch "$CONTROL_ROOT/docs/first-stranger-program/STOP"
+printf 'preserved status\n' >"$CONTROL_ROOT/docs/first-stranger-program/STATUS.md"
+
+if CONTROL_OUT="$(cd "$CONTROL_ROOT" && bash scripts/first-stranger/codex-lane.sh --next 2>&1)"; then
+  printf 'program-stop-selftest: FAIL (codex-lane ran while stopped)\n' >&2
+  exit 1
+fi
+printf '%s\n' "$CONTROL_OUT" | grep -q 'STOP sentinel present' || {
+  printf 'program-stop-selftest: FAIL (codex-lane did not report STOP: %s)\n' "$CONTROL_OUT" >&2
+  exit 1
+}
+
+STATUS_BEFORE="$(shasum -a 256 "$CONTROL_ROOT/docs/first-stranger-program/STATUS.md" | awk '{print $1}')"
+STATUS_OUT="$(cd "$CONTROL_ROOT" && bash scripts/first-stranger/status.sh)"
+STATUS_AFTER="$(shasum -a 256 "$CONTROL_ROOT/docs/first-stranger-program/STATUS.md" | awk '{print $1}')"
+[ "$STATUS_BEFORE" = "$STATUS_AFTER" ] || {
+  printf 'program-stop-selftest: FAIL (status dashboard changed while stopped)\n' >&2
+  exit 1
+}
+printf '%s\n' "$STATUS_OUT" | grep -q 'STOP sentinel present' || {
+  printf 'program-stop-selftest: FAIL (status did not report STOP: %s)\n' "$STATUS_OUT" >&2
+  exit 1
+}
+
+mkdir -p "$CONTROL_ROOT/bin" "$CONTROL_ROOT/fake-home"
+cat >"$CONTROL_ROOT/bin/launchctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$CONTROL_ROOT/bin/launchctl"
+if INSTALL_OUT="$(cd "$CONTROL_ROOT" && HOME="$CONTROL_ROOT/fake-home" \
+    PATH="$CONTROL_ROOT/bin:$PATH" bash scripts/first-stranger/install-launchd.sh 2>&1)"; then
+  printf 'program-stop-selftest: FAIL (launchd installer ran while stopped)\n' >&2
+  exit 1
+fi
+printf '%s\n' "$INSTALL_OUT" | grep -q 'STOP sentinel present' || {
+  printf 'program-stop-selftest: FAIL (launchd installer did not report STOP: %s)\n' "$INSTALL_OUT" >&2
+  exit 1
+}
+[ ! -e "$CONTROL_ROOT/fake-home/Library/LaunchAgents/com.mosh.stranger-loop.plist" ] || {
+  printf 'program-stop-selftest: FAIL (launchd installer wrote a plist while stopped)\n' >&2
+  exit 1
+}
+
 printf 'program-stop-selftest: PASS\n'
