@@ -4,7 +4,8 @@ const preview = process.env.MOSH_E2E_PREVIEW === "1";
 
 // E2E harness — drives the REAL React WebView UI in a headless Chromium against the
 // Vite dev server. In dev, bridge.ts wires in the in-memory mock backend
-// (bridge.mock.ts, MOCK_ENABLED = import.meta.env.DEV), which speaks the same
+// (bridge.mock.ts, enabled only in development, test, or explicit e2e mode), which
+// speaks the same
 // execute_command + snapshot + events contract the native C++ MoshOps exposes. So
 // these tests exercise the whole frontend — store, gestures, keymap, templates,
 // optimistic previews — deterministically, with no native build, no audio device,

@@ -599,6 +599,11 @@ export const useStore = create<State>((set, get, api) => ({
 
 // Browser-test only: expose the store so Playwright can drive state the in-memory mock
 // cannot reproduce. Production uses neither development nor the isolated e2e mode.
-if ((import.meta.env.DEV || import.meta.env.MODE === "e2e") && typeof window !== "undefined") {
+if (
+  (import.meta.env.MODE === "development" ||
+    import.meta.env.MODE === "e2e" ||
+    import.meta.env.MODE === "test") &&
+  typeof window !== "undefined"
+) {
   (window as unknown as { __moshStore?: typeof useStore }).__moshStore = useStore;
 }

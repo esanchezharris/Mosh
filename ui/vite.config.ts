@@ -154,6 +154,12 @@ function moshiBrain(env: Record<string, string>): Plugin {
 // external module scripts). base: "./" keeps refs origin-free. 03 / 06 §1.
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), ""); // "" → load ALL keys incl. unprefixed; SERVER-SIDE only, never bundled
+  if (command === "build" && mode !== "production" && mode !== "e2e") {
+    throw new Error(`${mode} mode is forbidden for packaged builds; use production or explicit e2e mode`);
+  }
+  if (command === "build" && mode !== "e2e" && process.env.NODE_ENV === "development") {
+    throw new Error("NODE_ENV=development is forbidden for packaged builds; unset it or use explicit e2e mode");
+  }
   if (command === "build" && mode !== "e2e" && env.VITE_MOSH_E2E_MOCK) {
     throw new Error("VITE_MOSH_E2E_MOCK is forbidden for packaged builds; use --mode e2e for browser-only test bundles");
   }

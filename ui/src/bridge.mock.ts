@@ -21,7 +21,11 @@ import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
-  Boolean(import.meta.env?.DEV || import.meta.env?.MODE === "e2e");
+  Boolean(
+    import.meta.env?.MODE === "development" ||
+    import.meta.env?.MODE === "e2e" ||
+    import.meta.env?.MODE === "test"
+  );
 
 // ── seed session ─────────────────────────────────────────────────────────────
 

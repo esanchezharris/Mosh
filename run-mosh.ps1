@@ -3,7 +3,7 @@
 # app is a FLAT layout — Mosh.exe with ui\, drumkits\, service\, and brain.env as siblings
 # (CMake stages ui\ + drumkits\ next to the exe; -Package adds service\ + brain.env + a zip).
 #
-# THIS SCRIPT CONTAINS NO KEYS. It loads brain keys from ui\.env.local (gitignored) and from
+# THIS SCRIPT CONTAINS NO KEYS. It loads brain configuration from ui\.env.local and from
 # the current environment. For real Stable Audio 3 on CUDA, dot-source the env written by
 # setup-sa3-cuda.ps1 first:
 #       . .\service\.sa3.cuda.ps1
@@ -78,7 +78,7 @@ foreach ($p in @("DEEPSEEK", "OPENAI", "XAI")) {
     }
 }
 if (-not $haveAny) {
-    Write-Host "  - no brain key found - paste one into ui\.env.local or configure the proxy (Moshi edits fail visibly without mutating the project)"
+    Write-Host "  - no brain configuration found - configure the proxy for packaged builds (Moshi edits fail visibly without mutating the project)"
 }
 
 # --- packaging helpers (the Windows analogue of run-mosh.sh's bundle_service /
@@ -148,21 +148,20 @@ function Copy-ServiceBundle {
 
 function Write-BundledBrainKey {
     param([string]$BrainFile)   # <dist>\brain.env
-    # Same keys + format as run-mosh.sh's bundle_brain_key: one KEY=value line per
-    # NON-EMPTY var, from the ui\.env.local values already loaded into the environment.
-    $keys = @(
-        "MOSHI_BRAIN_PROVIDER",
-        "MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY",
-        "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_API_KEY",
-        "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL", "DEEPSEEK_API_KEY",
-        "XAI_BASE_URL", "XAI_MODEL", "XAI_API_KEY"
-    )
-    $lines = @()
-    foreach ($k in $keys) {
-        $v = [Environment]::GetEnvironmentVariable($k)
-        if ($v) { $lines += "$k=$v" }
+    $providerKeys = @("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "LOCAL_API_KEY")
+    $configuredProviderKeys = @($providerKeys | Where-Object {
+        [Environment]::GetEnvironmentVariable($_)
+    })
+    if ($configuredProviderKeys.Count -gt 0) {
+        if (Test-Path $BrainFile) { Remove-Item $BrainFile }
+        throw "refusing to bundle provider API keys; configure MOSH_BRAIN_PROXY_URL and MOSH_BRAIN_PROXY_APIKEY instead"
     }
-    if ($lines.Count -gt 0) {
+
+    $keys = @("MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY")
+    $proxyUrl = [Environment]::GetEnvironmentVariable("MOSH_BRAIN_PROXY_URL")
+    $proxyApiKey = [Environment]::GetEnvironmentVariable("MOSH_BRAIN_PROXY_APIKEY")
+    if ($proxyUrl -and $proxyApiKey) {
+        $lines = @("MOSH_BRAIN_PROXY_URL=$proxyUrl", "MOSH_BRAIN_PROXY_APIKEY=$proxyApiKey")
         # CRITICAL: write WITHOUT a UTF-8 BOM. Set-Content/Out-File default to a BOM on
         # Windows PowerShell 5.1, which would prefix the first key name and BrainProxy's
         # key lookup would silently miss it.
@@ -170,11 +169,10 @@ function Write-BundledBrainKey {
         [System.IO.File]::WriteAllText($BrainFile, ($lines -join "`n") + "`n", $utf8NoBom)
         # chmod-600 analogue: drop inheritance, grant the current user only.
         try { icacls $BrainFile /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null } catch { }
-        $count = ($lines | Where-Object { $_ -match "_API_KEY=" }).Count
-        Write-Host "bundled brain key -> brain.env ($count provider key(s); Moshi has a brain on any launch)"
+        Write-Host "bundled proxy configuration -> brain.env"
     } else {
         if (Test-Path $BrainFile) { Remove-Item $BrainFile }
-        Write-Host "no brain key in env - skipped brain.env (paste one into ui\.env.local to bundle it)"
+        Write-Host "no complete brain proxy configuration - skipped brain.env"
     }
 }
 

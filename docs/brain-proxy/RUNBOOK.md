@@ -7,11 +7,10 @@ This is an **extractable-key ship-blocker**. The fix is the same shape as the ex
 multiplayer relay (`supabase/functions/relay`): move the keys to a small server-side
 proxy, and have the client call the proxy instead of a provider directly.
 
-**Scaffolded, not deployed.** Nothing in this change deploys real infrastructure or
-sets a real secret — that is deliberately left to you (the owner), below. Until you
-complete the deploy + cutover steps, the app behaves EXACTLY as it does today (bundled
-keys, direct provider calls) — the whole proxy path is inert until `MOSH_BRAIN_PROXY_URL`
-is set somewhere.
+**Live deployment state is external to this repository.** Do not infer it from a
+branch or an old PR description. Treat the backend as unverified until the owner
+completes the smoke test in §5. The packaged app is proxy-only either way: without a
+working `MOSH_BRAIN_PROXY_URL`, Moshi fails visibly and emits no edit commands.
 
 ---
 
@@ -20,18 +19,17 @@ is set somewhere.
 | File | Role |
 |---|---|
 | `supabase/functions/brain/index.ts` | The Edge Function. Accepts `{messages, model?/provider?, install_id}`, holds provider keys as Supabase secrets, proxies to deepseek→openai→xai (same chain + reasoning-model handling as today), enforces a per-install daily token cap, returns only `{ok, content}` — never a key, never which provider served it. |
-| `supabase/migrations/0003_brain_usage.sql` | The daily-cap table (`public.brain_usage_daily`) + two SECURITY DEFINER RPCs (`brain_usage_reserve` / `brain_usage_adjust`) the function calls as `service_role`. **Not applied anywhere yet** — see step 3. |
+| `supabase/migrations/0003_brain_usage.sql` | The daily-cap table (`public.brain_usage_daily`) + two SECURITY DEFINER RPCs (`brain_usage_reserve` / `brain_usage_adjust`) the function calls as `service_role`. Verify applied state before deployment; see step 3. |
 | `supabase/config.toml` | Added `[functions.brain]` with `verify_jwt = false` (mirrors `[functions.relay]` — Mosh has no per-user Supabase Auth). |
-| `src/brain/BrainProxy.{h,cpp}` | Native packaged-app path. New `proxyEnabled()` / `proxyUrl()` / `installId()`; `chat()` tries the proxy first when `MOSH_BRAIN_PROXY_URL` is set, and falls through to the existing bundled-key path on any proxy failure. |
+| `src/brain/BrainProxy.{h,cpp}` | Native path. `chat()` prefers the proxy when `MOSH_BRAIN_PROXY_URL` is set; direct-provider environment configuration remains available for local development, but packaging never copies those secrets. |
 | `ui/vite.config.ts` | Dev server's `/api/brain/chat` middleware gets the same proxy-first-then-fallthrough branch, gated on `MOSH_BRAIN_PROXY_URL` in `ui/.env.local`. |
 | `service/brain_client.py` | Same proxy-first-then-fallthrough branch for the Python sidecar (used by the lyric-generation loop and the prompt-compiler). |
 | `docs/brain-proxy/RUNBOOK.md` | This file. |
 
-**Additive by design:** all three client entry points keep their existing
-bundled-key / local-`.env`-key path as the fallback. If the proxy URL is unset, or the
-proxy is unreachable, or it errors, the client falls through to the pre-existing
-behavior. Nothing breaks mid-migration, and you can flip the cutover independently on
-each platform (see step 5).
+All three client entry points retain process-local direct-provider configuration for
+development. Distribution is a stricter boundary: macOS release/deploy, Windows
+packaging, and the guest ZIP refuse provider API keys and write only the proxy URL and
+publishable proxy credential.
 
 ---
 
@@ -78,8 +76,8 @@ immediately); you DO need to redeploy after editing `index.ts`.
 
 ## 3. Apply the daily-cap migration
 
-**This was intentionally NOT run for you.** Review `supabase/migrations/0003_brain_usage.sql`
-first, then:
+Check the linked project before assuming this migration is applied. Review
+`supabase/migrations/0003_brain_usage.sql`, then:
 
 ```sh
 supabase db push               # applies every not-yet-applied migration under supabase/migrations/
@@ -140,9 +138,9 @@ already documented and shipped for the multiplayer relay.
 
 ## 5. Flip the app to proxy mode
 
-Each of the three entry points is independently gated on `MOSH_BRAIN_PROXY_URL` being
-set (falling through to the old direct path if it's ever unreachable), so you can turn
-this on incrementally and verify each before moving on.
+Each entry point is gated on `MOSH_BRAIN_PROXY_URL`. Local development may fall back
+to direct environment configuration; distributable artifacts contain no provider
+secret and therefore fail visibly if the proxy is unavailable.
 
 **Dev (Vite):** add to `ui/.env.local`:
 ```
@@ -179,15 +177,9 @@ brain-configuration key lists identical. A proxy-only `ui/.env.local` therefore
 survives a Dock/Finder launch on macOS and a double-click launch on Windows without
 putting any provider key in the package.
 
-After confirming the proxy path end to end:
-
-> **The packaged app's `brain.env` no longer needs to contain a single provider key.**
-> `BrainProxy::chat()` tries the proxy first; provider keys live only in Supabase
-> secrets, server-side, never inside anything you ship. Once you've confirmed the
-> proxy path works end to end (`--brain-smoke` below, or the in-app brain UI), you can
-> leave the direct-provider `*_API_KEY` fields blank or remove them from
-> `ui/.env.local` before packaging. The resulting `brain.env` contains only the proxy
-> URL/publishable key plus any non-secret routing fields.
+The packaged app's `brain.env` contains only the proxy URL and publishable proxy
+credential. If any direct-provider `*_API_KEY` is present in the source dotenv,
+release and guest packaging stop before producing an artifact.
 
 Smoke it from the built app:
 ```sh
@@ -207,9 +199,8 @@ chain, which is fine since it is diagnostic-only, not read by proxy-mode logic).
 
 ## 6. What NOT to do
 
-- Don't remove the direct-provider path from any of the three files. It is the
-  documented fallback (proxy unset/unreachable) and is what keeps local dev working
-  without a deployed function.
+- Don't restore direct-provider fields to `brain.env`; direct configuration is local
+  development only.
 - Don't put a real provider key in `MOSH_BRAIN_PROXY_APIKEY` — that variable is the
   Supabase **publishable** key (safe to embed; it's a client key), not a provider
   secret. Provider secrets only ever go through `supabase secrets set`.
@@ -218,6 +209,6 @@ chain, which is fine since it is diagnostic-only, not read by proxy-mode logic).
 
 ## House principle
 
-Mosh doesn't invent — it transforms and recombines what's real. This proxy is
-plumbing (key custody + a spend cap) around the existing brain chat path; it does not
-change what gets generated or how.
+Everything starts from something real of yours. This proxy is plumbing around the
+existing brain chat path; it changes key custody and spend limits, not what gets
+generated.

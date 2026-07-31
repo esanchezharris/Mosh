@@ -22,12 +22,15 @@ execution, no network. Deterministic.
 import ast
 import os
 import re
+import subprocess
 import sys
+import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVICE = os.path.join(REPO, "service")
 RUN_MOSH = os.path.join(REPO, "run-mosh.sh")
 RUN_MOSH_PS1 = os.path.join(REPO, "run-mosh.ps1")
+PACKAGE_GUEST = os.path.join(REPO, "scripts", "playtest", "package-guest-zip.sh")
 
 fails = []
 
@@ -99,6 +102,52 @@ def _ps1_brain_keys():
     body = src[start:]
     match = re.search(r"\$keys\s*=\s*@\((.*?)\)", body, re.S)
     return set(re.findall(r'"([^"]+)"', match.group(1))) if match else set()
+
+
+def _package_guest_brain_configured(env_text: str) -> bool:
+    src = open(PACKAGE_GUEST, encoding="utf-8").read()
+    start = src.index("brain_env_configured()")
+    end = re.search(r"\n\}", src[start:])
+    body = src[start:start + (end.end() if end else len(src) - start)]
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
+        env_file.write(env_text)
+        env_file.flush()
+        result = subprocess.run(
+            ["bash", "-c", body + '\nbrain_env_configured "$1"', "brain-env-check", env_file.name],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
+def _package_guest_has_provider_key(env_text: str) -> bool:
+    src = open(PACKAGE_GUEST, encoding="utf-8").read()
+    start = src.index("brain_env_has_provider_key()")
+    end = re.search(r"\n\}", src[start:])
+    body = src[start:start + (end.end() if end else len(src) - start)]
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
+        env_file.write(env_text)
+        env_file.flush()
+        result = subprocess.run(
+            ["bash", "-c", body + '\nbrain_env_has_provider_key "$1"', "brain-env-check", env_file.name],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
+def _release_refuses_provider_key() -> bool:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8") as env_file:
+        env_file.write(" OPENAI_API_KEY = test-provider\n")
+        env_file.flush()
+        env = os.environ.copy()
+        for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "LOCAL_API_KEY"):
+            env.pop(key, None)
+        env["MOSH_BRAIN_ENV"] = env_file.name
+        try:
+            result = subprocess.run(
+                [RUN_MOSH, "release"], env=env, check=False, capture_output=True, text=True,
+                timeout=10)
+        except subprocess.TimeoutExpired:
+            return False
+    return result.returncode != 0 and "refusing to bundle provider API keys" in (
+        result.stdout + result.stderr)
 
 
 def _top_level_modules() -> set:
@@ -219,11 +268,25 @@ if os.path.isfile(RUN_MOSH_PS1):
           f"ps1-only={sorted(ps1_dirs - bundled_dirs)} sh-only={sorted(bundled_dirs - ps1_dirs)}")
     shell_brain_keys = _shell_brain_keys()
     ps1_brain_keys = _ps1_brain_keys()
-    check("macOS brain bundle includes proxy configuration",
-          {"MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY"} <= shell_brain_keys)
+    check("macOS brain bundle is proxy-only",
+          shell_brain_keys == {"MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY"},
+          f"keys={sorted(shell_brain_keys)}")
     check("run-mosh.ps1 brain bundle keys == run-mosh.sh",
           ps1_brain_keys == shell_brain_keys,
           f"ps1-only={sorted(ps1_brain_keys - shell_brain_keys)} sh-only={sorted(shell_brain_keys - ps1_brain_keys)}")
+    check("guest package recognizes proxy-only brain configuration",
+          _package_guest_brain_configured(
+              "MOSH_BRAIN_PROXY_URL=https://example.invalid/brain\n"
+              "MOSH_BRAIN_PROXY_APIKEY=test-publishable\n"))
+    check("guest package rejects direct-provider brain configuration",
+          not _package_guest_brain_configured(" OPENAI_API_KEY = test-provider\n")
+          and _package_guest_has_provider_key(" OPENAI_API_KEY = test-provider\n"))
+    check("guest package rejects keyless or incomplete brain configuration",
+          not _package_guest_brain_configured("MOSHI_BRAIN_PROVIDER=openai\n")
+          and not _package_guest_brain_configured(
+              "MOSH_BRAIN_PROXY_URL=https://example.invalid/brain\n"))
+    check("run-mosh.sh release refuses a configured provider key before preflight",
+          _release_refuses_provider_key())
 else:
     check("run-mosh.ps1 exists (Windows packaging whitelist mirror)", False, "run-mosh.ps1 missing")
 

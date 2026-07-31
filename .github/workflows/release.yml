@@ -46,12 +46,9 @@ name: Release
 #   MOSH_SIGN_IDENTITY           pin an exact identity string instead of auto-discovery
 #                                 (only useful if the imported .p12 somehow yields more
 #                                 than one Developer ID Application identity)
-#   MOSH_RELEASE_BRAIN_ENV_BASE64  base64 of a ui/.env.local-shaped dotenv with an LLM
-#                                 provider key, to bundle a brain key INTO the shipped
-#                                 app (Contents/Resources/brain.env) — see the "Brain
-#                                 key" note below. Omit to ship with no bundled brain
-#                                 key at all (the default; every install is provider-
-#                                 keyless until the user supplies their own key).
+#   MOSH_RELEASE_BRAIN_ENV_BASE64  base64 of a ui/.env.local-shaped dotenv containing
+#                                 MOSH_BRAIN_PROXY_URL and its publishable
+#                                 MOSH_BRAIN_PROXY_APIKEY. Provider keys are refused.
 #
 # See docs/release/SIGNING_RUNBOOK.md for the full one-time setup (creating the cert,
 # exporting the .p12, generating the app-specific password) and the Sparkle/appcast
@@ -194,15 +191,21 @@ jobs:
           echo "imported cert; identities now visible to security find-identity:"
           security find-identity -v -p codesigning "$KEYCHAIN" | sed 's/^/  /'
 
-      # ── optional: bundle a brain key (opt-in only — see the header note) ──────
-      - name: Bundle a brain key (optional, only if configured)
+      # ── optional: bundle proxy configuration ────────────────────────────────
+      - name: Bundle brain proxy configuration (optional)
         if: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 != '' }}
         env:
           BRAIN_ENV_BASE64: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 }}
         run: |
           set -euo pipefail
           printf '%s' "$BRAIN_ENV_BASE64" | base64 --decode > ui/.env.local
-          echo "wrote ui/.env.local from MOSH_RELEASE_BRAIN_ENV_BASE64 — run-mosh.sh release will bundle it"
+          if grep -qE '^[[:space:]]*[A-Z0-9_]+_API_KEY[[:space:]]*=[[:space:]]*.+' ui/.env.local; then
+            echo "provider API keys are forbidden in release artifacts" >&2
+            exit 1
+          fi
+          grep -qE '^MOSH_BRAIN_PROXY_URL=.+' ui/.env.local
+          grep -qE '^MOSH_BRAIN_PROXY_APIKEY=.+' ui/.env.local
+          echo "wrote proxy-only ui/.env.local from MOSH_RELEASE_BRAIN_ENV_BASE64"
 
       # ── build once here so a broken build fails BEFORE notarization is attempted;
       # `./run-mosh.sh release` below rebuilds against the same preset, which is then
