@@ -48,8 +48,7 @@ export function usePointerScrub(onScrub: (position: number) => void) {
   };
 
   const begin = (element: HTMLElement, pointerId: number, position: number) => {
-    if (activePointer.current != null && activeElement.current)
-      releasePointer(activeElement.current, activePointer.current);
+    if (activePointer.current != null) return false;
     cancelPending();
     activePointer.current = pointerId;
     activeElement.current = element;
@@ -58,6 +57,7 @@ export function usePointerScrub(onScrub: (position: number) => void) {
     moved.current = false;
     capturePointer(element, pointerId);
     onScrubRef.current(position);
+    return true;
   };
 
   const move = (pointerId: number, position: number) => {

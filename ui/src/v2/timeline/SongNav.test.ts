@@ -5,13 +5,30 @@ import { SongNav } from "./SongNav";
 import { useStore } from "../../store";
 import type { Snapshot } from "../../types";
 
-const snap = (): Snapshot =>
-  ({
-    schemaVersion: 1,
-    session: { tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4, length: 32 },
-    tracks: [],
-    sections: [],
-  }) as unknown as Snapshot;
+const snap = (): Snapshot => ({
+  schemaVersion: 1,
+  session: {
+    sampleRate: 48_000,
+    tempo: 120,
+    timeSigNumerator: 4,
+    timeSigDenominator: 4,
+    metronome: false,
+    key: { tonic: "A", mode: "minor" },
+    length: 32,
+    editFile: "",
+  },
+  tracks: [],
+  transport: {
+    playing: false,
+    recording: false,
+    position: 0,
+    looping: false,
+    loopStart: 0,
+    loopEnd: 0,
+  },
+  master: { volumeDb: 0, pan: 0 },
+  sections: [],
+});
 
 describe("SongNav — pointer scrubbing", () => {
   let host: HTMLDivElement;
@@ -122,6 +139,25 @@ describe("SongNav — pointer scrubbing", () => {
 
     pointer("pointerup", 700, 0);
     expect(onScrub).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the scrub owned by its initiating pointer", () => {
+    pointer("pointerdown", 300, 1, 7);
+    pointer("pointerdown", 700, 1, 8);
+    pointer("pointermove", 800, 1, 8);
+    pointer("pointerup", 800, 0, 8);
+    flushFrame();
+
+    expect(onScrub).toHaveBeenCalledTimes(1);
+    expect(onScrub).toHaveBeenLastCalledWith(9);
+
+    pointer("pointermove", 500, 1, 7);
+    flushFrame();
+    pointer("pointerup", 600, 0, 7);
+
+    expect(onScrub).toHaveBeenCalledTimes(3);
+    expect(onScrub).toHaveBeenNthCalledWith(2, 18);
+    expect(onScrub).toHaveBeenLastCalledWith(22.5);
   });
 
   it("pointer cancellation drops the queued position and ignores later moves", () => {
