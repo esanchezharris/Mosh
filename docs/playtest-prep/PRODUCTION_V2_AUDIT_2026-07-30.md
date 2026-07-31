@@ -215,12 +215,13 @@ open Settings, but did not visibly exercise Retry on that exact SHA.
 
 The successor focused battery is 47 assertions across seven cases. CTest also
 launches the real Release executable with a 60-second child stall and a 250 ms
-parent bound, then calls the real degraded `list_audio_devices` path. The smoke
-passes only when the command returns within one second with
-`audioEnabled:false`, zero device types, and the timeout error. The successor
-exact SHA, gate hash, native Settings/Retry screenshots, and five review
-verdicts are stored outside the repository and bound through PR #528's head and
-immutable evidence manifest after the commit is frozen.
+parent bound, then calls the real degraded `list_audio_devices`,
+`retry_audio_device`, and `list_audio_devices` sequence. The smoke passes only
+when both list calls return within one second with `audioEnabled:false` and zero
+device types, while Retry returns its second bounded timeout within two seconds.
+The successor exact SHA, gate hash, native Settings/Retry evidence, and five
+review verdicts will be stored outside the repository and bound through PR
+#528's head and immutable evidence manifest only after the commit is frozen.
 
 ## Timeline scrub fix evidence
 

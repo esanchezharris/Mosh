@@ -203,26 +203,58 @@ public:
 
         if (audioRecoverySmoke)
         {
-            auto* command = new juce::DynamicObject();
-            command->setProperty ("command", "list_audio_devices");
-            const auto started = juce::Time::getMillisecondCounterHiRes();
-            const auto result = moshOps->execute (juce::var (command));
-            const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - started;
-            const auto data = result.getProperty ("data", juce::var());
-            const auto types = data.getProperty ("types", juce::var());
-            const bool pass = (bool) result.getProperty ("ok", false)
-                           && ! (bool) data.getProperty ("audioEnabled", true)
-                           && types.isArray() && types.getArray()->isEmpty()
+            auto execute = [this] (const juce::String& name)
+            {
+                auto* command = new juce::DynamicObject();
+                command->setProperty ("command", name);
+                return moshOps->execute (juce::var (command));
+            };
+
+            const auto firstListStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto firstList = execute ("list_audio_devices");
+            const auto firstListElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - firstListStarted;
+            const auto firstData = firstList.getProperty ("data", juce::var());
+            const auto firstTypes = firstData.getProperty ("types", juce::var());
+
+            const auto retryStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto retry = execute ("retry_audio_device");
+            const auto retryElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - retryStarted;
+
+            const auto secondListStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto secondList = execute ("list_audio_devices");
+            const auto secondListElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - secondListStarted;
+            const auto secondData = secondList.getProperty ("data", juce::var());
+            const auto secondTypes = secondData.getProperty ("types", juce::var());
+            const auto retryError = retry.getProperty ("error", juce::var()).toString();
+
+            const bool pass = (bool) firstList.getProperty ("ok", false)
+                           && ! (bool) firstData.getProperty ("audioEnabled", true)
+                           && firstTypes.isArray() && firstTypes.getArray()->isEmpty()
+                           && firstListElapsedMs < 1000.0
+                           && ! (bool) retry.getProperty ("ok", true)
+                           && retryError.contains ("did not open within")
+                           && retryElapsedMs < 2000.0
+                           && (bool) secondList.getProperty ("ok", false)
+                           && ! (bool) secondData.getProperty ("audioEnabled", true)
+                           && secondTypes.isArray() && secondTypes.getArray()->isEmpty()
+                           && secondListElapsedMs < 1000.0
                            && engine->audioDeviceError().contains ("did not open within")
-                           && elapsedMs < 1000.0;
+                           && ! engine->hasAudio();
 
             auto* evidence = new juce::DynamicObject();
             evidence->setProperty ("pass", pass);
             evidence->setProperty ("audioEnabled",
-                                   data.getProperty ("audioEnabled", true));
+                                   secondData.getProperty ("audioEnabled", true));
             evidence->setProperty ("deviceTypeCount",
-                                   types.isArray() ? types.getArray()->size() : -1);
-            evidence->setProperty ("listElapsedMs", elapsedMs);
+                                   secondTypes.isArray() ? secondTypes.getArray()->size() : -1);
+            evidence->setProperty ("firstListElapsedMs", firstListElapsedMs);
+            evidence->setProperty ("retryOk", retry.getProperty ("ok", true));
+            evidence->setProperty ("retryElapsedMs", retryElapsedMs);
+            evidence->setProperty ("retryError", retryError);
+            evidence->setProperty ("secondListElapsedMs", secondListElapsedMs);
             evidence->setProperty ("audioDeviceError", engine->audioDeviceError());
             std::cout << juce::JSON::toString (juce::var (evidence), false).toStdString()
                       << std::endl;
