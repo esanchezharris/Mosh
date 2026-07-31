@@ -8,6 +8,8 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TrackLaneList } from "./TrackLaneList";
+import { useStore } from "../../store";
+import { useShell } from "../shellState";
 import type { Snapshot, Track } from "../../types";
 
 function audioTrack(): Track {
@@ -31,6 +33,8 @@ describe("v2 TrackLaneList — aux/return tracks excluded from the arrangement",
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    useStore.setState({ selectedTrackId: null });
+    useShell.setState({ selectedClipId: null });
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -68,5 +72,53 @@ describe("v2 TrackLaneList — aux/return tracks excluded from the arrangement",
     expect(host.querySelector('[data-testid="v2-empty"]')).not.toBeNull();
     expect(host.querySelectorAll('[data-testid="v2-lane"]').length).toBe(0);
     expect(host.querySelectorAll('[data-testid="v2-track-header"]').length).toBe(0);
+  });
+
+  it("clears the selected clip when a different track header is clicked", () => {
+    const first = audioTrack();
+    const second = { ...audioTrack(), id: "t2", index: 1, name: "Hook" };
+    useStore.setState({ selectedTrackId: first.id });
+    useShell.setState({ selectedClipId: "midi-clip-1" });
+    render([first, second]);
+
+    const secondHeader = host.querySelector<HTMLElement>('[data-track-id="t2"]')!;
+    act(() => secondHeader.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(useStore.getState().selectedTrackId).toBe("t2");
+    expect(useShell.getState().selectedClipId).toBeNull();
+  });
+
+  it.each(["Enter", " "])("clears the selected clip when a track header receives %s", (key) => {
+    const first = audioTrack();
+    const second = { ...audioTrack(), id: "t2", index: 1, name: "Hook" };
+    useStore.setState({ selectedTrackId: first.id });
+    useShell.setState({ selectedClipId: "midi-clip-1" });
+    render([first, second]);
+
+    const secondHeader = host.querySelector<HTMLElement>('[data-track-id="t2"]')!;
+    act(() => secondHeader.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })));
+
+    expect(useStore.getState().selectedTrackId).toBe("t2");
+    expect(useShell.getState().selectedClipId).toBeNull();
+  });
+
+  it.each([
+    ["Mute", " "],
+    ["Solo", "Enter"],
+    ["Delete Hook", " "],
+  ])("does not select the track when %s receives %s", (label, key) => {
+    const first = audioTrack();
+    const second = { ...audioTrack(), id: "t2", index: 1, name: "Hook" };
+    useStore.setState({ selectedTrackId: first.id });
+    useShell.setState({ selectedClipId: "midi-clip-1" });
+    render([first, second]);
+
+    const nestedControl = host.querySelector<HTMLElement>(
+      `[data-track-id="t2"] [aria-label="${label}"]`,
+    )!;
+    act(() => nestedControl.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })));
+
+    expect(useStore.getState().selectedTrackId).toBe(first.id);
+    expect(useShell.getState().selectedClipId).toBe("midi-clip-1");
   });
 });
