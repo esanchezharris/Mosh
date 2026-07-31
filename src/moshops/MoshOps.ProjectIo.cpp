@@ -17,6 +17,7 @@
 #include "ExportRange.h"
 #include "StemExport.h"
 #include "state/Ids.h"
+#include "engine/AudioDeviceStartup.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "multiplayer/LogicalId.h"
@@ -896,21 +897,22 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     auto& dm = adm();
 
     Array<var> types;
-    for (auto* type : dm.getAvailableDeviceTypes())
-    {
-        if (type == nullptr) continue;
-        type->scanForDevices();                          // required before getDeviceNames
+    if (audiostartup::shouldEnumerateDeviceTypes (eng.hasAudio()))
+        for (auto* type : dm.getAvailableDeviceTypes())
+        {
+            if (type == nullptr) continue;
+            type->scanForDevices();                          // required before getDeviceNames
 
-        Array<var> outputs, inputs;
-        for (auto& n : type->getDeviceNames (false)) outputs.add (n);
-        for (auto& n : type->getDeviceNames (true))  inputs.add (n);
+            Array<var> outputs, inputs;
+            for (auto& n : type->getDeviceNames (false)) outputs.add (n);
+            for (auto& n : type->getDeviceNames (true))  inputs.add (n);
 
-        auto* to = new DynamicObject();
-        to->setProperty ("name", type->getTypeName());
-        to->setProperty ("outputs", outputs);
-        to->setProperty ("inputs", inputs);
-        types.add (var (to));
-    }
+            auto* to = new DynamicObject();
+            to->setProperty ("name", type->getTypeName());
+            to->setProperty ("outputs", outputs);
+            to->setProperty ("inputs", inputs);
+            types.add (var (to));
+        }
 
     // Valid sample-rate / buffer-size lists are only meaningful when a device is
     // open (null headless → empty arrays).

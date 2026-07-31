@@ -6,7 +6,6 @@
 
 #include <atomic>
 #include <iostream>
-#include <thread>
 
 namespace mosh
 {
@@ -64,35 +63,26 @@ namespace
         }
     };
 
-    /** AUD-017 — a bounded PROBE of the audio hardware, run on a worker thread.
+    /** AUD-017 — a probe of the audio hardware, run only in a child process.
 
         It opens and starts a throwaway device via the platform AudioIODeviceType
         directly — NOT juce::AudioDeviceManager. That matters twice over:
 
           - ADM::initialise() also opens MIDI (openLastRequestedMidiDevices →
             MidiInput::getAvailableDevices), which touches a process-wide singleton
-            guarded by JUCE_ASSERT_MESSAGE_THREAD. Driving it off the message thread is
-            a real data race, not just a Debug assert (it aborts a Debug GUI launch).
-          - The device type owns nothing shared: if the open never returns, the stuck
-            thread holds only this object. Nothing engine-owned is half-initialised, so
-            ~te::Engine → closeDevices() has nothing to block on and the app stays
-            quittable.
+            guarded by JUCE_ASSERT_MESSAGE_THREAD.
+          - If CoreAudio never returns, the parent terminates this entire process. No
+            blocked HAL call or half-initialised device survives in the UI process.
 
         `start()` is deliberately included: the AUD-017 stack wedged inside
         AudioDeviceCreateIOProcID / _TellServerAboutStreamUsage, which is reached from
-        start(), not open(). A probe that only opened would have missed it.
-
-        On timeout the object is abandoned and LEAKED on purpose — freeing a device
-        stuck inside mach_msg would just move the hang into the destructor. One leaked
-        probe per wedged launch is a trade we take. */
+        start(), not open(). A probe that only opened would have missed it. */
     struct BoundedDeviceOpen
     {
         std::unique_ptr<juce::AudioIODeviceType> type;
         juce::String wantedOutput, wantedInput;   // from the saved setup; empty == default
         int stallMs = 0;                          // test hook — force the timeout path
         juce::String error;                       // empty == the HAL answered and played
-        juce::WaitableEvent done;
-        std::atomic<bool> abandoned { false };
 
         // Writes silence. The probe must actually run the IO proc to prove the device
         // is alive, and a real DAW's first sound must not be a burst of garbage.
@@ -119,10 +109,7 @@ namespace
                 juce::Thread::sleep (stallMs);
 
             if (type == nullptr)
-            {
-                done.signal();      // no probe on this platform — treated as "answered"
                 return;
-            }
 
             type->scanForDevices();
 
@@ -145,7 +132,6 @@ namespace
             if (dev == nullptr)
             {
                 error = "no audio device available";
-                done.signal();
                 return;
             }
 
@@ -166,12 +152,6 @@ namespace
                 dev->stop();        // both complete before cb leaves scope
             }
             dev->close();
-
-            // The waiter owns the object and destroys it after this signal. When it
-            // gave up (abandoned) nobody destroys it — that is the intentional leak;
-            // this thread must NOT free it either, because the device is by definition
-            // in a state we could not wait for.
-            done.signal();
         }
     };
 
@@ -190,6 +170,17 @@ namespace
         return {};
        #endif
     }
+}
+
+juce::String audiostartup::runProbeChild (const juce::StringArray& args)
+{
+    BoundedDeviceOpen job;
+    job.type = makeProbeDeviceType();
+    job.wantedOutput = probeArgumentValue (args, "--audio-probe-output");
+    job.wantedInput = probeArgumentValue (args, "--audio-probe-input");
+    job.stallMs = probeArgumentValue (args, "--audio-probe-stall-ms").getIntValue();
+    job.run();
+    return job.error;
 }
 
 MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::String& freshSessionName)
@@ -399,31 +390,37 @@ juce::String MoshEngine::openAudioDeviceBounded()
                            ? te::DeviceManager::defaultNumChannelsToOpen : 0;
     const int numOut = te::DeviceManager::defaultNumChannelsToOpen;
 
-    auto* job = new BoundedDeviceOpen();
-    job->type         = makeProbeDeviceType();
-    job->wantedOutput = audiostartup::outputNameFromSetup (setupXml.get());
-    job->wantedInput  = audiostartup::inputNameFromSetup (setupXml.get());
-    job->stallMs      = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
-                            .trim().getIntValue();
+    const auto probeArguments = audiostartup::probeChildArguments (
+        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+        audiostartup::outputNameFromSetup (setupXml.get()),
+        audiostartup::inputNameFromSetup (setupXml.get()),
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
+            .trim().getIntValue());
 
-    std::thread worker ([job] { job->run(); });
-
-    if (! job->done.wait (timeoutMs))
+    juce::ChildProcess probe;
+    if (! probe.start (probeArguments))
     {
-        // The HAL never answered. Give up on audio for this session rather than block
-        // the message thread forever with no window and no message. The engine's OWN
-        // DeviceManager was never initialised, so we land in precisely the headless
-        // no-audio state every harness already exercises — playback is off, the command
-        // surface is intact, and quitting works.
-        job->abandoned.store (true, std::memory_order_release);
-        worker.detach();          // `job` is leaked on purpose — see BoundedDeviceOpen
+        audioOpen = false;
+        return "Audio device " + label + " could not start the safety probe. "
+               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
+
+    if (! probe.waitForProcessToFinish (timeoutMs))
+    {
+        probe.kill();
+        probe.waitForProcessToFinish (1000);
         audioOpen = false;
         return audiostartup::timeoutMessage (label, timeoutMs);
     }
 
-    worker.join();                // run() has already signalled, so this returns at once
-    const auto probeError = job->error;
-    delete job;                   // the probe device is already stopped + closed
+    const auto probeOutput = probe.readAllProcessOutput();
+    if (! probeOutput.contains (audiostartup::kProbeResultPrefix))
+    {
+        audioOpen = false;
+        return "Audio device " + label + " safety probe exited without a result. "
+               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
+    const auto probeError = audiostartup::probeErrorFromOutput (probeOutput);
 
     // The HAL answered within the bound, so the real open is safe to do inline, exactly
     // where Tracktion has always done it (message thread, all its device bookkeeping in

@@ -4,6 +4,7 @@
 #include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
+#include "engine/AudioDeviceStartup.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -93,6 +94,16 @@ public:
         // MoshOps::cmdRescanPlugins / PluginHost::rescan.)
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
+
+        if (commandLine.contains ("--audio-probe"))
+        {
+            const auto error = audiostartup::runProbeChild (
+                juce::JUCEApplicationBase::getCommandLineParameterArray());
+            std::cout << audiostartup::probeResultLine (error).toStdString();
+            setApplicationReturnValue (error.isEmpty() ? 0 : 1);
+            quit();
+            return;
+        }
 
         // Non-interactive live brain round-trip (no engine/audio needed). Proves the
         // native brain_chat path end-to-end against the real provider resolved from

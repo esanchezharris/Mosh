@@ -96,3 +96,34 @@ TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
     CHECK (timeoutMessage (deviceLabel (&xml), 2500).contains ("\"Wedged Interface\""));
     CHECK (timeoutMessage (deviceLabel (&xml), 2500).contains ("2.5s"));
 }
+
+TEST_CASE ("the hardware probe is a separate killable process", "[audiostartup]")
+{
+    const juce::File executable ("/Applications/Mosh Audit.app/Contents/MacOS/Mosh");
+    const auto args = probeChildArguments (executable,
+                                           "MacBook Pro Speakers",
+                                           "BlackHole 2ch",
+                                           60000);
+
+    REQUIRE (args.size() == 8);
+    CHECK (args[0] == executable.getFullPathName());
+    CHECK (args[1] == "--audio-probe");
+    CHECK (args[2] == "--audio-probe-output");
+    CHECK (args[3] == "MacBook Pro Speakers");
+    CHECK (args[4] == "--audio-probe-input");
+    CHECK (args[5] == "BlackHole 2ch");
+    CHECK (args[6] == "--audio-probe-stall-ms");
+    CHECK (args[7] == "60000");
+
+    const auto output = "startup noise\n"
+                        + probeResultLine ("device failed to start")
+                        + "shutdown noise\n";
+    CHECK (probeErrorFromOutput (output) == "device failed to start");
+    CHECK (probeErrorFromOutput (probeResultLine ({})).isEmpty());
+}
+
+TEST_CASE ("degraded audio never re-enters hardware enumeration", "[audiostartup]")
+{
+    CHECK (shouldEnumerateDeviceTypes (true));
+    CHECK_FALSE (shouldEnumerateDeviceTypes (false));
+}
