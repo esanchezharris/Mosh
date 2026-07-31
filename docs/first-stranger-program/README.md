@@ -3,8 +3,9 @@
 > **Paused and superseded on 2026-07-30.** The tracked [`STOP`](STOP) sentinel
 > keeps the nightly loop inert. The active milestone is the
 > [Vocal Map Playtest Program](../vocal-map-program/README.md). This directory,
-> including its backlog, lane plans, status board, ledger, and evidence, is
-> preserved as historical program state.
+> including its backlog, lane plans, status board, and evidence, is preserved as
+> historical program state. No tracked program `LEDGER.md` existed at pause; the
+> configured ledger path remains only as historical loop wiring.
 
 The [SPEC.md](SPEC.md) is a decision-complete, 6-week program to get Mosh in front of its first
 non-owner user (playtest #1, ~wk 6). This folder wires that program into an **unattended loop** — the
@@ -48,12 +49,11 @@ reviewed PRs you merge with one click. It can never merge high-stakes work on it
 | `backlog.jsonl` | machine source of truth: the 17 lanes (status, `blockedOn`, `ownerMerge`) |
 | `lanes/FS-*.md` | per-lane gate-registered plans (written by the loop's Plan phase) |
 | `STATUS.md` | owner-blocker dashboard (auto-generated) |
-| `LEDGER.md` | append-only audit trail (merges / owner-routes / rejects) |
 | `STOP` / `ARMED` | per-program kill switch / live-arm sentinels |
 | `.claude/workflows/stranger-loop.workflow.js` | the orchestrator |
 | `scripts/first-stranger/{nightly,status,install-launchd}.sh` | scheduler + dashboard + installer |
 
 The loop reuses the classic auto-loop harness verbatim (`scripts/auto-loop/gate.sh`, `merge-one.sh`,
 `classify.sh`, worktree lifecycle) with two additive, env-gated seams: `AL_BACKLOG_JSONL`/`AL_LEDGER`
-(its own backlog + ledger) and `MOSH_STRANGER_MODE=1` (gate exclusion-list diffs + route them to you
+(its own backlog + configured ledger target) and `MOSH_STRANGER_MODE=1` (gate exclusion-list diffs + route them to you
 instead of auto-rejecting). The classic `auto-loop` and `polish-loop` are unaffected.

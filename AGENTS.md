@@ -38,7 +38,8 @@ freezes 2026-08-13 and the stack freezes 2026-08-27.
 
 The former First-Stranger automation is paused by its tracked
 `docs/first-stranger-program/STOP` sentinel. Preserve its backlog, lane plans,
-status board, ledger, and evidence as historical program state.
+status board, and evidence as historical program state. Its configured ledger
+target never became a tracked file before the pause.
 
 ## Verify before any merge
 ```sh

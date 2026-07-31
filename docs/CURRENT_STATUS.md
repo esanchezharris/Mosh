@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 > **This is the only rolling status doc.** Dated snapshots live in
 > [`docs/resumption/`](resumption/). History lives in [`docs/worklog/`](worklog/INDEX.md).
@@ -9,7 +9,7 @@ This is the short handoff for the current `main` program seat at **`~/Mosh`**
 (the git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git`; see Branch
 And Worktree Boundaries below). It points to the live docs that matter and calls
 out what is current versus historical. Claims are tagged **[measured]** (ran or
-read this session, 2026-07-28) or **[cited]** (a dated doc/worklog note).
+read this session, 2026-07-30) or **[cited]** (a dated doc/worklog note).
 
 ## Start Here
 
@@ -115,9 +115,10 @@ build).
   and stack freeze is 2026-08-27.
 - [`first-stranger-program/`](first-stranger-program/) — paused and superseded
   on 2026-07-30. Its tracked `STOP` sentinel keeps the automation inert while
-  the backlog, status board, lane plans, ledger, evidence, and open PRs remain
-  preserved. Existing PRs #471, #473, #475, and #478 are paused pending an
-  explicit owner close, park, or rebase decision.
+  the backlog, status board, lane plans, evidence, and open PRs remain
+  preserved. No tracked program ledger existed at pause. Existing PRs #471,
+  #473, #475, and #478 are paused pending an explicit owner close, park, or
+  rebase decision.
 - [`fms-lyrics-bench/`](fms-lyrics-bench/) — the FMS lyrics-first benchmark
   program (charter + machine-regenerated scoreboard).
 - The architecture-improvement waves are a preserved, inactive queue; accepted
@@ -153,8 +154,9 @@ build).
 - Agent work happens in per-task worktrees under the object store's
   `.claude/worktrees/` (one worktree = one agent). The proven dep-cache build
   recipe and the worktree traps live in CLAUDE.md "Gotchas".
-- Design lab: `/Users/emiliosanchez-harris/Documents/ClaudeMosh-lab`, branch
-  `design-lab`; do not use for program trunk hardening.
+- Design lab: the preserved `design-lab` branch only. Its former
+  `/Users/emiliosanchez-harris/Documents/ClaudeMosh-lab` worktree no longer
+  exists; do not use the branch for program trunk hardening.
 
 ## Verification Commands
 
