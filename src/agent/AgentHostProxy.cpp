@@ -7,11 +7,12 @@ namespace
     constexpr int kStartupTimeoutMs = 10000;
     constexpr int kRequestTimeoutMs = 12000;
 
-    juce::var error (const juce::String& message = "agent host unavailable")
+    juce::var error (const juce::String& message = "agent host unavailable", const juce::String& code = {})
     {
         auto* value = new juce::DynamicObject();
         value->setProperty ("ok", false);
         value->setProperty ("error", message);
+        if (code.isNotEmpty()) value->setProperty ("code", code);
         return juce::var (value);
     }
 
@@ -57,10 +58,14 @@ juce::File AgentHostProxy::locateEntry() const
         if (entry.existsAsFile()) return entry;
     }
 
+    // Deployed apps use the deterministic bundle first. The development checkout
+    // fallback stays useful for a source-tree executable but cannot mask a missing
+    // packaged runtime in a built app.
+    auto bundled = appResource ("agent-host/agent-host.mjs");
+    if (bundled.existsAsFile()) return bundled;
+
     auto dev = juce::File::getCurrentWorkingDirectory().getChildFile ("service/agent-host/src/main.ts");
     if (dev.existsAsFile()) return dev;
-    auto bundled = appResource ("agent-host/src/main.ts");
-    if (bundled.existsAsFile()) return bundled;
     return {};
 }
 
@@ -182,7 +187,12 @@ juce::var AgentHostProxy::supervisorTurn (const juce::var& request)
 
     int statusCode = 0;
     const auto plan = post ("/v1/supervisor/turns", body, statusCode);
-    if (statusCode < 200 || statusCode >= 300 || ! plan.isObject()) return error();
+    if (statusCode < 200 || statusCode >= 300 || ! plan.isObject())
+    {
+        const auto hostError = plan.getProperty ("error", juce::var());
+        const auto code = hostError.getProperty ("code", juce::var()).toString();
+        return error ("agent host unavailable", code);
+    }
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("plan", plan);

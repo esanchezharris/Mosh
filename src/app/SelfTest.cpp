@@ -7042,21 +7042,25 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"0.0.0.0\",\"port\":8787,\"capability\":\"x\"}").has_value(),
                "agent host: rejects a non-loopback startup envelope");
 
-        // A real lazy-start probe, deliberately with no OpenAI key. It proves the
-        // native proxy can launch the installed local Node host, consume its private
-        // startup capability, create the required private playtest, then surface an
-        // unavailable supervisor without ever returning the capability to this test.
-        const auto hostEntry = File::getCurrentWorkingDirectory().getChildFile ("service/agent-host/src/main.ts");
+        // Packaged-app lifecycle: run from a non-repository current directory and
+        // leave the entry override absent. This forces lookup of the CMake-staged
+        // single-file bundle in Contents/Resources/agent-host.
+        const auto hostEntry = File::getSpecialLocation (File::currentApplicationFile)
+            .getChildFile ("Contents/Resources/agent-host/agent-host.mjs");
+        check (hostEntry.existsAsFile(), "agent host: packaged single-file entry is staged in app resources");
         if (hostEntry.existsAsFile())
         {
-            const auto hostEntryUtf8 = hostEntry.getFullPathName().toStdString();
             auto hostData = File::createTempFile ("mosh-agent-host-selftest");
             hostData.deleteFile();
             hostData.createDirectory();
             const auto hostDataUtf8 = hostData.getFullPathName().toStdString();
-            mosh::setEnvVar ("MOSH_AGENT_HOST_ENTRY", hostEntryUtf8.c_str());
             mosh::setEnvVar ("MOSH_AGENT_HOST_DATA_DIR", hostDataUtf8.c_str());
             mosh::setEnvVar ("OPENAI_API_KEY", "");
+            mosh::unsetEnvVar ("MOSH_AGENT_HOST_ENTRY");
+            const auto repositoryCwd = File::getCurrentWorkingDirectory();
+            const auto outsideRepository = File::getSpecialLocation (File::tempDirectory);
+            check (outsideRepository.setAsCurrentWorkingDirectory(),
+                   "agent host: packaged probe runs with a cwd outside the repository");
             auto* hostRequest = new DynamicObject();
             hostRequest->setProperty ("message", "check lazy startup");
             auto* schema = new DynamicObject();
@@ -7067,11 +7071,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             hostRequest->setProperty ("stateDigest", var (new DynamicObject()));
             hostRequest->setProperty ("recentResults", var (Array<var>()));
             hostRequest->setProperty ("conversationContext", var (Array<var>()));
-            AgentHostProxy host;
-            const auto hostResult = host.supervisorTurn (var (hostRequest));
-            check (! (bool) hostResult.getProperty ("ok", false),
-                   "agent host: lazy private launch reaches the unavailable supervisor without exposing credentials");
-            mosh::unsetEnvVar ("MOSH_AGENT_HOST_ENTRY");
+            juce::var hostResult;
+            {
+                AgentHostProxy host;
+                hostResult = host.supervisorTurn (var (hostRequest));
+            }
+            check (! (bool) hostResult.getProperty ("ok", false)
+                       && hostResult.getProperty ("code", var()).toString() == "openai_unavailable",
+                   "agent host: packaged lazy launch reaches the host's explicit unavailable response");
+            check (repositoryCwd.setAsCurrentWorkingDirectory(),
+                   "agent host: packaged probe restores the repository working directory");
+            ChildProcess pgrep;
+            const auto pgrepStarted = pgrep.start (StringArray { "/usr/bin/pgrep", "-f", hostEntry.getFullPathName() },
+                                                    ChildProcess::wantStdOut);
+            const auto hostPids = pgrepStarted ? pgrep.readAllProcessOutput().trim() : String();
+            check (hostPids.isEmpty(), "agent host: packaged lazy launch leaves no host child behind");
             mosh::unsetEnvVar ("MOSH_AGENT_HOST_DATA_DIR");
             hostData.deleteRecursively();
         }
