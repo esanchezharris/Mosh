@@ -257,6 +257,19 @@ public:
             const auto secondData = secondList.getProperty ("data", juce::var());
             const auto secondTypes = secondData.getProperty ("types", juce::var());
             const auto retryError = retry.getProperty ("error", juce::var()).toString();
+            const auto timeoutDeviceError = engine->audioDeviceError();
+
+            const auto invalidSetupFile =
+                engine->sessionDir().getChildFile ("audio-device.xml");
+            const bool invalidSetupWritten =
+                invalidSetupFile.replaceWithText ("<NOTDEVICE/>");
+            const auto invalidRetryStarted =
+                juce::Time::getMillisecondCounterHiRes();
+            const auto invalidRetry = execute ("retry_audio_device");
+            const auto invalidRetryElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - invalidRetryStarted;
+            const auto invalidRetryError =
+                invalidRetry.getProperty ("error", juce::var()).toString();
 
             const bool pass = (bool) firstList.getProperty ("ok", false)
                            && defaultArgvRoundTrip
@@ -272,7 +285,12 @@ public:
                            && ! (bool) secondData.getProperty ("audioEnabled", true)
                            && secondTypes.isArray() && secondTypes.getArray()->isEmpty()
                            && secondListElapsedMs < 1000.0
-                           && engine->audioDeviceError().contains ("did not open within")
+                           && timeoutDeviceError.contains ("did not open within")
+                           && invalidSetupWritten
+                           && ! (bool) invalidRetry.getProperty ("ok", true)
+                           && invalidRetryElapsedMs < audiostartup::kMinTimeoutMs
+                           && invalidRetryError.contains ("invalid or too large")
+                           && engine->audioDeviceError().contains ("invalid or too large")
                            && ! engine->hasAudio();
 
             auto* evidence = new juce::DynamicObject();
@@ -289,6 +307,11 @@ public:
             evidence->setProperty ("retryElapsedMs", retryElapsedMs);
             evidence->setProperty ("retryError", retryError);
             evidence->setProperty ("secondListElapsedMs", secondListElapsedMs);
+            evidence->setProperty ("invalidSetupRetryOk",
+                                   invalidRetry.getProperty ("ok", true));
+            evidence->setProperty ("invalidSetupRetryElapsedMs",
+                                   invalidRetryElapsedMs);
+            evidence->setProperty ("invalidSetupRetryError", invalidRetryError);
             evidence->setProperty ("audioDeviceError", engine->audioDeviceError());
             std::cout << juce::JSON::toString (juce::var (evidence), false).toStdString()
                       << std::endl;

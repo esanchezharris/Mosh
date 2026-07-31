@@ -304,6 +304,32 @@ TEST_CASE ("probe setup serialization is parent-bounded", "[audiostartup]")
                                 &oversized, 2, 2, 0).isEmpty());
 }
 
+TEST_CASE ("probe argv stays inside a conservative Windows command envelope",
+           "[audiostartup]")
+{
+    const juce::String nonce ("fedcba9876543210fedcba9876543210");
+    juce::XmlElement setup ("DEVICESETUP");
+    setup.setAttribute ("audioOutputDeviceName", "MacBook Pro Speakers");
+
+    const auto args = probeChildArguments (
+        { "/Applications/Mosh Audit.app/Contents/MacOS/Mosh" },
+        nonce, &setup, 2, 2, 60000);
+    REQUIRE (args.size() == 7);
+
+    size_t commandChars = 0;
+    for (const auto& arg : args)
+        commandChars += static_cast<size_t> (arg.length()) + 3;
+    CHECK (commandChars <= static_cast<size_t> (kMaxProbeCommandLineChars));
+    CHECK (kMaxProbeCommandLineChars < 32767);
+
+    const auto oversizedExecutable = juce::String ("/")
+        + juce::String::repeatedString (
+            "x", kMaxProbeCommandLineChars)
+        + "/Mosh.exe";
+    CHECK (probeChildArguments ({ oversizedExecutable }, nonce, &setup,
+                                2, 2, 60000).isEmpty());
+}
+
 TEST_CASE ("audio probe timeout child fixture", "[audiostartup-child]")
 {
     const auto heartbeat = juce::SystemStats::getEnvironmentVariable (

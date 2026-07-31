@@ -307,8 +307,14 @@ juce::String MoshEngine::openAudioDeviceBounded()
     if (auto persisted = session.getChildFile ("audio-device.xml"); persisted.existsAsFile())
     {
         auto loaded = audiostartup::loadBoundedDeviceSetup (persisted);
-        if (loaded.valid)
-            setupXml = std::move (loaded.xml);
+        if (! loaded.valid)
+        {
+            audioOpen = false;
+            return "The saved audio device setup is invalid or too large. Running "
+                   "WITHOUT audio — playback and recording are off. Reset the "
+                   "audio device, then press Retry.";
+        }
+        setupXml = std::move (loaded.xml);
     }
     if (setupXml == nullptr)
         setupXml = enginePtr->getPropertyStorage().getXmlProperty (te::SettingID::audio_device_setup);

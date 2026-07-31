@@ -23,8 +23,11 @@ namespace mosh::audiostartup
     inline constexpr int kDefaultTimeoutMs = 5000;
     inline constexpr int kMinTimeoutMs     = 250;
     inline constexpr int kMaxTimeoutMs     = 60000;
-    inline constexpr size_t kMaxProbeSetupBytes = 131072;
-    inline constexpr int kMaxProbeSetupArgumentChars = 262144;
+    inline constexpr size_t kMaxProbeSetupBytes = 8192;
+    inline constexpr int kMaxProbeSetupArgumentChars = 12288;
+    // Windows CreateProcess caps the complete command line at 32,767 UTF-16
+    // characters. Keep an 8 KiB reserve for the executable path and quoting.
+    inline constexpr int kMaxProbeCommandLineChars = 24576;
     inline constexpr auto kProbeResultPrefix = "MOSH_AUDIO_PROBE_RESULT ";
 
     inline juce::String probeDeviceTypeName()
@@ -234,11 +237,25 @@ namespace mosh::audiostartup
         if (setupArgument.isEmpty())
             return {};
 
-        return { executable.getFullPathName(), "--audio-probe", nonce,
-                 setupArgument,
-                 juce::String (numInputChannels),
-                 juce::String (numOutputChannels),
-                 juce::String (stallMs) };
+        juce::StringArray arguments {
+            executable.getFullPathName(), "--audio-probe", nonce,
+            setupArgument,
+            juce::String (numInputChannels),
+            juce::String (numOutputChannels),
+            juce::String (stallMs)
+        };
+        size_t commandChars = 0;
+        for (const auto& argument : arguments)
+        {
+            const auto length = static_cast<size_t> (argument.length());
+            if (argument.isEmpty()
+                || commandChars > static_cast<size_t> (kMaxProbeCommandLineChars)
+                || length + 3 > static_cast<size_t> (kMaxProbeCommandLineChars)
+                                    - commandChars)
+                return {};
+            commandChars += length + 3;
+        }
+        return arguments;
     }
 
     inline ProbeRequest parseProbeRequest (const juce::StringArray& args)
