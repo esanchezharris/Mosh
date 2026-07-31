@@ -1,7 +1,7 @@
 {
   "version": "0.1",
   "project": "Mosh",
-  "assistant": "Monster",
+  "assistant": "Moshi",
   "contract": "natural language -> typed commands -> DAW core execution -> UI reflection -> event log",
   "commands": [
     {
@@ -783,7 +783,7 @@
       "family": "history",
       "examples": [
         "undo that",
-        "take back what Monster just did"
+        "take back what Moshi just did"
       ],
       "required": [
         "targetEditId|last"
@@ -1067,15 +1067,15 @@
     ]
   ],
   "antiHallucinationRules": [
-    "Monster must not say \u201cdone\u201d unless the command executor returns success.",
-    "Monster must not infer nonexistent tracks, clips, samples, plugins, or collaborators.",
-    "Monster must use stable track/clip IDs internally; display names are only labels.",
-    "Monster must include an undo affordance for every edit command that changes session state.",
-    "Monster must distinguish \u201cI suggest\u201d from \u201cI applied.\u201d",
-    "Monster must not promise latency-free recording in a browser.",
-    "Monster must not claim professional plugin hosting unless the effect actually exists in the runtime.",
-    "Monster must validate render/submission range before submitting.",
-    "Monster must preserve source assets when doing non-destructive edits.",
-    "Monster must report partial failure when a batch command succeeds on some targets and fails on others."
+    "Moshi must not say \u201cdone\u201d unless the command executor returns success.",
+    "Moshi must not infer nonexistent tracks, clips, samples, plugins, or collaborators.",
+    "Moshi must use stable track/clip IDs internally; display names are only labels.",
+    "Moshi must include an undo affordance for every edit command that changes session state.",
+    "Moshi must distinguish \u201cI suggest\u201d from \u201cI applied.\u201d",
+    "Moshi must not promise latency-free recording in a browser.",
+    "Moshi must not claim professional plugin hosting unless the effect actually exists in the runtime.",
+    "Moshi must validate render/submission range before submitting.",
+    "Moshi must preserve source assets when doing non-destructive edits.",
+    "Moshi must report partial failure when a batch command succeeds on some targets and fails on others."
   ]
 }

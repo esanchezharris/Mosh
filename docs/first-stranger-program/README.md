@@ -1,5 +1,11 @@
 # First-Stranger Program — automation
 
+> **Paused and superseded on 2026-07-30.** The tracked [`STOP`](STOP) sentinel
+> keeps the nightly loop inert. The active milestone is the
+> [Vocal Map Playtest Program](../vocal-map-program/README.md). This directory,
+> including its backlog, lane plans, status board, ledger, and evidence, is
+> preserved as historical program state.
+
 The [SPEC.md](SPEC.md) is a decision-complete, 6-week program to get Mosh in front of its first
 non-owner user (playtest #1, ~wk 6). This folder wires that program into an **unattended loop** — the
 `stranger-loop` — so it drives itself where safe and hands you a clean review queue everywhere else.

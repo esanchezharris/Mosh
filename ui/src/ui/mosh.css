@@ -1397,22 +1397,22 @@ button.tbadge:hover { border-color: var(--lime); color: var(--lime); }
 }
 .agent-send:disabled { opacity: 0.35; cursor: default; }
 
-/* ── Monster changes (agent edit review) ─────────────────────────────────────*/
-.monster {
+/* ── Moshi changes (agent edit review) ───────────────────────────────────────*/
+.moshi-changes {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 224px; z-index: 50;
   width: 320px; max-width: 92vw; background: var(--ink-raise); border: 1px solid var(--ink-line);
   border-radius: 14px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5); padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px; animation: mosh-pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.monster-head { display: flex; align-items: center; justify-content: space-between; }
-.monster-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.05em; }
-.monster-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
-.monster-row { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--bone); }
-.monster-row.err { color: var(--danger); }
-.monster-dot { color: var(--lime); flex: 0 0 auto; font-size: 11px; line-height: 1.4; }
-.monster-row.err .monster-dot { color: var(--rec); }
-.monster-text { line-height: 1.35; }
-.monster-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+.moshi-changes-head { display: flex; align-items: center; justify-content: space-between; }
+.moshi-changes-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.05em; }
+.moshi-changes-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.moshi-changes-row { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--bone); }
+.moshi-changes-row.err { color: var(--danger); }
+.moshi-changes-dot { color: var(--lime); flex: 0 0 auto; font-size: 11px; line-height: 1.4; }
+.moshi-changes-row.err .moshi-changes-dot { color: var(--rec); }
+.moshi-changes-text { line-height: 1.35; }
+.moshi-changes-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
 
 /* Stage 7 — type-beat LoRA training popover */
 .training-pop { width: min(94vw, 380px); max-height: min(80vh, 620px); overflow: auto; }

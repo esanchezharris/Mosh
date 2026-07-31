@@ -162,7 +162,7 @@ export type State = {
   // (for inputs that can't be shared); off keeps barge-in. UI-local + persisted.
   handsFreePauseOnRecord: boolean;
 
-  // Agent (Moshi running the session) — UI-local. agentChangeSet drives Monster
+  // Agent (Moshi running the session) — UI-local. agentChangeSet drives Moshi
   // changes; agentUtter signals the creature to react (voice + pose) to a reply.
   agentBusy: boolean;
   agentChangeSet: ChangeSet | null;

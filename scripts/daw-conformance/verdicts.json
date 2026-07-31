@@ -139,7 +139,7 @@
  },
  {
   "area": "Mixer",
-  "action": "Monster: turn vocal up",
+  "action": "Moshi: turn vocal up",
   "status": "pass",
   "invariants": [
    51,
@@ -157,18 +157,18 @@
   ]
  },
  {
-  "area": "Monster",
+  "area": "Moshi",
   "action": "Ask \u201cwhat changed?\u201d after edit",
   "status": "out-of-scope",
   "invariants": [],
-  "note": "Monster is outside the conventional-parity pass"
+  "note": "Moshi is outside the conventional-parity pass"
  },
  {
-  "area": "Monster",
+  "area": "Moshi",
   "action": "Issue ambiguous command \u201cmake that louder\u201d with no selection",
   "status": "out-of-scope",
   "invariants": [],
-  "note": "Monster is outside the conventional-parity pass"
+  "note": "Moshi is outside the conventional-parity pass"
  },
  {
   "area": "Post-pack",

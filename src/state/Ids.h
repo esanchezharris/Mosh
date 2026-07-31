@@ -219,7 +219,7 @@ namespace mosh::ids
     // repoints the clip's source to the growing file (byte-stable prefix ⇒ glitch-free mid-play).
     // `liveArmed` is the per-layer toggle surfaced in the snapshot for the UI. Non-undoable.
     MOSH_DECLARE_ID (liveArmed)
-    MOSH_DECLARE_ID (createdBy)        // user | (future) monster
+    MOSH_DECLARE_ID (createdBy)        // user | moshi; legacy "monster" values remain readable
     MOSH_DECLARE_ID (userKept)
     MOSH_DECLARE_ID (compiledEnvelope) // TRANSIENT: JSON of the last compile_render result (mode/backend/reasoning/say) — non-undoable, like lyricProposals
 

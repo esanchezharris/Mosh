@@ -32,7 +32,7 @@ import { PluginBrowser } from "./ui/PluginBrowser";
 import { PianoRoll } from "./ui/PianoRoll";
 import { AutomationPanel } from "./ui/AutomationPanel";
 import { DrumWindow } from "./ui/DrumWindow";
-import { MonsterChanges } from "./ui/MonsterChanges";
+import { MoshiChanges } from "./ui/MoshiChanges";
 import { SessionRail } from "./ui/SessionRail";
 import { AgentComposer } from "./ui/AgentComposer";
 import { SectionNavigator } from "./ui/SectionNavigator";
@@ -134,7 +134,7 @@ export function AppLegacy() {
       <PianoRoll />
       <AutomationPanel />
       <DrumWindow />
-      <MonsterChanges />
+      <MoshiChanges />
       {dragging && (
         <div className="drop-overlay" role="status" aria-live="polite" data-testid="drop-overlay">
           <span>Drop audio to import</span>

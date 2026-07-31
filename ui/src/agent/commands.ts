@@ -205,7 +205,7 @@ export function commandCatalogPrompt(): string {
   }).join("\n");
 }
 
-/** A short, human-readable summary of an executed command, for Monster changes. */
+/** A short, human-readable summary of an executed command, for Moshi changes. */
 export function describeCommand(command: string, args: Record<string, unknown>): string {
   const a = args as Record<string, string | number | boolean | undefined>;
   switch (command) {

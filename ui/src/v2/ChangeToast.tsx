@@ -2,7 +2,7 @@
 // edits, the change set surfaces briefly with a one-line summary + an Undo grace
 // affordance, then fades on its own (the changes are already applied — auto-dismiss =
 // keep). Hovering pauses the timer so Undo stays reachable. This replaces the classic
-// MonsterChanges dialog in v2 (the classic shell keeps its manual Keep/Undo panel).
+// MoshiChanges dialog in v2 (the classic shell keeps its manual Keep/Undo panel).
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
