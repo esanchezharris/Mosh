@@ -20,7 +20,7 @@
 // snapTimeMap is the same machinery BarRuler's own bar lines and TempoRibbon already
 // use — see BarRuler.test.ts for the guard that fails if this regresses to geom.ts.
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import type { Snapshot } from "../../types";
@@ -28,8 +28,23 @@ import { tempoMapFrom, snapTimeMap, gridLines, type TempoMap } from "../../time"
 import { contentSeconds } from "./geom";
 import { usePointerScrub } from "./usePointerScrub";
 
-const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).setPointerCapture(id); } catch { /* no-op */ } };
-const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
+const capturePointer = (element: HTMLElement, pointerId: number) => {
+  if (typeof element.setPointerCapture !== "function") return;
+  try {
+    element.setPointerCapture(pointerId);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+};
+
+const releasePointer = (element: HTMLElement, pointerId: number) => {
+  if (typeof element.releasePointerCapture !== "function") return;
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+};
 
 /** Pixel-x within the ruler -> bar-snapped seconds, via the PIECEWISE tempo map.
  *  Exported so BarRuler.test.ts can pin this against the flat geom.ts helpers without
@@ -54,9 +69,21 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   // gestures, and while a plain (non-shift) press is just seeking.
   const anchor = useRef<number | null>(null);
   const rangePointer = useRef<number | null>(null);
+  const rangeElement = useRef<HTMLDivElement | null>(null);
   const scrub = usePointerScrub((position) => {
     void exec("set_transport", { position });
   });
+  useEffect(() => () => {
+    const pointerId = rangePointer.current;
+    if (pointerId == null) return;
+    if (rangeElement.current) releasePointer(rangeElement.current, pointerId);
+    anchor.current = null;
+    rangePointer.current = null;
+    rangeElement.current = null;
+    setTimeRangeDragging(false);
+    const r = useShell.getState().timeRange;
+    if (r && r.end - r.start < 1e-6) setTimeRange(null);
+  }, [setTimeRange, setTimeRangeDragging]);
   const positionAt = (element: HTMLDivElement, clientX: number) => {
     const rect = element.getBoundingClientRect();
     return Math.max(0, (clientX - rect.left) / pxPerSec);
@@ -69,6 +96,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
       const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
       anchor.current = sec;
       rangePointer.current = e.pointerId;
+      rangeElement.current = e.currentTarget;
       setTimeRangeDragging(true);
       setTimeRange({ start: sec, end: sec });
       capturePointer(e.currentTarget, e.pointerId);
@@ -95,6 +123,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
     if (anchor.current == null || rangePointer.current !== e.pointerId) return false;
     anchor.current = null;
     rangePointer.current = null;
+    rangeElement.current = null;
     setTimeRangeDragging(false);
     releasePointer(e.currentTarget, e.pointerId);
     // A shift-press with no real movement leaves a zero-width span — treat it as no

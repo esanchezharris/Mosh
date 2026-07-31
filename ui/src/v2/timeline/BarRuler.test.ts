@@ -61,6 +61,7 @@ describe("BarRuler — shift-drag time-range gesture", () => {
   let exec: ReturnType<typeof vi.fn>;
   let frames: Array<{ id: number; cb: FrameRequestCallback }>;
   let nextFrameId: number;
+  let mounted: boolean;
 
   const render = (s: Snapshot) => act(() => root.render(React.createElement(BarRuler, { snapshot: s, width: 3200 })));
   const ruler = () => host.querySelector('[data-testid="v2-ruler"]') as HTMLElement;
@@ -98,13 +99,14 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
+    mounted = true;
     exec = vi.fn(async () => ({ ok: true }));
     useStore.setState({ exec, pxPerSec: PX, snapshot: snap() } as never);
     useShell.setState({ timeRange: null, timeRangeDragging: false });
     render(snap());
   });
   afterEach(() => {
-    act(() => root.unmount());
+    if (mounted) act(() => root.unmount());
     host.remove();
     vi.unstubAllGlobals();
   });
@@ -179,6 +181,24 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     expect(useShell.getState().timeRangeDragging).toBe(false);
     expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("releases a shift range and clears its dragging state on unmount", () => {
+    const element = ruler();
+    const release = vi.fn();
+    Object.defineProperty(element, "releasePointerCapture", {
+      configurable: true,
+      value: release,
+    });
+
+    down(4, true);
+    move(6);
+    act(() => root.unmount());
+    mounted = false;
+
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
+    expect(release).toHaveBeenCalledWith(1);
   });
 
   it("dragging backwards (end before start chronologically) still yields start <= end", () => {
