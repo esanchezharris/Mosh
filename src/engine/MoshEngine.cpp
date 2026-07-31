@@ -305,7 +305,11 @@ juce::String MoshEngine::openAudioDeviceBounded()
     // stored setup (what te::DeviceManager::loadSettings reads), else system defaults.
     std::unique_ptr<juce::XmlElement> setupXml;
     if (auto persisted = session.getChildFile ("audio-device.xml"); persisted.existsAsFile())
-        setupXml = juce::XmlDocument::parse (persisted);
+    {
+        auto loaded = audiostartup::loadBoundedDeviceSetup (persisted);
+        if (loaded.valid)
+            setupXml = std::move (loaded.xml);
+    }
     if (setupXml == nullptr)
         setupXml = enginePtr->getPropertyStorage().getXmlProperty (te::SettingID::audio_device_setup);
 
@@ -338,6 +342,14 @@ juce::String MoshEngine::openAudioDeviceBounded()
         numOut,
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
             .trim().getIntValue());
+
+    if (probeArguments.isEmpty())
+    {
+        audioOpen = false;
+        return "The saved audio device setup is invalid or too large. Running WITHOUT "
+               "audio — playback and recording are off. Reset the audio device, then "
+               "press Retry.";
+    }
 
     const auto probe = audiostartup::runProbeProcess (probeArguments, timeoutMs);
     if (probe.status == audiostartup::ProbeProcessStatus::failedToStart)

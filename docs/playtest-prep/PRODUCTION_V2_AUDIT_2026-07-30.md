@@ -224,7 +224,10 @@ Speakers + BlackHole timeout could open Settings but did not visibly exercise
 Retry. `a20c5651` proved the real degraded list → Retry → list command sequence
 but failed four review lanes for the gaps above.
 
-The repaired focused battery is 77 assertions across seven cases. CTest also
+The repaired focused battery is 97 assertions across ten cases. It bounds the
+parent's persisted-file read and XML serialization before argv construction,
+rejects oversized/malformed/invalid-UTF-8/wrong-root setups, and observes a
+portable timed-out child stop writing its heartbeat after kill/reap. CTest also
 launches the real Release executable with a 60-second child stall and a 250 ms
 parent bound. Before the command journey it round-trips system-default,
 output-only, and input-only setups through a real child argv boundary without

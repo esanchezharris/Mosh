@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "engine/AudioDeviceStartup.h"
+#include "util/Env.h"
 
 using namespace mosh::audiostartup;
 
@@ -238,8 +239,103 @@ TEST_CASE ("default and one-sided device setups survive strict probe framing",
     }
 }
 
+TEST_CASE ("persisted device setup is bounded before parent parsing", "[audiostartup]")
+{
+    const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getNonexistentChildFile ("mosh-audio-device-setup", ".xml");
+
+    SECTION ("a valid file at the byte ceiling is accepted")
+    {
+        juce::String xml ("<DEVICESETUP/>");
+        xml += juce::String::repeatedString (
+            " ", static_cast<int> (kMaxProbeSetupBytes - xml.getNumBytesAsUTF8()));
+        REQUIRE (xml.getNumBytesAsUTF8() == kMaxProbeSetupBytes);
+        REQUIRE (file.replaceWithData (xml.toRawUTF8(), xml.getNumBytesAsUTF8()));
+
+        auto loaded = loadBoundedDeviceSetup (file);
+        CHECK (loaded.valid);
+        REQUIRE (loaded.xml != nullptr);
+        CHECK (loaded.xml->hasTagName ("DEVICESETUP"));
+    }
+
+    SECTION ("oversized input is rejected before allocation and parse")
+    {
+        juce::MemoryBlock bytes (kMaxProbeSetupBytes + 1, true);
+        REQUIRE (file.replaceWithData (bytes.getData(), bytes.getSize()));
+        CHECK_FALSE (loadBoundedDeviceSetup (file).valid);
+    }
+
+    SECTION ("malformed XML, invalid UTF-8, and a wrong root fail closed")
+    {
+        for (const auto xml : { juce::String ("<DEVICESETUP>"),
+                                juce::String ("<NOTDEVICE/>") })
+        {
+            REQUIRE (file.replaceWithData (xml.toRawUTF8(), xml.getNumBytesAsUTF8()));
+            CHECK_FALSE (loadBoundedDeviceSetup (file).valid);
+        }
+
+        const unsigned char invalidUtf8[] = {
+            '<', 'D', 'E', 'V', 'I', 'C', 'E', 'S', 'E', 'T', 'U', 'P', '>',
+            0xff,
+            '<', '/', 'D', 'E', 'V', 'I', 'C', 'E', 'S', 'E', 'T', 'U', 'P', '>'
+        };
+        REQUIRE (file.replaceWithData (invalidUtf8, sizeof (invalidUtf8)));
+        CHECK_FALSE (loadBoundedDeviceSetup (file).valid);
+    }
+
+    file.deleteFile();
+}
+
+TEST_CASE ("probe setup serialization is parent-bounded", "[audiostartup]")
+{
+    juce::XmlElement wrongRoot ("NOTDEVICE");
+    CHECK (probeSetupArgument (&wrongRoot).isEmpty());
+    CHECK (probeChildArguments ({ "/Applications/Mosh.app/Contents/MacOS/Mosh" },
+                                "fedcba9876543210fedcba9876543210",
+                                &wrongRoot, 2, 2, 0).isEmpty());
+
+    juce::XmlElement oversized ("DEVICESETUP");
+    oversized.setAttribute (
+        "audioOutputDeviceName",
+        juce::String::repeatedString ("x", static_cast<int> (kMaxProbeSetupBytes)));
+    CHECK (probeSetupArgument (&oversized).isEmpty());
+    CHECK (probeChildArguments ({ "/Applications/Mosh.app/Contents/MacOS/Mosh" },
+                                "fedcba9876543210fedcba9876543210",
+                                &oversized, 2, 2, 0).isEmpty());
+}
+
+TEST_CASE ("audio probe timeout child fixture", "[audiostartup-child]")
+{
+    const auto heartbeat = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_AUDIO_TEST_HEARTBEAT", {});
+    if (heartbeat.isEmpty())
+        return;
+
+    const juce::File heartbeatFile (heartbeat);
+    for (int i = 0; i < 1000; ++i)
+    {
+        heartbeatFile.appendText ("x");
+        juce::Thread::sleep (10);
+    }
+}
+
 TEST_CASE ("a timed-out process is killed before the caller resumes", "[audiostartup]")
 {
-    const auto result = runProbeProcess ({ "/bin/sleep", "10" }, 50);
+    const auto heartbeat = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                               .getNonexistentChildFile ("mosh-audio-probe-heartbeat", ".txt");
+    mosh::setEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT", heartbeat.getFullPathName().toRawUTF8());
+    const auto result = runProbeProcess (
+        { juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+              .getFullPathName(),
+          "[audiostartup-child]" },
+        250);
+    mosh::unsetEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT");
+
     CHECK (result.status == ProbeProcessStatus::timedOut);
+    REQUIRE (heartbeat.existsAsFile());
+    const auto sizeAfterReturn = heartbeat.getSize();
+    REQUIRE (sizeAfterReturn > 0);
+    juce::Thread::sleep (100);
+    CHECK (heartbeat.getSize() == sizeAfterReturn);
+    heartbeat.deleteFile();
 }

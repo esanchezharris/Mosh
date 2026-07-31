@@ -23,6 +23,8 @@ namespace mosh::audiostartup
     inline constexpr int kDefaultTimeoutMs = 5000;
     inline constexpr int kMinTimeoutMs     = 250;
     inline constexpr int kMaxTimeoutMs     = 60000;
+    inline constexpr size_t kMaxProbeSetupBytes = 131072;
+    inline constexpr int kMaxProbeSetupArgumentChars = 262144;
     inline constexpr auto kProbeResultPrefix = "MOSH_AUDIO_PROBE_RESULT ";
 
     inline juce::String probeDeviceTypeName()
@@ -109,11 +111,116 @@ namespace mosh::audiostartup
             && nonce.containsOnly ("0123456789abcdefABCDEF-");
     }
 
+    struct BoundedDeviceSetup
+    {
+        bool valid = false;
+        std::unique_ptr<juce::XmlElement> xml;
+    };
+
+    inline BoundedDeviceSetup parseBoundedDeviceSetup (const void* data, size_t size)
+    {
+        BoundedDeviceSetup result;
+        if (data == nullptr || size == 0 || size > kMaxProbeSetupBytes)
+            return result;
+
+        const auto xmlText = juce::String::fromUTF8 (
+            static_cast<const char*> (data), static_cast<int> (size));
+        if (static_cast<size_t> (xmlText.getNumBytesAsUTF8()) != size)
+            return result;
+
+        auto xml = juce::XmlDocument::parse (xmlText);
+        if (xml == nullptr || ! xml->hasTagName ("DEVICESETUP"))
+            return result;
+
+        result.valid = true;
+        result.xml = std::move (xml);
+        return result;
+    }
+
+    /** Read the persisted setup only after checking its on-disk size. This is the
+        parent-side boundary: an untrusted audio-device.xml must not be loaded or
+        parsed into the UI process before the child limits get a chance to run. */
+    inline BoundedDeviceSetup loadBoundedDeviceSetup (const juce::File& file)
+    {
+        const auto size = file.getSize();
+        if (size <= 0 || size > static_cast<juce::int64> (kMaxProbeSetupBytes))
+            return {};
+
+        juce::FileInputStream input (file);
+        if (! input.openedOk())
+            return {};
+
+        juce::MemoryBlock bytes (static_cast<size_t> (size));
+        if (input.read (bytes.getData(), static_cast<int> (size)) != size)
+            return {};
+
+        return parseBoundedDeviceSetup (bytes.getData(), bytes.getSize());
+    }
+
+    /** Output stream used to serialise an already-parsed engine property without ever
+        allocating beyond the wire limit. XmlElement::toString would allocate the whole
+        tree before its size could be checked. */
+    class BoundedXmlOutput final : public juce::OutputStream
+    {
+    public:
+        bool write (const void* data, size_t size) override
+        {
+            const auto position = output.getPosition();
+            if (position < 0
+                || position > static_cast<juce::int64> (kMaxProbeSetupBytes)
+                || size > kMaxProbeSetupBytes
+                               - static_cast<size_t> (position))
+            {
+                exceeded = true;
+                return false;
+            }
+            return output.write (data, size);
+        }
+
+        void flush() override { output.flush(); }
+
+        bool setPosition (juce::int64 position) override
+        {
+            if (position < 0
+                || position > static_cast<juce::int64> (kMaxProbeSetupBytes))
+            {
+                exceeded = true;
+                return false;
+            }
+            return output.setPosition (position);
+        }
+
+        juce::int64 getPosition() override { return output.getPosition(); }
+        bool wasExceeded() const noexcept { return exceeded; }
+        juce::String toString() const { return output.toUTF8(); }
+
+    private:
+        juce::MemoryOutputStream output;
+        bool exceeded = false;
+    };
+
     inline juce::String probeSetupArgument (const juce::XmlElement* setupXml)
     {
-        return setupXml == nullptr
-                   ? "default"
-                   : "xml:" + juce::Base64::toBase64 (setupXml->toString());
+        if (setupXml == nullptr)
+            return "default";
+        if (! setupXml->hasTagName ("DEVICESETUP"))
+            return {};
+
+        BoundedXmlOutput output;
+        setupXml->writeTo (output, juce::XmlElement::TextFormat().singleLine());
+        if (output.wasExceeded() || output.getPosition() <= 0)
+            return {};
+
+        const auto xmlText = output.toString();
+        const auto xmlBytes = xmlText.getNumBytesAsUTF8();
+        if (xmlBytes <= 0
+            || static_cast<size_t> (xmlBytes) > kMaxProbeSetupBytes)
+            return {};
+
+        const auto argument = "xml:" + juce::Base64::toBase64 (
+            xmlText.toRawUTF8(), static_cast<size_t> (xmlBytes));
+        return argument.length() <= kMaxProbeSetupArgumentChars ? argument
+                                                                : juce::String();
     }
 
     inline juce::StringArray probeChildArguments (const juce::File& executable,
@@ -123,8 +230,12 @@ namespace mosh::audiostartup
                                                   int numOutputChannels,
                                                   int stallMs)
     {
+        const auto setupArgument = probeSetupArgument (setupXml);
+        if (setupArgument.isEmpty())
+            return {};
+
         return { executable.getFullPathName(), "--audio-probe", nonce,
-                 probeSetupArgument (setupXml),
+                 setupArgument,
                  juce::String (numInputChannels),
                  juce::String (numOutputChannels),
                  juce::String (stallMs) };
@@ -163,13 +274,14 @@ namespace mosh::audiostartup
         {
             request.useDefaultSetup = true;
         }
-        else if (setup.startsWith ("xml:") && setup.length() <= 262144)
+        else if (setup.startsWith ("xml:")
+                 && setup.length() <= kMaxProbeSetupArgumentChars)
         {
             const auto encodedXml = setup.substring (4);
             juce::MemoryOutputStream decoded;
             if (! juce::Base64::convertFromBase64 (decoded, encodedXml)
                 || decoded.getDataSize() == 0
-                || decoded.getDataSize() > 131072
+                || decoded.getDataSize() > kMaxProbeSetupBytes
                 || juce::Base64::toBase64 (decoded.getData(), decoded.getDataSize())
                        != encodedXml)
                 return request;
