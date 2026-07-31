@@ -104,6 +104,10 @@ cmd_prepare() {
   [ -d "$wt" ] || { jq -nc --arg r "no worktree auto-$slug" '{ready:false,phase:"prepare",reason:$r}'; return; }
 
   git -C "$wt" fetch --quiet origin main || true
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not rebasing"}'
+    return
+  fi
   local base_sha; base_sha="$(git -C "$wt" rev-parse origin/main)"
 
   # Rebase onto latest origin/main — no stale-green merges.
@@ -113,6 +117,10 @@ cmd_prepare() {
     return
   fi
   local head_sha; head_sha="$(git -C "$wt" rev-parse HEAD)"
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not classifying"}'
+    return
+  fi
 
   # Classify + exclusion (fail-closed). Non-empty diff required.
   local cj; cj="$("$SELF_DIR/classify.sh" origin/main "$wt")"
@@ -152,6 +160,10 @@ cmd_prepare() {
   # THE GATE (authoritative: ×3 selftest + verify.py run here for native).
   local gate_json gate_rc
   gate_json="$("$SELF_DIR/gate.sh" "$class" "$wt" origin/main)"; gate_rc=$?
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — gate result discarded"}'
+    return
+  fi
   local ready=false; [ "$gate_rc" -eq 0 ] && ready=true
 
   # One-line digest of the gate result for the ledger / reviewer.

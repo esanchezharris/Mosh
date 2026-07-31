@@ -107,6 +107,34 @@ expect_one_mutation_then_stop finalize stop-on-ready finalize lane 1 "$BASE_SHA"
 expect_one_mutation_then_stop reject stop-on-mutation reject lane 1 held "program stopped"
 expect_one_mutation_then_stop route-owner stop-on-mutation route-owner lane 1 T "gate pass" "review pass" 0
 
+PREPARE_LOOP="$SANDBOX/prepare-loop"
+PREPARE_WT="$FAKE_ROOT/.claude/worktrees/auto-prepare"
+mkdir -p "$PREPARE_LOOP" "$(dirname "$PREPARE_WT")"
+cp "$SELF_DIR/lib.sh" "$SELF_DIR/classify.sh" "$SELF_DIR/merge-one.sh" "$PREPARE_LOOP/"
+cat >"$PREPARE_LOOP/gate.sh" <<EOF
+#!/usr/bin/env bash
+touch "$PROGRAM_STOP"
+printf '%s\n' '{"class":"cheap","pass":true,"steps":[],"selftest":[]}'
+EOF
+chmod +x "$PREPARE_LOOP/gate.sh"
+
+rm -f "$PROGRAM_STOP"
+git -C "$FAKE_ROOT" worktree add -qb claude/auto-prepare "$PREPARE_WT" main
+mkdir -p "$PREPARE_WT/docs"
+printf 'prepare probe\n' >"$PREPARE_WT/docs/prepare-probe.md"
+git -C "$PREPARE_WT" add docs/prepare-probe.md
+git -C "$PREPARE_WT" commit -qm "prepare probe"
+git -C "$PREPARE_WT" push -qu origin HEAD
+
+PREPARE_OUT="$(AL_ROOT="$FAKE_ROOT" AL_PROGRAM_STOP="$PROGRAM_STOP" \
+  "$PREPARE_LOOP/merge-one.sh" prepare prepare 1 main)"
+if ! printf '%s\n' "$PREPARE_OUT" | jq -e \
+    '.phase == "prepare" and .stopped == true and (.reason | startswith("STOP sentinel present"))' \
+    >/dev/null; then
+  printf 'program-stop-selftest: FAIL (mid-gate prepare returned %s)\n' "$PREPARE_OUT" >&2
+  exit 1
+fi
+
 CONTROL_ROOT="$SANDBOX/control-root"
 mkdir -p "$CONTROL_ROOT/scripts/first-stranger" "$CONTROL_ROOT/docs/first-stranger-program"
 git init -q "$CONTROL_ROOT"
