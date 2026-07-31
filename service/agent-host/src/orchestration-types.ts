@@ -1,4 +1,4 @@
-import type { AuditEvent, PlaytestReport } from "./contracts.js";
+import type { AuditEvent, PlaytestReport, RepairJob } from "./contracts.js";
 
 export type UploadedEvidence = {
   evidenceId: string;
@@ -58,6 +58,10 @@ export interface GitAdapter {
     branch: string;
     path: string;
   }): Promise<void>;
+  removeWorktree(input: {
+    repositoryPath: string;
+    path: string;
+  }): Promise<void>;
 }
 
 export type RepairCheckpoint = {
@@ -65,12 +69,26 @@ export type RepairCheckpoint = {
   priorAppPath: string;
 };
 
+export interface RepairArtifactPolicy {
+  validateResult(
+    worktreePath: string,
+    result: NonNullable<RepairJob["result"]>,
+  ): Promise<NonNullable<RepairJob["result"]>>;
+  validateBuild(worktreePath: string, buildPath: string, sourceSha: string): Promise<string>;
+}
+
+export type RepairLaunchContext = {
+  buildPath: string;
+  worktreePath: string;
+  sourceSha: string;
+};
+
 export interface ProcessAdapter {
   checkpoint(): Promise<RepairCheckpoint>;
   stopTransport(): Promise<void>;
   releaseAudio(): Promise<void>;
   closeMosh(): Promise<void>;
-  launchRepairBuild(buildPath: string): Promise<void>;
+  launchRepairBuild(context: RepairLaunchContext): Promise<void>;
   closeRepairBuild(): Promise<void>;
   restoreCheckpoint(checkpointPath: string): Promise<void>;
   launchPriorApp(appPath: string): Promise<void>;
@@ -88,6 +106,7 @@ export type Dependencies = {
   appServer: AppServerAdapter;
   git: GitAdapter;
   processes: ProcessAdapter;
+  artifacts: RepairArtifactPolicy;
   repositoryPath: string;
   worktreeRoot: string;
 };

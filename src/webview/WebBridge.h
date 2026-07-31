@@ -74,6 +74,8 @@ public:
 
     /** App identity returned to the UI's `ping` (Stage 0 bridge proof). */
     static juce::var appInfo();
+    static bool enforceOwnerOnlyEvidencePermissions (const juce::File& target,
+                                                     bool directory);
 
 private:
     static bool isSafeUiResourcePath (const juce::String& url);

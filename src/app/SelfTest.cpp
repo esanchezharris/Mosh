@@ -9,6 +9,7 @@
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
 #include "agent/AgentHostProxy.h"
+#include "webview/WebBridge.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
@@ -19,6 +20,7 @@
 #include <map>
 #include <thread>
 #include <vector>
+#include <sys/stat.h>
 
 namespace mosh
 {
@@ -7041,6 +7043,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! AgentHostProxy::parseStartupEnvelope (
                    "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"0.0.0.0\",\"port\":8787,\"capability\":\"x\"}").has_value(),
                "agent host: rejects a non-loopback startup envelope");
+        auto permissionDirectory = File::createTempFile ("mosh-evidence-permissions");
+        permissionDirectory.deleteFile();
+        permissionDirectory.createDirectory();
+        const auto permissionFile = permissionDirectory.getChildFile ("window.png");
+        permissionFile.replaceWithData ("x", 1);
+        struct stat directoryStat {};
+        struct stat fileStat {};
+        check (WebBridge::enforceOwnerOnlyEvidencePermissions (permissionDirectory, true)
+                   && WebBridge::enforceOwnerOnlyEvidencePermissions (permissionFile, false)
+                   && ::stat (permissionDirectory.getFullPathName().toRawUTF8(), &directoryStat) == 0
+                   && ::stat (permissionFile.getFullPathName().toRawUTF8(), &fileStat) == 0
+                   && (directoryStat.st_mode & 0777) == 0700
+                   && (fileStat.st_mode & 0777) == 0600,
+               "owner cockpit: screenshot evidence uses 0700 directories and 0600 files");
+        permissionDirectory.deleteRecursively();
 
         // Packaged-app lifecycle: run from a non-repository current directory and
         // leave the entry override absent. This forces lookup of the CMake-staged
@@ -7085,6 +7102,13 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        "agent host: report creation requires an explicitly active playtest");
                 check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
                        "agent host: inactive report creates no persisted host artifact");
+                const auto inactiveTurn = host.supervisorTurn (var (hostRequest));
+                check (! (bool) inactiveTurn.getProperty ("ok", true)
+                           && inactiveTurn.getProperty ("code", var()).toString() == "playtest_not_started"
+                           && ! (bool) inactiveTurn.getProperty ("retryable", true),
+                       "agent host: supervisor never starts a playtest implicitly");
+                check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
+                       "agent host: rejected supervisor turn creates no trace before disclosure");
                 const auto started = host.startPlaytest (false);
                 check ((bool) started.getProperty ("active", false)
                            && (bool) started.getProperty ("disclosureRequired", false),
@@ -7108,8 +7132,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 hostResult = host.supervisorTurn (var (hostRequest));
             }
             check (! (bool) hostResult.getProperty ("ok", false)
-                       && hostResult.getProperty ("code", var()).toString() == "openai_unavailable",
-                   "agent host: packaged lazy launch reaches the host's explicit unavailable response");
+                       && hostResult.getProperty ("code", var()).toString() == "playtest_not_started",
+                   "agent host: closed playtest cannot produce a supervisor trace");
             check (repositoryCwd.setAsCurrentWorkingDirectory(),
                    "agent host: packaged probe restores the repository working directory");
             ChildProcess pgrep;

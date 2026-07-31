@@ -1,7 +1,9 @@
 import { z } from "zod";
 
 export type StdioChild = {
-  stdin: { write(line: string): boolean };
+  stdin: {
+    write(line: string, callback?: (error?: Error | null) => void): boolean;
+  };
   stdout: {
     setEncoding(encoding: string): void;
     on(event: "data", listener: (chunk: string) => void): unknown;
@@ -14,6 +16,7 @@ export type StdioChild = {
 type PendingRpc = {
   resolve(value: unknown): void;
   reject(error: Error): void;
+  timer: NodeJS.Timeout;
 };
 
 export type ServerRequest = {
@@ -49,11 +52,15 @@ export class StdioJsonRpcTransport implements JsonRpcTransport {
   private requestListener: ((request: ServerRequest) => Promise<unknown>) | undefined;
   private buffer = "";
 
-  constructor(private readonly child: StdioChild) {
+  constructor(
+    private readonly child: StdioChild,
+    private readonly requestTimeoutMs = 15_000,
+  ) {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.accept(chunk));
     child.once("exit", () => {
       for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
         pending.reject(codedError("codex_app_server_stopped", "Codex app-server stopped"));
       }
       this.pending.clear();
@@ -63,8 +70,18 @@ export class StdioJsonRpcTransport implements JsonRpcTransport {
   request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.write({ jsonrpc: "2.0", id, method, params });
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(codedError("codex_rpc_timeout", "Codex app-server request timed out"));
+      }, this.requestTimeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      this.write({ jsonrpc: "2.0", id, method, params }, (error) => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        clearTimeout(pending.timer);
+        pending.reject(codedError("codex_rpc_write_failed", error.message));
+      });
     });
   }
 
@@ -80,8 +97,17 @@ export class StdioJsonRpcTransport implements JsonRpcTransport {
     };
   }
 
-  private write(envelope: Record<string, unknown>): void {
-    this.child.stdin.write(`${JSON.stringify(envelope)}\n`);
+  private write(
+    envelope: Record<string, unknown>,
+    onError?: (error: Error) => void,
+  ): void {
+    try {
+      this.child.stdin.write(`${JSON.stringify(envelope)}\n`, (error) => {
+        if (error) onError?.(error);
+      });
+    } catch (error) {
+      onError?.(error as Error);
+    }
   }
 
   private accept(chunk: string): void {
@@ -127,6 +153,7 @@ export class StdioJsonRpcTransport implements JsonRpcTransport {
       const pending = this.pending.get(id);
       if (!pending) return;
       this.pending.delete(id);
+      clearTimeout(pending.timer);
       if (error) pending.reject(codedError("codex_rpc_error", error.message));
       else pending.resolve(result);
       return;

@@ -16,7 +16,9 @@ export type {
   GitAdapter,
   GitHubAdapter,
   ProcessAdapter,
+  RepairArtifactPolicy,
   RepairCheckpoint,
+  RepairLaunchContext,
   UploadedEvidence,
 } from "./orchestration-types.js";
 

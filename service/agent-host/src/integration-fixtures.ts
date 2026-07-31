@@ -7,6 +7,7 @@ import type {
   GitAdapter,
   GitHubAdapter,
   ProcessAdapter,
+  RepairArtifactPolicy,
 } from "./orchestration.js";
 
 export const INTEGRATION_CAPABILITY = "task-5-local-fixture-capability";
@@ -72,6 +73,9 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
     createWorktree: async (input) => {
       calls.git.push(`${input.branch}:${input.path}`);
     },
+    removeWorktree: async (input) => {
+      calls.git.push(`remove:${input.path}`);
+    },
   };
   const processes: ProcessAdapter = {
     checkpoint: async () => {
@@ -86,7 +90,11 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
     restoreCheckpoint: async () => { calls.process.push("restore_checkpoint"); },
     launchPriorApp: async () => { calls.process.push("launch_prior"); },
   };
-  return { evidence, github, appServer, git, processes };
+  const artifacts: RepairArtifactPolicy = {
+    validateResult: async (_worktreePath, result) => result,
+    validateBuild: async (_worktreePath, buildPath) => buildPath,
+  };
+  return { evidence, github, appServer, git, processes, artifacts };
 }
 
 export class FixtureSupervisor implements SupervisorModelAdapter {

@@ -140,7 +140,11 @@ process helper. It creates one isolated
 `codex/playtest-<issue>-<slug>` worktree, starts a network-off
 workspace-write Codex thread, and may produce only a draft PR. A successful
 repair records targeted RED/GREEN evidence, diagnostics, bundle/build paths,
-and `full_gate_pending`; it never merges.
+the exact `sourceSha`, and `full_gate_pending`; it never merges. Every result
+path must already exist as a canonical, non-symlink descendant of the recorded
+repair worktree. The build must be a `studio.mosh.app` bundle whose Mosh
+executable embeds that same source SHA. The launch request is accepted only
+when its canonical path exactly equals the validated result build.
 
 Launching a repair build is a separate owner action. The helper must checkpoint,
 stop transport, release audio, close the current app, and then launch the repair
@@ -148,6 +152,12 @@ build so two Mosh processes never overlap. Rollback closes candidates, restores
 the checkpoint, and launches the prior app. Live GPT Realtime audio, deployed
 Supabase evidence, the signed helper, and full owner feel/cutover remain explicit
 owner gates.
+
+The repair-control adapter repeats the bundle/path/source checks immediately
+before invoking the helper. The deployment helper should also be owner-signed,
+verify its own signature/designated requirement, reject unsigned callers, and
+accept only the already validated absolute app path. Those helper checks are
+defense in depth; they do not replace the Agent Host policy.
 
 ## PR #478 supersession
 
@@ -157,3 +167,50 @@ serially with other open PRs. Do not resolve overlap by keeping #478's older
 agent implementation. Packaging, Sparkle, and unrelated First-Stranger changes
 from #478 are not superseded by this branch and must be dispositioned
 separately. Neither the Agent Host nor a repair thread may merge a PR.
+
+### Exact PR #478 disposition
+
+Read-only GitHub inspection on 2026-07-30 produced this commit-level map:
+
+| PR #478 commit | Disposition |
+| --- | --- |
+| `d15cee8d65f0156516f0efbfaf991a859b777592` | Preserve all FS-K1 signing files. |
+| `3b2da0c56eded3edeaa84dd386e44818252a6d6e` | Preserve all Sparkle files; resolve `CMakeLists.txt` by keeping both Sparkle and Agent Host staging. |
+| `a51b70dbdaf466bab011a33241ad1281ff9704a1` | Preserve all BOM/package enforcement files. |
+| `aa14563a528679b1c5ef5960f694dd407d35a8b5` | Preserve `run-mosh.sh`. |
+| `2b30832fdc55f4f51d5fc18e640caf4d1bf8c8cf` | Preserve `docs/first-stranger-program/lanes/fs-b2.md`, `ui/src/agent/skills.ts`, and `ui/src/agent/skillsFsB2.test.ts`; this branch does not replace the five skills. |
+| `037e9fe97cf6cceb306789291d01512a946fbfab` | Split by the exact file lists below. |
+| `678b3923d431aeec486cc5ddcbcde1f10f9ebff8` | Preserve all program/status/setup files. |
+| `6f76c574d7e9df4c17ac6da38996c47fd4a3655b` | Merge-only commit; no independent payload to transplant. |
+| `39aa1414d8293acdc123f66ea45b529754fbed33`, `28e0a1e9db47329d9a809522b03cb269c095a415`, `b3d7bc2c9f0a8109425b369bbae83aac256261ce`, `44c56ea887d59162c133c13192e56408948e7cd1` | Preserve setup-cloud, Supabase-ignore, deployed proxy, and status changes. |
+| `22060883a655780197493860e0330727871ced66`, `39c9b4607dcc20505db53a0e73f0b44c5762e084` | Preserve release-feed, dependency, spec, status, and ownership-doc changes. |
+
+For `037e9fe...`, prefer this branch for these overlapping agent-facing files:
+`docs/agent-bench/README.md`, `src/app/SelfTest.cpp`,
+`src/webview/WebBridge.cpp`, `ui/scripts/agentBench.mts`,
+`ui/src/agent/brain.ts`, `ui/src/agent/brainCore.test.ts`,
+`ui/src/agent/brainCore.ts`, `ui/src/agent/loop/loop.ts`,
+`ui/src/agent/loop/loopPrompt.test.ts`, `ui/src/agent/loop/loopPrompt.ts`,
+`ui/src/agent/loop/runTask.ts`, `ui/src/bridge.ts`,
+`ui/src/settings/schema.test.ts`, and `ui/src/settings/schema.ts`.
+Preserve every other file in that commit: `AGENTS.md`,
+`docs/AGENT_ONBOARDING.md`, all `docs/agent-bench/scoreboard.*` files,
+`service/sft/build_add_note_corrective.py`, `src/brain/BrainProxy.cpp`,
+`src/brain/BrainProxy.h`, `src/moshops/MoshOps.cpp`,
+`tests/test_brain_proxy.cpp`, `ui/.env.example`,
+`ui/scripts/lib/codexMcpSeat.mts`, `ui/scripts/lib/moshMcpServer.mts`,
+`ui/scripts/lib/realEngine.mts`, `ui/src/agent/brainProvider.test.ts`,
+`ui/src/agent/loopSeam.ts`, `ui/src/bench/agentBench.mock.test.ts`,
+`ui/src/bench/agentTasks.ts`, `ui/src/bench/conversation.ts`,
+`ui/src/bench/goalChecks.ts`, `ui/src/bench/loopRunner.ts`,
+`ui/src/bench/singleShotRunner.ts`, `ui/src/bridge.mock.ts`, and
+`ui/src/v2/TopBar.tsx`.
+
+PR #522 must land and pass its full gate before this branch is rebased: both
+change `src/webview/WebBridge.cpp`, `ui/src/bridge.ts`,
+`ui/src/agent/brain.ts`, `ui/src/agent/loop/runTask.ts`, their tests, and
+`ui/package.json`. Preserve #522's no-demo production failure posture while
+adding the owner-only host routes. PR #514 should likewise land first; its only
+direct overlap is `ui/src/v2/RightRail.tsx`, where the Graphite rail structure
+must retain the disabled-by-default owner cockpit slot. Run a full gate after
+each serial integration.

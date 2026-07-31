@@ -1,11 +1,16 @@
 import path from "node:path";
+import { chmod, mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 const evidenceDirectory = process.env.MOSH_TASK5_EVIDENCE_DIR;
 
 async function screenshot(page: import("@playwright/test").Page, name: string) {
   if (!evidenceDirectory) return;
-  await page.screenshot({ path: path.join(evidenceDirectory, name), fullPage: true });
+  await mkdir(evidenceDirectory, { recursive: true, mode: 0o700 });
+  await chmod(evidenceDirectory, 0o700);
+  const file = path.join(evidenceDirectory, name);
+  await page.screenshot({ path: file, fullPage: true });
+  await chmod(file, 0o600);
 }
 
 test("owner cockpit stays default-off and renders the no-live-write owner flow", async ({ page }) => {

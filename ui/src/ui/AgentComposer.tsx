@@ -228,6 +228,13 @@ export function AgentComposer() {
         return;
       }
 
+      if (cockpit.status !== "active") {
+        const startRequired = "Start the owner playtest before using the hosted supervisor.";
+        setSay(startRequired);
+        pushAgentUtter("UHOH", startRequired);
+        return;
+      }
+
       const snapshot = st.snapshot;
       const supervised = await requestCapabilitySupervisor(text, {
         playing: snapshot?.transport.playing,
@@ -399,7 +406,9 @@ export function AgentComposer() {
           onPointerDown={(e) => {
             if (agentBusy || !voiceAvailable) return;
             pointerHeldRef.current = true;
-            if (useStore.getState().transport.recording) {
+            if (useStore.getState().transport.recording
+              && ownerCockpitEnabled
+              && cockpit.status === "active") {
               pointerHeldRef.current = false;
               setSay("Stop recording before talking to Moshi.");
               playMoshiEarcon("error");

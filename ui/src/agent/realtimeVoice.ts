@@ -38,18 +38,23 @@ export class PushToTalkController {
   async connect(): Promise<void> {
     this.disposed = false;
     this.failureHandled = false;
-    const mediaStream = await this.dependencies.getMediaStream();
-    this.tracks = mediaStream.getAudioTracks();
-    this.disableInput();
-    const apiKey = await this.dependencies.getClientSecret();
-    this.session = this.dependencies.createSession({
-      mediaStream,
-      audioElement: this.dependencies.audioElement,
-      historyStoreAudio: false,
-    });
-    this.session.onError((error) => void this.fail(error));
-    await this.session.connect({ apiKey });
-    await this.session.mute(true);
+    try {
+      const mediaStream = await this.dependencies.getMediaStream();
+      this.tracks = mediaStream.getAudioTracks();
+      this.disableInput();
+      const apiKey = await this.dependencies.getClientSecret();
+      this.session = this.dependencies.createSession({
+        mediaStream,
+        audioElement: this.dependencies.audioElement,
+        historyStoreAudio: false,
+      });
+      this.session.onError((error) => void this.fail(error));
+      await this.session.connect({ apiKey });
+      await this.session.mute(true);
+    } catch (error) {
+      await this.dispose();
+      throw error;
+    }
   }
 
   async press(state: { readonly recording: boolean }): Promise<
@@ -98,7 +103,9 @@ export class PushToTalkController {
     for (const track of tracks) {
       try { track.stop(); } catch {}
     }
-    session?.close();
+    try {
+      session?.close();
+    } catch {}
   }
 
   private disableInput(): void {

@@ -18,18 +18,18 @@ import {
 } from "./openai.js";
 import { FileAgentSession, PlaytestStore } from "./persistence.js";
 import { OwnerOrchestrator } from "./orchestration.js";
+import { sanitizeAuditData } from "./audit-boundary.js";
+import { MutationQueue } from "./mutation-queue.js";
+import {
+  OpenAIUnavailableError,
+  OrchestrationUnavailableError,
+} from "./service-errors.js";
 
-export class OpenAIUnavailableError extends Error {
-  readonly code = "openai_unavailable";
-}
-
-export class OrchestrationUnavailableError extends Error {
-  readonly code = "orchestration_unavailable";
-}
+export { OpenAIUnavailableError, OrchestrationUnavailableError } from "./service-errors.js";
 
 export class AgentHostService {
   readonly events = new EventEmitter();
-  private readonly mutationTails = new Map<string, Promise<void>>();
+  private readonly mutations = new MutationQueue();
 
   constructor(
     readonly store: PlaytestStore,
@@ -245,7 +245,7 @@ export class AgentHostService {
       sequence: (existing.at(-1)?.sequence ?? 0) + 1,
       type,
       at: new Date().toISOString(),
-      data,
+      data: sanitizeAuditData(data),
     };
     await this.store.appendEvent(event);
     this.events.emit(playtestId, event);
@@ -253,20 +253,6 @@ export class AgentHostService {
   }
 
   private async serializeMutation<T>(playtestId: string, operation: () => Promise<T>): Promise<T> {
-    const preceding = this.mutationTails.get(playtestId) ?? Promise.resolve();
-    let release!: () => void;
-    const tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.mutationTails.set(playtestId, tail);
-    await preceding.catch(() => undefined);
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.mutationTails.get(playtestId) === tail) {
-        this.mutationTails.delete(playtestId);
-      }
-    }
+    return this.mutations.run(playtestId, operation);
   }
 }

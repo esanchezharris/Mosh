@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { PlaytestReport, RepairJob } from "./contracts.js";
+import { sanitizeAuditData } from "./audit-boundary.js";
 import type { PlaytestStore } from "./persistence.js";
 import { reportContext } from "./report-context.js";
 import {
@@ -11,6 +12,21 @@ import {
 function slug(value: string): string {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return normalized.slice(0, 48) || "repair";
+}
+
+function safeFailure(error: unknown): { code: string; message: string } {
+  const candidate = error instanceof Error ? error : new Error("Repair start failed");
+  const code = error && typeof error === "object" && "code" in error
+    ? error.code
+    : undefined;
+  const sanitized = sanitizeAuditData({
+    code: typeof code === "string" ? code : "repair_start_failed",
+    message: candidate.message,
+  });
+  return {
+    code: typeof sanitized.code === "string" ? sanitized.code : "repair_start_failed",
+    message: typeof sanitized.message === "string" ? sanitized.message : "Repair start failed",
+  };
 }
 
 export class RepairManager {
@@ -80,6 +96,7 @@ export class RepairManager {
       baseSha: base.sha,
     });
     let repairThreadId: string;
+    let worktreeCreated = false;
     try {
       await this.dependencies.git.createWorktree({
         repositoryPath: this.dependencies.repositoryPath,
@@ -87,22 +104,39 @@ export class RepairManager {
         branch,
         path: worktreePath,
       });
+      worktreeCreated = true;
       await this.dependencies.appServer.initialize();
       repairThreadId = await this.dependencies.appServer.startThread(
         { mode: "workspace-write", cwd: worktreePath },
         (event) => this.emit(report.playtestId, `repair.codex.${event.type}`, { ...event.data }),
       );
     } catch (error) {
+      const startFailure = safeFailure(error);
       repair = {
         ...repair,
-        failure: {
-          code: (error as Error & { code?: string }).code ?? "repair_start_failed",
-          message: (error as Error).message,
-        },
+        status: worktreeCreated ? "failed" : "queued",
+        failure: startFailure,
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(repair);
-      throw error;
+      if (worktreeCreated) {
+        let worktreeRemoved = false;
+        try {
+          await this.dependencies.git.removeWorktree({
+            repositoryPath: this.dependencies.repositoryPath,
+            path: worktreePath,
+          });
+          worktreeRemoved = true;
+        } catch {
+          worktreeRemoved = false;
+        }
+        await this.emit(report.playtestId, "repair.start.failed", {
+          repairId: repair.id,
+          code: repair.failure?.code ?? "repair_start_failed",
+          worktreeRemoved,
+        });
+      }
+      throw failure(startFailure.code, startFailure.message);
     }
     repair = {
       ...repair,
@@ -119,12 +153,42 @@ export class RepairManager {
       baseSha: base.sha,
       repairThreadId,
     });
-    await this.dependencies.appServer.startTurn({
-      threadId: repairThreadId,
-      prompt,
-      mode: "workspace-write",
-      cwd: worktreePath,
-    });
+    try {
+      await this.dependencies.appServer.startTurn({
+        threadId: repairThreadId,
+        prompt,
+        mode: "workspace-write",
+        cwd: worktreePath,
+      });
+    } catch (error) {
+      const failureCode = (error as Error & { code?: string }).code ?? "repair_start_failed";
+      repair = {
+        ...repair,
+        status: "failed",
+        failure: {
+          code: failureCode,
+          message: (error as Error).message,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveRepair(repair);
+      let worktreeRemoved = false;
+      try {
+        await this.dependencies.git.removeWorktree({
+          repositoryPath: this.dependencies.repositoryPath,
+          path: worktreePath,
+        });
+        worktreeRemoved = true;
+      } catch {
+        worktreeRemoved = false;
+      }
+      await this.emit(report.playtestId, "repair.start.failed", {
+        repairId: repair.id,
+        code: failureCode,
+        worktreeRemoved,
+      });
+      throw error;
+    }
     return repair;
   }
 
@@ -132,21 +196,30 @@ export class RepairManager {
     repair: RepairJob,
     result: NonNullable<RepairJob["result"]>,
   ): Promise<RepairJob> {
+    if (!repair.worktreePath) {
+      throw failure("repair_worktree_path", "Repair worktree is missing");
+    }
+    const source = await this.dependencies.git.inspectBase(repair.worktreePath);
+    if (source.sha !== result.sourceSha) {
+      throw failure("repair_source_mismatch", "Repair source SHA does not match its worktree HEAD");
+    }
+    const validated = await this.dependencies.artifacts.validateResult(repair.worktreePath, result);
     const completed: RepairJob = {
       ...repair,
       status: "full_gate_pending",
-      result,
+      result: validated,
       updatedAt: new Date().toISOString(),
     };
     await this.store.saveRepair(completed);
     await this.emit(repair.playtestId, "repair.full_gate_pending", {
       repairId: repair.id,
-      redEvidencePath: result.redEvidencePath,
-      greenEvidencePath: result.greenEvidencePath,
-      diagnosticsPath: result.diagnosticsPath,
-      bundlePath: result.bundlePath,
-      buildPath: result.buildPath,
-      draftPrUrl: result.draftPrUrl,
+      redEvidencePath: validated.redEvidencePath,
+      greenEvidencePath: validated.greenEvidencePath,
+      diagnosticsPath: validated.diagnosticsPath,
+      bundlePath: validated.bundlePath,
+      buildPath: validated.buildPath,
+      sourceSha: validated.sourceSha,
+      draftPrUrl: validated.draftPrUrl,
       draft: true,
       merged: false,
     });

@@ -26,6 +26,19 @@ export class RepairSwap {
 
   private async launchUnlocked(repairId: string, buildPath: string): Promise<RepairJob> {
     let current = await this.store.loadRepair(repairId);
+    if (!current.result || !current.worktreePath) {
+      throw failure("repair_swap_state", "Repair result is missing");
+    }
+    const result = current.result;
+    const worktreePath = current.worktreePath;
+    const validatedBuild = await this.dependencies.artifacts.validateBuild(
+      worktreePath,
+      buildPath,
+      result.sourceSha,
+    );
+    if (validatedBuild !== result.buildPath) {
+      throw failure("repair_build_mismatch", "Launch build does not match the validated repair result");
+    }
     const recoverable = new Set(["checkpointed", "stopping", "current_app_closed"]);
     if (current.status !== "full_gate_pending"
       || (current.swap && !recoverable.has(current.swap.state))
@@ -80,7 +93,11 @@ export class RepairSwap {
         await this.store.saveRepair(current);
         await this.emit(current.playtestId, "repair.app.closed", { repairId });
       }
-      await this.dependencies.processes.launchRepairBuild(buildPath);
+      await this.dependencies.processes.launchRepairBuild({
+        buildPath: validatedBuild,
+        worktreePath,
+        sourceSha: result.sourceSha,
+      });
       current = {
         ...current,
         swap: { state: "repair_running", buildPath },

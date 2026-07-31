@@ -66,14 +66,15 @@ build).
   durable approval inbox, immutable evidence/GitHub adapters, read-only Codex
   coordinator, and isolated draft-only repair lane are integrated. Task 5 adds
   a bundled real-loopback fake-external lifecycle and exact-SHA offline
-  benchmark diagnostics; its final evidence is under
-  `.omo/evidence/task-5-owner-handoff/`. No live OpenAI request, Supabase
+  benchmark diagnostics. The tracked, redacted verification handoff is
+  [`docs/owner-cockpit/EVIDENCE_HANDOFF.md`](owner-cockpit/EVIDENCE_HANDOFF.md);
+  exact run logs and screenshots must be attached to the PR. No live OpenAI request, Supabase
   deployment, GitHub mutation, repair process swap, or final PR is part of the
   automated handoff. See [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md). This branch
   supersedes only PR #478's agent-facing hunks; merge/disposition it serially
   after whole-branch review.
 
-- **Trunk:** `origin/main` @ `c703a855` (merge of #490, 2026-07-29 early AM)
+- **Trunk:** `origin/main` @ `f3e68992` (merge of #520, 2026-07-30)
   [measured: `git log --oneline origin/main`]. The two most recent landed
   campaigns: the **v2 deslop pass** (#479, #481–#485, merged 2026-07-28) — CSS
   partials + shell baselines groundwork, bevel-border removal, accent
@@ -92,7 +93,7 @@ build).
   consolidation (#492). Follow-on PRs (clipRenderers probe change #497 —
   owner-merge; store slices #498; RFC 005 draft) are in the queue
   [measured: `gh pr view` per PR].
-- **Open PRs: 25** [measured 2026-07-29: `gh pr list --state open | jq
+- **Open PRs: 23** [measured 2026-07-30: `gh pr list --state open --limit 200 --json number | jq
   length`]. The bulk are the reviewed First-Stranger / fix backlog awaiting
   merge (#462–#478 range) plus the program's owner-merge PRs and three
   long-running WIP drafts (#322/#358/#363).
@@ -217,6 +218,6 @@ Then add the matching real-surface proof:
   active.
 - Type-beat LoRA has a rights-cleared scaffold and fake backend plumbing; real
   on-device training and vector layering remain deferred.
-- A large reviewed-PR queue (25 open, measured 2026-07-29) is waiting on merges now that Actions
+- A large reviewed-PR queue (23 open, measured 2026-07-30) is waiting on merges now that Actions
   billing is back; until the required check is restored, the local gate is the
   only merge authority — do not treat a green GitHub page as a gate result.

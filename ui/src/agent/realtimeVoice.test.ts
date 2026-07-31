@@ -22,6 +22,35 @@ function setup() {
   return { controller, session, track, secondTrack, audio };
 }
 
+function failingSetup(stage: "secret" | "session" | "connect" | "mute") {
+  const track = { enabled: true, stop: vi.fn() };
+  const stream = { getAudioTracks: () => [track] } as unknown as MediaStream;
+  const session = {
+    connect: vi.fn(async () => {
+      if (stage === "connect") throw new Error("connect failed");
+    }),
+    mute: vi.fn(async () => {
+      if (stage === "mute") throw new Error("mute failed");
+    }),
+    close: vi.fn(),
+    interrupt: vi.fn(),
+    onError: vi.fn(),
+  };
+  const controller = new PushToTalkController({
+    getClientSecret: vi.fn(async () => {
+      if (stage === "secret") throw new Error("secret failed");
+      return "ek_test";
+    }),
+    getMediaStream: vi.fn(async () => stream),
+    createSession: vi.fn(() => {
+      if (stage === "session") throw new Error("session failed");
+      return session;
+    }),
+    audioElement: { volume: 1 } as HTMLAudioElement,
+  });
+  return { controller, session, track };
+}
+
 describe("Realtime push-to-talk privacy lifecycle", () => {
   it("connects with history audio disabled and leaves both track and session muted", async () => {
     const { controller, session, track, secondTrack } = setup();
@@ -93,6 +122,19 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
       expect(session.close).toHaveBeenCalledOnce();
     });
   });
+
+  it.each(["secret", "session", "connect", "mute"] as const)(
+    "stops acquired tracks and closes any created session when %s setup fails",
+    async (stage) => {
+      const { controller, session, track } = failingSetup(stage);
+
+      await expect(controller.connect()).rejects.toThrow(`${stage} failed`);
+
+      expect(track.enabled).toBe(false);
+      expect(track.stop).toHaveBeenCalledOnce();
+      expect(session.close).toHaveBeenCalledTimes(stage === "secret" || stage === "session" ? 0 : 1);
+    },
+  );
 
   it("refuses voice during recording without stopping the take or opening the mic", async () => {
     const { controller, session, track } = setup();

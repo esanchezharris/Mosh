@@ -37,7 +37,7 @@ describe("repair worktree and app lifecycle", () => {
     expect((await store.loadRepair(repair.id)).result?.merged).toBe(false);
   });
 
-  it("persists a queued reservation before worktree creation and blocks duplicate recovery", async () => {
+  it("preserves the queued crash-window reservation when worktree creation itself fails", async () => {
     const { fakes, service, store, report } = await orchestrationFixture();
     await service.approveReport(report.id);
     fakes.failWorktree = true;
@@ -52,6 +52,31 @@ describe("repair worktree and app lifecycle", () => {
     await expect(service.createRepair(report.id)).rejects.toMatchObject({ code: "repair_active" });
     expect(fakes.gitCalls).toHaveLength(1);
   });
+
+  it.each(["initialize", "thread", "turn"] as const)(
+    "marks %s startup failure terminal, emits a safe failure, removes its worktree, and permits retry",
+    async (stage) => {
+      const { fakes, service, store, report } = await orchestrationFixture();
+      await service.approveReport(report.id);
+      fakes.failAppAction = stage;
+
+      await expect(service.createRepair(report.id)).rejects.toMatchObject({ code: "injected" });
+
+      const failed = (await store.listRepairs())[0];
+      expect(failed).toMatchObject({
+        status: "failed",
+        failure: { code: "injected", message: `injected ${stage} failure` },
+      });
+      expect(fakes.gitCalls.at(-1)).toContain('"remove":');
+      expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
+        type: "repair.start.failed",
+        data: { repairId: failed?.id, code: "injected", worktreeRemoved: true },
+      });
+
+      fakes.failAppAction = undefined;
+      await expect(service.createRepair(report.id)).resolves.toMatchObject({ status: "running" });
+    },
+  );
 
   it("recovers active-job exclusion and rolls back in safe process order", async () => {
     const { fakes, service, store, report } = await orchestrationFixture();
@@ -111,5 +136,30 @@ describe("repair worktree and app lifecycle", () => {
     });
     await second.service.rollbackRepair(secondRepair.id, "injected failure");
     expect((await second.store.loadRepair(secondRepair.id)).swap?.state).toBe("rolled_back");
+  });
+
+  it("rejects a launch path that differs from the validated result before checkpoint or close", async () => {
+    const { fakes, service, report } = await orchestrationFixture();
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+    await service.completeRepair(repair.id, repairResult);
+
+    await expect(service.launchRepairBuild(repair.id, "/outside/Evil.app"))
+      .rejects.toMatchObject({ code: "repair_build_mismatch" });
+
+    expect(fakes.processCalls).toEqual([]);
+  });
+
+  it("rejects a claimed source SHA that differs from the repair worktree HEAD", async () => {
+    const { fakes, service, report } = await orchestrationFixture();
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+
+    await expect(service.completeRepair(repair.id, {
+      ...repairResult,
+      sourceSha: "2".repeat(40),
+    })).rejects.toMatchObject({ code: "repair_source_mismatch" });
+
+    expect(fakes.processCalls).toEqual([]);
   });
 });

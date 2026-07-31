@@ -17,6 +17,7 @@ const repairCompletionInput = z.object({
   diagnosticsPath: z.string().min(1),
   bundlePath: z.string().min(1),
   buildPath: z.string().min(1),
+  sourceSha: z.string().regex(/^[a-f0-9]{40}$/),
   draftPrUrl: z.url(),
   draft: z.literal(true),
   merged: z.literal(false),

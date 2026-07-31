@@ -10,6 +10,7 @@ import {
   type GitAdapter,
   type GitHubAdapter,
   type ProcessAdapter,
+  type RepairArtifactPolicy,
 } from "../src/orchestration.js";
 
 const PNG = Buffer.from([
@@ -27,6 +28,7 @@ export class OrchestrationFakes {
   githubTransportFailure = false;
   evidenceSha = "a".repeat(64);
   failWorktree = false;
+  failAppAction: "initialize" | "thread" | "turn" | undefined;
   failProcessAction: string | undefined;
 
   evidence: EvidenceAdapter = {
@@ -62,13 +64,22 @@ export class OrchestrationFakes {
   appServer: AppServerAdapter = {
     initialize: async () => {
       this.appCalls.push({ kind: "initialize", value: null });
+      if (this.failAppAction === "initialize") {
+        throw Object.assign(new Error("injected initialize failure"), { code: "injected" });
+      }
     },
     startThread: async (input) => {
       this.appCalls.push({ kind: "thread", value: input });
+      if (this.failAppAction === "thread") {
+        throw Object.assign(new Error("injected thread failure"), { code: "injected" });
+      }
       return `${input.mode}-thread`;
     },
     startTurn: async (input) => {
       this.appCalls.push({ kind: "turn", value: input });
+      if (this.failAppAction === "turn") {
+        throw Object.assign(new Error("injected turn failure"), { code: "injected" });
+      }
       return "turn-1";
     },
   };
@@ -80,6 +91,9 @@ export class OrchestrationFakes {
       if (this.failWorktree) {
         throw Object.assign(new Error("injected worktree failure"), { code: "injected" });
       }
+    },
+    removeWorktree: async (input) => {
+      this.gitCalls.push(JSON.stringify({ remove: input.path }));
     },
   };
 
@@ -98,6 +112,11 @@ export class OrchestrationFakes {
     closeRepairBuild: async () => { await this.processAction("close_repair"); },
     restoreCheckpoint: async () => { await this.processAction("restore_checkpoint"); },
     launchPriorApp: async () => { await this.processAction("launch_prior"); },
+  };
+
+  artifacts: RepairArtifactPolicy = {
+    validateResult: async (_worktreePath, result) => result,
+    validateBuild: async (_worktreePath, buildPath) => buildPath,
   };
 
   private async processAction(name: string): Promise<void> {
@@ -120,6 +139,7 @@ export async function orchestrationFixture() {
     appServer: fakes.appServer,
     git: fakes.git,
     processes: fakes.processes,
+    artifacts: fakes.artifacts,
     repositoryPath: "/repo",
     worktreeRoot: "/worktrees",
   });
@@ -156,6 +176,7 @@ export const repairResult = {
   diagnosticsPath: "/evidence/diagnostics.log",
   bundlePath: "/evidence/repair-bundle",
   buildPath: "/build/Mosh.app",
+  sourceSha: "1".repeat(40),
   draftPrUrl: "https://github.invalid/pull/9",
   draft: true as const,
   merged: false as const,
@@ -175,6 +196,7 @@ export function restartedService(
       appServer: fakes.appServer,
       git: fakes.git,
       processes: fakes.processes,
+      artifacts: fakes.artifacts,
       repositoryPath: "/repo",
       worktreeRoot: "/worktrees",
     }),

@@ -11,6 +11,7 @@ import {
   RepairControlAdapter,
 } from "./adapters.js";
 import { OwnerOrchestrator } from "./orchestration.js";
+import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
 const apiKey = process.env.OPENAI_API_KEY;
 const runner = new NodeCommandRunner();
@@ -23,6 +24,7 @@ const worktreeRoot = process.env.MOSH_REPAIR_WORKTREE_ROOT;
 const repairHelper = process.env.MOSH_REPAIR_CONTROL_HELPER;
 const dataDirectory = process.env.MOSH_AGENT_HOST_DATA_DIR ?? defaultDataDirectory();
 const store = new PlaytestStore(dataDirectory);
+const repairArtifacts = new NativeRepairArtifactPolicy();
 const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
   && repositoryPath && worktreeRoot && repairHelper
   ? new OwnerOrchestrator(store, {
@@ -33,7 +35,8 @@ const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
       github: new GhGitHubAdapter(runner, githubRepository),
       appServer: codex,
       git: new GitCliAdapter(runner),
-      processes: new RepairControlAdapter(runner, repairHelper),
+      processes: new RepairControlAdapter(runner, repairHelper, repairArtifacts),
+      artifacts: repairArtifacts,
       repositoryPath,
       worktreeRoot,
     })

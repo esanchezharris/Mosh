@@ -354,7 +354,11 @@ juce::var AgentHostProxy::events (int afterSequence)
 juce::var AgentHostProxy::supervisorTurn (const juce::var& request)
 {
     const juce::ScopedLock guard (lock);
-    if (! request.isObject() || ! ensurePlaytest()) return error();
+    if (! request.isObject()) return error ("invalid supervisor request", "invalid_response", false);
+    if (playtestId.isEmpty())
+        return error ("Start an owner playtest before asking the supervisor.",
+                      "playtest_not_started", false);
+    if (origin.isEmpty() || capability.isEmpty() || ! process.isRunning()) return error();
 
     // Round-trip through JSON before appending the private playtest id so this
     // never mutates the WebView's request object.

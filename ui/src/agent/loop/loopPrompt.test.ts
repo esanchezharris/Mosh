@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { buildLoopSystemPrompt, renderTaskContext, LOOP_RULES } from "./loopPrompt";
 import { renderSession } from "../sessionRender";
 import { systemPrompt } from "../brainCore";
+import { retrieveCapabilities, supervisorCapabilitySchemas } from "../capability";
+import { isDirectSafeCall } from "../capabilityRuntime";
 import type { Snapshot } from "../../types";
 
 const SNAP: Snapshot = {
@@ -63,12 +65,16 @@ describe("buildLoopSystemPrompt", () => {
     expect(buildLoopSystemPrompt(SNAP)).not.toContain("Producer knowledge");
   });
 
-  it("uses bounded capability schemas whenever the runtime supplies a task", () => {
-    const prompt = buildLoopSystemPrompt(SNAP, "turn on the metronome");
+  it("retrieves a bounded typed schema and keeps execution behind the direct-safe allowlist", () => {
+    const capabilities = retrieveCapabilities("turn on the metronome");
+    const ids = capabilities.map((capability) => capability.id);
+    const schemas = supervisorCapabilitySchemas(capabilities);
 
-    expect(prompt).toContain("set_metronome(enabled:boolean)");
-    expect(prompt).not.toContain("remove_track(trackId)");
-    expect(prompt.length).toBeLessThan(buildLoopSystemPrompt(SNAP).length / 2);
+    expect(ids).toContain("set_metronome");
+    expect(ids).not.toContain("remove_track");
+    expect(schemas.map((schema) => schema.id)).toEqual(ids);
+    expect(isDirectSafeCall({ command: "set_metronome", args: { enabled: true } })).toBe(true);
+    expect(isDirectSafeCall({ command: "remove_track", args: { trackId: "17" } })).toBe(false);
   });
 });
 

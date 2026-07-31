@@ -73,6 +73,27 @@ const threadStarted = z.object({
   ]),
 }).passthrough();
 const turnStarted = z.object({ turn: z.object({ id: z.string().min(1) }) });
+const notificationScalar = z.union([
+  z.string().min(1).max(128),
+  z.number().int().safe(),
+  z.boolean(),
+]);
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function nestedScalar(
+  params: Record<string, unknown>,
+  direct: string,
+  parent: string,
+): string | number | boolean | undefined {
+  const candidate = params[direct] ?? record(params[parent])?.id;
+  const parsed = notificationScalar.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
 
 function policyFailure(): Error & { code: string } {
   return codedError("codex_policy_mismatch", "Codex app-server returned an unsafe effective policy");
@@ -184,12 +205,22 @@ export class CodexAppServerAdapter implements AppServerAdapter {
   }
 
   private handleNotification(method: string, params: unknown): void {
-    if (typeof params !== "object" || params === null || Array.isArray(params)) return;
-    const data: Record<string, unknown> = { ...params };
-    const threadId = data.threadId;
+    const input = record(params);
+    if (!input || method.length === 0 || method.length > 128) return;
+    const threadId = nestedScalar(input, "threadId", "thread");
     if (typeof threadId !== "string") return;
+    const type = method.includes("turn") ? "turn" : method.includes("thread") ? "thread" : "progress";
+    const data: Record<string, unknown> = { method, type, threadId };
+    for (const [key, value] of [
+      ["turnId", nestedScalar(input, "turnId", "turn")],
+      ["itemId", nestedScalar(input, "itemId", "item")],
+      ["status", notificationScalar.safeParse(input.status).data],
+      ["count", notificationScalar.safeParse(input.count).data],
+    ] as const) {
+      if (value !== undefined) data[key] = value;
+    }
     void this.eventListeners.get(threadId)?.({
-      type: method.includes("turn") ? "turn" : method.includes("thread") ? "thread" : "progress",
+      type,
       data,
     });
   }

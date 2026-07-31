@@ -14,6 +14,7 @@
 #include "../telemetry/Telemetry.h"
 #include "../telemetry/TelemetryConfig.h"
 #include <juce_cryptography/juce_cryptography.h>
+#include <sys/stat.h>
 
 namespace mosh
 {
@@ -147,6 +148,13 @@ bool WebBridge::isSafeUiResourcePath (const juce::File& uiDir, const juce::Strin
     return ui_resource_guard::isSafePath (uiDir, url);
 }
 
+bool WebBridge::enforceOwnerOnlyEvidencePermissions (const juce::File& target,
+                                                     bool directory)
+{
+    return ::chmod (target.getFullPathName().toRawUTF8(),
+                    directory ? (mode_t) 0700 : (mode_t) 0600) == 0;
+}
+
 juce::var WebBridge::reportRequestWithEvidence (const juce::var& request)
 {
     if (! request.isObject() || webView == nullptr) return {};
@@ -160,13 +168,20 @@ juce::var WebBridge::reportRequestWithEvidence (const juce::var& request)
 
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
         .getChildFile ("Mosh/playtests/screenshots");
-    if (! directory.createDirectory()) return {};
+    if (! directory.createDirectory()
+        || ! enforceOwnerOnlyEvidencePermissions (directory, true))
+        return {};
     const auto file = directory.getChildFile (juce::Uuid().toString() + ".png");
     {
         juce::FileOutputStream output (file);
         if (! output.openedOk() || ! juce::PNGImageFormat().writeImageToStream (image, output))
             return {};
         output.flush();
+    }
+    if (! enforceOwnerOnlyEvidencePermissions (file, false))
+    {
+        file.deleteFile();
+        return {};
     }
     if (file.getSize() <= 0 || file.getSize() > 8 * 1024 * 1024)
     {

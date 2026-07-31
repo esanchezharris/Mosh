@@ -1,13 +1,15 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PlaytestStore } from "../src/persistence.js";
 import { AgentHostService } from "../src/service.js";
+import { startAgentHost } from "../src/server.js";
 import {
   codexChildEnvironment,
   spawnCodexAppServer,
+  StdioJsonRpcTransport,
   type CodexSpawn,
   type RequestId,
   type StdioChild,
@@ -24,7 +26,11 @@ class FakeChild extends EventEmitter implements StdioChild {
   readonly writes: Array<Record<string, unknown>> = [];
   private readonly responseWaiters = new Map<RequestId, () => void>();
   readonly stdin = {
-    write: (line: string) => {
+    write: (line: string, callback?: (error?: Error | null) => void) => {
+      if (this.failWrites) {
+        callback?.(new Error("stdin closed"));
+        return false;
+      }
       const envelope = JSON.parse(line) as Record<string, unknown>;
       this.writes.push(envelope);
       const id = envelope.id;
@@ -32,9 +38,11 @@ class FakeChild extends EventEmitter implements StdioChild {
         this.responseWaiters.get(id)?.();
         this.responseWaiters.delete(id);
       }
+      callback?.();
       return true;
     },
   };
+  failWrites = false;
 
   kill(): boolean {
     this.emit("exit", 0);
@@ -51,6 +59,10 @@ class FakeChild extends EventEmitter implements StdioChild {
       id,
       error: { code: -32000, message },
     })}\n`);
+  }
+
+  notification(method: string, params: unknown): void {
+    this.stdout.emit("data", `${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
   }
 
   serverRequest(id: RequestId, method: string, params: unknown): Promise<void> {
@@ -331,6 +343,75 @@ describe("Codex child process boundary", () => {
     process.close();
   });
 
+  it("persists and streams only the bounded notification DTO from hostile Codex output", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "mosh-hostile-notification-"));
+    const store = new PlaytestStore(root);
+    const service = new AgentHostService(store);
+    await service.initialize();
+    const playtest = await service.createPlaytest({});
+    const child = new FakeChild();
+    const process = spawnCodexAppServer({ spawn: () => child, environment: {} });
+    const initializing = process.adapter.initialize();
+    child.reply(1, {});
+    await initializing;
+    const starting = process.adapter.startThread(
+      { mode: "read-only", cwd: "/repo" },
+      async (event) => {
+        await service.emit(playtest.id, `codex.${event.type}`, { ...event.data });
+      },
+    );
+    child.reply(2, coordinatorThread);
+    await starting;
+
+    child.notification("turn/progress", {
+      threadId: "coordinator-thread",
+      turnId: "turn-7",
+      itemId: "item-9",
+      status: "running",
+      count: 4,
+      output: "project /Users/owner/song.mosh Bearer hostile-token",
+      diff: "OPENAI_API_KEY=sk-hostile-secret",
+      content: "data:image/png;base64,AAAA",
+      path: "/Users/owner/audio.wav",
+      prompt: "private owner prompt",
+      image: "A".repeat(100_000),
+    });
+    await vi.waitFor(async () => {
+      expect(await store.loadEvents(playtest.id)).toHaveLength(2);
+    });
+    const notification = (await store.loadEvents(playtest.id)).at(-1);
+    expect(notification).toMatchObject({
+      type: "codex.turn",
+      data: {
+        method: "turn/progress",
+        type: "turn",
+        threadId: "coordinator-thread",
+        turnId: "turn-7",
+        itemId: "item-9",
+        status: "running",
+        count: 4,
+      },
+    });
+    expect(Object.keys(notification?.data ?? {}).sort()).toEqual(
+      ["count", "itemId", "method", "status", "threadId", "turnId", "type"].sort(),
+    );
+
+    const eventsPath = path.join(store.sessionDirectory(playtest.id), "events.jsonl");
+    const durable = await readFile(eventsPath, "utf8");
+    expect(durable).not.toMatch(/song\.mosh|audio\.wav|base64|private owner prompt|sk-hostile|Bearer|A{100}/u);
+
+    const host = await startAgentHost({ service, capability: "test-capability", port: 0 });
+    const response = await fetch(
+      `${host.origin}/v1/playtests/${playtest.id}/events?afterSequence=1&windowMs=1`,
+      { headers: { Authorization: "Bearer test-capability" } },
+    );
+    const stream = await response.text();
+    expect(stream).toContain('"method":"turn/progress"');
+    expect(stream).not.toMatch(/song\.mosh|audio\.wav|base64|private owner prompt|sk-hostile|Bearer|A{100}/u);
+    await host.close();
+    process.close();
+  });
+
   it("returns JSON-RPC errors for malformed server requests and rejects pending calls on child exit", async () => {
     const child = new FakeChild();
     const process = spawnCodexAppServer({ spawn: () => child, environment: {} });
@@ -360,5 +441,33 @@ describe("Codex child process boundary", () => {
       message: "bad initialize",
     });
     process.close();
+  });
+
+  it("rejects and removes a nonresponding request at its deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const transport = new StdioJsonRpcTransport(child, 25);
+    const pending = transport.request("never/replies", {});
+    const rejection = expect(pending).rejects.toMatchObject({ code: "codex_rpc_timeout" });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await rejection;
+    vi.useRealTimers();
+  });
+
+  it("rejects a failed child-stdin write and leaves later requests usable", async () => {
+    const child = new FakeChild();
+    const transport = new StdioJsonRpcTransport(child, 100);
+    child.failWrites = true;
+    await expect(transport.request("write/fails", {})).rejects.toMatchObject({
+      code: "codex_rpc_write_failed",
+      message: "stdin closed",
+    });
+
+    child.failWrites = false;
+    const recovered = transport.request("write/works", {});
+    child.reply(2, { ok: true });
+    await expect(recovered).resolves.toEqual({ ok: true });
   });
 });

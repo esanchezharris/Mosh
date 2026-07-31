@@ -12,7 +12,9 @@ import type {
   GitHubAdapter,
   ProcessAdapter,
   RepairCheckpoint,
+  RepairLaunchContext,
 } from "./orchestration.js";
+import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
 export { NodeCommandRunner } from "./command-runner.js";
 export type { CommandResult, CommandRunner } from "./command-runner.js";
@@ -207,6 +209,13 @@ export class GitCliAdapter implements GitAdapter {
     ]);
     if (result.exitCode !== 0) throw codedError("git_worktree_failed", "Could not create repair worktree");
   }
+
+  async removeWorktree(input: { repositoryPath: string; path: string }): Promise<void> {
+    const result = await this.runner.run("git", [
+      "-C", input.repositoryPath, "worktree", "remove", "--force", input.path,
+    ]);
+    if (result.exitCode !== 0) throw codedError("git_worktree_cleanup_failed", "Could not remove repair worktree");
+  }
 }
 
 const checkpointResult = z.object({
@@ -218,6 +227,7 @@ export class RepairControlAdapter implements ProcessAdapter {
   constructor(
     private readonly runner: CommandRunner,
     private readonly helperPath: string,
+    private readonly artifactPolicy = new NativeRepairArtifactPolicy(),
   ) {}
 
   async checkpoint(): Promise<RepairCheckpoint> {
@@ -228,7 +238,15 @@ export class RepairControlAdapter implements ProcessAdapter {
   async stopTransport(): Promise<void> { await this.action("stop-transport"); }
   async releaseAudio(): Promise<void> { await this.action("release-audio"); }
   async closeMosh(): Promise<void> { await this.action("close-mosh"); }
-  async launchRepairBuild(buildPath: string): Promise<void> {
+  async launchRepairBuild(context: RepairLaunchContext): Promise<void> {
+    const buildPath = await this.artifactPolicy.validateBuild(
+      context.worktreePath,
+      context.buildPath,
+      context.sourceSha,
+    );
+    if (buildPath !== context.buildPath) {
+      throw codedError("repair_build_mismatch", "Repair helper launch path changed after validation");
+    }
     await this.action("launch-repair", buildPath);
   }
   async closeRepairBuild(): Promise<void> { await this.action("close-repair"); }
