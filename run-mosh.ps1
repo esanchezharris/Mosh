@@ -146,6 +146,15 @@ function Copy-ServiceBundle {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+function Assert-SingleLineBrainProxyValue {
+    param([string]$Name, [string]$Value)
+    if ($null -eq $Value) { return }
+    $forbidden = [char[]]@([char]0, [char]10, [char]13)
+    if ($Value.IndexOfAny($forbidden) -ge 0) {
+        throw "invalid brain proxy configuration: $Name must be a single line"
+    }
+}
+
 function Write-BundledBrainKey {
     param([string]$BrainFile)   # <dist>\brain.env
     $providerKeys = @("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "LOCAL_API_KEY")
@@ -157,9 +166,15 @@ function Write-BundledBrainKey {
         throw "refusing to bundle provider API keys; configure MOSH_BRAIN_PROXY_URL and MOSH_BRAIN_PROXY_APIKEY instead"
     }
 
-    $keys = @("MOSH_BRAIN_PROXY_URL", "MOSH_BRAIN_PROXY_APIKEY")
     $proxyUrl = [Environment]::GetEnvironmentVariable("MOSH_BRAIN_PROXY_URL")
     $proxyApiKey = [Environment]::GetEnvironmentVariable("MOSH_BRAIN_PROXY_APIKEY")
+    try {
+        Assert-SingleLineBrainProxyValue -Name "MOSH_BRAIN_PROXY_URL" -Value $proxyUrl
+        Assert-SingleLineBrainProxyValue -Name "MOSH_BRAIN_PROXY_APIKEY" -Value $proxyApiKey
+    } catch {
+        if (Test-Path $BrainFile) { Remove-Item $BrainFile }
+        throw
+    }
     if ($proxyUrl -and $proxyApiKey) {
         $lines = @("MOSH_BRAIN_PROXY_URL=$proxyUrl", "MOSH_BRAIN_PROXY_APIKEY=$proxyApiKey")
         # CRITICAL: write WITHOUT a UTF-8 BOM. Set-Content/Out-File default to a BOM on
@@ -167,6 +182,13 @@ function Write-BundledBrainKey {
         # key lookup would silently miss it.
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($BrainFile, ($lines -join "`n") + "`n", $utf8NoBom)
+        $written = [System.IO.File]::ReadAllLines($BrainFile)
+        if ($written.Count -ne 2 -or
+            $written[0] -notmatch '^MOSH_BRAIN_PROXY_URL=.+$' -or
+            $written[1] -notmatch '^MOSH_BRAIN_PROXY_APIKEY=.+$') {
+            Remove-Item $BrainFile -ErrorAction SilentlyContinue
+            throw "invalid brain proxy configuration: refusing non-proxy brain.env"
+        }
         # chmod-600 analogue: drop inheritance, grant the current user only.
         try { icacls $BrainFile /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null } catch { }
         Write-Host "bundled proxy configuration -> brain.env"

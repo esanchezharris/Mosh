@@ -225,26 +225,71 @@ refuse_provider_brain_keys() {
   done
 }
 
+validate_brain_proxy_value() {
+  local name="$1" value="$2"
+  # POSIX environment strings cannot contain NUL. Reject the remaining line
+  # delimiters explicitly so one proxy value can never create another dotenv key.
+  case "$value" in
+    *$'\r'*|*$'\n'*)
+      echo "invalid brain proxy configuration: $name must be a single line" >&2
+      return 1
+      ;;
+  esac
+}
+
+brain_env_is_proxy_only() {
+  local file="$1" line count=0 seen_url=0 seen_apikey=0
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *$'\r'*) return 1 ;;
+      MOSH_BRAIN_PROXY_URL=?*)
+        [ "$seen_url" -eq 0 ] || return 1
+        seen_url=1
+        ;;
+      MOSH_BRAIN_PROXY_APIKEY=?*)
+        [ "$seen_apikey" -eq 0 ] || return 1
+        seen_apikey=1
+        ;;
+      *) return 1 ;;
+    esac
+    count=$((count + 1))
+  done < "$file"
+  [ "$count" -eq 2 ] && [ "$seen_url" -eq 1 ] && [ "$seen_apikey" -eq 1 ]
+}
+
 # Bundle only the proxy endpoint and its publishable credential so Finder/Dock launches
 # can reach Moshi without putting an extractable provider secret in a distributable app.
 bundle_brain_key() {                            # $1 = installed app
-  local DEST="$1" BF="$1/Contents/Resources/brain.env" v
+  local BF="$1/Contents/Resources/brain.env"
+  local proxy_url="${MOSH_BRAIN_PROXY_URL:-}"
+  local proxy_apikey="${MOSH_BRAIN_PROXY_APIKEY:-}"
   if ! refuse_provider_brain_keys; then
     rm -f "$BF"
     return 1
   fi
-  : > "$BF"
-  for v in MOSH_BRAIN_PROXY_URL MOSH_BRAIN_PROXY_APIKEY; do
-    [ -n "${!v:-}" ] && printf '%s=%s\n' "$v" "${!v}" >> "$BF"
-  done
-  chmod 600 "$BF" 2>/dev/null || true
-  if grep -Eq '^MOSH_BRAIN_PROXY_URL=.+$' "$BF" \
-      && grep -Eq '^MOSH_BRAIN_PROXY_APIKEY=.+$' "$BF"; then
-    echo "bundled proxy configuration → Contents/Resources/brain.env"
-  else
+  validate_brain_proxy_value MOSH_BRAIN_PROXY_URL "$proxy_url" || {
+    rm -f "$BF"
+    return 1
+  }
+  validate_brain_proxy_value MOSH_BRAIN_PROXY_APIKEY "$proxy_apikey" || {
+    rm -f "$BF"
+    return 1
+  }
+  if [ -z "$proxy_url" ] || [ -z "$proxy_apikey" ]; then
     rm -f "$BF"
     echo "no complete brain proxy configuration — skipped brain.env"
+    return
   fi
+  (umask 077; printf 'MOSH_BRAIN_PROXY_URL=%s\nMOSH_BRAIN_PROXY_APIKEY=%s\n' \
+    "$proxy_url" "$proxy_apikey" > "$BF")
+  if ! brain_env_is_proxy_only "$BF"; then
+    rm -f "$BF"
+    echo "invalid brain proxy configuration: refusing non-proxy brain.env" >&2
+    return 1
+  fi
+  chmod 600 "$BF" 2>/dev/null || true
+  echo "bundled proxy configuration → Contents/Resources/brain.env"
 }
 
 install_app() {                                 # $1 = source app, $2 = dest

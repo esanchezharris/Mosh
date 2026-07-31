@@ -85,7 +85,7 @@ extract_fn() {
     p && /^}/ {p=0; exit}
   ' "$file"
 }
-for fn in resolve_app build_app load_dotenv bundle_service refuse_provider_brain_keys bundle_brain_key install_app sign_app; do
+for fn in resolve_app build_app load_dotenv bundle_service refuse_provider_brain_keys validate_brain_proxy_value brain_env_is_proxy_only bundle_brain_key install_app sign_app; do
   fn_src="$(extract_fn "$fn" "$ROOT/run-mosh.sh")"
   if [[ -z "$fn_src" ]]; then
     echo "✗ could not extract function '$fn' from run-mosh.sh — has it been renamed/refactored?" >&2
