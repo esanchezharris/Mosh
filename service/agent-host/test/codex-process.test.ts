@@ -1,5 +1,10 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { PlaytestStore } from "../src/persistence.js";
+import { AgentHostService } from "../src/service.js";
 import {
   codexChildEnvironment,
   spawnCodexAppServer,
@@ -40,7 +45,7 @@ class FakeChild extends EventEmitter implements StdioChild {
     })}\n`);
   }
 
-  serverRequest(id: number, method: string, params: unknown): void {
+  serverRequest(id: number | string, method: string, params: unknown): void {
     this.stdout.emit("data", `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
   }
 }
@@ -71,6 +76,14 @@ const repairThread = {
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Timed out waiting for fake process output");
 }
 
 describe("Codex child process boundary", () => {
@@ -240,6 +253,50 @@ describe("Codex child process boundary", () => {
         },
       },
     ]);
+    process.close();
+  });
+
+  it("persists a string-ID approval event and echoes the exact string ID in its response", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "mosh-string-request-id-"));
+    const store = new PlaytestStore(root);
+    const service = new AgentHostService(store);
+    await service.initialize();
+    const playtest = await service.createPlaytest({});
+    const child = new FakeChild();
+    const process = spawnCodexAppServer({ spawn: () => child, environment: {} });
+    const initializing = process.adapter.initialize();
+    child.reply(1, {});
+    await initializing;
+    const starting = process.adapter.startThread(
+      { mode: "read-only", cwd: "/repo" },
+      async (event) => {
+        await service.emit(playtest.id, `codex.${event.type}`, { ...event.data });
+      },
+    );
+    child.reply(2, coordinatorThread);
+    await starting;
+
+    child.serverRequest("approval-request-alpha", "item/fileChange/requestApproval", {
+      threadId: "coordinator-thread",
+      turnId: "turn-string",
+      itemId: "item-string",
+      startedAtMs: 123,
+    });
+    await waitFor(() => child.writes.some((write) => write.id === "approval-request-alpha"));
+
+    expect((await store.loadEvents(playtest.id)).at(-1)).toMatchObject({
+      type: "codex.approval",
+      data: {
+        requestId: "approval-request-alpha",
+        method: "item/fileChange/requestApproval",
+        decision: "decline",
+      },
+    });
+    expect(child.writes.at(-1)).toEqual({
+      jsonrpc: "2.0",
+      id: "approval-request-alpha",
+      result: { decision: "decline" },
+    });
     process.close();
   });
 

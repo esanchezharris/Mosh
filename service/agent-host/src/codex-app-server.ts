@@ -9,7 +9,7 @@ import {
 } from "./json-rpc-transport.js";
 
 export { StdioJsonRpcTransport } from "./json-rpc-transport.js";
-export type { JsonRpcTransport, StdioChild } from "./json-rpc-transport.js";
+export type { JsonRpcTransport, RequestId, StdioChild } from "./json-rpc-transport.js";
 
 export type CodexSpawn = (
   command: string,

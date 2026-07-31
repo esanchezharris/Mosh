@@ -176,6 +176,7 @@ export {
 export type {
   CodexSpawn,
   JsonRpcTransport,
+  RequestId,
   StdioChild,
 } from "./codex-app-server.js";
 

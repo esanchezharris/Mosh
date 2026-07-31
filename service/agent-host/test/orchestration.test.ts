@@ -82,9 +82,9 @@ class Fakes {
     releaseAudio: async () => { await this.processAction("release_audio"); },
     closeMosh: async () => { await this.processAction("close_mosh"); },
     launchRepairBuild: async () => { await this.processAction("launch_repair"); },
-    closeRepairBuild: async () => { this.processCalls.push("close_repair"); },
-    restoreCheckpoint: async () => { this.processCalls.push("restore_checkpoint"); },
-    launchPriorApp: async () => { this.processCalls.push("launch_prior"); },
+    closeRepairBuild: async () => { await this.processAction("close_repair"); },
+    restoreCheckpoint: async () => { await this.processAction("restore_checkpoint"); },
+    launchPriorApp: async () => { await this.processAction("launch_prior"); },
   };
 
   private async processAction(name: string): Promise<void> {
@@ -147,6 +147,23 @@ const repairResult = {
   draft: true as const,
   merged: false as const,
 };
+
+function restartedService(store: PlaytestStore, fakes: Fakes): AgentHostService {
+  return new AgentHostService(
+    store,
+    undefined,
+    undefined,
+    new OwnerOrchestrator(store, {
+      evidence: fakes.evidence,
+      github: fakes.github,
+      appServer: fakes.appServer,
+      git: fakes.git,
+      processes: fakes.processes,
+      repositoryPath: "/repo",
+      worktreeRoot: "/worktrees",
+    }),
+  );
+}
 
 describe("owner orchestration approval and coordinator", () => {
   it("performs no external write before approval, then uploads immutable PNG evidence and syncs one issue", async () => {
@@ -326,18 +343,20 @@ describe("repair worktree and app lifecycle", () => {
     await restarted.rollbackRepair(repair.id, "retest failed");
     expect(fakes.processCalls).toEqual([
       "checkpoint", "stop_transport", "release_audio", "close_mosh", "launch_repair",
-      "close_repair", "restore_checkpoint", "launch_prior",
+      "close_repair", "close_mosh", "restore_checkpoint", "launch_prior",
     ]);
     const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
-    expect(types.slice(-8)).toEqual([
+    expect(types.slice(-10)).toEqual([
       "repair.checkpoint.created",
       "repair.transport.stopped",
       "repair.audio.released",
       "repair.app.closed",
       "repair.build.launched",
       "repair.build.closed",
+      "repair.app.closed",
       "repair.checkpoint.restored",
       "repair.prior_app.launched",
+      "repair.swap.rolled_back",
     ]);
   });
 
@@ -370,6 +389,146 @@ describe("repair worktree and app lifecycle", () => {
     });
     await second.service.rollbackRepair(secondRepair.id, "injected failure");
     expect((await second.store.loadRepair(secondRepair.id)).swap?.state).toBe("rolled_back");
+  });
+
+  it.each([
+    {
+      state: "checkpointed" as const,
+      actions: ["stop_transport", "release_audio", "close_mosh", "launch_repair"],
+      events: [
+        "repair.swap.recovered",
+        "repair.transport.stopped",
+        "repair.audio.released",
+        "repair.app.closed",
+        "repair.build.launched",
+      ],
+    },
+    {
+      state: "stopping" as const,
+      actions: ["stop_transport", "release_audio", "close_mosh", "launch_repair"],
+      events: [
+        "repair.swap.recovered",
+        "repair.transport.stopped",
+        "repair.audio.released",
+        "repair.app.closed",
+        "repair.build.launched",
+      ],
+    },
+    {
+      state: "current_app_closed" as const,
+      actions: ["close_repair", "launch_repair"],
+      events: [
+        "repair.swap.recovered",
+        "repair.build.closed",
+        "repair.build.launched",
+      ],
+    },
+  ])("continues persisted $state safely after a new orchestrator starts", async ({
+    state,
+    actions,
+    events,
+  }) => {
+    const { fakes, service, store, report } = await fixture();
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+    const completed = await service.completeRepair(repair.id, repairResult);
+    await store.saveRepair({
+      ...completed,
+      checkpoint: {
+        checkpointPath: "/tmp/checkpoint.mosh",
+        priorAppPath: "/Applications/Mosh.app",
+      },
+      swap: { state, buildPath: "/build/Mosh.app" },
+      updatedAt: new Date().toISOString(),
+    });
+    fakes.processCalls.length = 0;
+    const restarted = restartedService(store, fakes);
+    await restarted.initialize();
+
+    const recovered = await restarted.launchRepairBuild(repair.id, "/build/Mosh.app");
+
+    expect(recovered.swap?.state).toBe("repair_running");
+    expect(fakes.processCalls).toEqual(actions);
+    const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
+    expect(types.slice(-events.length)).toEqual(events);
+  });
+
+  it.each([
+    {
+      state: "checkpointed" as const,
+      failAction: "stop_transport",
+      attemptActions: ["stop_transport"],
+      attemptEvents: ["repair.swap.recovered", "repair.swap.failed"],
+    },
+    {
+      state: "stopping" as const,
+      failAction: "close_mosh",
+      attemptActions: ["stop_transport", "release_audio", "close_mosh"],
+      attemptEvents: [
+        "repair.swap.recovered",
+        "repair.transport.stopped",
+        "repair.audio.released",
+        "repair.swap.failed",
+      ],
+    },
+    {
+      state: "current_app_closed" as const,
+      failAction: "close_repair",
+      attemptActions: ["close_repair"],
+      attemptEvents: ["repair.swap.recovered", "repair.swap.failed"],
+    },
+  ])("rolls back without overlap when restarted $state recovery fails", async ({
+    state,
+    failAction,
+    attemptActions,
+    attemptEvents,
+  }) => {
+    const { fakes, service, store, report } = await fixture();
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+    const completed = await service.completeRepair(repair.id, repairResult);
+    await store.saveRepair({
+      ...completed,
+      checkpoint: {
+        checkpointPath: "/tmp/checkpoint.mosh",
+        priorAppPath: "/Applications/Mosh.app",
+      },
+      swap: { state, buildPath: "/build/Mosh.app" },
+      updatedAt: new Date().toISOString(),
+    });
+    fakes.processCalls.length = 0;
+    fakes.failProcessAction = failAction;
+    const firstRestart = restartedService(store, fakes);
+    await firstRestart.initialize();
+    await expect(firstRestart.launchRepairBuild(repair.id, "/build/Mosh.app"))
+      .rejects.toMatchObject({ code: "injected" });
+    expect((await store.loadRepair(repair.id)).swap?.state).toBe("failed");
+    expect(fakes.processCalls).toEqual(attemptActions);
+    const recoveryTypes = (await store.loadEvents(report.playtestId))
+      .map((event) => event.type);
+    expect(recoveryTypes.slice(-attemptEvents.length)).toEqual(attemptEvents);
+
+    const beforeRollback = fakes.processCalls.length;
+    const secondRestart = restartedService(store, fakes);
+    await secondRestart.initialize();
+    const rolledBack = await secondRestart.rollbackRepair(repair.id, "restart recovery failed");
+
+    expect(fakes.processCalls.slice(beforeRollback)).toEqual([
+      "close_repair",
+      "close_mosh",
+      "restore_checkpoint",
+      "launch_prior",
+    ]);
+    expect(rolledBack.swap?.state).toBe("rolled_back");
+    const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
+    expect(types.slice(-6)).toEqual([
+      "repair.swap.recovered",
+      "repair.build.closed",
+      "repair.app.closed",
+      "repair.checkpoint.restored",
+      "repair.prior_app.launched",
+      "repair.swap.rolled_back",
+    ]);
   });
 });
 

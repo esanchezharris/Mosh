@@ -17,10 +17,12 @@ type PendingRpc = {
 };
 
 export type ServerRequest = {
-  id: number;
+  id: RequestId;
   method: string;
   params: unknown;
 };
+
+export type RequestId = string | number;
 
 export interface JsonRpcTransport {
   request(method: string, params: unknown): Promise<unknown>;
@@ -29,7 +31,7 @@ export interface JsonRpcTransport {
 }
 
 const rpcEnvelope = z.object({
-  id: z.number().int().optional(),
+  id: z.union([z.string(), z.number().int()]).optional(),
   method: z.string().optional(),
   params: z.unknown().optional(),
   result: z.unknown().optional(),
@@ -42,7 +44,7 @@ function codedError(code: string, message: string): Error & { code: string } {
 
 export class StdioJsonRpcTransport implements JsonRpcTransport {
   private nextId = 1;
-  private readonly pending = new Map<number, PendingRpc>();
+  private readonly pending = new Map<RequestId, PendingRpc>();
   private readonly listeners = new Set<(method: string, params: unknown) => void>();
   private requestListener: ((request: ServerRequest) => Promise<unknown>) | undefined;
   private buffer = "";

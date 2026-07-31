@@ -26,33 +26,60 @@ export class RepairSwap {
 
   private async launchUnlocked(repairId: string, buildPath: string): Promise<RepairJob> {
     let current = await this.store.loadRepair(repairId);
-    if (current.status !== "full_gate_pending" || current.swap) {
+    const recoverable = new Set(["checkpointed", "stopping", "current_app_closed"]);
+    if (current.status !== "full_gate_pending"
+      || (current.swap && !recoverable.has(current.swap.state))
+      || (current.swap?.buildPath && current.swap.buildPath !== buildPath)) {
       throw failure("repair_swap_state", "Repair build is not ready for launch");
     }
     try {
-      const checkpoint = await this.dependencies.processes.checkpoint();
-      current = {
-        ...current,
-        checkpoint,
-        swap: { state: "checkpointed", buildPath },
-        updatedAt: new Date().toISOString(),
-      };
-      await this.store.saveRepair(current);
-      await this.emit(current.playtestId, "repair.checkpoint.created", { repairId, ...checkpoint });
-      current = { ...current, swap: { state: "stopping", buildPath }, updatedAt: new Date().toISOString() };
-      await this.store.saveRepair(current);
-      await this.dependencies.processes.stopTransport();
-      await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
-      await this.dependencies.processes.releaseAudio();
-      await this.emit(current.playtestId, "repair.audio.released", { repairId });
-      await this.dependencies.processes.closeMosh();
-      current = {
-        ...current,
-        swap: { state: "current_app_closed", buildPath },
-        updatedAt: new Date().toISOString(),
-      };
-      await this.store.saveRepair(current);
-      await this.emit(current.playtestId, "repair.app.closed", { repairId });
+      if (!current.swap) {
+        const checkpoint = await this.dependencies.processes.checkpoint();
+        current = {
+          ...current,
+          checkpoint,
+          swap: { state: "checkpointed", buildPath },
+          updatedAt: new Date().toISOString(),
+        };
+        await this.store.saveRepair(current);
+        await this.emit(current.playtestId, "repair.checkpoint.created", { repairId, ...checkpoint });
+      } else {
+        await this.emit(current.playtestId, "repair.swap.recovered", {
+          repairId,
+          fromState: current.swap.state,
+          action: "continue",
+        });
+      }
+      const launchState = current.swap?.state;
+      if (!launchState) {
+        throw failure("repair_swap_state", "Repair swap reservation is missing");
+      }
+      if (launchState === "current_app_closed") {
+        await this.dependencies.processes.closeRepairBuild();
+        await this.emit(current.playtestId, "repair.build.closed", {
+          repairId,
+          reason: "restart_recovery",
+        });
+      } else {
+        current = {
+          ...current,
+          swap: { state: "stopping", buildPath },
+          updatedAt: new Date().toISOString(),
+        };
+        await this.store.saveRepair(current);
+        await this.dependencies.processes.stopTransport();
+        await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
+        await this.dependencies.processes.releaseAudio();
+        await this.emit(current.playtestId, "repair.audio.released", { repairId });
+        await this.dependencies.processes.closeMosh();
+        current = {
+          ...current,
+          swap: { state: "current_app_closed", buildPath },
+          updatedAt: new Date().toISOString(),
+        };
+        await this.store.saveRepair(current);
+        await this.emit(current.playtestId, "repair.app.closed", { repairId });
+      }
       await this.dependencies.processes.launchRepairBuild(buildPath);
       current = {
         ...current,
@@ -73,6 +100,11 @@ export class RepairSwap {
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(failed);
+      await this.emit(current.playtestId, "repair.swap.failed", {
+        repairId,
+        fromState: current.swap?.state ?? "checkpoint",
+        code: (error as Error & { code?: string }).code ?? "repair_swap_failed",
+      });
       throw error;
     }
   }
@@ -81,9 +113,17 @@ export class RepairSwap {
     let current = await this.store.loadRepair(repairId);
     if (!current.checkpoint) throw failure("checkpoint_missing", "Repair checkpoint is missing");
     const checkpoint = current.checkpoint;
-    if (!current.swap || !["repair_running", "failed"].includes(current.swap.state)) {
+    if (!current.swap || ![
+      "checkpointed",
+      "stopping",
+      "current_app_closed",
+      "repair_running",
+      "rolling_back",
+      "failed",
+    ].includes(current.swap.state)) {
       throw failure("repair_swap_state", "Repair build is not in a rollback state");
     }
+    const fromState = current.swap.state;
     current = {
       ...current,
       swap: { ...current.swap, state: "rolling_back" },
@@ -91,8 +131,17 @@ export class RepairSwap {
     };
     await this.store.saveRepair(current);
     try {
+      if (fromState !== "repair_running") {
+        await this.emit(current.playtestId, "repair.swap.recovered", {
+          repairId,
+          fromState,
+          action: "rollback",
+        });
+      }
       await this.dependencies.processes.closeRepairBuild();
       await this.emit(current.playtestId, "repair.build.closed", { repairId, reason });
+      await this.dependencies.processes.closeMosh();
+      await this.emit(current.playtestId, "repair.app.closed", { repairId, reason });
       await this.dependencies.processes.restoreCheckpoint(checkpoint.checkpointPath);
       await this.emit(current.playtestId, "repair.checkpoint.restored", {
         repairId,
@@ -110,6 +159,7 @@ export class RepairSwap {
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(rolledBack);
+      await this.emit(current.playtestId, "repair.swap.rolled_back", { repairId, reason });
       return rolledBack;
     } catch (error) {
       const failed: RepairJob = {
@@ -118,6 +168,11 @@ export class RepairSwap {
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(failed);
+      await this.emit(current.playtestId, "repair.swap.failed", {
+        repairId,
+        fromState: "rolling_back",
+        code: (error as Error & { code?: string }).code ?? "repair_rollback_failed",
+      });
       throw error;
     }
   }
