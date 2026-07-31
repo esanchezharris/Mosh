@@ -406,7 +406,8 @@ export function AgentComposer() {
           onPointerDown={(e) => {
             if (agentBusy || !voiceAvailable) return;
             pointerHeldRef.current = true;
-            if (useStore.getState().transport.recording
+            const isRecording = useStore.getState().transport.recording;
+            if (isRecording
               && ownerCockpitEnabled
               && cockpit.status === "active") {
               pointerHeldRef.current = false;
@@ -416,6 +417,7 @@ export function AgentComposer() {
               return;
             }
             handsFree.pauseForPushToTalk();
+            if (isRecording) void useStore.getState().stopRecord();
             try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
             if (ownerCockpitEnabled && cockpit.status === "active" && !realtimeFailedRef.current) {
               setListening(true);

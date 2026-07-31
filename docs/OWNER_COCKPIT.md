@@ -206,11 +206,22 @@ Preserve every other file in that commit: `AGENTS.md`,
 `ui/src/bench/singleShotRunner.ts`, `ui/src/bridge.mock.ts`, and
 `ui/src/v2/TopBar.tsx`.
 
-PR #522 must land and pass its full gate before this branch is rebased: both
-change `src/webview/WebBridge.cpp`, `ui/src/bridge.ts`,
-`ui/src/agent/brain.ts`, `ui/src/agent/loop/runTask.ts`, their tests, and
-`ui/package.json`. Preserve #522's no-demo production failure posture while
-adding the owner-only host routes. PR #514 should likewise land first; its only
-direct overlap is `ui/src/v2/RightRail.tsx`, where the Graphite rail structure
-must retain the disabled-by-default owner cockpit slot. Run a full gate after
-each serial integration.
+The required serial landing order is:
+
+1. #522
+2. #514
+3. #507
+4. #508
+5. #510
+6. this owner-cockpit branch
+
+After each PR lands, rebase the next branch onto the resulting `main` and run
+its full local gate before continuing. #522 overlaps
+`src/webview/WebBridge.cpp`, `ui/src/bridge.ts`, `ui/src/agent/brain.ts`,
+`ui/src/agent/loop/runTask.ts`, their tests, and `ui/package.json`; preserve its
+no-demo production failure posture while adding the owner-only host routes.
+#514 directly overlaps `ui/src/v2/RightRail.tsx`, where the Graphite rail
+structure must retain the disabled-by-default owner cockpit slot. #507, #508,
+and #510 form the ordered selftest stack and overlap this branch in
+`CMakeLists.txt` and `src/app/SelfTest.cpp`; do not transplant or merge those
+chapters out of stack order.

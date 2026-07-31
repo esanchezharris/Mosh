@@ -80,6 +80,7 @@ import { AgentComposer } from "./AgentComposer";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 
+const defaultStopRecord = useStore.getState().stopRecord;
 const valueSetter = Object.getOwnPropertyDescriptor(
   window.HTMLInputElement.prototype,
   "value",
@@ -105,7 +106,7 @@ describe("AgentComposer supervisor entry point", () => {
     voiceCallbacks.current = null;
     requestSupervisorMock.mockResolvedValue({ plan: { intent: "ACK_GOT_IT", say: "done" }, calls: [{ command: "create_track", args: { name: "Lead" } }], telemetry: { latencyMs: 1 } });
     runAgentBatchMock.mockResolvedValue({ entries: [{ ok: true }], applied: 1 });
-    useStore.setState({ agentBusy: false, snapshot: null });
+    useStore.setState({ agentBusy: false, snapshot: null, stopRecord: defaultStopRecord });
     cockpitStatus.current = "active";
     useSettings.getState().set("ownerCockpit", true);
     act(() => { root.render(React.createElement(AgentComposer)); });
@@ -201,8 +202,14 @@ describe("AgentComposer supervisor entry point", () => {
   }) => {
     cockpitStatus.current = status;
     await act(async () => { useSettings.getState().set("ownerCockpit", cockpitEnabled); });
+    const stopRecord = vi.fn(async () => undefined);
     const transport = useStore.getState().transport;
-    act(() => { useStore.setState({ transport: { ...transport, recording: true } }); });
+    act(() => {
+      useStore.setState({
+        stopRecord,
+        transport: { ...transport, recording: true },
+      });
+    });
     act(() => { root.render(React.createElement(AgentComposer)); });
 
     await act(async () => {
@@ -210,6 +217,7 @@ describe("AgentComposer supervisor entry point", () => {
         .dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
     });
 
+    expect(stopRecord).toHaveBeenCalledOnce();
     expect(createVoiceInputMock).toHaveBeenCalledOnce();
     expect(host.textContent).not.toContain("Stop recording before talking to Moshi.");
   });
