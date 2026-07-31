@@ -26,7 +26,10 @@ class Fakes {
   processCalls: string[] = [];
   clean = true;
   authenticated = true;
+  githubTransportFailure = false;
   evidenceSha = "a".repeat(64);
+  failWorktree = false;
+  failProcessAction: string | undefined;
 
   evidence: EvidenceAdapter = {
     uploadPng: async (input) => {
@@ -44,6 +47,9 @@ class Fakes {
     syncApprovedReport: async (input) => {
       this.githubCalls.push(JSON.stringify(input));
       if (!this.authenticated) return { status: "auth_missing" };
+      if (this.githubTransportFailure) {
+        throw Object.assign(new Error("ambiguous GitHub transport failure"), { code: "github_failed" });
+      }
       return { status: "synced", issueNumber: input.kind === "note" ? 88 : 42, issueUrl: "https://github.invalid/42" };
     },
   };
@@ -64,6 +70,7 @@ class Fakes {
     inspectBase: async () => ({ sha: "1".repeat(40), clean: this.clean }),
     createWorktree: async (input) => {
       this.gitCalls.push(JSON.stringify(input));
+      if (this.failWorktree) throw Object.assign(new Error("injected worktree failure"), { code: "injected" });
     },
   };
   processes: ProcessAdapter = {
@@ -71,14 +78,23 @@ class Fakes {
       this.processCalls.push("checkpoint");
       return { checkpointPath: "/tmp/checkpoint.mosh", priorAppPath: "/Applications/Mosh.app" };
     },
-    stopTransport: async () => { this.processCalls.push("stop_transport"); },
-    releaseAudio: async () => { this.processCalls.push("release_audio"); },
-    closeMosh: async () => { this.processCalls.push("close_mosh"); },
-    launchRepairBuild: async () => { this.processCalls.push("launch_repair"); },
+    stopTransport: async () => { await this.processAction("stop_transport"); },
+    releaseAudio: async () => { await this.processAction("release_audio"); },
+    closeMosh: async () => { await this.processAction("close_mosh"); },
+    launchRepairBuild: async () => { await this.processAction("launch_repair"); },
     closeRepairBuild: async () => { this.processCalls.push("close_repair"); },
     restoreCheckpoint: async () => { this.processCalls.push("restore_checkpoint"); },
     launchPriorApp: async () => { this.processCalls.push("launch_prior"); },
   };
+
+  private async processAction(name: string): Promise<void> {
+    this.processCalls.push(name);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    if (this.failProcessAction === name) {
+      this.failProcessAction = undefined;
+      throw Object.assign(new Error(`injected ${name} failure`), { code: "injected" });
+    }
+  }
 }
 
 async function fixture() {
@@ -118,8 +134,19 @@ async function fixture() {
       },
     }],
   });
-  return { root, fakes, service, store, playtest, report };
+  return { root, fakes, service, store, orchestration, playtest, report };
 }
+
+const repairResult = {
+  redEvidencePath: "/evidence/red.log",
+  greenEvidencePath: "/evidence/green.log",
+  diagnosticsPath: "/evidence/diagnostics.log",
+  bundlePath: "/evidence/repair-bundle",
+  buildPath: "/build/Mosh.app",
+  draftPrUrl: "https://github.invalid/pull/9",
+  draft: true as const,
+  merged: false as const,
+};
 
 describe("owner orchestration approval and coordinator", () => {
   it("performs no external write before approval, then uploads immutable PNG evidence and syncs one issue", async () => {
@@ -156,6 +183,18 @@ describe("owner orchestration approval and coordinator", () => {
     expect((await store.loadReport(report.id)).external?.issueNumber).toBe(42);
   });
 
+  it("persists the stable sync intent before an ambiguous GitHub result", async () => {
+    const { fakes, service, store, report } = await fixture();
+    fakes.githubTransportFailure = true;
+    await expect(service.approveReport(report.id)).rejects.toMatchObject({ code: "github_failed" });
+    expect(await store.loadReport(report.id)).toMatchObject({
+      syncIntent: {
+        marker: `mosh-playtest-report:${report.id}`,
+        state: "pending",
+      },
+    });
+  });
+
   it("creates one scrubbed read-only coordinator thread per playtest and records streamed events", async () => {
     const { fakes, service, store, playtest, report } = await fixture();
     await service.approveReport(report.id);
@@ -169,6 +208,49 @@ describe("owner orchestration approval and coordinator", () => {
     expect(serialized).toContain("Loop jumps");
     expect(serialized).not.toContain("must-not-leave-host");
     expect((await store.loadEvents(playtest.id)).map((event) => event.type)).toContain("codex.turn.started");
+  });
+
+  it("serializes concurrent coordinator creation and fails closed on a stranded reservation", async () => {
+    const { fakes, service, store, playtest, report } = await fixture();
+    await service.approveReport(report.id);
+    const session = await store.loadSession(playtest.id);
+    const unreserved = { ...session };
+    delete unreserved.coordinatorThreadId;
+    delete unreserved.coordinator;
+    await store.saveSession({ ...unreserved, updatedAt: new Date().toISOString() });
+    fakes.appCalls.length = 0;
+
+    await Promise.all([
+      service.coordinateReport(report.id),
+      service.coordinateReport(report.id),
+    ]);
+    expect(fakes.appCalls.filter((call) => call.kind === "thread")).toHaveLength(1);
+
+    const ready = await store.loadSession(playtest.id);
+    const stranded = {
+      ...ready,
+      coordinator: { state: "starting", reservationId: crypto.randomUUID() },
+      updatedAt: new Date().toISOString(),
+    } as const;
+    delete (stranded as { coordinatorThreadId?: string }).coordinatorThreadId;
+    await store.saveSession(stranded);
+    const before = fakes.appCalls.length;
+    await expect(service.coordinateReport(report.id)).rejects.toMatchObject({
+      code: "coordinator_recovery_required",
+    });
+    expect(fakes.appCalls).toHaveLength(before);
+  });
+
+  it("rejects nested result payloads before sending any report context to app-server", async () => {
+    const { fakes, orchestration, report } = await fixture();
+    const unsafe = structuredClone(report);
+    unsafe.evidence[0]!.metadata.recentResults = [{
+      command: "set_loop",
+      ok: false,
+      payload: { audio: "data:audio/wav;base64,AAAA" },
+    }];
+    await expect(orchestration.coordinateReport(unsafe)).rejects.toThrow();
+    expect(fakes.appCalls).toEqual([]);
   });
 });
 
@@ -198,18 +280,24 @@ describe("repair worktree and app lifecycle", () => {
       cwd: "/worktrees/playtest-42-loop-jumps",
     });
 
-    const completed = await service.completeRepair(repair.id, {
-      redEvidencePath: "/evidence/red.log",
-      greenEvidencePath: "/evidence/green.log",
-      diagnosticsPath: "/evidence/diagnostics.log",
-      bundlePath: "/evidence/repair-bundle",
-      buildPath: "/build/Mosh.app",
-      draftPrUrl: "https://github.invalid/pull/9",
-      draft: true,
-      merged: false,
-    });
+    const completed = await service.completeRepair(repair.id, repairResult);
     expect(completed.status).toBe("full_gate_pending");
     expect((await store.loadRepair(repair.id)).result?.merged).toBe(false);
+  });
+
+  it("persists a queued reservation before worktree creation and blocks duplicate recovery after failure", async () => {
+    const { fakes, service, store, report } = await fixture();
+    await service.approveReport(report.id);
+    fakes.failWorktree = true;
+    await expect(service.createRepair(report.id)).rejects.toMatchObject({ code: "injected" });
+    const reserved = (await store.listRepairs())[0]!;
+    expect(reserved).toMatchObject({
+      status: "queued",
+      failure: { code: "injected", message: "injected worktree failure" },
+    });
+    fakes.failWorktree = false;
+    await expect(service.createRepair(report.id)).rejects.toMatchObject({ code: "repair_active" });
+    expect(fakes.gitCalls).toHaveLength(1);
   });
 
   it("recovers active-job exclusion after restart and rolls back in safe process order", async () => {
@@ -233,6 +321,7 @@ describe("repair worktree and app lifecycle", () => {
     await restarted.initialize();
     await expect(restarted.createRepair(report.id)).rejects.toMatchObject({ code: "repair_active" });
 
+    await restarted.completeRepair(repair.id, repairResult);
     await restarted.launchRepairBuild(repair.id, "/build/Mosh.app");
     await restarted.rollbackRepair(repair.id, "retest failed");
     expect(fakes.processCalls).toEqual([
@@ -250,6 +339,37 @@ describe("repair worktree and app lifecycle", () => {
       "repair.checkpoint.restored",
       "repair.prior_app.launched",
     ]);
+  });
+
+  it("serializes parallel swaps and persists a recoverable failed transition before rollback", async () => {
+    const { fakes, service, store, report } = await fixture();
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+    await service.completeRepair(repair.id, repairResult);
+    const attempts = await Promise.allSettled([
+      service.launchRepairBuild(repair.id, "/build/Mosh.app"),
+      service.launchRepairBuild(repair.id, "/build/Mosh.app"),
+    ]);
+    expect(attempts.map((attempt) => attempt.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(fakes.processCalls.filter((call) => call === "launch_repair")).toHaveLength(1);
+
+    await service.rollbackRepair(repair.id, "parallel launch probe");
+    const rolledBack = await store.loadRepair(repair.id);
+    expect(rolledBack.swap?.state).toBe("rolled_back");
+
+    const second = await fixture();
+    await second.service.approveReport(second.report.id);
+    const secondRepair = await second.service.createRepair(second.report.id);
+    await second.service.completeRepair(secondRepair.id, repairResult);
+    second.fakes.failProcessAction = "close_mosh";
+    await expect(second.service.launchRepairBuild(secondRepair.id, "/build/Mosh.app"))
+      .rejects.toMatchObject({ code: "injected" });
+    expect(await second.store.loadRepair(secondRepair.id)).toMatchObject({
+      checkpoint: { checkpointPath: "/tmp/checkpoint.mosh" },
+      swap: { state: "failed", buildPath: "/build/Mosh.app" },
+    });
+    await second.service.rollbackRepair(secondRepair.id, "injected failure");
+    expect((await second.store.loadRepair(secondRepair.id)).swap?.state).toBe("rolled_back");
   });
 });
 

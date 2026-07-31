@@ -1,9 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
+import {
+  codedError,
+  parseJson,
+  type CommandResult,
+  type CommandRunner,
+} from "./command-runner.js";
 import type {
-  AppServerAdapter,
-  AppServerEvent,
   EvidenceAdapter,
   GitAdapter,
   GitHubAdapter,
@@ -11,42 +14,8 @@ import type {
   RepairCheckpoint,
 } from "./orchestration.js";
 
-export type CommandResult = {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-};
-
-export interface CommandRunner {
-  run(command: string, args: readonly string[], cwd?: string): Promise<CommandResult>;
-}
-
-export class NodeCommandRunner implements CommandRunner {
-  async run(command: string, args: readonly string[], cwd?: string): Promise<CommandResult> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(command, [...args], {
-        ...(cwd ? { cwd } : {}),
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        if (stdout.length < 2_000_000) stdout += chunk;
-      });
-      child.stderr.on("data", (chunk: string) => {
-        if (stderr.length < 100_000) stderr += chunk;
-      });
-      child.once("error", reject);
-      child.once("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-    });
-  }
-}
-
-function codedError(code: string, message: string): Error & { code: string } {
-  return Object.assign(new Error(message), { code });
-}
+export { NodeCommandRunner } from "./command-runner.js";
+export type { CommandResult, CommandRunner } from "./command-runner.js";
 
 const edgeResponse = z.object({
   evidenceId: z.uuid(),
@@ -115,14 +84,6 @@ const issueView = z.object({
   url: z.url(),
   comments: z.array(z.object({ body: z.string() })),
 });
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw codedError("github_invalid_response", "gh returned invalid JSON");
-  }
-}
 
 function marker(kind: "report" | "session", id: string): string {
   return `<!-- mosh-playtest-${kind}:${id} -->`;
@@ -205,181 +166,18 @@ export class GhGitHubAdapter implements GitHubAdapter {
   }
 }
 
-export interface JsonRpcTransport {
-  request(method: string, params: unknown): Promise<unknown>;
-  onNotification(listener: (method: string, params: unknown) => void): () => void;
-}
-
-const threadStarted = z.object({ thread: z.object({ id: z.string().min(1) }) });
-const turnStarted = z.object({ turn: z.object({ id: z.string().min(1) }) });
-
-function appEvent(method: string, params: unknown): AppServerEvent {
-  const type = method.includes("approval")
-    ? "approval"
-    : method.includes("turn")
-      ? "turn"
-      : method.includes("thread")
-        ? "thread"
-        : "progress";
-  return {
-    type,
-    data: typeof params === "object" && params !== null && !Array.isArray(params)
-      ? { ...params }
-      : { value: params },
-  };
-}
-
-export class CodexAppServerAdapter implements AppServerAdapter {
-  private initialized = false;
-
-  constructor(private readonly transport: JsonRpcTransport) {}
-
-  async initialize(): Promise<void> {
-    if (this.initialized) return;
-    await this.transport.request("initialize", {
-      clientInfo: { name: "mosh-owner-cockpit", title: "Mosh Owner Cockpit", version: "1" },
-      capabilities: { experimentalApi: false },
-    });
-    this.initialized = true;
-  }
-
-  async startThread(
-    input: { mode: "read-only" | "workspace-write"; cwd: string },
-    onEvent?: (event: AppServerEvent) => void,
-  ): Promise<string> {
-    if (!this.initialized) await this.initialize();
-    if (onEvent) this.transport.onNotification((method, params) => onEvent(appEvent(method, params)));
-    const result = threadStarted.parse(await this.transport.request("thread/start", {
-      cwd: input.cwd,
-      sandbox: input.mode,
-      approvalPolicy: input.mode === "read-only" ? "never" : "on-request",
-    }));
-    return result.thread.id;
-  }
-
-  async startTurn(input: { threadId: string; prompt: string }): Promise<string> {
-    const result = turnStarted.parse(await this.transport.request("turn/start", {
-      threadId: input.threadId,
-      input: [{ type: "text", text: input.prompt }],
-    }));
-    return result.turn.id;
-  }
-}
-
-type PendingRpc = {
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-};
-
-export class StdioJsonRpcTransport implements JsonRpcTransport {
-  private nextId = 1;
-  private readonly pending = new Map<number, PendingRpc>();
-  private readonly listeners = new Set<(method: string, params: unknown) => void>();
-  private buffer = "";
-
-  constructor(private readonly child: ChildProcessWithoutNullStreams) {
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.accept(chunk));
-    child.once("exit", () => {
-      for (const pending of this.pending.values()) {
-        pending.reject(codedError("codex_app_server_stopped", "Codex app-server stopped"));
-      }
-      this.pending.clear();
-    });
-  }
-
-  request(method: string, params: unknown): Promise<unknown> {
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    });
-  }
-
-  onNotification(listener: (method: string, params: unknown) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  private accept(chunk: string): void {
-    this.buffer += chunk;
-    let newline = this.buffer.indexOf("\n");
-    while (newline >= 0) {
-      const line = this.buffer.slice(0, newline);
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line.trim()) this.acceptLine(line);
-      newline = this.buffer.indexOf("\n");
-    }
-  }
-
-  private acceptLine(line: string): void {
-    const envelope = z.object({
-      id: z.number().int().optional(),
-      method: z.string().optional(),
-      params: z.unknown().optional(),
-      result: z.unknown().optional(),
-      error: z.object({ message: z.string() }).optional(),
-    }).safeParse(parseJson(line));
-    if (!envelope.success) return;
-    if (envelope.data.id !== undefined) {
-      const pending = this.pending.get(envelope.data.id);
-      if (!pending) return;
-      this.pending.delete(envelope.data.id);
-      if (envelope.data.error) pending.reject(codedError("codex_rpc_error", envelope.data.error.message));
-      else pending.resolve(envelope.data.result);
-      return;
-    }
-    if (envelope.data.method) {
-      for (const listener of this.listeners) {
-        listener(envelope.data.method, envelope.data.params);
-      }
-    }
-  }
-}
-
-export function spawnCodexAppServer(): {
-  adapter: CodexAppServerAdapter;
-  close(): void;
-} {
-  const child = spawn("codex", ["app-server"], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: process.env,
-  });
-  child.stderr.resume();
-  return {
-    adapter: new CodexAppServerAdapter(new StdioJsonRpcTransport(child)),
-    close: () => child.kill("SIGTERM"),
-  };
-}
-
-export class LazyCodexAppServerAdapter implements AppServerAdapter {
-  private process: ReturnType<typeof spawnCodexAppServer> | undefined;
-
-  private adapter(): CodexAppServerAdapter {
-    this.process ??= spawnCodexAppServer();
-    return this.process.adapter;
-  }
-
-  initialize(): Promise<void> {
-    return this.adapter().initialize();
-  }
-
-  startThread(
-    input: { mode: "read-only" | "workspace-write"; cwd: string },
-    onEvent?: (event: AppServerEvent) => void,
-  ): Promise<string> {
-    return this.adapter().startThread(input, onEvent);
-  }
-
-  startTurn(input: { threadId: string; prompt: string }): Promise<string> {
-    return this.adapter().startTurn(input);
-  }
-
-  close(): void {
-    this.process?.close();
-    this.process = undefined;
-  }
-}
+export {
+  CodexAppServerAdapter,
+  LazyCodexAppServerAdapter,
+  StdioJsonRpcTransport,
+  codexChildEnvironment,
+  spawnCodexAppServer,
+} from "./codex-app-server.js";
+export type {
+  CodexSpawn,
+  JsonRpcTransport,
+  StdioChild,
+} from "./codex-app-server.js";
 
 export class GitCliAdapter implements GitAdapter {
   constructor(private readonly runner: CommandRunner) {}

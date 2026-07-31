@@ -133,6 +133,93 @@ describe("authenticated gh adapter", () => {
     });
     expect(runner.calls.some((call) => call.includes("comment"))).toBe(false);
   });
+
+  it("recovers an issue create accepted remotely when the local gh result is ambiguous", async () => {
+    const reportId = "44444444-4444-4444-8444-444444444444";
+    let remoteIssue = false;
+    let creates = 0;
+    const runner: CommandRunner = {
+      run: async (_command, args) => {
+        if (args[0] === "auth") return { exitCode: 0, stdout: "", stderr: "" };
+        if (args[1] === "list") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify(remoteIssue
+              ? [{ number: 51, url: "https://github.invalid/51" }]
+              : []),
+            stderr: "",
+          };
+        }
+        creates += 1;
+        remoteIssue = true;
+        return { exitCode: 1, stdout: "", stderr: "transport closed after acceptance" };
+      },
+    };
+    const adapter = new GhGitHubAdapter(runner, "owner/repo");
+    const input = {
+      reportId,
+      playtestId: crypto.randomUUID(),
+      kind: "bug" as const,
+      title: "Ambiguous create",
+      body: "Create may have succeeded.",
+      evidence: [],
+    };
+    await expect(adapter.syncApprovedReport(input)).rejects.toMatchObject({ code: "github_failed" });
+    await expect(adapter.syncApprovedReport(input)).resolves.toMatchObject({
+      status: "synced",
+      issueNumber: 51,
+    });
+    expect(creates).toBe(1);
+  });
+
+  it("recovers a note comment accepted remotely when the local gh result is ambiguous", async () => {
+    const reportId = "55555555-5555-4555-8555-555555555555";
+    let remoteComment = false;
+    let comments = 0;
+    const runner: CommandRunner = {
+      run: async (_command, args) => {
+        if (args[0] === "auth") return { exitCode: 0, stdout: "", stderr: "" };
+        if (args[1] === "list") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([{ number: 9, url: "https://github.invalid/9" }]),
+            stderr: "",
+          };
+        }
+        if (args[1] === "view") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              number: 9,
+              url: "https://github.invalid/9",
+              comments: remoteComment
+                ? [{ body: `<!-- mosh-playtest-report:${reportId} -->` }]
+                : [],
+            }),
+            stderr: "",
+          };
+        }
+        comments += 1;
+        remoteComment = true;
+        return { exitCode: 1, stdout: "", stderr: "transport closed after acceptance" };
+      },
+    };
+    const adapter = new GhGitHubAdapter(runner, "owner/repo");
+    const input = {
+      reportId,
+      playtestId: "66666666-6666-4666-8666-666666666666",
+      kind: "note" as const,
+      title: "Ambiguous comment",
+      body: "Comment may have succeeded.",
+      evidence: [],
+    };
+    await expect(adapter.syncApprovedReport(input)).rejects.toMatchObject({ code: "github_failed" });
+    await expect(adapter.syncApprovedReport(input)).resolves.toMatchObject({
+      status: "synced",
+      issueNumber: 9,
+    });
+    expect(comments).toBe(1);
+  });
 });
 
 describe("Codex app-server JSON-RPC adapter", () => {
@@ -141,17 +228,46 @@ describe("Codex app-server JSON-RPC adapter", () => {
     const transport: JsonRpcTransport = {
       request: async (method, params) => {
         requests.push({ method, params });
-        if (method === "thread/start") return { thread: { id: `thread-${requests.length}` } };
+        if (method === "thread/start") {
+          const thread = params as {
+            cwd: string;
+            sandbox: "read-only" | "workspace-write";
+            approvalPolicy: string;
+          };
+          return {
+            thread: { id: `thread-${requests.length}` },
+            cwd: thread.cwd,
+            model: "gpt-5",
+            modelProvider: "openai",
+            approvalPolicy: thread.approvalPolicy,
+            approvalsReviewer: "user",
+            sandbox: thread.sandbox === "read-only"
+              ? { type: "readOnly", networkAccess: false }
+              : {
+                  type: "workspaceWrite",
+                  networkAccess: false,
+                  writableRoots: [thread.cwd],
+                  excludeTmpdirEnvVar: true,
+                  excludeSlashTmp: true,
+                },
+          };
+        }
         if (method === "turn/start") return { turn: { id: "turn-1" } };
         return {};
       },
       onNotification: () => () => undefined,
+      onServerRequest: () => () => undefined,
     };
     const adapter = new CodexAppServerAdapter(transport);
     await adapter.initialize();
     const coordinator = await adapter.startThread({ mode: "read-only", cwd: "/repo" });
     const repair = await adapter.startThread({ mode: "workspace-write", cwd: "/worktree" });
-    await adapter.startTurn({ threadId: repair, prompt: "repair only this report" });
+    await adapter.startTurn({
+      threadId: repair,
+      prompt: "repair only this report",
+      mode: "workspace-write",
+      cwd: "/worktree",
+    });
 
     expect(coordinator).toBe("thread-2");
     expect(requests).toEqual([
@@ -172,7 +288,17 @@ describe("Codex app-server JSON-RPC adapter", () => {
       },
       {
         method: "turn/start",
-        params: { threadId: repair, input: [{ type: "text", text: "repair only this report" }] },
+        params: {
+          threadId: repair,
+          input: [{ type: "text", text: "repair only this report" }],
+          sandboxPolicy: {
+            type: "workspaceWrite",
+            networkAccess: false,
+            writableRoots: ["/worktree"],
+            excludeTmpdirEnvVar: true,
+            excludeSlashTmp: true,
+          },
+        },
       },
     ]);
   });

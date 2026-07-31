@@ -13,6 +13,22 @@ export const PlaytestSessionSchema = z.object({
   updatedAt: isoDate,
   closedAt: isoDate.optional(),
   coordinatorThreadId: z.string().min(1).optional(),
+  coordinator: z.discriminatedUnion("state", [
+    z.object({
+      state: z.literal("starting"),
+      reservationId: id,
+    }),
+    z.object({
+      state: z.literal("ready"),
+      reservationId: id,
+      threadId: z.string().min(1),
+    }),
+    z.object({
+      state: z.literal("failed"),
+      reservationId: id,
+      code: z.string().min(1),
+    }),
+  ]).optional(),
 });
 export type PlaytestSession = z.infer<typeof PlaytestSessionSchema>;
 
@@ -52,6 +68,12 @@ export const PlaytestReportSchema = z.object({
     issueNumber: z.number().int().positive(),
     issueUrl: z.url(),
   }).optional(),
+  syncIntent: z.object({
+    marker: z.string().min(1),
+    state: z.enum(["pending", "synced"]),
+    updatedAt: isoDate,
+    issueNumber: z.number().int().positive().optional(),
+  }).optional(),
 });
 export type PlaytestReport = z.infer<typeof PlaytestReportSchema>;
 
@@ -68,6 +90,23 @@ export const RepairJobSchema = z.object({
   checkpoint: z.object({
     checkpointPath: z.string().min(1),
     priorAppPath: z.string().min(1),
+  }).optional(),
+  failure: z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+  }).optional(),
+  swap: z.object({
+    state: z.enum([
+      "checkpointed",
+      "stopping",
+      "current_app_closed",
+      "repair_running",
+      "rolling_back",
+      "rolled_back",
+      "failed",
+    ]),
+    buildPath: z.string().min(1).optional(),
+    error: z.string().min(1).optional(),
   }).optional(),
   result: z.object({
     redEvidencePath: z.string().min(1),

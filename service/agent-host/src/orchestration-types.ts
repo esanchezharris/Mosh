@@ -1,0 +1,123 @@
+import type { AuditEvent, PlaytestReport } from "./contracts.js";
+
+export type UploadedEvidence = {
+  evidenceId: string;
+  sha256: string;
+  objectPath: string;
+  previewUrl: string;
+  previewExpiresAt: string;
+};
+
+export interface EvidenceAdapter {
+  uploadPng(input: {
+    evidenceId: string;
+    playtestId: string;
+    reportId: string;
+    localPath: string;
+  }): Promise<UploadedEvidence>;
+}
+
+export interface GitHubAdapter {
+  syncApprovedReport(input: {
+    reportId: string;
+    playtestId: string;
+    kind: PlaytestReport["kind"];
+    title: string;
+    body: string;
+    evidence: ReadonlyArray<UploadedEvidence>;
+  }): Promise<
+    | { status: "auth_missing" }
+    | { status: "synced"; issueNumber: number; issueUrl: string }
+  >;
+}
+
+export type AppServerEvent = {
+  type: "thread" | "turn" | "approval" | "progress";
+  data: Readonly<Record<string, unknown>>;
+};
+
+export interface AppServerAdapter {
+  initialize(): Promise<void>;
+  startThread(
+    input: { mode: "read-only" | "workspace-write"; cwd: string },
+    onEvent?: (event: AppServerEvent) => Promise<void> | void,
+  ): Promise<string>;
+  startTurn(input: {
+    threadId: string;
+    prompt: string;
+    mode: "read-only" | "workspace-write";
+    cwd: string;
+  }): Promise<string>;
+}
+
+export interface GitAdapter {
+  inspectBase(repositoryPath: string): Promise<{ sha: string; clean: boolean }>;
+  createWorktree(input: {
+    repositoryPath: string;
+    baseSha: string;
+    branch: string;
+    path: string;
+  }): Promise<void>;
+}
+
+export type RepairCheckpoint = {
+  checkpointPath: string;
+  priorAppPath: string;
+};
+
+export interface ProcessAdapter {
+  checkpoint(): Promise<RepairCheckpoint>;
+  stopTransport(): Promise<void>;
+  releaseAudio(): Promise<void>;
+  closeMosh(): Promise<void>;
+  launchRepairBuild(buildPath: string): Promise<void>;
+  closeRepairBuild(): Promise<void>;
+  restoreCheckpoint(checkpointPath: string): Promise<void>;
+  launchPriorApp(appPath: string): Promise<void>;
+}
+
+export type EventSink = (
+  playtestId: string,
+  type: string,
+  data: Record<string, unknown>,
+) => Promise<AuditEvent>;
+
+export type Dependencies = {
+  evidence: EvidenceAdapter;
+  github: GitHubAdapter;
+  appServer: AppServerAdapter;
+  git: GitAdapter;
+  processes: ProcessAdapter;
+  repositoryPath: string;
+  worktreeRoot: string;
+};
+
+export type Emit = (
+  playtestId: string,
+  type: string,
+  data: Record<string, unknown>,
+) => Promise<void>;
+
+export function failure(code: string, message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+export async function serialized<T>(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const preceding = tails.get(key) ?? Promise.resolve();
+  let release = (): void => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  tails.set(key, current);
+  await preceding;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (tails.get(key) === current) tails.delete(key);
+  }
+}
