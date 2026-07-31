@@ -1,6 +1,8 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <limits.h>
 
 #include <chrono>
 #include <filesystem>
@@ -88,6 +90,13 @@ int main (int argc, char** argv)
             && argv[index + 1] == embeddedSha)
             receivedSha = true;
     if (! receivedSha) return 6;
+    for (int descriptor = 3; descriptor < getdtablesize(); ++descriptor)
+    {
+        char path[PATH_MAX] {};
+        if (fcntl (descriptor, F_GETPATH, path) == 0
+            && std::string (path).find ("mosh-repair-handoff-") != std::string::npos)
+            return 8;
+    }
     std::ofstream marker (MOSH_REPAIR_FIXTURE_MARKER, std::ios::app);
     marker << "launched " << getpid() << "\n";
     return marker.good() ? 0 : 7;

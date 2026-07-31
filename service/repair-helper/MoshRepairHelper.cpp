@@ -52,6 +52,12 @@ struct Identity
     std::string team;
 };
 
+struct ProcessToken
+{
+    uint64_t seconds;
+    uint64_t microseconds;
+};
+
 [[noreturn]] void fail (const std::string& code, const std::string& message)
 {
     std::cerr << "{\"ok\":false,\"code\":\"" << code << "\",\"message\":\""
@@ -151,6 +157,44 @@ pid_t parentPid (pid_t pid)
     const auto bytes = proc_pidinfo (
         pid, PROC_PIDTBSDINFO, 0, &information, sizeof (information));
     return bytes == sizeof (information) ? static_cast<pid_t> (information.pbi_ppid) : -1;
+}
+
+std::optional<ProcessToken> processToken (pid_t pid)
+{
+    proc_bsdinfo information {};
+    const auto bytes = proc_pidinfo (
+        pid, PROC_PIDTBSDINFO, 0, &information, sizeof (information));
+    if (bytes != sizeof (information) || information.pbi_status == SZOMB)
+        return std::nullopt;
+    return ProcessToken {
+        information.pbi_start_tvsec,
+        information.pbi_start_tvusec,
+    };
+}
+
+bool isSameProcessRunning (pid_t pid, const ProcessToken& expected)
+{
+    const auto current = processToken (pid);
+    return current.has_value()
+        && current->seconds == expected.seconds
+        && current->microseconds == expected.microseconds;
+}
+
+uint64_t parseTokenPart (const char* value)
+{
+    try
+    {
+        const std::string text (value);
+        size_t consumed = 0;
+        const auto parsed = std::stoull (text, &consumed);
+        if (consumed != text.size())
+            throw std::runtime_error ("trailing");
+        return parsed;
+    }
+    catch (...)
+    {
+        throw std::runtime_error ("caller_token_invalid");
+    }
 }
 
 fs::path processAppPath (pid_t pid)
@@ -310,16 +354,6 @@ PriorTarget priorTarget (
     return { checkpoint, app };
 }
 
-bool isRunning (pid_t pid)
-{
-    proc_bsdinfo information {};
-    const auto bytes = proc_pidinfo (
-        pid, PROC_PIDTBSDINFO, 0, &information, sizeof (information));
-    if (bytes == sizeof (information) && information.pbi_status == SZOMB)
-        return false;
-    return kill (pid, 0) == 0 || errno == EPERM;
-}
-
 void writeTestStatus (const std::string& value)
 {
     if (const auto* statusPath = std::getenv ("MOSH_REPAIR_HELPER_TEST_STATUS");
@@ -405,6 +439,14 @@ pid_t spawnWorker (const std::vector<std::string>& arguments, int handoffLock)
         close (readyPipe[1]);
         throw std::runtime_error ("handoff_spawn_redirect_failed");
     }
+    if (handoffLock != kHandoffLockDescriptor
+        && posix_spawn_file_actions_addclose (&actions, handoffLock) != 0)
+    {
+        destroyActions();
+        close (readyPipe[0]);
+        close (readyPipe[1]);
+        throw std::runtime_error ("handoff_spawn_lock_close_failed");
+    }
     pid_t workerPid = -1;
     const auto result = posix_spawn (
         &workerPid, storage.front().c_str(), &actions, nullptr, argv.data(), environ);
@@ -429,6 +471,7 @@ template <typename CallerValidator, typename TargetValidator>
 [[noreturn]] void runWorker (
     pid_t parentHelperPid,
     pid_t callerPid,
+    const ProcessToken& callerToken,
     const fs::path& targetApp,
     const std::vector<std::string>& arguments,
     CallerValidator validateCallerNow,
@@ -440,6 +483,8 @@ template <typename CallerValidator, typename TargetValidator>
         validateWorkerParent (parentHelperPid, selfIdentity());
         if (fcntl (kHandoffLockDescriptor, F_GETFD) < 0)
             throw std::runtime_error ("handoff_lock_missing");
+        if (! isSameProcessRunning (callerPid, callerToken))
+            throw std::runtime_error ("caller_identity_changed");
         validateCallerNow();
         validateTargetNow();
     }
@@ -449,15 +494,20 @@ template <typename CallerValidator, typename TargetValidator>
     close (kReadyDescriptor);
     if (fcntl (kHandoffLockDescriptor, F_SETFD, FD_CLOEXEC) != 0)
         workerExit (77);
-    std::this_thread::sleep_for (std::chrono::milliseconds (750));
     writeTestStatus ("validated");
-    if (kill (callerPid, SIGTERM) != 0 && errno != ESRCH)
-        workerExit (71);
+    if (isSameProcessRunning (callerPid, callerToken))
+    {
+        try { validateCallerNow(); } catch (...) { workerExit (71); }
+        if (isSameProcessRunning (callerPid, callerToken)
+            && kill (callerPid, SIGTERM) != 0 && errno != ESRCH)
+            workerExit (71);
+    }
     writeTestStatus ("signalled");
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (30);
-    while (isRunning (callerPid) && std::chrono::steady_clock::now() < deadline)
+    while (isSameProcessRunning (callerPid, callerToken)
+           && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for (std::chrono::milliseconds (100));
-    if (isRunning (callerPid))
+    if (isSameProcessRunning (callerPid, callerToken))
         workerExit (72);
     try { validateTargetNow(); } catch (...) { workerExit (73); }
     writeTestStatus ("exec");
@@ -502,12 +552,17 @@ int main (int argc, char** argv)
         const std::string action (argv[1]);
         if (action == "__worker-repair")
         {
-            if (argc != 8) workerExit (75);
+            if (argc != 10) workerExit (75);
             const auto callerPid = parsePid (argv[6]);
-            const auto parentHelperPid = parsePid (argv[7]);
+            const ProcessToken callerToken {
+                parseTokenPart (argv[7]),
+                parseTokenPart (argv[8]),
+            };
+            const auto parentHelperPid = parsePid (argv[9]);
             runWorker (
                 parentHelperPid,
                 callerPid,
+                callerToken,
                 canonicalPath (argv[2], true),
                 { "--mosh-repair-source-sha", argv[4],
                   "--mosh-owner-checkpoint", argv[5] },
@@ -519,12 +574,17 @@ int main (int argc, char** argv)
         }
         if (action == "__worker-prior")
         {
-            if (argc != 6) workerExit (75);
+            if (argc != 8) workerExit (75);
             const auto callerPid = parsePid (argv[4]);
-            const auto parentHelperPid = parsePid (argv[5]);
+            const ProcessToken callerToken {
+                parseTokenPart (argv[5]),
+                parseTokenPart (argv[6]),
+            };
+            const auto parentHelperPid = parsePid (argv[7]);
             runWorker (
                 parentHelperPid,
                 callerPid,
+                callerToken,
                 canonicalPath (argv[3], true),
                 { "--mosh-owner-checkpoint", argv[2] },
                 [=] { validateCallerIdentity (callerPid, helper); },
@@ -543,13 +603,18 @@ int main (int argc, char** argv)
                 fail ("usage", "handoff-repair requires app, worktree, sourceSha, checkpoint, callerPid");
             const auto callerPid = parsePid (argv[6]);
             validateCaller (callerPid, helper);
+            const auto callerToken = processToken (callerPid);
+            if (! callerToken.has_value())
+                throw std::runtime_error ("caller_identity_unavailable");
             const auto target = repairTarget (argv[2], argv[3], argv[4], helper);
             const auto checkpoint = canonicalPath (argv[5], false);
             acceptHandoff (
                 callerPid,
                 target.app,
                 { "__worker-repair", target.app.string(), target.worktree.string(),
-                  target.sourceSha, checkpoint.string(), std::to_string (callerPid) });
+                  target.sourceSha, checkpoint.string(), std::to_string (callerPid),
+                  std::to_string (callerToken->seconds),
+                  std::to_string (callerToken->microseconds) });
             return 0;
         }
         if (action == "handoff-prior")
@@ -558,12 +623,17 @@ int main (int argc, char** argv)
                 fail ("usage", "handoff-prior requires checkpoint, app, callerPid");
             const auto callerPid = parsePid (argv[4]);
             validateCaller (callerPid, helper);
+            const auto callerToken = processToken (callerPid);
+            if (! callerToken.has_value())
+                throw std::runtime_error ("caller_identity_unavailable");
             const auto target = priorTarget (argv[2], argv[3], helper);
             acceptHandoff (
                 callerPid,
                 target.app,
                 { "__worker-prior", target.checkpoint.string(), target.app.string(),
-                  std::to_string (callerPid) });
+                  std::to_string (callerPid),
+                  std::to_string (callerToken->seconds),
+                  std::to_string (callerToken->microseconds) });
             return 0;
         }
         fail ("action_refused", "Unknown repair helper action");
