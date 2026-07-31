@@ -5,6 +5,13 @@ import {
 } from "./orchestration-fixture.js";
 
 describe("repair swap restart continuation", () => {
+  const hostileFailure = () => Object.assign(new Error([
+    "Authorization: Bearer hostile-bearer-token",
+    "OPENAI_API_KEY=sk-hostile-openai-token",
+    "SUPABASE_SERVICE_ROLE_KEY=supabase-hostile-token",
+    "/Users/owner/private/repair.app",
+  ].join(" ")), { code: "github_pat_hostilecodevalue" });
+
   it.each([
     {
       state: "checkpointed" as const,
@@ -117,5 +124,52 @@ describe("repair swap restart continuation", () => {
       "repair.prior_app.launched",
       "repair.swap.rolled_back",
     ]);
+  });
+
+  it("redacts hostile helper failures from returned errors, swap JSON, and events", async () => {
+    const { fakes, service, store, report, repair } =
+      await persistedSwapFixture("checkpointed");
+    fakes.failProcessAction = "close_mosh";
+    fakes.failProcessError = hostileFailure();
+
+    let launchReturned = "";
+    try {
+      await service.launchRepairBuild(repair.id, "/build/Mosh.app");
+    } catch (error) {
+      launchReturned = JSON.stringify({
+        code: (error as Error & { code?: string }).code,
+        message: (error as Error).message,
+      });
+    }
+    const launchDurable = JSON.stringify({
+      repair: await store.loadRepair(repair.id),
+      events: await store.loadEvents(report.playtestId),
+      returned: launchReturned,
+    });
+    expect(launchDurable).toContain("[REDACTED]");
+    expect(launchDurable).not.toMatch(
+      /Authorization|hostile-bearer|sk-hostile|supabase-hostile|github_pat_hostile|\/Users\/owner/u,
+    );
+
+    fakes.failProcessAction = "close_repair";
+    fakes.failProcessError = hostileFailure();
+    let rollbackReturned = "";
+    try {
+      await service.rollbackRepair(repair.id, "retry after helper failure");
+    } catch (error) {
+      rollbackReturned = JSON.stringify({
+        code: (error as Error & { code?: string }).code,
+        message: (error as Error).message,
+      });
+    }
+    const rollbackDurable = JSON.stringify({
+      repair: await store.loadRepair(repair.id),
+      events: await store.loadEvents(report.playtestId),
+      returned: rollbackReturned,
+    });
+    expect(rollbackDurable).toContain("[REDACTED]");
+    expect(rollbackDurable).not.toMatch(
+      /Authorization|hostile-bearer|sk-hostile|supabase-hostile|github_pat_hostile|\/Users\/owner/u,
+    );
   });
 });

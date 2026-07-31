@@ -74,7 +74,7 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
       calls.git.push(`${input.branch}:${input.path}`);
     },
     removeWorktree: async (input) => {
-      calls.git.push(`remove:${input.path}`);
+      calls.git.push(`remove:${input.branch}:${input.path}`);
     },
   };
   const processes: ProcessAdapter = {

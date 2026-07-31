@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { PlaytestReport, RepairJob } from "./contracts.js";
-import { sanitizeAuditData } from "./audit-boundary.js";
+import { safeFailure } from "./audit-boundary.js";
 import type { PlaytestStore } from "./persistence.js";
 import { reportContext } from "./report-context.js";
 import {
@@ -12,21 +12,6 @@ import {
 function slug(value: string): string {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return normalized.slice(0, 48) || "repair";
-}
-
-function safeFailure(error: unknown): { code: string; message: string } {
-  const candidate = error instanceof Error ? error : new Error("Repair start failed");
-  const code = error && typeof error === "object" && "code" in error
-    ? error.code
-    : undefined;
-  const sanitized = sanitizeAuditData({
-    code: typeof code === "string" ? code : "repair_start_failed",
-    message: candidate.message,
-  });
-  return {
-    code: typeof sanitized.code === "string" ? sanitized.code : "repair_start_failed",
-    message: typeof sanitized.message === "string" ? sanitized.message : "Repair start failed",
-  };
 }
 
 export class RepairManager {
@@ -111,7 +96,11 @@ export class RepairManager {
         (event) => this.emit(report.playtestId, `repair.codex.${event.type}`, { ...event.data }),
       );
     } catch (error) {
-      const startFailure = safeFailure(error);
+      const startFailure = safeFailure(
+        error,
+        "repair_start_failed",
+        "Repair start failed",
+      );
       repair = {
         ...repair,
         status: worktreeCreated ? "failed" : "queued",
@@ -125,6 +114,7 @@ export class RepairManager {
           await this.dependencies.git.removeWorktree({
             repositoryPath: this.dependencies.repositoryPath,
             path: worktreePath,
+            branch,
           });
           worktreeRemoved = true;
         } catch {
@@ -161,14 +151,15 @@ export class RepairManager {
         cwd: worktreePath,
       });
     } catch (error) {
-      const failureCode = (error as Error & { code?: string }).code ?? "repair_start_failed";
+      const startFailure = safeFailure(
+        error,
+        "repair_start_failed",
+        "Repair start failed",
+      );
       repair = {
         ...repair,
         status: "failed",
-        failure: {
-          code: failureCode,
-          message: (error as Error).message,
-        },
+        failure: startFailure,
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(repair);
@@ -177,6 +168,7 @@ export class RepairManager {
         await this.dependencies.git.removeWorktree({
           repositoryPath: this.dependencies.repositoryPath,
           path: worktreePath,
+          branch,
         });
         worktreeRemoved = true;
       } catch {
@@ -184,10 +176,10 @@ export class RepairManager {
       }
       await this.emit(report.playtestId, "repair.start.failed", {
         repairId: repair.id,
-        code: failureCode,
+        code: startFailure.code,
         worktreeRemoved,
       });
-      throw error;
+      throw failure(startFailure.code, startFailure.message);
     }
     return repair;
   }

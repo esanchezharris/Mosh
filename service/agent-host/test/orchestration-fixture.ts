@@ -29,7 +29,9 @@ export class OrchestrationFakes {
   evidenceSha = "a".repeat(64);
   failWorktree = false;
   failAppAction: "initialize" | "thread" | "turn" | undefined;
+  failAppError: (Error & { code?: string }) | undefined;
   failProcessAction: string | undefined;
+  failProcessError: (Error & { code?: string }) | undefined;
 
   evidence: EvidenceAdapter = {
     uploadPng: async (input) => {
@@ -65,20 +67,23 @@ export class OrchestrationFakes {
     initialize: async () => {
       this.appCalls.push({ kind: "initialize", value: null });
       if (this.failAppAction === "initialize") {
-        throw Object.assign(new Error("injected initialize failure"), { code: "injected" });
+        throw this.failAppError
+          ?? Object.assign(new Error("injected initialize failure"), { code: "injected" });
       }
     },
     startThread: async (input) => {
       this.appCalls.push({ kind: "thread", value: input });
       if (this.failAppAction === "thread") {
-        throw Object.assign(new Error("injected thread failure"), { code: "injected" });
+        throw this.failAppError
+          ?? Object.assign(new Error("injected thread failure"), { code: "injected" });
       }
       return `${input.mode}-thread`;
     },
     startTurn: async (input) => {
       this.appCalls.push({ kind: "turn", value: input });
       if (this.failAppAction === "turn") {
-        throw Object.assign(new Error("injected turn failure"), { code: "injected" });
+        throw this.failAppError
+          ?? Object.assign(new Error("injected turn failure"), { code: "injected" });
       }
       return "turn-1";
     },
@@ -93,7 +98,7 @@ export class OrchestrationFakes {
       }
     },
     removeWorktree: async (input) => {
-      this.gitCalls.push(JSON.stringify({ remove: input.path }));
+      this.gitCalls.push(JSON.stringify({ remove: input.path, branch: input.branch }));
     },
   };
 
@@ -124,12 +129,20 @@ export class OrchestrationFakes {
     await new Promise((resolve) => setTimeout(resolve, 2));
     if (this.failProcessAction === name) {
       this.failProcessAction = undefined;
-      throw Object.assign(new Error(`injected ${name} failure`), { code: "injected" });
+      const error = this.failProcessError
+        ?? Object.assign(new Error(`injected ${name} failure`), { code: "injected" });
+      this.failProcessError = undefined;
+      throw error;
     }
   }
 }
 
-export async function orchestrationFixture() {
+export async function orchestrationFixture(options: {
+  git?: GitAdapter;
+  repositoryPath?: string;
+  worktreeRoot?: string;
+  buildSha?: string;
+} = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "mosh-task4-"));
   const fakes = new OrchestrationFakes();
   const store = new PlaytestStore(root);
@@ -137,11 +150,11 @@ export async function orchestrationFixture() {
     evidence: fakes.evidence,
     github: fakes.github,
     appServer: fakes.appServer,
-    git: fakes.git,
+    git: options.git ?? fakes.git,
     processes: fakes.processes,
     artifacts: fakes.artifacts,
-    repositoryPath: "/repo",
-    worktreeRoot: "/worktrees",
+    repositoryPath: options.repositoryPath ?? "/repo",
+    worktreeRoot: options.worktreeRoot ?? "/worktrees",
   });
   const service = new AgentHostService(store, undefined, undefined, orchestration);
   await service.initialize();
@@ -158,7 +171,7 @@ export async function orchestrationFixture() {
       localPath: imagePath,
       sha256: "a".repeat(64),
       metadata: {
-        buildSha: "1".repeat(40),
+        buildSha: options.buildSha ?? "1".repeat(40),
         dirtyDigest: "clean",
         snapshotDigest: "c".repeat(64),
         recentResults: [{ ok: false, command: "set_loop" }],

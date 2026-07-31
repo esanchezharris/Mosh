@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+export type CommandEnvironment = Readonly<Record<string, string>>;
+
 export type CommandResult = {
   exitCode: number;
   stdout: string;
@@ -22,11 +24,68 @@ export function parseJson(text: string): unknown {
   }
 }
 
+const baseEnvironmentKeys = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "__CF_USER_TEXT_ENCODING",
+] as const;
+
+const githubEnvironmentKeys = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+  "GH_HOST",
+  "GH_CONFIG_DIR",
+  "GH_PROMPT_DISABLED",
+  "GH_NO_UPDATE_NOTIFIER",
+  "SSH_AUTH_SOCK",
+] as const;
+
+function selectedEnvironment(
+  source: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): CommandEnvironment {
+  return Object.freeze(Object.fromEntries(keys.flatMap((key) => {
+    const value = source[key];
+    return typeof value === "string" ? [[key, value]] : [];
+  })));
+}
+
+export function githubCommandEnvironment(
+  source: NodeJS.ProcessEnv,
+): CommandEnvironment {
+  return selectedEnvironment(source, [...baseEnvironmentKeys, ...githubEnvironmentKeys]);
+}
+
+export function localGitCommandEnvironment(
+  source: NodeJS.ProcessEnv,
+): CommandEnvironment {
+  return selectedEnvironment(source, baseEnvironmentKeys);
+}
+
+export function repairHelperCommandEnvironment(
+  source: NodeJS.ProcessEnv,
+): CommandEnvironment {
+  return selectedEnvironment(source, baseEnvironmentKeys);
+}
+
 export class NodeCommandRunner implements CommandRunner {
+  private readonly environment: CommandEnvironment;
+
+  constructor(environment: CommandEnvironment) {
+    this.environment = Object.freeze({ ...environment });
+  }
+
   async run(command: string, args: readonly string[], cwd?: string): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, [...args], {
         ...(cwd ? { cwd } : {}),
+        env: this.environment,
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stdout = "";

@@ -1,4 +1,5 @@
 import type { RepairJob } from "./contracts.js";
+import { safeFailure } from "./audit-boundary.js";
 import type { PlaytestStore } from "./persistence.js";
 import {
   failure,
@@ -107,12 +108,17 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.build.launched", { repairId, buildPath });
       return current;
     } catch (error) {
+      const swapFailure = safeFailure(
+        error,
+        "repair_swap_failed",
+        "Repair swap failed",
+      );
       const failed: RepairJob = {
         ...current,
         swap: {
           state: "failed",
           buildPath,
-          error: (error as Error).message,
+          error: swapFailure.message,
         },
         updatedAt: new Date().toISOString(),
       };
@@ -120,9 +126,9 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.swap.failed", {
         repairId,
         fromState: current.swap?.state ?? "checkpoint",
-        code: (error as Error & { code?: string }).code ?? "repair_swap_failed",
+        code: swapFailure.code,
       });
-      throw error;
+      throw failure(swapFailure.code, swapFailure.message);
     }
   }
 
@@ -179,18 +185,23 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.swap.rolled_back", { repairId, reason });
       return rolledBack;
     } catch (error) {
+      const rollbackFailure = safeFailure(
+        error,
+        "repair_rollback_failed",
+        "Repair rollback failed",
+      );
       const failed: RepairJob = {
         ...current,
-        swap: { ...current.swap, state: "failed", error: (error as Error).message },
+        swap: { ...current.swap, state: "failed", error: rollbackFailure.message },
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(failed);
       await this.emit(current.playtestId, "repair.swap.failed", {
         repairId,
         fromState: "rolling_back",
-        code: (error as Error & { code?: string }).code ?? "repair_rollback_failed",
+        code: rollbackFailure.code,
       });
-      throw error;
+      throw failure(rollbackFailure.code, rollbackFailure.message);
     }
   }
 }

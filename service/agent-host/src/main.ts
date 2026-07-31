@@ -6,15 +6,20 @@ import {
   EdgeFunctionEvidenceAdapter,
   GhGitHubAdapter,
   GitCliAdapter,
+  githubCommandEnvironment,
+  localGitCommandEnvironment,
   LazyCodexAppServerAdapter,
   NodeCommandRunner,
+  repairHelperCommandEnvironment,
   RepairControlAdapter,
 } from "./adapters.js";
 import { OwnerOrchestrator } from "./orchestration.js";
 import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
 const apiKey = process.env.OPENAI_API_KEY;
-const runner = new NodeCommandRunner();
+const githubRunner = new NodeCommandRunner(githubCommandEnvironment(process.env));
+const gitRunner = new NodeCommandRunner(localGitCommandEnvironment(process.env));
+const repairRunner = new NodeCommandRunner(repairHelperCommandEnvironment(process.env));
 const codex = new LazyCodexAppServerAdapter();
 const evidenceEndpoint = process.env.MOSH_PLAYTEST_EVIDENCE_URL;
 const evidenceSecret = process.env.MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET;
@@ -32,10 +37,10 @@ const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
         endpoint: evidenceEndpoint,
         ownerSecret: evidenceSecret,
       }),
-      github: new GhGitHubAdapter(runner, githubRepository),
+      github: new GhGitHubAdapter(githubRunner, githubRepository),
       appServer: codex,
-      git: new GitCliAdapter(runner),
-      processes: new RepairControlAdapter(runner, repairHelper, repairArtifacts),
+      git: new GitCliAdapter(gitRunner),
+      processes: new RepairControlAdapter(repairRunner, repairHelper, repairArtifacts),
       artifacts: repairArtifacts,
       repositoryPath,
       worktreeRoot,

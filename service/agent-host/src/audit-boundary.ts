@@ -29,6 +29,15 @@ function redact(value: string, secrets: readonly string[]): string {
   return safe.slice(0, MAX_STRING);
 }
 
+function redactFailureText(value: string): string {
+  return value
+    .replace(/\bAuthorization\s*:\s*(?:Bearer\s+)?\S+/giu, REDACTED)
+    .replace(
+      /\/(?:Users|Volumes|private|tmp|var\/folders|Applications|Library|opt|usr\/local)\/[^\s"'`,;)]+/gu,
+      "[REDACTED_PATH]",
+    );
+}
+
 function bounded(
   value: unknown,
   secrets: readonly string[],
@@ -56,4 +65,29 @@ export function sanitizeAuditData(
   const safe = bounded(data, configuredSecrets(environment), 0) as Record<string, unknown>;
   if (Buffer.byteLength(JSON.stringify(safe), "utf8") <= MAX_EVENT_BYTES) return safe;
   return { truncated: true };
+}
+
+export function safeFailure(
+  error: unknown,
+  fallbackCode: string,
+  fallbackMessage: string,
+): { code: string; message: string } {
+  const candidate = error instanceof Error ? error : new Error(fallbackMessage);
+  const rawCode = error && typeof error === "object" && "code" in error
+    ? error.code
+    : fallbackCode;
+  const sanitized = sanitizeAuditData({
+    code: typeof rawCode === "string" ? rawCode : fallbackCode,
+    message: candidate.message || fallbackMessage,
+  });
+  const code = redactFailureText(
+    typeof sanitized.code === "string" ? sanitized.code : fallbackCode,
+  );
+  const message = redactFailureText(
+    typeof sanitized.message === "string" ? sanitized.message : fallbackMessage,
+  );
+  return {
+    code: code || fallbackCode,
+    message: message || fallbackMessage,
+  };
 }

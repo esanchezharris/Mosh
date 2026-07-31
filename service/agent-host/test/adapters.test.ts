@@ -6,6 +6,7 @@ import {
   CodexAppServerAdapter,
   EdgeFunctionEvidenceAdapter,
   GhGitHubAdapter,
+  GitCliAdapter,
   type CommandResult,
   type CommandRunner,
   type JsonRpcTransport,
@@ -219,6 +220,21 @@ describe("authenticated gh adapter", () => {
       issueNumber: 9,
     });
     expect(comments).toBe(1);
+  });
+});
+
+describe("repair git branch boundary", () => {
+  it("refuses branch cleanup outside the owned codex/playtest namespace before running git", async () => {
+    const runner = new FakeRunner();
+    const adapter = new GitCliAdapter(runner);
+
+    await expect(adapter.removeWorktree({
+      repositoryPath: "/repo",
+      path: "/worktrees/repair",
+      branch: "main",
+    })).rejects.toMatchObject({ code: "git_branch_refused" });
+
+    expect(runner.calls).toEqual([]);
   });
 });
 

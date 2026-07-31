@@ -1,4 +1,12 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  GitCliAdapter,
+  localGitCommandEnvironment,
+  NodeCommandRunner,
+} from "../src/adapters.js";
 import {
   orchestrationFixture,
   repairResult,
@@ -6,6 +14,18 @@ import {
 } from "./orchestration-fixture.js";
 
 describe("repair worktree and app lifecycle", () => {
+  async function runGit(
+    runner: NodeCommandRunner,
+    repository: string,
+    args: readonly string[],
+  ) {
+    const result = await runner.run("git", ["-C", repository, ...args]);
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+    }
+    return result.stdout.trim();
+  }
+
   it("refuses a dirty base and admits only one active approved repair", async () => {
     const { fakes, service, report } = await orchestrationFixture();
     await service.approveReport(report.id);
@@ -77,6 +97,92 @@ describe("repair worktree and app lifecycle", () => {
       await expect(service.createRepair(report.id)).resolves.toMatchObject({ status: "running" });
     },
   );
+
+  it.each(["thread", "turn"] as const)(
+    "removes the real owned branch after %s startup failure so the deterministic retry succeeds",
+    async (stage) => {
+      const root = await mkdtemp(path.join(tmpdir(), "mosh-repair-git-retry-"));
+      const repository = path.join(root, "repo");
+      const worktreeRoot = path.join(root, "worktrees");
+      await mkdir(repository);
+      await mkdir(worktreeRoot);
+      const runner = new NodeCommandRunner(localGitCommandEnvironment(process.env));
+      await runGit(runner, repository, ["init"]);
+      await writeFile(path.join(repository, "README.md"), "repair retry\n");
+      await runGit(runner, repository, ["add", "README.md"]);
+      await runGit(runner, repository, [
+        "-c", "user.name=Mosh Test",
+        "-c", "user.email=mosh-test@example.invalid",
+        "commit", "-m", "fixture",
+      ]);
+      const baseSha = await runGit(runner, repository, ["rev-parse", "HEAD"]);
+      const git = new GitCliAdapter(runner);
+      const context = await orchestrationFixture({
+        git,
+        repositoryPath: repository,
+        worktreeRoot,
+        buildSha: baseSha,
+      });
+      await context.service.approveReport(context.report.id);
+      context.fakes.failAppAction = stage;
+
+      await expect(context.service.createRepair(context.report.id))
+        .rejects.toMatchObject({ code: "injected" });
+      const branch = "codex/playtest-42-loop-jumps";
+      const missingBranch = await runner.run("git", [
+        "-C", repository, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`,
+      ]);
+      expect(missingBranch.exitCode).toBe(1);
+
+      context.fakes.failAppAction = undefined;
+      const retry = await context.service.createRepair(context.report.id);
+      expect(retry).toMatchObject({ status: "running", branch });
+      expect(await runGit(runner, repository, [
+        "rev-parse", "--verify", `refs/heads/${branch}`,
+      ])).toBe(baseSha);
+
+      await git.removeWorktree({
+        repositoryPath: repository,
+        path: retry.worktreePath ?? "",
+        branch,
+      });
+    },
+  );
+
+  it("redacts hostile turn-start failures from returned errors, repair JSON, and events", async () => {
+    const { fakes, service, store, report } = await orchestrationFixture();
+    await service.approveReport(report.id);
+    const hostile = [
+      "Authorization: Bearer hostile-bearer-token",
+      "OPENAI_API_KEY=sk-hostile-openai-token",
+      "SUPABASE_SERVICE_ROLE_KEY=supabase-hostile-token",
+      "/Users/owner/private/session.mosh",
+    ].join(" ");
+    fakes.failAppAction = "turn";
+    fakes.failAppError = Object.assign(new Error(hostile), {
+      code: "github_pat_hostilecodevalue",
+    });
+
+    let returned = "";
+    try {
+      await service.createRepair(report.id);
+    } catch (error) {
+      returned = JSON.stringify({
+        code: (error as Error & { code?: string }).code,
+        message: (error as Error).message,
+      });
+    }
+    const durable = JSON.stringify({
+      repairs: await store.listRepairs(),
+      events: await store.loadEvents(report.playtestId),
+      returned,
+    });
+
+    expect(durable).toContain("[REDACTED]");
+    expect(durable).not.toMatch(
+      /Authorization|hostile-bearer|sk-hostile|supabase-hostile|github_pat_hostile|\/Users\/owner/u,
+    );
+  });
 
   it("recovers active-job exclusion and rolls back in safe process order", async () => {
     const { fakes, service, store, report } = await orchestrationFixture();

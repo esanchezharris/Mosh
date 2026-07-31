@@ -16,8 +16,17 @@ import type {
 } from "./orchestration.js";
 import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
-export { NodeCommandRunner } from "./command-runner.js";
-export type { CommandResult, CommandRunner } from "./command-runner.js";
+export {
+  githubCommandEnvironment,
+  localGitCommandEnvironment,
+  NodeCommandRunner,
+  repairHelperCommandEnvironment,
+} from "./command-runner.js";
+export type {
+  CommandEnvironment,
+  CommandResult,
+  CommandRunner,
+} from "./command-runner.js";
 
 const edgeResponse = z.object({
   evidenceId: z.uuid(),
@@ -210,11 +219,32 @@ export class GitCliAdapter implements GitAdapter {
     if (result.exitCode !== 0) throw codedError("git_worktree_failed", "Could not create repair worktree");
   }
 
-  async removeWorktree(input: { repositoryPath: string; path: string }): Promise<void> {
+  async removeWorktree(input: {
+    repositoryPath: string;
+    path: string;
+    branch: string;
+  }): Promise<void> {
+    if (!/^codex\/playtest-[a-z0-9](?:[a-z0-9-]{0,79})$/u.test(input.branch)) {
+      throw codedError("git_branch_refused", "Refusing to delete a non-playtest repair branch");
+    }
     const result = await this.runner.run("git", [
       "-C", input.repositoryPath, "worktree", "remove", "--force", input.path,
     ]);
     if (result.exitCode !== 0) throw codedError("git_worktree_cleanup_failed", "Could not remove repair worktree");
+    const reference = `refs/heads/${input.branch}`;
+    const exists = await this.runner.run("git", [
+      "-C", input.repositoryPath, "show-ref", "--verify", "--quiet", reference,
+    ]);
+    if (exists.exitCode === 1) return;
+    if (exists.exitCode !== 0) {
+      throw codedError("git_branch_inspect_failed", "Could not inspect repair branch");
+    }
+    const removed = await this.runner.run("git", [
+      "-C", input.repositoryPath, "branch", "--delete", "--force", "--", input.branch,
+    ]);
+    if (removed.exitCode !== 0) {
+      throw codedError("git_branch_cleanup_failed", "Could not remove repair branch");
+    }
   }
 }
 

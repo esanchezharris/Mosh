@@ -61,6 +61,7 @@ export interface GitAdapter {
   removeWorktree(input: {
     repositoryPath: string;
     path: string;
+    branch: string;
   }): Promise<void>;
 }
 
