@@ -8,6 +8,7 @@ const {
   realtimeControllerMock,
   requestSupervisorMock,
   runAgentBatchMock,
+  runLoopTaskMock,
   voiceCallbacks,
 } = vi.hoisted(() => {
   const callbacks: { current: { onFinal?: (text: string) => void } | null } = { current: null };
@@ -32,6 +33,7 @@ const {
     },
     requestSupervisorMock: vi.fn(),
     runAgentBatchMock: vi.fn(),
+    runLoopTaskMock: vi.fn(async () => ({ outcome: "done" })),
     voiceCallbacks: callbacks,
   };
 });
@@ -43,6 +45,10 @@ vi.mock("../agent/capabilityRuntime", () => ({
   emitCapabilityTelemetry: vi.fn(),
 }));
 vi.mock("../agent/executor", () => ({ runAgentBatch: runAgentBatchMock, logAgentTurn: vi.fn(async () => {}) }));
+vi.mock("../agent/loop/runTask", () => ({
+  loopAllowed: () => true,
+  runLoopTask: runLoopTaskMock,
+}));
 vi.mock("../agent/ownerCockpitRuntime", () => ({
   ownerCockpitRuntime: cockpitRuntimeMock,
   useOwnerCockpit: () => ({
@@ -107,6 +113,36 @@ describe("AgentComposer supervisor entry point", () => {
 
     expect(requestSupervisorMock).toHaveBeenCalledWith("create a lead track", expect.any(Object));
     expect(runAgentBatchMock).toHaveBeenCalledWith("done", [{ command: "create_track", args: { name: "Lead" } }], expect.objectContaining({ source: "supervisor" }));
+  });
+
+  it("routes the same complex ask exclusively through the flag-selected MoshOps executor seam", async () => {
+    const ask = "build me a lofi sketch";
+    const input = host.querySelector<HTMLInputElement>("[data-testid='agent-input']")!;
+    const send = host.querySelector<HTMLButtonElement>("[data-testid='agent-send']")!;
+    const submit = async () => {
+      valueSetter.call(input, ask);
+      act(() => { input.dispatchEvent(new Event("input", { bubbles: true })); });
+      await act(async () => { send.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    };
+
+    await act(async () => { useSettings.getState().set("ownerCockpit", false); });
+    await submit();
+
+    expect(runLoopTaskMock).toHaveBeenCalledWith(ask, expect.any(Object));
+    expect(requestSupervisorMock).not.toHaveBeenCalled();
+    expect(runAgentBatchMock).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    await act(async () => { useSettings.getState().set("ownerCockpit", true); });
+    await submit();
+
+    expect(requestSupervisorMock).toHaveBeenCalledWith(ask, expect.any(Object));
+    expect(runLoopTaskMock).not.toHaveBeenCalled();
+    expect(runAgentBatchMock).toHaveBeenCalledWith(
+      "done",
+      [{ command: "create_track", args: { name: "Lead" } }],
+      expect.objectContaining({ utterance: ask, source: "supervisor" }),
+    );
   });
 
   it("never sends a complex Apple fallback transcript containing a safe keyword to the supervisor", async () => {

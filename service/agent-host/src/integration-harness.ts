@@ -1,27 +1,19 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AgentInputItem, Session } from "@openai/agents-core";
-import type { SupervisorModelAdapter } from "./openai.js";
-import {
-  OwnerOrchestrator,
-  type AppServerAdapter,
-  type AppServerEvent,
-  type EvidenceAdapter,
-  type GitAdapter,
-  type GitHubAdapter,
-  type ProcessAdapter,
-} from "./orchestration.js";
+import { OwnerOrchestrator } from "./orchestration.js";
 import { PlaytestStore } from "./persistence.js";
 import { startAgentHost } from "./server.js";
 import { AgentHostService } from "./service.js";
-
-const CAPABILITY = "task-5-local-fixture-capability";
-const BUILD_SHA = "1".repeat(40);
-const SCREENSHOT_SHA = "a".repeat(64);
-const PNG = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-]);
+import {
+  createFixtureAdapters,
+  createIntegrationCalls,
+  FixtureSupervisor,
+  INTEGRATION_BUILD_SHA,
+  INTEGRATION_CAPABILITY,
+  INTEGRATION_PNG,
+  INTEGRATION_SCREENSHOT_SHA,
+} from "./integration-fixtures.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -69,7 +61,12 @@ async function missing(filePath: string): Promise<boolean> {
     await stat(filePath);
     return false;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    if (
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "ENOENT"
+    ) return true;
     throw error;
   }
 }
@@ -81,102 +78,20 @@ async function json(response: Response, expectedStatus: number): Promise<JsonRec
   return object(await response.json(), "HTTP response");
 }
 
-function fakeAdapters(calls: {
-  evidence: string[];
-  github: string[];
-  app: string[];
-  git: string[];
-  process: string[];
-}) {
-  const evidence: EvidenceAdapter = {
-    uploadPng: async (input) => {
-      calls.evidence.push(input.evidenceId);
-      return {
-        evidenceId: input.evidenceId,
-        sha256: SCREENSHOT_SHA,
-        objectPath: `${input.playtestId}/${input.reportId}/${input.evidenceId}.png`,
-        previewUrl: "https://fixture.invalid/signed-preview",
-        previewExpiresAt: "2030-01-01T00:00:00.000Z",
-      };
-    },
-  };
-  const github: GitHubAdapter = {
-    syncApprovedReport: async (input) => {
-      calls.github.push(input.reportId);
-      return {
-        status: "synced",
-        issueNumber: 42,
-        issueUrl: "https://fixture.invalid/issues/42",
-      };
-    },
-  };
-  const appServer: AppServerAdapter = {
-    initialize: async () => undefined,
-    startThread: async (input, onEvent) => {
-      calls.app.push(`thread:${input.mode}`);
-      const event: AppServerEvent = {
-        type: "progress",
-        data: { phase: input.mode === "read-only" ? "triage" : "focused-red" },
-      };
-      await onEvent?.(event);
-      return `${input.mode}-thread`;
-    },
-    startTurn: async (input) => {
-      calls.app.push(`turn:${input.mode}`);
-      return `${input.mode}-turn`;
-    },
-  };
-  const git: GitAdapter = {
-    inspectBase: async () => ({ sha: BUILD_SHA, clean: true }),
-    createWorktree: async (input) => {
-      calls.git.push(`${input.branch}:${input.path}`);
-    },
-  };
-  const processes: ProcessAdapter = {
-    checkpoint: async () => {
-      calls.process.push("checkpoint");
-      return { checkpointPath: "/fixture/checkpoint.mosh", priorAppPath: "/fixture/Mosh.app" };
-    },
-    stopTransport: async () => { calls.process.push("stop_transport"); },
-    releaseAudio: async () => { calls.process.push("release_audio"); },
-    closeMosh: async () => { calls.process.push("close_mosh"); },
-    launchRepairBuild: async () => { calls.process.push("launch_repair"); },
-    closeRepairBuild: async () => { calls.process.push("close_repair"); },
-    restoreCheckpoint: async () => { calls.process.push("restore_checkpoint"); },
-    launchPriorApp: async () => { calls.process.push("launch_prior"); },
-  };
-  return { evidence, github, appServer, git, processes };
-}
-
-class FixtureSupervisor implements SupervisorModelAdapter {
-  async run(_input: string, session: Session): Promise<unknown> {
-    await session.addItems([
-      { role: "user", content: "fixture supervisor turn" } as AgentInputItem,
-    ]);
-    return {
-      intent: "Toggle metronome",
-      say: "Metronome ready.",
-      commands: [{ capabilityId: "set_metronome", arguments: { enabled: true } }],
-      needsClarification: false,
-      selectedCapabilityIds: ["set_metronome"],
-    };
-  }
-}
-
 export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrationResult> {
   const root = await mkdtemp(path.join(tmpdir(), "mosh-task-5-integration-"));
-  const calls = { evidence: [] as string[], github: [] as string[], app: [] as string[], git: [] as string[], process: [] as string[] };
+  const calls = createIntegrationCalls();
   const store = new PlaytestStore(root);
-  const adapters = fakeAdapters(calls);
+  const adapters = createFixtureAdapters(calls);
   const orchestrator = new OwnerOrchestrator(store, {
     ...adapters,
     repositoryPath: "/fixture/repository",
     worktreeRoot: "/fixture/worktrees",
   });
   const service = new AgentHostService(store, new FixtureSupervisor(), undefined, orchestrator);
-  const host = await startAgentHost({ service, capability: CAPABILITY, port: 0 });
+  const host = await startAgentHost({ service, capability: INTEGRATION_CAPABILITY, port: 0 });
   const auth = {
-    Authorization: `Bearer ${CAPABILITY}`,
+    Authorization: `Bearer ${INTEGRATION_CAPABILITY}`,
     "Content-Type": "application/json",
   };
   const post = (pathname: string, body: unknown) => fetch(`${host.origin}${pathname}`, {
@@ -208,7 +123,7 @@ export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrat
     }), 200);
 
     const screenshotPath = path.join(root, "window.png");
-    await writeFile(screenshotPath, PNG);
+    await writeFile(screenshotPath, INTEGRATION_PNG);
     const report = await json(await post("/v1/reports", {
       playtestId,
       kind: "bug",
@@ -217,9 +132,9 @@ export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrat
       evidence: [{
         kind: "screenshot",
         localPath: screenshotPath,
-        sha256: SCREENSHOT_SHA,
+        sha256: INTEGRATION_SCREENSHOT_SHA,
         metadata: {
-          buildSha: BUILD_SHA,
+          buildSha: INTEGRATION_BUILD_SHA,
           dirtyDigest: "clean",
           timelinePosition: 8,
           snapshotDigest: "b".repeat(64),
@@ -238,13 +153,13 @@ export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrat
 
     const replayResponse = await fetch(
       `${host.origin}/v1/playtests/${playtestId}/events?afterSequence=0&windowMs=20`,
-      { headers: { Authorization: `Bearer ${CAPABILITY}` } },
+      { headers: { Authorization: `Bearer ${INTEGRATION_CAPABILITY}` } },
     );
     if (replayResponse.status !== 200) throw new Error(`SSE replay failed: ${replayResponse.status}`);
     const replay = await replayResponse.text();
     const streamedEvents = replay.split("\n")
       .filter((line) => line.startsWith("data: "))
-      .map((line) => object(JSON.parse(line.slice(6)) as unknown, "SSE event"))
+      .map((line) => object(JSON.parse(line.slice(6)), "SSE event"))
       .map((event) => stringProperty(event, "type"));
     if (!streamedEvents.includes("codex.progress") || !streamedEvents.includes("repair.codex.progress")) {
       throw new Error("SSE replay omitted coordinator or repair progress");
