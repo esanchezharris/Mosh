@@ -153,8 +153,9 @@ not a finding.
 
 | Finding | Severity | Root cause/disposition | Issue | Fix PR | Native retest |
 |---|---|---|---|---|---|
-| Timeline navigator and ruler emit only one seek for a held Computer Use drag | MAJOR | Confirmed in isolated installed JSONL; component root cause fixed in branch | [#517](https://github.com/zeke431/Mosh/issues/517) | pending | PASS on fixed Release v2; full gate pending |
-| Audio-track selection leaves the MIDI clip inspector visible | MAJOR | Confirmed: track header updates `selectedTrackId` but does not clear the higher-precedence `selectedClipId` | [#518](https://github.com/zeke431/Mosh/issues/518) | blocked behind #517 serial merge boundary | pending |
+| Timeline navigator and ruler emit only one seek for a held Computer Use drag | MAJOR | Pointer-owned continuous scrub fix merged at `364cb6fe`; click and Shift-range behavior preserved | [#517](https://github.com/zeke431/Mosh/issues/517) | [#519](https://github.com/zeke431/Mosh/pull/519) | PASS on exact merged Release |
+| Audio-track selection leaves the MIDI clip inspector visible | MAJOR | Canonical clip selection now clears before the multiplayer-aware track transition; merged at `f3e68992` | [#518](https://github.com/zeke431/Mosh/issues/518) | [#520](https://github.com/zeke431/Mosh/pull/520) | PASS on exact merged Release |
+| Packaged Moshi substitutes demo commands after a brain-provider failure | MAJOR | Both single-shot and agentic-loop callers now fail visibly without commands; deterministic mocks remain Vite/e2e-only | [#521](https://github.com/zeke431/Mosh/issues/521) | [#522](https://github.com/zeke431/Mosh/pull/522) | Single-shot PASS; exact two-path rerun pending desktop unlock |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
@@ -268,7 +269,7 @@ failure claim.
 | CAP-TRK-002 Rename/recolor/reorder/delete/icons | partial / partial | NOT REACHED |
 | CAP-TRK-009 Inactive tracks/inserts | partial / partial | NOT REACHED |
 | CAP-TRN-001 Play/stop/pause/resume | shipped / shipped | PASS sampled; long-session pending |
-| CAP-TRN-002 Seek/navigation | shipped / shipped | Installed FAIL; fixed Release native PASS at PR head; owner merge and final campaign rerun pending |
+| CAP-TRN-002 Seek/navigation | shipped / shipped | Installed FAIL; exact merged Release PASS at `364cb6fe`; final campaign rerun pending |
 | CAP-TRN-004 Loop region keyboard set/move/resize | shipped / partial | Shift range PASS; loop behavior NOT REACHED |
 | CAP-TRN-005 Metronome configuration | partial / partial | Toggle reached; audio/routing NOT REACHED |
 
