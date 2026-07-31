@@ -60,7 +60,7 @@ build).
 
 ## Current Status (as of 2026-07-30)
 
-- **Trunk:** `origin/main` @ `364cb6fe` (merge of #519, 2026-07-30)
+- **Trunk:** `origin/main` @ `f3e68992` (merge of #520, 2026-07-30)
   [measured: `git log -1 origin/main`].
 - **The Vocal Map Playtest Program is the active push.** Work advances through
   one fully gated, owner-merged serial PR at a time. Architecture-improvement
