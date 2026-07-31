@@ -1,10 +1,10 @@
 // AUD-017 — the pure decision layer of the bounded audio-device startup.
 //
-// The blocking part (a CoreAudio open on a worker thread with a timeout) needs real
-// hardware and lives in MoshEngine.cpp, which MoshTests deliberately cannot link. What
-// IS testable here is everything that decides how long to wait and what the user is
-// told — and those are exactly the parts that would silently rot: a timeout that a typo
-// turns off, or an error message that names nothing.
+// The blocking part (a CoreAudio open in a killable child process with a timeout)
+// needs real hardware and lives in MoshEngine.cpp, which MoshTests deliberately
+// cannot link. What IS testable here is everything that decides how long to wait
+// and what the user is told — and those are exactly the parts that would silently
+// rot: a timeout that a typo turns off, or an error message that names nothing.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -181,8 +181,10 @@ TEST_CASE ("probe framing cannot be shifted or spoofed by device output", "[audi
     const auto spoof = juce::String (kProbeResultPrefix)
                      + "00000000000000000000000000000000 \"\"\n";
     CHECK_FALSE (parseProbeResponse (spoof, nonce).valid);
-    CHECK_FALSE (parseProbeResponse (spoof + probeResultLine (nonce, "real"), nonce)
-                     .error.isEmpty());
+    const auto spoofThenReal =
+        parseProbeResponse (spoof + probeResultLine (nonce, "real"), nonce);
+    REQUIRE (spoofThenReal.valid);
+    CHECK_FALSE (spoofThenReal.error.isEmpty());
     CHECK_FALSE (parseProbeResponse (
         probeResultLine (nonce, {}) + probeResultLine (nonce, "duplicate"), nonce).valid);
     CHECK_FALSE (parseProbeResponse (

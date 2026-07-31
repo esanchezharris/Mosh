@@ -143,7 +143,7 @@ tree. It did not inspect source, logs, or hidden commands.
 | A09 | Undo/redo | Edit menu | Inspect entries | Undo/redo are reachable | Entries exposed; behavior not yet exercised | `more-tools.png` | MAJOR | pending journey | — | PARTIAL |
 | A10 | Shift-drag range | Detailed ruler | Shift-held drag | Range appears; no transport scrub | Black-box tool could not hold a modifier; informed native pass below succeeds | `shift-drag-attempt.png` | NOTE | — | — | PASS informed |
 | A11 | Audio track selection | MIDI clip selected; audio track present | Select audio track header | Track selection and inspector target are unambiguous | Audio track showed selected while MIDI clip inspector remained visible | `audio-selection-mismatch.png` | MAJOR | [#518](https://github.com/zeke431/Mosh/issues/518) | — | FAIL |
-| A12 | Degraded-audio Settings recovery | Exact merged Release; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` timed out, then Settings blocked in CoreAudio enumeration while the process stayed alive | `merged-379bd6a1/audio-device-failure-before-settings.jpg`, `merged-379bd6a1/showcase-settings-hang.sample.txt` | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | pending | FAIL baseline; successor native retest blocked |
+| A12 | Degraded-audio Settings recovery | Exact Release candidate; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; click Retry; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` blocked in Settings; candidate `84e29db2` returned from Retry in about 254 ms and Settings displayed “No audio device in this session” | `issue-527-84e29db2/native-before-retry.png`, `native-after-retry.png`, `native-settings-routing.png`, `retry-command-redacted.jsonl` | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | PASS candidate; merged-Release rerun pending |
 
 Correction to the source-free report: direct comparison of
 `before-ruler-drag.png` and `after-ruler-drag.png` shows that the MIDI clip
@@ -158,7 +158,8 @@ not a finding.
 | Audio-track selection leaves the MIDI clip inspector visible | MAJOR | Canonical clip selection now clears before the multiplayer-aware track transition; merged at `f3e68992` | [#518](https://github.com/zeke431/Mosh/issues/518) | [#520](https://github.com/zeke431/Mosh/pull/520) | PASS on exact merged Release |
 | Packaged Moshi substitutes demo commands after a brain-provider failure | MAJOR | Both single-shot and agentic-loop callers now fail visibly without commands; browser mocks use an explicit `e2e` mode and isolated `dist-e2e`, legacy/ambient development builds abort, and a real native WebView disables demo brains. The complete exact-head evidence successor merged at `6c3687db`. | [#521](https://github.com/zeke431/Mosh/issues/521) | [#522](https://github.com/zeke431/Mosh/pull/522) | PASS on exact merged Release |
 | Agentic terminal task drawer is exposed to accessibility before its pixels become visible | MAJOR | The entrance animation started at `opacity: 0`; the fix keeps the drawer opaque from mount while retaining its 6 px motion. The complete exact-head evidence successor merged at `379bd6a1`. | [#525](https://github.com/zeke431/Mosh/issues/525) | [#526](https://github.com/zeke431/Mosh/pull/526) | PASS on exact merged Release |
-| Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 moves the setup preflight into a killable child and suppresses degraded enumeration. Candidate `a20c5651` passed command-level recovery but was rejected for lossy empty argv fields, a non-identical rate/buffer/channel preflight, Linux no-app CMake breakage, and missing exact-head native pixels. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | FAIL; repaired successor and native permission handoff pending |
+| Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 moves the complete saved/default setup preflight into a killable child and suppresses degraded enumeration. Candidate `84e29db2` passed the uncontended native gate, executable smoke, hosted checks, visible Retry/Settings journey, and four implementation/security/QA review lanes; the context lane required this ledger refresh before publication. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | PASS candidate; owner-ordered rebase/merged-Release rerun pending |
+| Failed audio Retry duplicates the persistent degraded-audio warning | MINOR | Retry is bounded and truthful, but its failure notification repeats the existing banner and remains visible; separate presentation/accessibility root cause parked behind #528 | [#529](https://github.com/zeke431/Mosh/issues/529) | pending | FAIL candidate; does not block #527 |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
@@ -170,21 +171,21 @@ merge SHA `379bd6a1f6a653317bce98115f2fb686ad7444b0`. Its first broader-showcase
 launch exposed blocker #527: the five-second startup timeout returned, but
 opening Settings then blocked the UI in a second CoreAudio device scan.
 
-Issue #527 is the active serial fix in PR #528. Candidate `a20c5651` added a
-real executable timeout-to-degraded-command smoke, nonce-bound JSON framing,
-verified child termination, and one parent-side Tracktion initialization. Its
-five-lane review still failed: JUCE drops empty argv fields, the child did not
-consume saved sample rate/buffer/channel settings, Linux no-app configuration
-referenced the absent Mosh target, and a fresh exact app identity stopped at
-macOS permission prompts before visible Settings/Retry evidence. The working
-successor encodes the complete saved setup in a non-empty field, opens it
-through the same JUCE AudioDeviceManager path Tracktion uses, covers default
-and one-sided argv transport, and guards the app-only CTest. It is not
-mergeable until a new exact SHA has a clean native gate, visible Settings and
-Retry proof after owner permission handoff, all five exact-SHA review lanes,
-terminal hosted checks, and a resolved ordering against draft PR #523.
-Overlapping PRs #471 and #478 must rebase after #528 and replace their
-SHA-bound evidence; PR #473 also overlaps `tests/CMakeLists.txt`.
+Issue #527 is the active serial fix in PR #528. Candidate `84e29db2` encodes
+the complete saved setup in a non-empty field, opens it through the same JUCE
+AudioDeviceManager path Tracktion uses, covers default and one-sided argv
+transport, and guards the app-only CTest. Its uncontended full native gate
+passed (selftest 2214 × 3, CTest 2/2, render 29/29, conformance 154/0, Vitest
+2218/1), the executable recovery smoke passed, all hosted checks passed, and
+native Computer Use showed bounded Retry plus responsive Settings. Goal,
+security, code, and QA lanes passed; the context lane rejected stale ledger
+and public records, which this successor refreshes. Any successor commit must
+receive a fresh exact-SHA gate and five-lane review. PR #528 remains
+non-mergeable under VM-D015 until draft, owner-only PR #523 lands or the owner
+explicitly changes the order. After #523, #528 must rebase and replace every
+SHA-bound artifact. Overlapping PRs #471 and #478 must then rebase after #528;
+PR #473 also overlaps `tests/CMakeLists.txt`. Issue #529 is separately parked
+behind #528.
 
 The showcase, configured-backend pass, same-Mac collaboration run, export
 matrix, stem validation, and final merged-SHA inventory rerun remain open.
@@ -206,8 +207,10 @@ the original probe thread remained blocked in `AudioDeviceStart`.
   `merged-379bd6a1/showcase-settings-hang.sample.txt`
   (`f04a072d05fdf0f1d7a5f39f4974e2bd328ef50657fb78aa46a109f916cc1dc0`)
 
-PR #528 launches the same executable with `--audio-probe`, passes device names
-in fixed positional slots, and accepts exactly one nonce-bound JSON result.
+PR #528 launches the same executable with an exact `--audio-probe` mode token,
+passes the complete saved `DEVICESETUP` XML as one bounded, non-empty encoded
+argument (or the literal default setup), and accepts exactly one nonce-bound
+JSON result.
 Timeout returns only after the helper is killed and reaped. A successful
 preflight is followed by one Tracktion initialization of the same XML setup;
 probe refusal degrades instead of attempting a different fallback device. In
@@ -228,9 +231,24 @@ touching hardware. It then calls `list_audio_devices`,
 `retry_audio_device`, and `list_audio_devices`. The smoke passes only when all
 three argv probes reach the injected stall, both list calls return within one
 second with `audioEnabled:false` and zero device types, and Retry returns its
-second bounded timeout within two seconds. The successor exact SHA, gate hash,
-native Settings/Retry evidence, and five review verdicts will be stored outside
-the repository and bound through PR #528 only after the commit is frozen.
+second bounded timeout within two seconds.
+
+Candidate `84e29db241882b838596a5d1956433ea4e0429dd` is frozen under
+`~/Library/Mosh/audits/production-v2-20260730/issue-527-84e29db2/`.
+Its final uncontended native gate hashes to
+`41d1c336f44848c8f0abce5372c8afc4de2e4bca547bfc8c0a5661276f25998c`;
+the executable smoke hashes to
+`dc0e5d5a9bc4f616f8c07e11b7f453b430b945e04dac598d1ce6ae0d644c0812`.
+The native QA ledger hashes to
+`0d9acc07c2cb9b81cb2b5244081c9f067efd085b5a1530c0ae279a8ac9955e07`;
+the Settings screenshot to
+`fb2ba51bb2d6b4cf331bfaf175af2c755448ea705c355bcb59b214092eb41284`;
+and the redacted Retry command record to
+`1bc3ec25c61295bcc3a665f791e8a7118f8bc417a61af1081990d1a96e4d1b0a`.
+The first concurrent gate attempt remains archived as diagnostic history; an
+isolated rerun and the final uncontended gate both passed. This ledger-only and
+exact-mode cleanup successor must receive new SHA-bound gate and review proof
+before it can replace the candidate.
 
 ## Timeline scrub fix evidence
 

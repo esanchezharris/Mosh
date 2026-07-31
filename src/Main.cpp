@@ -95,10 +95,13 @@ public:
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
 
-        if (commandLine.contains ("--audio-probe"))
+        const auto commandLineParameters =
+            juce::JUCEApplicationBase::getCommandLineParameterArray();
+        if (! commandLineParameters.isEmpty()
+            && commandLineParameters[0] == "--audio-probe")
         {
             const auto request = audiostartup::parseProbeRequest (
-                juce::JUCEApplicationBase::getCommandLineParameterArray());
+                commandLineParameters);
             if (! request.valid)
             {
                 setApplicationReturnValue (2);
