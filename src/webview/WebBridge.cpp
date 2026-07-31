@@ -1,5 +1,6 @@
 #include "WebBridge.h"
 #include "UiResourcePathGuard.h"
+#include "../agent/AgentHostProxy.h"
 #include "../brain/BrainProxy.h"
 #include "../voice/NativeSpeech.h"
 // Crash/telemetry module (src/telemetry/) — opt-in, privacy-respecting. This is
@@ -228,6 +229,24 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 juce::Thread::launch ([messages, provider, completion]() mutable
                 {
                     auto result = BrainProxy::chat (messages, provider);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        // Owner-cockpit supervisor relay. This is intentionally a narrow native
+        // function rather than a browser URL: AgentHostProxy starts the local Node
+        // process lazily, keeps its generated bearer capability private, and accepts
+        // only the bounded supervisor-turn request.
+        .withNativeFunction (
+            juce::Identifier ("agent_host_supervisor_turn"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto request = args.size() > 0 ? args[0] : juce::var();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, request, completion]() mutable
+                {
+                    auto result = host->supervisorTurn (request);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })

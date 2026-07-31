@@ -8,6 +8,7 @@
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
+#include "agent/AgentHostProxy.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
@@ -7033,6 +7034,48 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
+        const auto startup = AgentHostProxy::parseStartupEnvelope (
+            "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"127.0.0.1\",\"port\":8787,\"capability\":\"native-only\"}");
+        check (startup.has_value() && startup->port == 8787 && startup->host == "127.0.0.1",
+               "agent host: accepts a loopback startup envelope without surfacing its capability");
+        check (! AgentHostProxy::parseStartupEnvelope (
+                   "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"0.0.0.0\",\"port\":8787,\"capability\":\"x\"}").has_value(),
+               "agent host: rejects a non-loopback startup envelope");
+
+        // A real lazy-start probe, deliberately with no OpenAI key. It proves the
+        // native proxy can launch the installed local Node host, consume its private
+        // startup capability, create the required private playtest, then surface an
+        // unavailable supervisor without ever returning the capability to this test.
+        const auto hostEntry = File::getCurrentWorkingDirectory().getChildFile ("service/agent-host/src/main.ts");
+        if (hostEntry.existsAsFile())
+        {
+            const auto hostEntryUtf8 = hostEntry.getFullPathName().toStdString();
+            auto hostData = File::createTempFile ("mosh-agent-host-selftest");
+            hostData.deleteFile();
+            hostData.createDirectory();
+            const auto hostDataUtf8 = hostData.getFullPathName().toStdString();
+            mosh::setEnvVar ("MOSH_AGENT_HOST_ENTRY", hostEntryUtf8.c_str());
+            mosh::setEnvVar ("MOSH_AGENT_HOST_DATA_DIR", hostDataUtf8.c_str());
+            mosh::setEnvVar ("OPENAI_API_KEY", "");
+            auto* hostRequest = new DynamicObject();
+            hostRequest->setProperty ("message", "check lazy startup");
+            auto* schema = new DynamicObject();
+            schema->setProperty ("id", "set_metronome");
+            schema->setProperty ("description", "Toggle click");
+            schema->setProperty ("inputSchema", JSON::parse ("{\"type\":\"object\"}"));
+            hostRequest->setProperty ("capabilitySchemas", var (Array<var> { var (schema) }));
+            hostRequest->setProperty ("stateDigest", var (new DynamicObject()));
+            hostRequest->setProperty ("recentResults", var (Array<var>()));
+            hostRequest->setProperty ("conversationContext", var (Array<var>()));
+            AgentHostProxy host;
+            const auto hostResult = host.supervisorTurn (var (hostRequest));
+            check (! (bool) hostResult.getProperty ("ok", false),
+                   "agent host: lazy private launch reaches the unavailable supervisor without exposing credentials");
+            mosh::unsetEnvVar ("MOSH_AGENT_HOST_ENTRY");
+            mosh::unsetEnvVar ("MOSH_AGENT_HOST_DATA_DIR");
+            hostData.deleteRecursively();
+        }
+
         // Deterministic provider resolution — set known env, no network calls.
         mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");
         mosh::setEnvVar ("DEEPSEEK_BASE_URL", "https://api.deepseek.test");

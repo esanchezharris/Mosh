@@ -1,4 +1,5 @@
 import type { SupervisorCapabilitySchema } from "./capability";
+import { agentHostSupervisorTurn } from "../bridge";
 
 export type SupervisorTurnRequest = {
   readonly message: string;
@@ -23,14 +24,7 @@ export class AgentHostUnavailableError extends Error {
   }
 }
 
-type AgentHostConfig = { readonly url: string; readonly capability: string; readonly playtestId: string };
-
-function configuredAgentHost(): AgentHostConfig | null {
-  const url = import.meta.env.VITE_MOSH_AGENT_HOST_URL;
-  const capability = import.meta.env.VITE_MOSH_AGENT_HOST_CAPABILITY;
-  const playtestId = import.meta.env.VITE_MOSH_AGENT_HOST_PLAYTEST_ID;
-  return url && capability && playtestId ? { url, capability, playtestId } : null;
-}
+export const AGENT_HOST_TIMEOUT_MS = 15_000;
 
 function parsePlan(value: unknown, allowedIds: ReadonlySet<string>): SupervisorPlan {
   if (!value || typeof value !== "object") throw new AgentHostUnavailableError("agent host returned an invalid supervisor plan");
@@ -50,17 +44,24 @@ function parsePlan(value: unknown, allowedIds: ReadonlySet<string>): SupervisorP
   return { intent: plan.intent, say: plan.say, commands, needsClarification: plan.needsClarification, selectedCapabilityIds };
 }
 
-/** Reachable production transport. Task 3 supplies the native launch configuration. */
-export async function requestSupervisorTurn(request: SupervisorTurnRequest): Promise<SupervisorPlan> {
-  const config = configuredAgentHost();
-  if (!config) throw new AgentHostUnavailableError();
-  const response = await fetch(`${config.url.replace(/\/$/, "")}/v1/supervisor/turns`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${config.capability}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...request, playtestId: config.playtestId }),
+function withTimeout<T>(operation: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new AgentHostUnavailableError("agent host timed out")), AGENT_HOST_TIMEOUT_MS);
+    operation.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      (reason: unknown) => { window.clearTimeout(timer); reject(reason); },
+    );
   });
-  let body: unknown;
-  try { body = await response.json(); } catch { throw new AgentHostUnavailableError("agent host returned invalid JSON"); }
-  if (!response.ok) throw new AgentHostUnavailableError();
-  return parsePlan(body, new Set(request.capabilitySchemas.map((capability) => capability.id)));
+}
+
+/** Production transport is native-only. The native layer owns the loopback host,
+ * generated bearer capability, and playtest; only a bounded plan returns here. */
+export async function requestSupervisorTurn(request: SupervisorTurnRequest): Promise<SupervisorPlan> {
+  try {
+    const plan = await withTimeout(agentHostSupervisorTurn(request));
+    return parsePlan(plan, new Set(request.capabilitySchemas.map((capability) => capability.id)));
+  } catch (error) {
+    if (error instanceof AgentHostUnavailableError) throw error;
+    throw new AgentHostUnavailableError();
+  }
 }

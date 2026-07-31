@@ -150,6 +150,9 @@ if (MOSH_BUILD_APP)
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp
+        # Owner cockpit: private loopback Node Agent Host proxy. Its generated
+        # capability is retained only in native memory, never in the UI bundle.
+        src/agent/AgentHostProxy.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
         src/webview/UiResourcePathGuard.cpp

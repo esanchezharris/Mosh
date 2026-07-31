@@ -138,6 +138,18 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   return { content: String(j.content ?? "") };
 }
 
+/** Owner-cockpit supervisor transport. The WebView never receives a host URL,
+ * capability, or playtest id: native starts and authenticates the loopback host,
+ * then returns only its plan. There is deliberately no web/dev fallback. */
+export async function agentHostSupervisorTurn(request: unknown): Promise<unknown> {
+  if (!realNative()) throw new Error("agent host unavailable");
+  const result = (await native("agent_host_supervisor_turn")(request)) as { ok?: boolean; plan?: unknown; error?: unknown };
+  if (!result || result.ok !== true || !result.plan) {
+    throw new Error(typeof result?.error === "string" ? result.error : "agent host unavailable");
+  }
+  return result.plan;
+}
+
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
 // through the app, never directly; same layering as brain_chat). In dev/mock there
 // is no service to escalate to: escalateCandidates throws (the hook degrades to the
