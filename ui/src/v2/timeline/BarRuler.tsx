@@ -20,15 +20,31 @@
 // snapTimeMap is the same machinery BarRuler's own bar lines and TempoRibbon already
 // use — see BarRuler.test.ts for the guard that fails if this regresses to geom.ts.
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import type { Snapshot } from "../../types";
 import { tempoMapFrom, snapTimeMap, gridLines, type TempoMap } from "../../time";
 import { contentSeconds } from "./geom";
+import { usePointerScrub } from "./usePointerScrub";
 
-const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).setPointerCapture(id); } catch { /* no-op */ } };
-const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
+const capturePointer = (element: HTMLElement, pointerId: number) => {
+  if (typeof element.setPointerCapture !== "function") return;
+  try {
+    element.setPointerCapture(pointerId);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+};
+
+const releasePointer = (element: HTMLElement, pointerId: number) => {
+  if (typeof element.releasePointerCapture !== "function") return;
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch (error) {
+    if (!(error instanceof DOMException)) throw error;
+  }
+};
 
 /** Pixel-x within the ruler -> bar-snapped seconds, via the PIECEWISE tempo map.
  *  Exported so BarRuler.test.ts can pin this against the flat geom.ts helpers without
@@ -52,47 +68,92 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   // Anchor of an in-progress range drag (seconds, already bar-snapped). null between
   // gestures, and while a plain (non-shift) press is just seeking.
   const anchor = useRef<number | null>(null);
+  const rangePointer = useRef<number | null>(null);
+  const rangeElement = useRef<HTMLDivElement | null>(null);
+  const scrub = usePointerScrub((position) => {
+    void exec("set_transport", { position });
+  });
+  useEffect(() => () => {
+    const pointerId = rangePointer.current;
+    if (pointerId == null) return;
+    if (rangeElement.current) releasePointer(rangeElement.current, pointerId);
+    anchor.current = null;
+    rangePointer.current = null;
+    rangeElement.current = null;
+    setTimeRangeDragging(false);
+    const r = useShell.getState().timeRange;
+    if (r && r.end - r.start < 1e-6) setTimeRange(null);
+  }, [setTimeRange, setTimeRangeDragging]);
+  const positionAt = (element: HTMLDivElement, clientX: number) => {
+    const rect = element.getBoundingClientRect();
+    return Math.max(0, (clientX - rect.left) / pxPerSec);
+  };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (rangePointer.current != null || scrub.isActive()) return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (e.shiftKey) {
       const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
       anchor.current = sec;
+      rangePointer.current = e.pointerId;
+      rangeElement.current = e.currentTarget;
       setTimeRangeDragging(true);
       setTimeRange({ start: sec, end: sec });
       capturePointer(e.currentTarget, e.pointerId);
       return;
     }
-    // Plain press: seek immediately, exactly like classic's onRulerDown — deciding at
-    // pointerdown means there is no click-vs-drag race to referee afterwards.
-    const sec = Math.max(0, (e.clientX - rect.left) / pxPerSec);
-    void exec("set_transport", { position: sec });
+    scrub.begin(e.currentTarget, e.pointerId, positionAt(e.currentTarget, e.clientX));
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (anchor.current == null || e.buttons === 0) return; // stray hover after a lost/cancelled capture
-    const rect = e.currentTarget.getBoundingClientRect();
-    const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
-    setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
+    if (anchor.current != null) {
+      if (rangePointer.current !== e.pointerId) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
+      setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
+      return;
+    }
+    scrub.move(
+      e.pointerId,
+      positionAt(e.currentTarget, e.clientX),
+    );
   };
 
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (anchor.current == null) return;
+  const endRangeDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (anchor.current == null || rangePointer.current !== e.pointerId) return false;
     anchor.current = null;
+    rangePointer.current = null;
+    rangeElement.current = null;
     setTimeRangeDragging(false);
     releasePointer(e.currentTarget, e.pointerId);
     // A shift-press with no real movement leaves a zero-width span — treat it as no
     // selection at all, matching classic's identical range-tool idiom.
     const r = useShell.getState().timeRange;
     if (r && r.end - r.start < 1e-6) setTimeRange(null);
+    return true;
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (anchor.current != null) {
+      endRangeDrag(e);
+      return;
+    }
+    scrub.end(e.currentTarget, e.pointerId, positionAt(e.currentTarget, e.clientX));
+  };
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (anchor.current != null) {
+      endRangeDrag(e);
+      return;
+    }
+    scrub.cancel(e.currentTarget, e.pointerId);
   };
 
   return (
     <div
       className="v2-ruler" style={{ width }} data-testid="v2-ruler"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-      onPointerUp={endDrag} onPointerCancel={endDrag}
-      title="Click to seek — shift-drag to select a time range"
+      onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onPointerCancel}
+      title="Click or drag to scrub — shift-drag to select a time range"
     >
       {bars.map((b, i) => (
         <div key={b.label} className="v2-ruler-bar" style={{ left: b.sec * pxPerSec }}>

@@ -59,38 +59,99 @@ describe("BarRuler — shift-drag time-range gesture", () => {
   let host: HTMLDivElement;
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
+  let frames: Array<{ id: number; cb: FrameRequestCallback }>;
+  let nextFrameId: number;
+  let mounted: boolean;
 
   const render = (s: Snapshot) => act(() => root.render(React.createElement(BarRuler, { snapshot: s, width: 3200 })));
   const ruler = () => host.querySelector('[data-testid="v2-ruler"]') as HTMLElement;
 
   // clientX in PX-per-second units; rect.left is 0 under jsdom's default zero DOMRect.
-  const down = (sec: number, shiftKey: boolean) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: sec * PX, shiftKey, buttons: 1 }));
+  const down = (sec: number, shiftKey: boolean, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: sec * PX, shiftKey, buttons: 1 }));
   });
-  const move = (sec: number) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: sec * PX, buttons: 1 }));
+  const move = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: sec * PX, buttons: 1 }));
   });
-  const up = (sec: number) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: sec * PX }));
+  const up = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, clientX: sec * PX }));
+  });
+  const cancel = (sec: number, pointerId = 1) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId, clientX: sec * PX }));
+  });
+  const flushFrame = () => act(() => {
+    const pending = frames.splice(0);
+    for (const frame of pending) frame.cb(16);
   });
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    frames = [];
+    nextFrameId = 1;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((cb: FrameRequestCallback) => {
+      const id = nextFrameId++;
+      frames.push({ id, cb });
+      return id;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => {
+      frames = frames.filter((frame) => frame.id !== id);
+    }));
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
+    mounted = true;
     exec = vi.fn(async () => ({ ok: true }));
     useStore.setState({ exec, pxPerSec: PX, snapshot: snap() } as never);
     useShell.setState({ timeRange: null, timeRangeDragging: false });
     render(snap());
   });
-  afterEach(() => { act(() => root.unmount()); host.remove(); });
+  afterEach(() => {
+    if (mounted) act(() => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  });
 
   it("a plain press (no Shift) seeks immediately and draws no range", () => {
     down(4, false);
     up(4);
     expect(exec).toHaveBeenCalledWith("set_transport", { position: 4 });
     expect(useShell.getState().timeRange).toBeNull();
+  });
+
+  it("a plain drag seeks at most once per frame and commits the pointer-up position", () => {
+    const capture = vi.fn();
+    const release = vi.fn();
+    Object.defineProperties(ruler(), {
+      setPointerCapture: { configurable: true, value: capture },
+      releasePointerCapture: { configurable: true, value: release },
+    });
+
+    down(2, false);
+    move(4);
+    move(6);
+    expect(exec).toHaveBeenCalledTimes(1);
+
+    flushFrame();
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec).toHaveBeenLastCalledWith("set_transport", { position: 6 });
+
+    up(7);
+    expect(exec).toHaveBeenCalledTimes(3);
+    expect(exec).toHaveBeenLastCalledWith("set_transport", { position: 7 });
+    expect(capture).toHaveBeenCalledWith(1);
+    expect(release).toHaveBeenCalledWith(1);
+  });
+
+  it("pointer cancellation discards a queued plain scrub and ends the gesture", () => {
+    down(2, false);
+    move(6);
+    cancel(6);
+    flushFrame();
+    move(8);
+    flushFrame();
+
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenLastCalledWith("set_transport", { position: 2 });
   });
 
   it("shift-drag draws a bar-snapped span, live, and clears the drag flag on release", () => {
@@ -103,6 +164,41 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     expect(useShell.getState().timeRangeDragging).toBe(false);
     expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 }); // survives release
     expect(exec, "a shift-drag must never also fire a seek").not.toHaveBeenCalled();
+  });
+
+  it("keeps a shift range owned by its initiating pointer", () => {
+    down(4, true, 1);
+    down(2, false, 2);
+    move(8, 2);
+    up(8, 2);
+
+    expect(useShell.getState().timeRangeDragging).toBe(true);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 4 });
+    expect(exec).not.toHaveBeenCalled();
+
+    move(6, 1);
+    up(6, 1);
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("releases a shift range and clears its dragging state on unmount", () => {
+    const element = ruler();
+    const release = vi.fn();
+    Object.defineProperty(element, "releasePointerCapture", {
+      configurable: true,
+      value: release,
+    });
+
+    down(4, true);
+    move(6);
+    act(() => root.unmount());
+    mounted = false;
+
+    expect(useShell.getState().timeRangeDragging).toBe(false);
+    expect(useShell.getState().timeRange).toEqual({ start: 4, end: 6 });
+    expect(release).toHaveBeenCalledWith(1);
   });
 
   it("dragging backwards (end before start chronologically) still yields start <= end", () => {
