@@ -31,8 +31,9 @@ loads `ui/.env.local` and exec's the binary with the env set:
 ```bash
 ./run-mosh.sh            # launches the built app with brain keys loaded
 ```
-- A plain double-click of `/Applications/Mosh.app` sees only provider configuration bundled
-  for that build. If none is present, Moshi fails visibly without editing the project. For
+- A plain double-click of `/Applications/Mosh.app` sees only proxy configuration bundled
+  for that build. Direct-provider secrets are never bundled. If no proxy pair is present,
+  Moshi fails visibly without editing the project. For
   local playtests, use `./run-mosh.sh` so the configured provider reaches the app.
 - Quick check without the GUI: `./run-mosh.sh smoke` prints a native brain round-trip
   (`--brain-smoke`), confirming the provider/key resolve.

@@ -21,22 +21,26 @@ inherited `MOSH_BRAIN_ENV` and reads `ui/.env.local` directly — see the script
 specific landmine. `MOSH_BRAIN_ENV_ZIP` is the script's dedicated override and makes the
 chosen proxy dotenv explicit at the call site.
 
-**What the script does (10 steps, all fail-closed — see the script for the authoritative
+**What the script does (10 steps — see the script for the authoritative
 list):** builds a fresh Release `Mosh.app` (or reuses one with `SKIP_BUILD=1`); stages a
 *copy* under `dist/stage/` — it never touches `/Applications/Mosh.app`; bundles the Python
-service + proxy configuration (loaded from the `MOSH_BRAIN_ENV_ZIP` path, never the ambient
-`MOSH_BRAIN_ENV`) by reusing the
+service and, when both proxy fields are present, proxy configuration (loaded from the
+`MOSH_BRAIN_ENV_ZIP` path, never the ambient `MOSH_BRAIN_ENV`) by reusing the
 literal functions out of `run-mosh.sh` (so this can't drift from the real deploy path);
 strips every machine-local `.*.env` pointer file so the zip never pins the guest's Mac to
 your paths; copies `setup-guest.sh` + `collect-diagnostics.sh` into
-`Contents/Resources/`; re-signs ad-hoc; verifies the bundle (TCC plist key, brain key
-present, all service module dirs non-empty, vendored SA3 files present); runs `--selftest`
+`Contents/Resources/`; re-signs ad-hoc; verifies the bundle (TCC plist key, proxy-only
+`brain.env` when supplied, no `brain.env` when proxy configuration is missing, all service
+module dirs non-empty, vendored SA3 files present); runs `--selftest`
 on the staged app; zips to `dist/Mosh-guest-<YYYYMMDD>-<shortsha>.zip`; then — the important
 part — **extracts that exact zip into a scratch dir, attaches a synthetic quarantine flag,
 runs `unquarantine.sh` against it, and re-runs `--selftest` from the extracted copy** (the
-"guest simulation," step 9/10). If anything in verification or the guest simulation fails,
-the script refuses to produce a zip (or deletes the one it just wrote) rather than hand you
-something broken — a zip existing on disk is itself proof it passed everything.
+"guest simulation," step 9/10). Required package-integrity checks fail closed. Missing proxy
+configuration is an intentional brainless package state, not a package-integrity failure;
+malformed, incomplete, multiline, or provider-key configuration is refused. If any required
+verification or the guest simulation fails, the script refuses to produce a zip (or deletes
+the one it just wrote) rather than hand you something broken — a zip existing on disk is
+itself proof it passed everything.
 
 **Output:** `dist/Mosh-guest-<date>-<sha>.zip`, plus a paste-ready Discord message printed
 at the end and a copy of `docs/TESTER_QUICKSTART.md` at `dist/READ-ME-FIRST.txt`.
