@@ -36,8 +36,9 @@ on the staged app; zips to `dist/Mosh-guest-<YYYYMMDD>-<shortsha>.zip`; then —
 part — **extracts that exact zip into a scratch dir, attaches a synthetic quarantine flag,
 runs `unquarantine.sh` against it, and re-runs `--selftest` from the extracted copy** (the
 "guest simulation," step 9/10). Required package-integrity checks fail closed. Missing proxy
-configuration is an intentional brainless package state, not a package-integrity failure;
-malformed, incomplete, multiline, or provider-key configuration is refused. If any required
+configuration is an intentional brainless package state, not a package-integrity failure.
+An incomplete proxy pair is treated the same way: `brain.env` is omitted and the package
+succeeds brainless. Multiline values and direct-provider keys are refused. If any required
 verification or the guest simulation fails, the script refuses to produce a zip (or deletes
 the one it just wrote) rather than hand you something broken — a zip existing on disk is
 itself proof it passed everything.
