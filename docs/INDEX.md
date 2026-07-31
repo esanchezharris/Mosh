@@ -56,9 +56,12 @@ history, not status.*
 
 ## Programs & loops (active work)
 
-- [`first-stranger-program/`](first-stranger-program/) — **the active program**: the 6-week
-  push to the first non-owner playtest (README + decision-complete SPEC, lanes backlog,
-  STATUS board, CODEX_HANDOFF).
+- [`vocal-map-program/`](vocal-map-program/) — **the active program**: the
+  vocal-first 2026-09-17 playtest milestone, decision-complete spec, rolling
+  status, research roster, and append-only decision log.
+- [`first-stranger-program/`](first-stranger-program/) — paused and superseded
+  historical program state; its automation is stopped and its backlog, lanes,
+  board, ledger, and evidence are preserved.
 - [`playtest-prep/`](playtest-prep/) — playtest preparation checklists and evidence.
 - [`demo-loop/`](demo-loop/) + [`demo/`](demo/) — demo-session state and artifacts.
 - [`polish-loop/`](polish-loop/) — the autonomous UI micro-polish loop's charter + ledger.

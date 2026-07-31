@@ -1,6 +1,6 @@
 // The composer that lives in Moshi's rail. You ask — by holding the mic to TALK
 // (voice-hero) or by typing (the quiet fallback) — his brain plans, the executor
-// runs the edits as ONE undo step, and the result lands in Monster changes. Voice
+// runs the edits as ONE undo step, and the result lands in Moshi changes. Voice
 // and text feed the very same run() funnel; nothing downstream knows the difference.
 
 import { useRef, useState, useEffect } from "react";

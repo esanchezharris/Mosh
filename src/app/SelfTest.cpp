@@ -711,7 +711,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (logsCommand ("undo"),         "JSONL records undo");
 
     // ─── Agent batch (batch_begin/end): N edits coalesce into ONE undo step ───
-    // This is what "Monster changes" rides on — the agent brackets its edits so a
+    // This is what "Moshi changes" rides on — the agent brackets its edits so a
     // single Undo reverts the whole thing. Leaves state unchanged for Stage 2.
     section ("Agent batch: N edits = one undo step");
     const int batchBase = tracks (ops);
