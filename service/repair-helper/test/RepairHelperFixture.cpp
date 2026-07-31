@@ -94,7 +94,11 @@ int main (int argc, char** argv)
         if (std::string (argv[index]) == "--mosh-owner-checkpoint")
             receivedCheckpoint = true;
     }
-    if (! receivedSha && ! receivedCheckpoint) return 6;
+   #if defined(MOSH_REPAIR_FIXTURE_PRIOR_TARGET)
+    if (! receivedCheckpoint) return 6;
+   #else
+    if (! receivedSha || ! receivedCheckpoint) return 6;
+   #endif
     for (int descriptor = 3; descriptor < getdtablesize(); ++descriptor)
     {
         char path[PATH_MAX] {};

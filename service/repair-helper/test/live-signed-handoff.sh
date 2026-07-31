@@ -58,6 +58,7 @@ xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
   "$SOURCE" -o "$MACOS/Mosh"
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
+  -DMOSH_REPAIR_FIXTURE_PRIOR_TARGET \
   "-DMOSH_REPAIR_FIXTURE_MARKER=\"$PRIOR_MARKER\"" \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
   "$SOURCE" -o "$PRIOR_MACOS/Mosh"
@@ -153,6 +154,8 @@ if kill -0 "$RACE_CALLER_PID" 2>/dev/null; then
   echo "Concurrent handoff caller remained alive." >&2
   exit 9
 fi
+HANDOFF_SETTLE_TICKS=20
+for ((tick = 0; tick < HANDOFF_SETTLE_TICKS; ++tick)); do sleep 0.1; done
 REPAIR_LAUNCHES=0
 PRIOR_LAUNCHES=0
 [[ ! -f "$RACE_MARKER" ]] || REPAIR_LAUNCHES="$(wc -l < "$RACE_MARKER" | tr -d ' ')"
