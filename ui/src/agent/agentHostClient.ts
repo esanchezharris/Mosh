@@ -8,13 +8,6 @@ import {
 } from "../bridge";
 import type { DraftReportInput } from "./ownerCockpit";
 
-type ErrorEnvelope = {
-  readonly ok?: boolean;
-  readonly error?: string;
-  readonly code?: string;
-  readonly retryable?: boolean;
-};
-
 export type HostEvent = {
   readonly sequence: number;
   readonly type: string;
@@ -50,17 +43,45 @@ export class AgentHostApiError extends Error {
   }
 }
 
-function unwrap(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object")
-    throw new AgentHostApiError("Invalid Agent Host response", "invalid_response");
-  const object = value as ErrorEnvelope & Record<string, unknown>;
-  if (object.ok === false)
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function invalidResponse(message = "Invalid Agent Host response"): never {
+  throw new AgentHostApiError(message, "invalid_response", false);
+}
+
+function unwrap(value: unknown): Readonly<Record<string, unknown>> {
+  if (!isRecord(value) || (value.ok !== true && value.ok !== false))
+    return invalidResponse();
+  if (value.ok === false) {
+    if ((value.error !== undefined && typeof value.error !== "string")
+      || (value.code !== undefined && typeof value.code !== "string")
+      || (value.retryable !== undefined && typeof value.retryable !== "boolean"))
+      return invalidResponse();
     throw new AgentHostApiError(
-      object.error ?? "Agent Host unavailable",
-      object.code ?? "host_unavailable",
-      object.retryable ?? false,
+      value.error ?? "Agent Host unavailable",
+      value.code ?? "host_unavailable",
+      value.retryable ?? false,
     );
-  return object;
+  }
+  return value;
+}
+
+function parseHostEvent(value: unknown): HostEvent | null {
+  if (!isRecord(value)
+    || !Number.isInteger(value.sequence)
+    || typeof value.sequence !== "number"
+    || value.sequence <= 0
+    || typeof value.type !== "string"
+    || value.type.length === 0
+    || !isRecord(value.data))
+    return null;
+  return {
+    sequence: value.sequence,
+    type: value.type,
+    data: value.data,
+  };
 }
 
 export class AgentHostClient {
@@ -127,9 +148,8 @@ export class AgentHostClient {
         const value = unwrap(await this.bridge.events(lastSequence));
         const events = Array.isArray(value.events) ? value.events : [];
         for (const candidate of events) {
-          if (!candidate || typeof candidate !== "object") continue;
-          const event = candidate as HostEvent;
-          if (!Number.isInteger(event.sequence) || event.sequence <= lastSequence) continue;
+          const event = parseHostEvent(candidate);
+          if (!event || event.sequence <= lastSequence) continue;
           lastSequence = event.sequence;
           onEvent(event);
           if (stopped) return;

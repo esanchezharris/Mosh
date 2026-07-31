@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentHostApiError, AgentHostClient } from "./agentHostClient";
+import { AgentHostApiError, AgentHostClient, type HostEvent } from "./agentHostClient";
 
 describe("owner cockpit Agent Host client", () => {
   it("starts and closes an explicit playtest without browser host credentials", async () => {
@@ -35,6 +35,23 @@ describe("owner cockpit Agent Host client", () => {
     });
   });
 
+  it("rejects malformed native error envelopes instead of asserting their types", async () => {
+    const client = new AgentHostClient({
+      start: vi.fn(async () => ({ ok: false, code: [], error: 7, retryable: "yes" })),
+      close: vi.fn(),
+      events: vi.fn(),
+      secret: vi.fn(),
+      createReport: vi.fn(),
+      approveReport: vi.fn(),
+    });
+
+    await expect(client.start(false)).rejects.toMatchObject({
+      name: "AgentHostApiError",
+      code: "invalid_response",
+      retryable: false,
+    });
+  });
+
   it("reconnects event delivery from the last sequence without duplicating events", async () => {
     vi.useFakeTimers();
     const events = vi.fn()
@@ -59,6 +76,37 @@ describe("owner cockpit Agent Host client", () => {
 
     expect(seen).toEqual([1, 2]);
     expect(events.mock.calls.map((call) => call[0])).toEqual([0, 0, 1]);
+    vi.useRealTimers();
+  });
+
+  it("drops malformed event payloads at the native boundary", async () => {
+    vi.useFakeTimers();
+    const events = vi.fn().mockResolvedValue({
+      ok: true,
+      events: [
+        { sequence: 1, type: 42, data: [] },
+        { sequence: 2, type: "report.created", data: { reportId: "r2" } },
+      ],
+    });
+    const client = new AgentHostClient({
+      start: vi.fn(),
+      close: vi.fn(),
+      events,
+      secret: vi.fn(),
+      createReport: vi.fn(),
+      approveReport: vi.fn(),
+    }, 100);
+    const seen: HostEvent[] = [];
+    const stop = client.watchEvents((event) => {
+      seen.push(event);
+      stop();
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(seen).toEqual([
+      { sequence: 2, type: "report.created", data: { reportId: "r2" } },
+    ]);
     vi.useRealTimers();
   });
 });

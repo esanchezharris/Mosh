@@ -20,12 +20,12 @@ function runtime() {
     })),
     approveReport: vi.fn(async () => undefined),
   };
-  return new OwnerCockpitRuntime(client);
+  return { cockpit: new OwnerCockpitRuntime(client), client };
 }
 
 describe("owner cockpit runtime presentation", () => {
   it("shows the hosted-trace disclosure only when the host marks this session", async () => {
-    const cockpit = runtime();
+    const { cockpit } = runtime();
     await cockpit.start(true);
     expect(cockpit.getSnapshot()).toMatchObject({
       status: "active",
@@ -35,7 +35,8 @@ describe("owner cockpit runtime presentation", () => {
   });
 
   it("holds minor notes until pause/close flush while surfacing blockers immediately", async () => {
-    const cockpit = runtime();
+    const { cockpit } = runtime();
+    await cockpit.start();
     await cockpit.createReport({ kind: "note", title: "Small spacing", body: "note spacing" });
     expect(cockpit.getSnapshot()).toMatchObject({ reports: [], pendingNotes: 1, urgentMessage: null });
 
@@ -53,5 +54,35 @@ describe("owner cockpit runtime presentation", () => {
         expect.objectContaining({ kind: "blocker" }),
       ],
     });
+  });
+
+  it("rejects the Composer phrase route before an explicit playtest start without invoking screenshot persistence", async () => {
+    const { cockpit, client } = runtime();
+
+    await expect(cockpit.createFromText("bug: silent playback")).rejects.toMatchObject({
+      name: "AgentHostApiError",
+      code: "playtest_not_started",
+      retryable: false,
+    });
+
+    expect(client.createReport).not.toHaveBeenCalled();
+    expect(cockpit.getSnapshot().reports).toEqual([]);
+  });
+
+  it("rejects the Felt Wrong route before an explicit playtest start without invoking screenshot persistence", async () => {
+    const { cockpit, client } = runtime();
+
+    await expect(cockpit.createReport({
+      kind: "bug",
+      title: "Felt wrong: drums stiff",
+      body: "Felt Wrong submission: drums stiff",
+    })).rejects.toMatchObject({
+      name: "AgentHostApiError",
+      code: "playtest_not_started",
+      retryable: false,
+    });
+
+    expect(client.createReport).not.toHaveBeenCalled();
+    expect(cockpit.getSnapshot().reports).toEqual([]);
   });
 });

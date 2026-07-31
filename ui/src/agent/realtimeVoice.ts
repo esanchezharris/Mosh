@@ -1,4 +1,6 @@
 import { classifyReportTrigger } from "./ownerCockpit";
+import { isDirectSafeCall } from "./capabilityRuntime";
+import { matchFastPath, type FastCtx } from "./fastPath";
 
 type AudioTrack = Pick<MediaStreamTrack, "enabled" | "stop">;
 
@@ -7,6 +9,7 @@ export type RealtimeSessionPort = {
   mute(muted: boolean): void | Promise<void>;
   close(): void;
   interrupt(): void;
+  onError(listener: (error: unknown) => void): void;
 };
 
 export type RealtimeSessionFactoryOptions = {
@@ -20,16 +23,21 @@ export type PushToTalkDependencies = {
   readonly getMediaStream: () => Promise<MediaStream>;
   readonly createSession: (options: RealtimeSessionFactoryOptions) => RealtimeSessionPort;
   readonly audioElement: HTMLAudioElement;
+  readonly onFailure?: (error: unknown) => void;
 };
 
 export class PushToTalkController {
   readonly sessionOptions = { historyStoreAudio: false as const };
   private session: RealtimeSessionPort | null = null;
   private tracks: AudioTrack[] = [];
+  private disposed = false;
+  private failureHandled = false;
 
   constructor(private readonly dependencies: PushToTalkDependencies) {}
 
   async connect(): Promise<void> {
+    this.disposed = false;
+    this.failureHandled = false;
     const mediaStream = await this.dependencies.getMediaStream();
     this.tracks = mediaStream.getAudioTracks();
     this.disableInput();
@@ -39,6 +47,7 @@ export class PushToTalkController {
       audioElement: this.dependencies.audioElement,
       historyStoreAudio: false,
     });
+    this.session.onError((error) => void this.fail(error));
     await this.session.connect({ apiKey });
     await this.session.mute(true);
   }
@@ -64,8 +73,11 @@ export class PushToTalkController {
     this.session?.interrupt();
   }
 
-  async fail(): Promise<void> {
-    await this.disable();
+  async fail(error: unknown = new Error("Realtime session failed")): Promise<void> {
+    if (this.disposed || this.failureHandled) return;
+    this.failureHandled = true;
+    await this.dispose();
+    this.dependencies.onFailure?.(error);
   }
 
   setPlaybackActive(playing: boolean): void {
@@ -73,11 +85,20 @@ export class PushToTalkController {
   }
 
   async dispose(): Promise<void> {
-    await this.disable();
-    for (const track of this.tracks) track.stop();
-    this.tracks = [];
-    this.session?.close();
+    if (this.disposed) return;
+    this.disposed = true;
+    const session = this.session;
     this.session = null;
+    const tracks = this.tracks;
+    this.tracks = [];
+    for (const track of tracks) track.enabled = false;
+    try {
+      await session?.mute(true);
+    } catch {}
+    for (const track of tracks) {
+      try { track.stop(); } catch {}
+    }
+    session?.close();
   }
 
   private disableInput(): void {
@@ -90,12 +111,12 @@ export class PushToTalkController {
   }
 }
 
-const SAFE_FALLBACK = /\b(?:play|pause|stop|undo|redo|metronome|click|loop|locate|seek|go to)\b/i;
-
-export function realtimeFallbackFor(text: string):
+export function realtimeFallbackFor(text: string, context: FastCtx):
   | { kind: "apple-speech"; allowed: true }
   | { kind: "text-only"; allowed: false; message: string } {
-  if (classifyReportTrigger(text) || SAFE_FALLBACK.test(text))
+  const action = matchFastPath(text, context);
+  if (classifyReportTrigger(text)
+    || (action?.kind === "commands" && action.commands.every(isDirectSafeCall)))
     return { kind: "apple-speech", allowed: true };
   return {
     kind: "text-only",

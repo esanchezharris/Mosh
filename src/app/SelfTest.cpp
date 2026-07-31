@@ -7074,6 +7074,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             juce::var hostResult;
             {
                 AgentHostProxy host;
+                auto* inactiveReportRequest = new DynamicObject();
+                inactiveReportRequest->setProperty ("kind", "bug");
+                inactiveReportRequest->setProperty ("title", "Inactive report");
+                inactiveReportRequest->setProperty ("body", "must not persist");
+                const auto inactiveReport = host.createReport (var (inactiveReportRequest));
+                check (! (bool) inactiveReport.getProperty ("ok", true)
+                           && inactiveReport.getProperty ("code", var()).toString() == "playtest_not_started"
+                           && ! (bool) inactiveReport.getProperty ("retryable", true),
+                       "agent host: report creation requires an explicitly active playtest");
+                check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
+                       "agent host: inactive report creates no persisted host artifact");
                 const auto started = host.startPlaytest (false);
                 check ((bool) started.getProperty ("active", false)
                            && (bool) started.getProperty ("disclosureRequired", false),

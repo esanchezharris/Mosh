@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { AgentHostClient } from "./agentHostClient";
+import { AgentHostApiError, AgentHostClient } from "./agentHostClient";
 import {
   classifyReportTrigger,
   type DraftReport,
@@ -85,6 +85,12 @@ export class OwnerCockpitRuntime {
   }
 
   async createReport(input: DraftReportInput): Promise<DraftReport> {
+    if (this.state.status !== "active")
+      throw new AgentHostApiError(
+        "Start an owner playtest before creating a report.",
+        "playtest_not_started",
+        false,
+      );
     const report = await this.client.createReport(input);
     this.allReports = [...this.allReports, report];
     if (input.kind === "note") {

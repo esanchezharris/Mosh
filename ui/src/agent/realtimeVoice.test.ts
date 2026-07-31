@@ -3,12 +3,14 @@ import { PushToTalkController, realtimeFallbackFor } from "./realtimeVoice";
 
 function setup() {
   const track = { enabled: true, stop: vi.fn() };
-  const stream = { getAudioTracks: () => [track] } as unknown as MediaStream;
+  const secondTrack = { enabled: true, stop: vi.fn() };
+  const stream = { getAudioTracks: () => [track, secondTrack] } as unknown as MediaStream;
   const session = {
     connect: vi.fn(async () => undefined),
     mute: vi.fn(async () => undefined),
     close: vi.fn(),
     interrupt: vi.fn(),
+    onError: vi.fn<(listener: (error: unknown) => void) => void>(),
   };
   const audio = { volume: 1 } as HTMLAudioElement;
   const controller = new PushToTalkController({
@@ -17,14 +19,15 @@ function setup() {
     createSession: vi.fn(() => session),
     audioElement: audio,
   });
-  return { controller, session, track, audio };
+  return { controller, session, track, secondTrack, audio };
 }
 
 describe("Realtime push-to-talk privacy lifecycle", () => {
   it("connects with history audio disabled and leaves both track and session muted", async () => {
-    const { controller, session, track } = setup();
+    const { controller, session, track, secondTrack } = setup();
     await controller.connect();
     expect(track.enabled).toBe(false);
+    expect(secondTrack.enabled).toBe(false);
     expect(session.mute).toHaveBeenLastCalledWith(true);
     expect(controller.sessionOptions).toMatchObject({ historyStoreAudio: false });
   });
@@ -34,7 +37,13 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     const secret = new Promise<string>((resolve) => { releaseSecret = resolve; });
     const track = { enabled: true, stop: vi.fn() };
     const stream = { getAudioTracks: () => [track] } as unknown as MediaStream;
-    const session = { connect: vi.fn(async () => undefined), mute: vi.fn(), close: vi.fn(), interrupt: vi.fn() };
+    const session = {
+      connect: vi.fn(async () => undefined),
+      mute: vi.fn(),
+      close: vi.fn(),
+      interrupt: vi.fn(),
+      onError: vi.fn(),
+    };
     const controller = new PushToTalkController({
       getClientSecret: () => secret,
       getMediaStream: vi.fn(async () => stream),
@@ -50,8 +59,8 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     await connecting;
   });
 
-  it("enables audio only while physically held and disables it on release, cancel, error, and dispose", async () => {
-    const { controller, session, track } = setup();
+  it("enables audio only while physically held and disables it on release, cancel, and dispose", async () => {
+    const { controller, session, track, secondTrack } = setup();
     await controller.connect();
     await controller.press({ recording: false });
     expect(track.enabled).toBe(true);
@@ -60,7 +69,6 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     for (const stop of [
       () => controller.release(),
       async () => { await controller.press({ recording: false }); await controller.cancel(); },
-      async () => { await controller.press({ recording: false }); await controller.fail(); },
     ]) {
       await stop();
       expect(track.enabled).toBe(false);
@@ -68,7 +76,22 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     }
     await controller.dispose();
     expect(track.stop).toHaveBeenCalledOnce();
+    expect(secondTrack.stop).toHaveBeenCalledOnce();
     expect(track.enabled).toBe(false);
+  });
+
+  it("stops every microphone track and closes the session from its actual error callback", async () => {
+    const { controller, session, track, secondTrack } = setup();
+    await controller.connect();
+    const listener = session.onError.mock.calls[0]?.[0];
+    expect(listener).toBeTypeOf("function");
+
+    listener?.(new Error("realtime transport failed"));
+    await vi.waitFor(() => {
+      expect(track.stop).toHaveBeenCalledOnce();
+      expect(secondTrack.stop).toHaveBeenCalledOnce();
+      expect(session.close).toHaveBeenCalledOnce();
+    });
   });
 
   it("refuses voice during recording without stopping the take or opening the mic", async () => {
@@ -94,9 +117,10 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
 
 describe("Realtime failure fallback", () => {
   it("allows only deterministic safe commands and report drafting through Apple speech", () => {
-    expect(realtimeFallbackFor("play")).toEqual({ kind: "apple-speech", allowed: true });
-    expect(realtimeFallbackFor("log this as a bug")).toEqual({ kind: "apple-speech", allowed: true });
-    expect(realtimeFallbackFor("rebuild the chorus around my vocal")).toEqual({
+    const context = { mode: "idle" as const, tempo: 120, timeSigNum: 4, tracks: [] };
+    expect(realtimeFallbackFor("play", context)).toEqual({ kind: "apple-speech", allowed: true });
+    expect(realtimeFallbackFor("log this as a bug", context)).toEqual({ kind: "apple-speech", allowed: true });
+    expect(realtimeFallbackFor("stop playback and rebuild the chorus around my vocal", context)).toEqual({
       kind: "text-only",
       allowed: false,
       message: "Realtime unavailable — type complex requests.",

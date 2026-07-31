@@ -7,13 +7,15 @@ namespace
     constexpr int kStartupTimeoutMs = 10000;
     constexpr int kRequestTimeoutMs = 12000;
 
-    juce::var error (const juce::String& message = "agent host unavailable", const juce::String& code = {})
+    juce::var error (const juce::String& message = "agent host unavailable",
+                     const juce::String& code = {},
+                     bool retryable = true)
     {
         auto* value = new juce::DynamicObject();
         value->setProperty ("ok", false);
         value->setProperty ("error", message);
         if (code.isNotEmpty()) value->setProperty ("code", code);
-        value->setProperty ("retryable", true);
+        value->setProperty ("retryable", retryable);
         return juce::var (value);
     }
 
@@ -256,10 +258,21 @@ juce::var AgentHostProxy::realtimeSecret()
     return juce::var (response);
 }
 
+bool AgentHostProxy::hasActivePlaytest() const
+{
+    const juce::ScopedLock guard (lock);
+    return playtestId.isNotEmpty()
+        && origin.isNotEmpty()
+        && capability.isNotEmpty()
+        && process.isRunning();
+}
+
 juce::var AgentHostProxy::createReport (const juce::var& request)
 {
     const juce::ScopedLock guard (lock);
-    if (! request.isObject() || ! ensurePlaytest()) return error();
+    if (! request.isObject()) return error ("invalid report request", "invalid_response", false);
+    if (playtestId.isEmpty()) return error ("playtest not started", "playtest_not_started", false);
+    if (origin.isEmpty() || capability.isEmpty() || ! process.isRunning()) return error();
     auto body = juce::JSON::parse (juce::JSON::toString (request));
     body.getDynamicObject()->setProperty ("playtestId", playtestId);
     int statusCode = 0;

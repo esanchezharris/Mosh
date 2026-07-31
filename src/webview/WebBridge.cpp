@@ -87,6 +87,16 @@ namespace
     {
         return juce::SHA256 (value.toRawUTF8(), (size_t) value.getNumBytesAsUTF8()).toHexString();
     }
+
+    juce::var playtestNotStartedError()
+    {
+        auto* failure = new juce::DynamicObject();
+        failure->setProperty ("ok", false);
+        failure->setProperty ("code", "playtest_not_started");
+        failure->setProperty ("error", "Start an owner playtest before creating a report.");
+        failure->setProperty ("retryable", false);
+        return juce::var (failure);
+    }
 } // namespace
 
 Resource WebBridge::serveUiResource (const juce::String& url)
@@ -377,6 +387,11 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             [this] (const juce::Array<juce::var>& args,
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
+                if (agentHost == nullptr || ! agentHost->hasActivePlaytest())
+                {
+                    completion (playtestNotStartedError());
+                    return;
+                }
                 const auto request = reportRequestWithEvidence (args.size() > 0 ? args[0] : juce::var());
                 if (! request.isObject())
                 {
@@ -387,7 +402,6 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     completion (juce::var (failure));
                     return;
                 }
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
                 auto host = agentHost;
                 juce::Thread::launch ([host, request, completion]() mutable
                 {

@@ -26,6 +26,7 @@ export function createOpenAIRealtimeController(
     getClientSecret: dependencies.getClientSecret,
     getMediaStream: () => navigator.mediaDevices.getUserMedia({ audio: true }),
     audioElement,
+    onFailure: dependencies.onFailure,
     createSession: ({ mediaStream, historyStoreAudio }) => {
       const recordingRefusal = () => {
         if (!dependencies.isRecording()) return null;
@@ -74,8 +75,13 @@ export function createOpenAIRealtimeController(
         },
         workflowName: "mosh-owner-playtest-realtime",
       });
-      session.on("error", dependencies.onFailure);
-      return session as RealtimeSessionPort;
+      return {
+        connect: ({ apiKey }) => session.connect({ apiKey }),
+        mute: (muted) => session.mute(muted),
+        close: () => session.close(),
+        interrupt: () => session.interrupt(),
+        onError: (listener) => { session.on("error", listener); },
+      } satisfies RealtimeSessionPort;
     },
   });
 }

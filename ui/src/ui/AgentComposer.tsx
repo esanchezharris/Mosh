@@ -154,7 +154,7 @@ export function AgentComposer() {
   const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
 
   // The single funnel: typed text and final speech both arrive here.
-  const run = async (text: string) => {
+  const run = async (text: string, allowSupervisor = true) => {
     if (!text || useStore.getState().agentBusy) return;
     setInput(""); setSay(null); setAgentBusy(true);
     try {
@@ -192,6 +192,12 @@ export function AgentComposer() {
             else setSay(`couldn't remember that — ${res.error}`);
           },
         });
+        return;
+      }
+
+      if (!allowSupervisor) {
+        setSay("Realtime unavailable — type complex requests.");
+        pushAgentUtter("UHOH", "Realtime unavailable — type complex requests.");
         return;
       }
 
@@ -260,7 +266,23 @@ export function AgentComposer() {
         onInterim: (t) => setInput(t),
         onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
         onFinal: (t) => {
-          if (!realtimeFailedRef.current || realtimeFallbackFor(t).allowed) void run(t);
+          if (!realtimeFailedRef.current) {
+            void run(t);
+            return;
+          }
+          const state = useStore.getState();
+          const fallback = realtimeFallbackFor(t, {
+            mode: state.currentMode(),
+            tempo: state.snapshot?.session?.tempo ?? 120,
+            timeSigNum: state.snapshot?.session?.timeSigNumerator ?? 4,
+            tracks: (state.snapshot?.tracks ?? []).map((track) => ({
+              id: track.id,
+              name: track.name,
+              mute: track.mute,
+              solo: track.solo,
+            })),
+          });
+          if (fallback.allowed) void run(t, false);
           else {
             setSay("Realtime unavailable — type complex requests.");
             pushAgentUtter("UHOH", "Realtime unavailable — type complex requests.");
@@ -280,7 +302,8 @@ export function AgentComposer() {
       isRecording: () => useStore.getState().transport.recording,
       onFailure: () => {
         realtimeFailedRef.current = true;
-        void controller.fail();
+        realtimeRef.current = null;
+        realtimeConnectingRef.current = null;
         setListening(false);
         setAgentListening(false);
         setSay("Realtime unavailable — safe voice commands only.");

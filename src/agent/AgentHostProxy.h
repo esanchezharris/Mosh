@@ -31,6 +31,7 @@ public:
     juce::var createReport (const juce::var& request);
     juce::var approveReport (const juce::String& reportId);
     juce::var events (int afterSequence);
+    bool hasActivePlaytest() const;
 
     /** Blocking; callers must invoke this away from JUCE's message thread.
         Returns { ok:true, plan } or a deliberately token-free error envelope. */

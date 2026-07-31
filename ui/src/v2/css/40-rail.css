@@ -48,6 +48,11 @@
 .v2-owner-row, .v2-owner-actions, .v2-owner-alert, .v2-owner-report { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .v2-owner-actions { margin-top: 8px; }
 .v2-owner-actions label { display: flex; align-items: center; gap: 5px; }
+.v2-owner-cockpit button:focus-visible,
+.v2-owner-cockpit input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--v2-accent);
+  outline-offset: 2px;
+}
 .v2-owner-disclosure, .v2-owner-error, .v2-owner-alert, .v2-owner-inbox { margin-top: 8px; padding: 8px; border: 1px solid var(--v2-line); border-radius: var(--v2-radius-xs); background: var(--v2-raised); line-height: 1.35; }
 .v2-owner-error, .v2-owner-alert { border-color: var(--v2-rec); color: var(--v2-text); }
 .v2-owner-event { margin-top: 6px; color: var(--v2-faint); }
