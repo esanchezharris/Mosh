@@ -40,7 +40,7 @@ export default defineConfig({
   }],
   webServer: {
     command: preview
-      ? "VITE_MOSH_E2E_MOCK=1 npm run build && npm exec vite -- preview --host 127.0.0.1 --port 5173"
+      ? "npm run build:e2e && npm exec vite -- preview --outDir dist-e2e --host 127.0.0.1 --port 5173"
       : "npm run dev -- --host 127.0.0.1",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI && !preview,

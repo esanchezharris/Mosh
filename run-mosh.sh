@@ -160,8 +160,8 @@ for p in DEEPSEEK OPENAI XAI; do
   if [ -n "${!k:-}" ]; then echo "  • $p: key present"; have_any=1; fi
 done
 if [ "$have_any" = 0 ]; then
-  echo "  • no brain key found — paste one into ui/.env.local (voice still works;"
-  echo "    the brain falls back to the offline mock without a key)"
+  echo "  • no brain key found — paste one into ui/.env.local or configure the proxy"
+  echo "    (Moshi edits fail visibly without mutating the project)"
 fi
 
 # --- deploy helpers ---------------------------------------------------------------

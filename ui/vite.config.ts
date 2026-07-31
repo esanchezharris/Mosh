@@ -154,12 +154,15 @@ function moshiBrain(env: Record<string, string>): Plugin {
 // external module scripts). base: "./" keeps refs origin-free. 03 / 06 §1.
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), ""); // "" → load ALL keys incl. unprefixed; SERVER-SIDE only, never bundled
+  if (command === "build" && mode !== "e2e" && env.VITE_MOSH_E2E_MOCK) {
+    throw new Error("VITE_MOSH_E2E_MOCK is forbidden for packaged builds; use --mode e2e for browser-only test bundles");
+  }
   const plugins: Plugin[] = [react(), moshiBrain(env)];
   if (command === "build") plugins.splice(1, 0, viteSingleFile());
   return {
     plugins,
     base: "./",
-    build: { outDir: "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
+    build: { outDir: mode === "e2e" ? "dist-e2e" : "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
     server: { port: 5173, strictPort: true },
   };
 });

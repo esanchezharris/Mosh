@@ -77,7 +77,7 @@ foreach ($p in @("DEEPSEEK", "OPENAI", "XAI")) {
     }
 }
 if (-not $haveAny) {
-    Write-Host "  - no brain key found - paste one into ui\.env.local (the brain falls back to the offline mock)"
+    Write-Host "  - no brain key found - paste one into ui\.env.local or configure the proxy (Moshi edits fail visibly without mutating the project)"
 }
 
 # --- packaging helpers (the Windows analogue of run-mosh.sh's bundle_service /

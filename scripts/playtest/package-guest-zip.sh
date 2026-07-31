@@ -213,10 +213,10 @@ if [[ -f "$BRAIN_ENV" ]]; then
   if grep -q '_API_KEY=' "$BRAIN_ENV" 2>/dev/null; then
     note_ok "brain.env present with an _API_KEY (guest's Moshi has a brain out of the box)"
   else
-    note_warn "brain.env present but carries NO _API_KEY — guest falls back to the offline mock brain"
+    note_warn "brain.env present but carries NO _API_KEY — configure the proxy or Moshi edits fail visibly without mutation"
   fi
 else
-  note_warn "no brain.env in the bundle — guest falls back to the offline mock brain (paste a key into ui/.env.local and re-run to bundle one)"
+  note_warn "no brain.env in the bundle — configure the proxy or paste a key into ui/.env.local and re-run to enable Moshi edits"
 fi
 
 [[ -f "$SVC_DIR/server.py" ]] && note_ok "service/server.py present" || note_bad "service/server.py MISSING"

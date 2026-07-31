@@ -11,9 +11,9 @@
 
 export function devPickerOverride(): boolean {
   const env = typeof import.meta !== "undefined"
-    ? (import.meta as { env?: { DEV?: boolean; VITE_MOSH_E2E_MOCK?: string } }).env
+    ? (import.meta as { env?: { DEV?: boolean; MODE?: string } }).env
     : undefined;
-  const dev = Boolean(env?.DEV || env?.VITE_MOSH_E2E_MOCK === "1");
+  const dev = Boolean(env?.DEV || env?.MODE === "e2e");
   if (!dev) return false;
   try {
     return new URLSearchParams(window.location.search).get("picker") === "1";

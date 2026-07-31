@@ -43,7 +43,7 @@ export const nativeMenuPresent = (): boolean => realNative();
 export const isRealNative = (): boolean => realNative();
 
 /** Deterministic brain substitutes are limited to Vite development and explicit browser e2e. */
-export const demoBrainAvailable = (): boolean => MOCK_ENABLED;
+export const demoBrainAvailable = (): boolean => MOCK_ENABLED && !realNative();
 
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();

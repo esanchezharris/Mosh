@@ -27,7 +27,8 @@ natively (PowerShell), **not** under WSL. Companion decisions: [WINDOWS_PARITY.m
 ```
 
 `-Build` stages `ui\` and `drumkits\` next to `Mosh.exe` automatically (CMake targets).
-If `-Smoke` prints the offline-mock reply, no brain key was found — check `ui\.env.local`.
+If `-Smoke` reports that Moshi cannot reach its brain, no provider or proxy is configured —
+check `ui\.env.local`. Packaged builds never substitute demo commands.
 
 **After the first build, verify the exe-adjacent DLLs are present** (JUCE stages the WebView
 runtime; CMake stages the MSVC redist):

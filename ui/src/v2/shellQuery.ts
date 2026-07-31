@@ -12,8 +12,8 @@ export type ShellId = "classic" | "v2";
 export function devShellOverride(): ShellId | null {
   // import.meta.env may be undefined in some non-Vite contexts; guard defensively.
   const dev = typeof import.meta !== "undefined" &&
-    Boolean((import.meta as { env?: { DEV?: boolean; VITE_MOSH_E2E_MOCK?: string } }).env?.DEV ||
-      (import.meta as { env?: { VITE_MOSH_E2E_MOCK?: string } }).env?.VITE_MOSH_E2E_MOCK === "1");
+    Boolean((import.meta as { env?: { DEV?: boolean; MODE?: string } }).env?.DEV ||
+      (import.meta as { env?: { MODE?: string } }).env?.MODE === "e2e");
   if (!dev) return null;
   try {
     const q = new URLSearchParams(window.location.search).get("shell");
