@@ -48,7 +48,8 @@ function installId(env: Record<string, string>): string {
 // same-origin /api/brain/* and never sees a credential. All three providers speak
 // OpenAI-compatible /chat/completions. Mirrors design-lab/playground/vite.config.js.
 // In the packaged app there is no Vite; a native brain_chat proxy serves the same
-// route (see bridge.brainChat). With no keys set, the UI falls back to a mock brain.
+// route (see bridge.brainChat). Keyless Vite dev may use the demo brain; packaged
+// builds fail visibly and never substitute mock commands.
 //
 // PROXY CUTOVER (docs/brain-proxy/RUNBOOK.md): when MOSH_BRAIN_PROXY_URL is set (in
 // ui/.env.local, same as the provider keys), /api/brain/chat forwards to the deployed
@@ -153,12 +154,21 @@ function moshiBrain(env: Record<string, string>): Plugin {
 // external module scripts). base: "./" keeps refs origin-free. 03 / 06 §1.
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), ""); // "" → load ALL keys incl. unprefixed; SERVER-SIDE only, never bundled
+  if (command === "build" && mode !== "production" && mode !== "e2e") {
+    throw new Error(`${mode} mode is forbidden for packaged builds; use production or explicit e2e mode`);
+  }
+  if (command === "build" && mode !== "e2e" && process.env.NODE_ENV === "development") {
+    throw new Error("NODE_ENV=development is forbidden for packaged builds; unset it or use explicit e2e mode");
+  }
+  if (command === "build" && mode !== "e2e" && env.VITE_MOSH_E2E_MOCK) {
+    throw new Error("VITE_MOSH_E2E_MOCK is forbidden for packaged builds; use --mode e2e for browser-only test bundles");
+  }
   const plugins: Plugin[] = [react(), moshiBrain(env)];
   if (command === "build") plugins.splice(1, 0, viteSingleFile());
   return {
     plugins,
     base: "./",
-    build: { outDir: "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
+    build: { outDir: mode === "e2e" ? "dist-e2e" : "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
     server: { port: 5173, strictPort: true },
   };
 });

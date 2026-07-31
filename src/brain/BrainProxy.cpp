@@ -225,10 +225,8 @@ var BrainProxy::chat (const var& messages, const String& requested)
         auto result = chatViaProxy (proxyUrl(), messages, requested);
         if ((bool) result.getProperty ("ok", false))
             return result;
-        // Fall through to the direct-provider path below (dev-only in practice: a
-        // production build that relies on the proxy carries no bundled keys, so
-        // resolve() below will itself return "no provider configured" — the existing,
-        // already-handled degrade path the UI falls back to a mock brain from).
+        // Fall through to the direct-provider path below. If no complete provider
+        // resolves, the caller receives a setup error and the UI emits no commands.
     }
 
     const auto p = resolve (requested);

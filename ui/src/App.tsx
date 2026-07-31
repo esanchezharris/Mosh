@@ -12,12 +12,12 @@ import { isCharacterLab } from "./lab/labQuery";
 import { AppLegacy } from "./AppLegacy";
 import { AppV2 } from "./v2/AppV2";
 
-// Dev-only Character Lab demo. The reference is gated on `import.meta.env.DEV` so that in
+// Dev-only Character Lab demo. The reference is gated on an explicit development mode so that in
 // the production build the ternary folds to a literal `null` and the lazy import() lands in
 // dead code Rollup removes — dropping the panel, its CSS and the vendored WebGL blob from
 // the shipped single-file bundle entirely (this build inlines all chunks, so a plain lazy()
 // alone would NOT exclude it). "Unreachable in production" thus holds at the bundle level.
-const CharacterLab = import.meta.env.DEV
+const CharacterLab = import.meta.env.MODE === "development"
   ? lazy(() => import("./lab/CharacterLab").then((m) => ({ default: m.CharacterLab })))
   : null;
 
@@ -28,7 +28,7 @@ export function App() {
 
   // Dev-only Character Lab demo: `?view=character-lab` swaps the whole shell for the
   // knob demo and never touches the store, so it has zero backend dependency and can't
-  // perturb a session. Unreachable in the shipped bundle (import.meta.env.DEV === false).
+  // perturb a session. Unreachable in the shipped production-mode bundle.
   const charLab = isCharacterLab();
 
   useEffect(() => { if (!charLab) init(); }, [init, charLab]);

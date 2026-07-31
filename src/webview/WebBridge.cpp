@@ -216,7 +216,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
         // proxy). Keys live in the environment, never in the WebView. The HTTP call
         // blocks, so it runs off the message thread and resolves the promise back on
         // it. Returns { ok, content, ... } or { ok:false, error } — bridge.ts throws
-        // on the error shape so the UI falls back to the mock brain (as in dev).
+        // on the error shape so packaged callers fail visibly without commands.
         .withNativeFunction (
             juce::Identifier ("brain_chat"),
             [] (const juce::Array<juce::var>& args,

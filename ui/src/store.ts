@@ -597,8 +597,13 @@ export const useStore = create<State>((set, get, api) => ({
   uiScale: useSettings.getState().get("uiScale") as number,
 }));
 
-// Dev-only: expose the store so Playwright e2e can drive state the in-memory mock can't
-// reproduce — notably multiplayer presence (no relay in dev). Stripped from prod builds.
-if (import.meta.env.DEV && typeof window !== "undefined") {
+// Browser-test only: expose the store so Playwright can drive state the in-memory mock
+// cannot reproduce. Production uses neither development nor the isolated e2e mode.
+if (
+  (import.meta.env.MODE === "development" ||
+    import.meta.env.MODE === "e2e" ||
+    import.meta.env.MODE === "test") &&
+  typeof window !== "undefined"
+) {
   (window as unknown as { __moshStore?: typeof useStore }).__moshStore = useStore;
 }

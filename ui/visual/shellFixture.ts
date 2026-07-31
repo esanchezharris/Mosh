@@ -1,15 +1,15 @@
 // Deterministic boot of the REAL v2 shell for screenshot capture.
 //
 // Why this exists rather than a Storybook story: `npm run build-storybook` is a production
-// Vite build, and the dev mock is gated on `import.meta.env.DEV || VITE_MOSH_E2E_MOCK === "1"`
+// Vite build, and the dev mock is gated on `import.meta.env.DEV || import.meta.env.MODE === "e2e"`
 // (bridge.mock.ts). In a production Storybook build both are false, `isNative()` is false, and
 // AppV2 renders the "Running outside the engine" fallback. A shell story added to the Storybook
 // visual gate would therefore screenshot a placeholder — forever stable, forever green, and
 // proving nothing. The Storybook decorator also forces `position: static` on `.v2-shell`, which
 // destroys the push-dock geometry that IS the composition under test.
 //
-// So the shell is captured against a production Vite build with the mock explicitly enabled,
-// which is the same recipe playwright.config.ts already uses behind MOSH_E2E_PREVIEW.
+// So the shell is captured against an optimized e2e-mode Vite build with the mock explicitly
+// enabled in the isolated dist-e2e output, matching the MOSH_E2E_PREVIEW recipe.
 
 import { expect, type Page } from "@playwright/test";
 

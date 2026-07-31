@@ -74,9 +74,10 @@ corpus gate verifies the recipe against only that role's source pitches.
   commands, resolves `capture`/`bind` refs, applies the program as one undoable batch, and
   rolls back the batch on partial failure.
 - The UI agent catalog exposes `generate_beat_recipe`, the brain prompt explicitly routes
-  make/start/build/generate-a-beat requests to it, the keyless mock brain emits the same
+  make/start/build/generate-a-beat requests to it, the Vite/e2e demo brain emits the same
   command for typed beat asks, the parser preserves object-form `capture`/`bind`, and the
-  browser mock creates editable MIDI tracks for tests.
+  browser mock creates editable MIDI tracks for tests. Packaged builds without a reachable
+  brain fail visibly without emitting commands.
 - The debug/native app command surface has been driven through `Mosh --run-script` against
   the local MIDI corpus with explicit `libraryDir` values: the original r2 proof applied 23
   generated commands with no unresolved refs and 7 editable MIDI-bearing tracks; the r6

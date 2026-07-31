@@ -57,15 +57,14 @@ export default defineConfig({
       stderr: "pipe",
     },
     {
-      // A PRODUCTION Vite build with the mock switched on explicitly, served by `vite preview`.
-      // Production, not `npm run dev`, for the reason recorded above: a dev server with HMR is
-      // this repo's known false-green vector. It also exercises the real dead-code path, so the
-      // bundle being screenshotted is shaped like the one that ships.
+      // An optimized e2e-mode Vite build with the mock switched on explicitly, served by
+      // `vite preview`. This uses `dist-e2e`, never the production `dist` staged into Mosh.app.
+      // A built bundle, not `npm run dev`, closes this repo's known HMR false-green vector.
       //
       // Port 6009 with --strictPort on purpose. 5173 is the documented foreign-dev-server trap,
       // 5191 belongs to playwright.isolated.config.ts, 6008 is Storybook above. Strict means a
       // collision fails loudly instead of quietly screenshotting another worktree's bundle.
-      command: "(lsof -ti:6009 | xargs kill -9 2>/dev/null || true) && VITE_MOSH_E2E_MOCK=1 npm run build && VITE_MOSH_E2E_MOCK=1 npx vite preview --host 127.0.0.1 --port 6009 --strictPort",
+      command: "(lsof -ti:6009 | xargs kill -9 2>/dev/null || true) && npm run build:e2e && npx vite preview --outDir dist-e2e --host 127.0.0.1 --port 6009 --strictPort",
       url: "http://127.0.0.1:6009/",
       reuseExistingServer: false,
       timeout: 300_000,

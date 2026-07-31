@@ -45,9 +45,10 @@ Three pieces behind one seam (the `execute_command` + snapshot/events contract):
 ./run-mosh.sh smoke     # non-interactive native brain round-trip
 ```
 
-Brain LLM keys (optional — voice falls back to an offline mock without them) go in `ui/.env.local`
-(see [`ui/.env.example`](ui/.env.example)). The generative model is wired with
-[`service/setup-sa3.sh`](service/setup-sa3.sh).
+Brain LLM keys are optional for the DAW but required for packaged Moshi edits unless a brain
+proxy is configured. Add them to `ui/.env.local` (see [`ui/.env.example`](ui/.env.example)).
+Moshi reports setup failure without mutating the project when no brain is reachable. The
+generative model is wired with [`service/setup-sa3.sh`](service/setup-sa3.sh).
 
 ## Verify
 
