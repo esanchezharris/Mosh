@@ -19,7 +19,7 @@ export type OwnerCockpitState = {
 
 type OwnerCockpitClient = Pick<
   AgentHostClient,
-  "start" | "close" | "watchEvents" | "realtimeSecret" | "createReport" | "approveReport"
+  "start" | "close" | "watchEvents" | "realtimeSecret" | "createReport" | "approveReport" | "createRepair"
 >;
 
 export class OwnerCockpitRuntime {
@@ -117,10 +117,21 @@ export class OwnerCockpitRuntime {
   }
 
   async approve(reportId: string): Promise<void> {
-    await this.client.approveReport(reportId);
-    this.allReports = this.allReports.filter((report) => report.id !== reportId);
-    this.quietReportIds.delete(reportId);
-    this.update({ reports: this.allReports.filter((item) => !this.quietReportIds.has(item.id)) });
+    const approved = await this.client.approveReport(reportId);
+    this.allReports = this.allReports.map((report) =>
+      report.id === reportId ? { ...report, status: approved.status } : report);
+    this.update({
+      reports: this.allReports.filter((item) => !this.quietReportIds.has(item.id)),
+      lastEvent: approved.status === "approved" ? "report.approved" : "report.sync.pending",
+    });
+  }
+
+  async fixNow(reportId: string): Promise<void> {
+    const report = this.allReports.find((candidate) => candidate.id === reportId);
+    if (!report || report.status !== "approved")
+      throw new AgentHostApiError("Approve and sync the report before repair.", "approval_required", false);
+    await this.client.createRepair(reportId);
+    this.update({ lastEvent: "repair.running" });
   }
 
   flushQuietReports(): void {

@@ -8,7 +8,7 @@ export type DraftReportInput = {
 
 export type DraftReport = DraftReportInput & {
   readonly id: string;
-  readonly status: "draft";
+  readonly status: "draft" | "approved" | "approved_pending_sync";
 };
 
 export type ReportHost = {

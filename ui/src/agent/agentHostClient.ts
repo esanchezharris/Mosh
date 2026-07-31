@@ -2,6 +2,7 @@ import {
   agentHostApproveReport,
   agentHostClosePlaytest,
   agentHostCreateReport,
+  agentHostCreateRepair,
   agentHostEvents,
   agentHostRealtimeSecret,
   agentHostStartPlaytest,
@@ -21,6 +22,7 @@ export type AgentHostBridge = {
   secret(): Promise<unknown>;
   createReport(input: DraftReportInput): Promise<unknown>;
   approveReport(reportId: string): Promise<unknown>;
+  createRepair?(reportId: string): Promise<unknown>;
 };
 
 const nativeBridge: AgentHostBridge = {
@@ -30,6 +32,7 @@ const nativeBridge: AgentHostBridge = {
   secret: agentHostRealtimeSecret,
   createReport: agentHostCreateReport,
   approveReport: agentHostApproveReport,
+  createRepair: agentHostCreateRepair,
 };
 
 export class AgentHostApiError extends Error {
@@ -134,8 +137,22 @@ export class AgentHostClient {
     return { id: value.id, ...input, status: "draft" };
   }
 
-  async approveReport(reportId: string): Promise<void> {
-    unwrap(await this.bridge.approveReport(reportId));
+  async approveReport(reportId: string): Promise<{
+    status: "approved" | "approved_pending_sync";
+  }> {
+    const value = unwrap(await this.bridge.approveReport(reportId));
+    if (value.status !== "approved" && value.status !== "approved_pending_sync")
+      throw new AgentHostApiError("Invalid approval response", "invalid_response");
+    return { status: value.status };
+  }
+
+  async createRepair(reportId: string): Promise<{ id: string; status: "running" }> {
+    if (!this.bridge.createRepair)
+      throw new AgentHostApiError("Repair orchestration unavailable", "repair_unavailable");
+    const value = unwrap(await this.bridge.createRepair(reportId));
+    if (typeof value.id !== "string" || value.status !== "running")
+      throw new AgentHostApiError("Invalid repair response", "invalid_response");
+    return { id: value.id, status: "running" };
   }
 
   watchEvents(onEvent: (event: HostEvent) => void): () => void {

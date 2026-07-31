@@ -2,11 +2,27 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer as createNodeServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
-import { AgentHostService, OpenAIUnavailableError } from "./service.js";
+import {
+  AgentHostService,
+  OpenAIUnavailableError,
+  OrchestrationUnavailableError,
+} from "./service.js";
 
 const createPlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
 const closePlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
 const routeId = z.uuid();
+const repairCompletionInput = z.object({
+  redEvidencePath: z.string().min(1),
+  greenEvidencePath: z.string().min(1),
+  diagnosticsPath: z.string().min(1),
+  bundlePath: z.string().min(1),
+  buildPath: z.string().min(1),
+  draftPrUrl: z.url(),
+  draft: z.literal(true),
+  merged: z.literal(false),
+}).strict();
+const repairLaunchInput = z.object({ buildPath: z.string().min(1) }).strict();
+const repairRollbackInput = z.object({ reason: z.string().trim().min(1).max(2_000) }).strict();
 
 export interface AgentHostServerOptions {
   service: AgentHostService;
@@ -42,8 +58,13 @@ function authorized(request: IncomingMessage, capability: string): boolean {
 
 function errorStatus(error: unknown): number {
   if (error instanceof OpenAIUnavailableError) return 503;
+  if (error instanceof OrchestrationUnavailableError) return 503;
   if (error instanceof z.ZodError || error instanceof SyntaxError) return 400;
   if ((error as NodeJS.ErrnoException).code === "ENOENT") return 404;
+  const code = (error as { code?: unknown }).code;
+  if (code === "approval_required") return 403;
+  if (code === "repair_active" || code === "dirty_base" || code === "base_sha_mismatch") return 409;
+  if (code === "github_sync_required" || code === "checkpoint_missing") return 409;
   return 500;
 }
 
@@ -51,13 +72,19 @@ function errorBody(error: unknown): unknown {
   if (error instanceof OpenAIUnavailableError) {
     return { error: { code: error.code, message: error.message, retryable: true } };
   }
+  if (error instanceof OrchestrationUnavailableError) {
+    return { error: { code: error.code, message: error.message, retryable: false } };
+  }
   if (error instanceof z.ZodError) {
     return { error: { code: "invalid_request", message: "Request validation failed", issues: error.issues } };
   }
   const status = errorStatus(error);
+  const typedCode = (error as { code?: unknown }).code;
   return {
     error: {
-      code: status === 404 ? "not_found" : status === 400 ? "invalid_request" : "internal_error",
+      code: typeof typedCode === "string"
+        ? typedCode
+        : status === 404 ? "not_found" : status === 400 ? "invalid_request" : "internal_error",
       message: status === 500 ? "Internal server error" : (error as Error).message,
     },
   };
@@ -111,6 +138,39 @@ export async function startAgentHost(options: AgentHostServerOptions) {
       if (repairsMatch && request.method === "POST") {
         await readBody(request);
         sendJson(response, 201, await options.service.createRepair(routeId.parse(repairsMatch[1])));
+        return;
+      }
+      const coordinateMatch = url.pathname.match(/^\/v1\/reports\/([^/]+)\/coordinate$/);
+      if (coordinateMatch && request.method === "POST") {
+        await readBody(request);
+        await options.service.coordinateReport(routeId.parse(coordinateMatch[1]));
+        sendJson(response, 202, { status: "started" });
+        return;
+      }
+      const completeMatch = url.pathname.match(/^\/v1\/repairs\/([^/]+)\/complete$/);
+      if (completeMatch && request.method === "POST") {
+        sendJson(response, 200, await options.service.completeRepair(
+          routeId.parse(completeMatch[1]),
+          repairCompletionInput.parse(await readBody(request)),
+        ));
+        return;
+      }
+      const launchMatch = url.pathname.match(/^\/v1\/repairs\/([^/]+)\/launch$/);
+      if (launchMatch && request.method === "POST") {
+        const body = repairLaunchInput.parse(await readBody(request));
+        sendJson(response, 200, await options.service.launchRepairBuild(
+          routeId.parse(launchMatch[1]),
+          body.buildPath,
+        ));
+        return;
+      }
+      const rollbackMatch = url.pathname.match(/^\/v1\/repairs\/([^/]+)\/rollback$/);
+      if (rollbackMatch && request.method === "POST") {
+        const body = repairRollbackInput.parse(await readBody(request));
+        sendJson(response, 200, await options.service.rollbackRepair(
+          routeId.parse(rollbackMatch[1]),
+          body.reason,
+        ));
         return;
       }
       const eventsMatch = url.pathname.match(/^\/v1\/playtests\/([^/]+)\/events$/);

@@ -30,6 +30,7 @@ public:
     juce::var realtimeSecret();
     juce::var createReport (const juce::var& request);
     juce::var approveReport (const juce::String& reportId);
+    juce::var createRepair (const juce::String& reportId);
     juce::var events (int afterSequence);
     bool hasActivePlaytest() const;
 

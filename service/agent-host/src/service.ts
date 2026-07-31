@@ -17,9 +17,14 @@ import {
   type SupervisorModelAdapter,
 } from "./openai.js";
 import { FileAgentSession, PlaytestStore } from "./persistence.js";
+import { OwnerOrchestrator } from "./orchestration.js";
 
 export class OpenAIUnavailableError extends Error {
   readonly code = "openai_unavailable";
+}
+
+export class OrchestrationUnavailableError extends Error {
+  readonly code = "orchestration_unavailable";
 }
 
 export class AgentHostService {
@@ -30,10 +35,24 @@ export class AgentHostService {
     readonly store: PlaytestStore,
     private readonly supervisor?: SupervisorModelAdapter,
     private readonly realtime?: RealtimeSecretAdapter,
-  ) {}
+    private readonly orchestration?: OwnerOrchestrator,
+  ) {
+    this.orchestration?.setEventSink((playtestId, type, data) =>
+      this.emit(playtestId, type, data));
+  }
 
   async initialize(): Promise<void> {
     await this.store.initialize();
+    for (const repair of await this.store.listRepairs()) {
+      if (repair.status === "queued" || repair.status === "running") {
+        await this.emit(repair.playtestId, "repair.recovered", {
+          repairId: repair.id,
+          status: repair.status,
+          worktreePath: repair.worktreePath ?? "",
+          repairThreadId: repair.repairThreadId ?? "",
+        });
+      }
+    }
   }
 
   async createPlaytest(input: { retainTranscript?: boolean | undefined }): Promise<PlaytestSession> {
@@ -147,7 +166,7 @@ export class AgentHostService {
 
   async approveReport(reportId: string): Promise<PlaytestReport> {
     const located = await this.store.loadReport(reportId);
-    return this.serializeMutation(located.playtestId, async () => {
+    const approved = await this.serializeMutation(located.playtestId, async () => {
       const current = await this.store.loadReport(reportId);
       const at = new Date().toISOString();
       const approved: PlaytestReport = {
@@ -160,26 +179,53 @@ export class AgentHostService {
       await this.emitUnlocked(approved.playtestId, "report.approved", { reportId });
       return approved;
     });
+    if (!this.orchestration) {
+      const pending: PlaytestReport = {
+        ...approved,
+        status: "approved_pending_sync",
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveReport(pending);
+      await this.emit(pending.playtestId, "report.sync.pending", {
+        reportId,
+        reason: "orchestration_unavailable",
+      });
+      return pending;
+    }
+    const synced = await this.orchestration.syncApprovedReport(approved);
+    if (synced.status === "approved") await this.orchestration.coordinateReport(synced);
+    return synced;
   }
 
   async createRepair(reportId: string): Promise<RepairJob> {
-    const located = await this.store.loadReport(reportId);
-    return this.serializeMutation(located.playtestId, async () => {
-      const report = await this.store.loadReport(reportId);
-      const at = new Date().toISOString();
-      const repair: RepairJob = {
-        version: 1,
-        id: randomUUID(),
-        playtestId: report.playtestId,
-        reportId,
-        status: "queued",
-        createdAt: at,
-        updatedAt: at,
-      };
-      await this.store.saveRepair(repair);
-      await this.emitUnlocked(report.playtestId, "repair.queued", { repairId: repair.id, reportId });
-      return repair;
-    });
+    if (this.orchestration) {
+      return this.orchestration.createRepair(await this.store.loadReport(reportId));
+    }
+    throw new OrchestrationUnavailableError("Repair orchestration is not configured");
+  }
+
+  async coordinateReport(reportId: string): Promise<void> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const report = await this.store.loadReport(reportId);
+    await this.orchestration.coordinateReport(report);
+  }
+
+  async completeRepair(repairId: string, result: NonNullable<RepairJob["result"]>): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.completeRepair(repair, result);
+  }
+
+  async launchRepairBuild(repairId: string, buildPath: string): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.launchRepairBuild(repair, buildPath);
+  }
+
+  async rollbackRepair(repairId: string, reason: string): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.rollbackRepair(repair, reason);
   }
 
   async emit(playtestId: string, type: string, data: Record<string, unknown>): Promise<AuditEvent> {

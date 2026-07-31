@@ -304,6 +304,27 @@ juce::var AgentHostProxy::approveReport (const juce::String& reportId)
     return juce::var (result);
 }
 
+juce::var AgentHostProxy::createRepair (const juce::String& reportId)
+{
+    const juce::ScopedLock guard (lock);
+    if (reportId.isEmpty() || ! ensureStarted()) return error();
+    int statusCode = 0;
+    const auto repair = post ("/v1/reports/" + reportId + "/repairs",
+                              juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+    {
+        const auto hostError = repair.getProperty ("error", juce::var());
+        return error (hostError.getProperty ("message", "repair start failed").toString(),
+                      hostError.getProperty ("code", juce::var()).toString(),
+                      statusCode >= 500);
+    }
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("status", repair.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
 juce::var AgentHostProxy::events (int afterSequence)
 {
     const juce::ScopedLock guard (lock);

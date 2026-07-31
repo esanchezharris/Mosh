@@ -170,6 +170,8 @@ export const agentHostCreateReport = (report: unknown): Promise<unknown> =>
   ownerHostNative("agent_host_create_report", report);
 export const agentHostApproveReport = (reportId: string): Promise<unknown> =>
   ownerHostNative("agent_host_approve_report", { reportId });
+export const agentHostCreateRepair = (reportId: string): Promise<unknown> =>
+  ownerHostNative("agent_host_create_repair", { reportId });
 export const agentHostEvents = (afterSequence: number): Promise<unknown> =>
   ownerHostNative("agent_host_events", { afterSequence });
 

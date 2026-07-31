@@ -9,6 +9,11 @@ project_id = "tpvkqaqydafpgockzchm"
 # the publishable apikey.
 verify_jwt = false
 
+[functions.playtest-evidence]
+# Owner-only bearer validation happens inside the function. Supabase service
+# credentials remain auto-injected into the Edge runtime and never reach Mosh.
+verify_jwt = false
+
 [functions.brain]
 # Mosh has no per-user Supabase Auth, so there is no user JWT to verify — install_id
 # (an opaque per-install UUID, see functions/brain/index.ts's header comment) is the

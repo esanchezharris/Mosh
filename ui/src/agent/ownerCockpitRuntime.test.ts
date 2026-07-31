@@ -18,7 +18,8 @@ function runtime() {
       ...input,
       status: "draft" as const,
     })),
-    approveReport: vi.fn(async () => undefined),
+    approveReport: vi.fn(async () => ({ status: "approved" as const })),
+    createRepair: vi.fn(async () => ({ id: "repair-1", status: "running" as const })),
   };
   return { cockpit: new OwnerCockpitRuntime(client), client };
 }
@@ -84,5 +85,23 @@ describe("owner cockpit runtime presentation", () => {
 
     expect(client.createReport).not.toHaveBeenCalled();
     expect(cockpit.getSnapshot().reports).toEqual([]);
+  });
+
+  it("offers Fix Now only after approval and records the running repair event", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const report = await cockpit.createReport({
+      kind: "bug",
+      title: "Loop jumps",
+      body: "The loop jumps at bar four.",
+    });
+    await expect(cockpit.fixNow(report.id)).rejects.toMatchObject({ code: "approval_required" });
+    expect(client.createRepair).not.toHaveBeenCalled();
+
+    await cockpit.approve(report.id);
+    expect(cockpit.getSnapshot().reports[0]?.status).toBe("approved");
+    await cockpit.fixNow(report.id);
+    expect(client.createRepair).toHaveBeenCalledWith(report.id);
+    expect(cockpit.getSnapshot().lastEvent).toBe("repair.running");
   });
 });

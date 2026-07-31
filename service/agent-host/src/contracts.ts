@@ -12,6 +12,7 @@ export const PlaytestSessionSchema = z.object({
   createdAt: isoDate,
   updatedAt: isoDate,
   closedAt: isoDate.optional(),
+  coordinatorThreadId: z.string().min(1).optional(),
 });
 export type PlaytestSession = z.infer<typeof PlaytestSessionSchema>;
 
@@ -25,6 +26,13 @@ export const EvidenceRecordSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   metadata: z.record(z.string(), jsonValue).default({}),
   createdAt: isoDate,
+  remote: z.object({
+    evidenceId: id,
+    objectPath: z.string().min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    previewUrl: z.url(),
+    previewExpiresAt: isoDate,
+  }).optional(),
 });
 export type EvidenceRecord = z.infer<typeof EvidenceRecordSchema>;
 
@@ -40,6 +48,10 @@ export const PlaytestReportSchema = z.object({
   createdAt: isoDate,
   updatedAt: isoDate,
   approvedAt: isoDate.optional(),
+  external: z.object({
+    issueNumber: z.number().int().positive(),
+    issueUrl: z.url(),
+  }).optional(),
 });
 export type PlaytestReport = z.infer<typeof PlaytestReportSchema>;
 
@@ -48,7 +60,25 @@ export const RepairJobSchema = z.object({
   id,
   playtestId: id,
   reportId: id,
-  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
+  status: z.enum(["queued", "running", "full_gate_pending", "failed", "cancelled"]),
+  baseSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
+  branch: z.string().min(1).optional(),
+  worktreePath: z.string().min(1).optional(),
+  repairThreadId: z.string().min(1).optional(),
+  checkpoint: z.object({
+    checkpointPath: z.string().min(1),
+    priorAppPath: z.string().min(1),
+  }).optional(),
+  result: z.object({
+    redEvidencePath: z.string().min(1),
+    greenEvidencePath: z.string().min(1),
+    diagnosticsPath: z.string().min(1),
+    bundlePath: z.string().min(1),
+    buildPath: z.string().min(1),
+    draftPrUrl: z.url(),
+    draft: z.literal(true),
+    merged: z.literal(false),
+  }).optional(),
   createdAt: isoDate,
   updatedAt: isoDate,
 });

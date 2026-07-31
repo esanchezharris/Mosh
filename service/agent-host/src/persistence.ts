@@ -134,6 +134,37 @@ export class PlaytestStore {
     );
   }
 
+  async loadRepair(repairId: string): Promise<RepairJob> {
+    for (const playtestId of await this.listSessionIds()) {
+      try {
+        return RepairJobSchema.parse(
+          await readJson(path.join(this.sessionDirectory(playtestId), "repairs", `${repairId}.json`)),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    throw Object.assign(new Error("Repair not found"), { code: "ENOENT" });
+  }
+
+  async listRepairs(): Promise<RepairJob[]> {
+    const repairs: RepairJob[] = [];
+    for (const playtestId of await this.listSessionIds()) {
+      const directory = path.join(this.sessionDirectory(playtestId), "repairs");
+      let names: string[];
+      try {
+        names = await readdir(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      for (const name of names.filter((candidate) => candidate.endsWith(".json")).sort()) {
+        repairs.push(RepairJobSchema.parse(await readJson(path.join(directory, name))));
+      }
+    }
+    return repairs;
+  }
+
   private async listSessionIds(): Promise<string[]> {
     try {
       return await readdir(path.join(this.root, "sessions"));

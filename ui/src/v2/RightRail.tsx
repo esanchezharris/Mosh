@@ -124,9 +124,16 @@ export function OwnerCockpitCard() {
             <div className="v2-owner-report" key={report.id}>
               <span><b>{report.kind}</b> {report.title}</span>
               <button type="button" className="v2-btn"
+                disabled={report.status === "approved"}
                 onClick={() => void ownerCockpitRuntime.approve(report.id).catch(() => undefined)}>
-                Approve
+                {report.status === "draft" ? "Approve" : report.status === "approved_pending_sync" ? "Retry Sync" : "Approved"}
               </button>
+              {report.kind !== "note" && report.status === "approved" && (
+                <button type="button" className="v2-btn"
+                  onClick={() => void ownerCockpitRuntime.fixNow(report.id).catch(() => undefined)}>
+                  Fix Now
+                </button>
+              )}
             </div>
           ))}
         </div>

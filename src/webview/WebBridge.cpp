@@ -425,6 +425,21 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 });
             })
         .withNativeFunction (
+            juce::Identifier ("agent_host_create_repair"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto reportId = args.size() > 0
+                    ? args[0].getProperty ("reportId", juce::var()).toString() : juce::String();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, reportId, completion]() mutable
+                {
+                    auto result = host->createRepair (reportId);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
             juce::Identifier ("agent_host_events"),
             [this] (const juce::Array<juce::var>& args,
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)

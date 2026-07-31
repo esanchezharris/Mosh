@@ -194,7 +194,7 @@ describe("contracts and persistence", () => {
     expect(await restarted.getItems()).toEqual([item]);
   });
 
-  it("purges non-retained transcripts but preserves reports, repairs, and audit events", async () => {
+  it("purges non-retained transcripts while preserving pending reports and audit events", async () => {
     const supervisor = new FakeSupervisor(validPlan);
     const host = await fixture({ supervisor });
     const playtest = await createPlaytest(host.origin);
@@ -207,7 +207,7 @@ describe("contracts and persistence", () => {
     });
     const report = await reportResponse.json() as { id: string };
     expect((await post(host.origin, `/v1/reports/${report.id}/approve`, {})).status).toBe(200);
-    expect((await post(host.origin, `/v1/reports/${report.id}/repairs`, {})).status).toBe(201);
+    expect((await post(host.origin, `/v1/reports/${report.id}/repairs`, {})).status).toBe(503);
     expect((await post(host.origin, `/v1/playtests/${playtest.id}/close`, {})).status).toBe(200);
 
     await expect(readFile(path.join(host.dataDirectory, "sessions", playtest.id, "transcript.json"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -217,7 +217,7 @@ describe("contracts and persistence", () => {
       "supervisor.turn.completed",
       "report.created",
       "report.approved",
-      "repair.queued",
+      "report.sync.pending",
       "playtest.closed",
     ]);
   });
