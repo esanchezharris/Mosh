@@ -286,6 +286,40 @@ TEST_CASE ("persisted device setup is bounded before parent parsing", "[audiosta
     file.deleteFile();
 }
 
+TEST_CASE ("device setup XML refuses DTD entity expansion before parsing",
+           "[audiostartup]")
+{
+    const juce::String entityBomb (
+        "<?xml version=\"1.0\"?>\n"
+        "<!DOCTYPE DEVICESETUP [\n"
+        "<!ENTITY a \"1234567890\">\n"
+        "<!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\">\n"
+        "<!ENTITY c \"&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;\">\n"
+        "<!ENTITY d \"&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;\">\n"
+        "<!ENTITY e \"&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;\">\n"
+        "]>\n"
+        "<DEVICESETUP audioOutputDeviceName=\"&e;\"/>");
+
+    REQUIRE (entityBomb.getNumBytesAsUTF8() < kMaxProbeSetupBytes);
+    CHECK_FALSE (isSafeDeviceSetupXmlText (entityBomb));
+    CHECK_FALSE (parseBoundedDeviceSetup (
+        entityBomb.toRawUTF8(),
+        static_cast<size_t> (entityBomb.getNumBytesAsUTF8())).valid);
+
+    const auto encodedBomb = "xml:" + juce::Base64::toBase64 (
+        entityBomb.toRawUTF8(),
+        static_cast<size_t> (entityBomb.getNumBytesAsUTF8()));
+    const juce::StringArray childArgs {
+        "--audio-probe",
+        "0123456789abcdef0123456789abcdef",
+        encodedBomb,
+        "2",
+        "2",
+        "0"
+    };
+    CHECK_FALSE (parseProbeRequest (childArgs).valid);
+}
+
 TEST_CASE ("probe setup serialization is parent-bounded", "[audiostartup]")
 {
     juce::XmlElement wrongRoot ("NOTDEVICE");

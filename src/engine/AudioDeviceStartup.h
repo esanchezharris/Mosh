@@ -120,6 +120,15 @@ namespace mosh::audiostartup
         std::unique_ptr<juce::XmlElement> xml;
     };
 
+    inline bool isSafeDeviceSetupXmlText (const juce::String& xmlText)
+    {
+        // XmlDocument expands declarations before returning the tree. A saved
+        // DEVICESETUP never needs a DTD, so reject declarations before parsing;
+        // otherwise a tiny persisted entity bomb can hang the parent process.
+        return ! xmlText.containsIgnoreCase ("<!DOCTYPE")
+            && ! xmlText.containsIgnoreCase ("<!ENTITY");
+    }
+
     inline BoundedDeviceSetup parseBoundedDeviceSetup (const void* data, size_t size)
     {
         BoundedDeviceSetup result;
@@ -128,7 +137,8 @@ namespace mosh::audiostartup
 
         const auto xmlText = juce::String::fromUTF8 (
             static_cast<const char*> (data), static_cast<int> (size));
-        if (static_cast<size_t> (xmlText.getNumBytesAsUTF8()) != size)
+        if (static_cast<size_t> (xmlText.getNumBytesAsUTF8()) != size
+            || ! isSafeDeviceSetupXmlText (xmlText))
             return result;
 
         auto xml = juce::XmlDocument::parse (xmlText);
@@ -306,10 +316,10 @@ namespace mosh::audiostartup
             const auto xmlText = juce::String::fromUTF8 (
                 static_cast<const char*> (decoded.getData()),
                 static_cast<int> (decoded.getDataSize()));
-            const auto xml = juce::XmlDocument::parse (xmlText);
+            const auto parsed = parseBoundedDeviceSetup (
+                decoded.getData(), decoded.getDataSize());
             if (xmlText.getNumBytesAsUTF8() != decoded.getDataSize()
-                || xml == nullptr
-                || ! xml->hasTagName ("DEVICESETUP"))
+                || ! parsed.valid)
                 return request;
 
             request.useDefaultSetup = false;
