@@ -422,6 +422,8 @@ esac
 if [ "$IS_APP" -eq 1 ]; then
   [ -f "$TARGET/Contents/Info.plist" ] || fail "not a valid app bundle (no Contents/Info.plist): $TARGET"
   [ -f "$ENTITLEMENTS" ] || fail "entitlements file not found: $ENTITLEMENTS"
+  xmllint --noout "$ENTITLEMENTS" ||
+    fail "entitlements file is not valid XML (codesign would reject it): $ENTITLEMENTS"
   log "plist check (pre-sign):"
   check_plist "$TARGET" "pre-sign" || fail "refusing to sign a bundle that's already missing required Info.plist keys — fix the build, not this script"
 fi

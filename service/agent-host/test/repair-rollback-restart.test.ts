@@ -5,18 +5,12 @@ import {
 } from "./orchestration-fixture.js";
 
 const rollbackActions = [
-  "close_repair",
-  "close_mosh",
-  "restore_checkpoint",
-  "launch_prior",
+  "handoff_prior",
 ];
 
 const rollbackEvents = [
   "repair.swap.recovered",
-  "repair.build.closed",
-  "repair.app.closed",
-  "repair.checkpoint.restored",
-  "repair.prior_app.launched",
+  "repair.rollback.handoff_accepted",
   "repair.swap.rolled_back",
 ];
 
@@ -36,24 +30,20 @@ describe("persisted rolling_back restart recovery", () => {
 
   it("persists failure and a second new orchestrator retries without app overlap", async () => {
     const { fakes, store, report, repair } = await persistedSwapFixture("rolling_back");
-    fakes.failProcessAction = "restore_checkpoint";
+    fakes.failProcessAction = "handoff_prior";
     const firstRestart = restartedService(store, fakes);
     await firstRestart.initialize();
 
     await expect(firstRestart.rollbackRepair(repair.id, "first restart"))
       .rejects.toMatchObject({ code: "injected" });
     expect(fakes.processCalls).toEqual([
-      "close_repair",
-      "close_mosh",
-      "restore_checkpoint",
+      "handoff_prior",
     ]);
     expect((await store.loadRepair(repair.id)).swap?.state).toBe("failed");
     const failedTypes = (await store.loadEvents(report.playtestId))
       .map((event) => event.type);
-    expect(failedTypes.slice(-4)).toEqual([
+    expect(failedTypes.slice(-2)).toEqual([
       "repair.swap.recovered",
-      "repair.build.closed",
-      "repair.app.closed",
       "repair.swap.failed",
     ]);
 

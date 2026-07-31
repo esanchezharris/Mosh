@@ -14,9 +14,10 @@ import {
   RepairControlAdapter,
 } from "./adapters.js";
 import { OwnerOrchestrator } from "./orchestration.js";
+import { readOwnerOpenAIKey } from "./owner-env.js";
 import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
-const apiKey = process.env.OPENAI_API_KEY;
+const apiKey = readOwnerOpenAIKey();
 const githubRunner = new NodeCommandRunner(githubCommandEnvironment(process.env));
 const gitRunner = new NodeCommandRunner(localGitCommandEnvironment(process.env));
 const repairRunner = new NodeCommandRunner(repairHelperCommandEnvironment(process.env));
@@ -48,7 +49,7 @@ const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
   : undefined;
 const service = new AgentHostService(
   store,
-  apiKey ? new OpenAIAgentsSupervisorAdapter() : undefined,
+  apiKey ? new OpenAIAgentsSupervisorAdapter(apiKey) : undefined,
   apiKey ? new OpenAIRealtimeSecretAdapter(apiKey) : undefined,
   orchestration,
 );

@@ -10,6 +10,7 @@ import {
 } from "../src/contracts.js";
 import {
   createHostedTraceRunner,
+  SupervisorOutputJsonSchema,
   type RealtimeSecretAdapter,
   type SupervisorModelAdapter,
 } from "../src/openai.js";
@@ -241,6 +242,17 @@ describe("supervisor and OpenAI boundaries", () => {
     expect(runner.config.tracingDisabled).toBe(false);
     expect(runner.config.traceIncludeSensitiveData).toBe(false);
     expect(runner.config.workflowName).toBe("mosh-owner-playtest-supervisor");
+  });
+
+  it("uses a non-strict output envelope so capability-specific arguments remain dynamic", () => {
+    expect(SupervisorOutputJsonSchema.strict).toBe(false);
+    expect(SupervisorOutputJsonSchema.schema.additionalProperties).toBe(false);
+    expect(
+      SupervisorOutputJsonSchema.schema.properties.commands.items.properties.arguments,
+    ).toEqual({
+      type: "object",
+      additionalProperties: true,
+    });
   });
 
   it("keeps local report APIs usable while returning a typed OpenAI unavailable response", async () => {

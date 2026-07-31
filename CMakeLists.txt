@@ -422,6 +422,7 @@ if (MOSH_BUILD_APP)
     # Native Owner Cockpit bridge: bundle/stage the Node application code, while
     # leaving the Node executable itself as the current owner-installed runtime.
     include(cmake/BuildAgentHost.cmake)
+    include(cmake/BuildRepairHelper.cmake)
 
     if (APPLE)
         add_custom_target(MoshRefreshBundleMetadata ALL
@@ -440,6 +441,9 @@ if (MOSH_BUILD_APP)
         endif()
         if (TARGET MoshStageAgentHost)
             add_dependencies(MoshRefreshBundleMetadata MoshStageAgentHost)
+        endif()
+        if (TARGET MoshStageRepairHelper)
+            add_dependencies(MoshRefreshBundleMetadata MoshStageRepairHelper)
         endif()
     endif()
 endif()

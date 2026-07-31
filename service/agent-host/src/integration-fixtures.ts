@@ -84,11 +84,9 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
     },
     stopTransport: async () => { calls.process.push("stop_transport"); },
     releaseAudio: async () => { calls.process.push("release_audio"); },
-    closeMosh: async () => { calls.process.push("close_mosh"); },
-    launchRepairBuild: async () => { calls.process.push("launch_repair"); },
+    handoffRepairBuild: async () => { calls.process.push("handoff_repair"); },
     closeRepairBuild: async () => { calls.process.push("close_repair"); },
-    restoreCheckpoint: async () => { calls.process.push("restore_checkpoint"); },
-    launchPriorApp: async () => { calls.process.push("launch_prior"); },
+    handoffPriorApp: async () => { calls.process.push("handoff_prior"); },
   };
   const artifacts: RepairArtifactPolicy = {
     validateResult: async (_worktreePath, result) => result,

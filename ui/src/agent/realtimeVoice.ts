@@ -7,6 +7,7 @@ type AudioTrack = Pick<MediaStreamTrack, "enabled" | "stop">;
 export type RealtimeSessionPort = {
   connect(options: { apiKey: string }): Promise<void>;
   mute(muted: boolean): void | Promise<void>;
+  sendMessage(message: string): void;
   close(): void;
   interrupt(): void;
   onError(listener: (error: unknown) => void): void;
@@ -24,24 +25,41 @@ export type PushToTalkDependencies = {
   readonly createSession: (options: RealtimeSessionFactoryOptions) => RealtimeSessionPort;
   readonly audioElement: HTMLAudioElement;
   readonly onFailure?: (error: unknown) => void;
+  readonly mediaAcquisitionTimeoutMs?: number;
+  readonly inputMode?: "webrtc-microphone" | "native-transcript";
+  readonly releaseMediaStream?: (stream: MediaStream) => void | Promise<void>;
 };
+
+export const REALTIME_MEDIA_ACQUISITION_TIMEOUT_MS = 10_000;
+
+export function describeRealtimeFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const redacted = message
+    .replace(/\b(?:sk|ek)[-_][A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  return redacted.slice(0, 160) || "connection failed";
+}
 
 export class PushToTalkController {
   readonly sessionOptions = { historyStoreAudio: false as const };
+  readonly inputMode: "webrtc-microphone" | "native-transcript";
   private session: RealtimeSessionPort | null = null;
+  private mediaStream: MediaStream | null = null;
   private tracks: AudioTrack[] = [];
   private disposed = false;
   private failureHandled = false;
 
-  constructor(private readonly dependencies: PushToTalkDependencies) {}
+  constructor(private readonly dependencies: PushToTalkDependencies) {
+    this.inputMode = dependencies.inputMode ?? "webrtc-microphone";
+  }
 
   async connect(): Promise<void> {
     this.disposed = false;
     this.failureHandled = false;
     try {
-      const mediaStream = await this.dependencies.getMediaStream();
-      this.tracks = mediaStream.getAudioTracks();
-      this.disableInput();
+      const mediaStream = await this.acquireMediaStream();
+      this.mediaStream = mediaStream;
       const apiKey = await this.dependencies.getClientSecret();
       this.session = this.dependencies.createSession({
         mediaStream,
@@ -73,6 +91,12 @@ export class PushToTalkController {
     await this.disable();
   }
 
+  submitTranscript(text: string): void {
+    const clean = text.trim();
+    if (!clean || !this.session) return;
+    this.session.sendMessage(clean);
+  }
+
   async cancel(): Promise<void> {
     await this.disable();
     this.session?.interrupt();
@@ -95,13 +119,18 @@ export class PushToTalkController {
     const session = this.session;
     this.session = null;
     const tracks = this.tracks;
+    const mediaStream = this.mediaStream;
     this.tracks = [];
+    this.mediaStream = null;
     for (const track of tracks) track.enabled = false;
     try {
       await session?.mute(true);
     } catch {}
     for (const track of tracks) {
       try { track.stop(); } catch {}
+    }
+    if (mediaStream) {
+      try { await this.dependencies.releaseMediaStream?.(mediaStream); } catch {}
     }
     try {
       session?.close();
@@ -110,6 +139,37 @@ export class PushToTalkController {
 
   private disableInput(): void {
     for (const track of this.tracks) track.enabled = false;
+  }
+
+  private async acquireMediaStream(): Promise<MediaStream> {
+    const request = this.dependencies.getMediaStream();
+    const timeoutMs = this.dependencies.mediaAcquisitionTimeoutMs
+      ?? REALTIME_MEDIA_ACQUISITION_TIMEOUT_MS;
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<MediaStream>((resolve, reject) => {
+        timer = setTimeout(() => {
+          expired = true;
+          reject(new Error("Realtime microphone request timed out"));
+        }, timeoutMs);
+        void request.then((stream) => {
+          if (expired) {
+            for (const track of stream.getAudioTracks()) {
+              try { track.stop(); } catch {}
+            }
+            void Promise.resolve(this.dependencies.releaseMediaStream?.(stream))
+              .catch(() => undefined);
+            return;
+          }
+          this.tracks = stream.getAudioTracks();
+          this.disableInput();
+          resolve(stream);
+        }, reject);
+      });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   private async disable(): Promise<void> {

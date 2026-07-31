@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PushToTalkController, realtimeFallbackFor } from "./realtimeVoice";
+import { describeRealtimeFailure, PushToTalkController, realtimeFallbackFor } from "./realtimeVoice";
 
 function setup() {
   const track = { enabled: true, stop: vi.fn() };
@@ -8,6 +8,7 @@ function setup() {
   const session = {
     connect: vi.fn(async () => undefined),
     mute: vi.fn(async () => undefined),
+    sendMessage: vi.fn(),
     close: vi.fn(),
     interrupt: vi.fn(),
     onError: vi.fn<(listener: (error: unknown) => void) => void>(),
@@ -32,6 +33,7 @@ function failingSetup(stage: "secret" | "session" | "connect" | "mute") {
     mute: vi.fn(async () => {
       if (stage === "mute") throw new Error("mute failed");
     }),
+    sendMessage: vi.fn(),
     close: vi.fn(),
     interrupt: vi.fn(),
     onError: vi.fn(),
@@ -69,6 +71,7 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     const session = {
       connect: vi.fn(async () => undefined),
       mute: vi.fn(),
+      sendMessage: vi.fn(),
       close: vi.fn(),
       interrupt: vi.fn(),
       onError: vi.fn(),
@@ -136,6 +139,34 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     },
   );
 
+  it("times out a pending WebKit microphone request and stops a stream that arrives late", async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseMedia!: (stream: MediaStream) => void;
+      const media = new Promise<MediaStream>((resolve) => { releaseMedia = resolve; });
+      const track = { enabled: true, stop: vi.fn() };
+      const stream = { getAudioTracks: () => [track] } as unknown as MediaStream;
+      const controller = new PushToTalkController({
+        getClientSecret: vi.fn(async () => "ek_test"),
+        getMediaStream: () => media,
+        createSession: vi.fn(),
+        audioElement: { volume: 1 } as HTMLAudioElement,
+        mediaAcquisitionTimeoutMs: 25,
+      });
+
+      const connecting = controller.connect();
+      const rejection = expect(connecting).rejects.toThrow("Realtime microphone request timed out");
+      await vi.advanceTimersByTimeAsync(25);
+      await rejection;
+
+      releaseMedia(stream);
+      await Promise.resolve();
+      expect(track.stop).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses voice during recording without stopping the take or opening the mic", async () => {
     const { controller, session, track } = setup();
     await controller.connect();
@@ -155,9 +186,22 @@ describe("Realtime push-to-talk privacy lifecycle", () => {
     controller.setPlaybackActive(false);
     expect(audio.volume).toBe(1);
   });
+
+  it("injects a native speech transcript into the connected Realtime session", async () => {
+    const { controller, session } = setup();
+    await controller.connect();
+    controller.submitTranscript("  explain the last change  ");
+    expect(session.sendMessage).toHaveBeenCalledWith("explain the last change");
+  });
 });
 
 describe("Realtime failure fallback", () => {
+  it("surfaces a bounded diagnostic without exposing credentials", () => {
+    expect(describeRealtimeFailure(new Error(
+      `Realtime call failed for ${["ek", "secret123"].join("_")} and ${["sk-proj", "secret456"].join("-")}`,
+    ))).toBe("Realtime call failed for [redacted] and [redacted]");
+  });
+
   it("allows only deterministic safe commands and report drafting through Apple speech", () => {
     const context = { mode: "idle" as const, tempo: 120, timeSigNum: 4, tracks: [] };
     expect(realtimeFallbackFor("play", context)).toEqual({ kind: "apple-speech", allowed: true });

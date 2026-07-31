@@ -1,5 +1,5 @@
-import { Agent, Runner } from "@openai/agents";
-import type { Session } from "@openai/agents-core";
+import { Agent, Runner, setDefaultOpenAIKey } from "@openai/agents";
+import type { JsonSchemaDefinition, Session } from "@openai/agents-core";
 import {
   RealtimeClientSecretSchema,
   SupervisorPlanSchema,
@@ -24,20 +24,69 @@ export function createHostedTraceRunner(): Runner {
   });
 }
 
-export class OpenAIAgentsSupervisorAdapter implements SupervisorModelAdapter {
-  private readonly runner = createHostedTraceRunner();
-  private readonly agent: Agent<unknown, typeof SupervisorPlanSchema>;
+export const SupervisorOutputJsonSchema = {
+  type: "json_schema",
+  name: "mosh_supervisor_plan",
+  strict: false,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      intent: { type: "string" },
+      say: { type: "string" },
+      commands: {
+        type: "array",
+        maxItems: 20,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            capabilityId: { type: "string" },
+            arguments: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+          required: ["capabilityId", "arguments"],
+        },
+      },
+      needsClarification: { type: "boolean" },
+      selectedCapabilityIds: {
+        type: "array",
+        maxItems: 20,
+        items: { type: "string" },
+      },
+    },
+    required: [
+      "intent",
+      "say",
+      "commands",
+      "needsClarification",
+      "selectedCapabilityIds",
+    ],
+  },
+} satisfies JsonSchemaDefinition;
 
-  constructor(model = process.env.MOSH_AGENT_HOST_MODEL ?? "gpt-5.2") {
+export class OpenAIAgentsSupervisorAdapter implements SupervisorModelAdapter {
+  private readonly runner: Runner;
+  private readonly agent: Agent<unknown, typeof SupervisorOutputJsonSchema>;
+
+  constructor(
+    apiKey?: string,
+    model = process.env.MOSH_AGENT_HOST_MODEL ?? "gpt-5.2",
+  ) {
+    if (apiKey) setDefaultOpenAIKey(apiKey);
+    this.runner = createHostedTraceRunner();
     this.agent = new Agent({
       name: "Mosh Owner Playtest Supervisor",
       model,
       instructions: [
         "Return a plan only. Never execute commands or mutate Mosh state.",
         "Use only the supplied capability schemas and include every command capability ID in selectedCapabilityIds.",
+        "Each command arguments object must match the supplied input schema for that capability.",
         "Ask for clarification when a safe, unambiguous plan cannot be formed.",
       ].join(" "),
-      outputType: SupervisorPlanSchema,
+      outputType: SupervisorOutputJsonSchema,
     });
   }
 

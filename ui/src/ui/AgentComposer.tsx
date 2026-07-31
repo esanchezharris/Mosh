@@ -19,7 +19,7 @@ import { IconArrowUp, IconMic } from "./icons";
 import { ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
 import { classifyReportTrigger } from "../agent/ownerCockpit";
 import { createOpenAIRealtimeController } from "../agent/openAIRealtime";
-import { playMoshiEarcon, realtimeFallbackFor, type PushToTalkController } from "../agent/realtimeVoice";
+import { describeRealtimeFailure, playMoshiEarcon, realtimeFallbackFor, type PushToTalkController } from "../agent/realtimeVoice";
 import { useSettings } from "../settings/store";
 import { createBrain } from "../agent/brain";
 
@@ -153,6 +153,7 @@ export function AgentComposer() {
   const realtimeConnectingRef = useRef<Promise<PushToTalkController> | null>(null);
   const realtimeFailedRef = useRef(false);
   const pointerHeldRef = useRef(false);
+  const assistiveHeldRef = useRef(false);
   const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
 
   // The single funnel: typed text and final speech both arrive here.
@@ -283,6 +284,11 @@ export function AgentComposer() {
         onInterim: (t) => setInput(t),
         onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
         onFinal: (t) => {
+          if (realtimeRef.current?.inputMode === "native-transcript") {
+            realtimeRef.current.submitTranscript(t);
+            setInput("");
+            return;
+          }
           if (!realtimeFailedRef.current) {
             void run(t);
             return;
@@ -317,13 +323,13 @@ export function AgentComposer() {
     const controller = createOpenAIRealtimeController({
       getClientSecret: () => ownerCockpitRuntime.client.realtimeSecret(),
       isRecording: () => useStore.getState().transport.recording,
-      onFailure: () => {
+      onFailure: (error) => {
         realtimeFailedRef.current = true;
         realtimeRef.current = null;
         realtimeConnectingRef.current = null;
         setListening(false);
         setAgentListening(false);
-        setSay("Realtime unavailable — safe voice commands only.");
+        setSay(`Realtime unavailable — ${describeRealtimeFailure(error)}`);
         playMoshiEarcon("error");
       },
       runDirectSafe: async (command, args) => {
@@ -393,6 +399,56 @@ export function AgentComposer() {
   const voiceAvailable = (ownerCockpitEnabled && cockpit.status === "active") || voiceSupported;
   const micLabel = !voiceAvailable ? "Voice unavailable here — type instead"
     : listening ? "Listening… release to send" : "Hold to talk";
+  const beginPushToTalk = () => {
+    if (agentBusy || !voiceAvailable || pointerHeldRef.current) return;
+    pointerHeldRef.current = true;
+    const isRecording = useStore.getState().transport.recording;
+    if (isRecording
+      && ownerCockpitEnabled
+      && cockpit.status === "active") {
+      pointerHeldRef.current = false;
+      setSay("Stop recording before talking to Moshi.");
+      playMoshiEarcon("error");
+      pushAgentUtter("UHOH", "Stop recording before talking to Moshi.");
+      return;
+    }
+    handsFree.pauseForPushToTalk();
+    if (isRecording) void useStore.getState().stopRecord();
+    if (ownerCockpitEnabled && cockpit.status === "active" && !realtimeFailedRef.current) {
+      setListening(true);
+      setAgentListening(true);
+      void ensureRealtime().then(async (controller) => {
+        if (!pointerHeldRef.current) return controller.release();
+        await controller.press({ recording: useStore.getState().transport.recording });
+        if (controller.inputMode === "native-transcript") ensureVoice()?.start();
+      }).catch((error) => {
+        setListening(false);
+        setAgentListening(false);
+        setSay(`Realtime unavailable — ${describeRealtimeFailure(error)}`);
+        ensureVoice()?.start();
+      });
+      return;
+    }
+    ensureVoice()?.start();
+  };
+  const releasePushToTalk = () => {
+    assistiveHeldRef.current = false;
+    pointerHeldRef.current = false;
+    void realtimeRef.current?.release();
+    voiceRef.current?.stop();
+    setListening(false);
+    setAgentListening(false);
+    handsFree.resumeAfterPushToTalk();
+  };
+  const cancelPushToTalk = () => {
+    assistiveHeldRef.current = false;
+    pointerHeldRef.current = false;
+    void realtimeRef.current?.cancel();
+    voiceRef.current?.stop();
+    setListening(false);
+    setAgentListening(false);
+    handsFree.resumeAfterPushToTalk();
+  };
 
   return (
     <div className="agent-composer">
@@ -404,52 +460,21 @@ export function AgentComposer() {
           disabled={!voiceAvailable || agentBusy}
           data-testid="agent-mic"
           onPointerDown={(e) => {
-            if (agentBusy || !voiceAvailable) return;
-            pointerHeldRef.current = true;
-            const isRecording = useStore.getState().transport.recording;
-            if (isRecording
-              && ownerCockpitEnabled
-              && cockpit.status === "active") {
-              pointerHeldRef.current = false;
-              setSay("Stop recording before talking to Moshi.");
-              playMoshiEarcon("error");
-              pushAgentUtter("UHOH", "Stop recording before talking to Moshi.");
-              return;
-            }
-            handsFree.pauseForPushToTalk();
-            if (isRecording) void useStore.getState().stopRecord();
+            assistiveHeldRef.current = false;
             try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
-            if (ownerCockpitEnabled && cockpit.status === "active" && !realtimeFailedRef.current) {
-              setListening(true);
-              setAgentListening(true);
-              void ensureRealtime().then(async (controller) => {
-                if (!pointerHeldRef.current) return controller.release();
-                await controller.press({ recording: useStore.getState().transport.recording });
-              }).catch(() => {
-                setListening(false);
-                setAgentListening(false);
-                setSay("Realtime unavailable — safe voice commands only.");
-                ensureVoice()?.start();
-              });
+            beginPushToTalk();
+          }}
+          onPointerUp={releasePushToTalk}
+          onPointerCancel={cancelPushToTalk}
+          onClickCapture={(e) => {
+            if (e.nativeEvent.detail !== 0) return;
+            if (assistiveHeldRef.current) {
+              releasePushToTalk();
               return;
             }
-            ensureVoice()?.start();
-          }}
-          onPointerUp={() => {
+            assistiveHeldRef.current = true;
             pointerHeldRef.current = false;
-            void realtimeRef.current?.release();
-            voiceRef.current?.stop();
-            setListening(false);
-            setAgentListening(false);
-            handsFree.resumeAfterPushToTalk();
-          }}
-          onPointerCancel={() => {
-            pointerHeldRef.current = false;
-            void realtimeRef.current?.cancel();
-            voiceRef.current?.stop();
-            setListening(false);
-            setAgentListening(false);
-            handsFree.resumeAfterPushToTalk();
+            beginPushToTalk();
           }}
         >
           {listening

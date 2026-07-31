@@ -112,11 +112,9 @@ export class OrchestrationFakes {
     },
     stopTransport: async () => { await this.processAction("stop_transport"); },
     releaseAudio: async () => { await this.processAction("release_audio"); },
-    closeMosh: async () => { await this.processAction("close_mosh"); },
-    launchRepairBuild: async () => { await this.processAction("launch_repair"); },
+    handoffRepairBuild: async () => { await this.processAction("handoff_repair"); },
     closeRepairBuild: async () => { await this.processAction("close_repair"); },
-    restoreCheckpoint: async () => { await this.processAction("restore_checkpoint"); },
-    launchPriorApp: async () => { await this.processAction("launch_prior"); },
+    handoffPriorApp: async () => { await this.processAction("handoff_prior"); },
   };
 
   artifacts: RepairArtifactPolicy = {

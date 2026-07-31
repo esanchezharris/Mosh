@@ -25,8 +25,10 @@ const {
       return { start: vi.fn(), stop: vi.fn(), abort: vi.fn(), listening: false };
     }),
     realtimeControllerMock: {
-      connect: vi.fn(async () => { throw new Error("realtime failed"); }),
+      connect: vi.fn<() => Promise<void>>(async () => { throw new Error("realtime failed"); }),
       dispose: vi.fn(async () => undefined),
+      inputMode: "native-transcript" as const,
+      submitTranscript: vi.fn(),
       press: vi.fn(),
       release: vi.fn(),
       cancel: vi.fn(),
@@ -106,7 +108,13 @@ describe("AgentComposer supervisor entry point", () => {
     voiceCallbacks.current = null;
     requestSupervisorMock.mockResolvedValue({ plan: { intent: "ACK_GOT_IT", say: "done" }, calls: [{ command: "create_track", args: { name: "Lead" } }], telemetry: { latencyMs: 1 } });
     runAgentBatchMock.mockResolvedValue({ entries: [{ ok: true }], applied: 1 });
-    useStore.setState({ agentBusy: false, snapshot: null, stopRecord: defaultStopRecord });
+    const transport = useStore.getState().transport;
+    useStore.setState({
+      agentBusy: false,
+      snapshot: null,
+      stopRecord: defaultStopRecord,
+      transport: { ...transport, recording: false },
+    });
     cockpitStatus.current = "active";
     useSettings.getState().set("ownerCockpit", true);
     act(() => { root.render(React.createElement(AgentComposer)); });
@@ -234,5 +242,29 @@ describe("AgentComposer supervisor entry point", () => {
     expect(createVoiceInputMock).not.toHaveBeenCalled();
     expect(realtimeControllerMock.connect).not.toHaveBeenCalled();
     expect(host.textContent).toContain("Stop recording before talking to Moshi.");
+  });
+
+  it("supports assistive click-to-toggle Realtime PTT on the native accessibility path", async () => {
+    realtimeControllerMock.connect.mockResolvedValueOnce(undefined);
+    realtimeControllerMock.press.mockResolvedValueOnce({ ok: true });
+    const mic = requiredElement<HTMLButtonElement>("[data-testid='agent-mic']");
+
+    await act(async () => {
+      mic.click();
+      await Promise.resolve();
+    });
+
+    expect(mic.disabled).toBe(false);
+    expect(realtimeControllerMock.connect).toHaveBeenCalledOnce();
+    expect(realtimeControllerMock.press).toHaveBeenCalledWith({ recording: false });
+    expect(mic.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => {
+      mic.click();
+      await Promise.resolve();
+    });
+
+    expect(realtimeControllerMock.release).toHaveBeenCalledOnce();
+    expect(mic.getAttribute("aria-pressed")).toBe("false");
   });
 });

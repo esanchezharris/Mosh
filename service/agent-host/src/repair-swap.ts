@@ -85,19 +85,12 @@ export class RepairSwap {
         await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
         await this.dependencies.processes.releaseAudio();
         await this.emit(current.playtestId, "repair.audio.released", { repairId });
-        await this.dependencies.processes.closeMosh();
-        current = {
-          ...current,
-          swap: { state: "current_app_closed", buildPath },
-          updatedAt: new Date().toISOString(),
-        };
-        await this.store.saveRepair(current);
-        await this.emit(current.playtestId, "repair.app.closed", { repairId });
       }
-      await this.dependencies.processes.launchRepairBuild({
+      await this.dependencies.processes.handoffRepairBuild({
         buildPath: validatedBuild,
         worktreePath,
         sourceSha: result.sourceSha,
+        checkpointPath: current.checkpoint!.checkpointPath,
       });
       current = {
         ...current,
@@ -105,7 +98,10 @@ export class RepairSwap {
         updatedAt: new Date().toISOString(),
       };
       await this.store.saveRepair(current);
-      await this.emit(current.playtestId, "repair.build.launched", { repairId, buildPath });
+      await this.emit(current.playtestId, "repair.build.handoff_accepted", {
+        repairId,
+        buildPath,
+      });
       return current;
     } catch (error) {
       const swapFailure = safeFailure(
@@ -161,18 +157,13 @@ export class RepairSwap {
           action: "rollback",
         });
       }
-      await this.dependencies.processes.closeRepairBuild();
-      await this.emit(current.playtestId, "repair.build.closed", { repairId, reason });
-      await this.dependencies.processes.closeMosh();
-      await this.emit(current.playtestId, "repair.app.closed", { repairId, reason });
-      await this.dependencies.processes.restoreCheckpoint(checkpoint.checkpointPath);
-      await this.emit(current.playtestId, "repair.checkpoint.restored", {
+      await this.dependencies.processes.handoffPriorApp({
+        checkpointPath: checkpoint.checkpointPath,
+        priorAppPath: checkpoint.priorAppPath,
+      });
+      await this.emit(current.playtestId, "repair.rollback.handoff_accepted", {
         repairId,
         checkpointPath: checkpoint.checkpointPath,
-      });
-      await this.dependencies.processes.launchPriorApp(checkpoint.priorAppPath);
-      await this.emit(current.playtestId, "repair.prior_app.launched", {
-        repairId,
         priorAppPath: checkpoint.priorAppPath,
       });
       const rolledBack: RepairJob = {

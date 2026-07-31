@@ -196,20 +196,16 @@ describe("repair worktree and app lifecycle", () => {
     await restarted.launchRepairBuild(repair.id, "/build/Mosh.app");
     await restarted.rollbackRepair(repair.id, "retest failed");
     expect(fakes.processCalls).toEqual([
-      "checkpoint", "stop_transport", "release_audio", "close_mosh", "launch_repair",
-      "close_repair", "close_mosh", "restore_checkpoint", "launch_prior",
+      "checkpoint", "stop_transport", "release_audio", "handoff_repair",
+      "handoff_prior",
     ]);
     const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
-    expect(types.slice(-10)).toEqual([
+    expect(types.slice(-6)).toEqual([
       "repair.checkpoint.created",
       "repair.transport.stopped",
       "repair.audio.released",
-      "repair.app.closed",
-      "repair.build.launched",
-      "repair.build.closed",
-      "repair.app.closed",
-      "repair.checkpoint.restored",
-      "repair.prior_app.launched",
+      "repair.build.handoff_accepted",
+      "repair.rollback.handoff_accepted",
       "repair.swap.rolled_back",
     ]);
   });
@@ -224,7 +220,7 @@ describe("repair worktree and app lifecycle", () => {
       service.launchRepairBuild(repair.id, "/build/Mosh.app"),
     ]);
     expect(attempts.map((attempt) => attempt.status).sort()).toEqual(["fulfilled", "rejected"]);
-    expect(fakes.processCalls.filter((call) => call === "launch_repair")).toHaveLength(1);
+    expect(fakes.processCalls.filter((call) => call === "handoff_repair")).toHaveLength(1);
 
     await service.rollbackRepair(repair.id, "parallel launch probe");
     expect((await store.loadRepair(repair.id)).swap?.state).toBe("rolled_back");
@@ -233,7 +229,7 @@ describe("repair worktree and app lifecycle", () => {
     await second.service.approveReport(second.report.id);
     const secondRepair = await second.service.createRepair(second.report.id);
     await second.service.completeRepair(secondRepair.id, repairResult);
-    second.fakes.failProcessAction = "close_mosh";
+    second.fakes.failProcessAction = "handoff_repair";
     await expect(second.service.launchRepairBuild(secondRepair.id, "/build/Mosh.app"))
       .rejects.toMatchObject({ code: "injected" });
     expect(await second.store.loadRepair(secondRepair.id)).toMatchObject({

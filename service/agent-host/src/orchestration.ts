@@ -15,6 +15,7 @@ export type {
   EvidenceAdapter,
   GitAdapter,
   GitHubAdapter,
+  PriorAppHandoffContext,
   ProcessAdapter,
   RepairArtifactPolicy,
   RepairCheckpoint,

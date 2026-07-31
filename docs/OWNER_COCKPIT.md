@@ -9,16 +9,17 @@ does not create an alternate DAW mutation path.
 
 ## Setup
 
-1. Install Node 20 or newer on the owner Mac. The app bundles the Agent Host
+1. Install Node 24 on the owner Mac. The app bundles the Agent Host
    JavaScript in `Mosh.app`, but this prototype still launches it with the
-   installed `node` executable. A signed embedded runtime/helper is an owner
-   gate.
+   installed `node` executable. Embedding and signing the runtime remains a
+   post-prototype packaging gate.
 2. Put credentials only in `~/.config/mosh/env` and keep that file mode `600`.
    Do not put values in this repository, a UI `.env`, screenshots, logs, or PR
    text.
 3. Build normally. `MoshStageAgentHost` bundles
    `service/agent-host/dist/agent-host.mjs` into
-   `Contents/Resources/agent-host/agent-host.mjs`.
+   `Contents/Resources/agent-host/agent-host.mjs`, and the native build stages
+   the signed-handoff component at `Contents/Helpers/MoshRepairHelper`.
 4. Launch through `./run-mosh.sh`, open Settings → Moshi, and enable
    **Owner playtest cockpit**. It defaults off in every profile.
 5. Open the right Moshi rail and press **Start**. Starting is explicit: report
@@ -54,7 +55,7 @@ Names are documented here; secret values are deliberately not.
 | `MOSH_GITHUB_REPOSITORY` | Repository passed to authenticated `gh` | Required for external synchronization. |
 | `MOSH_REPOSITORY_PATH` | Clean committed repair base checkout | Required for repair admission. |
 | `MOSH_REPAIR_WORKTREE_ROOT` | Parent for isolated repair worktrees | Required for repair admission. |
-| `MOSH_REPAIR_CONTROL_HELPER` | Owner-approved process/checkpoint helper | Required for app swap/rollback; signing and packaging remain an owner gate. |
+| `MOSH_REPAIR_CONTROL_HELPER` | Owner-approved full process/checkpoint controller | Required for app swap/rollback. The bundled handoff component does not yet replace native MoshOps checkpoint/transport/audio preparation. |
 
 External orchestration is fail-closed and enabled only when all six evidence,
 GitHub, repository, worktree, and helper variables are present. Otherwise
@@ -146,12 +147,22 @@ repair worktree. The build must be a `studio.mosh.app` bundle whose Mosh
 executable embeds that same source SHA. The launch request is accepted only
 when its canonical path exactly equals the validated result build.
 
-Launching a repair build is a separate owner action. The helper must checkpoint,
-stop transport, release audio, close the current app, and then launch the repair
-build so two Mosh processes never overlap. Rollback closes candidates, restores
-the checkpoint, and launches the prior app. Live GPT Realtime audio, deployed
-Supabase evidence, the signed helper, and full owner feel/cutover remain explicit
+Launching a repair build is a separate owner action. The full process controller
+must checkpoint through MoshOps, stop transport, release audio, and then invoke
+the bundled handoff component. The handoff verifies same-team signatures,
+caller ancestry, canonical worktree/app paths, bundle identity, and embedded
+source SHA before terminating the current Mosh and launching the repair, so two
+Mosh processes never overlap. Rollback revalidates and launches the prior app
+with the checkpoint. The signed handoff has passed its synthetic Developer ID
+fixture; native MoshOps preparation and an installed-app swap/rollback remain
 owner gates.
+
+The Realtime owner gate has reached a signed WKWebView connection and the
+native physical-input listening state. A human-spoken semantic turn is still
+required because system-generated speech is correctly rejected as echo.
+The deployed Supabase function and private bucket are active, but upload remains
+fail-closed until `MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET` is configured in the
+project and the matching owner value is present locally.
 
 The repair-control adapter repeats the bundle/path/source checks immediately
 before invoking the helper. The deployment helper should also be owner-signed,

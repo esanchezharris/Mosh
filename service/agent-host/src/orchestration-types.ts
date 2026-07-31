@@ -82,17 +82,21 @@ export type RepairLaunchContext = {
   buildPath: string;
   worktreePath: string;
   sourceSha: string;
+  checkpointPath: string;
+};
+
+export type PriorAppHandoffContext = {
+  checkpointPath: string;
+  priorAppPath: string;
 };
 
 export interface ProcessAdapter {
   checkpoint(): Promise<RepairCheckpoint>;
   stopTransport(): Promise<void>;
   releaseAudio(): Promise<void>;
-  closeMosh(): Promise<void>;
-  launchRepairBuild(context: RepairLaunchContext): Promise<void>;
+  handoffRepairBuild(context: RepairLaunchContext): Promise<void>;
   closeRepairBuild(): Promise<void>;
-  restoreCheckpoint(checkpointPath: string): Promise<void>;
-  launchPriorApp(appPath: string): Promise<void>;
+  handoffPriorApp(context: PriorAppHandoffContext): Promise<void>;
 }
 
 export type EventSink = (

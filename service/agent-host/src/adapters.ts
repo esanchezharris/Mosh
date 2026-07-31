@@ -10,6 +10,7 @@ import type {
   EvidenceAdapter,
   GitAdapter,
   GitHubAdapter,
+  PriorAppHandoffContext,
   ProcessAdapter,
   RepairCheckpoint,
   RepairLaunchContext,
@@ -254,6 +255,8 @@ const checkpointResult = z.object({
 });
 
 export class RepairControlAdapter implements ProcessAdapter {
+  private helperVerified: Promise<void> | undefined;
+
   constructor(
     private readonly runner: CommandRunner,
     private readonly helperPath: string,
@@ -267,8 +270,7 @@ export class RepairControlAdapter implements ProcessAdapter {
 
   async stopTransport(): Promise<void> { await this.action("stop-transport"); }
   async releaseAudio(): Promise<void> { await this.action("release-audio"); }
-  async closeMosh(): Promise<void> { await this.action("close-mosh"); }
-  async launchRepairBuild(context: RepairLaunchContext): Promise<void> {
+  async handoffRepairBuild(context: RepairLaunchContext): Promise<void> {
     const buildPath = await this.artifactPolicy.validateBuild(
       context.worktreePath,
       context.buildPath,
@@ -277,21 +279,46 @@ export class RepairControlAdapter implements ProcessAdapter {
     if (buildPath !== context.buildPath) {
       throw codedError("repair_build_mismatch", "Repair helper launch path changed after validation");
     }
-    await this.action("launch-repair", buildPath);
+    await this.action("handoff-repair", [
+      buildPath,
+      context.worktreePath,
+      context.sourceSha,
+      context.checkpointPath,
+      String(process.ppid),
+    ]);
   }
   async closeRepairBuild(): Promise<void> { await this.action("close-repair"); }
-  async restoreCheckpoint(checkpointPath: string): Promise<void> {
-    await this.action("restore-checkpoint", checkpointPath);
-  }
-  async launchPriorApp(appPath: string): Promise<void> {
-    await this.action("launch-prior", appPath);
+  async handoffPriorApp(context: PriorAppHandoffContext): Promise<void> {
+    await this.action("handoff-prior", [
+      context.checkpointPath,
+      context.priorAppPath,
+      String(process.ppid),
+    ]);
   }
 
-  private async action(name: string, argument?: string): Promise<CommandResult> {
-    const result = await this.runner.run(this.helperPath, argument ? [name, argument] : [name]);
+  private async action(name: string, arguments_: readonly string[] = []): Promise<CommandResult> {
+    await this.verifyHelper();
+    const result = await this.runner.run(this.helperPath, [name, ...arguments_]);
     if (result.exitCode !== 0) {
       throw codedError("repair_process_failed", `Repair process action failed: ${name}`);
     }
     return result;
+  }
+
+  private verifyHelper(): Promise<void> {
+    if (!this.helperVerified) {
+      this.helperVerified = this.runner.run(
+        "/usr/bin/codesign",
+        ["--verify", "--strict", "--verbose=2", this.helperPath],
+      ).then((result) => {
+        if (result.exitCode !== 0) {
+          throw codedError("repair_helper_unsigned", "Repair control helper signature is invalid");
+        }
+      }).catch((error) => {
+        this.helperVerified = undefined;
+        throw error;
+      });
+    }
+    return this.helperVerified;
   }
 }

@@ -20,6 +20,15 @@ namespace te = tracktion::engine;
 
 namespace
 {
+    juce::String valueAfter (
+        const juce::StringArray& arguments,
+        const juce::String& option)
+    {
+        const auto index = arguments.indexOf (option);
+        return index >= 0 && index + 1 < arguments.size()
+            ? arguments[index + 1] : juce::String();
+    }
+
     // Non-interactive live brain round-trip — the command-line smoke for the native
     // brain_chat proxy. Resolves the provider from the env and prints the reply (or a
     // clean error). Returns 0 on a successful round-trip, 1 otherwise.
@@ -93,6 +102,7 @@ public:
         // MoshOps::cmdRescanPlugins / PluginHost::rescan.)
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
+        const auto launchArguments = getCommandLineParameterArray();
 
         // Non-interactive live brain round-trip (no engine/audio needed). Proves the
         // native brain_chat path end-to-end against the real provider resolved from
@@ -171,6 +181,33 @@ public:
                                                 /*freshSession=*/ (noAudio || liveAudio || demoGui) && ! keepSession,
                                                 sessionBaseName);
         moshOps = std::make_unique<MoshOps> (*engine);
+        const auto repairSourceSha = valueAfter (
+            launchArguments, "--mosh-repair-source-sha");
+        if (repairSourceSha.isNotEmpty() && repairSourceSha != MOSH_BUILD_SHA)
+        {
+            std::cerr << "repair launch refused: source SHA does not match this build" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        const auto ownerCheckpoint = valueAfter (
+            launchArguments, "--mosh-owner-checkpoint");
+        if (ownerCheckpoint.isNotEmpty())
+        {
+            auto* args = new juce::DynamicObject();
+            args->setProperty ("file", ownerCheckpoint);
+            auto* command = new juce::DynamicObject();
+            command->setProperty ("name", "open_project");
+            command->setProperty ("args", juce::var (args));
+            const auto result = moshOps->execute (juce::var (command));
+            if (! (bool) result.getProperty ("ok", false))
+            {
+                std::cerr << "repair launch refused: checkpoint could not be opened" << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
+        }
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });

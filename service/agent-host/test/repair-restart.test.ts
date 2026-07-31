@@ -15,33 +15,31 @@ describe("repair swap restart continuation", () => {
   it.each([
     {
       state: "checkpointed" as const,
-      actions: ["stop_transport", "release_audio", "close_mosh", "launch_repair"],
+      actions: ["stop_transport", "release_audio", "handoff_repair"],
       events: [
         "repair.swap.recovered",
         "repair.transport.stopped",
         "repair.audio.released",
-        "repair.app.closed",
-        "repair.build.launched",
+        "repair.build.handoff_accepted",
       ],
     },
     {
       state: "stopping" as const,
-      actions: ["stop_transport", "release_audio", "close_mosh", "launch_repair"],
+      actions: ["stop_transport", "release_audio", "handoff_repair"],
       events: [
         "repair.swap.recovered",
         "repair.transport.stopped",
         "repair.audio.released",
-        "repair.app.closed",
-        "repair.build.launched",
+        "repair.build.handoff_accepted",
       ],
     },
     {
       state: "current_app_closed" as const,
-      actions: ["close_repair", "launch_repair"],
+      actions: ["close_repair", "handoff_repair"],
       events: [
         "repair.swap.recovered",
         "repair.build.closed",
-        "repair.build.launched",
+        "repair.build.handoff_accepted",
       ],
     },
   ])("continues persisted $state safely after a new orchestrator starts", async ({
@@ -70,8 +68,8 @@ describe("repair swap restart continuation", () => {
     },
     {
       state: "stopping" as const,
-      failAction: "close_mosh",
-      attemptActions: ["stop_transport", "release_audio", "close_mosh"],
+      failAction: "handoff_repair",
+      attemptActions: ["stop_transport", "release_audio", "handoff_repair"],
       attemptEvents: [
         "repair.swap.recovered",
         "repair.transport.stopped",
@@ -109,19 +107,13 @@ describe("repair swap restart continuation", () => {
     const rolledBack = await secondRestart.rollbackRepair(repair.id, "restart recovery failed");
 
     expect(fakes.processCalls.slice(beforeRollback)).toEqual([
-      "close_repair",
-      "close_mosh",
-      "restore_checkpoint",
-      "launch_prior",
+      "handoff_prior",
     ]);
     expect(rolledBack.swap?.state).toBe("rolled_back");
     const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
-    expect(types.slice(-6)).toEqual([
+    expect(types.slice(-3)).toEqual([
       "repair.swap.recovered",
-      "repair.build.closed",
-      "repair.app.closed",
-      "repair.checkpoint.restored",
-      "repair.prior_app.launched",
+      "repair.rollback.handoff_accepted",
       "repair.swap.rolled_back",
     ]);
   });
@@ -129,7 +121,7 @@ describe("repair swap restart continuation", () => {
   it("redacts hostile helper failures from returned errors, swap JSON, and events", async () => {
     const { fakes, service, store, report, repair } =
       await persistedSwapFixture("checkpointed");
-    fakes.failProcessAction = "close_mosh";
+    fakes.failProcessAction = "handoff_repair";
     fakes.failProcessError = hostileFailure();
 
     let launchReturned = "";
@@ -151,7 +143,7 @@ describe("repair swap restart continuation", () => {
       /Authorization|hostile-bearer|sk-hostile|supabase-hostile|github_pat_hostile|\/Users\/owner/u,
     );
 
-    fakes.failProcessAction = "close_repair";
+    fakes.failProcessAction = "handoff_prior";
     fakes.failProcessError = hostileFailure();
     let rollbackReturned = "";
     try {
