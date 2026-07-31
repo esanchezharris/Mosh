@@ -358,7 +358,9 @@ function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: Sec
 function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const clearSelection = useStore((s) => s.clearSelection);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const setSelectedClip = useShell((s) => s.setSelectedClip);
   // Only show the preset line when it actually says something. It used to fall back to
   // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
   // it cost the name column a line of vertical space to say nothing.
@@ -373,6 +375,11 @@ function TrackLaneHeader({ track }: { track: Track }) {
   // though unlike a bus deletion it IS a plain undoable Edit mutation — the dialog says so.
   const [confirmRemove, setConfirmRemove] = useState(false);
   const clipCount = track.clips.length;
+  const selectTrack = () => {
+    setSelectedClip(null);
+    clearSelection();
+    setSelectedTrack(track.id);
+  };
 
   return (
     <div
@@ -381,9 +388,10 @@ function TrackLaneHeader({ track }: { track: Track }) {
       tabIndex={0}
       aria-label={`Select track ${track.name}`}
       aria-pressed={sel}
-      onClick={() => setSelectedTrack(track.id)}
+      onClick={selectTrack}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedTrack(track.id); }
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(); }
       }}
       data-testid="v2-track-header"
       data-track-id={track.id}
