@@ -9,6 +9,7 @@ import {
   codexChildEnvironment,
   spawnCodexAppServer,
   type CodexSpawn,
+  type RequestId,
   type StdioChild,
 } from "../src/codex-app-server.js";
 
@@ -21,9 +22,16 @@ class FakeChild extends EventEmitter implements StdioChild {
   readonly stdout = new FakeStream();
   readonly stderr = new FakeStream();
   readonly writes: Array<Record<string, unknown>> = [];
+  private readonly responseWaiters = new Map<RequestId, () => void>();
   readonly stdin = {
     write: (line: string) => {
-      this.writes.push(JSON.parse(line) as Record<string, unknown>);
+      const envelope = JSON.parse(line) as Record<string, unknown>;
+      this.writes.push(envelope);
+      const id = envelope.id;
+      if (!envelope.method && (typeof id === "string" || typeof id === "number")) {
+        this.responseWaiters.get(id)?.();
+        this.responseWaiters.delete(id);
+      }
       return true;
     },
   };
@@ -45,8 +53,12 @@ class FakeChild extends EventEmitter implements StdioChild {
     })}\n`);
   }
 
-  serverRequest(id: number | string, method: string, params: unknown): void {
+  serverRequest(id: RequestId, method: string, params: unknown): Promise<void> {
+    const completed = new Promise<void>((resolve) => {
+      this.responseWaiters.set(id, resolve);
+    });
     this.stdout.emit("data", `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    return completed;
   }
 }
 
@@ -73,18 +85,6 @@ const repairThread = {
     excludeSlashTmp: true,
   },
 };
-
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-  throw new Error("Timed out waiting for fake process output");
-}
 
 describe("Codex child process boundary", () => {
   it("uses an explicit runtime allowlist and excludes every service/provider secret", () => {
@@ -192,18 +192,19 @@ describe("Codex child process boundary", () => {
       itemId: "item-7",
       startedAtMs: 123,
     };
-    child.serverRequest(91, "item/commandExecution/requestApproval", {
-      ...common, command: "rm -rf /", cwd: "/repo",
-    });
-    child.serverRequest(92, "item/fileChange/requestApproval", {
-      ...common, grantRoot: "/outside",
-    });
-    child.serverRequest(93, "item/permissions/requestApproval", {
-      ...common,
-      cwd: "/repo",
-      permissions: { network: { enabled: true } },
-    });
-    await settle();
+    await Promise.all([
+      child.serverRequest(91, "item/commandExecution/requestApproval", {
+        ...common, command: "rm -rf /", cwd: "/repo",
+      }),
+      child.serverRequest(92, "item/fileChange/requestApproval", {
+        ...common, grantRoot: "/outside",
+      }),
+      child.serverRequest(93, "item/permissions/requestApproval", {
+        ...common,
+        cwd: "/repo",
+        permissions: { network: { enabled: true } },
+      }),
+    ]);
 
     expect(events).toEqual([
       {
@@ -276,14 +277,12 @@ describe("Codex child process boundary", () => {
     child.reply(2, coordinatorThread);
     await starting;
 
-    child.serverRequest("approval-request-alpha", "item/fileChange/requestApproval", {
+    await child.serverRequest("approval-request-alpha", "item/fileChange/requestApproval", {
       threadId: "coordinator-thread",
       turnId: "turn-string",
       itemId: "item-string",
       startedAtMs: 123,
     });
-    await waitFor(() => child.writes.some((write) => write.id === "approval-request-alpha"));
-
     expect((await store.loadEvents(playtest.id)).at(-1)).toMatchObject({
       type: "codex.approval",
       data: {
@@ -321,13 +320,12 @@ describe("Codex child process boundary", () => {
     child.reply(3, repairThread);
     await repair;
 
-    child.serverRequest(94, "item/commandExecution/requestApproval", {
+    await child.serverRequest(94, "item/commandExecution/requestApproval", {
       threadId: "coordinator-thread",
       turnId: "turn-c",
       itemId: "item-c",
       startedAtMs: 123,
     });
-    await settle();
     expect(coordinatorEvents).toHaveLength(1);
     expect(repairEvents).toHaveLength(0);
     process.close();
@@ -336,8 +334,11 @@ describe("Codex child process boundary", () => {
   it("returns JSON-RPC errors for malformed server requests and rejects pending calls on child exit", async () => {
     const child = new FakeChild();
     const process = spawnCodexAppServer({ spawn: () => child, environment: {} });
-    child.serverRequest(71, "item/fileChange/requestApproval", { itemId: "missing-correlations" });
-    await settle();
+    await child.serverRequest(
+      71,
+      "item/fileChange/requestApproval",
+      { itemId: "missing-correlations" },
+    );
     expect(child.writes[0]).toEqual({
       jsonrpc: "2.0",
       id: 71,
