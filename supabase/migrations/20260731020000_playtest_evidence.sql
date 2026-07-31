@@ -13,7 +13,9 @@ set public = false,
     file_size_limit = excluded.file_size_limit,
     allowed_mime_types = excluded.allowed_mime_types;
 
-alter table storage.objects enable row level security;
+-- Supabase owns storage.objects and enables RLS on the managed table. Repeating
+-- ALTER TABLE here fails through the hosted migration API because the migration
+-- role is intentionally not the table owner.
 
 drop policy if exists "playtest evidence deny authenticated reads" on storage.objects;
 create policy "playtest evidence deny authenticated reads"
