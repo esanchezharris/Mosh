@@ -97,9 +97,16 @@ public:
 
         if (commandLine.contains ("--audio-probe"))
         {
-            const auto error = audiostartup::runProbeChild (
+            const auto request = audiostartup::parseProbeRequest (
                 juce::JUCEApplicationBase::getCommandLineParameterArray());
-            std::cout << audiostartup::probeResultLine (error).toStdString();
+            if (! request.valid)
+            {
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+            const auto error = audiostartup::runProbeChild (request);
+            std::cout << audiostartup::probeResultLine (request.nonce, error).toStdString();
             setApplicationReturnValue (error.isEmpty() ? 0 : 1);
             quit();
             return;
@@ -118,6 +125,7 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool goldenSelfTest = commandLine.contains ("--golden-selftest");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
         const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
@@ -126,8 +134,11 @@ public:
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
         const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
-        const bool headless = undoSelfTest || goldenSelfTest || commandLine.contains ("--selftest");
-        const bool noAudio = envNoAudio || headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
+        const bool headless = undoSelfTest || goldenSelfTest
+                           || commandLine.contains ("--selftest") || audioRecoverySmoke;
+        const bool noAudio = envNoAudio
+                          || (headless && ! audioRecoverySmoke)
+                          || scanDeep || runScript || voiceSmoke;
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
@@ -160,13 +171,15 @@ public:
         modes.voiceSmoke     = voiceSmoke;
         modes.demoGui        = demoGui;
         modes.envNoAudio     = envNoAudio;
-        const juce::String sessionBaseName = mosh::sessionpaths::harnessSessionBase (modes);
+        const juce::String sessionBaseName = audioRecoverySmoke
+            ? "session-audio-recovery-smoke"
+            : mosh::sessionpaths::harnessSessionBase (modes);
 
         // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
         // pumps the run loop — otherwise a repeated-crash history makes NSPersistentUIRestorer
         // block the run forever (see MacStateRestoration.h). No-op off macOS.
-        if (noAudio || liveAudio || demoGui)
+        if (noAudio || liveAudio || demoGui || audioRecoverySmoke)
             disableAppKitStateRestoration();
 
         // Headless: no audio device, and an isolated cold session so the harness is
@@ -179,13 +192,44 @@ public:
             && juce::SystemStats::getEnvironmentVariable ("MOSH_RUNSCRIPT_KEEP_SESSION", {}).trim() == "1"
             && juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim().isNotEmpty();
         engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
-                                                /*freshSession=*/ (noAudio || liveAudio || demoGui) && ! keepSession,
+                                                /*freshSession=*/ (noAudio || liveAudio || demoGui
+                                                                  || audioRecoverySmoke) && ! keepSession,
                                                 sessionBaseName);
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
+
+        if (audioRecoverySmoke)
+        {
+            auto* command = new juce::DynamicObject();
+            command->setProperty ("command", "list_audio_devices");
+            const auto started = juce::Time::getMillisecondCounterHiRes();
+            const auto result = moshOps->execute (juce::var (command));
+            const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - started;
+            const auto data = result.getProperty ("data", juce::var());
+            const auto types = data.getProperty ("types", juce::var());
+            const bool pass = (bool) result.getProperty ("ok", false)
+                           && ! (bool) data.getProperty ("audioEnabled", true)
+                           && types.isArray() && types.getArray()->isEmpty()
+                           && engine->audioDeviceError().contains ("did not open within")
+                           && elapsedMs < 1000.0;
+
+            auto* evidence = new juce::DynamicObject();
+            evidence->setProperty ("pass", pass);
+            evidence->setProperty ("audioEnabled",
+                                   data.getProperty ("audioEnabled", true));
+            evidence->setProperty ("deviceTypeCount",
+                                   types.isArray() ? types.getArray()->size() : -1);
+            evidence->setProperty ("listElapsedMs", elapsedMs);
+            evidence->setProperty ("audioDeviceError", engine->audioDeviceError());
+            std::cout << juce::JSON::toString (juce::var (evidence), false).toStdString()
+                      << std::endl;
+            setApplicationReturnValue (pass ? 0 : 1);
+            quit();
+            return;
+        }
 
         // Design-lab feed (opt-in): MOSH_LAB_FEED=1 autostarts the companion server
         // with a stable token (MOSH_LAB_TOKEN, default "mosh-lab") and a 24h TTL so

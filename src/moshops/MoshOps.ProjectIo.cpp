@@ -1140,8 +1140,7 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     if (args.hasProperty ("inputDevice"))
     {
         setup.inputDeviceName = args.getProperty ("inputDevice", var()).toString();
-        // Match the existing working rule (MoshEngine applyRequestedAudioOutputDevice):
-        // only request default input channels when an input device is selected.
+        // Only request default input channels when an input device is selected.
         setup.inputChannels.clear();
         setup.useDefaultInputChannels = setup.inputDeviceName.isNotEmpty();
     }
@@ -1157,7 +1156,7 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
         return err;
 
     // Rebuild Tracktion's wave-device wrappers + flush the async device update
-    // before the next snapshot (mirrors MoshEngine.cpp applyRequestedAudioOutputDevice).
+    // before the next snapshot.
     eng.engine().getDeviceManager().rescanWaveDeviceList();
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);

@@ -100,26 +100,72 @@ TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
 TEST_CASE ("the hardware probe is a separate killable process", "[audiostartup]")
 {
     const juce::File executable ("/Applications/Mosh Audit.app/Contents/MacOS/Mosh");
+    const juce::String nonce ("0123456789abcdef0123456789abcdef");
     const auto args = probeChildArguments (executable,
+                                           nonce,
                                            "MacBook Pro Speakers",
                                            "BlackHole 2ch",
                                            60000);
 
-    REQUIRE (args.size() == 8);
+    REQUIRE (args.size() == 6);
     CHECK (args[0] == executable.getFullPathName());
     CHECK (args[1] == "--audio-probe");
-    CHECK (args[2] == "--audio-probe-output");
+    CHECK (args[2] == nonce);
     CHECK (args[3] == "MacBook Pro Speakers");
-    CHECK (args[4] == "--audio-probe-input");
-    CHECK (args[5] == "BlackHole 2ch");
-    CHECK (args[6] == "--audio-probe-stall-ms");
-    CHECK (args[7] == "60000");
+    CHECK (args[4] == "BlackHole 2ch");
+    CHECK (args[5] == "60000");
 
     const auto output = "startup noise\n"
-                        + probeResultLine ("device failed to start")
+                        + probeResultLine (nonce, "device failed to start")
                         + "shutdown noise\n";
-    CHECK (probeErrorFromOutput (output) == "device failed to start");
-    CHECK (probeErrorFromOutput (probeResultLine ({})).isEmpty());
+    const auto response = parseProbeResponse (output, nonce);
+    REQUIRE (response.valid);
+    CHECK (response.error == "device failed to start");
+
+    auto childArgs = args;
+    childArgs.remove (0);
+    const auto request = parseProbeRequest (childArgs);
+    REQUIRE (request.valid);
+    CHECK (request.nonce == nonce);
+    CHECK (request.output == "MacBook Pro Speakers");
+    CHECK (request.input == "BlackHole 2ch");
+    CHECK (request.stallMs == 60000);
+}
+
+TEST_CASE ("probe framing cannot be shifted or spoofed by device output", "[audiostartup]")
+{
+    const juce::File executable ("/Applications/Mosh.app/Contents/MacOS/Mosh");
+    const juce::String nonce ("abcdef0123456789abcdef0123456789");
+    const auto args = probeChildArguments (executable, nonce,
+                                           "--audio-probe-input",
+                                           "--audio-probe-stall-ms", 250);
+    auto childArgs = args;
+    childArgs.remove (0);
+    const auto request = parseProbeRequest (childArgs);
+    REQUIRE (request.valid);
+    CHECK (request.output == "--audio-probe-input");
+    CHECK (request.input == "--audio-probe-stall-ms");
+
+    const auto spoof = juce::String (kProbeResultPrefix)
+                     + "00000000000000000000000000000000 \"\"\n";
+    CHECK_FALSE (parseProbeResponse (spoof + probeResultLine (nonce, "real"), nonce)
+                     .error.isEmpty());
+    CHECK_FALSE (parseProbeResponse (
+        probeResultLine (nonce, {}) + probeResultLine (nonce, "duplicate"), nonce).valid);
+    CHECK_FALSE (parseProbeResponse (
+        juce::String (kProbeResultPrefix) + nonce + " not-json\n", nonce).valid);
+    CHECK_FALSE (parseProbeResponse (
+        juce::String (kProbeResultPrefix) + nonce + " \"\" trailing\n", nonce).valid);
+    const auto multiline = parseProbeResponse (
+        probeResultLine (nonce, "first line\nsecond line"), nonce);
+    REQUIRE (multiline.valid);
+    CHECK (multiline.error == "first line\nsecond line");
+}
+
+TEST_CASE ("a timed-out process is killed before the caller resumes", "[audiostartup]")
+{
+    const auto result = runProbeProcess ({ "/bin/sleep", "10" }, 50);
+    CHECK (result.status == ProbeProcessStatus::timedOut);
 }
 
 TEST_CASE ("degraded audio never re-enters hardware enumeration", "[audiostartup]")

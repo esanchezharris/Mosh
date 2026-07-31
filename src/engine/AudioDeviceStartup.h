@@ -2,13 +2,15 @@
 
 #include <juce_core/juce_core.h>
 
-/** AUD-017 — the PURE parts of the bounded audio-device startup.
+/** AUD-017 — the engine-independent parts of guarded audio-device startup.
 
     Opening a CoreAudio device is a synchronous IPC to coreaudiod that can block
     forever when the HAL wedges (see docs/auto-loop/backlog.jsonl AUD-017: the app
     launched, showed no window, and sat at 0% CPU indefinitely). MoshEngine therefore
-    performs the open in a child process and waits with a timeout. If CoreAudio
-    wedges, the whole child is terminated so no blocked HAL call remains in Mosh.
+    preflights the exact setup in a child process and waits with a timeout. If
+    CoreAudio wedges, the whole child is terminated so no blocked HAL call remains
+    in Mosh; the in-process Tracktion initialisation runs only after that exact
+    preflight succeeds.
 
     The decision inputs (how long to wait, what to call the device, what to tell the
     user) live here so they are unit-testable WITHOUT the engine — `MoshTests` is
@@ -22,6 +24,17 @@ namespace mosh::audiostartup
     inline constexpr int kMinTimeoutMs     = 250;
     inline constexpr int kMaxTimeoutMs     = 60000;
     inline constexpr auto kProbeResultPrefix = "MOSH_AUDIO_PROBE_RESULT ";
+
+    inline juce::String probeDeviceTypeName()
+    {
+       #if JUCE_MAC
+        return "CoreAudio";
+       #elif JUCE_WINDOWS
+        return "Windows Audio";
+       #else
+        return {};
+       #endif
+    }
 
     /** Resolve the timeout from a raw MOSH_AUDIO_OPEN_TIMEOUT_MS value. Empty,
         non-numeric, or <= 0 all mean "use the default" — a typo must never turn the
@@ -78,40 +91,134 @@ namespace mosh::audiostartup
              "press Retry.";
     }
 
+    struct ProbeRequest
+    {
+        bool valid = false;
+        juce::String nonce;
+        juce::String output;
+        juce::String input;
+        int stallMs = 0;
+    };
+
+    inline bool isValidProbeNonce (const juce::String& nonce)
+    {
+        return juce::isPositiveAndBelow (nonce.length(), 65)
+            && nonce.length() >= 16
+            && nonce.containsOnly ("0123456789abcdefABCDEF-");
+    }
+
     inline juce::StringArray probeChildArguments (const juce::File& executable,
+                                                  const juce::String& nonce,
                                                   const juce::String& output,
                                                   const juce::String& input,
                                                   int stallMs)
     {
-        return { executable.getFullPathName(),
-                 "--audio-probe",
-                 "--audio-probe-output", output,
-                 "--audio-probe-input", input,
-                 "--audio-probe-stall-ms", juce::String (stallMs) };
+        return { executable.getFullPathName(), "--audio-probe", nonce, output, input,
+                 juce::String (stallMs) };
     }
 
-    inline juce::String probeArgumentValue (const juce::StringArray& args,
-                                            const juce::String& option)
+    inline ProbeRequest parseProbeRequest (const juce::StringArray& args)
     {
-        const auto index = args.indexOf (option);
-        return juce::isPositiveAndBelow (index + 1, args.size()) ? args[index + 1]
-                                                                 : juce::String();
+        ProbeRequest request;
+        const auto marker = args.indexOf ("--audio-probe");
+        if (marker < 0 || args.size() != marker + 5)
+            return request;
+
+        const auto stall = args[marker + 4];
+        if (! isValidProbeNonce (args[marker + 1])
+            || stall.isEmpty()
+            || ! stall.containsOnly ("0123456789")
+            || stall.length() > 8)
+            return request;
+
+        request.valid = true;
+        request.nonce = args[marker + 1];
+        request.output = args[marker + 2];
+        request.input = args[marker + 3];
+        request.stallMs = juce::jlimit (0, kMaxTimeoutMs, stall.getIntValue());
+        return request;
     }
 
-    inline juce::String probeResultLine (const juce::String& error)
+    inline juce::String probeResultLine (const juce::String& nonce,
+                                         const juce::String& error)
     {
-        return juce::String (kProbeResultPrefix)
-             + error.replace ("\r", " ").replace ("\n", " ") + "\n";
+        return juce::String (kProbeResultPrefix) + nonce + " "
+             + juce::JSON::toString (juce::var (error), false) + "\n";
     }
 
-    inline juce::String probeErrorFromOutput (const juce::String& output)
+    struct ProbeResponse
     {
-        const auto marker = output.indexOf (kProbeResultPrefix);
-        if (marker < 0)
-            return {};
-        const auto start = marker + (int) juce::String (kProbeResultPrefix).length();
-        const auto end = output.indexOfChar (start, '\n');
-        return output.substring (start, end >= 0 ? end : output.length()).trimEnd();
+        bool valid = false;
+        juce::String error;
+    };
+
+    inline ProbeResponse parseProbeResponse (const juce::String& output,
+                                             const juce::String& nonce)
+    {
+        ProbeResponse response;
+        if (! isValidProbeNonce (nonce))
+            return response;
+
+        const auto expected = juce::String (kProbeResultPrefix) + nonce + " ";
+        juce::String payload;
+        int matches = 0;
+        for (auto& line : juce::StringArray::fromLines (output))
+            if (line.startsWith (expected))
+            {
+                ++matches;
+                payload = line.substring (expected.length());
+            }
+
+        if (matches != 1)
+            return response;
+
+        const auto decoded = juce::JSON::fromString (payload);
+        if (! decoded.isString()
+            || juce::JSON::toString (decoded, false) != payload)
+            return response;
+
+        response.valid = true;
+        response.error = decoded.toString();
+        return response;
+    }
+
+    enum class ProbeProcessStatus
+    {
+        finished,
+        failedToStart,
+        timedOut,
+        failedToTerminate
+    };
+
+    struct ProbeProcessResult
+    {
+        ProbeProcessStatus status = ProbeProcessStatus::failedToStart;
+        juce::String output;
+        juce::uint32 exitCode = 0;
+    };
+
+    inline ProbeProcessResult runProbeProcess (const juce::StringArray& arguments,
+                                               int timeoutMs)
+    {
+        ProbeProcessResult result;
+        juce::ChildProcess process;
+        if (! process.start (arguments))
+            return result;
+
+        if (process.waitForProcessToFinish (timeoutMs))
+        {
+            result.status = ProbeProcessStatus::finished;
+            result.exitCode = process.getExitCode();
+            result.output = process.readAllProcessOutput();
+            return result;
+        }
+
+        const bool killed = process.kill();
+        const bool reaped = process.waitForProcessToFinish (1000);
+        result.status = (killed && reaped && ! process.isRunning())
+                            ? ProbeProcessStatus::timedOut
+                            : ProbeProcessStatus::failedToTerminate;
+        return result;
     }
 
     inline bool shouldEnumerateDeviceTypes (bool audioOpen)
@@ -119,5 +226,5 @@ namespace mosh::audiostartup
         return audioOpen;
     }
 
-    juce::String runProbeChild (const juce::StringArray& args);
+    juce::String runProbeChild (const ProbeRequest& request);
 } // namespace mosh::audiostartup
