@@ -25,6 +25,11 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+if [ -e "$REPO/docs/auto-loop/STOP" ] || [ -e "$REPO/docs/first-stranger-program/STOP" ]; then
+  echo "install-launchd.sh: STOP sentinel present — First-Stranger is paused." >&2
+  exit 1
+fi
+
 [ -f "$NIGHTLY" ] || { echo "nightly.sh not found at $NIGHTLY" >&2; exit 1; }
 chmod +x "$NIGHTLY" "$REPO/scripts/first-stranger/status.sh" 2>/dev/null || true
 mkdir -p "$HOME/Library/LaunchAgents" "$LOGDIR"
