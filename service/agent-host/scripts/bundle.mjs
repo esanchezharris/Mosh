@@ -13,3 +13,15 @@ await build({
   legalComments: "none",
   sourcemap: false,
 });
+
+await build({
+  entryPoints: ["scripts/integration.mts"],
+  outfile: "dist/agent-host-integration.mjs",
+  bundle: true,
+  format: "esm",
+  banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+  platform: "node",
+  target: "node20",
+  legalComments: "none",
+  sourcemap: false,
+});

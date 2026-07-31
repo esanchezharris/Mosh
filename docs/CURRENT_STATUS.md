@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 
 > **This is the only rolling status doc.** Dated snapshots live in
 > [`docs/resumption/`](resumption/). History lives in [`docs/worklog/`](worklog/INDEX.md).
@@ -58,7 +58,20 @@ neural insert was removed (2026-06-21); the only real-time neural path is an
 optional RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default
 build).
 
-## Current Status (as of 2026-07-29)
+## Current Status (as of 2026-07-30)
+
+- **Owner cockpit handoff is implemented on `codex/moshi-owner-cockpit`, not
+  merged.** The disabled-by-default v2 surface, private loopback Agent Host,
+  bounded capability retrieval, explicit provider failures, GPT Realtime PTT,
+  durable approval inbox, immutable evidence/GitHub adapters, read-only Codex
+  coordinator, and isolated draft-only repair lane are integrated. Task 5 adds
+  a bundled real-loopback fake-external lifecycle and exact-SHA offline
+  benchmark diagnostics; its final evidence is under
+  `.omo/evidence/task-5-owner-handoff/`. No live OpenAI request, Supabase
+  deployment, GitHub mutation, repair process swap, or final PR is part of the
+  automated handoff. See [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md). This branch
+  supersedes only PR #478's agent-facing hunks; merge/disposition it serially
+  after whole-branch review.
 
 - **Trunk:** `origin/main` @ `c703a855` (merge of #490, 2026-07-29 early AM)
   [measured: `git log --oneline origin/main`]. The two most recent landed

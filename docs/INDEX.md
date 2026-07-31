@@ -53,6 +53,8 @@ history, not status.*
   local setup, known quirks, and how to send diagnostics if something breaks.
 - [`PLAYTEST_SETUP.md`](PLAYTEST_SETUP.md) — short host-side pointer to
   `TESTER_QUICKSTART.md` (this used to be the guest doc itself; it's now a redirect).
+- [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md) — owner-only Agent Host, hosted-trace,
+  Realtime, report approval, repair-gate, retention, and diagnostics runbook.
 
 ## Programs & loops (active work)
 

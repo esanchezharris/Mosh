@@ -11,6 +11,7 @@
     "build": "tsc --noEmit",
     "bundle": "node scripts/bundle.mjs",
     "test": "vitest run",
+    "test:integration": "npm run bundle && node dist/agent-host-integration.mjs",
     "test:startup": "node test/startup-smoke.mjs",
     "test:watch": "vitest"
   },

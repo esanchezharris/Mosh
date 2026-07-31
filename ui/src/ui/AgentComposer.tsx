@@ -13,6 +13,8 @@ import { handleFast } from "../agent/performer";
 import { writePreference } from "../agent/memory/writePreference";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
+import { routeAsk } from "../agent/loop/router";
+import { loopAllowed, runLoopTask } from "../agent/loop/runTask";
 import { IconArrowUp, IconMic } from "./icons";
 import { ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
 import { classifyReportTrigger } from "../agent/ownerCockpit";
@@ -191,6 +193,14 @@ export function AgentComposer() {
             if (res.ok) st.setMemoryToast({ text: rtext, scope, kind: "preference", ts: res.ts });
             else setSay(`couldn't remember that — ${res.error}`);
           },
+        });
+        return;
+      }
+
+      if (!ownerCockpitEnabled && loopAllowed() && routeAsk(text) === "loop") {
+        await runLoopTask(text, {
+          say: (message) => setSay(message),
+          utter: (intent, message) => pushAgentUtter(intent, message),
         });
         return;
       }

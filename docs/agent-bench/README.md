@@ -57,6 +57,10 @@ npm run agent-bench -- --base http://127.0.0.1:8080/v1 --key-env LOCAL_KEY \
   --model <served-id> --tag local-r5-single
 
 # options: --tasks id,id · --max-steps N (default 8) · --bin <Mosh> · --no-render
+
+# no-provider infrastructure diagnostic (not a model-quality/cutover score):
+npm run agent-bench -- --offline-fixture --runner single \
+  --tag owner-cockpit-infrastructure --no-render
 ```
 
 Needs a Mosh binary (`--bin`, or auto-discovered newest of the build trees /
@@ -65,6 +69,13 @@ Needs a Mosh binary (`--bin`, or auto-discovered newest of the build trees /
 `~/mosh-agentbench-artifacts/<tag>/` — the by-ear side channel (never gating).
 
 ## Reading results honestly
+
+- Every new scoreboard records the exact Git SHA plus diagnostic capability
+  retrieval: mean retrieved-command count, retrieved/full catalog characters,
+  catalog reduction, tool success, model latency, and repair frequency.
+  `--offline-fixture` makes no provider request and exists only to validate the
+  benchmark/engine/telemetry plumbing on an immutable SHA. Its task success
+  score is deliberately not a model verdict and must not be compared as one.
 
 - **Session-render blind spots — CLOSED 2026-07-28**: the single-shot prompt
   used to omit buses, the master chain, the tempo map and the key, so

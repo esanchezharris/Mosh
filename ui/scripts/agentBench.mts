@@ -37,6 +37,7 @@
 // differs, run a cross-transport control before comparing to HTTP boards).
 // --chat-max-tokens is inert on both CLI transports — the CLI owns its caps.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +51,11 @@ import { validateCommand } from "../src/agent/commands";
 import { screenDestructive, DESTRUCTIVE_BLOCK_REASON, type AgentCommandCall } from "../src/agent/destructiveScreen";
 import { makeSingleShotRunner } from "../src/bench/singleShotRunner";
 import { makeLoopRunner } from "../src/bench/loopRunner";
+import {
+  diagnosticForTurn,
+  summarizeAgentDiagnostics,
+  type AgentBenchTurnDiagnostic,
+} from "../src/bench/agentBenchDiagnostics";
 import type { AgentEnv, AgentRunner, StepCommandResult } from "../src/agent/loopSeam";
 import type { Snapshot } from "../src/types";
 
@@ -57,13 +63,17 @@ const env = loadEnv();
 const RUNNER = argFlag("runner", "single")!;
 const CLAUDE_CLI = process.argv.includes("--claude-cli");
 const CODEX_CLI = process.argv.includes("--codex-cli");
-if (CLAUDE_CLI && CODEX_CLI) throw new Error("--claude-cli and --codex-cli are mutually exclusive");
+const OFFLINE_FIXTURE = process.argv.includes("--offline-fixture");
+if ([CLAUDE_CLI, CODEX_CLI, OFFLINE_FIXTURE].filter(Boolean).length > 1)
+  throw new Error("--claude-cli, --codex-cli, and --offline-fixture are mutually exclusive");
 const CLI_TRANSPORT = CLAUDE_CLI || CODEX_CLI;
 const baseOverride = argFlag("base");
 const keyEnv = argFlag("key-env");
 if (keyEnv && !env[keyEnv]) throw new Error(`--key-env ${keyEnv}: that env var is empty`);
 if (CLI_TRANSPORT && !argFlag("model")) throw new Error("--claude-cli/--codex-cli require --model");
-const cfg = CLI_TRANSPORT
+const cfg = OFFLINE_FIXTURE
+  ? { base: "offline-fixture", key: "-", model: "deterministic-infrastructure-fixture" }
+  : CLI_TRANSPORT
   ? { base: CLAUDE_CLI ? "claude-cli(subscription)" : "codex-cli(subscription)", key: "-", model: argFlag("model")! }
   : brainConfigFromEnv(
       {
@@ -83,6 +93,10 @@ const CHAT_MAX_TOKENS = Number(argFlag("chat-max-tokens", "800"));
 const TASK_FILTER = (argFlag("tasks", "all") || "all").split(",");
 const RENDER = !process.argv.includes("--no-render");
 const ART_DIR = join(homedir(), "mosh-agentbench-artifacts", TAG);
+const GIT_SHA = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: join(process.cwd(), ".."),
+  encoding: "utf8",
+}).trim();
 mkdirSync(OUT_DIR, { recursive: true });
 
 const sessionSafe = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -172,6 +186,20 @@ function makeRunner(usage: BrainUsage): AgentRunner {
   // keep-alive socket going down between the multi-second engine replays).
   // HTTP errors are real model/provider answers and are NOT retried.
   const chat = async (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => {
+    if (OFFLINE_FIXTURE) {
+      usage.calls += 1;
+      const ask = messages.findLast((message) => message.role === "user")?.content ?? "";
+      const ambiguous = /\b(?:should|could|maybe|what do you think|make it better)\b/i.test(ask);
+      return {
+        content: ambiguous
+          ? JSON.stringify({ intent: "HUH", say: "What direction feels right?" })
+          : JSON.stringify({
+              intent: "ACK_GOT_IT",
+              commands: [{ command: "set_metronome", args: { enabled: true } }],
+            }),
+        ms: 0,
+      };
+    }
     if (CLI_TRANSPORT) {
       const call = CLAUDE_CLI ? callClaudeCli : callCodexCli;
       try {
@@ -211,6 +239,7 @@ type Row = {
    *  rejection when reading a scoreboard after the fact. */
   results: Array<{ command: string; ok: boolean; error?: string }>;
   wallMs: number; brainError?: string;
+  diagnostic: AgentBenchTurnDiagnostic;
   renders: string[];
 };
 
@@ -237,13 +266,15 @@ async function runTask(task: AgentTask, runner: AgentRunner): Promise<Row> {
     if (existsSync(wavB) && existsSync(wavA)) renders.push(wavB, wavA);
   }
 
+  const results = run.transcript.flatMap((s) =>
+    s.results.map((r) => ({ command: r.command, ok: r.ok, error: r.error?.slice(0, 160) })));
   return {
     id: task.id, category: task.category, ask: task.ask,
     score,
     steps: run.stepCount,
     commands: run.transcript.flatMap((s) => s.commands.map((c) => c.command)),
-    results: run.transcript.flatMap((s) =>
-      s.results.map((r) => ({ command: r.command, ok: r.ok, error: r.error?.slice(0, 160) }))),
+    results,
+    diagnostic: diagnosticForTurn(task.ask, results, run.transcript.map((step) => step.ms)),
     wallMs, brainError: run.error, renders,
   };
 }
@@ -275,9 +306,10 @@ async function main() {
   const action = rows.filter((r) => !AGENT_TASKS.find((t) => t.id === r.id)?.ambiguous);
   const ambiguous = rows.filter((r) => AGENT_TASKS.find((t) => t.id === r.id)?.ambiguous);
   const effs = rows.map((r) => r.score.stepEff).filter((x): x is number => x !== null);
+  const diagnostics = summarizeAgentDiagnostics(rows.map((row) => row.diagnostic));
   const board = {
     tag: TAG, model: cfg.model, base: cfg.base, runner: RUNNER, bin: BIN,
-    maxSteps: MAX_STEPS, ranAt: new Date().toISOString(),
+    exactSha: GIT_SHA, maxSteps: MAX_STEPS, ranAt: new Date().toISOString(),
     success: rows.filter((r) => r.score.success).length / rows.length,
     passed: rows.filter((r) => r.score.success).length,
     total: rows.length,
@@ -286,7 +318,7 @@ async function main() {
     invalidRateMean: rows.reduce((a, r) => a + r.score.invalidRate, 0) / rows.length,
     wrongDefers: action.filter((r) => r.score.wrongDefer).length,
     deferCorrect: ambiguous.length ? ambiguous.filter((r) => r.score.deferCorrect).length / ambiguous.length : null,
-    byCat, usage, rows,
+    byCat, usage, diagnostics, rows,
   };
 
   const jsonPath = join(OUT_DIR, `scoreboard.${TAG}.json`);
@@ -295,9 +327,11 @@ async function main() {
   const md = [
     `# MoshAgentBench — ${TAG}`,
     ``,
-    `model \`${cfg.model}\` @ \`${cfg.base}\` · runner **${RUNNER}** · ${board.passed}/${board.total} = **${pct(board.success)}** · ${new Date().toISOString().slice(0, 10)}`,
+    `model \`${cfg.model}\` @ \`${cfg.base}\` · runner **${RUNNER}** · exact SHA \`${GIT_SHA}\` · ${board.passed}/${board.total} = **${pct(board.success)}** · ${new Date().toISOString().slice(0, 10)}`,
     ``,
     `step-eff ${pct(board.stepEffMean)} · cmd-err ${pct(board.cmdErrRateMean)} · invalid ${pct(board.invalidRateMean)} · wrong-defers ${board.wrongDefers} · defer-correct ${pct(board.deferCorrect)} · tokens ${usage.promptTokens}+${usage.completionTokens} (${usage.calls} calls)`,
+    ``,
+    `Diagnostic retrieval: mean ${diagnostics.meanRetrievedCommandCount.toFixed(1)} commands · ${diagnostics.meanRetrievedCatalogCharacterCount.toFixed(0)}/${diagnostics.fullCatalogCharacterCount} catalog chars · ${pct(diagnostics.meanCatalogReductionRatio)} reduction · tool success ${pct(diagnostics.toolSuccessRate)} · model latency ${diagnostics.meanModelLatencyMs.toFixed(1)} ms/turn · repair frequency ${pct(diagnostics.repairFrequency)} (${diagnostics.totalRepairs} repair turns).`,
     ``,
     `| category | pass | tasks |`,
     `|---|---|---|`,
