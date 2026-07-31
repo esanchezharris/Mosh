@@ -145,12 +145,11 @@ build).
 
 ## Branch And Worktree Boundaries
 
-- Main program seat: **`~/Mosh`** (moved out of iCloud 2026-07-16; a
-  compatibility symlink remains at the old `~/Documents/ClaudeMosh` path). The
-  git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git` via a
-  `gitdir:` pointer — never move the store or the checkout back under
-  iCloud-synced `~/Documents`. The GitHub repo is `zeke431/Mosh`
-  (renamed 2026-07-16; old URLs redirect).
+- Main program seat: **`~/Mosh`** (moved out of iCloud 2026-07-16; the former
+  `~/Documents/ClaudeMosh` compatibility path is absent). The git object store
+  lives at `~/Library/Mosh/repo/ClaudeMosh.git` via a `gitdir:` pointer — never
+  move the store or the checkout back under iCloud-synced `~/Documents`. The
+  GitHub repo is `zeke431/Mosh` (renamed 2026-07-16; old URLs redirect).
 - Agent work happens in per-task worktrees under the object store's
   `.claude/worktrees/` (one worktree = one agent). The proven dep-cache build
   recipe and the worktree traps live in CLAUDE.md "Gotchas".

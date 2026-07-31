@@ -61,7 +61,8 @@ history, not status.*
   status, research roster, and append-only decision log.
 - [`first-stranger-program/`](first-stranger-program/) — paused and superseded
   historical program state; its automation is stopped and its backlog, lanes,
-  board, ledger, and evidence are preserved.
+  board, and evidence are preserved. Its configured ledger target never became
+  a tracked file before the pause.
 - [`playtest-prep/`](playtest-prep/) — playtest preparation checklists and evidence.
 - [`demo-loop/`](demo-loop/) + [`demo/`](demo/) — demo-session state and artifacts.
 - [`polish-loop/`](polish-loop/) — the autonomous UI micro-polish loop's charter + ledger.

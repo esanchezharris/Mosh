@@ -34,6 +34,10 @@ if [ "\${1:-} \${2:-}" = "pr checks" ]; then
   exit 0
 fi
 printf '%s\n' "\$*" >>"$GH_MARKER"
+[ "\$mode" = "stop-on-merge" ] && [ "\${1:-} \${2:-}" = "pr merge" ] && {
+  touch "$PROGRAM_STOP"
+  exit 0
+}
 [ "\$mode" = "stop-on-mutation" ] && touch "$PROGRAM_STOP"
 [ "\$mode" = "stop-on-ready" ] && [ "\${1:-} \${2:-}" = "pr ready" ] && touch "$PROGRAM_STOP"
 exit 97
@@ -106,6 +110,21 @@ expect_one_mutation_then_stop() {
 expect_one_mutation_then_stop finalize stop-on-ready finalize lane 1 "$BASE_SHA"
 expect_one_mutation_then_stop reject stop-on-mutation reject lane 1 held "program stopped"
 expect_one_mutation_then_stop route-owner stop-on-mutation route-owner lane 1 T "gate pass" "review pass" 0
+
+rm -f "$PROGRAM_STOP" "$GH_MARKER" "$FAKE_ROOT/docs/auto-loop/LEDGER.md"
+printf 'stop-on-merge\n' >"$GH_MODE"
+POST_MERGE_OUT="$(PATH="$SANDBOX/bin:$PATH" AL_ROOT="$FAKE_ROOT" \
+  AL_PROGRAM_STOP="$PROGRAM_STOP" AL_CHECK_TIMEOUT_S=2 AL_CHECK_POLL_S=1 \
+  "$MERGE_ONE" finalize lane 1 "$BASE_SHA")"
+if ! printf '%s\n' "$POST_MERGE_OUT" | jq -e \
+    '.phase == "finalize" and .merged == true and .stopped == true' >/dev/null; then
+  printf 'program-stop-selftest: FAIL (post-merge STOP returned %s)\n' "$POST_MERGE_OUT" >&2
+  exit 1
+fi
+[ ! -e "$FAKE_ROOT/docs/auto-loop/LEDGER.md" ] || {
+  printf 'program-stop-selftest: FAIL (post-merge STOP still wrote the ledger)\n' >&2
+  exit 1
+}
 
 PREPARE_LOOP="$SANDBOX/prepare-loop"
 PREPARE_WT="$FAKE_ROOT/.claude/worktrees/auto-prepare"

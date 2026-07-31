@@ -62,16 +62,20 @@ const IMPLEMENT_SCHEMA = { type: 'object', required: ['id', 'slug', 'ready'], pr
 const PREPARE_SCHEMA = { type: 'object', required: ['ready'], properties: {
   ready: { type: 'boolean' }, class: { type: 'string' }, excluded: { type: 'boolean' },
   baseSha: { type: ['string', 'null'] }, headSha: { type: ['string', 'null'] },
-  reason: { type: 'string' }, gateSummary: { type: 'string' }, conflict: { type: 'boolean' } } }
+  reason: { type: 'string' }, gateSummary: { type: 'string' }, conflict: { type: 'boolean' },
+  stopped: { type: 'boolean' } } }
 
 const REVIEW_SCHEMA = { type: 'object', required: ['verdict', 'blockers'], properties: {
   verdict: { enum: ['APPROVE', 'REJECT'] }, blockers: { type: 'integer' },
   reasons: { type: 'array', items: { type: 'string' } } } }
 
 const FINAL_SCHEMA = { type: 'object', required: ['merged'], properties: {
-  merged: { type: 'boolean' }, mergeSha: { type: ['string', 'null'] }, reason: { type: 'string' } } }
+  merged: { type: 'boolean' }, mergeSha: { type: ['string', 'null'] }, reason: { type: 'string' },
+  stopped: { type: 'boolean' } } }
 
 const OK_SCHEMA = { type: 'object', properties: { ok: { type: 'boolean' } } }
+const STATUS_SCHEMA = { type: 'object', required: ['ok', 'stopped'], properties: {
+  ok: { type: 'boolean' }, stopped: { type: 'boolean' } } }
 
 // ── prompt builders ─────────────────────────────────────────────────────────────
 const PRIME = `PRIME DIRECTIVES (never violate): one mutation path (every change is a MoshOps command); one undo system; the swappable seam (UI couples to the backend ONLY via execute_command + snapshot/events); the tier wall (no model on the audio thread / no RT allocation); ASTD clamps stay; cache by the FULL fingerprint.`
@@ -180,9 +184,15 @@ Run EXACTLY that command (undrafts the PR, labels needs-owner-merge + program:${
 }
 
 async function agentSetStatus(items, status) {
-  if (!items.length) return
-  const cmds = items.map(it => `${ROOT}/discover.sh set-status ${it.id} ${status}`).join(' ; ')
-  await agent(`${RUN} ${cmds}\nRun those, then report JSON {ok:true}.`, { schema: OK_SCHEMA, label: `status:${status}`, phase: 'Load' })
+  if (!items.length) return { ok: true, stopped: false }
+  if (await stopRequested()) return { ok: false, stopped: true }
+  const cmds = items.map(it =>
+    `if test -e ${PROG}/STOP || test -e docs/auto-loop/STOP; then echo STOP; exit 0; fi; ${ROOT}/discover.sh set-status ${it.id} ${status}`
+  ).join(' ; ')
+  const result = await agent(`${RUN} ${cmds}
+Report JSON: {ok:<all set-status commands succeeded>, stopped:<true if STOP printed>}.`,
+    { schema: STATUS_SCHEMA, label: `status:${status}`, phase: 'Load' })
+  return result || { ok: false, stopped: true }
 }
 
 async function stopRequested() {
@@ -200,6 +210,12 @@ Run that (regenerates ${PROG}/STATUS.md from the backlog + open PRs). Report JSO
 // ════════════════════════════════════════════════════════════════════════════════
 // PREFLIGHT
 // ════════════════════════════════════════════════════════════════════════════════
+if (await stopRequested()) {
+  log('STOP sentinel present — halting before preflight.')
+  return { halted: 'stop-sentinel', planned: 0, mergedSafe: [], routedOwner: [],
+    rejected: [], dryRuns: 0, cycles: 0, baseline: cfg.baselineN, halts: ['stop-sentinel'],
+    dryRun: cfg.dryRun, planOnly: cfg.planOnly }
+}
 phase('Preflight')
 let baseline = cfg.baselineN
 if (!cfg.planOnly && baseline == null) {
@@ -219,6 +235,12 @@ Heavy (cold first build). Do not merge anything.`,
 } else {
   log(cfg.planOnly ? 'planOnly: skipping the heavy baseline build.' : `baseline pinned to ${baseline}.`)
 }
+if (await stopRequested()) {
+  log('STOP sentinel present — halting after preflight.')
+  return { halted: 'stop-sentinel', planned: 0, mergedSafe: [], routedOwner: [],
+    rejected: [], dryRuns: 0, cycles: 0, baseline, halts: ['stop-sentinel'],
+    dryRun: cfg.dryRun, planOnly: cfg.planOnly }
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MAIN LOOP
@@ -228,12 +250,18 @@ const mergedIds = [], ownerIds = [], rejectedIds = [], halts = []
 
 async function mergeQueueOne(item) {
   const prep = await agent(preparePrompt(item), { schema: PREPARE_SCHEMA, phase: 'Merge', label: `prepare:${item.id}` })
-  if (!prep) { await rejectAction(item, 'gate-red', 'prepare agent died'); rejectedIds.push(item.id); return 'rejected' }
+  if (prep && prep.stopped) return 'stopped'
+  if (!prep) {
+    if (await stopRequested()) return 'stopped'
+    await rejectAction(item, 'gate-red', 'prepare agent died'); rejectedIds.push(item.id); return 'rejected'
+  }
+  if (await stopRequested()) return 'stopped'
   if (prep.conflict) { await rejectAction(item, 'rebase-conflict', prep.reason || 'rebase conflict'); rejectedIds.push(item.id); return 'rejected' }
   if (!prep.ready) { await rejectAction(item, 'gate-red', prep.reason || 'gate failed'); rejectedIds.push(item.id); return 'rejected' }
 
   // Gate GREEN. Hostile review (gating for SAFE, advisory-but-surfaced for OWNER).
   const review = await agent(reviewPrompt(item, prep), { schema: REVIEW_SCHEMA, phase: 'Review', label: `review:${item.id}`, effort: 'high' })
+  if (await stopRequested()) return 'stopped'
 
   if (isSafe(prep, item)) {
     if (!review || review.verdict !== 'APPROVE' || review.blockers !== 0) {
@@ -242,6 +270,8 @@ async function mergeQueueOne(item) {
     }
     if (cfg.dryRun) { log(`DRY-RUN: SAFE ${item.id} would AUTO-MERGE (gate green + APPROVE).`); dryRuns++; return 'dry' }
     const fin = await agent(finalizePrompt(item, prep), { schema: FINAL_SCHEMA, phase: 'Merge', label: `finalize:${item.id}` })
+    if (fin && fin.stopped) return 'stopped'
+    if (await stopRequested()) return 'stopped'
     if (fin && fin.merged) { merges++; consecutiveFailures = 0; mergedIds.push(item.id); return 'merged' }
     await rejectAction(item, 'gate-red', fin ? (fin.reason || 'finalize failed') : 'finalize died')
     consecutiveFailures++; rejectedIds.push(item.id); return 'rejected'
@@ -249,7 +279,8 @@ async function mergeQueueOne(item) {
 
   // OWNER bucket — high-stakes: NEVER auto-merge. Route to the owner (review surfaced).
   if (cfg.dryRun) { log(`DRY-RUN: OWNER ${item.id} would ROUTE-TO-OWNER (${prep.excluded ? 'excluded' : prep.class}${item.ownerMerge ? ', ownerMerge' : ''}).`); dryRuns++; return 'dry' }
-  await routeToOwner(item, prep, review)
+  const routed = await routeToOwner(item, prep, review)
+  if ((routed && routed.stopped) || await stopRequested()) return 'stopped'
   ownerRoutes++; ownerIds.push(item.id); return 'owner'
 }
 
@@ -287,15 +318,22 @@ Report JSON: {stop:<true if STOP printed>, items:<the ready array, verbatim>}.`,
       .then(r => r ? Object.assign({}, it, { plan: r }) : Object.assign({}, it, { plan: null }))
   )))
   planned += plans.filter(p => p.plan && p.plan.planned).length
+  if (await stopRequested()) { halts.push('stop-sentinel'); break }
 
   // Lanes whose gap is already closed drop out (spec §0: report + skip).
   const live = plans.filter(p => p.plan && p.plan.gapExists !== false)
   const closed = plans.filter(p => p.plan && p.plan.gapExists === false)
-  for (const c of closed) { log(`gap already closed for ${c.id} — skipping (${c.plan.notes || ''}).`); await agentSetStatus([c], 'gap-closed') }
+  for (const c of closed) {
+    log(`gap already closed for ${c.id} — skipping (${c.plan.notes || ''}).`)
+    const status = await agentSetStatus([c], 'gap-closed')
+    if (status.stopped) { halts.push('stop-sentinel'); break }
+  }
+  if (halts.length) break
 
   if (cfg.planOnly) {
     log(`planOnly: planned ${plans.filter(p => p.plan && p.plan.planned).length}/${picked.length} lane(s); not implementing.`)
-    await agentSetStatus(live, 'ready')   // leave them ready for the real run
+    const status = await agentSetStatus(live, 'ready')   // leave them ready for the real run
+    if (status.stopped) { halts.push('stop-sentinel'); break }
     halts.push('plan-only'); break
   }
 
@@ -303,7 +341,8 @@ Report JSON: {stop:<true if STOP printed>, items:<the ready array, verbatim>}.`,
 
   // IMPLEMENT (parallel worktrees → draft PRs).
   phase('Implement')
-  await agentSetStatus(live, 'in_progress')
+  const implementationStatus = await agentSetStatus(live, 'in_progress')
+  if (implementationStatus.stopped || await stopRequested()) { halts.push('stop-sentinel'); break }
   const built = (await parallel(live.map(it => () =>
     agent(implementPrompt(it), { schema: IMPLEMENT_SCHEMA, phase: 'Implement', label: `impl:${it.id}` })
       .then(r => r ? Object.assign({}, it, r) : null)
@@ -313,13 +352,19 @@ Report JSON: {stop:<true if STOP printed>, items:<the ready array, verbatim>}.`,
   phase('Merge')
   for (const it of built) {
     if (await stopRequested()) { halts.push('stop-sentinel'); break }
-    if (!it.ready || !it.prNumber) { await agentSetStatus([it], 'blocked'); continue }
+    if (!it.ready || !it.prNumber) {
+      const status = await agentSetStatus([it], 'blocked')
+      if (status.stopped) { halts.push('stop-sentinel'); break }
+      continue
+    }
     const outcome = await mergeQueueOne(it)
+    if (outcome === 'stopped' || await stopRequested()) { halts.push('stop-sentinel'); break }
     const nextStatus = outcome === 'merged' ? 'done'
       : outcome === 'owner' ? 'awaiting-owner'
       : outcome === 'dry' ? 'ready'
       : 'needs-human'
-    await agentSetStatus([it], nextStatus)
+    const status = await agentSetStatus([it], nextStatus)
+    if (status.stopped) { halts.push('stop-sentinel'); break }
     if (consecutiveFailures >= 3) { log('circuit-breaker: 3 consecutive merge failures — halting.'); halts.push('circuit-breaker'); break }
     if (merges >= cfg.maxMerges) break
   }

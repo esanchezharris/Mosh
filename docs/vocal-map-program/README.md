@@ -2,7 +2,8 @@
 
 **Status:** active as of 2026-07-30. This program supersedes the paused
 [First-Stranger Program](../first-stranger-program/README.md) without deleting its
-backlog, lane plans, status board, ledger, or evidence.
+backlog, lane plans, status board, or evidence. No tracked First-Stranger
+program ledger existed at the pause boundary.
 
 ## Milestone
 

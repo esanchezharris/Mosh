@@ -236,6 +236,10 @@ cmd_finalize() {
     rm -f "$mlog"; return
   fi
   rm -f "$mlog"
+  if al_stop_requested; then
+    jq -nc '{merged:true,phase:"finalize",stopped:true,reason:"STOP sentinel present after merge command — post-merge bookkeeping skipped"}'
+    return
+  fi
 
   # Advance local main in the MAIN worktree.
   git -C "$MAIN" fetch --quiet origin main || true

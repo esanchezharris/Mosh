@@ -174,6 +174,7 @@ run_parity_checks() {
 
 run_loop_control_checks() {
   run_step "program_stop" bash scripts/auto-loop/program-stop-selftest.sh
+  run_step "stranger_loop_stop" node scripts/auto-loop/stranger-loop-stop-selftest.mjs
 }
 
 # ── cheap lane ───────────────────────────────────────────────────────────────────
