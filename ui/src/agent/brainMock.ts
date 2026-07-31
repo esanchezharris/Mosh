@@ -1,7 +1,6 @@
 // Demo mock-brain — a tiny heuristic that maps a few phrases to real commands so
-// the whole loop (talk → edits → Monster changes → undo) is demoable in the preview
-// BEFORE any LLM keys are configured. Once ui/.env.local has a key, the real brain
-// takes over and this is never called. Deliberately small — not a parser, a stub.
+// the Vite/e2e surface can demonstrate talk → edits → undo without an LLM key.
+// Packaged builds never call this. Deliberately small — not a parser, a stub.
 
 import type { Snapshot } from "../types";
 import type { BrainReply } from "./brain";

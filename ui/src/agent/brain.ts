@@ -19,7 +19,8 @@
 // is now non-empty for every flag-on session, not just ones with existing content —
 // an intentional M3 change from M2's "only when pools are non-empty" gate.
 
-import { archivePair, brainChat, escalateCandidates } from "../bridge";
+import { archivePair, brainChat, demoBrainAvailable, escalateCandidates } from "../bridge";
+import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
 import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
 import { useSettings } from "../settings/store";
@@ -68,7 +69,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         // Best-of-n augmentation (flag-gated). It must NEVER discard the valid
         // single-shot reply: its own inner failures return null, and this guard
         // catches anything that escapes (e.g. manifest/catalog build) so a
-        // best-of-n error can't fall through to the demo mock below.
+        // best-of-n error can't escape into the provider-failure posture below.
         let chosen = reply;
         let replaced = false;
         try {
@@ -96,6 +97,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         });
         return chosen;
       } catch {
+        if (demoBrainAvailable()) return mockBrainReply(text, snap);
         return { intent: "UHOH", say: "can't reach my brain — check setup and try again" };
       }
     },

@@ -212,9 +212,8 @@ reaches anyone with push access to the repo, and the resulting GitHub Release is
 public — bundling a real API key into that artifact is a materially larger exposure
 than a personal AirDrop. `MOSH_RELEASE_BRAIN_ENV_BASE64` exists as an explicit opt-in
 if you decide the tradeoff is worth it (e.g. a capped, disposable key made just for
-this); leaving it unset ships every CI release **keyless** — the app still works, the
-brain just falls back to the offline mock until the person running it supplies their
-own key.
+this); leaving it unset ships every CI release **keyless** — the DAW still works, while
+Moshi fails visibly without editing until the person running it supplies a provider.
 
 ### Triggering a release
 

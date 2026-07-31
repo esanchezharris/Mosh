@@ -48,7 +48,8 @@ function installId(env: Record<string, string>): string {
 // same-origin /api/brain/* and never sees a credential. All three providers speak
 // OpenAI-compatible /chat/completions. Mirrors design-lab/playground/vite.config.js.
 // In the packaged app there is no Vite; a native brain_chat proxy serves the same
-// route (see bridge.brainChat). With no keys set, the UI falls back to a mock brain.
+// route (see bridge.brainChat). Keyless Vite dev may use the demo brain; packaged
+// builds fail visibly and never substitute mock commands.
 //
 // PROXY CUTOVER (docs/brain-proxy/RUNBOOK.md): when MOSH_BRAIN_PROXY_URL is set (in
 // ui/.env.local, same as the provider keys), /api/brain/chat forwards to the deployed

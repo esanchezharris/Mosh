@@ -42,6 +42,9 @@ export const nativeMenuPresent = (): boolean => realNative();
  *  remember to seed. */
 export const isRealNative = (): boolean => realNative();
 
+/** Deterministic brain substitutes are limited to Vite development and explicit browser e2e. */
+export const demoBrainAvailable = (): boolean => MOCK_ENABLED;
+
 // Lazily-bound native functions (created once the backend has registered them).
 const nativeCache = new Map<string, (...a: unknown[]) => Promise<unknown>>();
 function native(name: string) {
@@ -111,13 +114,14 @@ export async function getSnapshot<T = unknown>(): Promise<T> {
 
 // Moshi's brain talks to an LLM through a SERVER-SIDE proxy (keys never reach the
 // client): a native `brain_chat` function in the packaged app, the Vite /api/brain
-// proxy in dev. Throws on failure (no proxy / no key) so the caller falls back to
-// the demo mock-brain. NOT the executeCommand seam — this is a chat round-trip.
+// proxy in dev. Throws on failure (no proxy / no key); packaged callers fail visibly,
+// while the explicit dev/e2e surface may substitute a deterministic demo brain.
+// NOT the executeCommand seam — this is a chat round-trip.
 export type BrainMessage = { role: string; content: string };
 export async function brainChat(messages: BrainMessage[], provider?: string): Promise<{ content: string }> {
   if (realNative()) {
     // Native proxy returns { ok, content } or { ok:false, error }. Throw on the error
-    // shape so the caller falls back to the mock brain — same contract as the dev fetch.
+    // shape so the caller can apply its packaged/dev posture — same contract as the dev fetch.
     const r = (await native("brain_chat")({ messages, provider })) as { ok?: boolean; content?: string; error?: string };
     if (r && r.ok === false) throw new Error(r.error ? String(r.error) : "brain unavailable");
     return { content: String(r?.content ?? "") };
