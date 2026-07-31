@@ -87,7 +87,10 @@ cmd_prepare() {
   local slug="$1" pr="$2" base="${3:-origin/main}"
   local wt; wt="$(slug_wt "$slug")"
 
-  if al_stop_requested; then jq -nc '{ready:false,phase:"prepare",reason:"STOP sentinel present"}'; return; fi
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not preparing"}'
+    return
+  fi
   [ -d "$wt" ] || { jq -nc --arg r "no worktree auto-$slug" '{ready:false,phase:"prepare",reason:$r}'; return; }
 
   git -C "$wt" fetch --quiet origin main || true
@@ -155,7 +158,10 @@ cmd_finalize() {
   exec 9>"$LOCK"
   if ! flock -n 9; then jq -nc '{merged:false,phase:"finalize",reason:"another finalize holds the lock"}'; return; fi
 
-  if al_stop_requested; then jq -nc '{merged:false,phase:"finalize",reason:"STOP sentinel present — not merging"}'; return; fi
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+    return
+  fi
 
   git -C "$MAIN" fetch --quiet origin main || true
   local cur; cur="$(git -C "$MAIN" rev-parse origin/main)"
@@ -213,6 +219,10 @@ cmd_finalize() {
 cmd_reject() {
   local slug="$1" pr="$2" sublabel="$3" reason="$4"
   local br; br="$(branch_of "$slug")"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not rejecting"}'
+    return
+  fi
   ensure_label "needs-human" "B60205"
   ensure_label "$sublabel" "FBCA04"
   gh pr edit "$pr" --add-label "needs-human" --add-label "$sublabel" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
@@ -235,6 +245,10 @@ cmd_reject() {
 cmd_route_owner() {
   local slug="$1" pr="$2" lane="$3" gsum="$4" note="${5:-APPROVE (adversarial self-review)}" flagged="${6:-0}"
   local br; br="$(branch_of "$slug")"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not routing"}'
+    return
+  fi
   ensure_label "needs-owner-merge" "5319E7"
   ensure_label "program:$lane" "0E8A16"
   gh pr ready "$pr" >/dev/null 2>&1 || true   # undraft → the owner can merge it

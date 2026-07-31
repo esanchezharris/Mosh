@@ -35,6 +35,19 @@
 Only one row may be `in progress`. The owner merges each fully gated PR before
 the next row starts.
 
+## Superseded First-Stranger PRs
+
+The First-Stranger evidence and open implementation work remain preserved, but
+they are not active Vocal Map dependencies and must not merge without a new
+owner disposition.
+
+| PR | Preserved work | State |
+| --- | --- | --- |
+| #471 | FS-T2 plugin-crash safe mode | paused |
+| #473 | FS-K3 opt-in crash reporting | paused |
+| #475 | FS-K4 packaging/BOM gate | paused |
+| #478 | combined First-Stranger ship-kit and brain work | paused |
+
 ## Current risks
 
 - Two singers and their separately consented adaptation recordings are not yet

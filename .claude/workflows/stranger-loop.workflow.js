@@ -32,7 +32,7 @@ const PROG = 'docs/first-stranger-program'
 // Point the shared scripts at the PROGRAM backlog + ledger, and enable stranger mode so
 // merge-one.sh gates (rather than auto-rejects) exclusion-list diffs. Exported into every
 // shell so discover.sh / merge-one.sh (which source lib.sh) pick them up.
-const RUN = `cd "$(git rev-parse --show-toplevel)" && export MOSH_STRANGER_MODE=1 AL_BACKLOG_JSONL="$PWD/${PROG}/backlog.jsonl" AL_LEDGER="$PWD/${PROG}/LEDGER.md" &&`
+const RUN = `cd "$(git rev-parse --show-toplevel)" && export MOSH_STRANGER_MODE=1 AL_BACKLOG_JSONL="$PWD/${PROG}/backlog.jsonl" AL_LEDGER="$PWD/${PROG}/LEDGER.md" AL_PROGRAM_STOP="$PWD/${PROG}/STOP" &&`
 
 const slugOf = (id) => String(id).toLowerCase().replace(/[^a-z0-9._-]/g, '-')
 

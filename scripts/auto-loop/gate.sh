@@ -172,10 +172,15 @@ run_parity_checks() {
   run_step "parity_scoreboard" bash -c 'python3 scripts/daw-conformance/scoreboard.py --check'
 }
 
+run_loop_control_checks() {
+  run_step "program_stop" bash scripts/auto-loop/program-stop-selftest.sh
+}
+
 # ── cheap lane ───────────────────────────────────────────────────────────────────
 gate_cheap() {
   ensure_node_modules
   run_parity_checks
+  run_loop_control_checks
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
   run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
@@ -208,6 +213,7 @@ runbook_advisory() {
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
   run_parity_checks
+  run_loop_control_checks
   runbook_advisory
 
   # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step), and

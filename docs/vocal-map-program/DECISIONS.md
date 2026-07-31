@@ -59,3 +59,9 @@ the program enters debugging. Research does not extend.
 
 Delivery is a serial PR train. Each PR receives the complete relevant local
 gate and owner merge before the next starts. No automation or agent merges.
+
+## VM-D010 — 2026-07-30 — Superseded pull requests
+
+Open First-Stranger PRs #471, #473, #475, and #478 remain preserved but paused.
+They are not dependencies of the Vocal Map train and require an explicit owner
+close, park, or rebase decision before any merge.

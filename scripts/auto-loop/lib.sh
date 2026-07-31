@@ -18,12 +18,12 @@ AL_ROOT="${AL_ROOT:-$AL_ROOT_DEFAULT}"
 AL_DOCS_DIR="$AL_ROOT/docs/auto-loop"
 # AL_LEDGER + AL_BACKLOG_JSONL accept an environment override so a SIBLING loop (the
 # First-Stranger "stranger-loop") can keep its own audit trail + backlog while sharing
-# the same scripts, STOP switch, and merge-queue lock. Unset ⇒ the classic auto-loop
-# paths, byte-identical to before.
+# the same scripts and merge-queue lock. Unset ⇒ the classic auto-loop paths.
 AL_LEDGER="${AL_LEDGER:-$AL_DOCS_DIR/LEDGER.md}"
 AL_BACKLOG="$AL_DOCS_DIR/BACKLOG.md"                 # human-readable companion (classic)
 AL_BACKLOG_JSONL="${AL_BACKLOG_JSONL:-$AL_DOCS_DIR/backlog.jsonl}"   # machine source of truth
 AL_STOP="$AL_DOCS_DIR/STOP"
+AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-}"
 AL_PAUSE="$AL_DOCS_DIR/PAUSE"
 
 # Machine-local home for the shared build cache + config. Lives OUTSIDE any git
@@ -48,7 +48,9 @@ al_die()  { printf '[auto-loop][die] %s\n' "$*" >&2; exit 1; }
 # ── kill switch ─────────────────────────────────────────────────────────────────
 # Returns 0 (true) if the loop must stop. Checked at every iteration boundary AND
 # immediately before any merge. A human drops the STOP file to halt instantly.
-al_stop_requested() { [ -e "$AL_STOP" ]; }
+al_stop_requested() {
+  [ -e "$AL_STOP" ] || { [ -n "$AL_PROGRAM_STOP" ] && [ -e "$AL_PROGRAM_STOP" ]; }
+}
 al_pause_requested() { [ -e "$AL_PAUSE" ]; }
 
 # ── binary resolution ───────────────────────────────────────────────────────────
