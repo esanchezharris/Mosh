@@ -27,7 +27,7 @@ const {
     realtimeControllerMock: {
       connect: vi.fn<() => Promise<void>>(async () => { throw new Error("realtime failed"); }),
       dispose: vi.fn(async () => undefined),
-      inputMode: "native-transcript" as const,
+      inputMode: "webrtc-microphone" as const,
       submitTranscript: vi.fn(),
       press: vi.fn(),
       release: vi.fn(),
@@ -257,6 +257,7 @@ describe("AgentComposer supervisor entry point", () => {
     expect(mic.disabled).toBe(false);
     expect(realtimeControllerMock.connect).toHaveBeenCalledOnce();
     expect(realtimeControllerMock.press).toHaveBeenCalledWith({ recording: false });
+    expect(createVoiceInputMock).not.toHaveBeenCalled();
     expect(mic.getAttribute("aria-pressed")).toBe("true");
 
     await act(async () => {

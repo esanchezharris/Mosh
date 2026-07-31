@@ -5,6 +5,7 @@
 #include <poll.h>
 #include <spawn.h>
 #include <signal.h>
+#include <sys/file.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -28,7 +29,8 @@ namespace
 {
 constexpr auto kMoshIdentifier = "studio.mosh.app";
 constexpr auto kHelperIdentifier = "MoshRepairHelper";
-constexpr int kReadyDescriptor = 3;
+constexpr int kReadyDescriptor = 198;
+constexpr int kHandoffLockDescriptor = 199;
 
 class CfObject
 {
@@ -334,7 +336,33 @@ void writeTestStatus (const std::string& value)
     _exit (code);
 }
 
-pid_t spawnWorker (const std::vector<std::string>& arguments)
+int acquireHandoffLock (pid_t callerPid)
+{
+    const auto path = fs::path ("/tmp")
+        / ("mosh-repair-handoff-" + std::to_string (geteuid())
+           + "-" + std::to_string (callerPid) + ".lock");
+    const auto descriptor = open (
+        path.c_str(), O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR);
+    if (descriptor < 0)
+        throw std::runtime_error ("handoff_lock_open_failed");
+    struct stat status {};
+    if (fstat (descriptor, &status) != 0
+        || ! S_ISREG (status.st_mode)
+        || status.st_uid != geteuid())
+    {
+        close (descriptor);
+        throw std::runtime_error ("handoff_lock_invalid");
+    }
+    if (flock (descriptor, LOCK_EX | LOCK_NB) != 0)
+    {
+        close (descriptor);
+        throw std::runtime_error (
+            errno == EWOULDBLOCK ? "handoff_in_progress" : "handoff_lock_failed");
+    }
+    return descriptor;
+}
+
+pid_t spawnWorker (const std::vector<std::string>& arguments, int handoffLock)
 {
     std::array<char, PROC_PIDPATHINFO_MAXSIZE> selfBuffer {};
     if (proc_pidpath (getpid(), selfBuffer.data(), static_cast<uint32_t> (selfBuffer.size())) <= 0)
@@ -367,6 +395,8 @@ pid_t spawnWorker (const std::vector<std::string>& arguments)
         || posix_spawn_file_actions_addclose (&actions, readyPipe[0]) != 0
         || posix_spawn_file_actions_adddup2 (
             &actions, readyPipe[1], kReadyDescriptor) != 0
+        || posix_spawn_file_actions_adddup2 (
+            &actions, handoffLock, kHandoffLockDescriptor) != 0
         || (readyPipe[1] != kReadyDescriptor
             && posix_spawn_file_actions_addclose (&actions, readyPipe[1]) != 0))
     {
@@ -408,6 +438,8 @@ template <typename CallerValidator, typename TargetValidator>
     try
     {
         validateWorkerParent (parentHelperPid, selfIdentity());
+        if (fcntl (kHandoffLockDescriptor, F_GETFD) < 0)
+            throw std::runtime_error ("handoff_lock_missing");
         validateCallerNow();
         validateTargetNow();
     }
@@ -415,6 +447,8 @@ template <typename CallerValidator, typename TargetValidator>
     if (write (kReadyDescriptor, "R", 1) != 1)
         workerExit (76);
     close (kReadyDescriptor);
+    if (fcntl (kHandoffLockDescriptor, F_SETFD, FD_CLOEXEC) != 0)
+        workerExit (77);
     std::this_thread::sleep_for (std::chrono::milliseconds (750));
     writeTestStatus ("validated");
     if (kill (callerPid, SIGTERM) != 0 && errno != ESRCH)
@@ -450,7 +484,9 @@ void acceptHandoff (
         std::cout << "{\"ok\":true,\"alreadyRunning\":true}\n";
         return;
     }
-    const auto workerPid = spawnWorker (workerArguments);
+    const auto handoffLock = acquireHandoffLock (callerPid);
+    const auto workerPid = spawnWorker (workerArguments, handoffLock);
+    close (handoffLock);
     std::cout << "{\"ok\":true,\"workerPid\":" << workerPid
               << ",\"callerPid\":" << callerPid << "}\n";
 }

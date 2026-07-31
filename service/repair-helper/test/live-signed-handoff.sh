@@ -32,6 +32,7 @@ MACOS="$CONTENTS/MacOS"
 HELPER="$FIXTURE/MoshRepairHelper"
 CALLER="$FIXTURE/MoshCaller"
 MARKER="$FIXTURE/launched.txt"
+RACE_MARKER="$FIXTURE/race-launched.txt"
 STATUS="$FIXTURE/worker-status.txt"
 CHECKPOINT="$(mktemp "$FIXTURE/checkpoint.XXXXXX.tracktionedit")"
 SHA="0123456789abcdef0123456789abcdef01234567"
@@ -101,4 +102,41 @@ if kill -0 "$CALLER_PID" 2>/dev/null; then
   echo "Caller remained alive after handoff." >&2
   exit 4
 fi
+
+xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
+  "-DMOSH_REPAIR_FIXTURE_MARKER=\"$RACE_MARKER\"" \
+  "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
+  "$SOURCE" -o "$MACOS/Mosh"
+codesign --force --options runtime --timestamp \
+  --identifier studio.mosh.app --sign "$IDENTITY" "$MACOS/Mosh"
+codesign --force --options runtime --timestamp \
+  --identifier studio.mosh.app --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+
+MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
+  "$CALLER" __RACE_HANDOFFS__ \
+    "$HELPER" handoff-repair \
+      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ \
+    __SECOND_HANDOFF__ \
+    "$HELPER" handoff-repair \
+      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ &
+RACE_CALLER_PID=$!
+
+for _ in {1..350}; do
+  [[ -s "$RACE_MARKER" ]] && break
+  sleep 0.1
+done
+[[ -s "$RACE_MARKER" ]] || {
+  echo "Concurrent signed handoff did not launch a target." >&2
+  [[ -s "$STATUS" ]] && sed 's/^/worker exit: /' "$STATUS" >&2
+  exit 8
+}
+if kill -0 "$RACE_CALLER_PID" 2>/dev/null; then
+  echo "Concurrent handoff caller remained alive." >&2
+  exit 9
+fi
+[[ "$(wc -l < "$RACE_MARKER" | tr -d ' ')" == "1" ]] || {
+  echo "Concurrent handoff launched more than one target." >&2
+  exit 10
+}
 echo "signed repair handoff: PASS"

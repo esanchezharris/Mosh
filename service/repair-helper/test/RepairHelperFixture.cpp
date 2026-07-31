@@ -17,32 +17,58 @@ void terminate (int)
 {
     _exit (0);
 }
+
+pid_t spawnCommand (char** argv, int first, int last)
+{
+    const auto child = fork();
+    if (child != 0) return child;
+    std::vector<std::string> storage;
+    storage.reserve (static_cast<size_t> (last - first));
+    const auto callerPid = std::to_string (getppid());
+    for (int index = first; index < last; ++index)
+        storage.push_back (std::string (argv[index]) == "__CALLER_PID__"
+            ? callerPid : argv[index]);
+    std::vector<char*> arguments;
+    for (auto& item : storage) arguments.push_back (item.data());
+    arguments.push_back (nullptr);
+    execv (arguments.front(), arguments.data());
+    _exit (4);
+}
 }
 
 int main (int argc, char** argv)
 {
     if (argc < 2) return 2;
     signal (SIGTERM, terminate);
-    const auto child = fork();
-    if (child < 0) return 3;
-    if (child == 0)
+    if (std::string (argv[1]) == "__RACE_HANDOFFS__")
     {
-        std::vector<std::string> storage;
-        storage.reserve (static_cast<size_t> (argc - 1));
-        const auto callerPid = std::to_string (getppid());
-        for (int index = 1; index < argc; ++index)
-            storage.push_back (std::string (argv[index]) == "__CALLER_PID__"
-                ? callerPid : argv[index]);
-        std::vector<char*> arguments;
-        for (auto& item : storage) arguments.push_back (item.data());
-        arguments.push_back (nullptr);
-        execv (arguments.front(), arguments.data());
-        _exit (4);
+        int separator = 0;
+        for (int index = 2; index < argc; ++index)
+            if (std::string (argv[index]) == "__SECOND_HANDOFF__")
+                separator = index;
+        if (separator == 0) return 8;
+        const auto first = spawnCommand (argv, 2, separator);
+        const auto second = spawnCommand (argv, separator + 1, argc);
+        if (first < 0 || second < 0) return 3;
+        int successful = 0;
+        for (const auto child : { first, second })
+        {
+            int status = 0;
+            if (waitpid (child, &status, 0) == child && WIFEXITED (status)
+                && WEXITSTATUS (status) == 0)
+                ++successful;
+        }
+        if (successful != 1) return 9;
     }
-    int status = 0;
-    if (waitpid (child, &status, 0) != child || ! WIFEXITED (status)
-        || WEXITSTATUS (status) != 0)
-        return 5;
+    else
+    {
+        const auto child = spawnCommand (argv, 1, argc);
+        if (child < 0) return 3;
+        int status = 0;
+        if (waitpid (child, &status, 0) != child || ! WIFEXITED (status)
+            || WEXITSTATUS (status) != 0)
+            return 5;
+    }
     while (true) pause();
 }
 #elif defined(MOSH_REPAIR_FIXTURE_TARGET)
@@ -62,7 +88,7 @@ int main (int argc, char** argv)
             && argv[index + 1] == embeddedSha)
             receivedSha = true;
     if (! receivedSha) return 6;
-    std::ofstream marker (MOSH_REPAIR_FIXTURE_MARKER, std::ios::trunc);
+    std::ofstream marker (MOSH_REPAIR_FIXTURE_MARKER, std::ios::app);
     marker << "launched " << getpid() << "\n";
     return marker.good() ? 0 : 7;
 }

@@ -4,7 +4,6 @@ import {
   RealtimeSession,
   tool,
 } from "@openai/agents/realtime";
-import { isRealNative } from "../bridge";
 import { PushToTalkController, type RealtimeSessionPort } from "./realtimeVoice";
 import type { DraftReportInput } from "./ownerCockpit";
 
@@ -22,37 +21,10 @@ export function createOpenAIRealtimeController(
 ): PushToTalkController {
   const audioElement = document.createElement("audio");
   audioElement.autoplay = true;
-  const useNativeTranscript = isRealNative();
-  let silentAudio: { stream: MediaStream; close: () => Promise<void> } | null = null;
   return new PushToTalkController({
     getClientSecret: dependencies.getClientSecret,
-    getMediaStream: async () => {
-      if (!useNativeTranscript)
-        return navigator.mediaDevices.getUserMedia({ audio: true });
-      const context = new AudioContext();
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      const destination = context.createMediaStreamDestination();
-      gain.gain.value = 0;
-      oscillator.connect(gain);
-      gain.connect(destination);
-      oscillator.start();
-      silentAudio = {
-        stream: destination.stream,
-        close: async () => {
-          try { oscillator.stop(); } catch {}
-          await context.close();
-        },
-      };
-      return destination.stream;
-    },
-    releaseMediaStream: async (stream) => {
-      if (silentAudio?.stream !== stream) return;
-      const resource = silentAudio;
-      silentAudio = null;
-      await resource.close();
-    },
-    inputMode: useNativeTranscript ? "native-transcript" : "webrtc-microphone",
+    getMediaStream: () => navigator.mediaDevices.getUserMedia({ audio: true }),
+    inputMode: "webrtc-microphone",
     audioElement,
     onFailure: dependencies.onFailure,
     createSession: ({ mediaStream, historyStoreAudio }) => {

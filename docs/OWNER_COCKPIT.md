@@ -217,17 +217,9 @@ Preserve every other file in that commit: `AGENTS.md`,
 `ui/src/bench/singleShotRunner.ts`, `ui/src/bridge.mock.ts`, and
 `ui/src/v2/TopBar.tsx`.
 
-The required serial landing order is:
-
-1. #522
-2. #514
-3. #507
-4. #508
-5. #510
-6. this owner-cockpit branch
-
-After each PR lands, rebase the next branch onto the resulting `main` and run
-its full local gate before continuing. #522 overlaps
+PR #524 is parked behind the Vocal Map playtest in PR #523 (VM-D015). After
+#523 lands, rebase this owner-cockpit branch onto the resulting `main` and run
+every SHA-bound owner and native gate before continuing. #522 overlaps
 `src/webview/WebBridge.cpp`, `ui/src/bridge.ts`, `ui/src/agent/brain.ts`,
 `ui/src/agent/loop/runTask.ts`, their tests, and `ui/package.json`; preserve its
 no-demo production failure posture while adding the owner-only host routes.
