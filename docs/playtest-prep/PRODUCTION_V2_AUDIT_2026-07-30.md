@@ -227,10 +227,13 @@ frame, and a Shift-range was not owned by its initiating pointer. Focused RED
 tests reproduced both failures. The hardening follow-up deduplicates committed
 positions, isolates range and scrub pointers, tolerates DOMs without pointer
 capture APIs, and adds lost-capture, unmount, same-endpoint, and multi-pointer
-regressions. The final immutable-SHA manifest, rerun hashes, five review
-verdicts, debugging audit, and PR handoff live under the final `timeline-fix-v3`
-evidence directory and in the PR body; they are generated only after the final
-commit so they cannot falsely attest to a mutable tree.
+regressions. A later exact-SHA review found and repaired two more lifecycle
+boundaries: a second pointer can no longer replace an active SongNav scrub, and
+unmounting BarRuler releases a Shift-range capture and clears the drag state.
+The final immutable-SHA manifest, rerun hashes, review verdicts, debugging
+audit, and PR handoff live under the final `timeline-fix-v6` evidence directory
+and in the PR body. They are generated only after the final commit so they
+cannot falsely attest to a mutable tree.
 
 ## T0 capability ledger
 
@@ -265,7 +268,7 @@ failure claim.
 | CAP-TRK-002 Rename/recolor/reorder/delete/icons | partial / partial | NOT REACHED |
 | CAP-TRK-009 Inactive tracks/inserts | partial / partial | NOT REACHED |
 | CAP-TRN-001 Play/stop/pause/resume | shipped / shipped | PASS sampled; long-session pending |
-| CAP-TRN-002 Seek/navigation | shipped / shipped | Installed FAIL; fixed Release native PASS; merge/final SHA pending |
+| CAP-TRN-002 Seek/navigation | shipped / shipped | Installed FAIL; fixed Release native PASS at PR head; owner merge and final campaign rerun pending |
 | CAP-TRN-004 Loop region keyboard set/move/resize | shipped / partial | Shift range PASS; loop behavior NOT REACHED |
 | CAP-TRN-005 Metronome configuration | partial / partial | Toggle reached; audio/routing NOT REACHED |
 
