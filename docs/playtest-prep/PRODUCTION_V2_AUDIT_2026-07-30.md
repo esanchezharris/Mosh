@@ -156,10 +156,29 @@ not a finding.
 | Timeline navigator and ruler emit only one seek for a held Computer Use drag | MAJOR | Pointer-owned continuous scrub fix merged at `364cb6fe`; click and Shift-range behavior preserved | [#517](https://github.com/zeke431/Mosh/issues/517) | [#519](https://github.com/zeke431/Mosh/pull/519) | PASS on exact merged Release |
 | Audio-track selection leaves the MIDI clip inspector visible | MAJOR | Canonical clip selection now clears before the multiplayer-aware track transition; merged at `f3e68992` | [#518](https://github.com/zeke431/Mosh/issues/518) | [#520](https://github.com/zeke431/Mosh/pull/520) | PASS on exact merged Release |
 | Packaged Moshi substitutes demo commands after a brain-provider failure | MAJOR | Both single-shot and agentic-loop callers fail visibly without commands; browser mocks use an explicit `e2e` mode and isolated `dist-e2e`, legacy/ambient development builds abort, and a real native WebView disables demo brains. `93f483da` was rejected for multiline proxy-value injection. `4b44ba11` repaired injection but was rejected for stale optional-brain guidance and a missing exact-prompt replay. `802cfde8` passed the exact prompt, gate, manual QA, and four review lanes but was rejected because one checklist sentence misstated incomplete-pair behavior and public status was stale. `7f28592c` corrected that sentence and passed its complete gate rerun, exact prompt, native QA, hosted checks, and four review lanes, but was rejected because this repository row, public issue #516, and four overlapping-PR ordering records lagged the evidence. The current PR head is a documentation-only successor that refreshes those records; its exact SHA is read from PR metadata rather than embedded here to avoid self-referential commit-hash churn. It may pass only with a fresh clean-tree gate, exact-prompt native bundle, all five exact-SHA review lanes, and hosted checks. | [#521](https://github.com/zeke431/Mosh/issues/521) | [#522](https://github.com/zeke431/Mosh/pull/522) | Rejected predecessors retained; current-head evidence must be complete and exact-SHA bound before merge |
-| Agentic terminal task drawer is exposed to accessibility but not visibly rendered | MAJOR | Native hide/show changes the accessibility subtree, while settled screenshots continue to omit the drawer pixels; keep separate from the truthful inline brain-setup failure | [#525](https://github.com/zeke431/Mosh/issues/525) | — | pending |
+| Agentic terminal task drawer is exposed to accessibility before its pixels become visible | MAJOR | The entrance animation started at `opacity: 0`; the fix keeps the drawer opaque from mount while retaining its 6 px motion. Product head `49d571f5` passed the RED/GREEN tests, exact native gate, and visible/hidden/reshown Computer Use proof. The current documentation-only successor must replace every SHA-bound gate and review record before merge. | [#525](https://github.com/zeke431/Mosh/issues/525) | [#526](https://github.com/zeke431/Mosh/pull/526) | Product behavior PASS at `49d571f5`; current-head evidence pending |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
+
+## Current serial-fix boundary
+
+PRs #519, #520, and #522 are merged. PR #526 is the active campaign fix for
+issue #525. Its product head `49d571f5` passed the focused component and CSS
+regressions, exact native gate, and native Computer Use hide/show journey. A
+final context review correctly rejected that head because this durable ledger
+and the public campaign ordering had not caught up with the evidence.
+
+This documentation-only successor is mergeable only after a fresh exact-SHA
+native gate, all five exact-SHA review lanes, terminal hosted checks, and
+confirmation that its Release binary and UI hashes match the already-observed
+product head. PRs #514 and #515 both overlap
+`ui/src/v2/css/95-fms-agent.css`; they are serialized behind #526 and must
+rebase, preserve the opaque-from-mount drawer contract, and replace all
+SHA-bound evidence after #526 merges.
+
+The showcase, configured-backend pass, same-Mac collaboration run, export
+matrix, stem validation, and final merged-SHA inventory rerun remain open.
 
 ## Timeline scrub fix evidence
 
