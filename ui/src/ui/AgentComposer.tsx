@@ -14,6 +14,12 @@ import { writePreference } from "../agent/memory/writePreference";
 import { createVoiceInput, createContinuousVoiceInput, isVoiceSupported, type VoiceInput } from "../agent/voiceInput";
 import { createHandsFree, type HandsFree } from "../agent/handsFree";
 import { IconArrowUp, IconMic } from "./icons";
+import { ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
+import { classifyReportTrigger } from "../agent/ownerCockpit";
+import { createOpenAIRealtimeController } from "../agent/openAIRealtime";
+import { playMoshiEarcon, realtimeFallbackFor, type PushToTalkController } from "../agent/realtimeVoice";
+import { useSettings } from "../settings/store";
+import { createBrain } from "../agent/brain";
 
 // Hands-free always-on listening. Owns the lifetime of the CONTINUOUS recognizer:
 // engages when the `handsFreeOn` toggle is true (and the tab is visible), disengages
@@ -122,6 +128,11 @@ export function AgentComposer() {
   const [input, setInput] = useState("");
   const [say, setSay] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const cockpit = useOwnerCockpit();
+  const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
+  const legacyBrainRef = useRef<ReturnType<typeof createBrain> | null>(null);
+  if (!legacyBrainRef.current)
+    legacyBrainRef.current = createBrain(() => useStore.getState().snapshot);
 
   // A brief, self-clearing caption. Used for the hands-free "heard but not a command"
   // acknowledgement so an always-on mic isn't a silent black box.
@@ -136,6 +147,10 @@ export function AgentComposer() {
   const voiceSupported = isVoiceSupported();
   // undefined = not yet built; null = platform has no speech API.
   const voiceRef = useRef<VoiceInput | null | undefined>(undefined);
+  const realtimeRef = useRef<PushToTalkController | null>(null);
+  const realtimeConnectingRef = useRef<Promise<PushToTalkController> | null>(null);
+  const realtimeFailedRef = useRef(false);
+  const pointerHeldRef = useRef(false);
   const handsFree = useHandsFree((heard) => flashSay(`“${heard}” (not a command)`));
 
   // The single funnel: typed text and final speech both arrive here.
@@ -144,6 +159,16 @@ export function AgentComposer() {
     setInput(""); setSay(null); setAgentBusy(true);
     try {
       const st = useStore.getState();
+      if (ownerCockpitEnabled && classifyReportTrigger(text)) {
+        const report = await ownerCockpitRuntime.createFromText(text);
+        if (report) {
+          const summary = `${report.kind} saved for approval`;
+          playMoshiEarcon("report");
+          setSay(summary);
+          pushAgentUtter(report.kind === "blocker" ? "UHOH" : "ACK_GOT_IT", summary);
+          return;
+        }
+      }
 
       // Deterministic fast path: an unambiguous, state-valid phrase runs locally (no API).
       // Anything ambiguous returns null and falls through to the LLM brain.
@@ -167,6 +192,23 @@ export function AgentComposer() {
             else setSay(`couldn't remember that — ${res.error}`);
           },
         });
+        return;
+      }
+
+      if (!ownerCockpitEnabled) {
+        const legacyBrain = legacyBrainRef.current;
+        if (!legacyBrain) throw new Error("brain unavailable");
+        const reply = await legacyBrain.send(text);
+        const commands = reply.commands ?? [];
+        setSay(reply.say ?? null);
+        pushAgentUtter(reply.intent ?? "UHOH", reply.say);
+        if (commands.length > 0)
+          setAgentChangeSet(await runAgentBatch(reply.say || text, commands, {
+            utterance: text,
+            source: "brain_chat",
+          }));
+        else
+          await logAgentTurn(reply.say || text, { utterance: text, source: "brain_chat" });
         return;
       }
 
@@ -217,14 +259,99 @@ export function AgentComposer() {
         onStart: () => { setListening(true); setAgentListening(true); setInput(""); },
         onInterim: (t) => setInput(t),
         onStop: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); },
-        onFinal: (t) => void run(t),
+        onFinal: (t) => {
+          if (!realtimeFailedRef.current || realtimeFallbackFor(t).allowed) void run(t);
+          else {
+            setSay("Realtime unavailable — type complex requests.");
+            pushAgentUtter("UHOH", "Realtime unavailable — type complex requests.");
+          }
+        },
         onError: () => { setListening(false); setAgentListening(false); handsFree.resumeAfterPushToTalk(); setSay("didn't catch that"); },
       });
     }
     return voiceRef.current;
   };
 
-  const micLabel = !voiceSupported ? "Voice unavailable here — type instead"
+  const ensureRealtime = (): Promise<PushToTalkController> => {
+    if (realtimeRef.current) return Promise.resolve(realtimeRef.current);
+    if (realtimeConnectingRef.current) return realtimeConnectingRef.current;
+    const controller = createOpenAIRealtimeController({
+      getClientSecret: () => ownerCockpitRuntime.client.realtimeSecret(),
+      isRecording: () => useStore.getState().transport.recording,
+      onFailure: () => {
+        realtimeFailedRef.current = true;
+        void controller.fail();
+        setListening(false);
+        setAgentListening(false);
+        setSay("Realtime unavailable — safe voice commands only.");
+        playMoshiEarcon("error");
+      },
+      runDirectSafe: async (command, args) => {
+        const call = { command, args };
+        if (!isDirectSafeCall(call)) return "That command needs the supervisor.";
+        const changeSet = await executeDirectSafeCapabilities("Realtime command", [call], { source: "realtime" });
+        setAgentChangeSet(changeSet);
+        return changeSet.entries.every((entry) => entry.ok) ? "Done." : "That did not apply.";
+      },
+      draftReport: async (report) => {
+        const durable = await ownerCockpitRuntime.createReport(report);
+        return `${durable.kind} saved for approval.`;
+      },
+      delegateSupervisor: async (message) => {
+        const snapshot = useStore.getState().snapshot;
+        const supervised = await requestCapabilitySupervisor(message, {
+          playing: snapshot?.transport.playing,
+          recording: snapshot?.transport.recording,
+          timelinePosition: snapshot?.transport.position,
+        });
+        if (supervised.calls.length > 0) {
+          const changeSet = await runAgentBatch(supervised.plan.say || message, supervised.calls, {
+            utterance: message,
+            source: "realtime-supervisor",
+          });
+          setAgentChangeSet(changeSet);
+        }
+        return supervised.plan.say || "Done.";
+      },
+    });
+    realtimeConnectingRef.current = controller.connect().then(() => {
+      if (ownerCockpitRuntime.getSnapshot().status !== "active") {
+        void controller.dispose();
+        throw new Error("playtest closed");
+      }
+      realtimeRef.current = controller;
+      realtimeFailedRef.current = false;
+      playMoshiEarcon("ready");
+      return controller;
+    }).catch((error) => {
+      realtimeFailedRef.current = true;
+      realtimeConnectingRef.current = null;
+      void controller.dispose();
+      throw error;
+    });
+    return realtimeConnectingRef.current;
+  };
+
+  const playing = useStore((state) => state.transport.playing);
+  useEffect(() => realtimeRef.current?.setPlaybackActive(playing), [playing]);
+  useEffect(() => {
+    if (cockpit.status === "active") return;
+    void realtimeRef.current?.dispose();
+    realtimeRef.current = null;
+    realtimeConnectingRef.current = null;
+  }, [cockpit.status]);
+  const recording = useStore((state) => state.transport.recording);
+  useEffect(() => {
+    if (recording) void realtimeRef.current?.cancel();
+  }, [recording]);
+  useEffect(() => () => {
+    pointerHeldRef.current = false;
+    void realtimeRef.current?.dispose();
+    realtimeRef.current = null;
+  }, []);
+
+  const voiceAvailable = (ownerCockpitEnabled && cockpit.status === "active") || voiceSupported;
+  const micLabel = !voiceAvailable ? "Voice unavailable here — type instead"
     : listening ? "Listening… release to send" : "Hold to talk";
 
   return (
@@ -234,21 +361,52 @@ export function AgentComposer() {
         <button
           className={`agent-mic${listening ? " on" : ""}`}
           title={micLabel} aria-label={micLabel} aria-pressed={listening}
-          disabled={!voiceSupported || agentBusy}
+          disabled={!voiceAvailable || agentBusy}
           data-testid="agent-mic"
           onPointerDown={(e) => {
-            if (agentBusy || !voiceSupported) return;
-            // Holding the talk button to address Moshi pauses always-on hands-free (so the
-            // two recognizers never fight for the mic; it resumes on release) and STOPS an
-            // in-progress take first (performer mode → assistant mode), then listens.
+            if (agentBusy || !voiceAvailable) return;
+            pointerHeldRef.current = true;
+            if (useStore.getState().transport.recording) {
+              pointerHeldRef.current = false;
+              setSay("Stop recording before talking to Moshi.");
+              playMoshiEarcon("error");
+              pushAgentUtter("UHOH", "Stop recording before talking to Moshi.");
+              return;
+            }
             handsFree.pauseForPushToTalk();
-            if (useStore.getState().currentMode() === "recording") void useStore.getState().stopRecord();
-            const v = ensureVoice(); if (!v) return;
             try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
-            v.start();
+            if (ownerCockpitEnabled && cockpit.status === "active" && !realtimeFailedRef.current) {
+              setListening(true);
+              setAgentListening(true);
+              void ensureRealtime().then(async (controller) => {
+                if (!pointerHeldRef.current) return controller.release();
+                await controller.press({ recording: useStore.getState().transport.recording });
+              }).catch(() => {
+                setListening(false);
+                setAgentListening(false);
+                setSay("Realtime unavailable — safe voice commands only.");
+                ensureVoice()?.start();
+              });
+              return;
+            }
+            ensureVoice()?.start();
           }}
-          onPointerUp={() => voiceRef.current?.stop()}
-          onPointerCancel={() => voiceRef.current?.stop()}
+          onPointerUp={() => {
+            pointerHeldRef.current = false;
+            void realtimeRef.current?.release();
+            voiceRef.current?.stop();
+            setListening(false);
+            setAgentListening(false);
+            handsFree.resumeAfterPushToTalk();
+          }}
+          onPointerCancel={() => {
+            pointerHeldRef.current = false;
+            void realtimeRef.current?.cancel();
+            voiceRef.current?.stop();
+            setListening(false);
+            setAgentListening(false);
+            handsFree.resumeAfterPushToTalk();
+          }}
         >
           {listening
             ? <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: "currentColor" }} />

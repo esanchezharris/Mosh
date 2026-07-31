@@ -43,6 +43,17 @@
 .v2-shell .v2-mosh-card .moshi-mood[data-mood="work"] { color: #ffcf6a; }
 .v2-mosh-status { display: flex; align-items: center; gap: 8px; padding: 5px 18px 0; color: var(--v2-dim); font-size: 12px; }
 .v2-mosh-status .wave { color: var(--v2-accent); }
+.v2-owner-cockpit { margin: 10px 14px 0; padding-top: 10px; border-top: 1px solid var(--v2-line); color: var(--v2-dim); font-size: var(--v2-fs-sm); }
+.v2-owner-cockpit[data-active="true"] { border-color: color-mix(in srgb, var(--v2-accent) 38%, var(--v2-line)); }
+.v2-owner-row, .v2-owner-actions, .v2-owner-alert, .v2-owner-report { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v2-owner-actions { margin-top: 8px; }
+.v2-owner-actions label { display: flex; align-items: center; gap: 5px; }
+.v2-owner-disclosure, .v2-owner-error, .v2-owner-alert, .v2-owner-inbox { margin-top: 8px; padding: 8px; border: 1px solid var(--v2-line); border-radius: var(--v2-radius-xs); background: var(--v2-raised); line-height: 1.35; }
+.v2-owner-error, .v2-owner-alert { border-color: var(--v2-rec); color: var(--v2-text); }
+.v2-owner-event { margin-top: 6px; color: var(--v2-faint); }
+.v2-owner-inbox { display: grid; gap: 7px; }
+.v2-owner-report { color: var(--v2-text); }
+.v2-owner-report > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* contextual inspector */
 .v2-insp-tabs { display: flex; gap: 4px; padding: 10px 16px 0; flex-wrap: wrap; }
@@ -205,4 +216,3 @@
 }
 .v2-invite:hover { color: var(--v2-text); border-color: var(--v2-accent); }
 .v2-invite svg { flex: 0 0 auto; }
-

@@ -13,6 +13,7 @@ namespace
         value->setProperty ("ok", false);
         value->setProperty ("error", message);
         if (code.isNotEmpty()) value->setProperty ("code", code);
+        value->setProperty ("retryable", true);
         return juce::var (value);
     }
 
@@ -71,6 +72,13 @@ juce::File AgentHostProxy::locateEntry() const
 
 void AgentHostProxy::stop()
 {
+    if (process.isRunning() && origin.isNotEmpty() && capability.isNotEmpty() && playtestId.isNotEmpty())
+    {
+        auto* request = new juce::DynamicObject();
+        request->setProperty ("retainTranscript", retainTranscript);
+        int ignoredStatus = 0;
+        post ("/v1/playtests/" + playtestId + "/close", juce::var (request), ignoredStatus);
+    }
     if (process.isRunning())
     {
         process.kill();
@@ -81,11 +89,13 @@ void AgentHostProxy::stop()
     origin.clear();
     capability.clear();
     playtestId.clear();
+    retainTranscript = false;
+    disclosureDelivered = false;
 }
 
 bool AgentHostProxy::ensureStarted()
 {
-    if (origin.isNotEmpty() && capability.isNotEmpty() && playtestId.isNotEmpty() && process.isRunning())
+    if (origin.isNotEmpty() && capability.isNotEmpty() && process.isRunning())
         return true;
 
     stop();
@@ -148,15 +158,22 @@ bool AgentHostProxy::ensureStarted()
         return false;
     }
 
-    int statusCode = 0;
-    const auto playtest = post ("/v1/playtests", juce::JSON::parse ("{\"retainTranscript\":false}"), statusCode);
-    playtestId = playtest.getProperty ("id", juce::var()).toString();
-    if (statusCode != 201 || playtestId.isEmpty())
-    {
-        stop();
-        return false;
-    }
     return true;
+}
+
+bool AgentHostProxy::ensurePlaytest()
+{
+    const auto requestedRetention = retainTranscript;
+    if (! ensureStarted()) return false;
+    retainTranscript = requestedRetention;
+    if (playtestId.isNotEmpty()) return true;
+    int statusCode = 0;
+    auto* request = new juce::DynamicObject();
+    request->setProperty ("retainTranscript", retainTranscript);
+    const auto playtest = post ("/v1/playtests", juce::var (request), statusCode);
+    playtestId = playtest.getProperty ("id", juce::var()).toString();
+    disclosureDelivered = false;
+    return statusCode == 201 && playtestId.isNotEmpty();
 }
 
 juce::var AgentHostProxy::post (const juce::String& path, const juce::var& body, int& statusCode) const
@@ -174,10 +191,136 @@ juce::var AgentHostProxy::post (const juce::String& path, const juce::var& body,
     return juce::JSON::parse (stream->readEntireStreamAsString());
 }
 
+juce::String AgentHostProxy::getEventStream (const juce::String& path, int& statusCode) const
+{
+    juce::StringArray headers;
+    headers.add ("Authorization: Bearer " + capability);
+    const auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+        .withConnectionTimeoutMs (kRequestTimeoutMs)
+        .withExtraHeaders (headers.joinIntoString ("\r\n"))
+        .withStatusCode (&statusCode);
+    const auto stream = juce::URL (origin + path).createInputStream (options);
+    if (stream == nullptr) return {};
+    return stream->readEntireStreamAsString();
+}
+
+juce::var AgentHostProxy::sessionResult (bool disclosureRequired) const
+{
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("active", playtestId.isNotEmpty());
+    result->setProperty ("retainTranscript", retainTranscript);
+    result->setProperty ("disclosureRequired", disclosureRequired);
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::startPlaytest (bool shouldRetain)
+{
+    const juce::ScopedLock guard (lock);
+    retainTranscript = shouldRetain;
+    if (! ensurePlaytest()) return error();
+    const auto disclosure = ! disclosureDelivered;
+    disclosureDelivered = true;
+    return sessionResult (disclosure);
+}
+
+juce::var AgentHostProxy::closePlaytest (bool shouldRetain)
+{
+    const juce::ScopedLock guard (lock);
+    retainTranscript = shouldRetain;
+    if (playtestId.isEmpty()) return sessionResult (false);
+    if (! ensureStarted()) return error();
+    auto* request = new juce::DynamicObject();
+    request->setProperty ("retainTranscript", shouldRetain);
+    int statusCode = 0;
+    const auto result = post ("/v1/playtests/" + playtestId + "/close", juce::var (request), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! result.isObject()) return error();
+    playtestId.clear();
+    disclosureDelivered = false;
+    return sessionResult (false);
+}
+
+juce::var AgentHostProxy::realtimeSecret()
+{
+    const juce::ScopedLock guard (lock);
+    if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto result = post ("/v1/realtime/client-secret", juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! result.isObject())
+        return error ("OpenAI Realtime unavailable",
+                      result.getProperty ("error", juce::var()).getProperty ("code", juce::var()).toString());
+    auto* response = new juce::DynamicObject();
+    response->setProperty ("ok", true);
+    response->setProperty ("value", result.getProperty ("value", juce::var()));
+    response->setProperty ("expiresAt", result.getProperty ("expires_at", juce::var()));
+    return juce::var (response);
+}
+
+juce::var AgentHostProxy::createReport (const juce::var& request)
+{
+    const juce::ScopedLock guard (lock);
+    if (! request.isObject() || ! ensurePlaytest()) return error();
+    auto body = juce::JSON::parse (juce::JSON::toString (request));
+    body.getDynamicObject()->setProperty ("playtestId", playtestId);
+    int statusCode = 0;
+    const auto report = post ("/v1/reports", body, statusCode);
+    if (statusCode != 201 || ! report.isObject()) return error ("report persistence failed");
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", report.getProperty ("id", juce::var()));
+    result->setProperty ("kind", report.getProperty ("kind", juce::var()));
+    result->setProperty ("title", report.getProperty ("title", juce::var()));
+    result->setProperty ("body", report.getProperty ("body", juce::var()));
+    result->setProperty ("status", report.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::approveReport (const juce::String& reportId)
+{
+    const juce::ScopedLock guard (lock);
+    if (reportId.isEmpty() || ! ensureStarted()) return error();
+    int statusCode = 0;
+    const auto report = post ("/v1/reports/" + reportId + "/approve",
+                              juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! report.isObject())
+        return error ("report approval failed");
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", report.getProperty ("id", juce::var()));
+    result->setProperty ("status", report.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::events (int afterSequence)
+{
+    const juce::ScopedLock guard (lock);
+    if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto stream = getEventStream ("/v1/playtests/" + playtestId
+        + "/events?afterSequence=" + juce::String (juce::jmax (0, afterSequence))
+        + "&windowMs=150", statusCode);
+    if (statusCode < 200 || statusCode >= 300)
+        return error ("event delivery unavailable");
+    juce::Array<juce::var> events;
+    for (const auto& line : juce::StringArray::fromLines (stream))
+    {
+        if (! line.startsWith ("data:")) continue;
+        const auto event = juce::JSON::parse (line.substring (5).trim());
+        if (event.isObject()
+            && (int) event.getProperty ("sequence", 0) > afterSequence
+            && events.size() < 100)
+            events.add (event);
+    }
+    auto* response = new juce::DynamicObject();
+    response->setProperty ("ok", true);
+    response->setProperty ("events", juce::var (events));
+    return juce::var (response);
+}
+
 juce::var AgentHostProxy::supervisorTurn (const juce::var& request)
 {
     const juce::ScopedLock guard (lock);
-    if (! request.isObject() || ! ensureStarted()) return error();
+    if (! request.isObject() || ! ensurePlaytest()) return error();
 
     // Round-trip through JSON before appending the private playtest id so this
     // never mutates the WebView's request object.

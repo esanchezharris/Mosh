@@ -7074,6 +7074,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             juce::var hostResult;
             {
                 AgentHostProxy host;
+                const auto started = host.startPlaytest (false);
+                check ((bool) started.getProperty ("active", false)
+                           && (bool) started.getProperty ("disclosureRequired", false),
+                       "agent host: explicit playtest start returns the once-per-session disclosure");
+                const auto startedAgain = host.startPlaytest (false);
+                check (! (bool) startedAgain.getProperty ("disclosureRequired", true),
+                       "agent host: repeated start does not repeat the hosted-trace disclosure");
+                const auto browserEnvelope = JSON::toString (started);
+                check (! browserEnvelope.containsIgnoreCase ("capability")
+                           && ! browserEnvelope.contains ("127.0.0.1")
+                           && ! browserEnvelope.containsIgnoreCase ("bearer"),
+                       "agent host: browser session envelope contains no loopback credential");
+                const auto delivered = host.events (0);
+                check ((bool) delivered.getProperty ("ok", false)
+                           && delivered.getProperty ("events", var()).isArray(),
+                       "agent host: authenticated event replay is delivered through the native proxy");
+                const auto closed = host.closePlaytest (true);
+                check (! (bool) closed.getProperty ("active", true)
+                           && (bool) closed.getProperty ("retainTranscript", false),
+                       "agent host: explicit close honors transcript retention");
                 hostResult = host.supervisorTurn (var (hostRequest));
             }
             check (! (bool) hostResult.getProperty ("ok", false)

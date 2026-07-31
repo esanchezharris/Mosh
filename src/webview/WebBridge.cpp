@@ -13,6 +13,7 @@
 #include "../telemetry/CrashReportFormatter.h"
 #include "../telemetry/Telemetry.h"
 #include "../telemetry/TelemetryConfig.h"
+#include <juce_cryptography/juce_cryptography.h>
 
 namespace mosh
 {
@@ -81,6 +82,11 @@ namespace
         std::memcpy (out.data(), utf8, len);
         return out;
     }
+
+    juce::String sha256 (const juce::String& value)
+    {
+        return juce::SHA256 (value.toRawUTF8(), (size_t) value.getNumBytesAsUTF8()).toHexString();
+    }
 } // namespace
 
 Resource WebBridge::serveUiResource (const juce::String& url)
@@ -131,6 +137,68 @@ bool WebBridge::isSafeUiResourcePath (const juce::File& uiDir, const juce::Strin
     return ui_resource_guard::isSafePath (uiDir, url);
 }
 
+juce::var WebBridge::reportRequestWithEvidence (const juce::var& request)
+{
+    if (! request.isObject() || webView == nullptr) return {};
+    auto* topLevel = webView->getTopLevelComponent();
+    if (topLevel == nullptr || topLevel->getWidth() <= 0 || topLevel->getHeight() <= 0) return {};
+    const auto scale = juce::jmin (1.0f,
+        juce::jmin (1920.0f / (float) topLevel->getWidth(),
+                    1200.0f / (float) topLevel->getHeight()));
+    const auto image = topLevel->createComponentSnapshot (topLevel->getLocalBounds(), true, scale);
+    if (! image.isValid()) return {};
+
+    auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("Mosh/playtests/screenshots");
+    if (! directory.createDirectory()) return {};
+    const auto file = directory.getChildFile (juce::Uuid().toString() + ".png");
+    {
+        juce::FileOutputStream output (file);
+        if (! output.openedOk() || ! juce::PNGImageFormat().writeImageToStream (image, output))
+            return {};
+        output.flush();
+    }
+    if (file.getSize() <= 0 || file.getSize() > 8 * 1024 * 1024)
+    {
+        file.deleteFile();
+        return {};
+    }
+
+    juce::MemoryBlock bytes;
+    if (! file.loadFileAsData (bytes))
+    {
+        file.deleteFile();
+        return {};
+    }
+    const auto snapshot = snapshotProvider ? snapshotProvider() : juce::var();
+    const auto snapshotJson = juce::JSON::toString (snapshot, true);
+    const auto session = snapshot.getProperty ("session", juce::var());
+    const auto transport = snapshot.getProperty ("transport", juce::var());
+
+    auto* metadata = new juce::DynamicObject();
+    metadata->setProperty ("buildSha", MOSH_BUILD_SHA);
+    metadata->setProperty ("dirtyDigest", MOSH_DIRTY_DIGEST);
+    metadata->setProperty ("projectReference",
+        juce::File (session.getProperty ("projectFile", juce::var()).toString()).getFileName());
+    metadata->setProperty ("timelinePosition", transport.getProperty ("position", 0.0));
+    metadata->setProperty ("snapshotDigest", sha256 (snapshotJson));
+    metadata->setProperty ("recentResults", juce::var (recentCommandResults));
+    metadata->setProperty ("width", image.getWidth());
+    metadata->setProperty ("height", image.getHeight());
+
+    auto* evidence = new juce::DynamicObject();
+    evidence->setProperty ("kind", "screenshot");
+    evidence->setProperty ("localPath", file.getFullPathName());
+    evidence->setProperty ("sha256", juce::SHA256 (bytes).toHexString());
+    evidence->setProperty ("metadata", juce::var (metadata));
+
+    auto body = juce::JSON::parse (juce::JSON::toString (request));
+    juce::Array<juce::var> evidenceList;
+    evidenceList.add (juce::var (evidence));
+    body.getDynamicObject()->setProperty ("evidence", juce::var (evidenceList));
+    return body;
+}
+
 juce::WebBrowserComponent::Options WebBridge::buildOptions()
 {
     return juce::WebBrowserComponent::Options{}
@@ -176,7 +244,20 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                         args[0].getProperty ("command", juce::var()).toString());
                     mosh::telemetry::Breadcrumbs::record (safeName);
                     mosh::telemetry::Telemetry::onCommand (safeName);
-                    completion (commandHandler (args[0]));
+                    const auto result = commandHandler (args[0]);
+                    auto* recent = new juce::DynamicObject();
+                    recent->setProperty ("command", safeName);
+                    recent->setProperty ("ok", result.getProperty ("ok", false));
+                    const auto code = result.getProperty ("code", juce::var()).toString();
+                    if (code.isNotEmpty()) recent->setProperty ("code", code.substring (0, 80));
+                    const auto status = result.getProperty ("status", juce::var()).toString();
+                    if (status.isNotEmpty()) recent->setProperty ("status", status.substring (0, 80));
+                    const auto data = result.getProperty ("data", juce::var());
+                    if (data.isObject() && data.hasProperty ("undoable"))
+                        recent->setProperty ("undoable", data.getProperty ("undoable", false));
+                    recentCommandResults.add (juce::var (recent));
+                    while (recentCommandResults.size() > 20) recentCommandResults.remove (0);
+                    completion (result);
                 }
                 else
                 {
@@ -247,6 +328,99 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                 juce::Thread::launch ([host, request, completion]() mutable
                 {
                     auto result = host->supervisorTurn (request);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_start_playtest"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const bool retain = args.size() > 0 && (bool) args[0].getProperty ("retainTranscript", false);
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, retain, completion]() mutable
+                {
+                    auto result = host->startPlaytest (retain);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_close_playtest"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const bool retain = args.size() > 0 && (bool) args[0].getProperty ("retainTranscript", false);
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, retain, completion]() mutable
+                {
+                    auto result = host->closePlaytest (retain);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_realtime_secret"),
+            [this] (const juce::Array<juce::var>&,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, completion]() mutable
+                {
+                    auto result = host->realtimeSecret();
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_create_report"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto request = reportRequestWithEvidence (args.size() > 0 ? args[0] : juce::var());
+                if (! request.isObject())
+                {
+                    auto* failure = new juce::DynamicObject();
+                    failure->setProperty ("ok", false);
+                    failure->setProperty ("code", "screenshot_failed");
+                    failure->setProperty ("error", "Could not capture the Mosh window.");
+                    completion (juce::var (failure));
+                    return;
+                }
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, request, completion]() mutable
+                {
+                    auto result = host->createReport (request);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_approve_report"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto reportId = args.size() > 0
+                    ? args[0].getProperty ("reportId", juce::var()).toString() : juce::String();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, reportId, completion]() mutable
+                {
+                    auto result = host->approveReport (reportId);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_events"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const int after = args.size() > 0 ? (int) args[0].getProperty ("afterSequence", 0) : 0;
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                auto host = agentHost;
+                juce::Thread::launch ([host, after, completion]() mutable
+                {
+                    auto result = host->events (after);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })

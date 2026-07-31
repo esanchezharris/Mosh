@@ -80,6 +80,7 @@ private:
     static bool isSafeUiResourcePath (const juce::File& uiDir, const juce::String& url);
 
     juce::WebBrowserComponent::Resource serveUiResource (const juce::String& url);
+    juce::var reportRequestWithEvidence (const juce::var& request);
 
     CommandHandler    commandHandler;
     SnapshotProvider  snapshotProvider;
@@ -90,6 +91,7 @@ private:
     ServiceRelay      archivePairHandler;
     juce::WebBrowserComponent* webView = nullptr;
     bool browserReadyForEvents = false;
+    juce::Array<juce::var> recentCommandResults;
 
     // Native speech-to-text (packaged-app voice). Created lazily on the first
     // voice_start; its transcripts are pushed to the UI as a `voice_event`.

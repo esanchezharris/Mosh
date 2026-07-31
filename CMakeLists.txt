@@ -118,6 +118,25 @@ endif()
 
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
+    find_package(Git QUIET)
+    set(MOSH_BUILD_SHA "unknown")
+    set(MOSH_DIRTY_DIGEST "clean")
+    if (GIT_FOUND)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE MOSH_BUILD_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" diff --binary HEAD
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE _mosh_dirty_diff ERROR_QUIET)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain --untracked-files=normal
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE _mosh_dirty_state ERROR_QUIET)
+        if (_mosh_dirty_diff OR _mosh_dirty_state)
+            string(SHA256 _mosh_diff_digest "${_mosh_dirty_diff}")
+            string(SHA256 _mosh_untracked_digest "${_mosh_dirty_state}")
+            string(SHA256 MOSH_DIRTY_DIGEST "${_mosh_diff_digest}:${_mosh_untracked_digest}")
+        endif()
+    endif()
     set(MOSH_APP_EXTRA_ARGS "")
     if (APPLE)
         list(APPEND MOSH_APP_EXTRA_ARGS
@@ -233,6 +252,8 @@ if (MOSH_BUILD_APP)
         TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
         MOSH_VERSION_STRING="${PROJECT_VERSION}"
+        MOSH_BUILD_SHA="${MOSH_BUILD_SHA}"
+        MOSH_DIRTY_DIGEST="${MOSH_DIRTY_DIGEST}"
         # RT-safety tripwire — Debug ONLY. Release leaves MOSH_RT_GUARD undefined so the
         # guard header collapses to inline no-ops and RealtimeAudioGuard.cpp compiles to
         # nothing (no global operator new override) → Release binary byte-unaffected.

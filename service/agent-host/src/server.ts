@@ -117,23 +117,35 @@ export async function startAgentHost(options: AgentHostServerOptions) {
       if (eventsMatch && request.method === "GET") {
         const playtestId = routeId.parse(eventsMatch[1]);
         await options.service.store.loadSession(playtestId);
+        const events = await options.service.store.loadEvents(playtestId);
+        const afterSequence = Math.max(0, Number(url.searchParams.get("afterSequence") ?? 0) || 0);
         response.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         });
         const lastId = request.headers["last-event-id"];
-        const events = await options.service.store.loadEvents(playtestId);
         const lastIndex = typeof lastId === "string" ? events.findIndex((event) => event.id === lastId) : -1;
-        for (const event of events.slice(lastIndex + 1)) {
+        const replay = lastIndex >= 0
+          ? events.slice(lastIndex + 1)
+          : events.filter((event) => event.sequence > afterSequence);
+        for (const event of replay) {
           response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         }
         const listener = (event: unknown) => {
-          const audit = event as { id: string; type: string };
+          const audit = event as { id: string; type: string; sequence: number };
+          if (audit.sequence <= afterSequence) return;
           response.write(`id: ${audit.id}\nevent: ${audit.type}\ndata: ${JSON.stringify(event)}\n\n`);
         };
         options.service.events.on(playtestId, listener);
         request.on("close", () => options.service.events.off(playtestId, listener));
+        const windowMs = Math.min(1_000, Math.max(0, Number(url.searchParams.get("windowMs") ?? 0) || 0));
+        if (windowMs > 0) {
+          setTimeout(() => {
+            options.service.events.off(playtestId, listener);
+            response.end();
+          }, windowMs);
+        }
         return;
       }
       sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });

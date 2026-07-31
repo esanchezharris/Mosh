@@ -116,12 +116,23 @@ export class AgentHostService {
     return this.serializeMutation(playtestId, async () => {
       await this.store.loadSession(playtestId);
       const at = new Date().toISOString();
+      const reportId = randomUUID();
+      const evidence = Array.isArray(object.evidence)
+        ? object.evidence.map((candidate) => ({
+            ...(candidate as Record<string, unknown>),
+            version: 1,
+            id: randomUUID(),
+            playtestId,
+            reportId,
+            createdAt: at,
+          }))
+        : [];
       const report = PlaytestReportSchema.parse({
         ...object,
         version: 1,
-        id: randomUUID(),
+        id: reportId,
         status: "draft",
-        evidence: object.evidence ?? [],
+        evidence,
         createdAt: at,
         updatedAt: at,
       });

@@ -159,6 +159,15 @@ export const SETTINGS: SettingDef[] = [
     help: "Moshi recalls preferences and patterns it's learned, plus this project's own notes, and folds a few relevant ones into its thinking each turn. Off = no recall.",
   },
   {
+    id: "ownerCockpit",
+    type: "bool",
+    default: false,
+    scope: "app",
+    category: "Moshi",
+    label: "Owner playtest cockpit",
+    help: "Owner-only playtest controls, local report approval, hosted text/tool tracing, and GPT Realtime push-to-talk.",
+  },
+  {
     id: "layout",
     type: "enum",
     default: "mosh",

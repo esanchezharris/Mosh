@@ -150,6 +150,29 @@ export async function agentHostSupervisorTurn(request: unknown): Promise<unknown
   return result.plan;
 }
 
+async function ownerHostNative(name: string, request: unknown = {}): Promise<unknown> {
+  if (!realNative()) return {
+    ok: false,
+    code: "host_unavailable",
+    error: "Owner playtest host is available in the packaged app.",
+    retryable: false,
+  };
+  return native(name)(request);
+}
+
+export const agentHostStartPlaytest = (retainTranscript: boolean): Promise<unknown> =>
+  ownerHostNative("agent_host_start_playtest", { retainTranscript });
+export const agentHostClosePlaytest = (retainTranscript: boolean): Promise<unknown> =>
+  ownerHostNative("agent_host_close_playtest", { retainTranscript });
+export const agentHostRealtimeSecret = (): Promise<unknown> =>
+  ownerHostNative("agent_host_realtime_secret");
+export const agentHostCreateReport = (report: unknown): Promise<unknown> =>
+  ownerHostNative("agent_host_create_report", report);
+export const agentHostApproveReport = (reportId: string): Promise<unknown> =>
+  ownerHostNative("agent_host_approve_report", { reportId });
+export const agentHostEvents = (afterSequence: number): Promise<unknown> =>
+  ownerHostNative("agent_host_events", { afterSequence });
+
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
 // through the app, never directly; same layering as brain_chat). In dev/mock there
 // is no service to escalate to: escalateCandidates throws (the hook degrades to the

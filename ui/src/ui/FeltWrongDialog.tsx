@@ -4,6 +4,8 @@ import { archivePair } from "../bridge";
 import { buildFeltWrongRow } from "../agent/feltWrong";
 import { getSessionLog } from "../agent/memory/sessionLog";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
+import { ownerCockpitRuntime } from "../agent/ownerCockpitRuntime";
+import { useSettings } from "../settings/store";
 
 // Taste loop (workshop 2026-07-19): the ⌘⇧F "felt wrong" capture. A two-word tag +
 // the command-diff since the last felt-right waterline + a snapshot, archived through
@@ -14,6 +16,7 @@ import { useEscapeToClose } from "../hooks/useEscapeToClose";
 export function FeltWrongDialog() {
   const open = useStore((s) => s.feltWrongOpen);
   const close = useStore((s) => s.setFeltWrongOpen);
+  const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
   const [tag, setTag] = useState("");
   useEscapeToClose(open, () => close(false));
   if (!open) return null;
@@ -24,6 +27,12 @@ export function FeltWrongDialog() {
     const snap = useStore.getState().snapshot;
     try {
       const row = buildFeltWrongRow(clean, getSessionLog(), snap);
+      if (ownerCockpitEnabled)
+        void ownerCockpitRuntime.createReport({
+          kind: "bug",
+          title: `Felt wrong: ${clean}`,
+          body: `Felt Wrong submission: ${clean}`,
+        }).catch(() => undefined);
       void archivePair(row).catch(() => { /* best-effort by contract */ });
     } catch { /* empty tag already guarded; never break the session */ }
     setTag("");

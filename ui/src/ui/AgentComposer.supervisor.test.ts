@@ -14,6 +14,7 @@ vi.mock("../agent/executor", () => ({ runAgentBatch: runAgentBatchMock, logAgent
 
 import { AgentComposer } from "./AgentComposer";
 import { useStore } from "../store";
+import { useSettings } from "../settings/store";
 
 const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
 
@@ -29,10 +30,15 @@ describe("AgentComposer supervisor entry point", () => {
     requestSupervisorMock.mockResolvedValue({ plan: { intent: "ACK_GOT_IT", say: "done" }, calls: [{ command: "create_track", args: { name: "Lead" } }], telemetry: { latencyMs: 1 } });
     runAgentBatchMock.mockResolvedValue({ entries: [{ ok: true }], applied: 1 });
     useStore.setState({ agentBusy: false, snapshot: null });
+    useSettings.getState().set("ownerCockpit", true);
     act(() => { root.render(React.createElement(AgentComposer)); });
   });
 
-  afterEach(() => { act(() => root.unmount()); host.remove(); });
+  afterEach(() => {
+    act(() => root.unmount());
+    useSettings.getState().set("ownerCockpit", false);
+    host.remove();
+  });
 
   it("routes a non-direct ask through the host before the validated executor", async () => {
     const input = host.querySelector<HTMLInputElement>("[data-testid='agent-input']")!;
