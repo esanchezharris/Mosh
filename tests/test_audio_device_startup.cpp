@@ -101,19 +101,29 @@ TEST_CASE ("the hardware probe is a separate killable process", "[audiostartup]"
 {
     const juce::File executable ("/Applications/Mosh Audit.app/Contents/MacOS/Mosh");
     const juce::String nonce ("0123456789abcdef0123456789abcdef");
+    juce::XmlElement setup ("DEVICESETUP");
+    setup.setAttribute ("deviceType", "CoreAudio");
+    setup.setAttribute ("audioOutputDeviceName", "MacBook Pro Speakers");
+    setup.setAttribute ("audioInputDeviceName", "BlackHole 2ch");
+    setup.setAttribute ("audioDeviceRate", 44100.0);
+    setup.setAttribute ("audioDeviceBufferSize", 1024);
+    setup.setAttribute ("audioDeviceInChans", "01");
+    setup.setAttribute ("audioDeviceOutChans", "10");
     const auto args = probeChildArguments (executable,
                                            nonce,
-                                           "MacBook Pro Speakers",
-                                           "BlackHole 2ch",
+                                           &setup,
+                                           512,
+                                           512,
                                            60000);
 
-    REQUIRE (args.size() == 6);
+    REQUIRE (args.size() == 7);
     CHECK (args[0] == executable.getFullPathName());
     CHECK (args[1] == "--audio-probe");
     CHECK (args[2] == nonce);
-    CHECK (args[3] == "MacBook Pro Speakers");
-    CHECK (args[4] == "BlackHole 2ch");
-    CHECK (args[5] == "60000");
+    CHECK (args[3].startsWith ("xml:"));
+    CHECK (args[4] == "512");
+    CHECK (args[5] == "512");
+    CHECK (args[6] == "60000");
 
     const auto output = "startup noise\n"
                         + probeResultLine (nonce, "device failed to start")
@@ -127,27 +137,50 @@ TEST_CASE ("the hardware probe is a separate killable process", "[audiostartup]"
     const auto request = parseProbeRequest (childArgs);
     REQUIRE (request.valid);
     CHECK (request.nonce == nonce);
-    CHECK (request.output == "MacBook Pro Speakers");
-    CHECK (request.input == "BlackHole 2ch");
+    CHECK_FALSE (request.useDefaultSetup);
+    CHECK (request.numInputChannels == 512);
+    CHECK (request.numOutputChannels == 512);
     CHECK (request.stallMs == 60000);
+    const auto parsedSetup = juce::XmlDocument::parse (request.setupXml);
+    REQUIRE (parsedSetup != nullptr);
+    CHECK (parsedSetup->getStringAttribute ("audioOutputDeviceName")
+           == "MacBook Pro Speakers");
+    CHECK (parsedSetup->getStringAttribute ("audioInputDeviceName")
+           == "BlackHole 2ch");
+    CHECK (parsedSetup->getDoubleAttribute ("audioDeviceRate") == 44100.0);
+    CHECK (parsedSetup->getIntAttribute ("audioDeviceBufferSize") == 1024);
+    CHECK (parsedSetup->getStringAttribute ("audioDeviceInChans") == "01");
+    CHECK (parsedSetup->getStringAttribute ("audioDeviceOutChans") == "10");
 }
 
 TEST_CASE ("probe framing cannot be shifted or spoofed by device output", "[audiostartup]")
 {
     const juce::File executable ("/Applications/Mosh.app/Contents/MacOS/Mosh");
     const juce::String nonce ("abcdef0123456789abcdef0123456789");
-    const auto args = probeChildArguments (executable, nonce,
-                                           "--audio-probe-input",
-                                           "--audio-probe-stall-ms", 250);
+    juce::XmlElement setup ("DEVICESETUP");
+    setup.setAttribute ("audioOutputDeviceName", "--audio-probe-input");
+    setup.setAttribute ("audioInputDeviceName", "--audio-probe-stall-ms");
+    const auto args = probeChildArguments (executable, nonce, &setup, 2, 2, 250);
     auto childArgs = args;
     childArgs.remove (0);
     const auto request = parseProbeRequest (childArgs);
     REQUIRE (request.valid);
-    CHECK (request.output == "--audio-probe-input");
-    CHECK (request.input == "--audio-probe-stall-ms");
+    const auto parsedSetup = juce::XmlDocument::parse (request.setupXml);
+    REQUIRE (parsedSetup != nullptr);
+    CHECK (parsedSetup->getStringAttribute ("audioOutputDeviceName")
+           == "--audio-probe-input");
+    CHECK (parsedSetup->getStringAttribute ("audioInputDeviceName")
+           == "--audio-probe-stall-ms");
+    auto invalidSetupArgs = childArgs;
+    invalidSetupArgs.set (2, "xml:not-base64");
+    CHECK_FALSE (parseProbeRequest (invalidSetupArgs).valid);
+    auto excessiveChannelsArgs = childArgs;
+    excessiveChannelsArgs.set (3, "513");
+    CHECK_FALSE (parseProbeRequest (excessiveChannelsArgs).valid);
 
     const auto spoof = juce::String (kProbeResultPrefix)
                      + "00000000000000000000000000000000 \"\"\n";
+    CHECK_FALSE (parseProbeResponse (spoof, nonce).valid);
     CHECK_FALSE (parseProbeResponse (spoof + probeResultLine (nonce, "real"), nonce)
                      .error.isEmpty());
     CHECK_FALSE (parseProbeResponse (
@@ -162,14 +195,49 @@ TEST_CASE ("probe framing cannot be shifted or spoofed by device output", "[audi
     CHECK (multiline.error == "first line\nsecond line");
 }
 
+TEST_CASE ("default and one-sided device setups survive strict probe framing",
+           "[audiostartup]")
+{
+    const juce::File executable ("/Applications/Mosh.app/Contents/MacOS/Mosh");
+    const juce::String nonce ("fedcba9876543210fedcba9876543210");
+
+    SECTION ("system default")
+    {
+        auto args = probeChildArguments (executable, nonce, nullptr, 2, 2, 0);
+        REQUIRE (args.size() == 7);
+        CHECK (args[3] == "default");
+        CHECK_FALSE (args.contains (juce::String(), false));
+        args.remove (0);
+        const auto request = parseProbeRequest (args);
+        REQUIRE (request.valid);
+        CHECK (request.useDefaultSetup);
+        CHECK (request.setupXml.isEmpty());
+    }
+
+    for (const auto inputOnly : { false, true })
+    {
+        juce::XmlElement setup ("DEVICESETUP");
+        setup.setAttribute (inputOnly ? "audioInputDeviceName"
+                                      : "audioOutputDeviceName",
+                            inputOnly ? "BlackHole 2ch"
+                                      : "MacBook Pro Speakers");
+        auto args = probeChildArguments (executable, nonce, &setup, 2, 2, 0);
+        REQUIRE (args.size() == 7);
+        CHECK_FALSE (args.contains (juce::String(), false));
+        args.remove (0);
+        const auto request = parseProbeRequest (args);
+        REQUIRE (request.valid);
+        const auto decoded = juce::XmlDocument::parse (request.setupXml);
+        REQUIRE (decoded != nullptr);
+        CHECK (decoded->getStringAttribute ("audioOutputDeviceName")
+               == (inputOnly ? "" : "MacBook Pro Speakers"));
+        CHECK (decoded->getStringAttribute ("audioInputDeviceName")
+               == (inputOnly ? "BlackHole 2ch" : ""));
+    }
+}
+
 TEST_CASE ("a timed-out process is killed before the caller resumes", "[audiostartup]")
 {
     const auto result = runProbeProcess ({ "/bin/sleep", "10" }, 50);
     CHECK (result.status == ProbeProcessStatus::timedOut);
-}
-
-TEST_CASE ("degraded audio never re-enters hardware enumeration", "[audiostartup]")
-{
-    CHECK (shouldEnumerateDeviceTypes (true));
-    CHECK_FALSE (shouldEnumerateDeviceTypes (false));
 }

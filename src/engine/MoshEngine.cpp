@@ -63,121 +63,50 @@ namespace
         }
     };
 
-    /** AUD-017 — a probe of the audio hardware, run only in a child process.
+    /** AUD-017 — the exact JUCE audio setup, opened only in a child process.
 
-        It opens and starts a throwaway device via the platform AudioIODeviceType
-        directly — NOT juce::AudioDeviceManager. That matters twice over:
+        Tracktion's DeviceManager::loadSettings delegates its audio open to these same
+        AudioDeviceManager entry points. Passing the complete saved XML preserves the
+        device type, names, sample rate, buffer, and channel masks; passing null takes
+        the same default-device path. AudioDeviceManager also starts the IO proc, which
+        reaches the AudioDeviceStart frame that wedged in the original failure.
 
-          - ADM::initialise() also opens MIDI (openLastRequestedMidiDevices →
-            MidiInput::getAvailableDevices), which touches a process-wide singleton
-            guarded by JUCE_ASSERT_MESSAGE_THREAD.
-          - If CoreAudio never returns, the parent terminates this entire process. No
-            blocked HAL call or half-initialised device survives in the UI process.
-
-        `start()` is deliberately included: the AUD-017 stack wedged inside
-        AudioDeviceCreateIOProcID / _TellServerAboutStreamUsage, which is reached from
-        start(), not open(). A probe that only opened would have missed it. */
+        If CoreAudio never returns, the parent terminates this entire process. No
+        blocked HAL call or half-initialised device survives in the UI process. */
     struct BoundedDeviceOpen
     {
-        std::unique_ptr<juce::AudioIODeviceType> type;
-        juce::String wantedOutput, wantedInput;   // from the saved setup; empty == default
-        int stallMs = 0;                          // test hook — force the timeout path
-        juce::String error;                       // empty == the HAL answered and played
-
-        // Writes silence. The probe must actually run the IO proc to prove the device
-        // is alive, and a real DAW's first sound must not be a burst of garbage.
-        struct SilentCallback final : juce::AudioIODeviceCallback
-        {
-            void audioDeviceIOCallbackWithContext (const float* const*, int,
-                                                   float* const* out, int numOut, int numSamples,
-                                                   const juce::AudioIODeviceCallbackContext&) override
-            {
-                for (int c = 0; c < numOut; ++c)
-                    if (out[c] != nullptr)
-                        juce::FloatVectorOperations::clear (out[c], numSamples);
-            }
-            void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
-            void audioDeviceStopped() override {}
-        };
+        std::unique_ptr<juce::XmlElement> setupXml;
+        int numInputChannels = 0;
+        int numOutputChannels = 0;
+        int stallMs = 0;
+        juce::String error;
 
         void run()
         {
-            // MOSH_AUDIO_OPEN_STALL_MS makes the worker sleep before opening, so the
+            // The test hook sleeps before touching hardware, so the request/argv and
             // timeout branch is reachable on healthy hardware. Without it the failure
             // path could only be "verified" by wedging a real HAL — i.e. not verified.
             if (stallMs > 0)
                 juce::Thread::sleep (stallMs);
 
-            if (type == nullptr)
-                return;
-
-            type->scanForDevices();
-
-            auto pick = [this] (bool input, const juce::String& wanted)
-            {
-                auto names = type->getDeviceNames (input);
-                if (wanted.isNotEmpty() && names.contains (wanted))
-                    return wanted;
-                const int idx = type->getDefaultDeviceIndex (input);
-                return juce::isPositiveAndBelow (idx, names.size()) ? names[idx] : juce::String();
-            };
-
-            const auto outName = pick (false, wantedOutput);
-            // Only probe an input when one is actually configured. The AUD-017 wedge was
-            // an input/output PAIRING (AudioIODeviceCombiner), so when there IS one it
-            // must be part of the probe or the probe proves the wrong thing.
-            const auto inName = wantedInput.isNotEmpty() ? pick (true, wantedInput) : juce::String();
-
-            std::unique_ptr<juce::AudioIODevice> dev (type->createDevice (outName, inName));
-            if (dev == nullptr)
-            {
-                error = "no audio device available";
-                return;
-            }
-
-            juce::BigInteger inChans, outChans;
-            outChans.setRange (0, juce::jmin (2, dev->getOutputChannelNames().size()), true);
-            if (inName.isNotEmpty())
-                inChans.setRange (0, juce::jmin (2, dev->getInputChannelNames().size()), true);
-
-            auto rates = dev->getAvailableSampleRates();
-            const double rate = rates.contains (48000.0) ? 48000.0
-                              : (! rates.isEmpty() ? rates[0] : 44100.0);
-
-            error = dev->open (inChans, outChans, rate, dev->getDefaultBufferSize());
-            if (error.isEmpty())
-            {
-                SilentCallback cb;
-                dev->start (&cb);   // the frame AUD-017 wedged in
-                dev->stop();        // both complete before cb leaves scope
-            }
-            dev->close();
+            juce::AudioDeviceManager manager;
+            error = setupXml != nullptr
+                        ? manager.initialise (numInputChannels, numOutputChannels,
+                                              setupXml.get(), true)
+                        : manager.initialiseWithDefaultDevices (numInputChannels,
+                                                                numOutputChannels);
+            manager.closeAudioDevice();
         }
     };
-
-    /** The platform's default audio device type, or null where we have no probe. A null
-        type means the open runs UNBOUNDED, exactly as it always did — a missing probe
-        must never mean "no audio". */
-    std::unique_ptr<juce::AudioIODeviceType> makeProbeDeviceType()
-    {
-       #if JUCE_MAC
-        return std::unique_ptr<juce::AudioIODeviceType> (
-            juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
-       #elif JUCE_WINDOWS
-        return std::unique_ptr<juce::AudioIODeviceType> (
-            juce::AudioIODeviceType::createAudioIODeviceType_WASAPI (juce::WASAPIDeviceMode::shared));
-       #else
-        return {};
-       #endif
-    }
 }
 
 juce::String audiostartup::runProbeChild (const ProbeRequest& request)
 {
     BoundedDeviceOpen job;
-    job.type = makeProbeDeviceType();
-    job.wantedOutput = request.output;
-    job.wantedInput = request.input;
+    if (! request.useDefaultSetup)
+        job.setupXml = juce::XmlDocument::parse (request.setupXml);
+    job.numInputChannels = request.numInputChannels;
+    job.numOutputChannels = request.numOutputChannels;
     job.stallMs = request.stallMs;
     job.run();
     return job.error;
@@ -404,8 +333,9 @@ juce::String MoshEngine::openAudioDeviceBounded()
     const auto probeArguments = audiostartup::probeChildArguments (
         juce::File::getSpecialLocation (juce::File::currentExecutableFile),
         nonce,
-        audiostartup::outputNameFromSetup (setupXml.get()),
-        audiostartup::inputNameFromSetup (setupXml.get()),
+        setupXml.get(),
+        numIn,
+        numOut,
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
             .trim().getIntValue());
 

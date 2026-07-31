@@ -143,7 +143,7 @@ tree. It did not inspect source, logs, or hidden commands.
 | A09 | Undo/redo | Edit menu | Inspect entries | Undo/redo are reachable | Entries exposed; behavior not yet exercised | `more-tools.png` | MAJOR | pending journey | — | PARTIAL |
 | A10 | Shift-drag range | Detailed ruler | Shift-held drag | Range appears; no transport scrub | Black-box tool could not hold a modifier; informed native pass below succeeds | `shift-drag-attempt.png` | NOTE | — | — | PASS informed |
 | A11 | Audio track selection | MIDI clip selected; audio track present | Select audio track header | Track selection and inspector target are unambiguous | Audio track showed selected while MIDI clip inspector remained visible | `audio-selection-mismatch.png` | MAJOR | [#518](https://github.com/zeke431/Mosh/issues/518) | — | FAIL |
-| A12 | Degraded-audio Settings recovery | Exact merged Release; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` timed out, then Settings blocked in CoreAudio enumeration while the process stayed alive | `merged-379bd6a1/audio-device-failure-before-settings.jpg`, `merged-379bd6a1/showcase-settings-hang.sample.txt` | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | pending | FAIL baseline; candidate PASS |
+| A12 | Degraded-audio Settings recovery | Exact merged Release; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` timed out, then Settings blocked in CoreAudio enumeration while the process stayed alive | `merged-379bd6a1/audio-device-failure-before-settings.jpg`, `merged-379bd6a1/showcase-settings-hang.sample.txt` | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | pending | FAIL baseline; successor native retest blocked |
 
 Correction to the source-free report: direct comparison of
 `before-ruler-drag.png` and `after-ruler-drag.png` shows that the MIDI clip
@@ -158,7 +158,7 @@ not a finding.
 | Audio-track selection leaves the MIDI clip inspector visible | MAJOR | Canonical clip selection now clears before the multiplayer-aware track transition; merged at `f3e68992` | [#518](https://github.com/zeke431/Mosh/issues/518) | [#520](https://github.com/zeke431/Mosh/pull/520) | PASS on exact merged Release |
 | Packaged Moshi substitutes demo commands after a brain-provider failure | MAJOR | Both single-shot and agentic-loop callers now fail visibly without commands; browser mocks use an explicit `e2e` mode and isolated `dist-e2e`, legacy/ambient development builds abort, and a real native WebView disables demo brains. The complete exact-head evidence successor merged at `6c3687db`. | [#521](https://github.com/zeke431/Mosh/issues/521) | [#522](https://github.com/zeke431/Mosh/pull/522) | PASS on exact merged Release |
 | Agentic terminal task drawer is exposed to accessibility before its pixels become visible | MAJOR | The entrance animation started at `opacity: 0`; the fix keeps the drawer opaque from mount while retaining its 6 px motion. The complete exact-head evidence successor merged at `379bd6a1`. | [#525](https://github.com/zeke431/Mosh/issues/525) | [#526](https://github.com/zeke431/Mosh/pull/526) | PASS on exact merged Release |
-| Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 runs the exact hardware preflight in a killable child, authenticates its result with a per-launch nonce, performs one matching Tracktion initialization only after success, and suppresses degraded enumeration. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | Previous exact candidate proved both timeout paths; successor exact-SHA gate and Retry capture pending |
+| Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 moves the setup preflight into a killable child and suppresses degraded enumeration. Candidate `a20c5651` passed command-level recovery but was rejected for lossy empty argv fields, a non-identical rate/buffer/channel preflight, Linux no-app CMake breakage, and missing exact-head native pixels. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | FAIL; repaired successor and native permission handoff pending |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
@@ -170,16 +170,21 @@ merge SHA `379bd6a1f6a653317bce98115f2fb686ad7444b0`. Its first broader-showcase
 launch exposed blocker #527: the five-second startup timeout returned, but
 opening Settings then blocked the UI in a second CoreAudio device scan.
 
-Issue #527 is the active serial fix in PR #528. Exact-SHA review of its first
-candidate rejected implementation-mirroring coverage, ambiguous child
-arguments, unauthenticated output framing, and duplicate parent-side device
-opens. The successor adds a real executable timeout-to-degraded-command smoke,
-strict positional arguments, nonce-bound JSON framing, verified child
-termination, and one exact setup shared by preflight and Tracktion. It is not
-mergeable until the successor has a clean native gate, both native timeout
-paths including visible Retry, all five exact-SHA review lanes, and terminal
-hosted checks. Overlapping PRs #471 and #478 must rebase after #528 and replace
-their SHA-bound evidence.
+Issue #527 is the active serial fix in PR #528. Candidate `a20c5651` added a
+real executable timeout-to-degraded-command smoke, nonce-bound JSON framing,
+verified child termination, and one parent-side Tracktion initialization. Its
+five-lane review still failed: JUCE drops empty argv fields, the child did not
+consume saved sample rate/buffer/channel settings, Linux no-app configuration
+referenced the absent Mosh target, and a fresh exact app identity stopped at
+macOS permission prompts before visible Settings/Retry evidence. The working
+successor encodes the complete saved setup in a non-empty field, opens it
+through the same JUCE AudioDeviceManager path Tracktion uses, covers default
+and one-sided argv transport, and guards the app-only CTest. It is not
+mergeable until a new exact SHA has a clean native gate, visible Settings and
+Retry proof after owner permission handoff, all five exact-SHA review lanes,
+terminal hosted checks, and a resolved ordering against draft PR #523.
+Overlapping PRs #471 and #478 must rebase after #528 and replace their
+SHA-bound evidence; PR #473 also overlaps `tests/CMakeLists.txt`.
 
 The showcase, configured-backend pass, same-Mac collaboration run, export
 matrix, stem validation, and final merged-SHA inventory rerun remain open.
@@ -209,19 +214,23 @@ probe refusal degrades instead of attempting a different fallback device. In
 degraded mode the real `list_audio_devices` command returns an empty inventory
 without entering the HAL. Retry reuses the same boundary.
 
-The first immutable candidate `6a0e5afc` and its gate remain archived as
-rejected evidence. They proved the real Speakers + BlackHole timeout could
-open Settings, but did not visibly exercise Retry on that exact SHA.
+The immutable candidates `6a0e5afc`, `0254ab10`, and `a20c5651` and their
+gates remain archived as predecessor evidence. `6a0e5afc` proved the real
+Speakers + BlackHole timeout could open Settings but did not visibly exercise
+Retry. `a20c5651` proved the real degraded list → Retry → list command sequence
+but failed four review lanes for the gaps above.
 
-The successor focused battery is 47 assertions across seven cases. CTest also
+The repaired focused battery is 76 assertions across seven cases. CTest also
 launches the real Release executable with a 60-second child stall and a 250 ms
-parent bound, then calls the real degraded `list_audio_devices`,
-`retry_audio_device`, and `list_audio_devices` sequence. The smoke passes only
-when both list calls return within one second with `audioEnabled:false` and zero
-device types, while Retry returns its second bounded timeout within two seconds.
-The successor exact SHA, gate hash, native Settings/Retry evidence, and five
-review verdicts will be stored outside the repository and bound through PR
-#528's head and immutable evidence manifest only after the commit is frozen.
+parent bound. Before the command journey it round-trips system-default,
+output-only, and input-only setups through a real child argv boundary without
+touching hardware. It then calls `list_audio_devices`,
+`retry_audio_device`, and `list_audio_devices`. The smoke passes only when all
+three argv probes reach the injected stall, both list calls return within one
+second with `audioEnabled:false` and zero device types, and Retry returns its
+second bounded timeout within two seconds. The successor exact SHA, gate hash,
+native Settings/Retry evidence, and five review verdicts will be stored outside
+the repository and bound through PR #528 only after the commit is frozen.
 
 ## Timeline scrub fix evidence
 

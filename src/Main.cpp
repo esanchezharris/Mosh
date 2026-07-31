@@ -203,6 +203,31 @@ public:
 
         if (audioRecoverySmoke)
         {
+            auto probeTransportSurvivesArgv = [] (const juce::XmlElement* setup)
+            {
+                const auto result = audiostartup::runProbeProcess (
+                    audiostartup::probeChildArguments (
+                        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+                        juce::Uuid().toString(),
+                        setup,
+                        2,
+                        2,
+                        60000),
+                    audiostartup::kMinTimeoutMs);
+                return result.status == audiostartup::ProbeProcessStatus::timedOut;
+            };
+
+            juce::XmlElement outputOnlySetup ("DEVICESETUP");
+            outputOnlySetup.setAttribute ("audioOutputDeviceName",
+                                          "MacBook Pro Speakers");
+            juce::XmlElement inputOnlySetup ("DEVICESETUP");
+            inputOnlySetup.setAttribute ("audioInputDeviceName", "BlackHole 2ch");
+            const bool defaultArgvRoundTrip = probeTransportSurvivesArgv (nullptr);
+            const bool outputOnlyArgvRoundTrip =
+                probeTransportSurvivesArgv (&outputOnlySetup);
+            const bool inputOnlyArgvRoundTrip =
+                probeTransportSurvivesArgv (&inputOnlySetup);
+
             auto execute = [this] (const juce::String& name)
             {
                 auto* command = new juce::DynamicObject();
@@ -231,6 +256,9 @@ public:
             const auto retryError = retry.getProperty ("error", juce::var()).toString();
 
             const bool pass = (bool) firstList.getProperty ("ok", false)
+                           && defaultArgvRoundTrip
+                           && outputOnlyArgvRoundTrip
+                           && inputOnlyArgvRoundTrip
                            && ! (bool) firstData.getProperty ("audioEnabled", true)
                            && firstTypes.isArray() && firstTypes.getArray()->isEmpty()
                            && firstListElapsedMs < 1000.0
@@ -246,6 +274,9 @@ public:
 
             auto* evidence = new juce::DynamicObject();
             evidence->setProperty ("pass", pass);
+            evidence->setProperty ("defaultArgvRoundTrip", defaultArgvRoundTrip);
+            evidence->setProperty ("outputOnlyArgvRoundTrip", outputOnlyArgvRoundTrip);
+            evidence->setProperty ("inputOnlyArgvRoundTrip", inputOnlyArgvRoundTrip);
             evidence->setProperty ("audioEnabled",
                                    secondData.getProperty ("audioEnabled", true));
             evidence->setProperty ("deviceTypeCount",

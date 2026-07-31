@@ -95,8 +95,10 @@ namespace mosh::audiostartup
     {
         bool valid = false;
         juce::String nonce;
-        juce::String output;
-        juce::String input;
+        bool useDefaultSetup = true;
+        juce::String setupXml;
+        int numInputChannels = 0;
+        int numOutputChannels = 0;
         int stallMs = 0;
     };
 
@@ -107,13 +109,24 @@ namespace mosh::audiostartup
             && nonce.containsOnly ("0123456789abcdefABCDEF-");
     }
 
+    inline juce::String probeSetupArgument (const juce::XmlElement* setupXml)
+    {
+        return setupXml == nullptr
+                   ? "default"
+                   : "xml:" + juce::Base64::toBase64 (setupXml->toString());
+    }
+
     inline juce::StringArray probeChildArguments (const juce::File& executable,
                                                   const juce::String& nonce,
-                                                  const juce::String& output,
-                                                  const juce::String& input,
+                                                  const juce::XmlElement* setupXml,
+                                                  int numInputChannels,
+                                                  int numOutputChannels,
                                                   int stallMs)
     {
-        return { executable.getFullPathName(), "--audio-probe", nonce, output, input,
+        return { executable.getFullPathName(), "--audio-probe", nonce,
+                 probeSetupArgument (setupXml),
+                 juce::String (numInputChannels),
+                 juce::String (numOutputChannels),
                  juce::String (stallMs) };
     }
 
@@ -121,20 +134,67 @@ namespace mosh::audiostartup
     {
         ProbeRequest request;
         const auto marker = args.indexOf ("--audio-probe");
-        if (marker < 0 || args.size() != marker + 5)
+        if (marker != 0 || args.size() != 6)
             return request;
 
-        const auto stall = args[marker + 4];
-        if (! isValidProbeNonce (args[marker + 1])
-            || stall.isEmpty()
-            || ! stall.containsOnly ("0123456789")
-            || stall.length() > 8)
+        const auto setup = args[2];
+        const auto numIn = args[3];
+        const auto numOut = args[4];
+        const auto stall = args[5];
+        const auto isBoundedInteger = [] (const juce::String& value, int maxValue)
+        {
+            return value.isNotEmpty()
+                && value.length() <= 8
+                && value.containsOnly ("0123456789")
+                && value.getLargeIntValue() <= maxValue;
+        };
+        const auto isChannelCount = [&isBoundedInteger] (const juce::String& value)
+        {
+            return value == "-1" || isBoundedInteger (value, 512);
+        };
+
+        if (! isValidProbeNonce (args[1])
+            || ! isChannelCount (numIn)
+            || ! isChannelCount (numOut)
+            || ! isBoundedInteger (stall, kMaxTimeoutMs))
             return request;
+
+        if (setup == "default")
+        {
+            request.useDefaultSetup = true;
+        }
+        else if (setup.startsWith ("xml:") && setup.length() <= 262144)
+        {
+            const auto encodedXml = setup.substring (4);
+            juce::MemoryOutputStream decoded;
+            if (! juce::Base64::convertFromBase64 (decoded, encodedXml)
+                || decoded.getDataSize() == 0
+                || decoded.getDataSize() > 131072
+                || juce::Base64::toBase64 (decoded.getData(), decoded.getDataSize())
+                       != encodedXml)
+                return request;
+
+            const auto xmlText = juce::String::fromUTF8 (
+                static_cast<const char*> (decoded.getData()),
+                static_cast<int> (decoded.getDataSize()));
+            const auto xml = juce::XmlDocument::parse (xmlText);
+            if (xmlText.getNumBytesAsUTF8() != decoded.getDataSize()
+                || xml == nullptr
+                || ! xml->hasTagName ("DEVICESETUP"))
+                return request;
+
+            request.useDefaultSetup = false;
+            request.setupXml = xmlText;
+        }
+        else
+        {
+            return request;
+        }
 
         request.valid = true;
-        request.nonce = args[marker + 1];
-        request.output = args[marker + 2];
-        request.input = args[marker + 3];
+        request.nonce = args[1];
+        request.numInputChannels = numIn.getIntValue();
+        request.numOutputChannels = numOut.getIntValue();
         request.stallMs = juce::jlimit (0, kMaxTimeoutMs, stall.getIntValue());
         return request;
     }
@@ -219,11 +279,6 @@ namespace mosh::audiostartup
                             ? ProbeProcessStatus::timedOut
                             : ProbeProcessStatus::failedToTerminate;
         return result;
-    }
-
-    inline bool shouldEnumerateDeviceTypes (bool audioOpen)
-    {
-        return audioOpen;
     }
 
     juce::String runProbeChild (const ProbeRequest& request);

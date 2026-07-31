@@ -897,7 +897,7 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     auto& dm = adm();
 
     Array<var> types;
-    if (audiostartup::shouldEnumerateDeviceTypes (eng.hasAudio()))
+    if (eng.hasAudio())
         for (auto* type : dm.getAvailableDeviceTypes())
         {
             if (type == nullptr) continue;
