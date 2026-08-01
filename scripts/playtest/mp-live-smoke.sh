@@ -14,12 +14,16 @@
 # Usage:  MOSH_BIN=/path/to/Mosh bash scripts/playtest/mp-live-smoke.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+source "$ROOT/scripts/lib/harness-session.sh"
 BIN="${MOSH_BIN:-$(find "$ROOT/build-macos-arm64-release" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
 [ -x "$BIN" ] || { echo "Mosh binary not found; set MOSH_BIN"; exit 2; }
 
 ART="${ART:-/tmp/pp-mp-smoke}"; mkdir -p "$ART"
 SESS_A="_harness/session-pp-mpA-$$"; SESS_B="_harness/session-pp-mpB-$$"
-for s in "$SESS_A" "$SESS_B"; do rm -rf "$HOME/Library/Mosh/$s" "$HOME/Library/Mosh/${s}-undo"; done
+for s in "$SESS_A" "$SESS_B"; do
+  mosh_reset_owned_harness_session "$s"
+  mosh_reset_owned_harness_session "${s}-undo"
+done
 
 echo "binary: $BIN"
 if [ -n "${MOSH_RELAY_URL:-}" ]; then

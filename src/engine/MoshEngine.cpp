@@ -65,18 +65,45 @@ namespace
 
     struct MoshPropertyStorage final : te::PropertyStorage
     {
-        explicit MoshPropertyStorage (juce::File directory)
-            : te::PropertyStorage ("Mosh"), prefsDirectory (std::move (directory))
+        MoshPropertyStorage (juce::File appDataDirectory,
+                             juce::File sessionDirectory,
+                             juce::File directory,
+                             juce::String tag,
+                             bool ownerStorage)
+            : te::PropertyStorage ("Mosh"),
+              moshDirectory (std::move (appDataDirectory)),
+              storageSessionDirectory (std::move (sessionDirectory)),
+              prefsDirectory (std::move (directory)),
+              uniqueTag (std::move (tag)),
+              useOwnerStorage (ownerStorage)
         {
         }
 
         juce::File getAppPrefsFolder() override
         {
+            if (! useOwnerStorage
+                && (! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)
+                    || prefsDirectory.createDirectory().failed()
+                    || ! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)))
+            {
+                uniqueTag += "-" + juce::Uuid().toString().substring (0, 8);
+                storageSessionDirectory =
+                    mosh::sessionpaths::prepareSafetySessionDirectory (
+                        moshDirectory, uniqueTag);
+                prefsDirectory = storageSessionDirectory.getChildFile (
+                    "_settings/run-" + uniqueTag);
+            }
             prefsDirectory.createDirectory();
             return prefsDirectory;
         }
 
+        juce::File moshDirectory;
+        juce::File storageSessionDirectory;
         juce::File prefsDirectory;
+        juce::String uniqueTag;
+        bool useOwnerStorage = false;
     };
 
     /** AUD-017 — the exact JUCE audio setup, opened only in a child process.
@@ -154,12 +181,14 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
                               && explicitSession.isEmpty();
     session = mosh::sessionpaths::resolveSessionDirectory (
         moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
+    if (session == mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag))
+        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     bool didResetHarnessSession = false;
     if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
     {
         didResetHarnessSession = mosh::sessionpaths::resetOwnedHarnessSession (moshDir, session);
         if (! didResetHarnessSession)
-            session = mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag);
+            session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }
 
     session.createDirectory();
@@ -167,14 +196,16 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
         && ! mosh::sessionpaths::markOwnedHarnessSession (moshDir, session))
     {
-        session = mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag);
-        session.createDirectory();
+        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }
 
     const auto propertyStorageDir =
         mosh::sessionpaths::resolvePropertyStorageDir (
             moshDir, session, uniqueTag, useOwnerSession);
     propertyStorageDir.createDirectory();
+    const auto propertyStorageSession = useOwnerSession
+        ? moshDir
+        : propertyStorageDir.getParentDirectory().getParentDirectory();
 
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
@@ -184,7 +215,8 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
     behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
-        std::make_unique<MoshPropertyStorage> (propertyStorageDir),
+        std::make_unique<MoshPropertyStorage> (
+            moshDir, propertyStorageSession, propertyStorageDir, uniqueTag, useOwnerSession),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
 

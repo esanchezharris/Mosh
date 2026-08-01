@@ -16,6 +16,8 @@ import json
 import os
 import shutil
 import sys
+import tempfile
+import uuid
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # service/
@@ -145,9 +147,11 @@ check("_install_id() honours the override verbatim", brain_client._install_id() 
 _clear_env()
 
 # ── 7. _install_id(): minted once, persisted, and reused — isolated from the real session ─
-leaf = "_harness/session-brainclient-pytest"
+leaf = f"_harness/session-brainclient-pytest-{uuid.uuid4().hex[:8]}"
 identity_dir = os.path.join(os.path.expanduser("~"), "Library", "Mosh", leaf)
-shutil.rmtree(identity_dir, ignore_errors=True)  # start clean regardless of a prior interrupted run
+os.makedirs(identity_dir)
+with open(os.path.join(identity_dir, ".mosh-harness-owned-v1"), "w", encoding="utf-8") as f:
+    f.write("Mosh isolated harness session v1")
 os.environ["MOSH_SELFTEST_SESSION"] = leaf
 try:
     first = brain_client._install_id()
@@ -159,7 +163,19 @@ try:
     check("_install_id() reuses the persisted id rather than re-minting", second == first,
           f"{first} != {second}")
 finally:
-    shutil.rmtree(identity_dir, ignore_errors=True)  # leave no trace
+    marker = os.path.join(identity_dir, ".mosh-harness-owned-v1")
+    if (not os.path.islink(identity_dir) and not os.path.islink(marker)
+            and open(marker, encoding="utf-8").read() == "Mosh isolated harness session v1"):
+        shutil.rmtree(identity_dir)
+_clear_env()
+
+with tempfile.TemporaryDirectory(prefix="mosh-brainclient-outside-") as outside:
+    os.environ["MOSH_SELFTEST_SESSION"] = outside
+    brain_client._INSTALL_ID_CACHE = None
+    unsafe_id = brain_client._install_id()
+    check("_install_id() still returns an ephemeral id for an unsafe absolute session", bool(unsafe_id))
+    check("_install_id() never writes identity.json through an unsafe absolute session",
+          not os.path.exists(os.path.join(outside, "identity.json")))
 _clear_env()
 
 print(f"\n{'OK' if not fails else 'FAILED'}: {len(fails)} failure(s)")

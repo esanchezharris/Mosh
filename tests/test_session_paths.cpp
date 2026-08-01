@@ -109,6 +109,13 @@ TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[ses
     REQUIRE_FALSE (resetOwnedHarnessSession (moshDir, unowned));
     REQUIRE (precious.loadFileAsString() == "owner data");
 
+    const auto empty = moshDir.getChildFile ("_harness").getChildFile ("empty");
+    REQUIRE (empty.createDirectory());
+    REQUIRE (resolveSessionDirectory (moshDir, "_harness/empty", "pid1-aaaa", false, true)
+             == empty);
+    REQUIRE (markOwnedHarnessSession (moshDir, empty));
+    REQUIRE (isOwnedHarnessSession (moshDir, empty));
+
     const auto owned = moshDir.getChildFile ("_harness").getChildFile ("owned");
     REQUIRE (owned.createDirectory());
     REQUIRE (markOwnedHarnessSession (moshDir, owned));
@@ -137,13 +144,43 @@ TEST_CASE ("symlinked session and settings ancestors use safety directories", "[
     REQUIRE (juce::File::createSymbolicLink (settingsRoot,
                                              outside.getFullPathName(), true));
     REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings-safety-auto-pid1-aaaa"));
+             == moshDir.getChildFile ("session-safety-auto-pid1-aaaa/_settings/run-pid1-aaaa"));
 
     const auto sessionLink = moshDir.getChildFile ("nested");
     REQUIRE (juce::File::createSymbolicLink (sessionLink,
                                              outside.getFullPathName(), true));
     REQUIRE (resolveSessionDirectory (moshDir, "nested/run", "pid1-aaaa", false, true)
              == moshDir.getChildFile ("session-safety-auto-pid1-aaaa"));
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("brain identity storage uses the same resolved harness boundary", "[sessionpaths][brain]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-identity-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    REQUIRE (moshDir.createDirectory());
+
+    const auto empty = moshDir.getChildFile ("_harness/identity-empty");
+    REQUIRE (empty.createDirectory());
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "_harness/identity-empty", "pid1-aaaa")
+             == empty);
+    REQUIRE (isOwnedHarnessSession (moshDir, empty));
+
+    const auto unowned = moshDir.getChildFile ("_harness/identity-unowned");
+    REQUIRE (unowned.createDirectory());
+    REQUIRE (unowned.getChildFile ("keep.txt").replaceWithText ("owner data"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "_harness/identity-unowned", "pid2-bbbb")
+             == moshDir.getChildFile ("session-safety-auto-pid2-bbbb"));
+    REQUIRE_FALSE (unowned.getChildFile ("identity.json").exists());
+
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "session", "pid3-cccc")
+             == moshDir.getChildFile ("session-safety-auto-pid3-cccc"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "../outside", "pid4-dddd")
+             == moshDir.getChildFile ("session-safety-auto-pid4-dddd"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "", "pid5-eeee")
+             == moshDir.getChildFile ("session"));
 
     REQUIRE (sandbox.deleteRecursively());
 }

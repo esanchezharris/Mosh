@@ -81,6 +81,10 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
+add_test(NAME HarnessSessionShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME HarnessSessionPython
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke COMMAND $<TARGET_FILE:Mosh> --audio-recovery-smoke)
     set_tests_properties(AudioRecoverySmoke PROPERTIES

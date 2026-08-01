@@ -286,7 +286,9 @@ fi
 # ────────────────────────── 7. selftest the staged app ──────────────────────────
 header "7/10  selftest staged app"
 SELFTEST_SESSION="_harness/session-package-zip-$$"
-rm -rf "$HOME/Library/Mosh/${SELFTEST_SESSION}" "$HOME/Library/Mosh/${SELFTEST_SESSION}-undo" 2>/dev/null || true
+source "$ROOT/scripts/lib/harness-session.sh"
+mosh_reset_owned_harness_session "$SELFTEST_SESSION"
+mosh_reset_owned_harness_session "${SELFTEST_SESSION}-undo"
 ST_LOG="$(mktemp -t pkg-guest-selftest.XXXX.log)"
 if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SELFTEST_SESSION" "$STAGED/Contents/MacOS/Mosh" --selftest >"$ST_LOG" 2>&1; then
   RESULT="$(grep -oE '[0-9]+/[0-9]+ checks passed' "$ST_LOG" | tail -1)"
@@ -352,7 +354,8 @@ if ditto -x -k "$ZIP_PATH" "$SIM_DIR"; then
     fi
 
     SIM_SESSION="_harness/session-package-zip-sim-$$"
-    rm -rf "$HOME/Library/Mosh/${SIM_SESSION}" "$HOME/Library/Mosh/${SIM_SESSION}-undo" 2>/dev/null || true
+    mosh_reset_owned_harness_session "$SIM_SESSION"
+    mosh_reset_owned_harness_session "${SIM_SESSION}-undo"
     SIM_LOG="$(mktemp -t pkg-guest-sim-selftest.XXXX.log)"
     if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SIM_SESSION" "$SIM_APP/Contents/MacOS/Mosh" --selftest >"$SIM_LOG" 2>&1; then
       SIM_RESULT="$(grep -oE '[0-9]+/[0-9]+ checks passed' "$SIM_LOG" | tail -1)"

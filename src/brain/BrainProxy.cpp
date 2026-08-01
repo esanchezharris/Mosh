@@ -1,4 +1,5 @@
 #include "BrainProxy.h"
+#include "engine/SessionPaths.h"
 
 namespace mosh
 {
@@ -185,15 +186,15 @@ String BrainProxy::installId()
     if (const auto ov = SystemStats::getEnvironmentVariable ("MOSH_BRAIN_INSTALL_ID", {}); ov.isNotEmpty())
         return ov;
 
-    // Same app-data root MoshEngine::MoshEngine uses (src/engine/MoshEngine.cpp):
-    // ~/Library/<Mosh>/<leaf>. MOSH_SELFTEST_SESSION mirrors the engine's own leaf
-    // override so a harness run resolves to the isolated "session-selftest"-style dir
-    // instead of touching the real ~/Library/Mosh/session/identity.json.
+    // This uses SessionPaths before MoshEngine exists because --brain-smoke calls the
+    // proxy directly. Only an absent/empty or exact marker-owned `_harness` request is
+    // persisted there; unsafe values resolve to the same per-process safety session.
     const auto leaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
-    const auto identityFile = File::getSpecialLocation (File::userApplicationDataDirectory)
-                                   .getChildFile ("Mosh")
-                                   .getChildFile (leaf.isNotEmpty() ? leaf : "session")
-                                   .getChildFile ("identity.json");
+    const auto moshDir = File::getSpecialLocation (File::userApplicationDataDirectory)
+                             .getChildFile ("Mosh");
+    const auto identityDirectory = mosh::sessionpaths::resolveIdentitySessionDirectory (
+        moshDir, leaf, mosh::sessionpaths::processTag());
+    const auto identityFile = identityDirectory.getChildFile ("identity.json");
 
     if (identityFile.existsAsFile())
     {

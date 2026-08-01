@@ -90,6 +90,28 @@ namespace mosh::sessionpaths
         return moshDir.getChildFile (kSafetyPrefix + uniqueTag);
     }
 
+    inline juce::File prepareSafetySessionDirectory (const juce::File& moshDir,
+                                                      const juce::String& uniqueTag)
+    {
+        for (int attempt = 0; attempt < 4; ++attempt)
+        {
+            const auto suffix = attempt == 0
+                ? uniqueTag
+                : uniqueTag + "-" + juce::Uuid().toString().substring (0, 8);
+            const auto directory = safetySessionDirectory (moshDir, suffix);
+            if (directory.exists()
+                && (! directory.isDirectory()
+                    || ! isContainedWithoutSymlinks (moshDir, directory)))
+                continue;
+            if (! directory.exists() && directory.createDirectory().failed())
+                continue;
+            if (directory.isDirectory()
+                && isContainedWithoutSymlinks (moshDir, directory))
+                return directory;
+        }
+        return {};
+    }
+
     inline bool isHarnessSessionDirectory (const juce::File& moshDir,
                                            const juce::File& directory)
     {
@@ -107,6 +129,15 @@ namespace mosh::sessionpaths
         return marker.existsAsFile()
             && ! marker.isSymbolicLink()
             && marker.loadFileAsString() == kHarnessOwnershipContents;
+    }
+
+    inline bool isEmptyHarnessSession (const juce::File& moshDir,
+                                       const juce::File& directory)
+    {
+        return directory.isDirectory()
+            && isHarnessSessionDirectory (moshDir, directory)
+            && directory.findChildFiles (
+                   juce::File::findFilesAndDirectories, false).isEmpty();
     }
 
     /** Marks a newly-created, empty `_harness` directory as disposable.
@@ -153,7 +184,9 @@ namespace mosh::sessionpaths
 
         if (explicitOverride
             && isHarnessSessionDirectory (moshDir, requested)
-            && (! requested.exists() || isOwnedHarnessSession (moshDir, requested)))
+            && (! requested.exists()
+                || isOwnedHarnessSession (moshDir, requested)
+                || isEmptyHarnessSession (moshDir, requested)))
             return requested;
 
         if (! explicitOverride
@@ -163,6 +196,26 @@ namespace mosh::sessionpaths
             return requested;
 
         return safetySessionDirectory (moshDir, uniqueTag);
+    }
+
+    inline juce::File resolveIdentitySessionDirectory (const juce::File& moshDir,
+                                                        const juce::String& explicitOverride,
+                                                        const juce::String& uniqueTag)
+    {
+        if (explicitOverride.trim().isEmpty())
+            return moshDir.getChildFile ("session");
+
+        auto directory = resolveSessionDirectory (
+            moshDir, explicitOverride.trim(), uniqueTag, false, true);
+        if (directory == safetySessionDirectory (moshDir, uniqueTag))
+            return prepareSafetySessionDirectory (moshDir, uniqueTag);
+
+        if (! directory.exists() && directory.createDirectory().failed())
+            return prepareSafetySessionDirectory (moshDir, uniqueTag);
+        if (! isOwnedHarnessSession (moshDir, directory)
+            && ! markOwnedHarnessSession (moshDir, directory))
+            return prepareSafetySessionDirectory (moshDir, uniqueTag);
+        return directory;
     }
 
     /** Resolves Tracktion's property-storage directory for this launch.
@@ -180,14 +233,18 @@ namespace mosh::sessionpaths
             return moshDir;
 
         if (! isContainedWithoutSymlinks (moshDir, sessionDirectory))
-            return moshDir.getChildFile ("_settings-safety-auto-" + uniqueTag);
+        {
+            const auto safeSession = prepareSafetySessionDirectory (moshDir, uniqueTag);
+            return safeSession.getChildFile ("_settings/run-" + uniqueTag);
+        }
 
         const auto root = sessionDirectory.getChildFile ("_settings");
         const auto requested = root.getChildFile ("run-" + uniqueTag);
         if (isContainedWithoutSymlinks (root, requested))
             return requested;
 
-        return moshDir.getChildFile ("_settings-safety-auto-" + uniqueTag);
+        const auto safeSession = prepareSafetySessionDirectory (moshDir, uniqueTag);
+        return safeSession.getChildFile ("_settings/run-" + uniqueTag);
     }
 
     /** Which non-interactive mode (if any) this launch is. Mirrors Main.cpp's flags. */

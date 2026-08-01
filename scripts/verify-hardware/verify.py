@@ -24,6 +24,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+from harness_session import reset_owned_harness_session
 
 REPO = Path(__file__).resolve().parents[2]
 ART = REPO / "verify-artifacts"
@@ -938,8 +939,7 @@ def check_crash_recovery(ctx):
     recovered Beta carries its clip (proves the value-based id-rebinding worked)."""
     SESSION = "verify-recovery"
     base = _session_dir(SESSION)
-    if base.exists():
-        shutil.rmtree(base, ignore_errors=True)
+    reset_owned_harness_session(base)
     keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
 
     run1 = [
@@ -989,9 +989,8 @@ def _replay_txn_golden(ctx, name, session):
     if not golden.exists():
         return None, None, f"missing golden {name}"
     commands = [json.loads(l) for l in golden.read_text().splitlines() if l.strip()]
-    base = _mosh_session_base() / session
-    if base.exists():
-        shutil.rmtree(base, ignore_errors=True)
+    base = _session_dir(session)
+    reset_owned_harness_session(base)
     results, proc = run_script(ctx.bin, commands, session, timeout=120)
     statuses = [r.get("data", {}) for r in results if r.get("command") == "batch_status"]
     return results, statuses, proc.stderr[-300:]
@@ -1087,8 +1086,7 @@ def check_skill_transaction_real_engine(ctx):
     # (the crash shape). Run 2 must refuse to start any skill until T2's recovery resolves it.
     SESSION = "verify-txn-restart"
     base = _session_dir(SESSION)
-    if base.exists():
-        shutil.rmtree(base, ignore_errors=True)
+    reset_owned_harness_session(base)
     keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
     orphan = "verify-orphan-txn"
     run1 = [

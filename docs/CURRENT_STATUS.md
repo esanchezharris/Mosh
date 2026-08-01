@@ -69,8 +69,9 @@ build).
   `origin/main`].
 - **The production-v2 end-to-end audit is the active push.** The durable ledger
   is `docs/playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`. Issue #557 is the
-  active serial blocker because audit sessions can mutate global Tracktion
-  settings; draft PR #558 waits behind it and must regenerate all exact-SHA
+  active serial blocker because audit sessions and pre-engine brain identity
+  consumers can mutate owner storage; its candidate also marker-gates first-party
+  recursive cleanup. Draft PR #558 waits behind it and must regenerate all exact-SHA
   evidence after rebasing. PR #523 is outside this campaign and must not be
   merged by the audit loop [measured: issue/PR state, 2026-08-01]. The earlier
   architecture-improvement Wave 0 landed

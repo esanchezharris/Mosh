@@ -1,49 +1,13 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { viteSingleFile } from "vite-plugin-singlefile";
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { installId } from "./src/sessionIdentity";
 
 // Per-install id sent to the brain PROXY (supabase/functions/brain, see
 // docs/brain-proxy/RUNBOOK.md) for its daily token-cap bookkeeping — never a secret,
-// just a bucket key. Reused from the SAME ~/Library/Mosh/<session>/identity.json
-// "uuid" field src/brain/BrainProxy.cpp's installId() and service/brain_client.py's
-// _install_id() read/write, so whichever of the three processes runs first mints it
-// and the others converge on it. MOSH_SELFTEST_SESSION mirrors the native harness's
-// own isolation leaf (unset in normal dev use -> the real "session" dir); unset in
-// dev, this whole module is unreachable anyway (proxy mode is opt-in below).
-let _cachedInstallId: string | null = null;
-function installId(env: Record<string, string>): string {
-  if (env.MOSH_BRAIN_INSTALL_ID) return env.MOSH_BRAIN_INSTALL_ID;
-  if (_cachedInstallId) return _cachedInstallId;
-  const leaf = (env.MOSH_SELFTEST_SESSION || "").trim() || "session";
-  const dir = join(homedir(), "Library", "Mosh", leaf);
-  const file = join(dir, "identity.json");
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf-8"));
-    if (typeof parsed.uuid === "string" && parsed.uuid) {
-      const uuidValue: string = parsed.uuid;   // JSON.parse is `any` — pin the type explicitly
-      _cachedInstallId = uuidValue;
-      return uuidValue;
-    }
-  } catch {
-    /* file absent/unreadable/malformed -> mint one below */
-  }
-  const fresh = randomUUID();
-  try {
-    if (!existsSync(file)) {
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(file, JSON.stringify({ uuid: fresh }));
-    }
-  } catch {
-    /* best-effort persistence only; an ephemeral id still lets the request through */
-  }
-  _cachedInstallId = fresh;
-  return fresh;
-}
-
+// just a bucket key. Normal dev uses the owner session; a harness persists only when
+// its exact ownership marker exists. Unsafe explicit values remain ephemeral and
+// cannot write owner or arbitrary identity files.
 // Brain proxy (dev) — keys live ONLY here (server side); the browser talks to
 // same-origin /api/brain/* and never sees a credential. All three providers speak
 // OpenAI-compatible /chat/completions. Mirrors design-lab/playground/vite.config.js.
