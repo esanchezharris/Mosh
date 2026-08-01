@@ -316,6 +316,35 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(after.tracks.find((track) => track.id === trackId)?.clips).toHaveLength(clipsBefore + 1);
   });
 
+  it("preserves command-confirmed recording across an unrelated re-render before telemetry", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "set_transport",
+      data: { playing: true, recording: true, position: 0 },
+    };
+
+    await clickRecord();
+    expect(useStore.getState().transport.recording).toBe(false);
+    act(() => {
+      useStore.setState({ agentBusy: true });
+    });
+    await clickTransport('[data-testid="v2-stop"]', 2);
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { position: 0 } },
+    ]);
+  });
+
   it("serializes a rapid Record then Play before recording telemetry arrives", async () => {
     const snap0 = useStore.getState().snapshot!;
     const trackId = snap0.tracks[0]?.id!;
