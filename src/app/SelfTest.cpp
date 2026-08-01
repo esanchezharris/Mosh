@@ -9753,6 +9753,34 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
 
+    // ── GAP 2 precondition — arm before ANY playback has allocated the context ──
+    // This is intentionally before the GAP-3 play call. A fresh production project
+    // must be able to press Record first; requiring one hidden Play/Stop cycle left the
+    // visible input picker populated while arm_track returned applied:false.
+    String recTrackId;
+    if (requestedInput.isNotEmpty())
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "Record Smoke"));
+        check (ok (rt), "GAP2: create_track (record) ok");
+        recTrackId = rt["data"].getProperty ("trackId", var()).toString();
+
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", recTrackId }, { "armed", true }}));
+        check (ok (arm), "GAP2: cold arm_track ok before playback");
+        check ((bool) arm["data"].getProperty ("applied", false),
+               "GAP2: cold arm_track applied before playback");
+        check ((bool) arm["data"].getProperty ("armed", false), "GAP2: track reports armed");
+        // The track snapshot should report it has an input now.
+        {
+            auto tv = ops.snapshot().getProperty ("tracks", var());
+            bool hasInput = false;
+            if (auto* arr = tv.getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("id", var()).toString() == recTrackId)
+                        hasInput = (bool) t.getProperty ("hasInput", false);
+            check (hasInput, "GAP2: cold-armed track reports hasInput");
+        }
+    }
+
     // ── GAP 3 — metering live-smoke (gated on MOSH_AUDIO_OUTPUT_DEVICE) ──
     // Enable the track meter + attach the level sink BEFORE playback, so the
     // LevelMeterPlugin tap is present when the playback graph is prepared (this matches
@@ -9842,25 +9870,6 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     // keeps it out of the default headless selftest.
     if (requestedInput.isNotEmpty())
     {
-        auto rt = cmd (ops, "create_track", args1 ("name", "Record Smoke"));
-        check (ok (rt), "GAP2: create_track (record) ok");
-        const auto recTrackId = rt["data"].getProperty ("trackId", var()).toString();
-
-        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", recTrackId }, { "armed", true }}));
-        check (ok (arm), "GAP2: arm_track ok");
-        check ((bool) arm["data"].getProperty ("applied", false), "GAP2: arm_track applied (input assigned)");
-        check ((bool) arm["data"].getProperty ("armed", false), "GAP2: track reports armed");
-        // The track snapshot should report it has an input now.
-        {
-            auto tv = ops.snapshot().getProperty ("tracks", var());
-            bool hasInput = false;
-            if (auto* arr = tv.getArray())
-                for (auto& t : *arr)
-                    if (t.getProperty ("id", var()).toString() == recTrackId)
-                        hasInput = (bool) t.getProperty ("hasInput", false);
-            check (hasInput, "GAP2: armed track reports hasInput");
-        }
-
         auto recordSeek = cmd (ops, "set_transport", args1 ("position", 0.0));
         check (ok (recordSeek), "GAP2: seek to 0 ok");
         check (std::abs ((double) recordSeek["data"].getProperty ("position", -1.0)) < 0.01,

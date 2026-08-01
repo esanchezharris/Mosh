@@ -495,9 +495,17 @@ juce::var MoshOps::cmdArmTrack (const juce::var& args)
     // (tracktion_InputDevice.h: recordEnabled.referTo (state, IDs::armed, nullptr, false)),
     // so a transaction here would be empty. Treat it like set_metronome / set_transport.
 
-    // getAllInputDevices() is empty headless / without a playback context, so there
-    // are no instances to operate on. Degrade gracefully: ok result, applied:false,
-    // never an error (mirrors cmdSetTransport skipping play/record when !hasAudio()).
+    // A fresh Edit has no playback context yet, so getAllInputDevices() would be empty
+    // until the user pressed Play once. Record-arm is itself a live-audio action: make
+    // the context available before looking up device instances rather than exposing a
+    // hidden Play-first precondition. Headless remains a graceful applied:false no-op.
+    if (armed && eng.hasAudio())
+        eng.ensurePlaybackContext();
+
+    // getAllInputDevices() is still empty headless / without an open audio device, so
+    // there are no instances to operate on. Degrade gracefully: ok result,
+    // applied:false, never an error (mirrors cmdSetTransport skipping play/record when
+    // !hasAudio()).
     bool applied = false;
     auto inputs = eng.edit().getAllInputDevices();
 
