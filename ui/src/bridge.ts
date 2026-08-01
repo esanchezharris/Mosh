@@ -67,6 +67,8 @@ export type AppInfo = {
   backend: string;
   repairSourceSha?: string;
   repairId?: string;
+  rolledBackRepairId?: string;
+  rolledBackRepairBuildPath?: string;
 };
 
 export type RemotePairingInfo = {

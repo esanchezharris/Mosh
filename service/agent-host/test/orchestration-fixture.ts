@@ -23,6 +23,7 @@ export class OrchestrationFakes {
   appCalls: Array<{ kind: string; value: unknown }> = [];
   gitCalls: string[] = [];
   processCalls: string[] = [];
+  priorHandoffs: Array<Record<string, string>> = [];
   clean = true;
   authenticated = true;
   githubTransportFailure = false;
@@ -113,7 +114,10 @@ export class OrchestrationFakes {
     stopTransport: async () => { await this.processAction("stop_transport"); },
     releaseAudio: async () => { await this.processAction("release_audio"); },
     handoffRepairBuild: async () => { await this.processAction("handoff_repair"); },
-    handoffPriorApp: async () => { await this.processAction("handoff_prior"); },
+    handoffPriorApp: async (context) => {
+      this.priorHandoffs.push({ ...context });
+      await this.processAction("handoff_prior");
+    },
   };
 
   artifacts: RepairArtifactPolicy = {
@@ -214,7 +218,7 @@ export function restartedService(
 }
 
 export async function persistedSwapFixture(
-  state: "checkpointed" | "stopping" | "repair_running" | "rolling_back" | "rolled_back",
+  state: "checkpointed" | "stopping" | "repair_running" | "rolling_back" | "rolled_back" | "failed",
 ) {
   const context = await orchestrationFixture();
   await context.service.approveReport(context.report.id);

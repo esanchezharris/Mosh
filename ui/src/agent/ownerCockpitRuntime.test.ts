@@ -131,6 +131,10 @@ describe("owner cockpit runtime presentation", () => {
       "Owner requested rollback after repair retest",
     );
     expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
+
+    await cockpit.launchRepair();
+    expect(client.launchRepair).toHaveBeenCalledTimes(2);
+    expect(cockpit.getSnapshot().repair?.status).toBe("repair_running");
   });
 
   it("surfaces a preflight launch rejection without falsely offering rollback", async () => {
@@ -266,5 +270,19 @@ describe("owner cockpit runtime presentation", () => {
       "Owner requested rollback after repair retest",
     );
     expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
+  });
+
+  it("restores one-click relaunch when the prior app starts after rollback", async () => {
+    const { cockpit, client } = runtime();
+    cockpit.resumeRolledBackRepair("repair-1", "/worktree/build/Mosh.app");
+    expect(cockpit.getSnapshot().repair).toEqual({
+      id: "repair-1",
+      buildPath: "/worktree/build/Mosh.app",
+      status: "rolled_back",
+    });
+
+    await cockpit.launchRepair();
+    expect(client.launchRepair).toHaveBeenCalledWith("repair-1", "/worktree/build/Mosh.app");
+    expect(cockpit.getSnapshot().repair?.status).toBe("repair_running");
   });
 });

@@ -92,6 +92,8 @@ int main (int argc, char** argv)
     bool receivedSha = false;
     bool receivedCheckpoint = false;
     bool receivedRepairId = false;
+    bool receivedRolledBackRepairId = false;
+    bool receivedRolledBackRepairBuild = false;
     for (int index = 1; index + 1 < argc; ++index)
     {
         if (std::string (argv[index]) == "--mosh-repair-source-sha"
@@ -102,9 +104,16 @@ int main (int argc, char** argv)
         if (std::string (argv[index]) == "--mosh-repair-id"
             && argv[index + 1] == repairId)
             receivedRepairId = true;
+        if (std::string (argv[index]) == "--mosh-rolled-back-repair-id"
+            && argv[index + 1] == repairId)
+            receivedRolledBackRepairId = true;
+        if (std::string (argv[index]) == "--mosh-rolled-back-repair-build"
+            && std::string (argv[index + 1]).ends_with ("Mosh.app"))
+            receivedRolledBackRepairBuild = true;
     }
    #if defined(MOSH_REPAIR_FIXTURE_PRIOR_TARGET)
-    if (! receivedCheckpoint) return 6;
+    if (! receivedCheckpoint || ! receivedRolledBackRepairId || ! receivedRolledBackRepairBuild)
+        return 6;
     if (std::getenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA") != nullptr
         || std::getenv ("MOSH_ACTIVE_REPAIR_ID") != nullptr)
         return 9;

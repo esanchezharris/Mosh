@@ -74,6 +74,12 @@ describe("persisted rolled_back relaunch", () => {
     const restarted = restartedService(store, fakes);
     await restarted.initialize();
     await restarted.rollbackRepair(repair.id, "owner requested rollback");
+    expect(fakes.priorHandoffs).toEqual([{
+      checkpointPath: "/tmp/checkpoint.mosh",
+      priorAppPath: "/Applications/Mosh.app",
+      repairId: repair.id,
+      buildPath: "/build/Mosh.app",
+    }]);
     fakes.processCalls.length = 0;
 
     const relaunched = await restarted.launchRepairBuild(repair.id, "/build/Mosh.app");
@@ -91,5 +97,15 @@ describe("persisted rolled_back relaunch", () => {
       "repair.audio.released",
       "repair.build.handoff_accepted",
     ]);
+  });
+
+  it("does not relaunch a generic failed swap with a checkpoint", async () => {
+    const { fakes, store, repair } = await persistedSwapFixture("failed");
+    const restarted = restartedService(store, fakes);
+    await restarted.initialize();
+
+    await expect(restarted.launchRepairBuild(repair.id, "/build/Mosh.app"))
+      .rejects.toMatchObject({ code: "repair_swap_state" });
+    expect(fakes.processCalls).toEqual([]);
   });
 });

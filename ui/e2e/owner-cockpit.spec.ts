@@ -123,10 +123,17 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
   await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: repair running");
   await page.getByRole("button", { name: "Roll Back" }).click();
   await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: rolled back");
+  await expect(page.getByRole("button", { name: "Launch Repair" })).toBeVisible();
+  await page.getByRole("button", { name: "Launch Repair" }).click();
+  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: repair running");
   const repairCalls = await page.evaluate(() =>
     (window as unknown as { __moshOwnerCalls: string[] }).__moshOwnerCalls.filter((name) =>
       name === "agent_host_launch_repair" || name === "agent_host_rollback_repair"));
-  expect(repairCalls).toEqual(["agent_host_launch_repair", "agent_host_rollback_repair"]);
+  expect(repairCalls).toEqual([
+    "agent_host_launch_repair",
+    "agent_host_rollback_repair",
+    "agent_host_launch_repair",
+  ]);
 
   const input = page.getByTestId("agent-input");
   await input.fill("bug: metronome drifts after bar four");

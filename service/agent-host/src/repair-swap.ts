@@ -145,6 +145,8 @@ export class RepairSwap {
     ].includes(current.swap.state)) {
       throw failure("repair_swap_state", "Repair build is not in a rollback state");
     }
+    const buildPath = current.swap.buildPath;
+    if (!buildPath) throw failure("repair_swap_state", "Repair build path is missing");
     const fromState = current.swap.state;
     current = {
       ...current,
@@ -163,6 +165,8 @@ export class RepairSwap {
       await this.dependencies.processes.handoffPriorApp({
         checkpointPath: checkpoint.checkpointPath,
         priorAppPath: checkpoint.priorAppPath,
+        repairId,
+        buildPath,
       });
       await this.emit(current.playtestId, "repair.rollback.handoff_accepted", {
         repairId,

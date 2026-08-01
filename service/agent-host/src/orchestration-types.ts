@@ -89,6 +89,8 @@ export type RepairLaunchContext = {
 export type PriorAppHandoffContext = {
   checkpointPath: string;
   priorAppPath: string;
+  repairId: string;
+  buildPath: string;
 };
 
 export interface ProcessAdapter {

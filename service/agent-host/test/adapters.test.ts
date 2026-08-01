@@ -318,6 +318,42 @@ describe("native MoshOps repair control", () => {
     ]);
   });
 
+  it("hands durable rolled-back repair metadata to the signed prior-app launcher", async () => {
+    const runner = new FakeRunner();
+    const adapter = new RepairControlAdapter(runner, "/signed/helper", {
+      endpoint: "http://127.0.0.1:49152",
+      capability: "owner-capability",
+      helperTeamId: "AB12CD34EF",
+    });
+
+    await adapter.handoffPriorApp({
+      checkpointPath: "/tmp/checkpoint.tracktionedit",
+      priorAppPath: "/Applications/Mosh.app",
+      repairId: "11111111-1111-4111-8111-111111111111",
+      buildPath: "/worktree/build/Mosh.app",
+    });
+
+    expect(runner.calls).toEqual([
+      [
+        "/usr/bin/codesign",
+        "--verify",
+        "--strict",
+        "--verbose=2",
+        "-R=identifier \"MoshRepairHelper\" and certificate leaf[subject.OU] = \"AB12CD34EF\"",
+        "/signed/helper",
+      ],
+      [
+        "/signed/helper",
+        "handoff-prior",
+        "/tmp/checkpoint.tracktionedit",
+        "/Applications/Mosh.app",
+        "11111111-1111-4111-8111-111111111111",
+        "/worktree/build/Mosh.app",
+        String(process.ppid),
+      ],
+    ]);
+  });
+
   it("rejects a helper that does not satisfy the Mosh team and identifier requirement", async () => {
     const runner = new FakeRunner();
     runner.responses.push({ exitCode: 1, stdout: "", stderr: "designated requirement failed" });
@@ -368,6 +404,33 @@ describe("native MoshOps repair control", () => {
       code: "repair_helper_caller_chain_invalid",
       message: "Repair process action failed: handoff-repair",
     });
+  });
+
+  it("falls back when the helper failure line exceeds the diagnostic bound", async () => {
+    const runner = new FakeRunner();
+    runner.responses.push(
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        exitCode: 1,
+        stdout: "",
+        stderr: JSON.stringify({ ok: false, code: "usage", padding: "x".repeat(4_096) }),
+      },
+    );
+    const artifacts = new NativeRepairArtifactPolicy();
+    vi.spyOn(artifacts, "validateBuild").mockResolvedValue("/worktree/build/Mosh.app");
+    const adapter = new RepairControlAdapter(runner, "/signed/helper", {
+      endpoint: "http://127.0.0.1:49152",
+      capability: "owner-capability",
+      helperTeamId: "AB12CD34EF",
+    }, artifacts);
+
+    await expect(adapter.handoffRepairBuild({
+      repairId: "11111111-1111-4111-8111-111111111111",
+      buildPath: "/worktree/build/Mosh.app",
+      worktreePath: "/worktree",
+      sourceSha: "a".repeat(40),
+      checkpointPath: "/tmp/checkpoint.tracktionedit",
+    })).rejects.toMatchObject({ code: "repair_process_failed" });
   });
 });
 

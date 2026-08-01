@@ -20,7 +20,7 @@ import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
 import type { Plugin } from "../types";
-import { ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
+import { canLaunchRepair, ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
 import { useSettings } from "../settings/store";
 import { ping } from "../bridge";
 
@@ -79,6 +79,11 @@ export function OwnerCockpitCard() {
     void ping().then((info) => {
       setRepairSourceSha(info.repairSourceSha ?? null);
       if (info.repairId) ownerCockpitRuntime.resumeInstalledRepair(info.repairId);
+      else if (info.rolledBackRepairId && info.rolledBackRepairBuildPath)
+        ownerCockpitRuntime.resumeRolledBackRepair(
+          info.rolledBackRepairId,
+          info.rolledBackRepairBuildPath,
+        );
     });
   }, []);
   useEffect(() => {
@@ -126,7 +131,7 @@ export function OwnerCockpitCard() {
       {state.repair && (
         <div className="v2-owner-actions" data-testid="v2-repair-controls">
           <span>Repair: {state.repair.status.replace(/_/g, " ")}</span>
-          {(state.repair.status === "ready" || state.repair.status === "launch_failed") && (
+          {canLaunchRepair(state.repair.status) && (
             <button type="button" className="v2-btn"
               onClick={() => void ownerCockpitRuntime.launchRepair().catch(() => undefined)}>
               Launch Repair

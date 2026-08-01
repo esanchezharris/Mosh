@@ -189,9 +189,21 @@ public:
             launchArguments, "--mosh-repair-source-sha");
         const auto repairId = valueAfter (
             launchArguments, "--mosh-repair-id");
+        const auto rolledBackRepairId = valueAfter (
+            launchArguments, "--mosh-rolled-back-repair-id");
+        const auto rolledBackRepairBuild = valueAfter (
+            launchArguments, "--mosh-rolled-back-repair-build");
         if (repairSourceSha.isEmpty() != repairId.isEmpty())
         {
             std::cerr << "repair launch refused: incomplete repair identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        if (rolledBackRepairId.isEmpty() != rolledBackRepairBuild.isEmpty()
+            || (repairId.isNotEmpty() && rolledBackRepairId.isNotEmpty()))
+        {
+            std::cerr << "repair launch refused: incomplete recovery identity" << std::endl;
             setApplicationReturnValue (1);
             quit();
             return;
@@ -207,6 +219,11 @@ public:
         {
             mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_SOURCE_SHA", repairSourceSha.toRawUTF8());
             mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_ID", repairId.toRawUTF8());
+        }
+        if (rolledBackRepairId.isNotEmpty())
+        {
+            mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_ID", rolledBackRepairId.toRawUTF8());
+            mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_BUILD_PATH", rolledBackRepairBuild.toRawUTF8());
         }
         const auto ownerCheckpoint = valueAfter (
             launchArguments, "--mosh-owner-checkpoint");

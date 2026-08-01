@@ -371,6 +371,15 @@ PriorTarget priorTarget (
     return { checkpoint, app };
 }
 
+fs::path recoverableRepairBuild (const char* value, const Identity& helper)
+{
+    const auto app = canonicalPath (value, true);
+    if (app.extension() != ".app")
+        throw std::runtime_error ("repair_build_invalid");
+    validateTarget (app, helper);
+    return app;
+}
+
 void writeTestStatus (const std::string& value)
 {
     if (const auto* statusPath = std::getenv ("MOSH_REPAIR_HELPER_TEST_STATUS");
@@ -491,7 +500,6 @@ template <typename CallerValidator, typename TargetValidator>
     const ProcessToken& callerToken,
     const fs::path& targetApp,
     const std::vector<std::string>& arguments,
-    bool clearRepairEnvironment,
     CallerValidator validateCallerNow,
     TargetValidator validateTargetNow)
 {
@@ -530,11 +538,10 @@ template <typename CallerValidator, typename TargetValidator>
     try { validateTargetNow(); } catch (...) { workerExit (73); }
     writeTestStatus ("exec");
 
-    if (clearRepairEnvironment)
-    {
-        unsetenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA");
-        unsetenv ("MOSH_ACTIVE_REPAIR_ID");
-    }
+    unsetenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA");
+    unsetenv ("MOSH_ACTIVE_REPAIR_ID");
+    unsetenv ("MOSH_ROLLED_BACK_REPAIR_ID");
+    unsetenv ("MOSH_ROLLED_BACK_REPAIR_BUILD_PATH");
 
     const auto executable = targetApp / "Contents" / "MacOS" / "Mosh";
     std::vector<std::string> storage { executable.string() };
@@ -591,7 +598,6 @@ int main (int argc, char** argv)
                 { "--mosh-repair-source-sha", argv[4],
                   "--mosh-owner-checkpoint", argv[5],
                   "--mosh-repair-id", repairId (argv[6]) },
-                false,
                 [=] { validateCallerIdentity (callerPid, helper); },
                 [=] {
                     repairTarget (argv[2], argv[3], argv[4], helper);
@@ -600,22 +606,27 @@ int main (int argc, char** argv)
         }
         if (action == "__worker-prior")
         {
-            if (argc != 8) workerExit (75);
-            const auto callerPid = parsePid (argv[4]);
+            if (argc != 10) workerExit (75);
+            const auto callerPid = parsePid (argv[6]);
             const ProcessToken callerToken {
-                parseTokenPart (argv[5]),
-                parseTokenPart (argv[6]),
+                parseTokenPart (argv[7]),
+                parseTokenPart (argv[8]),
             };
-            const auto parentHelperPid = parsePid (argv[7]);
+            const auto parentHelperPid = parsePid (argv[9]);
             runWorker (
                 parentHelperPid,
                 callerPid,
                 callerToken,
                 canonicalPath (argv[3], true),
-                { "--mosh-owner-checkpoint", argv[2] },
-                true,
+                { "--mosh-owner-checkpoint", argv[2],
+                  "--mosh-rolled-back-repair-id", repairId (argv[4]),
+                  "--mosh-rolled-back-repair-build", argv[5] },
                 [=] { validateCallerIdentity (callerPid, helper); },
-                [=] { priorTarget (argv[2], argv[3], helper); });
+                [=] {
+                    priorTarget (argv[2], argv[3], helper);
+                    repairId (argv[4]);
+                    recoverableRepairBuild (argv[5], helper);
+                });
         }
         if (action == "probe")
         {
@@ -647,18 +658,21 @@ int main (int argc, char** argv)
         }
         if (action == "handoff-prior")
         {
-            if (argc != 5)
-                fail ("usage", "handoff-prior requires checkpoint, app, callerPid");
-            const auto callerPid = parsePid (argv[4]);
+            if (argc != 7)
+                fail ("usage", "handoff-prior requires checkpoint, app, repairId, repairBuild, callerPid");
+            const auto id = repairId (argv[4]);
+            const auto callerPid = parsePid (argv[6]);
             validateCaller (callerPid, helper);
             const auto callerToken = processToken (callerPid);
             if (! callerToken.has_value())
                 throw std::runtime_error ("caller_identity_unavailable");
             const auto target = priorTarget (argv[2], argv[3], helper);
+            const auto repairBuild = recoverableRepairBuild (argv[5], helper);
             acceptHandoff (
                 callerPid,
                 target.app,
                 { "__worker-prior", target.checkpoint.string(), target.app.string(),
+                  id, repairBuild.string(),
                   std::to_string (callerPid),
                   std::to_string (callerToken->seconds),
                   std::to_string (callerToken->microseconds) });

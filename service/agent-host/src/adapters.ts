@@ -264,13 +264,21 @@ const helperFailureResult = z.object({
   ok: z.literal(false),
   code: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/u),
 });
+const helperFailureLineLimit = 4_096;
 
 function helperFailureCode(stderr: string): string {
-  const firstLine = stderr.split(/\r?\n/u, 1)[0] ?? "";
+  const prefix = stderr.slice(0, helperFailureLineLimit + 1);
+  const lineBreak = prefix.search(/\r?\n/u);
+  const firstLine = prefix.slice(0, lineBreak === -1 ? prefix.length : lineBreak);
+  if (firstLine.length > helperFailureLineLimit) return "repair_process_failed";
+  let value: unknown;
   try {
-    const parsed = helperFailureResult.safeParse(JSON.parse(firstLine));
-    if (parsed.success) return `repair_helper_${parsed.data.code}`;
-  } catch {}
+    value = JSON.parse(firstLine);
+  } catch {
+    return "repair_process_failed";
+  }
+  const parsed = helperFailureResult.safeParse(value);
+  if (parsed.success) return `repair_helper_${parsed.data.code}`;
   return "repair_process_failed";
 }
 
@@ -315,6 +323,8 @@ export class RepairControlAdapter implements ProcessAdapter {
     await this.action("handoff-prior", [
       context.checkpointPath,
       context.priorAppPath,
+      context.repairId,
+      context.buildPath,
       String(process.ppid),
     ]);
   }

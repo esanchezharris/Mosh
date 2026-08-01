@@ -22,6 +22,12 @@ export type OwnerCockpitState = {
   } | null;
 };
 
+export type OwnerCockpitRepairStatus = NonNullable<OwnerCockpitState["repair"]>["status"];
+
+export function canLaunchRepair(status: OwnerCockpitRepairStatus): boolean {
+  return status === "ready" || status === "launch_failed" || status === "rolled_back";
+}
+
 type OwnerCockpitClient = Pick<
   AgentHostClient,
   "start" | "close" | "watchEvents" | "realtimeSecret" | "createReport" | "approveReport"
@@ -148,14 +154,14 @@ export class OwnerCockpitRuntime {
   async launchRepair(): Promise<void> {
     await this.runOwnerAction("Repair launch failed.", async () => {
       const repair = this.state.repair;
-      if (!repair?.buildPath || (repair.status !== "ready" && repair.status !== "launch_failed"))
+      if (!repair?.buildPath || !canLaunchRepair(repair.status))
         throw new AgentHostApiError("Repair build is not ready.", "repair_swap_state", false);
       try {
         await this.client.launchRepair(repair.id, repair.buildPath);
       } catch (error) {
         const current = this.state.repair;
         if (current?.id === repair.id
-          && (current.status === "ready" || current.status === "launch_failed"))
+          && canLaunchRepair(current.status))
           this.update({ repair: { ...current, status: "launch_failed" } });
         throw error;
       }
@@ -178,6 +184,14 @@ export class OwnerCockpitRuntime {
     this.update({
       lastEvent: "repair.build.resumed",
       repair: { id: repairId, status: "repair_running" },
+    });
+  }
+
+  resumeRolledBackRepair(repairId: string, buildPath: string): void {
+    if (!repairId || !buildPath || this.state.repair?.id === repairId) return;
+    this.update({
+      lastEvent: "repair.swap.recovered",
+      repair: { id: repairId, buildPath, status: "rolled_back" },
     });
   }
 

@@ -779,6 +779,13 @@ juce::var WebBridge::appInfo()
     if (repairSourceSha.isNotEmpty()) o->setProperty ("repairSourceSha", repairSourceSha);
     const auto repairId = juce::SystemStats::getEnvironmentVariable ("MOSH_ACTIVE_REPAIR_ID", {});
     if (repairId.isNotEmpty()) o->setProperty ("repairId", repairId);
+    const auto rolledBackRepairId = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_ROLLED_BACK_REPAIR_ID", {});
+    if (rolledBackRepairId.isNotEmpty()) o->setProperty ("rolledBackRepairId", rolledBackRepairId);
+    const auto rolledBackRepairBuildPath = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_ROLLED_BACK_REPAIR_BUILD_PATH", {});
+    if (rolledBackRepairBuildPath.isNotEmpty())
+        o->setProperty ("rolledBackRepairBuildPath", rolledBackRepairBuildPath);
     return juce::var (o);
 }
 
