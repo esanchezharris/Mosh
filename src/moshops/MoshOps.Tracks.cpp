@@ -10,12 +10,32 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "RecordingLanding.h"
 #include "state/Ids.h"
 #include "multiplayer/LogicalId.h"
 
 namespace mosh
 {
 using namespace juce;
+
+namespace
+{
+juce::String captureStateForClip (te::Clip& clip)
+{
+    if (auto* midi = dynamic_cast<te::MidiClip*> (&clip))
+        return "midi\n" + midi->getSequence().state.toXmlString();
+
+    if (auto* wave = dynamic_cast<te::WaveAudioClip*> (&clip))
+    {
+        juce::StringArray state { "wave", juce::String (wave->getNumTakes (false)),
+                                 juce::String (wave->getCurrentTake()) };
+        state.addArray (wave->getTakeDescriptions());
+        return state.joinIntoString ("\n");
+    }
+
+    return {};
+}
+}
 
 juce::var MoshOps::cmdCreateTrack (const juce::var& args)
 {
@@ -625,10 +645,6 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     if (! transport.isRecording())
         return reportNoOp ("not recording");
 
-    // Snapshot the clip ids already present on every armed track BEFORE stopping, so the
-    // newly-landed take(s) are exactly the post-stop set minus this set. A single track
-    // can be targeted by multiple input instances (wave + MIDI), and several tracks can
-    // be armed at once, so we collect across ALL armed inputs (key the set per track id).
     // Bind the input array to a local before iterating (no dangling temporary).
     juce::Array<te::AudioTrack*> armedTracks;
     {
@@ -644,11 +660,16 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                         armedTracks.add (t);
     }
 
-    juce::HashMap<juce::String, int> beforeIds;     // clip itemID -> 1 (membership set)
+    juce::HashMap<juce::String, int> beforeIds;
+    juce::HashMap<juce::String, juce::String> beforeCaptureStates;
     for (auto* t : armedTracks)
         for (auto* c : t->getClips())
             if (c != nullptr)
-                beforeIds.set (c->itemID.toString(), 1);
+            {
+                const auto id = c->itemID.toString();
+                beforeIds.set (id, 1);
+                beforeCaptureStates.set (id, captureStateForClip (*c));
+            }
 
     // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
     // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
@@ -656,35 +677,45 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     // track.getClips() right after this returns.
     transport.stop (discard, false);
 
-    // Belt-and-suspenders: pump the message loop so any queued ValueTree/Selectable
-    // settling + itemID assignment completes before we diff the clips. Headless there is
-    // no GUI dispatch between commands, so we pump explicitly (mirrors createAudioTrack).
-    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-        for (int i = 0; i < 4; ++i)
-            mm->runDispatchLoopUntil (1);
-
-    // Diff: any clip on an armed track not in the before-set is a freshly-landed take.
-    // This detects BOTH wave takes (WaveAudioClip) and MIDI takes (MidiClip, sequence
-    // already finalized on stop) — clipToVar serializes either kind (notes for MIDI).
     // ARE-003: the landed clip's start is auto-adjusted by record latency inside
     // Tracktion; we just read it back via clipToVar (no app-side alignment).
     Array<var> landed;
+    int landedTrackCount = 0;
     if (! discard)
         for (auto* t : armedTracks)
+        {
+            bool trackLanded = false;
             for (auto* c : t->getClips())
-                if (c != nullptr && ! beforeIds.contains (c->itemID.toString()))
-                    landed.add (clipToVar (*c));
+                if (c != nullptr)
+                {
+                    const auto id = c->itemID.toString();
+                    if (recording::didLandClip (beforeIds.contains (id),
+                                                beforeCaptureStates[id],
+                                                captureStateForClip (*c)))
+                    {
+                        landed.add (clipToVar (*c));
+                        trackLanded = true;
+                    }
+                }
+            if (trackLanded)
+                ++landedTrackCount;
+        }
+
+    const bool applied = recording::captureApplied (armedTracks.size(),
+                                                    landedTrackCount, discard);
 
     logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
     emit ("transport", transportToVar());
     emitSnapshotInvalidated();
 
     auto* data = new DynamicObject();
-    data->setProperty ("applied", true);
+    data->setProperty ("applied", applied);
     data->setProperty ("discarded", discard);
     data->setProperty ("clips", landed);
-    if (landed.isEmpty() && ! discard)
-        data->setProperty ("reason", "no take captured (no live input)");
+    if (! applied)
+        data->setProperty ("reason", landed.isEmpty()
+            ? "no take captured (no live input)"
+            : "one or more armed tracks did not capture a take");
     return okResult ("stop_recording", var (data));
 }
 

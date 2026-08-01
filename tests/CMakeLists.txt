@@ -25,6 +25,7 @@ target_sources(MoshTests PRIVATE
     test_agent_txn.cpp
     test_annotations.cpp
     test_remote_companion.cpp
+    test_recording_landing.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
