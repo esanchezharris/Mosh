@@ -90,6 +90,26 @@ namespace mosh::sessionpaths
         return moshDir.getChildFile (kSafetyPrefix + uniqueTag);
     }
 
+    inline bool hasIsolationOwnershipMarker (const juce::File& directory)
+    {
+        const auto marker = directory.getChildFile (kHarnessOwnershipFile);
+        return marker.existsAsFile()
+            && ! marker.isSymbolicLink()
+            && marker.loadFileAsString() == kHarnessOwnershipContents;
+    }
+
+    inline bool markEmptyIsolationDirectory (const juce::File& directory)
+    {
+        if (! directory.isDirectory())
+            return false;
+        if (hasIsolationOwnershipMarker (directory))
+            return true;
+        if (! directory.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty())
+            return false;
+        return directory.getChildFile (kHarnessOwnershipFile)
+                        .replaceWithText (kHarnessOwnershipContents);
+    }
+
     inline juce::File prepareSafetySessionDirectory (const juce::File& moshDir,
                                                       const juce::String& uniqueTag)
     {
@@ -99,14 +119,17 @@ namespace mosh::sessionpaths
                 ? uniqueTag
                 : uniqueTag + "-" + juce::Uuid().toString().substring (0, 8);
             const auto directory = safetySessionDirectory (moshDir, suffix);
-            if (directory.exists()
-                && (! directory.isDirectory()
-                    || ! isContainedWithoutSymlinks (moshDir, directory)))
+            if (directory.exists())
+            {
+                if (directory.isDirectory()
+                    && isContainedWithoutSymlinks (moshDir, directory)
+                    && hasIsolationOwnershipMarker (directory))
+                    return directory;
                 continue;
-            if (! directory.exists() && directory.createDirectory().failed())
-                continue;
-            if (directory.isDirectory()
-                && isContainedWithoutSymlinks (moshDir, directory))
+            }
+            if (directory.createDirectory().wasOk()
+                && isContainedWithoutSymlinks (moshDir, directory)
+                && markEmptyIsolationDirectory (directory))
                 return directory;
         }
         return {};
@@ -125,10 +148,32 @@ namespace mosh::sessionpaths
         if (! directory.isDirectory() || ! isHarnessSessionDirectory (moshDir, directory))
             return false;
 
-        const auto marker = directory.getChildFile (kHarnessOwnershipFile);
-        return marker.existsAsFile()
-            && ! marker.isSymbolicLink()
-            && marker.loadFileAsString() == kHarnessOwnershipContents;
+        return hasIsolationOwnershipMarker (directory);
+    }
+
+    inline bool isAutoSessionDirectory (const juce::File& moshDir,
+                                        const juce::File& directory)
+    {
+        return directory.getParentDirectory() == moshDir
+            && isAutoIsolatedLeaf (directory.getFileName())
+            && isContainedWithoutSymlinks (moshDir, directory);
+    }
+
+    inline bool isOwnedAutoSession (const juce::File& moshDir,
+                                    const juce::File& directory)
+    {
+        if (! directory.isDirectory() || ! isAutoSessionDirectory (moshDir, directory))
+            return false;
+
+        return hasIsolationOwnershipMarker (directory);
+    }
+
+    inline bool markOwnedAutoSession (const juce::File& moshDir,
+                                      const juce::File& directory)
+    {
+        if (! directory.isDirectory() || ! isAutoSessionDirectory (moshDir, directory))
+            return false;
+        return markEmptyIsolationDirectory (directory);
     }
 
     inline bool isEmptyHarnessSession (const juce::File& moshDir,
@@ -150,13 +195,7 @@ namespace mosh::sessionpaths
     {
         if (! directory.isDirectory() || ! isHarnessSessionDirectory (moshDir, directory))
             return false;
-        if (isOwnedHarnessSession (moshDir, directory))
-            return true;
-        if (! directory.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty())
-            return false;
-
-        return directory.getChildFile (kHarnessOwnershipFile)
-                        .replaceWithText (kHarnessOwnershipContents);
+        return markEmptyIsolationDirectory (directory);
     }
 
     inline bool resetOwnedHarnessSession (const juce::File& moshDir,
@@ -192,7 +231,8 @@ namespace mosh::sessionpaths
         if (! explicitOverride
             && isAutoIsolatedLeaf (sessionLeaf)
             && requested.getParentDirectory() == moshDir
-            && isContainedWithoutSymlinks (moshDir, requested))
+            && isContainedWithoutSymlinks (moshDir, requested)
+            && (! requested.exists() || isOwnedAutoSession (moshDir, requested)))
             return requested;
 
         return safetySessionDirectory (moshDir, uniqueTag);
@@ -283,92 +323,6 @@ namespace mosh::sessionpaths
         if (m.envNoAudio)     return "session-selftest";
 
         return {};   // interactive GUI
-    }
-
-    /** How long an auto-isolated dir must be untouched before the pruner may delete it.
-        Generous on purpose: a CONCURRENT run's dir must never be mistaken for garbage
-        (that would reintroduce the very bug this file exists to fix). A harness run is
-        minutes at most, so a day of silence means the run is long gone.
-    */
-    inline constexpr int kPruneAfterHours = 24;
-
-    /** Marks a directory this scheme moved aside instead of deleting. Distinct from
-        kAutoMarker so the pruner (which only ever touches "-auto-" dirs) leaves these
-        alone — a preserved dir must outlive the run that rescued it.
-    */
-    inline constexpr const char* kLegacyMarker = "-legacy-";
-
-    /** Moves a pre-existing REAL directory at the pointer path out of the way.
-
-        NEVER deletes it. The tempting premise — "the legacy harness dir was wiped by
-        every run anyway, so it was never durable state" — is precisely what SLF-CONC-001
-        disproved: since #246 (2026-07-07) the interactive GUI's session ALSO resolved to
-        "session-selftest", so a real directory at a legacy harness path can hold the
-        owner's actual project. This function keys off a directory's NAME, which says
-        nothing about its CONTENTS, so deleting is never justified here. Renaming costs
-        nothing and turns the worst case from silent permanent data loss into "an oddly
-        named folder appeared".
-
-        @returns where it was moved, or an empty File if nothing needed moving.
-    */
-    inline juce::File preserveLegacyDir (const juce::File& pointer)
-    {
-        if (! pointer.isDirectory() || pointer.isSymbolicLink())
-            return {};
-
-        const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
-        auto aside = pointer.getSiblingFile (pointer.getFileName() + kLegacyMarker + stamp);
-
-        // Two runs racing within the same second must not clobber each other's rescue.
-        if (aside.exists())
-            aside = pointer.getSiblingFile (pointer.getFileName() + kLegacyMarker + stamp
-                                            + "-" + juce::Uuid().toString().substring (0, 8));
-
-        return pointer.moveFileTo (aside) ? aside : juce::File();
-    }
-
-    /** Points <moshDir>/<baseName> at the run's real dir and prunes stale auto dirs.
-
-        Auto-isolation would otherwise break every "look in ~/Library/Mosh/session-selftest
-        afterwards" habit (scripts/validate-command-log-contract.sh defaults to exactly that
-        path). The legacy path therefore survives as a symlink to the most recent run.
-        Concurrent runs race to own it; last writer wins, which is fine for inspection.
-    */
-    inline void publishLatestPointer (const juce::File& moshDir,
-                                      const juce::String& baseName,
-                                      const juce::File& actualSessionDir)
-    {
-        // Never touch the GUI dir, whatever the caller passed.
-        if (baseName.isEmpty() || baseName == "session")
-            return;
-
-        const auto pointer = moshDir.getChildFile (baseName);
-
-        // A pre-existing REAL directory is PRESERVED, not deleted (see preserveLegacyDir).
-        // A symlink is our own pointer from an earlier run — that IS disposable, so unlink it.
-        if (pointer.isDirectory() && ! pointer.isSymbolicLink())
-            preserveLegacyDir (pointer);
-        else if (pointer.exists() || pointer.isSymbolicLink())
-            pointer.deleteFile();
-
-        // Best-effort: a failed symlink (e.g. Windows without the privilege) must never
-        // fail the run — the real session dir is printed at startup either way.
-        juce::File::createSymbolicLink (pointer, actualSessionDir.getFullPathName(), true);
-
-        // Prune this base's stale auto dirs. Guarded three ways: the name must be one
-        // WE generated, must belong to THIS base, and must be untouched for a day.
-        const auto now = juce::Time::getCurrentTime();
-        for (const auto& child : moshDir.findChildFiles (juce::File::findDirectories, false))
-        {
-            const auto leaf = child.getFileName();
-            if (! isAutoIsolatedLeaf (leaf) || ! leaf.startsWith (baseName + kAutoMarker))
-                continue;
-            if (child == actualSessionDir || child.isSymbolicLink())
-                continue;
-            if ((now - child.getLastModificationTime()).inHours() < (double) kPruneAfterHours)
-                continue;   // could be a live run — leave it alone
-            child.deleteRecursively();
-        }
     }
 
     /** A per-process tag: pid (greppable against a live process) + a Uuid fragment

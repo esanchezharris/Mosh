@@ -110,12 +110,15 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   another session's dev server owns `:5173` — a foreign bundle false-fails *every* spec.
   Same class: `preview_start` resolves `.claude/launch.json` from the *session's* cwd, so a dev
   server can silently serve a different worktree. Probe the served tree before believing a screenshot.
-- **`--selftest` sessions:** headless runs auto-isolate, but an explicit `MOSH_SELFTEST_SESSION`
-  wins **verbatim** — two runs sharing one leaf delete each other's artifacts mid-test.
+- **`--selftest` sessions:** headless runs auto-isolate. An explicit `MOSH_SELFTEST_SESSION`
+  is honored only under `_harness/`; an existing leaf must be empty or carry the exact
+  `.mosh-harness-owned-v1` marker. Unsafe, escaping, symlinked, or unowned values fall
+  back to a unique safety session. Two runs must still use distinct harness leaves.
   `commandLine.contains("--selftest")` is also true for `--selftest-undo`; match undo FIRST.
   ([SLF-CONC-001](docs/worklog/2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md))
-- **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`. There is no
-  sandbox; isolate via `MOSH_SELFTEST_SESSION` or unit-test the pure helper instead.
+- **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`; changing
+  `$HOME` is not a sandbox. Use a unique marker-owned `_harness` leaf or unit-test the
+  pure helper instead.
 - **Branch protection vs the loops:** `enforce_admins` is on, so **`gh pr merge --admin` cannot
   bypass a required check**; `merge-one.sh` waits for the check and merges without `--admin`.
   Don't reintroduce `--admin` — it will just fail.

@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
 #include "SourceRef.h"
@@ -195,6 +196,12 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
         && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
         && ! mosh::sessionpaths::markOwnedHarnessSession (moshDir, session))
+    {
+        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
+    }
+    if (mosh::sessionpaths::isAutoSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session)
+        && ! mosh::sessionpaths::markOwnedAutoSession (moshDir, session))
     {
         session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }

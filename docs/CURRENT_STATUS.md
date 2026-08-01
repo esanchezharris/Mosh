@@ -77,16 +77,15 @@ build).
   architecture-improvement Wave 0 landed
   2026-07-28: #486 (worklog INDEX repair + RED-proven guard) and #487
   (`docs/rfc/` decision-log scaffold, RFCs 001–004) are MERGED; #489
-  (glob-aware god-file guards + the 209-row lock-scope golden ledger) passed
-  the full native gate (selftest ×3 deterministic) and awaits **owner merge**
-  (`needs-owner-merge` label). Wave 1 landed 2026-07-28/29: #490 (PROGRESS
+  (glob-aware god-file guards + the 209-row lock-scope golden ledger) merged
+  2026-07-29. Wave 1 landed 2026-07-28/29: #490 (PROGRESS
   retirement), #491 (PluginBrowser dedupe), #493 (store event-rail
   extraction), #494 (Rack/GenDrawer out of Dock.tsx), #495 (classic-shell
   audit — owner decision pending, feeds RFC 005), and this status
-  consolidation (#492). Follow-on PRs (clipRenderers probe change #497 —
-  owner-merge; store slices #498; RFC 005 draft) are in the queue
-  [measured: `gh pr view` per PR].
-- **Open PRs: 25** [measured 2026-07-29: `gh pr list --state open | jq
+  consolidation (#492), and store slices #498. Follow-on PRs #497 and its
+  stacked reachability/refactor sequence #500/#507/#508/#510 remain open;
+  RFC 005 remains a draft [measured: `gh pr view` per PR, 2026-08-01].
+- **Open PRs: 25** [measured 2026-08-01: `gh pr list --state open | jq
   length`]. The bulk are the reviewed First-Stranger / fix backlog awaiting
   merge (#462–#478 range) plus the program's owner-merge PRs and three
   long-running WIP drafts (#322/#358/#363).

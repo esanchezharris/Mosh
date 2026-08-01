@@ -14,6 +14,7 @@
 #include <juce_core/juce_core.h>
 
 #include "engine/SessionPaths.h"
+#include "engine/SessionMaintenance.h"
 
 using namespace mosh::sessionpaths;
 
@@ -129,6 +130,26 @@ TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[ses
     REQUIRE (sandbox.deleteRecursively());
 }
 
+TEST_CASE ("safety session preparation never claims a populated unowned collision", "[sessionpaths]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-safety-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    REQUIRE (moshDir.createDirectory());
+
+    const auto collision = safetySessionDirectory (moshDir, "pid1-aaaa");
+    REQUIRE (collision.createDirectory());
+    const auto precious = collision.getChildFile ("keep.txt");
+    REQUIRE (precious.replaceWithText ("owner data"));
+
+    const auto prepared = prepareSafetySessionDirectory (moshDir, "pid1-aaaa");
+    REQUIRE (prepared != collision);
+    REQUIRE (precious.loadFileAsString() == "owner data");
+    REQUIRE (isOwnedAutoSession (moshDir, prepared));
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
 TEST_CASE ("symlinked session and settings ancestors use safety directories", "[sessionpaths]")
 {
     const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
@@ -228,6 +249,39 @@ TEST_CASE ("auto-isolated leaves are identifiable so stale ones can be pruned", 
     REQUIRE_FALSE (isAutoIsolatedLeaf ("session-selftest"));
     REQUIRE_FALSE (isAutoIsolatedLeaf ("session-run-script"));
     REQUIRE_FALSE (isAutoIsolatedLeaf ("gate-worktree-7"));
+}
+
+TEST_CASE ("stale auto-session pruning requires the exact ownership marker", "[sessionpaths]")
+{
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+    moshDir.createDirectory();
+
+    const auto actual = moshDir.getChildFile ("session-selftest-auto-3-cccccccc");
+    actual.createDirectory();
+    actual.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
+
+    const auto unowned = moshDir.getChildFile ("session-selftest-auto-1-aaaaaaaa");
+    unowned.createDirectory();
+    const auto ownerArtifact = unowned.getChildFile ("session.tracktionedit");
+    ownerArtifact.replaceWithText ("<EDIT>not harness-owned</EDIT>");
+
+    const auto owned = moshDir.getChildFile ("session-selftest-auto-2-bbbbbbbb");
+    owned.createDirectory();
+    owned.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
+    owned.getChildFile ("mosh-log.jsonl").replaceWithText ("{\"seq\":1}");
+
+    const auto stale = juce::Time::getCurrentTime() - juce::RelativeTime::days (2.0);
+    unowned.setLastModificationTime (stale);
+    owned.setLastModificationTime (stale);
+
+    publishLatestPointer (moshDir, "session-selftest", actual);
+
+    REQUIRE (ownerArtifact.existsAsFile());
+    REQUIRE (ownerArtifact.loadFileAsString() == "<EDIT>not harness-owned</EDIT>");
+    REQUIRE_FALSE (owned.exists());
+
+    moshDir.deleteRecursively();
 }
 
 TEST_CASE ("a populated legacy dir at the pointer path is PRESERVED, never deleted", "[sessionpaths]")

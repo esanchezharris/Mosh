@@ -86,10 +86,11 @@ add_test(NAME HarnessSessionShell
 add_test(NAME HarnessSessionPython
          COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
 if (TARGET Mosh)
-    add_test(NAME AudioRecoverySmoke COMMAND $<TARGET_FILE:Mosh> --audio-recovery-smoke)
+    add_test(NAME AudioRecoverySmoke
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh
+                          $<TARGET_FILE:Mosh>)
     set_tests_properties(AudioRecoverySmoke PROPERTIES
-        ENVIRONMENT "MOSH_AUDIO_OPEN_STALL_MS=60000;MOSH_AUDIO_OPEN_TIMEOUT_MS=250;MOSH_SELFTEST_SESSION=_harness/ctest-audio-recovery-smoke"
-        TIMEOUT 10)
+        TIMEOUT 15)
 endif()
 # test_training.cpp shells out to service/training relative to the CWD, so ctest
 # must run the suite from the repo root.
