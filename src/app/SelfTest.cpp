@@ -9719,6 +9719,7 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     section ("live-audio CoreAudio callback smoke");
 
     auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto& tracktionDeviceManager = eng.engine().getDeviceManager();
     auto* device = deviceManager.getCurrentAudioDevice();
     check (eng.hasAudio(), "audio mode is enabled");
     check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
@@ -9737,12 +9738,17 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (device->getName().equalsIgnoreCase (requested), "current output matches MOSH_AUDIO_OUTPUT_DEVICE");
     }
 
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    tracktionDeviceManager.rescanMidiDeviceList();
+    if (mm != nullptr)
+        mm->runDispatchLoopUntil (100);
+
     auto track = cmd (ops, "create_track", args1 ("name", "Live Smoke"));
     check (ok (track), "create_track ok");
     const auto trackId = track["data"].getProperty ("trackId", var()).toString();
 
     check (ok (cmd (ops, "add_test_tone_clip",
-                   objN ({{ "trackId", trackId }, { "seconds", 2.0 }, { "freq", 440.0 }}))),
+                   objN ({{ "trackId", trackId }, { "seconds", 6.0 }, { "freq", 440.0 }}))),
            "add_test_tone_clip ok");
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
@@ -9802,7 +9808,6 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     LiveAudioProbe probe;
     deviceManager.addAudioCallback (&probe);
 
-    auto* mm = MessageManager::getInstanceWithoutCreating();
     auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
     smokeMs = jlimit (500, 15000, smokeMs);
     const auto end = Time::getMillisecondCounter() + (uint32) smokeMs;
@@ -9856,8 +9861,14 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (hasInput, "GAP2: armed track reports hasInput");
         }
 
-        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "GAP2: seek to 0 ok");
-        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "GAP2: set_transport record ok");
+        auto recordSeek = cmd (ops, "set_transport", args1 ("position", 0.0));
+        check (ok (recordSeek), "GAP2: seek to 0 ok");
+        check (std::abs ((double) recordSeek["data"].getProperty ("position", -1.0)) < 0.01,
+               "GAP2: transport reached 0 before recording");
+        auto recordStart = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (recordStart), "GAP2: set_transport record ok");
+        check ((bool) recordStart["data"].getProperty ("recording", false),
+               "GAP2: record command entered recording state");
 
         // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
         // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
@@ -9907,8 +9918,13 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             speech->stopContinuous();
         }
 
+        check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before explicit stop");
         auto stop = cmd (ops, "stop_recording");
         check (ok (stop), "GAP2: stop_recording ok");
+        check ((bool) stop["data"].getProperty ("applied", false), "GAP2: stop_recording applied");
+        if (! (bool) stop["data"].getProperty ("applied", false))
+            std::cerr << "  ..   GAP2 stop reason: "
+                      << stop["data"].getProperty ("reason", var()).toString() << "\n";
         auto landed = stop["data"].getProperty ("clips", var());
         const int nLanded = landed.isArray() ? landed.size() : 0;
         check (nLanded > 0, "GAP2: a take clip landed on the armed track");

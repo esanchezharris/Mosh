@@ -119,7 +119,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(after.transport.recording).toBe(true);
   });
 
-  it("clicking again while recording just stops it — no re-arm attempt", async () => {
+  it("clicking Record again while recording lands the take through stop_recording", async () => {
     const snap = useStore.getState().snapshot!;
     render(snap);
     await clickRecord(); // arm + start
@@ -134,14 +134,46 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(useStore.getState().transport.recording).toBe(true);
     render(useStore.getState().snapshot!);
 
-    await clickRecord(); // should just stop — nothing left to arm
+    const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
+    await clickRecord();
 
-    expect(execCalls.map((c) => c.command)).toEqual(["set_transport"]);
-    expect(execCalls[0].args).toMatchObject({ action: "record" });
+    expect(execCalls.map((c) => c.command)).toEqual(["stop_recording"]);
 
     await act(async () => {
       await useStore.getState().refresh();
     });
     expect(useStore.getState().transport.recording).toBe(false);
+    expect(useStore.getState().snapshot!.tracks.flatMap((track) => track.clips)).toHaveLength(clipsBefore + 1);
+  });
+
+  it("the visible Stop button lands the active take before returning to project start", async () => {
+    const snap = useStore.getState().snapshot!;
+    render(snap);
+    await clickRecord();
+
+    await act(async () => {
+      await useStore.getState().exec("set_transport", { position: 6 });
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
+
+    const stop = host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!;
+    await act(async () => {
+      stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(execCalls).toEqual([
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { position: 0 } },
+    ]);
+
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
+    expect(useStore.getState().snapshot!.tracks.flatMap((track) => track.clips)).toHaveLength(clipsBefore + 1);
   });
 });
