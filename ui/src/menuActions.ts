@@ -32,7 +32,7 @@ export interface ActionStore {
   pasteClipboard: () => Promise<void>;
   clearSelection: () => void;
   selection: Set<string>;
-  transport: { playing: boolean; position?: number };
+  transport: { playing: boolean; recording?: boolean; position?: number };
   enterRecord?: (bar?: number) => Promise<void>;
   snapshot?: Snapshot | null;
   clipboard?: unknown;
@@ -211,7 +211,7 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       await store.exec("set_transport", { action: "toggle" });
       return;
     case "record":
-      if (store.enterRecord) {
+      if (store.enterRecord && !store.transport.recording) {
         await store.enterRecord();
         return;
       }

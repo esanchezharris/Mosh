@@ -331,6 +331,21 @@ describe("runAction — transport", () => {
     expect(execCalls).toEqual([]);
   });
 
+  it("record finalizes through transport when recording is already active", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      transport: { playing: true, recording: true, position: 3 },
+    });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
   it("seek and loop_region preserve ruler set_transport payloads", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("seek", ctx, { position: 2.25 });
