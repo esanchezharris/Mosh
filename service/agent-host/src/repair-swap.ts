@@ -27,6 +27,14 @@ export class RepairSwap {
 
   private async launchUnlocked(repairId: string, buildPath: string): Promise<RepairJob> {
     let current = await this.store.loadRepair(repairId);
+    const anotherActiveRepair = (await this.store.listRepairs()).find((job) =>
+      job.id !== repairId
+      && (job.status === "queued"
+        || job.status === "running"
+        || job.status === "full_gate_pending"));
+    if (anotherActiveRepair) {
+      throw failure("repair_active", "Another repair is already active");
+    }
     try {
       if (!current.result || !current.worktreePath) {
         throw failure("repair_swap_state", "Repair result is missing");

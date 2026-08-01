@@ -25,6 +25,7 @@ export type {
 
 export class OwnerOrchestrator {
   private emitEvent?: EventSink;
+  private repairTail: Promise<void> = Promise.resolve();
   private readonly coordinator: ReportCoordinator;
   private readonly repairs: RepairManager;
   private readonly swaps: RepairSwap;
@@ -64,21 +65,35 @@ export class OwnerOrchestrator {
   }
 
   createRepair(report: PlaytestReport): Promise<RepairJob> {
-    return this.repairs.create(report);
+    return this.serializeRepairOperation(() => this.repairs.create(report));
   }
 
   completeRepair(
     repair: RepairJob,
     result: NonNullable<RepairJob["result"]>,
   ): Promise<RepairJob> {
-    return this.repairs.complete(repair, result);
+    return this.serializeRepairOperation(() => this.repairs.complete(repair, result));
   }
 
   launchRepairBuild(repair: RepairJob, buildPath: string): Promise<RepairJob> {
-    return this.swaps.launch(repair.id, buildPath);
+    return this.serializeRepairOperation(() => this.swaps.launch(repair.id, buildPath));
   }
 
   rollbackRepair(repair: RepairJob, reason: string): Promise<RepairJob> {
-    return this.swaps.rollback(repair.id, reason);
+    return this.serializeRepairOperation(() => this.swaps.rollback(repair.id, reason));
+  }
+
+  private async serializeRepairOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const preceding = this.repairTail;
+    let release = (): void => undefined;
+    this.repairTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await preceding;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 }

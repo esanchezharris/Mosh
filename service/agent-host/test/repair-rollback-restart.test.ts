@@ -111,4 +111,41 @@ describe("persisted rolled_back relaunch", () => {
       .rejects.toMatchObject({ code: "repair_swap_state" });
     expect(fakes.processCalls).toEqual([]);
   });
+
+  it("rejects relaunching an older repair while a newer repair is active", async () => {
+    const { fakes, store, report, repair } = await persistedSwapFixture("repair_running");
+    const restarted = restartedService(store, fakes);
+    await restarted.initialize();
+    await restarted.rollbackRepair(repair.id, "owner requested rollback");
+    const newer = await restarted.createRepair(report.id);
+    fakes.processCalls.length = 0;
+
+    await expect(restarted.launchRepairBuild(repair.id, "/build/Mosh.app"))
+      .rejects.toMatchObject({ code: "repair_active" });
+
+    expect(fakes.processCalls).toEqual([]);
+    expect((await store.loadRepair(repair.id)).swap?.state).toBe("rolled_back");
+    expect((await store.loadRepair(newer.id)).status).toBe("running");
+  });
+
+  it("serializes a concurrent relaunch and new repair reservation", async () => {
+    const { fakes, store, report, repair } = await persistedSwapFixture("repair_running");
+    const restarted = restartedService(store, fakes);
+    await restarted.initialize();
+    await restarted.rollbackRepair(repair.id, "owner requested rollback");
+    fakes.processCalls.length = 0;
+
+    const outcomes = await Promise.allSettled([
+      restarted.createRepair(report.id),
+      restarted.launchRepairBuild(repair.id, "/build/Mosh.app"),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    expect(outcomes.find((outcome) => outcome.status === "rejected")).toMatchObject({
+      reason: { code: "repair_active" },
+    });
+    const active = (await store.listRepairs()).filter((job) =>
+      job.status === "queued" || job.status === "running" || job.status === "full_gate_pending");
+    expect(active).toHaveLength(1);
+  });
 });
