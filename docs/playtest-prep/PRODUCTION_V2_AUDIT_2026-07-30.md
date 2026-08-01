@@ -143,7 +143,7 @@ tree. It did not inspect source, logs, or hidden commands.
 | A09 | Undo/redo | Edit menu | Inspect entries | Undo/redo are reachable | Entries exposed; behavior not yet exercised | `more-tools.png` | MAJOR | pending journey | — | PARTIAL |
 | A10 | Shift-drag range | Detailed ruler | Shift-held drag | Range appears; no transport scrub | Black-box tool could not hold a modifier; informed native pass below succeeds | `shift-drag-attempt.png` | NOTE | — | — | PASS informed |
 | A11 | Audio track selection | MIDI clip selected; audio track present | Select audio track header | Track selection and inspector target are unambiguous | Audio track showed selected while MIDI clip inspector remained visible | `audio-selection-mismatch.png` | MAJOR | [#518](https://github.com/zeke431/Mosh/issues/518) | — | FAIL |
-| A12 | Degraded-audio Settings recovery | Exact Release candidate; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; click Retry; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` blocked in Settings; frozen PR candidates returned from Retry and kept Settings responsive. The current exact result is authoritative only when the external manifest `head_sha` matches the live PR head. | Issue #527 exact-head audit manifest, screenshots, redacted Retry JSONL | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | Current-head manifest required; merged-Release rerun pending |
+| A12 | Degraded-audio Settings recovery | Exact Release candidate; MacBook Pro Speakers + BlackHole 2ch pairing | Launch through the bounded timeout; click Retry; open File/options > Settings | Degraded mode remains responsive and Settings explains the unavailable device | Baseline `379bd6a1` blocked in Settings; frozen #528 candidates returned from Retry and kept Settings responsive. PR #560 subsequently isolated audit property storage while preserving the installed owner fingerprints. | Issue #527 and #557 exact-head manifests, screenshots, redacted Retry JSONL | BLOCKER | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528), [#560](https://github.com/zeke431/Mosh/pull/560) | PASS on exact candidates; combined merged-Release device rerun pending |
 
 Correction to the source-free report: direct comparison of
 `before-ruler-drag.png` and `after-ruler-drag.png` shows that the MIDI clip
@@ -159,49 +159,35 @@ not a finding.
 | Packaged Moshi substitutes demo commands after a brain-provider failure | MAJOR | Both single-shot and agentic-loop callers now fail visibly without commands; browser mocks use an explicit `e2e` mode and isolated `dist-e2e`, legacy/ambient development builds abort, and a real native WebView disables demo brains. The complete exact-head evidence successor merged at `6c3687db`. | [#521](https://github.com/zeke431/Mosh/issues/521) | [#522](https://github.com/zeke431/Mosh/pull/522) | PASS on exact merged Release |
 | Agentic terminal task drawer is exposed to accessibility before its pixels become visible | MAJOR | The entrance animation started at `opacity: 0`; the fix keeps the drawer opaque from mount while retaining its 6 px motion. The complete exact-head evidence successor merged at `379bd6a1`. | [#525](https://github.com/zeke431/Mosh/issues/525) | [#526](https://github.com/zeke431/Mosh/pull/526) | PASS on exact merged Release |
 | Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 moves the complete saved/default setup preflight into a killable child, suppresses degraded enumeration, and rejects DTD/entity declarations before JUCE parses persisted or child setup XML. Exact gate, native UI, hosted, and five-lane verdicts live outside the repository because a commit cannot embed its own final SHA. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | PASS only when external manifest matches PR head; owner-ordered rebase/merged-Release rerun pending |
-| Named audit/harness launches mutate owner Tracktion settings; arbitrary explicit leaves can target owner data | BLOCKER | Candidate preserves the normal installed-app default, gives every non-owner process separate Tracktion property storage, accepts resettable sessions only below owned `_harness`, and sends reserved, escaping, symlinked, arbitrary, or unowned paths to unique safety storage. Native, Python, and Vite brain identities share this boundary; first-party reset and stale auto-session pruning require the exact ownership marker and retain relocated data recoverably. Exact-head headless, native gate, and recovery-smoke evidence must preserve owner settings hash + mtime and project/session hashes. Owner-app coexistence passes only on an exact external package; signed Release + BlackHole/physical-audio acceptance remains OWNER-GATED/PENDING. | [#557](https://github.com/zeke431/Mosh/issues/557) | pending | candidate GREEN; exact-head rerun pending |
+| Named audit/harness launches mutate owner Tracktion settings; arbitrary explicit leaves can target owner data | BLOCKER | PR #560 preserves the normal installed-app default, gives every non-owner process separate property storage, requires exact-marker ownership, and retains reset quarantines recoverably. Native, Python, and Vite identity consumers share the same boundary. The exact candidate kept installed-owner Settings, identity, session tree, and PID invariant while all local/hosted gates and five review lanes passed. | [#557](https://github.com/zeke431/Mosh/issues/557) | [#560](https://github.com/zeke431/Mosh/pull/560) | PASS exact head; merged at `06dea1c1`; signed Release + hardware remain pending |
 | Failed audio Retry duplicates the persistent degraded-audio warning | MINOR | Retry is bounded and truthful, but its failure notification repeats the existing banner and remains visible; separate presentation/accessibility root cause parked behind #528 | [#529](https://github.com/zeke431/Mosh/issues/529) | pending | FAIL candidate; does not block #527 |
+| Primary Stop exits recording without surfacing the take | BLOCKER | The v2 Stop and To-start controls used generic transport stop instead of the take-aware `stop_recording` lifecycle. Draft PR #558 routes every recording-ending transport control through MoshOps, serializes rapid actions, and preserves non-recording behavior. Prior proof lands, saves, and reloads a non-silent take; the rebased exact head requires a new gate and native rerun. | [#531](https://github.com/zeke431/Mosh/issues/531) | [#558](https://github.com/zeke431/Mosh/pull/558) | Rebased candidate; exact-head acceptance pending |
+| Recorded take can persist with its source offset at EOF | BLOCKER | Dedicated lifecycle proof exposed a distinct placement defect: a non-zero timeline recording can reference the end of its source and render silent. This is not fixed by #531. | [#545](https://github.com/zeke431/Mosh/issues/545) | pending | FAIL frozen reproduction |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
 
 ## Current serial-fix boundary
 
-PRs #519, #520, #522, #526, and #528 are merged. The canonical campaign
-baseline is merge SHA `e520550b597163d51122e0cff1de42b11f58ec56`.
+PRs #519, #520, #522, #526, #528, and #560 are merged. The canonical campaign
+baseline is merge SHA `06dea1c17788ae75a4618ae0a549fe23cca07c97`.
 
-Issue #557 is the active serial predecessor. It blocks trustworthy native work
-because older audit binaries can write global Tracktion settings even when
-`MOSH_SELFTEST_SESSION` isolates their project and command-log directories.
-The candidate isolates property storage before Tracktion engine construction
-and makes recursive session reset conditional on an exact ownership marker
-inside `_harness`. External exact-head evidence binds the base/head pair, clean
-tree, gate, runtime hashes, and five review verdicts; any new commit invalidates
-that evidence.
+PR #560 closed the audit-settings isolation predecessor with exact native gate,
+owner-app-open Computer Use, hosted Linux/macOS, 26-artifact integrity, and five
+fresh PASS reviews. The installed owner settings, identity, session tree, and PID
+remained invariant. This coexistence proof does not certify signed Release audio
+or hardware routing.
 
-PR #558 remains draft. After #557 merges, #558 must rebase onto that merge SHA
-and regenerate all SHA-bound gates, runtime evidence, reviews, ledger entries,
-and manifests; predecessor hosted checks are supporting signal only. PR #523 is
-not part of this audit's serial path and must not be merged by this campaign.
-Issue #529 remains separately parked behind the audio-recovery work.
+Draft PR #558 is the active serial candidate. Its rebase onto `06dea1c1`
+invalidates every predecessor SHA-bound gate, runtime artifact, review, ledger,
+and manifest. Those must be regenerated before review or merge; old hosted checks
+are supporting history only. Recorded-source placement #545 remains an independent
+blocker and is not fixed by #558. PR #523 is outside this audit path and must not
+be merged by this campaign. Issue #529 remains separately parked.
 
-Candidate #557 isolates Tracktion property storage for every named
-audit/harness session while preserving the normal installed-app default.
-Brain identity consumers and first-party cleanup now honor the same owned
-`_harness` boundary; unsafe Python/Vite requests use ephemeral IDs without a
-filesystem write.
-Exact-head headless launch, Retry, clean exit, and local native gate must
-preserve the owner `Settings.xml` hash + mtime and project/session hashes. The
-exact external package also records whether the installed owner process remains
-open with identical settings, identity, and session-tree fingerprints. Signed
-Release + BlackHole/physical-audio acceptance remains OWNER-GATED/PENDING.
-
-The installed owner baseline is open and frozen against mutation. Issue #557
-evidence must preserve its process and owner fingerprints while a uniquely
-identified audit candidate runs; this coexistence proof does not certify signed
-audio or hardware routing. The showcase, configured-backend pass, same-Mac
-collaboration run, export matrix, stem validation, and final merged-SHA inventory
-rerun remain open.
+The showcase, configured-backend pass, same-Mac collaboration run, export matrix,
+stem validation, signed/hardware acceptance, and final merged-SHA inventory rerun
+remain open.
 
 ## Audio timeout recovery evidence
 
