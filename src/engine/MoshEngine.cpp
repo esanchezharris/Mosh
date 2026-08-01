@@ -153,16 +153,27 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
                               && freshSessionName.isEmpty()
                               && explicitSession.isEmpty();
     session = mosh::sessionpaths::resolveSessionDirectory (
-        moshDir, sessionLeaf, uniqueTag, useOwnerSession);
+        moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
     const auto propertyStorageDir =
         mosh::sessionpaths::resolvePropertyStorageDir (
             moshDir, sessionLeaf, uniqueTag, useOwnerSession);
 
-    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project.
-    const bool mayWipe = freshSession && ! useOwnerSession;
-    if (mayWipe)
-        session.deleteRecursively();
+    bool didResetHarnessSession = false;
+    if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
+    {
+        didResetHarnessSession = mosh::sessionpaths::resetOwnedHarnessSession (moshDir, session);
+        if (! didResetHarnessSession)
+            session = mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag);
+    }
+
     session.createDirectory();
+    if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::markOwnedHarnessSession (moshDir, session))
+    {
+        session = mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag);
+        session.createDirectory();
+    }
     propertyStorageDir.createDirectory();
 
     // 3-arg construction so we can disable auto device-init in no-audio mode
@@ -182,11 +193,10 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // GUI session, or another concurrent harness — see freshSession below. Established
     // BEFORE the device init so PRE-001 can restore the persisted device setup from it.
     // freshSessionName is a BASE leaf ("session-selftest", ...); empty means the GUI.
-    // resolveSessionLeaf applies the MOSH_SELFTEST_SESSION override (explicit always wins
-    // verbatim — gate.sh/verify.py read artifacts back out of that exact path) and otherwise
-    // auto-isolates headless runs per process, so two concurrent harnesses can no longer
-    // wipe each other's session dir mid-test. See src/engine/SessionPaths.h.
-    if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
+    // resolveSessionLeaf captures MOSH_SELFTEST_SESSION; resolveSessionDirectory then
+    // accepts it only inside the marker-owned _harness namespace. Unset overrides still
+    // auto-isolate per process. See src/engine/SessionPaths.h.
+    if (explicitSession.isEmpty() && mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
         mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);
     session.getChildFile ("audio").createDirectory();
     // A2 — latch the prior session's liveness sentinel BEFORE this run overwrites it. Present
@@ -209,8 +219,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
 
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
-    // Shares mayWipe with the dir wipe above — never `freshSession` alone.
-    if (mayWipe)
+    if (didResetHarnessSession)
         editPath.deleteFile();
 
     bool loadedFromFile = false;

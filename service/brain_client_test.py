@@ -145,7 +145,7 @@ check("_install_id() honours the override verbatim", brain_client._install_id() 
 _clear_env()
 
 # ── 7. _install_id(): minted once, persisted, and reused — isolated from the real session ─
-leaf = "session-brainclient-pytest"
+leaf = "_harness/session-brainclient-pytest"
 identity_dir = os.path.join(os.path.expanduser("~"), "Library", "Mosh", leaf)
 shutil.rmtree(identity_dir, ignore_errors=True)  # start clean regardless of a prior interrupted run
 os.environ["MOSH_SELFTEST_SESSION"] = leaf

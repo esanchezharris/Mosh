@@ -89,10 +89,10 @@ TEST_CASE ("BrainProxy installId is minted once and reused, isolated from the re
     ScopedCleanBrainEnv clean;
     // MOSH_SELFTEST_SESSION mirrors MoshEngine's own hermeticity boundary
     // (src/engine/MoshEngine.cpp) so this never touches ~/Library/Mosh/session/identity.json.
-    ScopedEnv leaf ("MOSH_SELFTEST_SESSION", "session-brainproxy-catch2-test");
+    ScopedEnv leaf ("MOSH_SELFTEST_SESSION", "_harness/session-brainproxy-catch2-test");
     auto dir = File::getSpecialLocation (File::userApplicationDataDirectory)
                    .getChildFile ("Mosh")
-                   .getChildFile ("session-brainproxy-catch2-test");
+                   .getChildFile ("_harness/session-brainproxy-catch2-test");
     dir.deleteRecursively();   // start clean regardless of a prior interrupted run
 
     const auto first = BrainProxy::installId();

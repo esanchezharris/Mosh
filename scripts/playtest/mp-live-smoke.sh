@@ -18,7 +18,7 @@ BIN="${MOSH_BIN:-$(find "$ROOT/build-macos-arm64-release" -name Mosh -path '*Mos
 [ -x "$BIN" ] || { echo "Mosh binary not found; set MOSH_BIN"; exit 2; }
 
 ART="${ART:-/tmp/pp-mp-smoke}"; mkdir -p "$ART"
-SESS_A="session-pp-mpA-$$"; SESS_B="session-pp-mpB-$$"
+SESS_A="_harness/session-pp-mpA-$$"; SESS_B="_harness/session-pp-mpB-$$"
 for s in "$SESS_A" "$SESS_B"; do rm -rf "$HOME/Library/Mosh/$s" "$HOME/Library/Mosh/${s}-undo"; done
 
 echo "binary: $BIN"

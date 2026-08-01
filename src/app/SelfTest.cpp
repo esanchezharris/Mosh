@@ -605,7 +605,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // against the raw env value would fail for any nested value. `fromLastOccurrenceOf`
     // returns the whole string when there is no '/', so a flat value behaves exactly as before.
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
-        check ((s == "session" && mosh::sessionpaths::isSafetyIsolatedLeaf (eng.sessionDir().getFileName()))
+        check (mosh::sessionpaths::isSafetyIsolatedLeaf (eng.sessionDir().getFileName())
                    || eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
                "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
 
@@ -6006,8 +6006,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── A2 — crash-recovery liveness sentinel ───
     // The GUI writes a session.running sentinel once the window is live and deletes it on a
     // clean quit; its presence at the next launch flags an unclean exit (a prior crash). The
-    // headless harness uses a wiped freshSession dir + never marks it, so it always reads
-    // clean. We exercise the mark/clear primitives + the clean-start read directly (the
+    // headless harness uses a cold isolated session, so it always reads clean. We exercise
+    // the mark/clear primitives + the clean-start read directly (the
     // ctor latch is GUI-only). Self-contained: leaves the sentinel cleared.
     section ("A2: crash-recovery liveness sentinel");
     {

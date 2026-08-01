@@ -41,7 +41,7 @@ def _minimal_env(script: Path, results: Path, session: str, extra_env: dict[str,
         {
             "MOSH_RUN_SCRIPT": str(script),
             "MOSH_RUN_SCRIPT_OUT": str(results),
-            "MOSH_SELFTEST_SESSION": session,
+            "MOSH_SELFTEST_SESSION": session if session.startswith("_harness/") else f"_harness/{session}",
             "MOSH_NO_AUDIO": "1",
             "MOSH_ENABLE_SA3": "0",
         }

@@ -25,7 +25,7 @@ echo
 
 # 1) Command-surface selftest (isolated session, headless).
 echo "[1/4] command-surface selftest…"
-S="session-preflight-$$"; rm -rf "$HOME/Library/Mosh/$S" "$HOME/Library/Mosh/${S}-undo" 2>/dev/null
+S="_harness/session-preflight-$$"; rm -rf "$HOME/Library/Mosh/$S" "$HOME/Library/Mosh/${S}-undo" 2>/dev/null
 ST_LOG="$(mktemp -t pp-pf-selftest.XXXX.log)"
 if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$S" "$BIN" --selftest >"$ST_LOG" 2>&1; then
   note_pass "selftest — $(grep -oE '[0-9]+/[0-9]+ checks passed' "$ST_LOG" | tail -1)"

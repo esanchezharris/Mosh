@@ -84,7 +84,7 @@ add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
 if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke COMMAND $<TARGET_FILE:Mosh> --audio-recovery-smoke)
     set_tests_properties(AudioRecoverySmoke PROPERTIES
-        ENVIRONMENT "MOSH_AUDIO_OPEN_STALL_MS=60000;MOSH_AUDIO_OPEN_TIMEOUT_MS=250;MOSH_SELFTEST_SESSION=ctest-audio-recovery-smoke"
+        ENVIRONMENT "MOSH_AUDIO_OPEN_STALL_MS=60000;MOSH_AUDIO_OPEN_TIMEOUT_MS=250;MOSH_SELFTEST_SESSION=_harness/ctest-audio-recovery-smoke"
         TIMEOUT 10)
 endif()
 # test_training.cpp shells out to service/training relative to the CWD, so ctest

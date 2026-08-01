@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-07-29
+Updated: 2026-08-01
 
 > **This is the only rolling status doc.** Dated snapshots live in
 > [`docs/resumption/`](resumption/). History lives in [`docs/worklog/`](worklog/INDEX.md).
@@ -9,7 +9,7 @@ This is the short handoff for the current `main` program seat at **`~/Mosh`**
 (the git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git`; see Branch
 And Worktree Boundaries below). It points to the live docs that matter and calls
 out what is current versus historical. Claims are tagged **[measured]** (ran or
-read this session, 2026-07-28) or **[cited]** (a dated doc/worklog note).
+read in the dated status pass) or **[cited]** (a dated doc/worklog note).
 
 ## Start Here
 
@@ -58,16 +58,22 @@ neural insert was removed (2026-06-21); the only real-time neural path is an
 optional RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default
 build).
 
-## Current Status (as of 2026-07-29)
+## Current Status (as of 2026-08-01)
 
-- **Trunk:** `origin/main` @ `c703a855` (merge of #490, 2026-07-29 early AM)
-  [measured: `git log --oneline origin/main`]. The two most recent landed
+- **Trunk:** `origin/main` @ `e520550b` (squash merge of #528) [measured:
+  `git rev-parse origin/main` and `gh pr view 528`, 2026-08-01]. The recent landed
   campaigns: the **v2 deslop pass** (#479, #481–#485, merged 2026-07-28) — CSS
   partials + shell baselines groundwork, bevel-border removal, accent
   reservation, bloom removal, density (64→72px lanes) — and the
   **architecture-improvement program** below [measured: merge commits on
   `origin/main`].
-- **The architecture-improvement program is the active push.** Wave 0 landed
+- **The production-v2 end-to-end audit is the active push.** The durable ledger
+  is `docs/playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`. Issue #557 is the
+  active serial blocker because audit sessions can mutate global Tracktion
+  settings; draft PR #558 waits behind it and must regenerate all exact-SHA
+  evidence after rebasing. PR #523 is outside this campaign and must not be
+  merged by the audit loop [measured: issue/PR state, 2026-08-01]. The earlier
+  architecture-improvement Wave 0 landed
   2026-07-28: #486 (worklog INDEX repair + RED-proven guard) and #487
   (`docs/rfc/` decision-log scaffold, RFCs 001–004) are MERGED; #489
   (glob-aware god-file guards + the 209-row lock-scope golden ledger) passed

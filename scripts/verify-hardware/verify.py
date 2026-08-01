@@ -47,6 +47,10 @@ def find_binary(explicit=None):
     sys.exit("Mosh binary not found — build it (./run-mosh.sh build) or pass --bin")
 
 
+def _harness_session(session):
+    return session if session.startswith("_harness/") else f"_harness/{session}"
+
+
 def run_script(binary, commands, session, sa3=False, extra_env=None, timeout=180):
     """Write commands as JSONL, run `--run-script`, return (results, proc)."""
     spath = ART / f"{session}.script.jsonl"
@@ -58,7 +62,7 @@ def run_script(binary, commands, session, sa3=False, extra_env=None, timeout=180
     env.update({
         "MOSH_RUN_SCRIPT": str(spath),
         "MOSH_RUN_SCRIPT_OUT": str(opath),
-        "MOSH_SELFTEST_SESSION": session,
+        "MOSH_SELFTEST_SESSION": _harness_session(session),
         "MOSH_ENABLE_SA3": "1" if sa3 else "0",
     })
     if extra_env:
@@ -315,6 +319,10 @@ def _mosh_session_base():
     return Path.home() / ".local" / "share" / "Mosh"
 
 
+def _session_dir(session):
+    return _mosh_session_base() / _harness_session(session)
+
+
 def check_transform(ctx):
     """Route B: the Tier-B transform render mode produces real, non-silent audio that
     differs from its input. Runs OFFLINE — the fake transform adapter is stdlib-only
@@ -338,7 +346,7 @@ def check_transform(ctx):
     results, proc = run_script(ctx.bin, cmds, SESSION,
                                extra_env={"MOSH_SERVICE_PORT": _service_port(8795), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
-    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    outputs = sorted(glob.glob(str(_session_dir(SESSION) / "renders" / "*" / "output.wav")))
     if fails or not outputs:
         return row("Transform render (fake)", False,
                    {"failed_commands": fails, "exists": bool(outputs), "stderr": proc.stderr[-500:]})
@@ -391,7 +399,7 @@ def check_compile_render(ctx):
     fails = failed_commands(results)
     comp = next((r for r in results if r.get("command") == "compile_render"), None)
     cdata = (comp or {}).get("data", {}) or {}
-    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    outputs = sorted(glob.glob(str(_session_dir(SESSION) / "renders" / "*" / "output.wav")))
     detail = {"failed_commands": fails, "compile": cdata}
     if fails or not outputs:
         detail["stderr"] = proc.stderr[-500:]
@@ -424,7 +432,7 @@ def check_compile_corrective(ctx):
     fails = failed_commands(results)
     comp = next((r for r in results if r.get("command") == "compile_render"), None)
     cdata = (comp or {}).get("data", {}) or {}
-    outputs = glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav"))
+    outputs = glob.glob(str(_session_dir(SESSION) / "renders" / "*" / "output.wav"))
     ok = (not fails and cdata.get("mode") == "corrective" and cdata.get("subtype") == "pitch"
           and cdata.get("tool") == "moshAutoTune" and not outputs)   # named the tool, rendered nothing
     return row("Compile corrective (honest boundary)", ok,
@@ -462,7 +470,7 @@ def check_relative_ref_export(ctx):
     a timeout) and is non-silent. Engine-only (no service / no models)."""
     SESSION = "verify-relref"
     out = ART / "06_relative_ref_export.wav"
-    tone = _mosh_session_base() / SESSION / "audio" / "tone.wav"   # add_test_tone_clip writes here
+    tone = _session_dir(SESSION) / "audio" / "tone.wav"   # add_test_tone_clip writes here
     cmds = [
         {"command": "create_track", "args": {"name": "A"}, "capture": {"T": "trackId"}},
         {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 2.0, "freq": 220.0, "name": "tone"}, "capture": {"C": "clipId"}},
@@ -641,7 +649,7 @@ def check_render_artifact_portability(ctx):
     dest_dir = ART / "al009-project"
     dest_edit = dest_dir / "renders.tracktionedit"
     out = ART / "07_render_portability.wav"
-    pool_renders = _mosh_session_base() / SESSION / "renders"
+    pool_renders = _session_dir(SESSION) / "renders"
     shutil.rmtree(dest_dir, ignore_errors=True)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -668,7 +676,7 @@ def check_render_artifact_portability(ctx):
     renders_dir = dest_dir / "audio" / "renders"
     consolidated = renders_dir.is_dir() and any(renders_dir.glob("*.wav"))
     xml = dest_edit.read_text() if dest_edit.exists() else ""
-    pool_abs = str(_mosh_session_base() / SESSION)
+    pool_abs = str(_session_dir(SESSION))
     rel_ok = ("audio/renders/" in xml) and ("../audio/renders/" not in xml) and (pool_abs not in xml)
     if fails or not clip_id or not consolidated or not rel_ok:
         return row("Render-artifact portability (AL-009)", False,
@@ -720,7 +728,7 @@ def check_midi_render(ctx):
     results, proc = run_script(ctx.bin, cmds, SESSION,
                               extra_env={"MOSH_SERVICE_PORT": _service_port(8796), "MOSH_ENABLE_TRANSFORM": "0"})
     fails = failed_commands(results)
-    outputs = sorted(glob.glob(str(_mosh_session_base() / SESSION / "renders" / "*" / "output.wav")))
+    outputs = sorted(glob.glob(str(_session_dir(SESSION) / "renders" / "*" / "output.wav")))
     if fails or not outputs:
         return row("Generative on MIDI (auto-bounce)", False,
                    {"failed_commands": fails, "exists": bool(outputs), "stderr": proc.stderr[-500:]})
@@ -832,7 +840,7 @@ def check_reactive_rerender(ctx):
                                           "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
     fails = failed_commands(results)
     layer_id = _data_field(results, "create_render_layer", "layerId")
-    audio_dir = _mosh_session_base() / SESSION / "audio"
+    audio_dir = _session_dir(SESSION) / "audio"
     files = sorted(glob.glob(str(audio_dir / f"{layer_id}-*.wav"))) if layer_id else []
     snap = _snap_for(results, "after_reactive")
     st = {}
@@ -887,7 +895,7 @@ def check_freeze_stops_rerender(ctx):
                                           "MOSH_REACTIVE_DEBOUNCE_MS": "1"})
     fails = failed_commands(results)
     layer_id = _data_field(results, "create_render_layer", "layerId")
-    audio_dir = _mosh_session_base() / SESSION / "audio"
+    audio_dir = _session_dir(SESSION) / "audio"
 
     def layer_files():
         return sorted(glob.glob(str(audio_dir / f"{layer_id}-*.wav"))) if layer_id else []
@@ -929,7 +937,7 @@ def check_crash_recovery(ctx):
     Asserts: before-recover the saved state has 1 track; after-recover it has 2, and the
     recovered Beta carries its clip (proves the value-based id-rebinding worked)."""
     SESSION = "verify-recovery"
-    base = _mosh_session_base() / SESSION
+    base = _session_dir(SESSION)
     if base.exists():
         shutil.rmtree(base, ignore_errors=True)
     keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
@@ -1078,7 +1086,7 @@ def check_skill_transaction_real_engine(ctx):
     # --selftest: run 1 opens a transaction, applies a step, and exits without resolving it
     # (the crash shape). Run 2 must refuse to start any skill until T2's recovery resolves it.
     SESSION = "verify-txn-restart"
-    base = _mosh_session_base() / SESSION
+    base = _session_dir(SESSION)
     if base.exists():
         shutil.rmtree(base, ignore_errors=True)
     keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}

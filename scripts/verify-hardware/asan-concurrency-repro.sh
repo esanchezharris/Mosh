@@ -5,7 +5,7 @@ crashes=0; total=0; oob=0
 for r in $(seq 1 "$ROUNDS"); do
   pids=()
   for i in 1 2 3 4 5; do
-    ( MOSH_SELFTEST_SESSION="asan-$LABEL-r$r-$i" MOSH_SERVICE_PORT=$((9500 + r*10 + i)) \
+    ( MOSH_SELFTEST_SESSION="_harness/asan-$LABEL-r$r-$i" MOSH_SERVICE_PORT=$((9500 + r*10 + i)) \
         "$BIN" --selftest -ApplePersistenceIgnoreState YES > "/tmp/asan-$LABEL-$r-$i.log" 2>&1 ) &
     pids+=($!)
   done

@@ -285,7 +285,7 @@ fi
 
 # ────────────────────────── 7. selftest the staged app ──────────────────────────
 header "7/10  selftest staged app"
-SELFTEST_SESSION="session-package-zip-$$"
+SELFTEST_SESSION="_harness/session-package-zip-$$"
 rm -rf "$HOME/Library/Mosh/${SELFTEST_SESSION}" "$HOME/Library/Mosh/${SELFTEST_SESSION}-undo" 2>/dev/null || true
 ST_LOG="$(mktemp -t pkg-guest-selftest.XXXX.log)"
 if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SELFTEST_SESSION" "$STAGED/Contents/MacOS/Mosh" --selftest >"$ST_LOG" 2>&1; then
@@ -351,7 +351,7 @@ if ditto -x -k "$ZIP_PATH" "$SIM_DIR"; then
       note_warn "could not attach a synthetic quarantine xattr to test unquarantine.sh (non-fatal)"
     fi
 
-    SIM_SESSION="session-package-zip-sim-$$"
+    SIM_SESSION="_harness/session-package-zip-sim-$$"
     rm -rf "$HOME/Library/Mosh/${SIM_SESSION}" "$HOME/Library/Mosh/${SIM_SESSION}-undo" 2>/dev/null || true
     SIM_LOG="$(mktemp -t pkg-guest-sim-selftest.XXXX.log)"
     if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SIM_SESSION" "$SIM_APP/Contents/MacOS/Mosh" --selftest >"$SIM_LOG" 2>&1; then
