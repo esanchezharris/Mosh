@@ -403,6 +403,29 @@ export const useStore = create<State>((set, get, api) => ({
       if (get().projectEpoch === transitionEpoch && replacementReady)
         set({ projectTransitioning: false });
       if (!replacementReady) {
+        if (get().projectEpoch === transitionEpoch) {
+          // The edit did change, so the previous snapshot is no longer safe to expose.
+          // Reopen the UI on an honest blank state, then retry once through the normal
+          // refresh path. Recording cannot target stale armed/selected track ids while
+          // that retry is pending, and a second failure leaves the app recoverable.
+          set({
+            snapshot: null,
+            connected: false,
+            projectTransitioning: false,
+            selection: new Set<string>(),
+            selectedTrackId: null,
+            expandedTracks: new Set<string>(),
+            transport: {
+              playing: false,
+              recording: false,
+              position: 0,
+              looping: false,
+              loopStart: 0,
+              loopEnd: 0,
+            },
+          });
+          await get().refresh();
+        }
         recordSessionCommand(command, args, res.ok);
         return res;
       }

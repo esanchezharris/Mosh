@@ -294,4 +294,41 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     snapshotSpy.mockRestore();
     executeSpy.mockRestore();
   });
+
+  it("clears stale project state and retries after a replacement snapshot failure", async () => {
+    const previous = useStore.getState().snapshot!;
+    const replacement: Snapshot = {
+      ...previous,
+      session: { ...previous.session, editFile: "/mock/retried.mosh" },
+      tracks: [],
+    };
+    let releaseRetry: ((snapshot: Snapshot) => void) | undefined;
+    const executeSpy = vi.spyOn(bridge, "executeCommand").mockResolvedValueOnce({
+      ok: true,
+      command: "open_project",
+    });
+    const snapshotSpy = vi.spyOn(bridge, "getSnapshot")
+      .mockRejectedValueOnce(new Error("snapshot temporarily unavailable"))
+      .mockImplementationOnce(async () => new Promise((resolve) => { releaseRetry = resolve; }));
+
+    const opening = useStore.getState().exec("open_project", { file: "/mock/retried.mosh" });
+    await vi.waitFor(() => expect(releaseRetry).toBeTypeOf("function"));
+
+    expect(useStore.getState()).toMatchObject({
+      snapshot: null,
+      connected: false,
+      projectTransitioning: false,
+      selectedTrackId: null,
+    });
+    await useStore.getState().enterRecord();
+    expect(useStore.getState().lastError).toBe("Add a track before recording.");
+    expect(executeSpy).toHaveBeenCalledOnce();
+
+    releaseRetry!(replacement);
+    await opening;
+    expect(useStore.getState().projectTransitioning).toBe(false);
+    expect(useStore.getState().snapshot?.session.editFile).toBe("/mock/retried.mosh");
+    snapshotSpy.mockRestore();
+    executeSpy.mockRestore();
+  });
 });
