@@ -14,6 +14,9 @@ with tempfile.TemporaryDirectory(prefix="mosh-harness-reset-") as temp:
     (owned / "stale.txt").write_text("stale")
     assert harness_session.reset_owned_harness_session(owned)
     assert not owned.exists()
+    recovery = list((root / "_harness").glob(".mosh-reset-owned-*"))
+    assert len(recovery) == 1
+    assert (recovery[0] / "stale.txt").read_text() == "stale"
 
     unowned = root / "_harness" / "unowned"
     unowned.mkdir()

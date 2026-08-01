@@ -38,7 +38,7 @@ namespace mosh::sessionpaths
             if (child == actualSessionDir || child.isSymbolicLink())
                 continue;
             // Names and age are attacker/owner-controlled metadata. Only the exact
-            // marker establishes that recursive deletion is permitted.
+            // marker permits relocation into a recoverable reset quarantine.
             if (! isOwnedAutoSession (moshDir, child))
                 continue;
             if ((now - child.getLastModificationTime()).inHours() < (double) kPruneAfterHours)

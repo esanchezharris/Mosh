@@ -14,7 +14,9 @@ source "$(cd "$(dirname "$0")" && pwd)/harness-session.sh"
 mosh_reset_owned_harness_session "_harness/owned"
 test ! -e "$MOSH_APP_DATA_DIR/_harness/owned"
 test -d "$MOSH_APP_DATA_DIR/_harness/.mosh-reset.KEEP"
-test -z "$(find "$MOSH_APP_DATA_DIR/_harness" -maxdepth 1 -type d -name '.mosh-reset.*' ! -name '.mosh-reset.KEEP' -print -quit)"
+recovery="$(find "$MOSH_APP_DATA_DIR/_harness" -maxdepth 1 -type d -name '.mosh-reset.*' ! -name '.mosh-reset.KEEP' -print -quit)"
+test -n "$recovery"
+test "$(cat "$recovery/session/stale.txt")" = "stale"
 if mosh_reset_owned_harness_session "_harness/unowned"; then
   echo "unowned harness reset unexpectedly succeeded" >&2
   exit 1

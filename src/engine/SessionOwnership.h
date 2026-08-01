@@ -150,18 +150,15 @@ namespace mosh::sessionpaths
                 containmentRoot.getChildFile (quarantineName).getChildFile (movedName));
        #endif
 
-        if (! detail::removeDirectoryContents (moved.get()))
-            return false;
-
-        const auto currentName = detail::nameForIdentity (quarantine.get(), *movedIdentity);
-        if (! currentName)
-            return false;
-        const auto currentIdentity = detail::identityAt (quarantine.get(), *currentName);
-        if (! currentIdentity || ! detail::sameIdentity (*movedIdentity, *currentIdentity)
-            || ::unlinkat (quarantine.get(), currentName->c_str(), AT_REMOVEDIR) != 0)
-            return false;
-
-        return ::unlinkat (root.get(), quarantineName.c_str(), AT_REMOVEDIR) == 0;
+        // Keep the verified session under its unique quarantine instead of recursively
+        // unlinking it. POSIX has no identity-conditional unlink: a concurrent writer
+        // could replace a checked child in the final check-to-unlink window. Atomic
+        // relocation frees the requested path while preserving every captured entry for
+        // recovery, including a replacement that raced with this reset.
+        const auto currentIdentity = detail::identityAt (quarantine.get(), movedName);
+        return currentIdentity && detail::sameIdentity (*movedIdentity, *currentIdentity)
+            && detail::markerMatches (
+                moved.get(), kHarnessOwnershipFile, kHarnessOwnershipContents);
        #endif
     }
 }

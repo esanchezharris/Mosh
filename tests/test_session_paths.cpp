@@ -149,9 +149,12 @@ TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[ses
              == owned);
     REQUIRE (resetOwnedHarnessSession (moshDir, owned));
     REQUIRE_FALSE (owned.exists());
-    REQUIRE (moshDir.getChildFile ("_harness")
-                  .findChildFiles (juce::File::findDirectories, false, ".mosh-reset-*")
-                  .isEmpty());
+    const auto recoveries = moshDir.getChildFile ("_harness")
+                                .findChildFiles (juce::File::findDirectories, false,
+                                                 ".mosh-reset-*");
+    REQUIRE (recoveries.size() == 1);
+    REQUIRE (recoveries[0].getChildFile ("session/stale.txt").loadFileAsString()
+             == "stale harness data");
 
     REQUIRE (sandbox.deleteRecursively());
 }
@@ -228,6 +231,45 @@ TEST_CASE ("ownership reset never deletes a replacement after quarantine verific
     REQUIRE_FALSE (resetOwnedIsolationDirectory (root, target, &hooks));
     REQUIRE (replacement.getChildFile ("keep.txt").loadFileAsString() == "replacement data");
     REQUIRE_FALSE (replacement.getChildFile (kHarnessOwnershipFile).exists());
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("ownership reset retains replaced quarantine children for recovery",
+           "[sessionpaths][race]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-child-race-" + juce::Uuid().toString());
+    const auto root = sandbox.getChildFile ("Mosh");
+    const auto target = root.getChildFile ("session-selftest-auto-pid1-aaaa");
+    REQUIRE (root.createDirectory());
+    REQUIRE (createFreshOwnedIsolationDirectory (root, target));
+
+    const auto staleFile = target.getChildFile ("render.wav");
+    const auto staleDirectory = target.getChildFile ("exports");
+    REQUIRE (staleFile.replaceWithText ("owned stale file"));
+    REQUIRE (staleDirectory.createDirectory());
+    REQUIRE (staleDirectory.getChildFile ("old.wav").replaceWithText ("owned stale directory"));
+
+    juce::File quarantined;
+    IsolationOwnershipTestHooks hooks;
+    hooks.afterQuarantinedDirectoryOpened = [&] (const juce::File& directory)
+    {
+        quarantined = directory;
+        REQUIRE (directory.getChildFile ("render.wav").deleteFile());
+        REQUIRE (directory.getChildFile ("render.wav").replaceWithText ("replacement file"));
+        REQUIRE (directory.getChildFile ("exports").deleteRecursively());
+        REQUIRE (directory.getChildFile ("exports").createDirectory());
+        REQUIRE (directory.getChildFile ("exports/keep.wav")
+                     .replaceWithText ("replacement directory"));
+    };
+
+    REQUIRE (resetOwnedIsolationDirectory (root, target, &hooks));
+    REQUIRE_FALSE (target.exists());
+    REQUIRE (quarantined.getChildFile ("render.wav").loadFileAsString()
+             == "replacement file");
+    REQUIRE (quarantined.getChildFile ("exports/keep.wav").loadFileAsString()
+             == "replacement directory");
 
     REQUIRE (sandbox.deleteRecursively());
 }
@@ -380,8 +422,11 @@ TEST_CASE ("stale auto-session pruning requires the exact ownership marker", "[s
     REQUIRE (ownerArtifact.existsAsFile());
     REQUIRE (ownerArtifact.loadFileAsString() == "<EDIT>not harness-owned</EDIT>");
     REQUIRE_FALSE (owned.exists());
-    REQUIRE (moshDir.findChildFiles (
-                 juce::File::findDirectories, false, ".mosh-reset-*").isEmpty());
+    const auto recoveries = moshDir.findChildFiles (
+        juce::File::findDirectories, false, ".mosh-reset-*");
+    REQUIRE (recoveries.size() == 1);
+    REQUIRE (recoveries[0].getChildFile ("session/mosh-log.jsonl").loadFileAsString()
+             == "{\"seq\":1}");
 
     moshDir.deleteRecursively();
 }

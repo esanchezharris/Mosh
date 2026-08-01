@@ -98,10 +98,11 @@ kill_stray_services() {
 # hazard — `session*` also matches the owner's hand-made session-backup-* dirs, and
 # `lora*` also matches the real 10 GB adapter rack.
 #
-# The engine accepts explicit sessions only below `_harness`, claims absent or empty
-# leaves with its exact ownership marker, and recursively resets only marker-owned
-# leaves. Reserved, traversal, symlinked, and populated-unowned requests fail over to
-# a unique safety session without touching owner data.
+# The engine accepts explicit sessions only below `_harness`. It can create and mark
+# an absent leaf; an existing leaf is accepted only when it already has the exact
+# marker. Reset atomically relocates marker-owned data into a recoverable quarantine.
+# Reserved, traversal, symlinked, empty-unowned, and populated-unowned requests fail
+# over to a unique safety session without touching owner data.
 unique_session() {
   local slug="${1:-al}"
   slug="$(printf '%s' "$slug" | tr -c 'A-Za-z0-9._-' '-')"

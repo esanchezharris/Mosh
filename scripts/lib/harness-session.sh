@@ -62,5 +62,5 @@ mosh_reset_owned_harness_session() {
     printf 'harness ownership changed during reset: %s\n' "$session" >&2
     return 2
   fi
-  /bin/rm -rf -- "$quarantine"
+  return 0
 }

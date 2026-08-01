@@ -187,8 +187,10 @@ String BrainProxy::installId()
         return ov;
 
     // This uses SessionPaths before MoshEngine exists because --brain-smoke calls the
-    // proxy directly. Only an absent/empty or exact marker-owned `_harness` request is
-    // persisted there; unsafe values resolve to the same per-process safety session.
+    // proxy directly. An absent `_harness` request can be created and marked; an
+    // existing request is persisted only when it already has the exact marker.
+    // Unsafe or unowned values use per-process safety storage, or an ephemeral ID if
+    // that storage cannot be allocated.
     const auto leaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
     const auto moshDir = mosh::sessionpaths::moshDataDirectory (leaf.isNotEmpty());
     const auto identityDirectory = mosh::sessionpaths::resolveIdentitySessionDirectory (

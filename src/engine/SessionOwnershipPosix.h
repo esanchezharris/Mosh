@@ -4,7 +4,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
@@ -246,91 +245,6 @@ namespace mosh::sessionpaths::detail
         return true;
     }
 
-    inline bool removeEntry (int parentFd, const std::string& name);
-
-    inline bool removeDirectoryContents (int directoryFd)
-    {
-        const auto duplicate = ::dup (directoryFd);
-        if (duplicate < 0)
-            return false;
-
-        auto* stream = ::fdopendir (duplicate);
-        if (stream == nullptr)
-        {
-            ::close (duplicate);
-            return false;
-        }
-
-        std::vector<std::string> names;
-        while (auto* entry = ::readdir (stream))
-        {
-            const std::string name (entry->d_name);
-            if (name == "." || name == "..")
-                continue;
-            names.push_back (name);
-        }
-        ::closedir (stream);
-
-        bool ok = true;
-        for (const auto& name : names)
-            if (! removeEntry (directoryFd, name))
-                ok = false;
-        return ok;
-    }
-
-    inline bool removeEntry (int parentFd, const std::string& name)
-    {
-        const auto before = identityAt (parentFd, name);
-        if (! before)
-            return errno == ENOENT;
-
-        if (! S_ISDIR (before->mode))
-        {
-            const auto current = identityAt (parentFd, name);
-            return current && sameIdentity (*before, *current)
-                && ::unlinkat (parentFd, name.c_str(), 0) == 0;
-        }
-
-        auto directory = openChildDirectory (parentFd, name);
-        const auto opened = directory ? identityForFd (directory.get()) : std::nullopt;
-        if (! opened || ! sameIdentity (*before, *opened)
-            || ! removeDirectoryContents (directory.get()))
-            return false;
-
-        const auto current = identityAt (parentFd, name);
-        return current && sameIdentity (*opened, *current)
-            && ::unlinkat (parentFd, name.c_str(), AT_REMOVEDIR) == 0;
-    }
-
-    inline std::optional<std::string> nameForIdentity (
-        int parentFd, const FileIdentity& wanted)
-    {
-        const auto duplicate = ::dup (parentFd);
-        if (duplicate < 0)
-            return std::nullopt;
-        auto* stream = ::fdopendir (duplicate);
-        if (stream == nullptr)
-        {
-            ::close (duplicate);
-            return std::nullopt;
-        }
-
-        std::optional<std::string> result;
-        while (auto* entry = ::readdir (stream))
-        {
-            const std::string name (entry->d_name);
-            if (name == "." || name == "..")
-                continue;
-            const auto identity = identityAt (parentFd, name);
-            if (identity && sameIdentity (*identity, wanted))
-            {
-                result = name;
-                break;
-            }
-        }
-        ::closedir (stream);
-        return result;
-    }
 }
 
 #endif

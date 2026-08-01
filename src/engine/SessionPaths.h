@@ -73,8 +73,9 @@ namespace mosh::sessionpaths
                                             const juce::String& explicitOverride,
                                             const juce::String& uniqueTag)
     {
-        // An explicitly requested leaf always wins verbatim: callers that set it are
-        // reading artifacts back out of that exact path afterwards.
+        // Preserve an explicit request verbatim for validation. The requested
+        // filesystem path does not necessarily win: unsafe or unowned requests are
+        // redirected to a unique safety directory by resolveSessionDirectory.
         if (const auto s = explicitOverride.trim(); s.isNotEmpty())
             return s;
 
@@ -156,11 +157,11 @@ namespace mosh::sessionpaths
         return createFreshOwnedIsolationDirectory (moshDir, directory);
     }
 
-    /** Marks a newly-created, empty `_harness` directory as disposable.
+    /** Creates and marks a new `_harness` directory as resettable.
 
-        Refusing non-empty directories is deliberate: an arbitrary existing directory
-        can contain owner data regardless of its name, and must never be claimed merely
-        because a caller supplied its path in MOSH_SELFTEST_SESSION. */
+        Refusing every existing unowned directory, even an empty one, is deliberate:
+        path contents can change after observation, so an arbitrary existing directory
+        must never be claimed merely because a caller supplied it. */
     inline bool createOwnedHarnessSession (const juce::File& moshDir,
                                            const juce::File& directory)
     {
@@ -181,7 +182,7 @@ namespace mosh::sessionpaths
     /** Resolves the project directory without allowing an environment-controlled
         leaf or a symlinked ancestor to escape the Mosh application-data root.
 
-        Explicit overrides are disposable only below `_harness`, and an existing
+        Explicit overrides are resettable only below `_harness`, and an existing
         directory there must carry our ownership marker. Other explicit names route
         to a unique safety directory instead of risking owner data. */
     inline juce::File resolveSessionDirectory (const juce::File& moshDir,

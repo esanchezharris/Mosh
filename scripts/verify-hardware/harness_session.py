@@ -1,5 +1,4 @@
 import os
-import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -55,5 +54,4 @@ def reset_owned_harness_session(path):
         if not os.path.lexists(candidate):
             os.replace(quarantine, candidate)
         raise RuntimeError(f"harness ownership changed during reset: {candidate}")
-    shutil.rmtree(quarantine)
     return True
