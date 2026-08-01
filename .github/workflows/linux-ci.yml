@@ -47,7 +47,7 @@ concurrency:
 jobs:
   linux-x64:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -108,8 +108,11 @@ jobs:
       - name: Build MoshTests
         run: cmake --build build-linux-headless --target MoshTests
 
-      - name: Run MoshTests (ctest)
-        run: ctest --test-dir build-linux-headless -R MoshTests --output-on-failure
+      - name: Run MoshTests with progress (diagnostic only)
+        run: |
+          timeout 15m stdbuf -oL -eL \
+            build-linux-headless/tests/MoshTests_artefacts/Debug/MoshTests \
+            --reporter compact --success --durations yes
 
       # ── Stage 1b (REQUIRED): the cross-platform Python service imports/boots ──
       # No build step — prove the service is import-clean and answers /health on Linux
