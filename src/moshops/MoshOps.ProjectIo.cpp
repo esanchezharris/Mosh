@@ -1417,20 +1417,23 @@ juce::var MoshOps::cmdCreateRepairCheckpoint (const juce::var& args)
     if (eng.edit().getTransport().isRecording())
         return errResult ("create_repair_checkpoint", "stop recording before launching a repair build");
 
-    const auto root = eng.sessionDir().getParentDirectory().getChildFile ("repair-checkpoints");
-    const auto directory = root.getChildFile (
-        String::toHexString (Time::currentTimeMillis()) + "-"
-        + String::toHexString (Random::getSystemRandom().nextInt64()));
-    if (! directory.createDirectory())
-        return errResult ("create_repair_checkpoint", "could not create repair checkpoint directory");
-   #if JUCE_MAC
-    ::chmod (directory.getFullPathName().toRawUTF8(), S_IRWXU);
-   #endif
+    // Tracktion edit files may refer to source media relative to their own directory.
+    // A checkpoint in a central Library folder therefore opens successfully while its
+    // clips silently lose `audio/...` sources. Keep the checkpoint beside the active
+    // edit so repair and rollback launches resolve the exact same relative media tree.
+    const auto activeProject = eng.editFile();
+    const auto directory = activeProject.getParentDirectory();
+    if (! directory.isDirectory())
+        return errResult ("create_repair_checkpoint", "project directory is unavailable");
 
-    const auto checkpoint = directory.getChildFile ("project.tracktionedit");
+    const auto token = String::toHexString (Time::currentTimeMillis()) + "-"
+        + String::toHexString (Random::getSystemRandom().nextInt64());
+    const auto checkpoint = directory.getNonexistentChildFile (
+        activeProject.getFileNameWithoutExtension() + ".mosh-repair-checkpoint-" + token,
+        ".tracktionedit", false);
     if (! tracktion::engine::EditFileOperations (eng.edit()).writeToFile (checkpoint, false))
     {
-        directory.deleteRecursively();
+        checkpoint.deleteFile();
         return errResult ("create_repair_checkpoint", "repair checkpoint save failed");
     }
    #if JUCE_MAC

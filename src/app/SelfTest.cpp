@@ -9788,12 +9788,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "repair swap: MoshOps persists a concrete project checkpoint");
         check (eng.editFile() == activeProject,
                "repair swap: checkpoint does not replace the active project");
+        check (File (checkpointPath).getParentDirectory() == activeProject.getParentDirectory(),
+               "repair swap: checkpoint preserves relative media resolution");
         check (File (priorAppPath).isDirectory() && priorAppPath.endsWith (".app"),
                "repair swap: checkpoint records the installed app for rollback");
         const auto released = cmd (ops, "release_audio_device");
         check (ok (released) && ! (bool) released["data"].getProperty ("audioEnabled", true),
                "repair swap: MoshOps releases the audio device before handoff");
-        File (checkpointPath).getParentDirectory().deleteRecursively();
+        File (checkpointPath).deleteFile();
     }
 
     finishSection();
