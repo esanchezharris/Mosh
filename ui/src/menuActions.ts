@@ -19,7 +19,12 @@ export type { ActionId };
 /** The store surface runAction reads. The real Zustand store satisfies this
  *  structurally; tests pass a fake so each action's command is asserted directly. */
 export interface ActionStore {
-  exec: (command: string, args?: Record<string, unknown>) => Promise<{ ok: boolean }>;
+  exec: (command: string, args?: Record<string, unknown>) => Promise<{
+    ok: boolean;
+    command?: string;
+    data?: unknown;
+    error?: string;
+  }>;
   refresh: () => Promise<void>;
   // AGT-MEM (M3) — drops the cached agent-memory pools (agent/memory/hydrate.ts) so
   // the NEXT retrieval re-fetches for whichever project is open. Optional so
@@ -34,6 +39,7 @@ export interface ActionStore {
   clearSelection: () => void;
   selection: Set<string>;
   transport: { playing: boolean; recording?: boolean; position?: number };
+  reconcileTransport?: (transport: Partial<ActionStore["transport"]>) => void;
   projectTransitioning?: boolean;
   currentMode?: () => "idle" | "recording" | "reviewing";
   enterRecord?: (bar?: number) => Promise<void>;
@@ -131,7 +137,14 @@ function runRecordAction(store: ActionStore): Promise<void> {
 function runTransportAction(store: ActionStore, args: Record<string, unknown>): Promise<void> {
   return enqueueTransportAction(async () => {
     if (store.projectTransitioning) return;
-    await store.exec("set_transport", args);
+    const result = await store.exec("set_transport", args);
+    if (!result.ok || !result.data || typeof result.data !== "object") return;
+    const data = result.data as Record<string, unknown>;
+    const transport: Partial<ActionStore["transport"]> = {};
+    if (typeof data.playing === "boolean") transport.playing = data.playing;
+    if (typeof data.recording === "boolean") transport.recording = data.recording;
+    if (typeof data.position === "number") transport.position = data.position;
+    if (Object.keys(transport).length) store.reconcileTransport?.(transport);
   });
 }
 

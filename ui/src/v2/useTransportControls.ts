@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useStore, type State } from "../store";
 import type { CommandResult } from "../types";
 import { landedRecordingClipIds, type RecordingCommandData } from "../recordingLifecycle";
@@ -6,7 +6,6 @@ import { enqueueTransportAction } from "../transportActionQueue";
 
 type TransportControlsOptions = {
   exec: State["exec"];
-  recording: boolean;
   anyArmed: boolean;
   fallbackTrackId?: string;
 };
@@ -18,17 +17,11 @@ function failureMessage(result: CommandResult, fallback: string): string {
 
 export function useTransportControls({
   exec,
-  recording,
   anyArmed,
   fallbackTrackId,
 }: TransportControlsOptions) {
-  const recordingIntent = useRef(recording);
   const pendingActions = useRef(0);
   const visibleFailure = useRef<string | null>(null);
-
-  useEffect(() => {
-    recordingIntent.current = recording;
-  }, [recording]);
 
   function showFailure(message: string): void {
     visibleFailure.current = message;
@@ -67,7 +60,6 @@ export function useTransportControls({
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
-    recordingIntent.current = false;
     useStore.setState((state) => ({
       transport: { ...state.transport, playing: false, recording: false },
     }));
@@ -83,7 +75,7 @@ export function useTransportControls({
       const projectEpoch = useStore.getState().projectEpoch;
       return enqueue(async () => {
         if (!projectIsCurrent(projectEpoch)) return;
-        if (recordingIntent.current) {
+        if (useStore.getState().transport.recording) {
           await stopRecording(projectEpoch);
           return;
         }
@@ -108,11 +100,9 @@ export function useTransportControls({
         }
         const state = result.data as { playing?: boolean; recording?: boolean } | undefined;
         if (state?.recording !== true) {
-          recordingIntent.current = false;
           showFailure(failureMessage(result, "Could not start recording."));
           return;
         }
-        recordingIntent.current = true;
         useStore.setState((store) => ({
           transport: {
             ...store.transport,
@@ -127,7 +117,7 @@ export function useTransportControls({
       const projectEpoch = useStore.getState().projectEpoch;
       return enqueue(async () => {
         if (!projectIsCurrent(projectEpoch)) return;
-        if (recordingIntent.current) {
+        if (useStore.getState().transport.recording) {
           if (!await stopRecording(projectEpoch) || !projectIsCurrent(projectEpoch)) return;
           await exec("set_transport", { position: 0 });
           return;
@@ -135,7 +125,6 @@ export function useTransportControls({
         const result = await exec("set_transport", { action: "stop", position: 0 });
         if (!projectIsCurrent(projectEpoch)) return;
         if (result.ok) {
-          recordingIntent.current = false;
           useStore.setState((state) => ({
             transport: { ...state.transport, playing: false, recording: false, position: 0 },
           }));
@@ -147,7 +136,7 @@ export function useTransportControls({
       const projectEpoch = useStore.getState().projectEpoch;
       return enqueue(async () => {
         if (!projectIsCurrent(projectEpoch)) return;
-        if (recordingIntent.current) {
+        if (useStore.getState().transport.recording) {
           await stopRecording(projectEpoch);
           return;
         }
@@ -155,7 +144,6 @@ export function useTransportControls({
         if (!projectIsCurrent(projectEpoch)) return;
         const state = result.data as { recording?: boolean } | undefined;
         if (result.ok && typeof state?.recording === "boolean") {
-          recordingIntent.current = state.recording;
           useStore.setState((store) => ({
             transport: { ...store.transport, recording: state.recording! },
           }));

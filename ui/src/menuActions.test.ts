@@ -309,6 +309,27 @@ describe("runAction — transport", () => {
     expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
   });
 
+  it("reconciles command-confirmed transport state before telemetry", async () => {
+    const reconcileTransport = vi.fn();
+    const { ctx } = makeCtx({}, {
+      reconcileTransport,
+      exec: vi.fn(async () => ({
+        ok: true,
+        command: "set_transport",
+        data: { playing: false, recording: false, position: 4.5, ignored: "field" },
+      })),
+    });
+
+    await runAction("play_pause", ctx);
+
+    expect(reconcileTransport).toHaveBeenCalledOnce();
+    expect(reconcileTransport).toHaveBeenCalledWith({
+      playing: false,
+      recording: false,
+      position: 4.5,
+    });
+  });
+
   it("record/to_start/to_end keep their transport payloads", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("record", ctx);

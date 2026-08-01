@@ -550,6 +550,66 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(after.tracks[0]!.clips.some((clip) => (clip.numTakes ?? 0) > 0)).toBe(true);
   });
 
+  it("shares a menu recording start with TopBar before telemetry", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]!.id;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    await act(async () => {
+      await runAction("record", {
+        store: useStore.getState(),
+        pickFiles: vi.fn(async () => ({ ok: false, files: [] })),
+        pickSaveFile: vi.fn(async () => ({ ok: false, file: "" })),
+      });
+      const settledTarget = settledExecCount + 1;
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
+    });
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "stop_recording", args: undefined },
+    ]);
+  });
+
+  it("shares generic menu finalization with TopBar before telemetry", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]!.id;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    await clickRecord();
+
+    await act(async () => {
+      await runAction("play_pause", {
+        store: useStore.getState(),
+        pickFiles: vi.fn(async () => ({ ok: false, files: [] })),
+        pickSaveFile: vi.fn(async () => ({ ok: false, file: "" })),
+      });
+      const settledTarget = settledExecCount + 1;
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
+    });
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "toggle" } },
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
   it("keeps a rejected recording start visible", async () => {
     const snap0 = useStore.getState().snapshot!;
     const trackId = snap0.tracks[0]?.id!;

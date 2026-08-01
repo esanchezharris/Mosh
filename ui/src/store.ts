@@ -201,7 +201,7 @@ export type State = {
 } & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice;
 
 type StateGet = () => State;
-type StateSet = (state: Partial<State>) => void;
+type StateSet = (state: Partial<State> | ((state: State) => Partial<State>)) => void;
 
 async function startRecording(get: StateGet, set: StateSet, projectEpoch: number, bar?: number): Promise<void> {
   if (get().projectEpoch !== projectEpoch) return;
@@ -280,6 +280,61 @@ async function stopRecording(get: StateGet, set: StateSet, projectEpoch: number)
   set({ takeDecisionPending: true, lastTakeClipId: landed });
 }
 
+async function refreshSnapshot(
+  get: StateGet,
+  set: StateSet,
+  projectEpoch: number,
+  allowProjectTransition: boolean,
+): Promise<boolean> {
+  if (!isNative() || (get().projectTransitioning && !allowProjectTransition)) return false;
+  try {
+    const snap = await getSnapshot<Snapshot>();
+    if (get().projectEpoch !== projectEpoch
+      || (get().projectTransitioning && !allowProjectTransition)) return false;
+    set({ snapshot: snap, connected: true, transport: snap.transport });
+    // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
+    const banner = versionBannerError(snap);
+    if (banner) set({ lastError: banner });
+    // Prune selection / fetch peaks for current clips.
+    const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
+    set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
+    // Prune the inline-FX expand set against current tracks (mirror the selection
+    // prune) so a removed track's id can't make a later id-reused track open by itself.
+    const trackIds = new Set(snap.tracks.map((t) => t.id));
+    set((s) => ([...s.expandedTracks].every((id) => trackIds.has(id))
+      ? {}
+      : { expandedTracks: new Set([...s.expandedTracks].filter((id) => trackIds.has(id))) }));
+    // Auto-select a track for the rack if none is selected.
+    set((s) => {
+      const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
+      return exists ? {} : { selectedTrackId: snap.tracks[0]?.id ?? null };
+    });
+    // Prune stale render-quality readouts (judge scores). A clip keeps its qa only while its
+    // render layer is still a LIVE render; once the layer is removed, reset, or rejected
+    // (reverted to "dirty"/"error") the score is dead and must not linger.
+    set((s) => {
+      if (Object.keys(s.qaByClip).length === 0) return {};
+      const live = new Set<string>();
+      for (const t of snap.tracks) for (const c of t.clips) {
+        const rl = c.renderLayer;
+        if (rl && rl.status !== "dirty" && rl.status !== "error") live.add(c.id);
+      }
+      const stale = Object.keys(s.qaByClip).filter((id) => !live.has(id));
+      if (stale.length === 0) return {};
+      const qaByClip = { ...s.qaByClip };
+      for (const id of stale) delete qaByClip[id];
+      return { qaByClip };
+    });
+    for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
+    return true;
+  } catch (e) {
+    if (get().projectEpoch !== projectEpoch
+      || (get().projectTransitioning && !allowProjectTransition)) return false;
+    set({ lastError: String(e) });
+    return false;
+  }
+}
+
 export const useStore = create<State>((set, get, api) => ({
   // RFC 004 slices — field groups + their actions along the existing rails.
   // Composed FIRST so the core fields below read as the remainder; no key overlaps.
@@ -315,50 +370,8 @@ export const useStore = create<State>((set, get, api) => ({
   clipboard: null,
 
   refresh: async () => {
-    if (!isNative() || get().projectTransitioning) return;
     const projectEpoch = get().projectEpoch;
-    try {
-      const snap = await getSnapshot<Snapshot>();
-      if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
-      set({ snapshot: snap, connected: true, transport: snap.transport });
-      // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
-      const banner = versionBannerError(snap);
-      if (banner) set({ lastError: banner });
-      // Prune selection / fetch peaks for current clips.
-      const ids = new Set(snap.tracks.flatMap((t) => t.clips.map((c) => c.id)));
-      set((s) => ({ selection: new Set([...s.selection].filter((id) => ids.has(id))) }));
-      // Prune the inline-FX expand set against current tracks (mirror the selection
-      // prune) so a removed track's id can't make a later id-reused track open by itself.
-      const trackIds = new Set(snap.tracks.map((t) => t.id));
-      set((s) => ([...s.expandedTracks].every((id) => trackIds.has(id))
-        ? {}
-        : { expandedTracks: new Set([...s.expandedTracks].filter((id) => trackIds.has(id))) }));
-      // Auto-select a track for the rack if none is selected.
-      set((s) => {
-        const exists = snap.tracks.some((t) => t.id === s.selectedTrackId);
-        return exists ? {} : { selectedTrackId: snap.tracks[0]?.id ?? null };
-      });
-      // Prune stale render-quality readouts (judge scores). A clip keeps its qa only while its
-      // render layer is still a LIVE render; once the layer is removed, reset, or rejected
-      // (reverted to "dirty"/"error") the score is dead and must not linger.
-      set((s) => {
-        if (Object.keys(s.qaByClip).length === 0) return {};
-        const live = new Set<string>();
-        for (const t of snap.tracks) for (const c of t.clips) {
-          const rl = c.renderLayer;
-          if (rl && rl.status !== "dirty" && rl.status !== "error") live.add(c.id);
-        }
-        const stale = Object.keys(s.qaByClip).filter((id) => !live.has(id));
-        if (stale.length === 0) return {};
-        const qaByClip = { ...s.qaByClip };
-        for (const id of stale) delete qaByClip[id];
-        return { qaByClip };
-      });
-      for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
-    } catch (e) {
-      if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
-      set({ lastError: String(e) });
-    }
+    await refreshSnapshot(get, set, projectEpoch, false);
   },
 
   exec: async (command, args = {}, transaction) => {
@@ -379,11 +392,21 @@ export const useStore = create<State>((set, get, api) => ({
       res = await executeCommand<CommandResult>(
         transaction ? { command, args, transaction } : { command, args },
       );
-    } finally {
+    } catch (error) {
       if (replacesProject && get().projectEpoch === transitionEpoch)
         set({ projectTransitioning: false });
+      throw error;
     }
-    if (replacesProject) void get().refresh();
+    if (replacesProject && get().projectEpoch === transitionEpoch) {
+      const replacementReady = !res.ok
+        || await refreshSnapshot(get, set, transitionEpoch, true);
+      if (get().projectEpoch === transitionEpoch && replacementReady)
+        set({ projectTransitioning: false });
+      if (!replacementReady) {
+        recordSessionCommand(command, args, res.ok);
+        return res;
+      }
+    }
     recordSessionCommand(command, args, res.ok);
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {

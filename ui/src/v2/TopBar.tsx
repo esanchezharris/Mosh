@@ -38,7 +38,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
     ?? snapshot.tracks[0]?.id;
   const transport = useTransportControls({
     exec,
-    recording: t.recording,
     anyArmed,
     fallbackTrackId,
   });

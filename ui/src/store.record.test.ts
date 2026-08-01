@@ -262,4 +262,36 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     await opening;
     executeSpy.mockRestore();
   });
+
+  it("keeps Record closed until the replacement snapshot commits", async () => {
+    const previous = useStore.getState().snapshot!;
+    const replacement: Snapshot = {
+      ...previous,
+      session: { ...previous.session, editFile: "/mock/next.mosh" },
+      tracks: [],
+    };
+    let releaseSnapshot: ((snapshot: Snapshot) => void) | undefined;
+    const executeSpy = vi.spyOn(bridge, "executeCommand").mockResolvedValueOnce({
+      ok: true,
+      command: "open_project",
+    });
+    const snapshotSpy = vi.spyOn(bridge, "getSnapshot").mockImplementationOnce(
+      async () => new Promise((resolve) => { releaseSnapshot = resolve; }),
+    );
+
+    const opening = useStore.getState().exec("open_project", { file: "/mock/next.mosh" });
+    await vi.waitFor(() => expect(releaseSnapshot).toBeTypeOf("function"));
+    expect(useStore.getState().projectTransitioning).toBe(true);
+
+    await useStore.getState().enterRecord();
+
+    expect(useStore.getState().lastError).toBe("Wait for the project to finish opening before recording.");
+    expect(executeSpy).toHaveBeenCalledOnce();
+    releaseSnapshot!(replacement);
+    await opening;
+    expect(useStore.getState().projectTransitioning).toBe(false);
+    expect(useStore.getState().snapshot?.session.editFile).toBe("/mock/next.mosh");
+    snapshotSpy.mockRestore();
+    executeSpy.mockRestore();
+  });
 });
