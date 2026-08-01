@@ -4,7 +4,7 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
@@ -30,6 +30,18 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const recordingIntent = useRef(t.recording);
+  const transportQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    recordingIntent.current = t.recording;
+  }, [t.recording]);
+
+  function enqueueTransport(action: () => Promise<void>): Promise<void> {
+    const next = transportQueue.current.then(action, action);
+    transportQueue.current = next.catch(() => {});
+    return next;
+  }
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
@@ -46,25 +58,34 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   // is armed yet — an already-armed track (or an in-progress recording, where the
   // click just stops it) is left untouched.
   const anyArmed = snapshot.tracks.some((tr) => tr.armed);
-  async function handleRecord() {
-    if (t.recording) {
-      await exec("stop_recording");
-      return;
-    }
-    if (!anyArmed) {
-      const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
-      if (trackId) await exec("arm_track", { trackId, armed: true });
-    }
-    await exec("set_transport", { action: "record" });
+  function handleRecord(): Promise<void> {
+    return enqueueTransport(async () => {
+      if (recordingIntent.current) {
+        const result = await exec("stop_recording");
+        if (result.ok) recordingIntent.current = false;
+        return;
+      }
+      if (!anyArmed) {
+        const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
+        if (trackId) await exec("arm_track", { trackId, armed: true });
+      }
+      const result = await exec("set_transport", { action: "record" });
+      const applied = (result.data as { applied?: boolean } | undefined)?.applied;
+      if (result.ok && applied !== false) recordingIntent.current = true;
+    });
   }
 
-  async function handleStop() {
-    if (t.recording) {
-      await exec("stop_recording");
-      await exec("set_transport", { position: 0 });
-      return;
-    }
-    await exec("set_transport", { action: "stop", position: 0 });
+  function handleStop(): Promise<void> {
+    return enqueueTransport(async () => {
+      if (recordingIntent.current) {
+        const result = await exec("stop_recording");
+        if (result.ok) recordingIntent.current = false;
+        await exec("set_transport", { position: 0 });
+        return;
+      }
+      const result = await exec("set_transport", { action: "stop", position: 0 });
+      if (result.ok) recordingIntent.current = false;
+    });
   }
 
   return (

@@ -21,6 +21,8 @@ describe("v2 TopBar Record button — arms the selected track before recording (
   let host: HTMLDivElement;
   let root: Root;
   let execCalls: { command: string; args?: Record<string, unknown> }[];
+  let settledExecCount: number;
+  let settleWaiters: { target: number; resolve: () => void }[];
 
   beforeEach(async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,11 +31,18 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       await useStore.getState().refresh();
     });
     execCalls = [];
+    settledExecCount = 0;
+    settleWaiters = [];
     const orig = useStore.getState().exec;
     vi.spyOn(useStore.getState(), "exec").mockImplementation(
       async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
-        return orig(command, args);
+        const result = await orig(command, args);
+        settledExecCount += 1;
+        const ready = settleWaiters.filter((waiter) => waiter.target <= settledExecCount);
+        settleWaiters = settleWaiters.filter((waiter) => waiter.target > settledExecCount);
+        ready.forEach((waiter) => waiter.resolve());
+        return result;
       },
     );
     host = document.createElement("div");
@@ -53,22 +62,27 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     });
   }
 
-  async function clickRecord() {
-    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
-    await act(async () => {
-      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      // Flush the handler's sequential `await exec(...)` chain (arm_track, then
-      // set_transport) — a macrotask boundary drains the whole microtask queue.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+  function waitForSettledExecs(target: number): Promise<void> {
+    if (settledExecCount >= target) return Promise.resolve();
+    return new Promise((resolve) => settleWaiters.push({ target, resolve }));
   }
 
-  async function clickTransport(selector: string) {
-    const btn = host.querySelector<HTMLButtonElement>(selector)!;
-    await act(async () => {
+  async function clickRecord(expectedExecs = 1) {
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
+    const settledTarget = settledExecCount + expectedExecs;
+    act(() => {
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await waitForSettledExecs(settledTarget);
+  }
+
+  async function clickTransport(selector: string, expectedExecs = 1) {
+    const btn = host.querySelector<HTMLButtonElement>(selector)!;
+    const settledTarget = settledExecCount + expectedExecs;
+    act(() => {
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await waitForSettledExecs(settledTarget);
   }
 
   it("arms the selected track then starts recording, when no track is armed yet", async () => {
@@ -82,7 +96,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
     expect(btn.getAttribute("data-armed")).toBe("false");
 
-    await clickRecord();
+    await clickRecord(2);
 
     expect(execCalls.map((c) => c.command)).toEqual(["arm_track", "set_transport"]);
     expect(execCalls[0].args).toMatchObject({ trackId, armed: true });
@@ -122,7 +136,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
   it("clicking Record again while recording lands the take through stop_recording", async () => {
     const snap = useStore.getState().snapshot!;
     render(snap);
-    await clickRecord(); // arm + start
+    await clickRecord(2); // arm + start
     execCalls = [];
 
     // Sync the store (transport + the now-armed track list) off the mock, mirroring
@@ -149,7 +163,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
   it("the visible Stop button lands the active take before returning to project start", async () => {
     const snap = useStore.getState().snapshot!;
     render(snap);
-    await clickRecord();
+    await clickRecord(2);
 
     await act(async () => {
       await useStore.getState().exec("set_transport", { position: 6 });
@@ -159,7 +173,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     execCalls = [];
     const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
 
-    await clickTransport('[data-testid="v2-stop"]');
+    await clickTransport('[data-testid="v2-stop"]', 2);
 
     expect(execCalls).toEqual([
       { command: "stop_recording", args: undefined },
@@ -194,7 +208,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
 
   it("To start lands the active take before returning to project start", async () => {
     render(useStore.getState().snapshot!);
-    await clickRecord();
+    await clickRecord(2);
     await act(async () => {
       await useStore.getState().exec("set_transport", { position: 6 });
       await useStore.getState().refresh();
@@ -203,7 +217,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     execCalls = [];
     const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
 
-    await clickTransport('[aria-label="To start"]');
+    await clickTransport('[aria-label="To start"]', 2);
 
     expect(execCalls).toEqual([
       { command: "stop_recording", args: undefined },
@@ -233,5 +247,33 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       await useStore.getState().refresh();
     });
     expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
+  });
+
+  it("serializes a rapid Record then Stop before recording telemetry arrives", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    const settledTarget = settledExecCount + 3;
+    const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
+    const stop = host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!;
+    act(() => {
+      record.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await waitForSettledExecs(settledTarget);
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { position: 0 } },
+    ]);
+    const after = await mockSnapshot<Snapshot>();
+    expect(after.transport).toMatchObject({ recording: false, position: 0 });
   });
 });
