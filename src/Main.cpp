@@ -12,6 +12,7 @@
 #include "brain/BrainProxy.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
+#include <exception>
 #include <iostream>
 #include <thread>
 
@@ -194,10 +195,20 @@ public:
         const bool keepSession = runScript
             && juce::SystemStats::getEnvironmentVariable ("MOSH_RUNSCRIPT_KEEP_SESSION", {}).trim() == "1"
             && juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim().isNotEmpty();
-        engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
-                                                /*freshSession=*/ (noAudio || liveAudio || demoGui
-                                                                  || audioRecoverySmoke) && ! keepSession,
-                                                sessionBaseName);
+        try
+        {
+            engine = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
+                                                   /*freshSession=*/ (noAudio || liveAudio || demoGui
+                                                                     || audioRecoverySmoke) && ! keepSession,
+                                                   sessionBaseName);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "Mosh startup failed: " << error.what() << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));

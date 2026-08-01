@@ -222,7 +222,9 @@ jobs:
           APP="$(find build-macos-arm64-release -maxdepth 4 -name 'Mosh.app' -type d | sort | tail -n 1)"
           BIN="$APP/Contents/MacOS/Mosh"
           [ -x "$BIN" ] || { echo "::error::built Mosh binary not found"; exit 1; }
-          SESS="ci-release-$$"
+          SESS="_harness/ci-release-$$"
+          source scripts/lib/harness-session.sh
+          mosh_reset_owned_harness_session "$SESS"
           PORT=$((10000 + RANDOM % 5000))
           set +e
           MOSH_SELFTEST_SESSION="$SESS" MOSH_SERVICE_PORT="$PORT" \

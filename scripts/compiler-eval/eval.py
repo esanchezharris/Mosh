@@ -30,7 +30,7 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "verify-hardware"))
 sys.path.insert(0, str(ROOT / "service"))
 
-from verify import run_script, find_binary, _mosh_session_base, failed_commands  # noqa: E402
+from verify import run_script, find_binary, _session_dir, failed_commands  # noqa: E402
 from compiler import oracle  # noqa: E402
 
 OUT = HERE / "artifacts"
@@ -52,7 +52,7 @@ def render_candidate(binary, instruction, intensity, idx):
     results, _ = run_script(binary, cmds, session, extra_env={"MOSH_SERVICE_PORT": PORT})
     comp = next((r for r in results if r.get("command") == "compile_render"), None)
     data = (comp or {}).get("data", {}) or {}
-    outs = sorted(glob.glob(str(_mosh_session_base() / session / "renders" / "*" / "output.wav")))
+    outs = sorted(glob.glob(str(_session_dir(session) / "renders" / "*" / "output.wav")))
     out = outs[0] if outs else None
     inp = str(Path(out).parent / "input.wav") if out else None
     return data, out, inp, failed_commands(results)

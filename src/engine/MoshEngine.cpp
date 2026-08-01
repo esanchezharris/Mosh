@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
 #include "SourceRef.h"
@@ -6,11 +7,20 @@
 
 #include <atomic>
 #include <iostream>
+#include <stdexcept>
 
 namespace mosh
 {
 namespace
 {
+    juce::File requireAllocatedDirectory (std::optional<juce::File> directory,
+                                          const char* purpose)
+    {
+        if (! directory)
+            throw std::runtime_error (std::string ("Unable to allocate isolated ") + purpose);
+        return *directory;
+    }
+
     // AUD-017 — Mosh ALWAYS suppresses the engine's automatic audio-device init and
     // opens the device itself, bounded (openAudioDeviceBounded below). The te::Engine
     // ctor calls Engine::initialise() → DeviceManager::initialise() → JUCE
@@ -61,6 +71,51 @@ namespace
             limits.maxNumMasterPlugins += 1;
             return limits;
         }
+    };
+
+    struct MoshPropertyStorage final : te::PropertyStorage
+    {
+        MoshPropertyStorage (juce::File appDataDirectory,
+                             juce::File sessionDirectory,
+                             juce::File directory,
+                             juce::String tag,
+                             bool ownerStorage)
+            : te::PropertyStorage ("Mosh"),
+              moshDirectory (std::move (appDataDirectory)),
+              storageSessionDirectory (std::move (sessionDirectory)),
+              prefsDirectory (std::move (directory)),
+              uniqueTag (std::move (tag)),
+              useOwnerStorage (ownerStorage)
+        {
+        }
+
+        juce::File getAppPrefsFolder() override
+        {
+            if (! useOwnerStorage
+                && (! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)
+                    || prefsDirectory.createDirectory().failed()
+                    || ! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)))
+            {
+                uniqueTag += "-" + juce::Uuid().toString().substring (0, 8);
+                storageSessionDirectory = requireAllocatedDirectory (
+                    mosh::sessionpaths::prepareSafetySessionDirectory (
+                        moshDirectory, uniqueTag),
+                    "settings session");
+                prefsDirectory = storageSessionDirectory.getChildFile (
+                    "_settings/run-" + uniqueTag);
+            }
+            if (prefsDirectory.createDirectory().failed())
+                throw std::runtime_error ("Unable to create isolated settings directory");
+            return prefsDirectory;
+        }
+
+        juce::File moshDirectory;
+        juce::File storageSessionDirectory;
+        juce::File prefsDirectory;
+        juce::String uniqueTag;
+        bool useOwnerStorage = false;
     };
 
     /** AUD-017 — the exact JUCE audio setup, opened only in a child process.
@@ -121,6 +176,73 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // separates "degraded, offer a retry" from "headless, never touch hardware".
     audioWanted = audioOpen;
 
+    // Resolve both project and Tracktion-preference storage before constructing the
+    // Engine: its constructor may read/write Settings.xml. The GUI keeps the historic
+    // ~/Library/Mosh/Settings.xml location; every named harness/audit leaf is isolated.
+    const auto explicitSession =
+        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+    const auto uniqueTag = mosh::sessionpaths::processTag();
+    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
+        freshSessionName,
+        explicitSession,
+        uniqueTag);
+    const bool useOwnerSession = ! freshSession
+                              && freshSessionName.isEmpty()
+                              && explicitSession.isEmpty();
+    const auto moshDir = mosh::sessionpaths::moshDataDirectory (! useOwnerSession);
+    session = mosh::sessionpaths::resolveSessionDirectory (
+        moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
+    if (session == mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag))
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session");
+    bool didResetHarnessSession = false;
+    if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
+    {
+        didResetHarnessSession = mosh::sessionpaths::resetOwnedHarnessSession (moshDir, session);
+        if (! didResetHarnessSession)
+            session = requireAllocatedDirectory (
+                mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+                "safety session after reset failure");
+    }
+
+    if (useOwnerSession)
+    {
+        if (session.createDirectory().failed())
+            throw std::runtime_error ("Unable to create owner session directory");
+    }
+    if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::createOwnedHarnessSession (moshDir, session))
+    {
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after harness ownership failure");
+    }
+    if (mosh::sessionpaths::isAutoSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session)
+        && ! mosh::sessionpaths::createOwnedAutoSession (moshDir, session))
+    {
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after automatic ownership failure");
+    }
+
+    if (! useOwnerSession
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session))
+        throw std::runtime_error ("Isolated session ownership could not be verified");
+
+    const auto propertyStorageDir = requireAllocatedDirectory (
+        mosh::sessionpaths::resolvePropertyStorageDir (
+            moshDir, session, uniqueTag, useOwnerSession),
+        "settings directory");
+    if (propertyStorageDir.createDirectory().failed())
+        throw std::runtime_error ("Unable to create settings directory");
+    const auto propertyStorageSession = useOwnerSession
+        ? moshDir
+        : propertyStorageDir.getParentDirectory().getParentDirectory();
+
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
     // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
@@ -129,7 +251,8 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
     behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
-        juce::String ("Mosh"),
+        std::make_unique<MoshPropertyStorage> (
+            moshDir, propertyStorageSession, propertyStorageDir, uniqueTag, useOwnerSession),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
 
@@ -138,36 +261,10 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // GUI session, or another concurrent harness — see freshSession below. Established
     // BEFORE the device init so PRE-001 can restore the persisted device setup from it.
     // freshSessionName is a BASE leaf ("session-selftest", ...); empty means the GUI.
-    // resolveSessionLeaf applies the MOSH_SELFTEST_SESSION override (explicit always wins
-    // verbatim — gate.sh/verify.py read artifacts back out of that exact path) and otherwise
-    // auto-isolates headless runs per process, so two concurrent harnesses can no longer
-    // wipe each other's session dir mid-test. See src/engine/SessionPaths.h.
-    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
-        freshSessionName,
-        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
-        mosh::sessionpaths::processTag());
-    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("Mosh");
-    session = moshDir.getChildFile (sessionLeaf);
-    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project. Nothing
-    // should route "session" here with freshSession set, but this is a data-loss class —
-    // guard it rather than trust every caller. ONE boolean covers EVERY destructive step
-    // below (the dir wipe AND the edit-file delete): guarding only the first left
-    // `MOSH_SELFTEST_SESSION=session` + any headless mode still deleting the GUI's
-    // session.tracktionedit, which is exactly what this guard exists to prevent.
-    const bool mayWipe = freshSession && sessionLeaf != "session";
-    if (mayWipe)
-        session.deleteRecursively();
-    else if (freshSession)
-        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
-        // runs — so the refusal was invisible exactly where it matters. And refusing is
-        // not the end of it: the run then starts WARM off the GUI's existing project, so
-        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
-        // only: this is printed, and a redirected Windows console defaults to cp1252.
-        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
-                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
-    session.createDirectory();
-    if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
+    // resolveSessionLeaf captures MOSH_SELFTEST_SESSION; resolveSessionDirectory then
+    // accepts it only inside the marker-owned _harness namespace. Unset overrides still
+    // auto-isolate per process. See src/engine/SessionPaths.h.
+    if (explicitSession.isEmpty() && mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
         mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);
     session.getChildFile ("audio").createDirectory();
     // A2 — latch the prior session's liveness sentinel BEFORE this run overwrites it. Present
@@ -190,8 +287,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
 
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
-    // Shares mayWipe with the dir wipe above — never `freshSession` alone.
-    if (mayWipe)
+    if (didResetHarnessSession)
         editPath.deleteFile();
 
     bool loadedFromFile = false;

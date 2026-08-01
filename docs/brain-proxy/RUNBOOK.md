@@ -117,9 +117,12 @@ All three client entry points resolve the SAME id, converging on one file:
 
 Whichever of the three runs first on a machine mints the UUID and persists it; the
 others then read and reuse it. `MOSH_BRAIN_INSTALL_ID` overrides all three outright
-(useful for testing/CI — see the gate section below); `MOSH_SELFTEST_SESSION` picks an
-isolated leaf directory, mirroring `MoshEngine`'s own harness-isolation convention, so
-automated runs never touch or mutate your real `~/Library/Mosh/session/identity.json`.
+(useful for testing/CI — see the gate section below). With no session override, the
+owner identity is used. An explicit override may persist identity only in an exact
+marker-owned `_harness` leaf; the packaged engine can claim a newly-created empty leaf
+before the sidecars start. Unsafe, escaping, symlinked, or unowned values use a
+per-process safety/ephemeral identity and never mutate the real
+`~/Library/Mosh/session/identity.json`.
 
 `identity.json` already existed on this machine with a `uuid` field (pre-dating this
 change — apparently seeded ahead of the still-unbuilt FS-K3 crash-reporting consent

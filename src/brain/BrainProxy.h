@@ -64,12 +64,9 @@ struct BrainProxy
 
     /** The per-install id sent to the proxy for its daily token-cap bookkeeping
         (migrations/0003_brain_usage.sql) — an opaque bookkeeping key, never a secret.
-        Reused from "<session>/identity.json"'s "uuid" field under the same
-        ~/Library/Mosh app-data root MoshEngine uses (minted + persisted on first use
-        if the file/field is absent). Two test seams: MOSH_BRAIN_INSTALL_ID overrides
-        outright (no filesystem I/O at all); MOSH_SELFTEST_SESSION picks the session
-        leaf, mirroring MoshEngine's own hermeticity boundary, so a harness run never
-        touches the real ~/Library/Mosh/session/identity.json. */
+        Reused from "<session>/identity.json" under the same validated SessionPaths
+        boundary MoshEngine uses. MOSH_BRAIN_INSTALL_ID overrides without filesystem
+        I/O; unsafe explicit sessions resolve to per-process safety storage. */
     static juce::String installId();
 };
 
