@@ -100,6 +100,7 @@ TEST_CASE ("reserved and escaping session leaves never resolve to owner data", "
              == moshDir.getChildFile ("session"));
     REQUIRE (resolveSessionDirectory (moshDir, "session", "pid1-aaaa", false)
              == moshDir.getChildFile ("session-safety-auto-pid1-aaaa"));
+    REQUIRE (isSafetyIsolatedLeaf ("session-safety-auto-pid1-aaaa"));
     REQUIRE (resolveSessionDirectory (moshDir, "../owner", "pid1-aaaa", false)
              == moshDir.getChildFile ("session-safety-auto-pid1-aaaa"));
 }

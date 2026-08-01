@@ -32,6 +32,7 @@ namespace mosh::sessionpaths
     // legacy fixed names. Deliberately distinctive -- deleting the wrong dir here
     // would destroy someone's project.
     inline constexpr const char* kAutoMarker = "-auto-";
+    inline constexpr const char* kSafetyPrefix = "session-safety-auto-";
 
     /** Resolves the session-dir leaf name.
 
@@ -82,7 +83,7 @@ namespace mosh::sessionpaths
             && isContainedWithoutSymlinks (moshDir, requested))
             return requested;
 
-        return moshDir.getChildFile ("session-safety-auto-" + uniqueTag);
+        return moshDir.getChildFile (kSafetyPrefix + uniqueTag);
     }
 
     /** Resolves Tracktion's property-storage directory for this launch.
@@ -149,6 +150,11 @@ namespace mosh::sessionpaths
     inline bool isAutoIsolatedLeaf (const juce::String& leafName)
     {
         return leafName.startsWith ("session-") && leafName.contains (kAutoMarker);
+    }
+
+    inline bool isSafetyIsolatedLeaf (const juce::String& leafName)
+    {
+        return leafName.startsWith (kSafetyPrefix);
     }
 
     /** How long an auto-isolated dir must be untouched before the pruner may delete it.
