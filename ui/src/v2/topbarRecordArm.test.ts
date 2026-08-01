@@ -37,6 +37,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     settleWaiters = [];
     nextExecResult = null;
     nextExecError = null;
+    useStore.setState({ lastError: null });
     const orig = useStore.getState().exec;
     vi.spyOn(useStore.getState(), "exec").mockImplementation(
       async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
@@ -96,6 +97,12 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await waitForSettledExecs(settledTarget);
+  }
+
+  async function flushQueuedTransport() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   }
 
   it("arms the selected track then starts recording, when no track is armed yet", async () => {
@@ -282,6 +289,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await waitForSettledExecs(settledTarget);
+    await flushQueuedTransport();
 
     expect(execCalls).toEqual([
       { command: "set_transport", args: { action: "record" } },
@@ -344,6 +352,123 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     ]);
   });
 
+  it("does not start recording when automatic arming is rejected", async () => {
+    render(useStore.getState().snapshot!);
+    nextExecResult = {
+      ok: false,
+      command: "arm_track",
+      error: "No input available",
+    };
+
+    await clickRecord();
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+    expect(useStore.getState().lastError).toBe("No input available");
+  });
+
+  it("does not start recording when automatic arming is not applied", async () => {
+    render(useStore.getState().snapshot!);
+    nextExecResult = {
+      ok: true,
+      command: "arm_track",
+      data: { applied: false, reason: "no input device" },
+    };
+
+    await clickRecord();
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+    expect(useStore.getState().lastError).toBe("no input device");
+  });
+
+  it("keeps a rejected recording start visible", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: false,
+      command: "set_transport",
+      error: "Could not start recording",
+    };
+
+    await clickRecord();
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+    expect(useStore.getState().lastError).toBe("Could not start recording");
+  });
+
+  it("does not seek after stop_recording is rejected", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: false,
+      command: "stop_recording",
+      error: "Could not land take",
+    };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("Could not land take");
+  });
+
+  it("does not seek when stop_recording is not applied", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "stop_recording",
+      data: { applied: false, clips: [], reason: "no audio device" },
+    };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("no audio device");
+  });
+
+  it("does not seek when stop_recording lands no take", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [], reason: "no take captured (no live input)" },
+    };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("no take captured (no live input)");
+  });
+
   it("continues with the next queued transport action after a bridge rejection", async () => {
     const snap0 = useStore.getState().snapshot!;
     const trackId = snap0.tracks[0]?.id!;
@@ -363,10 +488,12 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await waitForSettledExecs(settledTarget);
+    await flushQueuedTransport();
 
     expect(execCalls).toEqual([
       { command: "set_transport", args: { action: "record" } },
       { command: "set_transport", args: { action: "stop", position: 0 } },
     ]);
+    expect(useStore.getState().lastError).toBe("bridge rejected record");
   });
 });

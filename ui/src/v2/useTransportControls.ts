@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { State } from "../store";
+import { useStore, type State } from "../store";
+import type { CommandResult } from "../types";
 
 type TransportControlsOptions = {
   exec: State["exec"];
@@ -7,6 +8,17 @@ type TransportControlsOptions = {
   anyArmed: boolean;
   fallbackTrackId?: string;
 };
+
+type RecordingCommandData = {
+  applied?: boolean;
+  clips?: unknown[];
+  reason?: string;
+};
+
+function failureMessage(result: CommandResult, fallback: string): string {
+  const data = result.data as RecordingCommandData | undefined;
+  return result.error ?? data?.reason ?? fallback;
+}
 
 export function useTransportControls({
   exec,
@@ -16,20 +28,47 @@ export function useTransportControls({
 }: TransportControlsOptions) {
   const recordingIntent = useRef(recording);
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const pendingActions = useRef(0);
+  const visibleFailure = useRef<string | null>(null);
 
   useEffect(() => {
     recordingIntent.current = recording;
   }, [recording]);
 
+  function showFailure(message: string): void {
+    visibleFailure.current = message;
+    useStore.setState({ lastError: message });
+  }
+
   function enqueue(action: () => Promise<void>): Promise<void> {
-    const next = queue.current.then(action, action);
-    queue.current = next.catch(() => {});
+    if (pendingActions.current === 0) visibleFailure.current = null;
+    pendingActions.current += 1;
+    const run = async () => {
+      try {
+        await action();
+      } catch (error) {
+        showFailure(error instanceof Error ? error.message : String(error));
+      } finally {
+        pendingActions.current -= 1;
+        if (visibleFailure.current)
+          useStore.setState({ lastError: visibleFailure.current });
+      }
+    };
+    const next = queue.current.then(run, run);
+    queue.current = next;
     return next;
   }
 
-  async function stopRecording(): Promise<void> {
+  async function stopRecording(): Promise<boolean> {
     const result = await exec("stop_recording");
-    if (result.ok) recordingIntent.current = false;
+    const data = result.data as RecordingCommandData | undefined;
+    const landedNoTake = Array.isArray(data?.clips) && data.clips.length === 0;
+    if (!result.ok || data?.applied === false || landedNoTake) {
+      showFailure(failureMessage(result, "Could not land the recording take."));
+      return false;
+    }
+    recordingIntent.current = false;
+    return true;
   }
 
   return {
@@ -38,16 +77,26 @@ export function useTransportControls({
         await stopRecording();
         return;
       }
-      if (!anyArmed && fallbackTrackId)
-        await exec("arm_track", { trackId: fallbackTrackId, armed: true });
+      if (!anyArmed && fallbackTrackId) {
+        const arm = await exec("arm_track", { trackId: fallbackTrackId, armed: true });
+        const armData = arm.data as RecordingCommandData | undefined;
+        if (!arm.ok || armData?.applied === false) {
+          showFailure(failureMessage(arm, "No audio input available — check your microphone connection and permissions."));
+          return;
+        }
+      }
       const result = await exec("set_transport", { action: "record" });
+      if (!result.ok) {
+        showFailure(failureMessage(result, "Could not start recording."));
+        return;
+      }
       const state = result.data as { recording?: boolean } | undefined;
-      recordingIntent.current = result.ok && state?.recording === true;
+      recordingIntent.current = state?.recording === true;
     }),
 
     stop: () => enqueue(async () => {
       if (recordingIntent.current) {
-        await stopRecording();
+        if (!await stopRecording()) return;
         await exec("set_transport", { position: 0 });
         return;
       }
