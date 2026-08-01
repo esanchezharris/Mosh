@@ -438,6 +438,32 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(useStore.getState().lastError).toBe("no input device");
   });
 
+  it("does not continue a delayed arm into a replacement project", async () => {
+    let releaseArm: ((result: CommandResult) => void) | undefined;
+    vi.mocked(useStore.getState().exec).mockImplementationOnce(
+      async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        return new Promise((resolve) => { releaseArm = resolve; });
+      },
+    );
+    render(useStore.getState().snapshot!);
+
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(releaseArm).toBeTypeOf("function"));
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    releaseArm!({ ok: true, command: "arm_track", data: { applied: true } });
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+  });
+
   it("keeps a rejected recording start visible", async () => {
     const snap0 = useStore.getState().snapshot!;
     const trackId = snap0.tracks[0]?.id!;
@@ -542,6 +568,27 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     render(useStore.getState().snapshot!);
     execCalls = [];
     nextExecResult = { ok: true, command: "stop_recording" };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("Could not land the recording take.");
+  });
+
+  it.each([null, {}])("does not seek when stop_recording reports malformed clip %j", async (clip) => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [clip] },
+    };
 
     await clickTransport('[data-testid="v2-stop"]');
     await flushQueuedTransport();

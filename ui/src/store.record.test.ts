@@ -107,4 +107,83 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     expect(useStore.getState().snapshot?.transport.recording ?? false).toBe(false);
     spy.mockRestore();
   });
+
+  it("does not continue arming into a replacement project", async () => {
+    let releaseArm: ((result: CommandResult) => void) | undefined;
+    const calls: string[] = [];
+    const spy = vi.spyOn(useStore.getState(), "exec").mockImplementation(
+      async (command: string): Promise<CommandResult> => {
+        calls.push(command);
+        if (command === "arm_track")
+          return new Promise((resolve) => { releaseArm = resolve; });
+        return { ok: true, command, data: { recording: true } };
+      },
+    );
+
+    const pending = useStore.getState().enterRecord();
+    await vi.waitFor(() => expect(releaseArm).toBeTypeOf("function"));
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    releaseArm!({ ok: true, command: "arm_track", data: { applied: true } });
+    await pending;
+
+    expect(calls).toEqual(["arm_track"]);
+    expect(useStore.getState().takeDecisionPending).toBe(false);
+    spy.mockRestore();
+  });
+
+  it.each([null, {}, { id: "" }])("rejects a malformed landed clip descriptor: %j", async (clip) => {
+    const spy = vi.spyOn(useStore.getState(), "exec").mockResolvedValue({
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [clip] },
+    });
+
+    await useStore.getState().stopRecord();
+
+    expect(useStore.getState().takeDecisionPending).toBe(false);
+    expect(useStore.getState().lastTakeClipId).toBeNull();
+    expect(useStore.getState().lastError).toBe("Could not land the recording take.");
+    spy.mockRestore();
+  });
+
+  it("does not promote an unrelated clip when the backend reports a foreign id", async () => {
+    const spy = vi.spyOn(useStore.getState(), "exec").mockResolvedValue({
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [{ id: "foreign-take" }] },
+    });
+
+    await useStore.getState().stopRecord();
+
+    expect(useStore.getState().takeDecisionPending).toBe(false);
+    expect(useStore.getState().lastTakeClipId).toBeNull();
+    expect(useStore.getState().lastError).toBe("Could not find the landed recording take.");
+    spy.mockRestore();
+  });
+
+  it("does not open take review when stop completes after a project replacement", async () => {
+    let releaseStop: ((result: CommandResult) => void) | undefined;
+    const landedId = useStore.getState().snapshot!.tracks[0]!.clips[0]!.id;
+    const spy = vi.spyOn(useStore.getState(), "exec").mockImplementation(
+      async (command: string): Promise<CommandResult> => {
+        if (command === "stop_recording")
+          return new Promise((resolve) => { releaseStop = resolve; });
+        return { ok: true, command };
+      },
+    );
+
+    const pending = useStore.getState().stopRecord();
+    await vi.waitFor(() => expect(releaseStop).toBeTypeOf("function"));
+    useStore.setState((state) => ({ projectEpoch: state.projectEpoch + 1 }));
+    releaseStop!({
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [{ id: landedId }] },
+    });
+    await pending;
+
+    expect(useStore.getState().takeDecisionPending).toBe(false);
+    expect(useStore.getState().lastTakeClipId).toBeNull();
+    spy.mockRestore();
+  });
 });

@@ -35,6 +35,7 @@ import { createTelemetrySlice, type TelemetrySlice } from "./store/telemetry";
 import { createMpSlice, type MpSlice } from "./store/mp";
 import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
+import { landedRecordingClipIds, type RecordingCommandData } from "./recordingLifecycle";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -47,6 +48,7 @@ export type TimeRange = { start: number; end: number };
 
 export type State = {
   snapshot: Snapshot | null;
+  projectEpoch: number;
   connected: boolean;
   lastError: string | null;
   // A2 — UI-local: the crash-recovery notice is dismissed for this session (view state, not
@@ -204,6 +206,7 @@ export const useStore = create<State>((set, get, api) => ({
   ...createCatalogsSlice(set, get, api),
 
   snapshot: null,
+  projectEpoch: 0,
   connected: isNative(),
   lastError: null,
   recoveryDismissed: false,
@@ -272,6 +275,13 @@ export const useStore = create<State>((set, get, api) => ({
   },
 
   exec: async (command, args = {}, transaction) => {
+    if (["new_project", "open_project", "open_recent", "reload", "recover_session"].includes(command)) {
+      set((state) => ({
+        projectEpoch: state.projectEpoch + 1,
+        takeDecisionPending: false,
+        lastTakeClipId: null,
+      }));
+    }
     const res = await executeCommand<CommandResult>(
       transaction ? { command, args, transaction } : { command, args },
     );
@@ -537,6 +547,7 @@ export const useStore = create<State>((set, get, api) => ({
   },
   enterRecord: async (bar) => {
     const s = get();
+    const projectEpoch = s.projectEpoch;
     const snap = s.snapshot;
     const trackId = s.selectedTrackId ?? snap?.tracks.find((t) => t.type === "audio")?.id ?? snap?.tracks[0]?.id;
     if (!trackId) {
@@ -545,6 +556,7 @@ export const useStore = create<State>((set, get, api) => ({
       return;
     }
     const arm = await s.exec("arm_track", { trackId, armed: true });
+    if (get().projectEpoch !== projectEpoch) return;
     // No-input / mic-permission UX (G2a): arming fails in two distinct ways —
     // ok:false (a live device rejected the target) OR ok:true with applied:false
     // (the graceful headless/no-device no-op proven by the "no fake clip" conformance
@@ -561,8 +573,10 @@ export const useStore = create<State>((set, get, api) => ({
       const tempo = snap.session?.tempo ?? 120;
       const num = snap.session?.timeSigNumerator ?? 4;
       await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
+      if (get().projectEpoch !== projectEpoch) return;
     }
     const record = await s.exec("set_transport", { action: "record" });
+    if (get().projectEpoch !== projectEpoch) return;
     const recordState = record.data as { recording?: boolean } | undefined;
     if (!record.ok || record.command !== "set_transport" || recordState?.recording !== true) {
       set({ lastError: record.error ?? "Could not start recording." });
@@ -573,20 +587,26 @@ export const useStore = create<State>((set, get, api) => ({
   },
   stopRecord: async () => {
     const s = get();
-    const trackOf = () => get().snapshot?.tracks.find((t) => t.id === get().selectedTrackId);
-    const before = new Set((trackOf()?.clips ?? []).map((c) => c.id));
+    const projectEpoch = s.projectEpoch;
     const res = await s.exec("stop_recording", {});
-    const stopData = res.data as { applied?: boolean; clips?: { id: string }[]; reason?: string } | undefined;
-    if (!res.ok || res.command !== "stop_recording" || stopData?.applied !== true
-        || !Array.isArray(stopData.clips) || stopData.clips.length === 0) {
+    if (get().projectEpoch !== projectEpoch) return;
+    const stopData = res.data as RecordingCommandData | undefined;
+    const landedIds = landedRecordingClipIds(res);
+    if (!landedIds) {
       set({ lastError: res.error ?? stopData?.reason ?? "Could not land the recording take." });
       return;
     }
     await s.refresh();
-    const landed = stopData.clips[0]?.id;
-    const after = trackOf()?.clips ?? [];
-    const fresh = after.find((c) => !before.has(c.id))?.id;
-    set({ takeDecisionPending: true, lastTakeClipId: landed ?? fresh ?? after[after.length - 1]?.id ?? null });
+    if (get().projectEpoch !== projectEpoch) return;
+    const projectClipIds = new Set(
+      (get().snapshot?.tracks ?? []).flatMap((track) => track.clips.map((clip) => clip.id)),
+    );
+    const landed = landedIds.find((id) => projectClipIds.has(id));
+    if (!landed) {
+      set({ lastError: "Could not find the landed recording take." });
+      return;
+    }
+    set({ takeDecisionPending: true, lastTakeClipId: landed });
   },
   keepTake: async () => {
     const s = get();

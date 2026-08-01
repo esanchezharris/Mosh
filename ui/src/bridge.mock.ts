@@ -847,11 +847,80 @@ function mkMoshFx(type: string): MoshFxReadout | undefined {
 
 // ── command dispatch ─────────────────────────────────────────────────────────
 
+type MockRecordingStop = {
+  applied: boolean;
+  discarded: boolean;
+  clips: { id: string }[];
+  reason?: string;
+};
+
+function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
+  stopPlayback();
+  snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+  emit("transport", snapshot.transport);
+  if (discardRecordings) {
+    invalidate();
+    return { applied: true, discarded: true, clips: [] };
+  }
+
+  const targets = snapshot.tracks.filter((track) => track.armed);
+  if (targets.length === 0) {
+    return {
+      applied: false,
+      discarded: false,
+      clips: [],
+      reason: "no take captured (no armed live input)",
+    };
+  }
+
+  pushUndo();
+  const landed: { id: string }[] = [];
+  for (const track of targets) {
+    const existing = track.clips.find((clip) => clip.takes && clip.takes.length > 0);
+    if (existing && existing.takes) {
+      const index = existing.takes.length;
+      existing.takes.forEach((take) => (take.isCurrent = false));
+      existing.takes.push({ index, description: `Take ${index + 1}`, isCurrent: true });
+      existing.numTakes = existing.takes.length;
+      existing.currentTakeIndex = index;
+      landed.push({ id: existing.id });
+    } else {
+      const clip = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
+      clip.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
+      clip.numTakes = 1;
+      clip.currentTakeIndex = 0;
+      track.clips.push(clip);
+      landed.push({ id: clip.id });
+    }
+  }
+  invalidate();
+  return { applied: true, discarded: false, clips: landed };
+}
+
 function dispatch(command: string, args: Record<string, unknown>): CommandResult {
   switch (command) {
     case "set_transport": {
-      const t = snapshot.transport;
       const action = str(args.action);
+      const shouldFinalize = snapshot.transport.recording
+        && (action === "stop" || action === "toggle" || action === "record" || action === "to_start");
+      if (shouldFinalize) {
+        const stopped = finalizeMockRecording(false);
+        if (!stopped.applied) return err(command, stopped.reason ?? "could not land recording take");
+
+        const next = { ...snapshot.transport };
+        if (action === "to_start") next.position = 0;
+        if ("position" in args) next.position = Math.max(0, num(args.position));
+        if ("loop" in args) {
+          next.looping = Boolean(args.loop);
+          next.loopStart = num(args.loopStart, next.loopStart);
+          next.loopEnd = num(args.loopEnd, next.loopEnd);
+        }
+        snapshot.transport = next;
+        emit("transport", snapshot.transport);
+        return ok(command, snapshot.transport);
+      }
+
+      const t = snapshot.transport;
       if (action === "toggle") {
         const playing = !t.playing;
         snapshot.transport = { ...t, playing };
@@ -1715,42 +1784,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { trackId: t.id, mode: t.monitor, applied: true });
     }
     case "stop_recording": {
-      stopPlayback();
-      snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
-      emit("transport", snapshot.transport);
-      if (Boolean(args.discardRecordings)) {
-        invalidate();
-        return ok(command, { applied: true, discarded: true, clips: [] });
-      }
-      pushUndo(); // bracket only the actual take landing (the undoable document edit)
-      const armed = snapshot.tracks.filter((t) => t.armed);
-      const targets = armed.length ? armed : snapshot.tracks[0] ? [snapshot.tracks[0]] : [];
-      const landed: { id: string }[] = [];
-      for (const t of targets) {
-        // Stack onto an existing take-bearing clip if present, else start one.
-        const existing = t.clips.find((c) => c.takes && c.takes.length > 0);
-        if (existing && existing.takes) {
-          const idx = existing.takes.length;
-          existing.takes.forEach((tk) => (tk.isCurrent = false));
-          existing.takes.push({ index: idx, description: `Take ${idx + 1}`, isCurrent: true });
-          existing.numTakes = existing.takes.length;
-          existing.currentTakeIndex = idx;
-          landed.push({ id: existing.id });
-        } else {
-          const c = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
-          c.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
-          c.numTakes = 1; c.currentTakeIndex = 0;
-          t.clips.push(c);
-          landed.push({ id: c.id });
-        }
-      }
-      invalidate();
-      return ok(command, {
-        applied: landed.length > 0,
-        discarded: false,
-        clips: landed,
-        ...(landed.length > 0 ? {} : { reason: "no take captured (no live input)" }),
-      });
+      return ok(command, finalizeMockRecording(Boolean(args.discardRecordings)));
     }
     case "list_takes": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");

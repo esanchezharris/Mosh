@@ -1,18 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useStore, type State } from "../store";
 import type { CommandResult } from "../types";
+import { landedRecordingClipIds, type RecordingCommandData } from "../recordingLifecycle";
 
 type TransportControlsOptions = {
   exec: State["exec"];
   recording: boolean;
   anyArmed: boolean;
   fallbackTrackId?: string;
-};
-
-type RecordingCommandData = {
-  applied?: boolean;
-  clips?: unknown[];
-  reason?: string;
 };
 
 function failureMessage(result: CommandResult, fallback: string): string {
@@ -59,20 +54,19 @@ export function useTransportControls({
     return next;
   }
 
-  async function stopRecording(): Promise<boolean> {
+  function projectIsCurrent(projectEpoch: number): boolean {
+    return useStore.getState().projectEpoch === projectEpoch;
+  }
+
+  async function stopRecording(projectEpoch: number): Promise<boolean> {
     const result = await exec("stop_recording");
-    const data = result.data as RecordingCommandData | undefined;
+    if (!projectIsCurrent(projectEpoch)) return false;
     if (!result.ok || result.command !== "stop_recording") {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
     recordingIntent.current = false;
-    if (data?.applied !== true || !Array.isArray(data.clips)) {
-      showFailure(failureMessage(result, "Could not land the recording take."));
-      return false;
-    }
-    const landedNoTake = data.clips.length === 0;
-    if (landedNoTake) {
+    if (!landedRecordingClipIds(result)) {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
@@ -80,56 +74,72 @@ export function useTransportControls({
   }
 
   return {
-    record: () => enqueue(async () => {
-      if (recordingIntent.current) {
-        await stopRecording();
-        return;
-      }
-      if (!anyArmed) {
-        if (!fallbackTrackId) {
-          showFailure("Add a track before recording.");
+    record: () => {
+      const projectEpoch = useStore.getState().projectEpoch;
+      return enqueue(async () => {
+        if (!projectIsCurrent(projectEpoch)) return;
+        if (recordingIntent.current) {
+          await stopRecording(projectEpoch);
           return;
         }
-        const arm = await exec("arm_track", { trackId: fallbackTrackId, armed: true });
-        const armData = arm.data as RecordingCommandData | undefined;
-        if (!arm.ok || arm.command !== "arm_track" || armData?.applied !== true) {
-          showFailure(failureMessage(arm, "No audio input available — check your microphone connection and permissions."));
+        if (!anyArmed) {
+          if (!fallbackTrackId) {
+            showFailure("Add a track before recording.");
+            return;
+          }
+          const arm = await exec("arm_track", { trackId: fallbackTrackId, armed: true });
+          if (!projectIsCurrent(projectEpoch)) return;
+          const armData = arm.data as RecordingCommandData | undefined;
+          if (!arm.ok || arm.command !== "arm_track" || armData?.applied !== true) {
+            showFailure(failureMessage(arm, "No audio input available — check your microphone connection and permissions."));
+            return;
+          }
+        }
+        const result = await exec("set_transport", { action: "record" });
+        if (!projectIsCurrent(projectEpoch)) return;
+        if (!result.ok || result.command !== "set_transport") {
+          showFailure(failureMessage(result, "Could not start recording."));
           return;
         }
-      }
-      const result = await exec("set_transport", { action: "record" });
-      if (!result.ok || result.command !== "set_transport") {
-        showFailure(failureMessage(result, "Could not start recording."));
-        return;
-      }
-      const state = result.data as { recording?: boolean } | undefined;
-      if (state?.recording !== true) {
-        recordingIntent.current = false;
-        showFailure(failureMessage(result, "Could not start recording."));
-        return;
-      }
-      recordingIntent.current = true;
-    }),
+        const state = result.data as { recording?: boolean } | undefined;
+        if (state?.recording !== true) {
+          recordingIntent.current = false;
+          showFailure(failureMessage(result, "Could not start recording."));
+          return;
+        }
+        recordingIntent.current = true;
+      });
+    },
 
-    stop: () => enqueue(async () => {
-      if (recordingIntent.current) {
-        if (!await stopRecording()) return;
-        await exec("set_transport", { position: 0 });
-        return;
-      }
-      const result = await exec("set_transport", { action: "stop", position: 0 });
-      if (result.ok) recordingIntent.current = false;
-    }),
+    stop: () => {
+      const projectEpoch = useStore.getState().projectEpoch;
+      return enqueue(async () => {
+        if (!projectIsCurrent(projectEpoch)) return;
+        if (recordingIntent.current) {
+          if (!await stopRecording(projectEpoch) || !projectIsCurrent(projectEpoch)) return;
+          await exec("set_transport", { position: 0 });
+          return;
+        }
+        const result = await exec("set_transport", { action: "stop", position: 0 });
+        if (!projectIsCurrent(projectEpoch)) return;
+        if (result.ok) recordingIntent.current = false;
+      });
+    },
 
-    togglePlay: () => enqueue(async () => {
-      if (recordingIntent.current) {
-        await stopRecording();
-        return;
-      }
-      const result = await exec("set_transport", { action: "toggle" });
-      const state = result.data as { recording?: boolean } | undefined;
-      if (result.ok && typeof state?.recording === "boolean")
-        recordingIntent.current = state.recording;
-    }),
+    togglePlay: () => {
+      const projectEpoch = useStore.getState().projectEpoch;
+      return enqueue(async () => {
+        if (!projectIsCurrent(projectEpoch)) return;
+        if (recordingIntent.current) {
+          await stopRecording(projectEpoch);
+          return;
+        }
+        const result = await exec("set_transport", { action: "toggle" });
+        if (!projectIsCurrent(projectEpoch)) return;
+        const state = result.data as { recording?: boolean } | undefined;
+        if (result.ok && typeof state?.recording === "boolean")
+          recordingIntent.current = state.recording;
+      });
+    },
   };
 }
