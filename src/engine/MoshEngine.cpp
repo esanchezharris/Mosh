@@ -464,6 +464,23 @@ juce::String MoshEngine::retryAudioDevice()
     return {};
 }
 
+juce::String MoshEngine::releaseAudioDeviceForRepair()
+{
+    auto& transport = edit().getTransport();
+    if (transport.isRecording())
+        return "stop recording before launching a repair build";
+
+    transport.stop (false, false);
+    transport.freePlaybackContext();
+    if (audioOpen)
+        enginePtr->getDeviceManager().deviceManager.closeAudioDevice();
+    audioOpen = false;
+    audioWanted = false;
+    inputsConfigured = false;
+    audioError = "audio device released for repair handoff";
+    return {};
+}
+
 void MoshEngine::applyRequestedAudioOutputDevice()
 {
     if (! audioOpen)

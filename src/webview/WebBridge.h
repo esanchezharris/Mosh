@@ -8,6 +8,7 @@ namespace mosh
 {
 class NativeSpeech;
 class AgentHostProxy;
+class RemoteCompanionServer;
 
 /**
     The swappable seam (00 §0, "swappable-frontend principle").
@@ -41,6 +42,7 @@ public:
     void setRemoteStartHandler (RemoteHandler h) { remoteStartHandler = std::move (h); }
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
     void setRemoteStatusProvider (RemoteStatusProvider p) { remoteStatusProvider = std::move (p); }
+    void setOwnerControlServer (RemoteCompanionServer* server) { ownerControlServer = server; }
 
     /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
         cannot reach the service port itself). Same layering as brain_chat — brain
@@ -101,6 +103,7 @@ private:
     // Lazily created by the native-only supervisor relay. The generated Agent
     // Host capability and private playtest id stay in this process, not the UI.
     std::shared_ptr<AgentHostProxy> agentHost;
+    RemoteCompanionServer* ownerControlServer = nullptr;
 
     // The native file dialog (wave: settings). launchAsync's callback must outlive
     // the dialog, so the FileChooser is held here, not in a local. Only one dialog at

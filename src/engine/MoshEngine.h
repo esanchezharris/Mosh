@@ -48,6 +48,8 @@ public:
         hardware-free error when this session never wanted audio. */
     juce::String retryAudioDevice();
 
+    juce::String releaseAudioDeviceForRepair();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 

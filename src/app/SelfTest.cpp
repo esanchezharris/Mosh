@@ -9766,6 +9766,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
     }
 
+    section ("Owner repair checkpoint and audio handoff");
+    {
+        const auto checkpoint = cmd (ops, "create_repair_checkpoint");
+        const auto checkpointPath = checkpoint["data"].getProperty ("checkpointPath", var()).toString();
+        const auto priorAppPath = checkpoint["data"].getProperty ("priorAppPath", var()).toString();
+        check (ok (checkpoint) && File (checkpointPath).existsAsFile(),
+               "repair swap: MoshOps persists a concrete project checkpoint");
+        check (File (priorAppPath).isDirectory() && priorAppPath.endsWith (".app"),
+               "repair swap: checkpoint records the installed app for rollback");
+        const auto released = cmd (ops, "release_audio_device");
+        check (ok (released) && ! (bool) released["data"].getProperty ("audioEnabled", true),
+               "repair swap: MoshOps releases the audio device before handoff");
+        File (checkpointPath).getParentDirectory().deleteRecursively();
+    }
+
     finishSection();
     std::cerr << "===== " << (checks - failures) << "/" << checks
               << " checks passed, " << failures << " failed =====\n\n";

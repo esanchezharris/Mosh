@@ -6,6 +6,7 @@
 
 namespace mosh
 {
+class RemoteCompanionServer;
 /**
     Private owner-cockpit transport. The WebView gives this proxy only a bounded
     supervisor-turn request; it owns the local Agent Host process, generated
@@ -14,7 +15,8 @@ namespace mosh
 class AgentHostProxy
 {
 public:
-    AgentHostProxy() = default;
+    explicit AgentHostProxy (RemoteCompanionServer* ownerControl = nullptr)
+        : ownerControlServer (ownerControl) {}
 
     struct StartupEnvelope
     {
@@ -31,6 +33,8 @@ public:
     juce::var createReport (const juce::var& request);
     juce::var approveReport (const juce::String& reportId);
     juce::var createRepair (const juce::String& reportId);
+    juce::var launchRepair (const juce::String& repairId, const juce::String& buildPath);
+    juce::var rollbackRepair (const juce::String& repairId, const juce::String& reason);
     juce::var events (int afterSequence);
     bool hasActivePlaytest() const;
 
@@ -58,6 +62,7 @@ private:
     juce::String playtestId;
     bool retainTranscript = false;
     bool disclosureDelivered = false;
+    RemoteCompanionServer* ownerControlServer = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AgentHostProxy)
 };

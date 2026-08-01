@@ -150,6 +150,25 @@ export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrat
     if (approved.status !== "approved") throw new Error("Approved report did not synchronize");
     const repair = await json(await post(`/v1/reports/${reportId}/repairs`, {}), 201);
     const repairId = stringProperty(repair, "id");
+    const buildPath = "/fixture/worktrees/playtest-42-metronome-drift/build/Mosh.app";
+    await json(await post(`/v1/repairs/${repairId}/complete`, {
+      redEvidencePath: "/fixture/evidence/red.log",
+      greenEvidencePath: "/fixture/evidence/green.log",
+      diagnosticsPath: "/fixture/evidence/diagnostics.log",
+      bundlePath: "/fixture/evidence/repair-bundle",
+      buildPath,
+      sourceSha: INTEGRATION_BUILD_SHA,
+      draftPrUrl: "https://fixture.invalid/pull/42",
+      draft: true,
+      merged: false,
+    }), 200);
+    await json(await post(`/v1/repairs/${repairId}/launch`, { buildPath }), 200);
+    const rolledBack = await json(await post(`/v1/repairs/${repairId}/rollback`, {
+      reason: "fixture retest requested rollback",
+    }), 200);
+    if (calls.process.join(",") !== "checkpoint,stop_transport,release_audio,handoff_repair,handoff_prior") {
+      throw new Error(`Repair process order was ${calls.process.join(",")}`);
+    }
 
     const replayResponse = await fetch(
       `${host.origin}/v1/playtests/${playtestId}/events?afterSequence=0&windowMs=20`,
@@ -192,8 +211,9 @@ export async function runOwnerCockpitIntegration(): Promise<OwnerCockpitIntegrat
       },
       supervisor,
       repair: {
-        status: repair.status,
+        status: rolledBack.status,
         branch: repair.branch,
+        swapState: object(rolledBack.swap, "repair swap").state,
       },
       events: persistedEvents.map((event) => event.type),
       retention: {

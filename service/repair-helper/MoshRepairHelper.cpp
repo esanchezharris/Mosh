@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <filesystem>
@@ -225,6 +226,20 @@ pid_t parsePid (const char* value)
     {
         fail ("caller_pid_invalid", "Caller PID is invalid");
     }
+}
+
+std::string repairId (const char* value)
+{
+    const std::string id (value);
+    if (id.size() != 36)
+        throw std::runtime_error ("repair_id_invalid");
+    for (size_t index = 0; index < id.size(); ++index)
+    {
+        const bool separator = index == 8 || index == 13 || index == 18 || index == 23;
+        if (separator ? id[index] != '-' : ! std::isxdigit (static_cast<unsigned char> (id[index])))
+            throw std::runtime_error ("repair_id_invalid");
+    }
+    return id;
 }
 
 void rejectSymlinks (const fs::path& candidate)
@@ -474,6 +489,7 @@ template <typename CallerValidator, typename TargetValidator>
     const ProcessToken& callerToken,
     const fs::path& targetApp,
     const std::vector<std::string>& arguments,
+    bool clearRepairEnvironment,
     CallerValidator validateCallerNow,
     TargetValidator validateTargetNow)
 {
@@ -511,6 +527,12 @@ template <typename CallerValidator, typename TargetValidator>
         workerExit (72);
     try { validateTargetNow(); } catch (...) { workerExit (73); }
     writeTestStatus ("exec");
+
+    if (clearRepairEnvironment)
+    {
+        unsetenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA");
+        unsetenv ("MOSH_ACTIVE_REPAIR_ID");
+    }
 
     const auto executable = targetApp / "Contents" / "MacOS" / "Mosh";
     std::vector<std::string> storage { executable.string() };
@@ -552,20 +574,22 @@ int main (int argc, char** argv)
         const std::string action (argv[1]);
         if (action == "__worker-repair")
         {
-            if (argc != 10) workerExit (75);
-            const auto callerPid = parsePid (argv[6]);
+            if (argc != 11) workerExit (75);
+            const auto callerPid = parsePid (argv[7]);
             const ProcessToken callerToken {
-                parseTokenPart (argv[7]),
                 parseTokenPart (argv[8]),
+                parseTokenPart (argv[9]),
             };
-            const auto parentHelperPid = parsePid (argv[9]);
+            const auto parentHelperPid = parsePid (argv[10]);
             runWorker (
                 parentHelperPid,
                 callerPid,
                 callerToken,
                 canonicalPath (argv[2], true),
                 { "--mosh-repair-source-sha", argv[4],
-                  "--mosh-owner-checkpoint", argv[5] },
+                  "--mosh-owner-checkpoint", argv[5],
+                  "--mosh-repair-id", repairId (argv[6]) },
+                false,
                 [=] { validateCallerIdentity (callerPid, helper); },
                 [=] {
                     repairTarget (argv[2], argv[3], argv[4], helper);
@@ -587,6 +611,7 @@ int main (int argc, char** argv)
                 callerToken,
                 canonicalPath (argv[3], true),
                 { "--mosh-owner-checkpoint", argv[2] },
+                true,
                 [=] { validateCallerIdentity (callerPid, helper); },
                 [=] { priorTarget (argv[2], argv[3], helper); });
         }
@@ -599,9 +624,10 @@ int main (int argc, char** argv)
         }
         if (action == "handoff-repair")
         {
-            if (argc != 7)
-                fail ("usage", "handoff-repair requires app, worktree, sourceSha, checkpoint, callerPid");
-            const auto callerPid = parsePid (argv[6]);
+            if (argc != 8)
+                fail ("usage", "handoff-repair requires app, worktree, sourceSha, checkpoint, repairId, callerPid");
+            const auto id = repairId (argv[6]);
+            const auto callerPid = parsePid (argv[7]);
             validateCaller (callerPid, helper);
             const auto callerToken = processToken (callerPid);
             if (! callerToken.has_value())
@@ -612,7 +638,7 @@ int main (int argc, char** argv)
                 callerPid,
                 target.app,
                 { "__worker-repair", target.app.string(), target.worktree.string(),
-                  target.sourceSha, checkpoint.string(), std::to_string (callerPid),
+                  target.sourceSha, checkpoint.string(), id, std::to_string (callerPid),
                   std::to_string (callerToken->seconds),
                   std::to_string (callerToken->microseconds) });
             return 0;

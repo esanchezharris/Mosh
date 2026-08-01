@@ -183,12 +183,26 @@ public:
         moshOps = std::make_unique<MoshOps> (*engine);
         const auto repairSourceSha = valueAfter (
             launchArguments, "--mosh-repair-source-sha");
+        const auto repairId = valueAfter (
+            launchArguments, "--mosh-repair-id");
+        if (repairSourceSha.isEmpty() != repairId.isEmpty())
+        {
+            std::cerr << "repair launch refused: incomplete repair identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
         if (repairSourceSha.isNotEmpty() && repairSourceSha != MOSH_BUILD_SHA)
         {
             std::cerr << "repair launch refused: source SHA does not match this build" << std::endl;
             setApplicationReturnValue (1);
             quit();
             return;
+        }
+        if (repairSourceSha.isNotEmpty())
+        {
+            mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_SOURCE_SHA", repairSourceSha.toRawUTF8());
+            mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_ID", repairId.toRawUTF8());
         }
         const auto ownerCheckpoint = valueAfter (
             launchArguments, "--mosh-owner-checkpoint");
@@ -197,7 +211,7 @@ public:
             auto* args = new juce::DynamicObject();
             args->setProperty ("file", ownerCheckpoint);
             auto* command = new juce::DynamicObject();
-            command->setProperty ("name", "open_project");
+            command->setProperty ("command", "open_project");
             command->setProperty ("args", juce::var (args));
             const auto result = moshOps->execute (juce::var (command));
             if (! (bool) result.getProperty ("ok", false))
@@ -212,6 +226,10 @@ public:
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
+        ownerControlServer = std::make_unique<RemoteCompanionServer> (
+            engine->sessionDir().getChildFile ("owner-control"));
+        ownerControlServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
+        ownerControlServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
 
         // Design-lab feed (opt-in): MOSH_LAB_FEED=1 autostarts the companion server
         // with a stable token (MOSH_LAB_TOKEN, default "mosh-lab") and a 24h TTL so
@@ -328,6 +346,7 @@ public:
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+        bridge.setOwnerControlServer (ownerControlServer.get());
         // WP-11 best-of-n relays (brain traffic is UI-domain — same layering as
         // brain_chat, NOT MoshOps commands; the bridge runs these off-thread).
         bridge.setEscalateHandler ([this] (const juce::var& p) { return moshOps->escalateCandidates (p); });
@@ -401,6 +420,7 @@ public:
         }
         menuController.reset();   // tears down the macOS main menu before the window
         mainWindow.reset();
+        ownerControlServer.reset();
         remoteServer.reset();
         moshOps.reset();
         engine.reset();
@@ -420,6 +440,7 @@ private:
     std::unique_ptr<MoshEngine> engine;
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
+    std::unique_ptr<RemoteCompanionServer> ownerControlServer;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
     AutoSaveTimer autoSave;

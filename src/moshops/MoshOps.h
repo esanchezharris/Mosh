@@ -379,6 +379,8 @@ private:
     // pre-validates the file exists; commandName tags the log + result envelope.
     juce::var openProjectFile     (const juce::File& file, const juce::var& args, const char* commandName);
     juce::var cmdSaveAs           (const juce::var& args);   // persists + re-points (undoable:false)
+    juce::var cmdCreateRepairCheckpoint (const juce::var& args);
+    juce::var cmdReleaseAudioDevice (const juce::var& args);
     // PRJ-008 — per-project format / time-base intent (undoable:false preference,
     // stored on a MOSH_PROJECT child of the Edit tree; saves/reloads with the edit).
     juce::var cmdSetProjectSettings (const juce::var& args);

@@ -39,16 +39,18 @@ function request(body: Uint8Array, secret = "owner-secret", contentType = "image
   });
 }
 
+const authorize = async (candidate: string) => candidate === "owner-secret";
+
 Deno.test("evidence handler requires owner secret before storage access", async () => {
   const storage = new FakeStorage();
-  const handler = createEvidenceHandler({ ownerSecret: "owner-secret", storage });
+  const handler = createEvidenceHandler({ authorize, storage });
   assertEquals((await handler(request(PNG, "wrong"))).status, 401);
   assertEquals(storage.writes, []);
 });
 
 Deno.test("evidence handler rejects MIME, signature, and bounded-size violations", async () => {
   const storage = new FakeStorage();
-  const handler = createEvidenceHandler({ ownerSecret: "owner-secret", storage, maxBytes: PNG.length });
+  const handler = createEvidenceHandler({ authorize, storage, maxBytes: PNG.length });
   assertEquals((await handler(request(PNG, "owner-secret", "image/jpeg"))).status, 415);
   assertEquals((await handler(request(new Uint8Array([1, 2, 3])))).status, 415);
   assertEquals((await handler(request(new Uint8Array([...PNG, 2])))).status, 413);
@@ -57,7 +59,7 @@ Deno.test("evidence handler rejects MIME, signature, and bounded-size violations
 
 Deno.test("evidence handler writes one immutable path, checksum, and five-minute preview", async () => {
   const storage = new FakeStorage();
-  const handler = createEvidenceHandler({ ownerSecret: "owner-secret", storage });
+  const handler = createEvidenceHandler({ authorize, storage });
   const response = await handler(request(PNG));
   assertEquals(response.status, 200);
   assertEquals(storage.writes[0], {

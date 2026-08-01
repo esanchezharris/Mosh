@@ -13,7 +13,7 @@ describe("owner cockpit bundled integration harness", () => {
       github: 1,
       codexThreads: 2,
       gitWorktrees: 1,
-      processActions: 0,
+      processActions: 5,
       live: 0,
     });
     expect(result.supervisor).toMatchObject({
@@ -21,8 +21,9 @@ describe("owner cockpit bundled integration harness", () => {
       commands: [{ capabilityId: "set_metronome" }],
     });
     expect(result.repair).toMatchObject({
-      status: "running",
+      status: "failed",
       branch: "codex/playtest-42-metronome-drift",
+      swapState: "rolled_back",
     });
     expect(result.events).toEqual(expect.arrayContaining([
       "playtest.created",
@@ -36,6 +37,13 @@ describe("owner cockpit bundled integration harness", () => {
       "repair.reserved",
       "repair.started",
       "repair.codex.progress",
+      "repair.full_gate_pending",
+      "repair.checkpoint.created",
+      "repair.transport.stopped",
+      "repair.audio.released",
+      "repair.build.handoff_accepted",
+      "repair.rollback.handoff_accepted",
+      "repair.swap.rolled_back",
       "playtest.closed",
     ]));
     expect(result.retention).toEqual({

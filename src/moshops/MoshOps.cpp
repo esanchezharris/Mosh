@@ -596,6 +596,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "open_recent")       return cmdOpenRecent (args);
     if (name == "save_as")           return cmdSaveAs (args);
+    if (name == "create_repair_checkpoint") return cmdCreateRepairCheckpoint (args);
+    if (name == "release_audio_device") return cmdReleaseAudioDevice (args);
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
     if (name == "set_count_in")      return broadcastStructuralIfActive (name, args, cmdSetCountIn (args));

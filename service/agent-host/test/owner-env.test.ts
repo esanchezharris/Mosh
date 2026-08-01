@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readOwnerOpenAIKey } from "../src/owner-env.js";
+import { readOwnerEnvironment, readOwnerOpenAIKey } from "../src/owner-env.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -44,5 +44,18 @@ describe("owner OpenAI credential loading", () => {
   it("refuses a credential file readable by group or other users", () => {
     const filePath = ownerEnv("OPENAI_API_KEY=unsafe-owner-key\n", 0o644);
     expect(readOwnerOpenAIKey({}, filePath)).toBeUndefined();
+  });
+
+  it("loads owner orchestration settings while inherited values win", () => {
+    const filePath = ownerEnv(`
+      MOSH_PLAYTEST_EVIDENCE_URL=https://edge.invalid/from-file
+      MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET=file-secret
+      ignored-lowercase=value
+    `);
+    expect(readOwnerEnvironment({ MOSH_PLAYTEST_EVIDENCE_URL: "https://edge.invalid/inherited" }, filePath))
+      .toMatchObject({
+        MOSH_PLAYTEST_EVIDENCE_URL: "https://edge.invalid/inherited",
+        MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET: "file-secret",
+      });
   });
 });

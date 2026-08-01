@@ -253,6 +253,13 @@ const checkpointResult = z.object({
   checkpointPath: z.string().min(1),
   priorAppPath: z.string().min(1),
 });
+const nativeControlResult = z.object({
+  ok: z.literal(true),
+  data: z.object({
+    ok: z.literal(true),
+    data: z.unknown().optional(),
+  }),
+});
 
 export class RepairControlAdapter implements ProcessAdapter {
   private helperVerified: Promise<void> | undefined;
@@ -260,16 +267,20 @@ export class RepairControlAdapter implements ProcessAdapter {
   constructor(
     private readonly runner: CommandRunner,
     private readonly helperPath: string,
+    private readonly nativeControl: {
+      endpoint: string;
+      capability: string;
+      fetch?: typeof fetch;
+    },
     private readonly artifactPolicy = new NativeRepairArtifactPolicy(),
   ) {}
 
   async checkpoint(): Promise<RepairCheckpoint> {
-    const result = await this.action("checkpoint");
-    return checkpointResult.parse(parseJson(result.stdout));
+    return checkpointResult.parse(await this.nativeAction("create_repair_checkpoint"));
   }
 
-  async stopTransport(): Promise<void> { await this.action("stop-transport"); }
-  async releaseAudio(): Promise<void> { await this.action("release-audio"); }
+  async stopTransport(): Promise<void> { await this.nativeAction("set_transport", { action: "stop" }); }
+  async releaseAudio(): Promise<void> { await this.nativeAction("release_audio_device"); }
   async handoffRepairBuild(context: RepairLaunchContext): Promise<void> {
     const buildPath = await this.artifactPolicy.validateBuild(
       context.worktreePath,
@@ -284,10 +295,11 @@ export class RepairControlAdapter implements ProcessAdapter {
       context.worktreePath,
       context.sourceSha,
       context.checkpointPath,
+      context.repairId,
       String(process.ppid),
     ]);
   }
-  async closeRepairBuild(): Promise<void> { await this.action("close-repair"); }
+  async closeRepairBuild(): Promise<void> { await this.nativeAction("release_audio_device"); }
   async handoffPriorApp(context: PriorAppHandoffContext): Promise<void> {
     await this.action("handoff-prior", [
       context.checkpointPath,
@@ -303,6 +315,20 @@ export class RepairControlAdapter implements ProcessAdapter {
       throw codedError("repair_process_failed", `Repair process action failed: ${name}`);
     }
     return result;
+  }
+
+  private async nativeAction(name: string, arguments_: Readonly<Record<string, unknown>> = {}): Promise<unknown> {
+    const response = await (this.nativeControl.fetch ?? fetch)(`${this.nativeControl.endpoint}/command`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.nativeControl.capability}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command: { command: name, args: arguments_ } }),
+    });
+    if (!response.ok) throw codedError("repair_process_failed", `Native repair action failed: ${name}`);
+    const result = nativeControlResult.parse(await response.json());
+    return result.data.data;
   }
 
   private verifyHelper(): Promise<void> {

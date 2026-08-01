@@ -22,6 +22,7 @@ import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../u
 import type { Plugin } from "../types";
 import { ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
 import { useSettings } from "../settings/store";
+import { ping } from "../bridge";
 
 export function RightRail() {
   const open = useShell((s) => s.rightOpen);
@@ -73,6 +74,13 @@ export function OwnerCockpitCard() {
   const playing = useStore((store) => store.transport.playing);
   const active = state.status === "active";
   const busy = state.status === "starting" || state.status === "closing";
+  const [repairSourceSha, setRepairSourceSha] = useState<string | null>(null);
+  useEffect(() => {
+    void ping().then((info) => {
+      setRepairSourceSha(info.repairSourceSha ?? null);
+      if (info.repairId) ownerCockpitRuntime.resumeInstalledRepair(info.repairId);
+    });
+  }, []);
   useEffect(() => {
     if (!playing && state.pendingNotes > 0) ownerCockpitRuntime.flushQuietReports();
   }, [playing, state.pendingNotes]);
@@ -85,6 +93,11 @@ export function OwnerCockpitCard() {
         <strong>Owner playtest</strong>
         <span role="status" aria-live="polite">{state.status}</span>
       </div>
+      {repairSourceSha && (
+        <div className="v2-owner-alert" role="status" data-testid="v2-repair-banner">
+          Repair build {repairSourceSha.slice(0, 8)} · rollback remains available
+        </div>
+      )}
       <div className="v2-owner-actions">
         {!active ? (
           <button type="button" className="v2-btn" disabled={busy}
@@ -110,6 +123,23 @@ export function OwnerCockpitCard() {
       )}
       {state.lastEvent && <div className="v2-owner-event" role="status" aria-live="polite">{state.lastEvent}</div>}
       {state.error && <div className="v2-owner-error" role="alert">{state.error}</div>}
+      {state.repair && (
+        <div className="v2-owner-actions" data-testid="v2-repair-controls">
+          <span>Repair: {state.repair.status.replace(/_/g, " ")}</span>
+          {state.repair.status === "ready" && (
+            <button type="button" className="v2-btn"
+              onClick={() => void ownerCockpitRuntime.launchRepair().catch(() => undefined)}>
+              Launch Repair
+            </button>
+          )}
+          {(state.repair.status === "repair_running" || state.repair.status === "failed") && (
+            <button type="button" className="v2-btn"
+              onClick={() => void ownerCockpitRuntime.rollbackRepair().catch(() => undefined)}>
+              Roll Back
+            </button>
+          )}
+        </div>
+      )}
       {state.urgentMessage && (
         <div className="v2-owner-alert" role="alert">
           <span>{state.urgentMessage}</span>

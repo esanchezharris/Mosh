@@ -25,6 +25,7 @@ public:
     // and a 24h TTL so a local browser playground can poll /events without the
     // pairing dance. Opt-in (env-gated in Main); LAN-visible like pairing.
     juce::var startLabFeed (const juce::String& token);
+    juce::var startOwnerControl (const juce::String& token);
     juce::var stopServer();
     juce::var status (bool includePairingSecrets = true) const;
     void pushEvent (const juce::var& event);
@@ -65,7 +66,7 @@ private:
 
     juce::var callOnMessageThread (const std::function<juce::var()>& fn,
                                    int timeoutMs = 5000) const;
-    RemoteAuthResult authorizeRequest (const juce::var& body) const;
+    RemoteAuthResult authorizeRequest (const Request& request, const juce::var& body) const;
     juce::var eventsSince (int sinceSeq) const;
     void startBonjour();
     void stopBonjour();
@@ -79,6 +80,7 @@ private:
     mutable juce::CriticalSection lock;
     std::unique_ptr<juce::StreamingSocket> listener;
     bool running = false;
+    bool ownerControl = false;
     int port = RemoteCompanionProtocol::defaultPort();
     juce::Array<juce::var> eventQueue;
     int eventSeq = 0;

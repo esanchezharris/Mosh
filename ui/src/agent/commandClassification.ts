@@ -18,12 +18,14 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   reload: "discards unsaved changes back to the last save — a data-loss gate that stays human",
   recover_session: "crash-recovery acceptance is an explicit human decision",
   discard_recovery: "throwing away a recovery point is an explicit human decision",
+  create_repair_checkpoint: "owner-cockpit repair handoff plumbing — only the approved installed-app swap may create this checkpoint",
   relink_clip: "repairs a broken source-file reference — file-path surgery, not a musical move",
   import_clip_data: "carries a base64 clip payload (multiplayer/clipboard plumbing) — unrepresentable in ArgSpec",
   paste_clip: "object-typed 'clip' descriptor unrepresentable in ArgSpec (and the SFT parser's S/N/B set); agent equivalent = duplicate_clip + move_clip",
 
   // ── device / settings / scan admin — needs user acknowledgment ────────────────
   set_audio_device: "audio-device selection is session admin the producer must acknowledge",
+  release_audio_device: "owner-cockpit repair handoff plumbing — the agent may not disconnect the producer's audio device",
   retry_audio_device: "AUD-017 — the response to a device-failed-to-open banner; the producer fixes the hardware, then presses Retry",
   set_buffer_size: "buffer-size changes are session admin the producer must acknowledge",
   set_audio_threads: "thread-count tuning is session admin the producer must acknowledge",

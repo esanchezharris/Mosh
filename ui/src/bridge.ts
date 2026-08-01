@@ -65,6 +65,8 @@ export type AppInfo = {
   version: string;
   stage: number;
   backend: string;
+  repairSourceSha?: string;
+  repairId?: string;
 };
 
 export type RemotePairingInfo = {
@@ -172,6 +174,10 @@ export const agentHostApproveReport = (reportId: string): Promise<unknown> =>
   ownerHostNative("agent_host_approve_report", { reportId });
 export const agentHostCreateRepair = (reportId: string): Promise<unknown> =>
   ownerHostNative("agent_host_create_repair", { reportId });
+export const agentHostLaunchRepair = (repairId: string, buildPath: string): Promise<unknown> =>
+  ownerHostNative("agent_host_launch_repair", { repairId, buildPath });
+export const agentHostRollbackRepair = (repairId: string, reason: string): Promise<unknown> =>
+  ownerHostNative("agent_host_rollback_repair", { repairId, reason });
 export const agentHostEvents = (afterSequence: number): Promise<unknown> =>
   ownerHostNative("agent_host_events", { afterSequence });
 

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { AgentHostApiError, AgentHostClient } from "./agentHostClient";
+import { AgentHostApiError, AgentHostClient, type HostEvent } from "./agentHostClient";
 import {
   classifyReportTrigger,
   type DraftReport,
@@ -15,11 +15,17 @@ export type OwnerCockpitState = {
   readonly urgentMessage: string | null;
   readonly error: string | null;
   readonly lastEvent: string | null;
+  readonly repair: {
+    readonly id: string;
+    readonly status: "running" | "ready" | "repair_running" | "rolled_back" | "failed";
+    readonly buildPath?: string;
+  } | null;
 };
 
 type OwnerCockpitClient = Pick<
   AgentHostClient,
-  "start" | "close" | "watchEvents" | "realtimeSecret" | "createReport" | "approveReport" | "createRepair"
+  "start" | "close" | "watchEvents" | "realtimeSecret" | "createReport" | "approveReport"
+    | "createRepair" | "launchRepair" | "rollbackRepair"
 >;
 
 export class OwnerCockpitRuntime {
@@ -32,6 +38,7 @@ export class OwnerCockpitRuntime {
     urgentMessage: null,
     error: null,
     lastEvent: null,
+    repair: null,
   };
   private readonly listeners = new Set<() => void>();
   private readonly quietReportIds = new Set<string>();
@@ -59,7 +66,7 @@ export class OwnerCockpitRuntime {
           : this.state.disclosure,
       });
       this.stopEvents?.();
-      this.stopEvents = this.client.watchEvents((event) => this.update({ lastEvent: event.type }));
+      this.stopEvents = this.client.watchEvents((event) => this.handleEvent(event));
     } catch (error) {
       this.update({ status: "outage", error: error instanceof Error ? error.message : "Agent Host unavailable" });
       throw error;
@@ -130,8 +137,32 @@ export class OwnerCockpitRuntime {
     const report = this.allReports.find((candidate) => candidate.id === reportId);
     if (!report || report.status !== "approved")
       throw new AgentHostApiError("Approve and sync the report before repair.", "approval_required", false);
-    await this.client.createRepair(reportId);
-    this.update({ lastEvent: "repair.running" });
+    const repair = await this.client.createRepair(reportId);
+    this.update({ lastEvent: "repair.running", repair: { id: repair.id, status: "running" } });
+  }
+
+  async launchRepair(): Promise<void> {
+    const repair = this.state.repair;
+    if (!repair?.buildPath || repair.status !== "ready")
+      throw new AgentHostApiError("Repair build is not ready.", "repair_swap_state", false);
+    await this.client.launchRepair(repair.id, repair.buildPath);
+    this.update({ lastEvent: "repair.build.handoff_accepted", repair: { ...repair, status: "repair_running" } });
+  }
+
+  async rollbackRepair(reason = "Owner requested rollback after repair retest"): Promise<void> {
+    const repair = this.state.repair;
+    if (!repair || (repair.status !== "repair_running" && repair.status !== "failed"))
+      throw new AgentHostApiError("No repair build is available to roll back.", "repair_swap_state", false);
+    await this.client.rollbackRepair(repair.id, reason);
+    this.update({ lastEvent: "repair.swap.rolled_back", repair: { ...repair, status: "rolled_back" } });
+  }
+
+  resumeInstalledRepair(repairId: string): void {
+    if (!repairId || this.state.repair?.id === repairId) return;
+    this.update({
+      lastEvent: "repair.build.resumed",
+      repair: { id: repairId, status: "repair_running" },
+    });
   }
 
   flushQuietReports(): void {
@@ -146,6 +177,26 @@ export class OwnerCockpitRuntime {
   private update(patch: Partial<OwnerCockpitState>): void {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
+  }
+
+  private handleEvent(event: HostEvent): void {
+    if (event.type === "repair.full_gate_pending"
+      && typeof event.data.repairId === "string"
+      && typeof event.data.buildPath === "string") {
+      this.update({
+        lastEvent: event.type,
+        repair: { id: event.data.repairId, status: "ready", buildPath: event.data.buildPath },
+      });
+      return;
+    }
+    if (event.type === "repair.build.handoff_accepted" && this.state.repair)
+      this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "repair_running" } });
+    else if (event.type === "repair.swap.rolled_back" && this.state.repair)
+      this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "rolled_back" } });
+    else if (event.type === "repair.swap.failed" && this.state.repair)
+      this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "failed" } });
+    else
+      this.update({ lastEvent: event.type });
   }
 }
 

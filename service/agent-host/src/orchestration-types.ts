@@ -79,6 +79,7 @@ export interface RepairArtifactPolicy {
 }
 
 export type RepairLaunchContext = {
+  repairId: string;
   buildPath: string;
   worktreePath: string;
   sourceSha: string;

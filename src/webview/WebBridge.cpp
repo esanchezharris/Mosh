@@ -348,7 +348,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 const auto request = args.size() > 0 ? args[0] : juce::var();
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, request, completion]() mutable
                 {
@@ -362,7 +362,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 const bool retain = args.size() > 0 && (bool) args[0].getProperty ("retainTranscript", false);
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, retain, completion]() mutable
                 {
@@ -376,7 +376,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 const bool retain = args.size() > 0 && (bool) args[0].getProperty ("retainTranscript", false);
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, retain, completion]() mutable
                 {
@@ -389,7 +389,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             [this] (const juce::Array<juce::var>&,
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, completion]() mutable
                 {
@@ -431,7 +431,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             {
                 const auto reportId = args.size() > 0
                     ? args[0].getProperty ("reportId", juce::var()).toString() : juce::String();
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, reportId, completion]() mutable
                 {
@@ -446,11 +446,43 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
             {
                 const auto reportId = args.size() > 0
                     ? args[0].getProperty ("reportId", juce::var()).toString() : juce::String();
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, reportId, completion]() mutable
                 {
                     auto result = host->createRepair (reportId);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_launch_repair"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto request = args.size() > 0 ? args[0] : juce::var();
+                const auto repairId = request.getProperty ("repairId", juce::var()).toString();
+                const auto buildPath = request.getProperty ("buildPath", juce::var()).toString();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
+                auto host = agentHost;
+                juce::Thread::launch ([host, repairId, buildPath, completion]() mutable
+                {
+                    auto result = host->launchRepair (repairId, buildPath);
+                    juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
+                });
+            })
+        .withNativeFunction (
+            juce::Identifier ("agent_host_rollback_repair"),
+            [this] (const juce::Array<juce::var>& args,
+                    juce::WebBrowserComponent::NativeFunctionCompletion completion)
+            {
+                const auto request = args.size() > 0 ? args[0] : juce::var();
+                const auto repairId = request.getProperty ("repairId", juce::var()).toString();
+                const auto reason = request.getProperty ("reason", juce::var()).toString();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
+                auto host = agentHost;
+                juce::Thread::launch ([host, repairId, reason, completion]() mutable
+                {
+                    auto result = host->rollbackRepair (repairId, reason);
                     juce::MessageManager::callAsync ([completion, result]() mutable { completion (result); });
                 });
             })
@@ -460,7 +492,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 const int after = args.size() > 0 ? (int) args[0].getProperty ("afterSequence", 0) : 0;
-                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy>();
+                if (agentHost == nullptr) agentHost = std::make_shared<AgentHostProxy> (ownerControlServer);
                 auto host = agentHost;
                 juce::Thread::launch ([host, after, completion]() mutable
                 {
@@ -743,6 +775,10 @@ juce::var WebBridge::appInfo()
     o->setProperty ("version", MOSH_VERSION_STRING);
     o->setProperty ("stage", 0);
     o->setProperty ("backend", "juce");
+    const auto repairSourceSha = juce::SystemStats::getEnvironmentVariable ("MOSH_ACTIVE_REPAIR_SOURCE_SHA", {});
+    if (repairSourceSha.isNotEmpty()) o->setProperty ("repairSourceSha", repairSourceSha);
+    const auto repairId = juce::SystemStats::getEnvironmentVariable ("MOSH_ACTIVE_REPAIR_ID", {});
+    if (repairId.isNotEmpty()) o->setProperty ("repairId", repairId);
     return juce::var (o);
 }
 

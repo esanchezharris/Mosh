@@ -150,7 +150,8 @@ inline Class classify (const juce::String& command, juce::String& reason)
     static const std::set<juce::String> lifecycle {
         "new_project", "open_project", "open_recent", "save", "save_as", "reload",
         "recover_session", "discard_recovery", "export_audio", "export_stems",
-        "set_transport", "stop_recording", "undo", "redo",
+        "set_transport", "stop_recording", "create_repair_checkpoint",
+        "release_audio_device", "undo", "redo",
     };
     if (lifecycle.count (command) > 0)
     {

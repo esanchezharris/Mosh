@@ -44,6 +44,7 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
       backend: { emitByBackend(eventId: string, serialized: string): void };
     };
     const juce = (window as unknown as { __JUCE__: JuceHarness }).__JUCE__;
+    (window as unknown as { __moshOwnerCalls: string[] }).__moshOwnerCalls = [];
     juce.initialisationData.__juce__functions = [
       "agent_host_start_playtest",
       "agent_host_close_playtest",
@@ -51,8 +52,11 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
       "agent_host_create_report",
       "agent_host_approve_report",
       "agent_host_create_repair",
+      "agent_host_launch_repair",
+      "agent_host_rollback_repair",
       "agent_host_realtime_secret",
       "agent_host_supervisor_turn",
+      "ping",
     ];
     juce.postMessage = (serialized: string) => {
       const message = JSON.parse(serialized) as {
@@ -60,13 +64,32 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
         payload: { name: string; params: unknown[]; resultId: number };
       };
       if (message.eventId !== "__juce__invoke") return;
+      (window as unknown as { __moshOwnerCalls: string[] }).__moshOwnerCalls.push(message.payload.name);
       const request = message.payload.params[0] as Record<string, unknown> | undefined;
       const result = message.payload.name === "agent_host_start_playtest"
         ? { ok: true, active: true, retainTranscript: false, disclosureRequired: true }
+        : message.payload.name === "ping"
+          ? {
+              ok: true,
+              app: "Mosh",
+              version: "repair",
+              stage: 0,
+              backend: "juce",
+              repairSourceSha: "a".repeat(40),
+              repairId: "repair-1",
+            }
         : message.payload.name === "agent_host_events"
-          ? { ok: true, events: [] }
+          ? { ok: true, events: [{
+              sequence: 1,
+              type: "repair.full_gate_pending",
+              data: { repairId: "repair-1", buildPath: "/private/repair/Mosh.app" },
+            }] }
           : message.payload.name === "agent_host_create_report"
             ? { ok: true, id: "fixture-report", ...request }
+            : message.payload.name === "agent_host_launch_repair"
+              ? { ok: true, id: "repair-1", state: "repair_running" }
+              : message.payload.name === "agent_host_rollback_repair"
+                ? { ok: true, id: "repair-1", state: "rolled_back" }
             : message.payload.name === "agent_host_supervisor_turn"
               ? { ok: false, code: "openai_unavailable", error: "OpenAI supervisor unavailable", retryable: true }
               : { ok: true };
@@ -77,6 +100,15 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
     };
   });
 
+  await page.getByTestId("file-options").click();
+  await page.getByTestId("fo-settings").click();
+  await ownerSwitch.click();
+  await ownerSwitch.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("v2-repair-banner")).toContainText("Repair build aaaaaaaa");
+  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: repair running");
+  await expect(page.getByRole("button", { name: "Roll Back" })).toBeVisible();
+
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await expect(page.getByTestId("v2-trace-disclosure")).toContainText(
     "Hosted text and tool traces may outlive a locally purged transcript",
@@ -84,7 +116,17 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
   const mic = page.getByTestId("agent-mic");
   await expect(mic).toBeEnabled();
   await expect(mic).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: ready");
   await screenshot(page, "ui-enabled-disclosure-ptt.png");
+
+  await page.getByRole("button", { name: "Launch Repair" }).click();
+  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: repair running");
+  await page.getByRole("button", { name: "Roll Back" }).click();
+  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: rolled back");
+  const repairCalls = await page.evaluate(() =>
+    (window as unknown as { __moshOwnerCalls: string[] }).__moshOwnerCalls.filter((name) =>
+      name === "agent_host_launch_repair" || name === "agent_host_rollback_repair"));
+  expect(repairCalls).toEqual(["agent_host_launch_repair", "agent_host_rollback_repair"]);
 
   const input = page.getByTestId("agent-input");
   await input.fill("bug: metronome drifts after bar four");

@@ -21,6 +21,9 @@
 #include "engine/RenderArtifacts.h"
 #include "multiplayer/LogicalId.h"
 #include <thread>
+#if JUCE_MAC
+ #include <sys/stat.h>
+#endif
 
 namespace mosh
 {
@@ -1407,6 +1410,53 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("file", eng.editFile().getFullPathName());
     return okResult ("save_as", var (data));
+}
+
+juce::var MoshOps::cmdCreateRepairCheckpoint (const juce::var& args)
+{
+    if (eng.edit().getTransport().isRecording())
+        return errResult ("create_repair_checkpoint", "stop recording before launching a repair build");
+
+    const auto root = eng.sessionDir().getParentDirectory().getChildFile ("repair-checkpoints");
+    const auto directory = root.getChildFile (
+        String::toHexString (Time::currentTimeMillis()) + "-"
+        + String::toHexString (Random::getSystemRandom().nextInt64()));
+    if (! directory.createDirectory())
+        return errResult ("create_repair_checkpoint", "could not create repair checkpoint directory");
+   #if JUCE_MAC
+    ::chmod (directory.getFullPathName().toRawUTF8(), S_IRWXU);
+   #endif
+
+    auto* saveArgs = new DynamicObject();
+    const auto checkpoint = directory.getChildFile ("project.tracktionedit");
+    saveArgs->setProperty ("file", checkpoint.getFullPathName());
+    const auto saved = cmdSaveAs (var (saveArgs));
+    if (! (bool) saved.getProperty ("ok", false))
+        return errResult ("create_repair_checkpoint", "repair checkpoint save failed");
+   #if JUCE_MAC
+    ::chmod (checkpoint.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR);
+   #endif
+
+    auto* data = new DynamicObject();
+    data->setProperty ("checkpointPath", checkpoint.getFullPathName());
+    data->setProperty ("priorAppPath", File::getSpecialLocation (File::currentApplicationFile).getFullPathName());
+    logLine ("create_repair_checkpoint", args, true, {}, false);
+    return okResult ("create_repair_checkpoint", var (data));
+}
+
+juce::var MoshOps::cmdReleaseAudioDevice (const juce::var& args)
+{
+    const auto failure = eng.releaseAudioDeviceForRepair();
+    if (failure.isNotEmpty())
+    {
+        logLine ("release_audio_device", args, false, failure, false);
+        return errResult ("release_audio_device", failure);
+    }
+    logLine ("release_audio_device", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("release_audio_device", var (data));
 }
 
 } // namespace mosh

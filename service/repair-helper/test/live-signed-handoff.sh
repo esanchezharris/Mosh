@@ -40,6 +40,7 @@ PRIOR_MARKER="$FIXTURE/prior-launched.txt"
 STATUS="$FIXTURE/worker-status.txt"
 CHECKPOINT="$(mktemp "$FIXTURE/checkpoint.XXXXXX.tracktionedit")"
 SHA="0123456789abcdef0123456789abcdef01234567"
+REPAIR_ID="11111111-1111-4111-8111-111111111111"
 
 mkdir -p "$MACOS"
 mkdir -p "$PRIOR_MACOS"
@@ -56,11 +57,13 @@ xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_CALLER "$SOURCE" -o "$CALLER"
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
   "-DMOSH_REPAIR_FIXTURE_MARKER=\"$MARKER\"" \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
+  "-DMOSH_REPAIR_FIXTURE_ID=\"$REPAIR_ID\"" \
   "$SOURCE" -o "$MACOS/Mosh"
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
   -DMOSH_REPAIR_FIXTURE_PRIOR_TARGET \
   "-DMOSH_REPAIR_FIXTURE_MARKER=\"$PRIOR_MARKER\"" \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
+  "-DMOSH_REPAIR_FIXTURE_ID=\"$REPAIR_ID\"" \
   "$SOURCE" -o "$PRIOR_MACOS/Mosh"
 xcrun clang++ -std=c++20 "$HELPER_SOURCE" \
   -framework CoreFoundation -framework Security -o "$HELPER"
@@ -88,14 +91,14 @@ if "$HELPER" probe "$$" >/dev/null 2>&1; then
   exit 5
 fi
 if "$HELPER" __worker-repair \
-  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$$" "$$" >/dev/null 2>&1; then
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$$" "$$" >/dev/null 2>&1; then
   echo "Unbound worker invocation was accepted." >&2
   exit 7
 fi
 
 codesign --remove-signature "$APP"
 if "$CALLER" "$HELPER" handoff-repair \
-  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ >/dev/null 2>&1; then
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ >/dev/null 2>&1; then
   echo "Unsigned repair target was accepted." >&2
   exit 6
 fi
@@ -105,7 +108,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 
 MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
   "$CALLER" "$HELPER" handoff-repair \
-    "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ &
+    "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ &
 CALLER_PID=$!
 
 for _ in {1..350}; do
@@ -122,9 +125,32 @@ if kill -0 "$CALLER_PID" 2>/dev/null; then
   exit 4
 fi
 
+MOSH_ACTIVE_REPAIR_SOURCE_SHA="$SHA" \
+MOSH_ACTIVE_REPAIR_ID="$REPAIR_ID" \
+MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
+  "$CALLER" "$HELPER" handoff-prior \
+    "$CHECKPOINT" "$PRIOR_APP" __CALLER_PID__ &
+ROLLBACK_CALLER_PID=$!
+
+for _ in {1..350}; do
+  [[ -s "$PRIOR_MARKER" ]] && break
+  sleep 0.1
+done
+[[ -s "$PRIOR_MARKER" ]] || {
+  echo "Signed rollback did not launch the prior target." >&2
+  [[ -s "$STATUS" ]] && sed 's/^/worker exit: /' "$STATUS" >&2
+  exit 11
+}
+if kill -0 "$ROLLBACK_CALLER_PID" 2>/dev/null; then
+  echo "Rollback caller remained alive after handoff." >&2
+  exit 12
+fi
+: > "$PRIOR_MARKER"
+
 xcrun clang++ -std=c++20 -DMOSH_REPAIR_FIXTURE_TARGET \
   "-DMOSH_REPAIR_FIXTURE_MARKER=\"$RACE_MARKER\"" \
   "-DMOSH_REPAIR_FIXTURE_SHA=\"$SHA\"" \
+  "-DMOSH_REPAIR_FIXTURE_ID=\"$REPAIR_ID\"" \
   "$SOURCE" -o "$MACOS/Mosh"
 codesign --force --options runtime --timestamp \
   --identifier studio.mosh.app --sign "$IDENTITY" "$MACOS/Mosh"
@@ -135,7 +161,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
   "$CALLER" __RACE_HANDOFFS__ \
     "$HELPER" handoff-repair \
-      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" __CALLER_PID__ \
+      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ \
     __SECOND_HANDOFF__ \
     "$HELPER" handoff-prior \
       "$CHECKPOINT" "$PRIOR_APP" __CALLER_PID__ &
@@ -164,4 +190,4 @@ PRIOR_LAUNCHES=0
   echo "Concurrent handoff launched more than one target." >&2
   exit 10
 }
-echo "signed repair handoff: PASS"
+echo "signed repair handoff and rollback: PASS"

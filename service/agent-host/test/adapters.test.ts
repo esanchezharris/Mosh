@@ -1,16 +1,18 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CodexAppServerAdapter,
   EdgeFunctionEvidenceAdapter,
   GhGitHubAdapter,
   GitCliAdapter,
+  RepairControlAdapter,
   type CommandResult,
   type CommandRunner,
   type JsonRpcTransport,
 } from "../src/adapters.js";
+import { NativeRepairArtifactPolicy } from "../src/repair-artifact-policy.js";
 
 class FakeRunner implements CommandRunner {
   calls: string[][] = [];
@@ -235,6 +237,76 @@ describe("repair git branch boundary", () => {
     })).rejects.toMatchObject({ code: "git_branch_refused" });
 
     expect(runner.calls).toEqual([]);
+  });
+});
+
+describe("native MoshOps repair control", () => {
+  it("checkpoints, stops transport, and releases audio through authenticated MoshOps", async () => {
+    const runner = new FakeRunner();
+    const commands: Array<{ command: string; args: Record<string, unknown>; authorization: string | null }> = [];
+    const adapter = new RepairControlAdapter(runner, "/signed/helper", {
+      endpoint: "http://127.0.0.1:49152",
+      capability: "owner-capability",
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        const body = await request.json() as { command: { command: string; args: Record<string, unknown> } };
+        commands.push({ ...body.command, authorization: request.headers.get("authorization") });
+        return Response.json({
+          ok: true,
+          data: {
+            ok: true,
+            data: body.command.command === "create_repair_checkpoint"
+              ? { checkpointPath: "/tmp/checkpoint.tracktionedit", priorAppPath: "/Applications/Mosh.app" }
+              : {},
+          },
+        });
+      },
+    });
+
+    await expect(adapter.checkpoint()).resolves.toEqual({
+      checkpointPath: "/tmp/checkpoint.tracktionedit",
+      priorAppPath: "/Applications/Mosh.app",
+    });
+    await adapter.stopTransport();
+    await adapter.releaseAudio();
+    expect(commands).toEqual([
+      { command: "create_repair_checkpoint", args: {}, authorization: "Bearer owner-capability" },
+      { command: "set_transport", args: { action: "stop" }, authorization: "Bearer owner-capability" },
+      { command: "release_audio_device", args: {}, authorization: "Bearer owner-capability" },
+    ]);
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("hands the stable repair id to the signed installed-app launcher", async () => {
+    const runner = new FakeRunner();
+    const artifacts = new NativeRepairArtifactPolicy();
+    vi.spyOn(artifacts, "validateBuild").mockResolvedValue("/worktree/build/Mosh.app");
+    const adapter = new RepairControlAdapter(runner, "/signed/helper", {
+      endpoint: "http://127.0.0.1:49152",
+      capability: "owner-capability",
+    }, artifacts);
+
+    await adapter.handoffRepairBuild({
+      repairId: "11111111-1111-4111-8111-111111111111",
+      buildPath: "/worktree/build/Mosh.app",
+      worktreePath: "/worktree",
+      sourceSha: "a".repeat(40),
+      checkpointPath: "/tmp/checkpoint.tracktionedit",
+    });
+
+    expect(runner.calls).toEqual([
+      ["/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "/signed/helper"],
+      [
+        "/signed/helper",
+        "handoff-repair",
+        "/worktree/build/Mosh.app",
+        "/worktree",
+        "a".repeat(40),
+        "/tmp/checkpoint.tracktionedit",
+        "11111111-1111-4111-8111-111111111111",
+        String(process.ppid),
+      ],
+    ]);
   });
 });
 

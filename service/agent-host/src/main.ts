@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { AgentHostService } from "./service.js";
 import { OpenAIAgentsSupervisorAdapter, OpenAIRealtimeSecretAdapter } from "./openai.js";
 import { defaultDataDirectory, PlaytestStore } from "./persistence.js";
@@ -14,25 +15,29 @@ import {
   RepairControlAdapter,
 } from "./adapters.js";
 import { OwnerOrchestrator } from "./orchestration.js";
-import { readOwnerOpenAIKey } from "./owner-env.js";
+import { readOwnerEnvironment } from "./owner-env.js";
 import { NativeRepairArtifactPolicy } from "./repair-artifact-policy.js";
 
-const apiKey = readOwnerOpenAIKey();
-const githubRunner = new NodeCommandRunner(githubCommandEnvironment(process.env));
-const gitRunner = new NodeCommandRunner(localGitCommandEnvironment(process.env));
-const repairRunner = new NodeCommandRunner(repairHelperCommandEnvironment(process.env));
+const ownerEnvironment = readOwnerEnvironment();
+const apiKey = ownerEnvironment.OPENAI_API_KEY;
+const capability = ownerEnvironment.MOSH_AGENT_HOST_CAPABILITY
+  ?? randomBytes(32).toString("base64url");
+const githubRunner = new NodeCommandRunner(githubCommandEnvironment(ownerEnvironment));
+const gitRunner = new NodeCommandRunner(localGitCommandEnvironment(ownerEnvironment));
+const repairRunner = new NodeCommandRunner(repairHelperCommandEnvironment(ownerEnvironment));
 const codex = new LazyCodexAppServerAdapter();
-const evidenceEndpoint = process.env.MOSH_PLAYTEST_EVIDENCE_URL;
-const evidenceSecret = process.env.MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET;
-const githubRepository = process.env.MOSH_GITHUB_REPOSITORY;
-const repositoryPath = process.env.MOSH_REPOSITORY_PATH;
-const worktreeRoot = process.env.MOSH_REPAIR_WORKTREE_ROOT;
-const repairHelper = process.env.MOSH_REPAIR_CONTROL_HELPER;
-const dataDirectory = process.env.MOSH_AGENT_HOST_DATA_DIR ?? defaultDataDirectory();
+const evidenceEndpoint = ownerEnvironment.MOSH_PLAYTEST_EVIDENCE_URL;
+const evidenceSecret = ownerEnvironment.MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET;
+const githubRepository = ownerEnvironment.MOSH_GITHUB_REPOSITORY;
+const repositoryPath = ownerEnvironment.MOSH_REPOSITORY_PATH;
+const worktreeRoot = ownerEnvironment.MOSH_REPAIR_WORKTREE_ROOT;
+const repairHelper = ownerEnvironment.MOSH_REPAIR_CONTROL_HELPER;
+const repairControlUrl = ownerEnvironment.MOSH_REPAIR_CONTROL_URL;
+const dataDirectory = ownerEnvironment.MOSH_AGENT_HOST_DATA_DIR ?? defaultDataDirectory();
 const store = new PlaytestStore(dataDirectory);
 const repairArtifacts = new NativeRepairArtifactPolicy();
 const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
-  && repositoryPath && worktreeRoot && repairHelper
+  && repositoryPath && worktreeRoot && repairHelper && repairControlUrl
   ? new OwnerOrchestrator(store, {
       evidence: new EdgeFunctionEvidenceAdapter({
         endpoint: evidenceEndpoint,
@@ -41,7 +46,10 @@ const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
       github: new GhGitHubAdapter(githubRunner, githubRepository),
       appServer: codex,
       git: new GitCliAdapter(gitRunner),
-      processes: new RepairControlAdapter(repairRunner, repairHelper, repairArtifacts),
+      processes: new RepairControlAdapter(repairRunner, repairHelper, {
+        endpoint: repairControlUrl,
+        capability,
+      }, repairArtifacts),
       artifacts: repairArtifacts,
       repositoryPath,
       worktreeRoot,
@@ -53,16 +61,14 @@ const service = new AgentHostService(
   apiKey ? new OpenAIRealtimeSecretAdapter(apiKey) : undefined,
   orchestration,
 );
-const requestedPort = process.env.PORT === undefined ? 0 : Number.parseInt(process.env.PORT, 10);
+const requestedPort = ownerEnvironment.PORT === undefined ? 0 : Number.parseInt(ownerEnvironment.PORT, 10);
 if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65_535) {
   throw new Error("PORT must be an integer from 0 through 65535");
 }
 const host = await startAgentHost({
   service,
   port: requestedPort,
-  ...(process.env.MOSH_AGENT_HOST_CAPABILITY
-    ? { capability: process.env.MOSH_AGENT_HOST_CAPABILITY }
-    : {}),
+  capability,
 });
 
 process.stdout.write(`${JSON.stringify({

@@ -5,6 +5,7 @@
 #include <limits.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -80,12 +81,17 @@ int main (int argc, char** argv)
 #ifndef MOSH_REPAIR_FIXTURE_SHA
 #error MOSH_REPAIR_FIXTURE_SHA is required
 #endif
+#ifndef MOSH_REPAIR_FIXTURE_ID
+#error MOSH_REPAIR_FIXTURE_ID is required
+#endif
 
 int main (int argc, char** argv)
 {
     const std::string embeddedSha = MOSH_REPAIR_FIXTURE_SHA;
+    const std::string repairId = MOSH_REPAIR_FIXTURE_ID;
     bool receivedSha = false;
     bool receivedCheckpoint = false;
+    bool receivedRepairId = false;
     for (int index = 1; index + 1 < argc; ++index)
     {
         if (std::string (argv[index]) == "--mosh-repair-source-sha"
@@ -93,11 +99,17 @@ int main (int argc, char** argv)
             receivedSha = true;
         if (std::string (argv[index]) == "--mosh-owner-checkpoint")
             receivedCheckpoint = true;
+        if (std::string (argv[index]) == "--mosh-repair-id"
+            && argv[index + 1] == repairId)
+            receivedRepairId = true;
     }
    #if defined(MOSH_REPAIR_FIXTURE_PRIOR_TARGET)
     if (! receivedCheckpoint) return 6;
+    if (std::getenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA") != nullptr
+        || std::getenv ("MOSH_ACTIVE_REPAIR_ID") != nullptr)
+        return 9;
    #else
-    if (! receivedSha || ! receivedCheckpoint) return 6;
+    if (! receivedSha || ! receivedCheckpoint || ! receivedRepairId) return 6;
    #endif
     for (int descriptor = 3; descriptor < getdtablesize(); ++descriptor)
     {

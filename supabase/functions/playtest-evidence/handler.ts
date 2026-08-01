@@ -11,7 +11,7 @@ export interface EvidenceStorage {
 }
 
 type Options = {
-  ownerSecret: string;
+  authorize: (candidate: string) => Promise<boolean>;
   storage: EvidenceStorage;
   maxBytes?: number;
   now?: () => number;
@@ -28,19 +28,6 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
-function secureEqual(left: string, right: string): boolean {
-  const encoder = new TextEncoder();
-  const leftBytes = encoder.encode(left);
-  const rightBytes = encoder.encode(right);
-  let difference = leftBytes.length ^ rightBytes.length;
-  const length = Math.max(leftBytes.length, rightBytes.length);
-  for (let index = 0; index < length; index += 1) {
-    difference |= (leftBytes[index % Math.max(1, leftBytes.length)] ?? 0)
-      ^ (rightBytes[index % Math.max(1, rightBytes.length)] ?? 0);
-  }
-  return difference === 0;
-}
-
 function hex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
@@ -50,7 +37,8 @@ export function createEvidenceHandler(options: Options) {
   return async (request: Request): Promise<Response> => {
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     const authorization = request.headers.get("authorization") ?? "";
-    if (!secureEqual(authorization, `Bearer ${options.ownerSecret}`)) {
+    const candidate = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    if (!candidate || !await options.authorize(candidate)) {
       return json({ error: "unauthorized" }, 401);
     }
     if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "image/png") {

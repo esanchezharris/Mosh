@@ -4,7 +4,9 @@ import {
   agentHostCreateReport,
   agentHostCreateRepair,
   agentHostEvents,
+  agentHostLaunchRepair,
   agentHostRealtimeSecret,
+  agentHostRollbackRepair,
   agentHostStartPlaytest,
 } from "../bridge";
 import type { DraftReportInput } from "./ownerCockpit";
@@ -23,6 +25,8 @@ export type AgentHostBridge = {
   createReport(input: DraftReportInput): Promise<unknown>;
   approveReport(reportId: string): Promise<unknown>;
   createRepair?(reportId: string): Promise<unknown>;
+  launchRepair?(repairId: string, buildPath: string): Promise<unknown>;
+  rollbackRepair?(repairId: string, reason: string): Promise<unknown>;
 };
 
 const nativeBridge: AgentHostBridge = {
@@ -33,6 +37,8 @@ const nativeBridge: AgentHostBridge = {
   createReport: agentHostCreateReport,
   approveReport: agentHostApproveReport,
   createRepair: agentHostCreateRepair,
+  launchRepair: agentHostLaunchRepair,
+  rollbackRepair: agentHostRollbackRepair,
 };
 
 export class AgentHostApiError extends Error {
@@ -153,6 +159,24 @@ export class AgentHostClient {
     if (typeof value.id !== "string" || value.status !== "running")
       throw new AgentHostApiError("Invalid repair response", "invalid_response");
     return { id: value.id, status: "running" };
+  }
+
+  async launchRepair(repairId: string, buildPath: string): Promise<{ id: string; state: "repair_running" }> {
+    if (!this.bridge.launchRepair)
+      throw new AgentHostApiError("Repair launch unavailable", "repair_unavailable");
+    const value = unwrap(await this.bridge.launchRepair(repairId, buildPath));
+    if (typeof value.id !== "string" || value.state !== "repair_running")
+      throw new AgentHostApiError("Invalid repair launch response", "invalid_response");
+    return { id: value.id, state: value.state };
+  }
+
+  async rollbackRepair(repairId: string, reason: string): Promise<{ id: string; state: "rolled_back" }> {
+    if (!this.bridge.rollbackRepair)
+      throw new AgentHostApiError("Repair rollback unavailable", "repair_unavailable");
+    const value = unwrap(await this.bridge.rollbackRepair(repairId, reason));
+    if (typeof value.id !== "string" || value.state !== "rolled_back")
+      throw new AgentHostApiError("Invalid repair rollback response", "invalid_response");
+    return { id: value.id, state: value.state };
   }
 
   watchEvents(onEvent: (event: HostEvent) => void): () => void {

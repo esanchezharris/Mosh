@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { OwnerCockpitRuntime } from "./ownerCockpitRuntime";
+import type { HostEvent } from "./agentHostClient";
 import type { DraftReportInput } from "./ownerCockpit";
 
 function runtime() {
@@ -11,7 +12,7 @@ function runtime() {
       disclosureRequired: true,
     })),
     close: vi.fn(async (retainTranscript: boolean) => ({ active: false, retainTranscript })),
-    watchEvents: vi.fn(() => () => undefined),
+    watchEvents: vi.fn((_onEvent: (event: HostEvent) => void) => () => undefined),
     realtimeSecret: vi.fn(async () => "ek_test"),
     createReport: vi.fn(async (input: DraftReportInput) => ({
       id: `report-${++report}`,
@@ -20,6 +21,8 @@ function runtime() {
     })),
     approveReport: vi.fn(async () => ({ status: "approved" as const })),
     createRepair: vi.fn(async () => ({ id: "repair-1", status: "running" as const })),
+    launchRepair: vi.fn(async () => ({ id: "repair-1", state: "repair_running" as const })),
+    rollbackRepair: vi.fn(async () => ({ id: "repair-1", state: "rolled_back" as const })),
   };
   return { cockpit: new OwnerCockpitRuntime(client), client };
 }
@@ -103,5 +106,43 @@ describe("owner cockpit runtime presentation", () => {
     await cockpit.fixNow(report.id);
     expect(client.createRepair).toHaveBeenCalledWith(report.id);
     expect(cockpit.getSnapshot().lastEvent).toBe("repair.running");
+  });
+
+  it("offers launch after the validated build event and preserves one-click rollback", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 7,
+      type: "repair.full_gate_pending",
+      data: { repairId: "repair-1", buildPath: "/worktree/build/Mosh.app" },
+    });
+    expect(cockpit.getSnapshot().repair).toEqual({
+      id: "repair-1",
+      status: "ready",
+      buildPath: "/worktree/build/Mosh.app",
+    });
+
+    await cockpit.launchRepair();
+    expect(client.launchRepair).toHaveBeenCalledWith("repair-1", "/worktree/build/Mosh.app");
+    await cockpit.rollbackRepair();
+    expect(client.rollbackRepair).toHaveBeenCalledWith(
+      "repair-1",
+      "Owner requested rollback after repair retest",
+    );
+    expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
+  });
+
+  it("restores one-click rollback when the installed repair app starts", async () => {
+    const { cockpit, client } = runtime();
+    cockpit.resumeInstalledRepair("repair-1");
+    expect(cockpit.getSnapshot().repair).toEqual({ id: "repair-1", status: "repair_running" });
+
+    await cockpit.rollbackRepair();
+    expect(client.rollbackRepair).toHaveBeenCalledWith(
+      "repair-1",
+      "Owner requested rollback after repair retest",
+    );
+    expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
   });
 });

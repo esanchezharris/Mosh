@@ -1,4 +1,5 @@
 #include "AgentHostProxy.h"
+#include "../remote/RemoteCompanionServer.h"
 
 namespace mosh
 {
@@ -93,6 +94,8 @@ void AgentHostProxy::stop()
     playtestId.clear();
     retainTranscript = false;
     disclosureDelivered = false;
+    if (ownerControlServer != nullptr)
+        ownerControlServer->stopServer();
 }
 
 bool AgentHostProxy::ensureStarted()
@@ -104,11 +107,31 @@ bool AgentHostProxy::ensureStarted()
     const auto entry = locateEntry();
     if (! entry.existsAsFile()) return false;
 
+    juce::String ownerControlOrigin;
+    if (ownerControlServer != nullptr)
+    {
+        auto& random = juce::Random::getSystemRandom();
+        const auto bootstrapToken = juce::String::toHexString (random.nextInt64())
+            + juce::String::toHexString (random.nextInt64());
+        const auto control = ownerControlServer->startOwnerControl (bootstrapToken);
+        if (! (bool) control.getProperty ("ok", false)) return false;
+        ownerControlOrigin = control.getProperty ("data", juce::var())
+            .getProperty ("origin", juce::var()).toString();
+        if (ownerControlOrigin.isEmpty()) return false;
+    }
+
     juce::StringArray command;
     // `/usr/bin/env PORT=0 …` supplies no secret through argv. The Agent Host
     // generates its capability and prints one startup envelope that is consumed
     // below into this native object's memory only.
-    command.addArray ({ "/usr/bin/env", "PORT=0", "node" });
+    command.addArray ({ "/usr/bin/env", "PORT=0" });
+    if (ownerControlOrigin.isNotEmpty())
+        command.add ("MOSH_REPAIR_CONTROL_URL=" + ownerControlOrigin);
+    const auto helper = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+        .getChildFile ("Contents/Helpers/MoshRepairHelper");
+    if (helper.existsAsFile())
+        command.add ("MOSH_REPAIR_CONTROL_HELPER=" + helper.getFullPathName());
+    command.add ("node");
     if (entry.hasFileExtension (".ts"))
     {
         const auto hostRoot = entry.getParentDirectory().getParentDirectory(); // src/main.ts -> agent-host
@@ -150,6 +173,15 @@ bool AgentHostProxy::ensureStarted()
         {
             origin = "http://127.0.0.1:" + juce::String (envelope->port);
             capability = envelope->capability;
+            if (ownerControlServer != nullptr)
+            {
+                const auto control = ownerControlServer->startOwnerControl (capability);
+                if (! (bool) control.getProperty ("ok", false))
+                {
+                    origin.clear();
+                    capability.clear();
+                }
+            }
             break;
         }
         line.clear();
@@ -322,6 +354,42 @@ juce::var AgentHostProxy::createRepair (const juce::String& reportId)
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));
     result->setProperty ("status", repair.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::launchRepair (const juce::String& repairId,
+                                        const juce::String& buildPath)
+{
+    const juce::ScopedLock guard (lock);
+    if (repairId.isEmpty() || buildPath.isEmpty() || ! ensureStarted()) return error();
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("buildPath", buildPath);
+    int statusCode = 0;
+    const auto repair = post ("/v1/repairs/" + repairId + "/launch", juce::var (body), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+        return error ("repair build launch failed", "repair_swap_failed", false);
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("state", repair.getProperty ("swap", juce::var()).getProperty ("state", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::rollbackRepair (const juce::String& repairId,
+                                          const juce::String& reason)
+{
+    const juce::ScopedLock guard (lock);
+    if (repairId.isEmpty() || reason.isEmpty() || ! ensureStarted()) return error();
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("reason", reason);
+    int statusCode = 0;
+    const auto repair = post ("/v1/repairs/" + repairId + "/rollback", juce::var (body), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+        return error ("repair rollback failed", "repair_rollback_failed", false);
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("state", repair.getProperty ("swap", juce::var()).getProperty ("state", juce::var()));
     return juce::var (result);
 }
 

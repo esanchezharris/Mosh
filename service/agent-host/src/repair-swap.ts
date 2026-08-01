@@ -87,6 +87,7 @@ export class RepairSwap {
         await this.emit(current.playtestId, "repair.audio.released", { repairId });
       }
       await this.dependencies.processes.handoffRepairBuild({
+        repairId,
         buildPath: validatedBuild,
         worktreePath,
         sourceSha: result.sourceSha,

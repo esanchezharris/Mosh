@@ -15,7 +15,11 @@ does not create an alternate DAW mutation path.
    post-prototype packaging gate.
 2. Put credentials only in `~/.config/mosh/env` and keep that file mode `600`.
    Do not put values in this repository, a UI `.env`, screenshots, logs, or PR
-   text.
+   text. Run `scripts/owner-cockpit/provision-evidence-secret.sh` once to create
+   or preserve the local evidence credential and the non-secret owner paths. It
+   prints only the SHA-256 digest that must match the private Supabase
+   `mosh_owner_credentials` row; use `MOSH_ROTATE_EVIDENCE_SECRET=1` only when
+   intentionally rotating both sides.
 3. Build normally. `MoshStageAgentHost` bundles
    `service/agent-host/dist/agent-host.mjs` into
    `Contents/Resources/agent-host/agent-host.mjs`, and the native build stages
@@ -55,11 +59,12 @@ Names are documented here; secret values are deliberately not.
 | `MOSH_GITHUB_REPOSITORY` | Repository passed to authenticated `gh` | Required for external synchronization. |
 | `MOSH_REPOSITORY_PATH` | Clean committed repair base checkout | Required for repair admission. |
 | `MOSH_REPAIR_WORKTREE_ROOT` | Parent for isolated repair worktrees | Required for repair admission. |
-| `MOSH_REPAIR_CONTROL_HELPER` | Owner-approved full process/checkpoint controller | Required for app swap/rollback. The bundled handoff component does not yet replace native MoshOps checkpoint/transport/audio preparation. |
+| `MOSH_REPAIR_CONTROL_URL` | Private native MoshOps control origin | Native supplies this loopback-only value automatically. Never configure it in the WebView. |
+| `MOSH_REPAIR_CONTROL_HELPER` | Signed repair-app handoff helper | Native supplies the bundled helper path automatically. It launches only after MoshOps checkpoint, transport stop, and audio release succeed. |
 
-External orchestration is fail-closed and enabled only when all six evidence,
-GitHub, repository, worktree, and helper variables are present. Otherwise
-approval remains `approved_pending_sync` and Fix Now is unavailable.
+External orchestration is fail-closed and enabled only when the evidence,
+GitHub, repository, worktree, native-control, and helper values are present.
+Otherwise approval remains `approved_pending_sync` and Fix Now is unavailable.
 
 ## Security and mutation boundary
 
@@ -148,21 +153,28 @@ executable embeds that same source SHA. The launch request is accepted only
 when its canonical path exactly equals the validated result build.
 
 Launching a repair build is a separate owner action. The full process controller
-must checkpoint through MoshOps, stop transport, release audio, and then invoke
-the bundled handoff component. The handoff verifies same-team signatures,
-caller ancestry, canonical worktree/app paths, bundle identity, and embedded
-source SHA before terminating the current Mosh and launching the repair, so two
-Mosh processes never overlap. Rollback revalidates and launches the prior app
-with the checkpoint. The signed handoff has passed its synthetic Developer ID
-fixture; native MoshOps preparation and an installed-app swap/rollback remain
-owner gates.
+now checkpoints through MoshOps, stops transport, releases the audio device, and
+only then invokes the bundled handoff component. Active recording refuses the
+checkpoint/release instead of interrupting a take. The handoff verifies
+same-team signatures, caller ancestry, canonical worktree/app paths, bundle
+identity, and embedded source SHA before terminating the current Mosh and
+launching the repair, so two Mosh processes never overlap. It also carries a
+stable repair ID into the repair app, allowing the restarted Moshi owner card to
+recover the active repair and keep **Roll back** available. Rollback revalidates
+and launches the prior app with the checkpoint while scrubbing the active-repair
+environment. The card shows the active repair source SHA and offers explicit
+**Launch repair build** and **Roll back** actions. The signed handoff and full
+lifecycle pass the synthetic installed-app harness; a physical installed-app
+swap remains an owner gate because it exercises the machine's real Developer ID
+signature, audio device, and window lifecycle.
 
 The Realtime owner gate has reached a signed WKWebView connection and the
 native physical-input listening state. A human-spoken semantic turn is still
 required because system-generated speech is correctly rejected as echo.
-The deployed Supabase function and private bucket are active, but upload remains
-fail-closed until `MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET` is configured in the
-project and the matching owner value is present locally.
+The deployed Supabase function and private bucket authenticate the owner token
+against a service-role-only SHA-256 digest. The plaintext owner token exists only
+in the mode-`600` local env file. The deployed upload and short-lived signed
+preview flow have passed a live request; mismatched credentials fail closed.
 
 The repair-control adapter repeats the bundle/path/source checks immediately
 before invoking the helper. The deployment helper should also be owner-signed,

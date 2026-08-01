@@ -19,7 +19,19 @@ const storage: EvidenceStorage = {
   },
 };
 
-const ownerSecret = Deno.env.get("MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET");
-if (!ownerSecret) throw new Error("MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET is required");
+function hex(bytes: ArrayBuffer): string {
+  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
 
-Deno.serve(createEvidenceHandler({ ownerSecret, storage }));
+async function authorize(candidate: string): Promise<boolean> {
+  const digest = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(candidate)));
+  const { data, error } = await client
+    .from("mosh_owner_credentials")
+    .select("secret_sha256")
+    .eq("name", "playtest_evidence")
+    .maybeSingle();
+  if (error || !data) return false;
+  return data.secret_sha256 === digest;
+}
+
+Deno.serve(createEvidenceHandler({ authorize, storage }));
