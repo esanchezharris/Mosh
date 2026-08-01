@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
+#include "app/InstancePolicy.h"
 #include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
@@ -78,7 +79,10 @@ public:
 
     const juce::String getApplicationName() override    { return "Mosh"; }
     const juce::String getApplicationVersion() override { return MOSH_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override          { return true; }   // allow scan children + headless runs
+    bool moreThanOneInstanceAllowed() override
+    {
+        return mosh::instancepolicy::allowsMultipleInstances (getCommandLineParameterArray());
+    }
 
     void initialise (const juce::String& commandLine) override
     {

@@ -85,7 +85,6 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
     stopTransport: async () => { calls.process.push("stop_transport"); },
     releaseAudio: async () => { calls.process.push("release_audio"); },
     handoffRepairBuild: async () => { calls.process.push("handoff_repair"); },
-    closeRepairBuild: async () => { calls.process.push("close_repair"); },
     handoffPriorApp: async () => { calls.process.push("handoff_prior"); },
   };
   const artifacts: RepairArtifactPolicy = {

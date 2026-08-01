@@ -164,9 +164,11 @@ recover the active repair and keep **Roll back** available. Rollback revalidates
 and launches the prior app with the checkpoint while scrubbing the active-repair
 environment. The card shows the active repair source SHA and offers explicit
 **Launch repair build** and **Roll back** actions. The signed handoff and full
-lifecycle pass the synthetic installed-app harness; a physical installed-app
-swap remains an owner gate because it exercises the machine's real Developer ID
-signature, audio device, and window lifecycle.
+lifecycle pass the synthetic installed-app harness. Interactive launches are
+single-instance, while explicit selftest, script, voice, and plugin-scan child
+modes remain independently runnable. A physical installed-app swap remains an
+owner gate because it exercises the machine's real Developer ID signature,
+audio device, and window lifecycle.
 
 The Realtime owner gate has reached a signed WKWebView connection and the
 native physical-input listening state. A human-spoken semantic turn is still

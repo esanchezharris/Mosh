@@ -13,11 +13,15 @@ chmod 700 "$env_dir"
 touch "$env_file"
 chmod 600 "$env_file"
 
-secret="$(/usr/bin/awk -F= '
+secret="$(/usr/bin/awk '
   /^([[:space:]]*export[[:space:]]+)?MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET=/ {
     value = substr($0, index($0, "=") + 1)
     gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-    if (value ~ /^[a-f0-9]{64}$/) print value
+    first = substr(value, 1, 1)
+    last = substr(value, length(value), 1)
+    if ((first == "\"" && last == "\"") || (first == "\047" && last == "\047"))
+      value = substr(value, 2, length(value) - 2)
+    if (length(value) == 64 && value !~ /[^[:xdigit:]]/) print value
   }
 ' "$env_file" | /usr/bin/tail -1)"
 if [[ "${MOSH_ROTATE_EVIDENCE_SECRET:-0}" == "1" || "${#secret}" != "64" ]]; then
@@ -38,7 +42,8 @@ chmod 600 "$temporary"
   /usr/bin/printf 'MOSH_REPOSITORY_PATH=%s\n' "$repository_path"
   /usr/bin/printf 'MOSH_REPAIR_WORKTREE_ROOT=%s\n' "$worktree_root"
 } >> "$temporary"
-/bin/mv -f "$temporary" "$env_file"
+/bin/cat "$temporary" > "$env_file"
+/bin/rm -f "$temporary"
 chmod 600 "$env_file"
 trap - EXIT
 

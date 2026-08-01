@@ -240,8 +240,8 @@ describe("repair worktree and app lifecycle", () => {
     expect((await second.store.loadRepair(secondRepair.id)).swap?.state).toBe("rolled_back");
   });
 
-  it("rejects a launch path that differs from the validated result before checkpoint or close", async () => {
-    const { fakes, service, report } = await orchestrationFixture();
+  it("persists and emits a launch-path preflight rejection before process actions", async () => {
+    const { fakes, service, store, report } = await orchestrationFixture();
     await service.approveReport(report.id);
     const repair = await service.createRepair(report.id);
     await service.completeRepair(repair.id, repairResult);
@@ -250,6 +250,17 @@ describe("repair worktree and app lifecycle", () => {
       .rejects.toMatchObject({ code: "repair_build_mismatch" });
 
     expect(fakes.processCalls).toEqual([]);
+    expect(await store.loadRepair(repair.id)).toMatchObject({
+      swap: {
+        state: "failed",
+        buildPath: "/outside/Evil.app",
+        error: "Launch build does not match the validated repair result",
+      },
+    });
+    expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
+      type: "repair.swap.failed",
+      data: { repairId: repair.id, code: "repair_build_mismatch" },
+    });
   });
 
   it("rejects a claimed source SHA that differs from the repair worktree HEAD", async () => {

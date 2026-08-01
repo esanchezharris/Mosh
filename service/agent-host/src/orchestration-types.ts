@@ -96,7 +96,6 @@ export interface ProcessAdapter {
   stopTransport(): Promise<void>;
   releaseAudio(): Promise<void>;
   handoffRepairBuild(context: RepairLaunchContext): Promise<void>;
-  closeRepairBuild(): Promise<void>;
   handoffPriorApp(context: PriorAppHandoffContext): Promise<void>;
 }
 

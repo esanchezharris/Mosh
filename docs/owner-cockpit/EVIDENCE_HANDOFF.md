@@ -18,6 +18,8 @@ the pull request; reviewers must not depend on that ignored directory alone.
 | Native disclosure and permissions | Focused native build plus `MOSH_NO_AUDIO=1 Mosh --selftest` | Supervisor cannot create a playtest/trace; disclosure precedes the active route; screenshot directory/file modes are 0700/0600. |
 | Mock-bridge owner UI | `MOSH_TASK5_EVIDENCE_DIR=<private-dir> npx playwright test e2e/owner-cockpit.spec.ts` | Default-off, disclosure, report inbox, and unavailable state render; evidence directory/file modes are 0700/0600. This is mock-bridge UI evidence, not a live native proxy claim. |
 | Signed handoff boundary | `service/repair-helper/test/live-signed-handoff.sh` with an available Developer ID identity | Strictly signed caller/helper/target succeed; unsigned caller, unbound worker mode, and a target whose signature is removed are rejected; accepted handoff terminates the fixture caller before the target marker appears; concurrent repair and rollback handoffs for one caller produce exactly one target launch; the launched target inherits no handoff-lock descriptor. |
+| Interactive singleton | `scripts/owner-cockpit/test-single-instance.sh <Mosh executable>` | A second ordinary GUI launch exits while the primary remains alive; explicit selftest, script, voice, and plugin-scan child modes remain independently runnable. |
+| Evidence-secret provisioning | `scripts/owner-cockpit/test-provision-evidence-secret.sh` | A quoted credential is preserved, symlinked env files remain symlinks, rotation is explicit, and owner env/repair paths retain 0600/0700 modes. |
 
 ## External owner gates
 
@@ -25,9 +27,9 @@ The signed WKWebView has connected to OpenAI Realtime and entered the native
 physical-input listening state. The remaining voice gate is a human-spoken
 semantic turn; synthesized `say` audio is echo-cancelled and is not equivalent.
 
-The deployed Supabase function and private bucket are present, but a live upload
-remains blocked on the project-side `MOSH_PLAYTEST_EVIDENCE_OWNER_SECRET`.
-Synthetic Developer ID handoff is green. Native MoshOps checkpoint/audio
-preparation, a real installed-app swap/rollback, and final owner feel remain
-owner-only gates. No automated result may describe those remaining gates as
-completed.
+The deployed Supabase function and private bucket have passed an authenticated
+live upload and short-lived signed preview using the digest-backed owner
+credential. Synthetic Developer ID handoff and the native MoshOps
+checkpoint/audio-release preparation are green. A physical installed-app
+swap/rollback and final owner feel remain owner-only gates. No automated result
+may describe those remaining gates as completed.

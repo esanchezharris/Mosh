@@ -58,7 +58,7 @@ neural insert was removed (2026-06-21); the only real-time neural path is an
 optional RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default
 build).
 
-## Current Status (as of 2026-07-30)
+## Current Status (as of 2026-07-31)
 
 - **Owner cockpit handoff is implemented on `codex/moshi-owner-cockpit`, not
   merged.** The disabled-by-default v2 surface, private loopback Agent Host,
@@ -66,15 +66,20 @@ build).
   durable approval inbox, immutable evidence/GitHub adapters, read-only Codex
   coordinator, and isolated draft-only repair lane are integrated. Task 5 adds
   a bundled real-loopback fake-external lifecycle and exact-SHA offline
-  benchmark diagnostics. The tracked, redacted verification handoff is
+  benchmark diagnostics. The owner-only follow-through now includes deployed
+  digest-authenticated Supabase evidence upload/preview, native MoshOps
+  checkpoint and audio release, a signed repair/rollback helper, stable repair
+  identity across the app restart, and an interactive single-instance guard.
+  The tracked, redacted verification handoff is
   [`docs/owner-cockpit/EVIDENCE_HANDOFF.md`](owner-cockpit/EVIDENCE_HANDOFF.md);
-  exact run logs and screenshots must be attached to the PR. No live OpenAI request, Supabase
-  deployment, GitHub mutation, repair process swap, or final PR is part of the
-  automated handoff. See [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md). This branch
-  supersedes only PR #478's agent-facing hunks; merge/disposition it serially
-  after whole-branch review.
+  exact run logs and screenshots must be attached to draft PR #524. A
+  human-spoken Realtime semantic turn and the physical installed-app
+  swap/rollback remain owner gates. See [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md).
+  This branch supersedes only PR #478's agent-facing hunks; keep it draft and
+  parked behind #523, then rebase onto the resulting `main` and rerun every
+  SHA-bound gate before merge review.
 
-- **Trunk:** `origin/main` @ `f3e68992` (merge of #520, 2026-07-30)
+- **Trunk:** `origin/main` @ `e520550b` (merge of #528, 2026-07-31)
   [measured: `git log --oneline origin/main`]. The two most recent landed
   campaigns: the **v2 deslop pass** (#479, #481–#485, merged 2026-07-28) — CSS
   partials + shell baselines groundwork, bevel-border removal, accent

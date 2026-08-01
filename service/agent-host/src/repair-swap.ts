@@ -27,26 +27,26 @@ export class RepairSwap {
 
   private async launchUnlocked(repairId: string, buildPath: string): Promise<RepairJob> {
     let current = await this.store.loadRepair(repairId);
-    if (!current.result || !current.worktreePath) {
-      throw failure("repair_swap_state", "Repair result is missing");
-    }
-    const result = current.result;
-    const worktreePath = current.worktreePath;
-    const validatedBuild = await this.dependencies.artifacts.validateBuild(
-      worktreePath,
-      buildPath,
-      result.sourceSha,
-    );
-    if (validatedBuild !== result.buildPath) {
-      throw failure("repair_build_mismatch", "Launch build does not match the validated repair result");
-    }
-    const recoverable = new Set(["checkpointed", "stopping", "current_app_closed"]);
-    if (current.status !== "full_gate_pending"
-      || (current.swap && !recoverable.has(current.swap.state))
-      || (current.swap?.buildPath && current.swap.buildPath !== buildPath)) {
-      throw failure("repair_swap_state", "Repair build is not ready for launch");
-    }
     try {
+      if (!current.result || !current.worktreePath) {
+        throw failure("repair_swap_state", "Repair result is missing");
+      }
+      const result = current.result;
+      const worktreePath = current.worktreePath;
+      const validatedBuild = await this.dependencies.artifacts.validateBuild(
+        worktreePath,
+        buildPath,
+        result.sourceSha,
+      );
+      if (validatedBuild !== result.buildPath) {
+        throw failure("repair_build_mismatch", "Launch build does not match the validated repair result");
+      }
+      const recoverable = new Set(["checkpointed", "stopping"]);
+      if (current.status !== "full_gate_pending"
+        || (current.swap && !recoverable.has(current.swap.state))
+        || (current.swap?.buildPath && current.swap.buildPath !== buildPath)) {
+        throw failure("repair_swap_state", "Repair build is not ready for launch");
+      }
       if (!current.swap) {
         const checkpoint = await this.dependencies.processes.checkpoint();
         current = {
@@ -68,24 +68,16 @@ export class RepairSwap {
       if (!launchState) {
         throw failure("repair_swap_state", "Repair swap reservation is missing");
       }
-      if (launchState === "current_app_closed") {
-        await this.dependencies.processes.closeRepairBuild();
-        await this.emit(current.playtestId, "repair.build.closed", {
-          repairId,
-          reason: "restart_recovery",
-        });
-      } else {
-        current = {
-          ...current,
-          swap: { state: "stopping", buildPath },
-          updatedAt: new Date().toISOString(),
-        };
-        await this.store.saveRepair(current);
-        await this.dependencies.processes.stopTransport();
-        await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
-        await this.dependencies.processes.releaseAudio();
-        await this.emit(current.playtestId, "repair.audio.released", { repairId });
-      }
+      current = {
+        ...current,
+        swap: { state: "stopping", buildPath },
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveRepair(current);
+      await this.dependencies.processes.stopTransport();
+      await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
+      await this.dependencies.processes.releaseAudio();
+      await this.emit(current.playtestId, "repair.audio.released", { repairId });
       await this.dependencies.processes.handoffRepairBuild({
         repairId,
         buildPath: validatedBuild,
@@ -136,7 +128,6 @@ export class RepairSwap {
     if (!current.swap || ![
       "checkpointed",
       "stopping",
-      "current_app_closed",
       "repair_running",
       "rolling_back",
       "failed",

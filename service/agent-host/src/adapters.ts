@@ -299,7 +299,6 @@ export class RepairControlAdapter implements ProcessAdapter {
       String(process.ppid),
     ]);
   }
-  async closeRepairBuild(): Promise<void> { await this.nativeAction("release_audio_device"); }
   async handoffPriorApp(context: PriorAppHandoffContext): Promise<void> {
     await this.action("handoff-prior", [
       context.checkpointPath,

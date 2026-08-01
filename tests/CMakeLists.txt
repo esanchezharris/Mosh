@@ -9,6 +9,7 @@ juce_add_console_app(MoshTests PRODUCT_NAME "MoshTests")
 target_sources(MoshTests PRIVATE
     test_sanity.cpp
     test_session_paths.cpp
+    test_instance_policy.cpp
     test_audio_device_startup.cpp
     test_drum_pattern.cpp
     test_automation_mode.cpp

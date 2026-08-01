@@ -99,7 +99,6 @@ export const RepairJobSchema = z.object({
     state: z.enum([
       "checkpointed",
       "stopping",
-      "current_app_closed",
       "repair_running",
       "rolling_back",
       "rolled_back",

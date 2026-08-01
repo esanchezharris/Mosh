@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { OwnerCockpitRuntime } from "./ownerCockpitRuntime";
-import type { HostEvent } from "./agentHostClient";
+import { AgentHostApiError, type HostEvent } from "./agentHostClient";
 import type { DraftReportInput } from "./ownerCockpit";
 
 function runtime() {
@@ -131,6 +131,26 @@ describe("owner cockpit runtime presentation", () => {
       "Owner requested rollback after repair retest",
     );
     expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
+  });
+
+  it("surfaces a repair launch rejection while preserving the rollback-ready state", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 8,
+      type: "repair.full_gate_pending",
+      data: { repairId: "repair-1", buildPath: "/worktree/build/Mosh.app" },
+    });
+    client.launchRepair.mockRejectedValueOnce(
+      new AgentHostApiError("Launch build does not match the validated repair result", "repair_build_mismatch", false),
+    );
+
+    await expect(cockpit.launchRepair()).rejects.toMatchObject({ code: "repair_build_mismatch" });
+    expect(cockpit.getSnapshot()).toMatchObject({
+      error: "Launch build does not match the validated repair result",
+      repair: { id: "repair-1", status: "ready" },
+    });
   });
 
   it("restores one-click rollback when the installed repair app starts", async () => {

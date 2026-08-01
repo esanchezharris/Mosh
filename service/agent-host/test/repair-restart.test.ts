@@ -33,15 +33,6 @@ describe("repair swap restart continuation", () => {
         "repair.build.handoff_accepted",
       ],
     },
-    {
-      state: "current_app_closed" as const,
-      actions: ["close_repair", "handoff_repair"],
-      events: [
-        "repair.swap.recovered",
-        "repair.build.closed",
-        "repair.build.handoff_accepted",
-      ],
-    },
   ])("continues persisted $state safely after a new orchestrator starts", async ({
     state,
     actions,
@@ -76,12 +67,6 @@ describe("repair swap restart continuation", () => {
         "repair.audio.released",
         "repair.swap.failed",
       ],
-    },
-    {
-      state: "current_app_closed" as const,
-      failAction: "close_repair",
-      attemptActions: ["close_repair"],
-      attemptEvents: ["repair.swap.recovered", "repair.swap.failed"],
     },
   ])("rolls back without overlap when restarted $state recovery fails", async ({
     state,

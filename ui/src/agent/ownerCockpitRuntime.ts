@@ -124,37 +124,45 @@ export class OwnerCockpitRuntime {
   }
 
   async approve(reportId: string): Promise<void> {
-    const approved = await this.client.approveReport(reportId);
-    this.allReports = this.allReports.map((report) =>
-      report.id === reportId ? { ...report, status: approved.status } : report);
-    this.update({
-      reports: this.allReports.filter((item) => !this.quietReportIds.has(item.id)),
-      lastEvent: approved.status === "approved" ? "report.approved" : "report.sync.pending",
+    await this.runOwnerAction("Report approval failed.", async () => {
+      const approved = await this.client.approveReport(reportId);
+      this.allReports = this.allReports.map((report) =>
+        report.id === reportId ? { ...report, status: approved.status } : report);
+      this.update({
+        reports: this.allReports.filter((item) => !this.quietReportIds.has(item.id)),
+        lastEvent: approved.status === "approved" ? "report.approved" : "report.sync.pending",
+      });
     });
   }
 
   async fixNow(reportId: string): Promise<void> {
-    const report = this.allReports.find((candidate) => candidate.id === reportId);
-    if (!report || report.status !== "approved")
-      throw new AgentHostApiError("Approve and sync the report before repair.", "approval_required", false);
-    const repair = await this.client.createRepair(reportId);
-    this.update({ lastEvent: "repair.running", repair: { id: repair.id, status: "running" } });
+    await this.runOwnerAction("Repair creation failed.", async () => {
+      const report = this.allReports.find((candidate) => candidate.id === reportId);
+      if (!report || report.status !== "approved")
+        throw new AgentHostApiError("Approve and sync the report before repair.", "approval_required", false);
+      const repair = await this.client.createRepair(reportId);
+      this.update({ lastEvent: "repair.running", repair: { id: repair.id, status: "running" } });
+    });
   }
 
   async launchRepair(): Promise<void> {
-    const repair = this.state.repair;
-    if (!repair?.buildPath || repair.status !== "ready")
-      throw new AgentHostApiError("Repair build is not ready.", "repair_swap_state", false);
-    await this.client.launchRepair(repair.id, repair.buildPath);
-    this.update({ lastEvent: "repair.build.handoff_accepted", repair: { ...repair, status: "repair_running" } });
+    await this.runOwnerAction("Repair launch failed.", async () => {
+      const repair = this.state.repair;
+      if (!repair?.buildPath || repair.status !== "ready")
+        throw new AgentHostApiError("Repair build is not ready.", "repair_swap_state", false);
+      await this.client.launchRepair(repair.id, repair.buildPath);
+      this.update({ lastEvent: "repair.build.handoff_accepted", repair: { ...repair, status: "repair_running" } });
+    });
   }
 
   async rollbackRepair(reason = "Owner requested rollback after repair retest"): Promise<void> {
-    const repair = this.state.repair;
-    if (!repair || (repair.status !== "repair_running" && repair.status !== "failed"))
-      throw new AgentHostApiError("No repair build is available to roll back.", "repair_swap_state", false);
-    await this.client.rollbackRepair(repair.id, reason);
-    this.update({ lastEvent: "repair.swap.rolled_back", repair: { ...repair, status: "rolled_back" } });
+    await this.runOwnerAction("Repair rollback failed.", async () => {
+      const repair = this.state.repair;
+      if (!repair || (repair.status !== "repair_running" && repair.status !== "failed"))
+        throw new AgentHostApiError("No repair build is available to roll back.", "repair_swap_state", false);
+      await this.client.rollbackRepair(repair.id, reason);
+      this.update({ lastEvent: "repair.swap.rolled_back", repair: { ...repair, status: "rolled_back" } });
+    });
   }
 
   resumeInstalledRepair(repairId: string): void {
@@ -172,6 +180,17 @@ export class OwnerCockpitRuntime {
 
   clearUrgent(): void {
     this.update({ urgentMessage: null });
+  }
+
+  private async runOwnerAction<T>(fallback: string, action: () => Promise<T>): Promise<T> {
+    this.update({ error: null });
+    try {
+      return await action();
+    } catch (error) {
+      const surfaced = error instanceof Error ? error : new Error(fallback);
+      this.update({ error: surfaced.message });
+      throw surfaced;
+    }
   }
 
   private update(patch: Partial<OwnerCockpitState>): void {
@@ -193,8 +212,14 @@ export class OwnerCockpitRuntime {
       this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "repair_running" } });
     else if (event.type === "repair.swap.rolled_back" && this.state.repair)
       this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "rolled_back" } });
-    else if (event.type === "repair.swap.failed" && this.state.repair)
-      this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "failed" } });
+    else if (event.type === "repair.swap.failed" && this.state.repair) {
+      const code = typeof event.data.code === "string" ? ` (${event.data.code})` : "";
+      this.update({
+        lastEvent: event.type,
+        error: `Repair swap failed${code}.`,
+        repair: { ...this.state.repair, status: "failed" },
+      });
+    }
     else
       this.update({ lastEvent: event.type });
   }

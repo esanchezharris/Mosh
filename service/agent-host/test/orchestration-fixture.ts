@@ -113,7 +113,6 @@ export class OrchestrationFakes {
     stopTransport: async () => { await this.processAction("stop_transport"); },
     releaseAudio: async () => { await this.processAction("release_audio"); },
     handoffRepairBuild: async () => { await this.processAction("handoff_repair"); },
-    closeRepairBuild: async () => { await this.processAction("close_repair"); },
     handoffPriorApp: async () => { await this.processAction("handoff_prior"); },
   };
 
@@ -215,7 +214,7 @@ export function restartedService(
 }
 
 export async function persistedSwapFixture(
-  state: "checkpointed" | "stopping" | "current_app_closed" | "rolling_back",
+  state: "checkpointed" | "stopping" | "rolling_back",
 ) {
   const context = await orchestrationFixture();
   await context.service.approveReport(context.report.id);
