@@ -33,6 +33,7 @@ PRIOR_APP="$FIXTURE/PriorMosh.app"
 PRIOR_CONTENTS="$PRIOR_APP/Contents"
 PRIOR_MACOS="$PRIOR_CONTENTS/MacOS"
 HELPER="$FIXTURE/MoshRepairHelper"
+SUBSTITUTED_HELPER="$FIXTURE/SubstitutedRepairHelper"
 CALLER="$FIXTURE/MoshCaller"
 MARKER="$FIXTURE/launched.txt"
 RACE_MARKER="$FIXTURE/race-launched.txt"
@@ -85,6 +86,21 @@ codesign --verify --strict --verbose=2 "$CALLER"
 codesign --verify --strict --verbose=2 "$HELPER"
 codesign --verify --deep --strict --verbose=2 "$APP"
 codesign --verify --deep --strict --verbose=2 "$PRIOR_APP"
+
+TEAM_ID="$(codesign -dv --verbose=4 "$HELPER" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+[[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || {
+  echo "Signed helper has no valid TeamIdentifier." >&2
+  exit 13
+}
+HELPER_REQUIREMENT="identifier \"MoshRepairHelper\" and certificate leaf[subject.OU] = \"$TEAM_ID\""
+codesign --verify --strict --verbose=2 "-R=$HELPER_REQUIREMENT" "$HELPER"
+cp "$HELPER" "$SUBSTITUTED_HELPER"
+codesign --force --sign - "$SUBSTITUTED_HELPER"
+codesign --verify --strict "$SUBSTITUTED_HELPER"
+if codesign --verify --strict "-R=$HELPER_REQUIREMENT" "$SUBSTITUTED_HELPER" >/dev/null 2>&1; then
+  echo "Ad-hoc helper substitution satisfied the pinned helper requirement." >&2
+  exit 14
+fi
 
 if "$HELPER" probe "$$" >/dev/null 2>&1; then
   echo "Unsigned caller was accepted." >&2

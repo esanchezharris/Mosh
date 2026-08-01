@@ -126,7 +126,7 @@ export function OwnerCockpitCard() {
       {state.repair && (
         <div className="v2-owner-actions" data-testid="v2-repair-controls">
           <span>Repair: {state.repair.status.replace(/_/g, " ")}</span>
-          {state.repair.status === "ready" && (
+          {(state.repair.status === "ready" || state.repair.status === "launch_failed") && (
             <button type="button" className="v2-btn"
               onClick={() => void ownerCockpitRuntime.launchRepair().catch(() => undefined)}>
               Launch Repair

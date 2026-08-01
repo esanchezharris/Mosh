@@ -6,6 +6,7 @@ import {
   type SupervisorPlan,
   type SupervisorTurn,
 } from "./contracts.js";
+import { sanitizeHostedText } from "./audit-boundary.js";
 
 export interface SupervisorModelAdapter {
   run(input: string, session: Session, traceMetadata: Record<string, string>): Promise<unknown>;
@@ -122,15 +123,8 @@ export class OpenAIRealtimeSecretAdapter implements RealtimeSecretAdapter {
   }
 }
 
-const secretPattern = /\b(?:sk|ek|sess)-[A-Za-z0-9_-]{8,}\b/g;
-const bearerPattern = /\bBearer\s+[A-Za-z0-9._-]+/gi;
-
 function safeText(value: string, maximumLength: number): string {
-  return value
-    .replace(secretPattern, "[REDACTED]")
-    .replace(bearerPattern, "Bearer [REDACTED]")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .slice(0, maximumLength);
+  return sanitizeHostedText(value, maximumLength);
 }
 
 function safeString(value: unknown, maximumLength = 500): string | undefined {

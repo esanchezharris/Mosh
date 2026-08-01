@@ -259,8 +259,16 @@ describe("repair worktree and app lifecycle", () => {
     });
     expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
       type: "repair.swap.failed",
-      data: { repairId: repair.id, code: "repair_build_mismatch" },
+      data: { repairId: repair.id, fromState: "preflight", code: "repair_build_mismatch" },
     });
+
+    await expect(service.rollbackRepair(repair.id, "no checkpoint exists"))
+      .rejects.toMatchObject({ code: "checkpoint_missing" });
+    await expect(service.launchRepairBuild(repair.id, "/build/Mosh.app"))
+      .resolves.toMatchObject({ swap: { state: "repair_running" } });
+    expect(fakes.processCalls).toEqual([
+      "checkpoint", "stop_transport", "release_audio", "handoff_repair",
+    ]);
   });
 
   it("rejects a claimed source SHA that differs from the repair worktree HEAD", async () => {

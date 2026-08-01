@@ -341,6 +341,38 @@ describe("supervisor and OpenAI boundaries", () => {
     expect(supervisor.sessions).toEqual([playtest.id]);
   });
 
+  it("redacts credential families and configured secrets before hosted supervisor input", async () => {
+    const configuredSecret = "configured-owner-secret-value";
+    process.env.MOSH_TEST_OWNER_SECRET = configuredSecret;
+    try {
+      const supervisor = new FakeSupervisor(validPlan);
+      const host = await fixture({ supervisor });
+      const playtest = await createPlaytest(host.origin);
+      const turn = {
+        ...validTurn(playtest.id),
+        message: [
+          "github_pat_abcdefghijklmnopqrstuvwxyz",
+          "ghp_abcdefghijklmnopqrstuvwxyz",
+          "SUPABASE_SERVICE_ROLE_KEY=role-secret",
+          "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJtb3NoIn0.c2lnbmF0dXJl",
+          configuredSecret,
+        ].join(" "),
+        conversationContext: [{ role: "user" as const, text: `do not trace ${configuredSecret}` }],
+      };
+
+      expect((await post(host.origin, "/v1/supervisor/turns", turn)).status).toBe(200);
+      const hostedInput = supervisor.inputs.join("\n");
+      expect(hostedInput).not.toContain("github_pat_");
+      expect(hostedInput).not.toContain("ghp_");
+      expect(hostedInput).not.toContain("role-secret");
+      expect(hostedInput).not.toContain("eyJhbGci");
+      expect(hostedInput).not.toContain(configuredSecret);
+      expect(hostedInput.match(/\[REDACTED\]/gu)?.length).toBeGreaterThanOrEqual(6);
+    } finally {
+      delete process.env.MOSH_TEST_OWNER_SECRET;
+    }
+  });
+
   it("serializes parallel turns so transcript and SDK-session updates are not lost", async () => {
     const supervisor = new ConcurrentSessionSupervisor();
     const host = await fixture({ supervisor });

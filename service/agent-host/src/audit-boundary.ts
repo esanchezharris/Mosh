@@ -22,11 +22,23 @@ function configuredSecrets(environment: NodeJS.ProcessEnv): string[] {
     .map(([, value]) => value as string);
 }
 
-function redact(value: string, secrets: readonly string[]): string {
+function redact(value: string, secrets: readonly string[], maximumLength = MAX_STRING): string {
   let safe = value;
   for (const pattern of credentialPatterns) safe = safe.replace(pattern, REDACTED);
   for (const secret of secrets) safe = safe.split(secret).join(REDACTED);
-  return safe.slice(0, MAX_STRING);
+  return safe.slice(0, maximumLength);
+}
+
+export function sanitizeHostedText(
+  value: string,
+  maximumLength: number,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return redact(
+    value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, ""),
+    configuredSecrets(environment),
+    maximumLength,
+  );
 }
 
 function redactFailureText(value: string): string {

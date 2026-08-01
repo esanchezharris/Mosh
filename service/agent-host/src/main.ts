@@ -32,12 +32,13 @@ const githubRepository = ownerEnvironment.MOSH_GITHUB_REPOSITORY;
 const repositoryPath = ownerEnvironment.MOSH_REPOSITORY_PATH;
 const worktreeRoot = ownerEnvironment.MOSH_REPAIR_WORKTREE_ROOT;
 const repairHelper = ownerEnvironment.MOSH_REPAIR_CONTROL_HELPER;
+const repairHelperTeamId = ownerEnvironment.MOSH_REPAIR_CONTROL_TEAM_ID;
 const repairControlUrl = ownerEnvironment.MOSH_REPAIR_CONTROL_URL;
 const dataDirectory = ownerEnvironment.MOSH_AGENT_HOST_DATA_DIR ?? defaultDataDirectory();
 const store = new PlaytestStore(dataDirectory);
 const repairArtifacts = new NativeRepairArtifactPolicy();
 const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
-  && repositoryPath && worktreeRoot && repairHelper && repairControlUrl
+  && repositoryPath && worktreeRoot && repairHelper && repairHelperTeamId && repairControlUrl
   ? new OwnerOrchestrator(store, {
       evidence: new EdgeFunctionEvidenceAdapter({
         endpoint: evidenceEndpoint,
@@ -49,6 +50,7 @@ const orchestration = evidenceEndpoint && evidenceSecret && githubRepository
       processes: new RepairControlAdapter(repairRunner, repairHelper, {
         endpoint: repairControlUrl,
         capability,
+        helperTeamId: repairHelperTeamId,
       }, repairArtifacts),
       artifacts: repairArtifacts,
       repositoryPath,

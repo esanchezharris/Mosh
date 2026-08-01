@@ -66,6 +66,7 @@ function errorStatus(error: unknown): number {
   if (code === "approval_required") return 403;
   if (code === "repair_active" || code === "dirty_base" || code === "base_sha_mismatch") return 409;
   if (code === "github_sync_required" || code === "checkpoint_missing") return 409;
+  if (code === "repair_build_mismatch" || code === "repair_swap_state") return 409;
   return 500;
 }
 

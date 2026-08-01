@@ -319,6 +319,7 @@ if (MOSH_BUILD_APP)
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
     # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.
     if (APPLE)
+        target_link_libraries(Mosh PRIVATE "-framework Security")
         target_sources(Mosh PRIVATE src/voice/NativeSpeech.mm)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")

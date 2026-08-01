@@ -45,6 +45,10 @@ public:
     /** Pure parser used by the native self-test. The capability never leaves
         this native-only type and is never written to logs. */
     static std::optional<StartupEnvelope> parseStartupEnvelope (const juce::String& line);
+    static juce::var parseHostFailure (const juce::var& response,
+                                       const juce::String& fallbackMessage,
+                                       const juce::String& fallbackCode,
+                                       int statusCode);
 
 private:
     bool ensureStarted();

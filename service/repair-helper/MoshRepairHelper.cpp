@@ -98,8 +98,10 @@ Identity selfIdentity()
     if (SecCodeCopySelf (kSecCSDefaultFlags, &raw) != errSecSuccess)
         throw std::runtime_error ("helper_identity_unavailable");
     CfObject code (raw);
-    const auto identity = signingIdentity (
-        reinterpret_cast<SecStaticCodeRef> (const_cast<void*> (code.get())));
+    const auto typed = reinterpret_cast<SecCodeRef> (const_cast<void*> (code.get()));
+    if (SecCodeCheckValidity (typed, kSecCSStrictValidate, nullptr) != errSecSuccess)
+        throw std::runtime_error ("helper_signature_invalid");
+    const auto identity = signingIdentity (reinterpret_cast<SecStaticCodeRef> (typed));
     if (identity.team.empty())
         throw std::runtime_error ("helper_team_missing");
     return identity;

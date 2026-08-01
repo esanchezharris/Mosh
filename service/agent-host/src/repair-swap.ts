@@ -42,12 +42,13 @@ export class RepairSwap {
         throw failure("repair_build_mismatch", "Launch build does not match the validated repair result");
       }
       const recoverable = new Set(["checkpointed", "stopping"]);
+      const failedBeforeCheckpoint = current.swap?.state === "failed" && !current.checkpoint;
       if (current.status !== "full_gate_pending"
-        || (current.swap && !recoverable.has(current.swap.state))
-        || (current.swap?.buildPath && current.swap.buildPath !== buildPath)) {
+        || (current.swap && !recoverable.has(current.swap.state) && !failedBeforeCheckpoint)
+        || (current.swap?.buildPath && current.swap.buildPath !== buildPath && !failedBeforeCheckpoint)) {
         throw failure("repair_swap_state", "Repair build is not ready for launch");
       }
-      if (!current.swap) {
+      if (!current.checkpoint) {
         const checkpoint = await this.dependencies.processes.checkpoint();
         current = {
           ...current,
@@ -57,6 +58,13 @@ export class RepairSwap {
         };
         await this.store.saveRepair(current);
         await this.emit(current.playtestId, "repair.checkpoint.created", { repairId, ...checkpoint });
+      } else if (!current.swap) {
+        current = {
+          ...current,
+          swap: { state: "checkpointed", buildPath },
+          updatedAt: new Date().toISOString(),
+        };
+        await this.store.saveRepair(current);
       } else {
         await this.emit(current.playtestId, "repair.swap.recovered", {
           repairId,
@@ -114,7 +122,7 @@ export class RepairSwap {
       await this.store.saveRepair(failed);
       await this.emit(current.playtestId, "repair.swap.failed", {
         repairId,
-        fromState: current.swap?.state ?? "checkpoint",
+        fromState: current.swap?.state ?? "preflight",
         code: swapFailure.code,
       });
       throw failure(swapFailure.code, swapFailure.message);

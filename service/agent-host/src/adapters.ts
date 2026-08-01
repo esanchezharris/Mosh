@@ -262,14 +262,13 @@ const nativeControlResult = z.object({
 });
 
 export class RepairControlAdapter implements ProcessAdapter {
-  private helperVerified: Promise<void> | undefined;
-
   constructor(
     private readonly runner: CommandRunner,
     private readonly helperPath: string,
     private readonly nativeControl: {
       endpoint: string;
       capability: string;
+      helperTeamId: string;
       fetch?: typeof fetch;
     },
     private readonly artifactPolicy = new NativeRepairArtifactPolicy(),
@@ -330,20 +329,17 @@ export class RepairControlAdapter implements ProcessAdapter {
     return result.data.data;
   }
 
-  private verifyHelper(): Promise<void> {
-    if (!this.helperVerified) {
-      this.helperVerified = this.runner.run(
-        "/usr/bin/codesign",
-        ["--verify", "--strict", "--verbose=2", this.helperPath],
-      ).then((result) => {
-        if (result.exitCode !== 0) {
-          throw codedError("repair_helper_unsigned", "Repair control helper signature is invalid");
-        }
-      }).catch((error) => {
-        this.helperVerified = undefined;
-        throw error;
-      });
+  private async verifyHelper(): Promise<void> {
+    if (!/^[A-Z0-9]{10}$/u.test(this.nativeControl.helperTeamId)) {
+      throw codedError("repair_helper_identity", "Repair control helper team identity is invalid");
     }
-    return this.helperVerified;
+    const requirement = `identifier "MoshRepairHelper" and certificate leaf[subject.OU] = "${this.nativeControl.helperTeamId}"`;
+    const result = await this.runner.run(
+      "/usr/bin/codesign",
+      ["--verify", "--strict", "--verbose=2", `-R=${requirement}`, this.helperPath],
+    );
+    if (result.exitCode !== 0) {
+      throw codedError("repair_helper_identity", "Repair control helper identity is invalid");
+    }
   }
 }

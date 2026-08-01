@@ -17,7 +17,7 @@ export type OwnerCockpitState = {
   readonly lastEvent: string | null;
   readonly repair: {
     readonly id: string;
-    readonly status: "running" | "ready" | "repair_running" | "rolled_back" | "failed";
+    readonly status: "running" | "ready" | "launch_failed" | "repair_running" | "rolled_back" | "failed";
     readonly buildPath?: string;
   } | null;
 };
@@ -148,9 +148,14 @@ export class OwnerCockpitRuntime {
   async launchRepair(): Promise<void> {
     await this.runOwnerAction("Repair launch failed.", async () => {
       const repair = this.state.repair;
-      if (!repair?.buildPath || repair.status !== "ready")
+      if (!repair?.buildPath || (repair.status !== "ready" && repair.status !== "launch_failed"))
         throw new AgentHostApiError("Repair build is not ready.", "repair_swap_state", false);
-      await this.client.launchRepair(repair.id, repair.buildPath);
+      try {
+        await this.client.launchRepair(repair.id, repair.buildPath);
+      } catch (error) {
+        this.update({ repair: { ...repair, status: "launch_failed" } });
+        throw error;
+      }
       this.update({ lastEvent: "repair.build.handoff_accepted", repair: { ...repair, status: "repair_running" } });
     });
   }
@@ -214,10 +219,13 @@ export class OwnerCockpitRuntime {
       this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "rolled_back" } });
     else if (event.type === "repair.swap.failed" && this.state.repair) {
       const code = typeof event.data.code === "string" ? ` (${event.data.code})` : "";
+      const hasCheckpoint = typeof event.data.fromState === "string"
+        && ["checkpointed", "stopping", "repair_running", "rolling_back", "failed"]
+          .includes(event.data.fromState);
       this.update({
         lastEvent: event.type,
         error: `Repair swap failed${code}.`,
-        repair: { ...this.state.repair, status: "failed" },
+        repair: { ...this.state.repair, status: hasCheckpoint ? "failed" : "launch_failed" },
       });
     }
     else

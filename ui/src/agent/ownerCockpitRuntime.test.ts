@@ -133,7 +133,7 @@ describe("owner cockpit runtime presentation", () => {
     expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
   });
 
-  it("surfaces a repair launch rejection while preserving the rollback-ready state", async () => {
+  it("surfaces a preflight launch rejection without falsely offering rollback", async () => {
     const { cockpit, client } = runtime();
     await cockpit.start();
     const onEvent = client.watchEvents.mock.calls[0]?.[0];
@@ -149,8 +149,32 @@ describe("owner cockpit runtime presentation", () => {
     await expect(cockpit.launchRepair()).rejects.toMatchObject({ code: "repair_build_mismatch" });
     expect(cockpit.getSnapshot()).toMatchObject({
       error: "Launch build does not match the validated repair result",
-      repair: { id: "repair-1", status: "ready" },
+      repair: { id: "repair-1", status: "launch_failed" },
     });
+  });
+
+  it("offers rollback only when a swap failure happened after checkpointing", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 8,
+      type: "repair.full_gate_pending",
+      data: { repairId: "repair-1", buildPath: "/worktree/build/Mosh.app" },
+    });
+    onEvent?.({
+      sequence: 9,
+      type: "repair.swap.failed",
+      data: { repairId: "repair-1", fromState: "preflight", code: "repair_build_mismatch" },
+    });
+    expect(cockpit.getSnapshot().repair?.status).toBe("launch_failed");
+
+    onEvent?.({
+      sequence: 10,
+      type: "repair.swap.failed",
+      data: { repairId: "repair-1", fromState: "stopping", code: "repair_process_failed" },
+    });
+    expect(cockpit.getSnapshot().repair?.status).toBe("failed");
   });
 
   it("restores one-click rollback when the installed repair app starts", async () => {

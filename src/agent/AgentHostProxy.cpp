@@ -1,6 +1,10 @@
 #include "AgentHostProxy.h"
 #include "../remote/RemoteCompanionServer.h"
 
+#if JUCE_MAC
+#include <Security/Security.h>
+#endif
+
 namespace mosh
 {
 namespace
@@ -25,6 +29,34 @@ namespace
         return juce::File::getSpecialLocation (juce::File::currentApplicationFile)
             .getChildFile ("Contents/Resources")
             .getChildFile (relative);
+    }
+
+    juce::String currentSigningTeam()
+    {
+#if JUCE_MAC
+        SecCodeRef rawCode = nullptr;
+        if (SecCodeCopySelf (kSecCSDefaultFlags, &rawCode) != errSecSuccess)
+            return {};
+        const auto releaseCode = juce::ScopeGuard ([rawCode] { CFRelease (rawCode); });
+        if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
+            return {};
+        CFDictionaryRef rawInformation = nullptr;
+        if (SecCodeCopySigningInformation (
+                rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
+            return {};
+        const auto releaseInformation = juce::ScopeGuard (
+            [rawInformation] { CFRelease (rawInformation); });
+        const auto value = CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier);
+        if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
+            return {};
+        char buffer[128] {};
+        if (! CFStringGetCString (static_cast<CFStringRef> (value), buffer,
+                                  sizeof (buffer), kCFStringEncodingUTF8))
+            return {};
+        return juce::String::fromUTF8 (buffer);
+#else
+        return {};
+#endif
     }
 }
 
@@ -51,6 +83,19 @@ std::optional<AgentHostProxy::StartupEnvelope> AgentHostProxy::parseStartupEnvel
         || envelope.capability.isEmpty())
         return std::nullopt;
     return envelope;
+}
+
+juce::var AgentHostProxy::parseHostFailure (const juce::var& response,
+                                            const juce::String& fallbackMessage,
+                                            const juce::String& fallbackCode,
+                                            int statusCode)
+{
+    const auto hostError = response.getProperty ("error", juce::var());
+    const auto message = hostError.getProperty ("message", fallbackMessage).toString();
+    const auto code = hostError.getProperty ("code", fallbackCode).toString();
+    return error (message.isNotEmpty() ? message : fallbackMessage,
+                  code.isNotEmpty() ? code : fallbackCode,
+                  statusCode >= 500);
 }
 
 juce::File AgentHostProxy::locateEntry() const
@@ -130,7 +175,11 @@ bool AgentHostProxy::ensureStarted()
     const auto helper = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
         .getChildFile ("Contents/Helpers/MoshRepairHelper");
     if (helper.existsAsFile())
+    {
         command.add ("MOSH_REPAIR_CONTROL_HELPER=" + helper.getFullPathName());
+        if (const auto team = currentSigningTeam(); team.isNotEmpty())
+            command.add ("MOSH_REPAIR_CONTROL_TEAM_ID=" + team);
+    }
     command.add ("node");
     if (entry.hasFileExtension (".ts"))
     {
@@ -344,12 +393,7 @@ juce::var AgentHostProxy::createRepair (const juce::String& reportId)
     const auto repair = post ("/v1/reports/" + reportId + "/repairs",
                               juce::var (new juce::DynamicObject()), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
-    {
-        const auto hostError = repair.getProperty ("error", juce::var());
-        return error (hostError.getProperty ("message", "repair start failed").toString(),
-                      hostError.getProperty ("code", juce::var()).toString(),
-                      statusCode >= 500);
-    }
+        return parseHostFailure (repair, "repair start failed", "repair_start_failed", statusCode);
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));
@@ -367,7 +411,7 @@ juce::var AgentHostProxy::launchRepair (const juce::String& repairId,
     int statusCode = 0;
     const auto repair = post ("/v1/repairs/" + repairId + "/launch", juce::var (body), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
-        return error ("repair build launch failed", "repair_swap_failed", false);
+        return parseHostFailure (repair, "repair build launch failed", "repair_swap_failed", statusCode);
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));
@@ -385,7 +429,7 @@ juce::var AgentHostProxy::rollbackRepair (const juce::String& repairId,
     int statusCode = 0;
     const auto repair = post ("/v1/repairs/" + repairId + "/rollback", juce::var (body), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
-        return error ("repair rollback failed", "repair_rollback_failed", false);
+        return parseHostFailure (repair, "repair rollback failed", "repair_rollback_failed", statusCode);
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));

@@ -247,6 +247,7 @@ describe("native MoshOps repair control", () => {
     const adapter = new RepairControlAdapter(runner, "/signed/helper", {
       endpoint: "http://127.0.0.1:49152",
       capability: "owner-capability",
+      helperTeamId: "AB12CD34EF",
       fetch: async (input, init) => {
         const request = new Request(input, init);
         const body = await request.json() as { command: { command: string; args: Record<string, unknown> } };
@@ -284,6 +285,7 @@ describe("native MoshOps repair control", () => {
     const adapter = new RepairControlAdapter(runner, "/signed/helper", {
       endpoint: "http://127.0.0.1:49152",
       capability: "owner-capability",
+      helperTeamId: "AB12CD34EF",
     }, artifacts);
 
     await adapter.handoffRepairBuild({
@@ -295,7 +297,14 @@ describe("native MoshOps repair control", () => {
     });
 
     expect(runner.calls).toEqual([
-      ["/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "/signed/helper"],
+      [
+        "/usr/bin/codesign",
+        "--verify",
+        "--strict",
+        "--verbose=2",
+        "-R=identifier \"MoshRepairHelper\" and certificate leaf[subject.OU] = \"AB12CD34EF\"",
+        "/signed/helper",
+      ],
       [
         "/signed/helper",
         "handoff-repair",
@@ -307,6 +316,28 @@ describe("native MoshOps repair control", () => {
         String(process.ppid),
       ],
     ]);
+  });
+
+  it("rejects a helper that does not satisfy the Mosh team and identifier requirement", async () => {
+    const runner = new FakeRunner();
+    runner.responses.push({ exitCode: 1, stdout: "", stderr: "designated requirement failed" });
+    const artifacts = new NativeRepairArtifactPolicy();
+    vi.spyOn(artifacts, "validateBuild").mockResolvedValue("/worktree/build/Mosh.app");
+    const adapter = new RepairControlAdapter(runner, "/substituted/helper", {
+      endpoint: "http://127.0.0.1:49152",
+      capability: "owner-capability",
+      helperTeamId: "AB12CD34EF",
+    }, artifacts);
+
+    await expect(adapter.handoffRepairBuild({
+      repairId: "11111111-1111-4111-8111-111111111111",
+      buildPath: "/worktree/build/Mosh.app",
+      worktreePath: "/worktree",
+      sourceSha: "a".repeat(40),
+      checkpointPath: "/tmp/checkpoint.tracktionedit",
+    })).rejects.toMatchObject({ code: "repair_helper_identity" });
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]).toContain("-R=identifier \"MoshRepairHelper\" and certificate leaf[subject.OU] = \"AB12CD34EF\"");
   });
 });
 

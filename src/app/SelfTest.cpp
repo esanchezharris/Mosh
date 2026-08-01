@@ -7043,6 +7043,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! AgentHostProxy::parseStartupEnvelope (
                    "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"0.0.0.0\",\"port\":8787,\"capability\":\"x\"}").has_value(),
                "agent host: rejects a non-loopback startup envelope");
+        const auto typedRepairFailure = AgentHostProxy::parseHostFailure (
+            JSON::parse ("{\"error\":{\"code\":\"repair_build_mismatch\",\"message\":\"Launch build does not match the validated repair result\"}}"),
+            "repair build launch failed", "repair_swap_failed", 409);
+        check (! (bool) typedRepairFailure.getProperty ("ok", true)
+                   && typedRepairFailure.getProperty ("code", var()).toString() == "repair_build_mismatch"
+                   && typedRepairFailure.getProperty ("error", var()).toString()
+                        == "Launch build does not match the validated repair result"
+                   && ! (bool) typedRepairFailure.getProperty ("retryable", true),
+               "agent host: typed repair preflight failure survives native bridge envelope");
         auto permissionDirectory = File::createTempFile ("mosh-evidence-permissions");
         permissionDirectory.deleteFile();
         permissionDirectory.createDirectory();

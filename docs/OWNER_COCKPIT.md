@@ -61,6 +61,7 @@ Names are documented here; secret values are deliberately not.
 | `MOSH_REPAIR_WORKTREE_ROOT` | Parent for isolated repair worktrees | Required for repair admission. |
 | `MOSH_REPAIR_CONTROL_URL` | Private native MoshOps control origin | Native supplies this loopback-only value automatically. Never configure it in the WebView. |
 | `MOSH_REPAIR_CONTROL_HELPER` | Signed repair-app handoff helper | Native supplies the bundled helper path automatically. It launches only after MoshOps checkpoint, transport stop, and audio release succeed. |
+| `MOSH_REPAIR_CONTROL_TEAM_ID` | Running Mosh app's signing team | Native derives this from the running signed app and supplies it only to Agent Host. Repair orchestration stays unavailable for unsigned/ad-hoc app builds. |
 
 External orchestration is fail-closed and enabled only when the evidence,
 GitHub, repository, worktree, native-control, and helper values are present.
@@ -179,10 +180,48 @@ in the mode-`600` local env file. The deployed upload and short-lived signed
 preview flow have passed a live request; mismatched credentials fail closed.
 
 The repair-control adapter repeats the bundle/path/source checks immediately
-before invoking the helper. The deployment helper should also be owner-signed,
-verify its own signature/designated requirement, reject unsigned callers, and
-accept only the already validated absolute app path. Those helper checks are
-defense in depth; they do not replace the Agent Host policy.
+before invoking the helper. It also re-verifies the helper immediately before
+each handoff against the running Mosh app's Team Identifier and the exact
+`MoshRepairHelper` code-signing identifier. The helper validates its own live
+signature, rejects unsigned callers, and accepts only the already validated
+absolute app path. Those helper checks are defense in depth; they do not
+replace the Agent Host policy.
+
+## Physical installed-app swap and rollback checklist
+
+This is the remaining owner gate. Use a Developer-ID-signed build of this PR
+and a repair build signed by the same team; an ad-hoc development build is
+expected to leave repair orchestration unavailable.
+
+1. Install the signed candidate as `/Applications/Mosh.app`. Open an
+   identifiable project, note its path and the candidate source SHA, and make a
+   harmless unsaved change you can recognize after restart. Start playback,
+   but do not record: active recording must refuse the swap.
+2. In Settings → Moshi enable **Owner playtest cockpit**, press **Start**, and
+   create a blocker with **Log this** or the Felt Wrong hotkey. In the owner
+   inbox press **Approve**, then **Fix Now**. Wait until the repair card says
+   `ready` and shows **Launch Repair**. A GitHub issue and repair worktree must
+   exist only after approval.
+3. Press **Launch Repair** once. Accept only if the event sequence shows
+   `repair.checkpoint.created`, `repair.transport.stopped`,
+   `repair.audio.released`, and `repair.build.handoff_accepted` in that order;
+   playback stops; the original app closes; exactly one Mosh process remains;
+   and the restarted app shows the repair banner with the expected source SHA
+   and repair ID. Confirm the same project opens at the checkpointed state and
+   the audio device can play again.
+4. Retest the blocker, then press **Roll Back**. Accept only if the repair app
+   closes, exactly one prior app starts, the repair banner is gone, the same
+   checkpointed project returns, and the prior app reacquires working audio.
+5. If launch fails before a checkpoint exists, the card says `launch failed`
+   and does not offer a false rollback. Correct the signed build/result and
+   retry **Launch Repair**. If failure happens after checkpointing, **Roll
+   Back** remains available. If neither app is visible, relaunch the recorded
+   prior application path and open the checkpoint path recorded in the repair
+   job; do not start a second repair.
+
+Record the two process counts, banner SHA/repair ID, project path, ordered event
+names, and a short audio-playback observation. Do not attach the project,
+audio, local credential file, or raw capability to the PR.
 
 ## PR #478 supersession
 
