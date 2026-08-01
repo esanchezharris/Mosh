@@ -625,10 +625,6 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
     if (! transport.isRecording())
         return reportNoOp ("not recording");
 
-    // Snapshot the clip ids already present on every armed track BEFORE stopping, so the
-    // newly-landed take(s) are exactly the post-stop set minus this set. A single track
-    // can be targeted by multiple input instances (wave + MIDI), and several tracks can
-    // be armed at once, so we collect across ALL armed inputs (key the set per track id).
     // Bind the input array to a local before iterating (no dangling temporary).
     juce::Array<te::AudioTrack*> armedTracks;
     {
@@ -644,11 +640,11 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                         armedTracks.add (t);
     }
 
-    juce::HashMap<juce::String, int> beforeIds;     // clip itemID -> 1 (membership set)
+    juce::HashMap<juce::String, juce::String> beforeClipStates;
     for (auto* t : armedTracks)
         for (auto* c : t->getClips())
             if (c != nullptr)
-                beforeIds.set (c->itemID.toString(), 1);
+                beforeClipStates.set (c->itemID.toString(), JSON::toString (clipToVar (*c), false));
 
     // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
     // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
@@ -663,17 +659,20 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
         for (int i = 0; i < 4; ++i)
             mm->runDispatchLoopUntil (1);
 
-    // Diff: any clip on an armed track not in the before-set is a freshly-landed take.
-    // This detects BOTH wave takes (WaveAudioClip) and MIDI takes (MidiClip, sequence
-    // already finalized on stop) — clipToVar serializes either kind (notes for MIDI).
     // ARE-003: the landed clip's start is auto-adjusted by record latency inside
     // Tracktion; we just read it back via clipToVar (no app-side alignment).
     Array<var> landed;
     if (! discard)
         for (auto* t : armedTracks)
             for (auto* c : t->getClips())
-                if (c != nullptr && ! beforeIds.contains (c->itemID.toString()))
-                    landed.add (clipToVar (*c));
+                if (c != nullptr)
+                {
+                    const auto id = c->itemID.toString();
+                    const auto serialized = clipToVar (*c);
+                    if (! beforeClipStates.contains (id)
+                        || beforeClipStates[id] != JSON::toString (serialized, false))
+                        landed.add (serialized);
+                }
 
     logLine ("stop_recording", args, true, {}, false);   // recording op is NOT undoable
     emit ("transport", transportToVar());

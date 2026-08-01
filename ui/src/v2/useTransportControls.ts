@@ -62,12 +62,16 @@ export function useTransportControls({
   async function stopRecording(): Promise<boolean> {
     const result = await exec("stop_recording");
     const data = result.data as RecordingCommandData | undefined;
-    const landedNoTake = Array.isArray(data?.clips) && data.clips.length === 0;
-    if (!result.ok || data?.applied === false || landedNoTake) {
+    if (!result.ok || data?.applied === false) {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
     recordingIntent.current = false;
+    const landedNoTake = Array.isArray(data?.clips) && data.clips.length === 0;
+    if (landedNoTake) {
+      showFailure(failureMessage(result, "Could not land the recording take."));
+      return false;
+    }
     return true;
   }
 
@@ -91,7 +95,12 @@ export function useTransportControls({
         return;
       }
       const state = result.data as { recording?: boolean } | undefined;
-      recordingIntent.current = state?.recording === true;
+      if (state?.recording !== true) {
+        recordingIntent.current = false;
+        showFailure(failureMessage(result, "Could not start recording."));
+        return;
+      }
+      recordingIntent.current = true;
     }),
 
     stop: () => enqueue(async () => {

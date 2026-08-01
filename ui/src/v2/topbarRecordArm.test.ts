@@ -344,6 +344,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     };
 
     await clickRecord();
+    expect(useStore.getState().lastError).toBe("Could not start recording.");
     await clickTransport('[data-testid="v2-stop"]');
 
     expect(execCalls).toEqual([
@@ -467,6 +468,32 @@ describe("v2 TopBar Record button — arms the selected track before recording (
 
     expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
     expect(useStore.getState().lastError).toBe("no take captured (no live input)");
+  });
+
+  it("clears recording intent after an applied stop that reports no new clip", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "stop_recording",
+      data: { applied: true, clips: [], reason: "no take captured (no live input)" },
+    };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+    expect(useStore.getState().lastError).toBe("no take captured (no live input)");
+    await clickTransport('[data-testid="v2-play"]');
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { action: "toggle" } },
+    ]);
   });
 
   it("continues with the next queued transport action after a bridge rejection", async () => {
