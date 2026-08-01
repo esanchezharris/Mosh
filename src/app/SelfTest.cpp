@@ -9925,7 +9925,8 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
                "GAP2: generic transport stop exited recording state");
 
         var landed;
-        if (auto* tracks = ops.snapshot().getProperty ("tracks", var()).getArray())
+        const auto tracksState = ops.snapshot().getProperty ("tracks", var());
+        if (auto* tracks = tracksState.getArray())
             for (auto& trackState : *tracks)
                 if (trackState.getProperty ("id", var()).toString() == recTrackId)
                     landed = trackState.getProperty ("clips", var());
