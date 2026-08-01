@@ -57,6 +57,32 @@ namespace mosh::sessionpaths
         return baseName + kAutoMarker + uniqueTag;
     }
 
+    /** Resolves Tracktion's property-storage directory for this launch.
+
+        The interactive GUI deliberately keeps the legacy ~/Library/Mosh/Settings.xml
+        path. Every named harness/audit session gets a sibling directory instead, so
+        tests and candidate apps cannot read or rewrite the owner's device/plugin
+        preferences while the installed app is open.
+    */
+    inline juce::File resolvePropertyStorageDir (const juce::File& moshDir,
+                                                 const juce::String& sessionLeaf)
+    {
+        if (sessionLeaf.isEmpty() || sessionLeaf == "session")
+            return moshDir;
+
+        const auto root = moshDir.getChildFile ("_settings");
+        const auto requested = root.getChildFile (sessionLeaf);
+        if (requested.isAChildOf (root))
+            return requested;
+
+        const auto escapedLeaf = sessionLeaf.replace ("%", "%25")
+                                            .replace (".", "%2E")
+                                            .replace ("/", "%2F")
+                                            .replace ("\\", "%5C")
+                                            .replace (":", "%3A");
+        return root.getChildFile (escapedLeaf);
+    }
+
     /** Which non-interactive mode (if any) this launch is. Mirrors Main.cpp's flags. */
     struct HarnessModes
     {

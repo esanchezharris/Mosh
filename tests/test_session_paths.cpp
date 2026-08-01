@@ -69,6 +69,23 @@ TEST_CASE ("the interactive GUI session leaf is never auto-isolated", "[sessionp
     REQUIRE (resolveSessionLeaf ("session", "", "pid1-aaaa") == "session");
 }
 
+TEST_CASE ("only the interactive GUI uses the owner property-storage directory", "[sessionpaths]")
+{
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-property-root");
+
+    REQUIRE (resolvePropertyStorageDir (moshDir, "") == moshDir);
+    REQUIRE (resolvePropertyStorageDir (moshDir, "session") == moshDir);
+    REQUIRE (resolvePropertyStorageDir (moshDir, "audit/run-7")
+             == moshDir.getChildFile ("_settings").getChildFile ("audit/run-7"));
+    REQUIRE (resolvePropertyStorageDir (moshDir, "session-selftest-auto-2-bbbb")
+             == moshDir.getChildFile ("_settings")
+                       .getChildFile ("session-selftest-auto-2-bbbb"));
+    REQUIRE (resolvePropertyStorageDir (moshDir, "../Settings.xml")
+             == moshDir.getChildFile ("_settings")
+                       .getChildFile ("%2E%2E%2FSettings%2Exml"));
+}
+
 TEST_CASE ("the interactive GUI is never handed a harness session base", "[sessionpaths]")
 {
     // REGRESSION (#246 inverted the precedence): Main.cpp's ternary chain fell through

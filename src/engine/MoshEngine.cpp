@@ -63,6 +63,22 @@ namespace
         }
     };
 
+    struct MoshPropertyStorage final : te::PropertyStorage
+    {
+        explicit MoshPropertyStorage (juce::File directory)
+            : te::PropertyStorage ("Mosh"), prefsDirectory (std::move (directory))
+        {
+        }
+
+        juce::File getAppPrefsFolder() override
+        {
+            prefsDirectory.createDirectory();
+            return prefsDirectory;
+        }
+
+        juce::File prefsDirectory;
+    };
+
     /** AUD-017 — the exact JUCE audio setup, opened only in a child process.
 
         Tracktion's DeviceManager::loadSettings delegates its audio open to these same
@@ -121,6 +137,38 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // separates "degraded, offer a retry" from "headless, never touch hardware".
     audioWanted = audioOpen;
 
+    // Resolve both project and Tracktion-preference storage before constructing the
+    // Engine: its constructor may read/write Settings.xml. The GUI keeps the historic
+    // ~/Library/Mosh/Settings.xml location; every named harness/audit leaf is isolated.
+    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
+        freshSessionName,
+        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
+        mosh::sessionpaths::processTag());
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                             .getChildFile ("Mosh");
+    session = moshDir.getChildFile (sessionLeaf);
+    const auto propertyStorageDir =
+        mosh::sessionpaths::resolvePropertyStorageDir (moshDir, sessionLeaf);
+
+    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project or
+    // preferences. One guard covers both isolated directories.
+    const bool mayWipe = freshSession && sessionLeaf != "session";
+    if (mayWipe)
+    {
+        session.deleteRecursively();
+        propertyStorageDir.deleteRecursively();
+    }
+    else if (freshSession)
+        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
+        // runs — so the refusal was invisible exactly where it matters. And refusing is
+        // not the end of it: the run then starts WARM off the GUI's existing project, so
+        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
+        // only: this is printed, and a redirected Windows console defaults to cp1252.
+        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
+                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
+    session.createDirectory();
+    propertyStorageDir.createDirectory();
+
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
     // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
@@ -129,7 +177,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
     behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
-        juce::String ("Mosh"),
+        std::make_unique<MoshPropertyStorage> (propertyStorageDir),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
 
@@ -142,31 +190,6 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // verbatim — gate.sh/verify.py read artifacts back out of that exact path) and otherwise
     // auto-isolates headless runs per process, so two concurrent harnesses can no longer
     // wipe each other's session dir mid-test. See src/engine/SessionPaths.h.
-    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
-        freshSessionName,
-        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
-        mosh::sessionpaths::processTag());
-    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("Mosh");
-    session = moshDir.getChildFile (sessionLeaf);
-    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project. Nothing
-    // should route "session" here with freshSession set, but this is a data-loss class —
-    // guard it rather than trust every caller. ONE boolean covers EVERY destructive step
-    // below (the dir wipe AND the edit-file delete): guarding only the first left
-    // `MOSH_SELFTEST_SESSION=session` + any headless mode still deleting the GUI's
-    // session.tracktionedit, which is exactly what this guard exists to prevent.
-    const bool mayWipe = freshSession && sessionLeaf != "session";
-    if (mayWipe)
-        session.deleteRecursively();
-    else if (freshSession)
-        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
-        // runs — so the refusal was invisible exactly where it matters. And refusing is
-        // not the end of it: the run then starts WARM off the GUI's existing project, so
-        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
-        // only: this is printed, and a redirected Windows console defaults to cp1252.
-        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
-                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
-    session.createDirectory();
     if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
         mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);
     session.getChildFile ("audio").createDirectory();
