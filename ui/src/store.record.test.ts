@@ -14,8 +14,9 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useStore } from "./store";
+import * as bridge from "./bridge";
 import { __resetMockForTests } from "./bridge.mock";
-import type { CommandResult } from "./types";
+import type { CommandResult, Snapshot } from "./types";
 
 describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
   beforeEach(async () => {
@@ -75,6 +76,27 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     const s = useStore.getState();
     expect(s.lastError).toBeNull();
     expect(s.snapshot?.transport.recording ?? false).toBe(true);
+  });
+
+  it("keeps an existing armed track instead of arming the selected track", async () => {
+    const firstTrackId = useStore.getState().snapshot!.tracks[0]!.id;
+    const created = await useStore.getState().exec("create_track", { name: "Selected B" });
+    const secondTrackId = (created.data as { trackId: string }).trackId;
+    await useStore.getState().exec("arm_track", { trackId: firstTrackId, armed: true });
+    await useStore.getState().refresh();
+    useStore.setState({ selectedTrackId: secondTrackId });
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const originalExec = useStore.getState().exec;
+    const spy = vi.spyOn(useStore.getState(), "exec").mockImplementation(async (command, args) => {
+      calls.push({ command, args });
+      return originalExec(command, args);
+    });
+
+    await useStore.getState().enterRecord();
+
+    expect(calls).toEqual([{ command: "set_transport", args: { action: "record" } }]);
+    expect(useStore.getState().snapshot?.tracks.find((track) => track.id === secondTrackId)?.armed).not.toBe(true);
+    spy.mockRestore();
   });
 
   it("does not start recording from a malformed arm success", async () => {
@@ -185,5 +207,59 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     expect(useStore.getState().takeDecisionPending).toBe(false);
     expect(useStore.getState().lastTakeClipId).toBeNull();
     spy.mockRestore();
+  });
+
+  it("does not refresh an old snapshot while a project replacement is in flight", async () => {
+    const current = useStore.getState().snapshot!;
+    useStore.setState({
+      snapshot: { ...current, session: { ...current.session, editFile: "/sentinel/new-project.mosh" } },
+      projectTransitioning: true,
+    });
+
+    await useStore.getState().refresh();
+
+    expect(useStore.getState().snapshot?.session.editFile).toBe("/sentinel/new-project.mosh");
+  });
+
+  it("drops an in-flight old snapshot when the project epoch changes", async () => {
+    const oldSnapshot = useStore.getState().snapshot!;
+    let releaseSnapshot: ((snapshot: Snapshot) => void) | undefined;
+    const snapshotSpy = vi.spyOn(bridge, "getSnapshot").mockImplementationOnce(
+      async () => new Promise((resolve) => { releaseSnapshot = resolve; }),
+    );
+
+    useStore.setState({ projectTransitioning: false });
+    const refresh = useStore.getState().refresh();
+    await vi.waitFor(() => expect(releaseSnapshot).toBeTypeOf("function"));
+    useStore.setState((state) => ({
+      projectEpoch: state.projectEpoch + 1,
+      projectTransitioning: true,
+      snapshot: {
+        ...oldSnapshot,
+        session: { ...oldSnapshot.session, editFile: "/sentinel/replacement.mosh" },
+      },
+    }));
+    releaseSnapshot!(oldSnapshot);
+    await refresh;
+
+    expect(useStore.getState().snapshot?.session.editFile).toBe("/sentinel/replacement.mosh");
+    useStore.setState({ projectTransitioning: false });
+    snapshotSpy.mockRestore();
+  });
+
+  it("rejects Record while a real project replacement command is pending", async () => {
+    let releaseOpen: ((result: CommandResult) => void) | undefined;
+    const executeSpy = vi.spyOn(bridge, "executeCommand").mockImplementationOnce(
+      async () => new Promise((resolve) => { releaseOpen = resolve; }),
+    );
+
+    const opening = useStore.getState().exec("open_project", { file: "/mock/next.mosh" });
+    await vi.waitFor(() => expect(useStore.getState().projectTransitioning).toBe(true));
+    await useStore.getState().enterRecord();
+
+    expect(useStore.getState().lastError).toBe("Wait for the project to finish opening before recording.");
+    releaseOpen!({ ok: true, command: "open_project" });
+    await opening;
+    executeSpy.mockRestore();
   });
 });

@@ -419,7 +419,7 @@ const listeners = new Map<string, Set<Listener>>();
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -855,6 +855,16 @@ type MockRecordingStop = {
 };
 
 function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
+  if (!snapshot.transport.recording) {
+    emit("transport", snapshot.transport);
+    invalidate();
+    return {
+      applied: false,
+      discarded: discardRecordings,
+      clips: [],
+      reason: "not recording",
+    };
+  }
   stopPlayback();
   snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
   emit("transport", snapshot.transport);
@@ -865,6 +875,7 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
 
   const targets = snapshot.tracks.filter((track) => track.armed);
   if (targets.length === 0) {
+    invalidate();
     return {
       applied: false,
       discarded: false,
@@ -873,7 +884,6 @@ function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
     };
   }
 
-  pushUndo();
   const landed: { id: string }[] = [];
   for (const track of targets) {
     const existing = track.clips.find((clip) => clip.takes && clip.takes.length > 0);
@@ -1763,8 +1773,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // session state: arming flags the track; stop_recording lands a take on each
     // armed track. Repeat recordings stack onto the same clip's native take tree
     // (the UI shows lanes once a clip has ≥2 takes); set_current_take / keep_take
-    // act on that tree. arm/monitor mirror the backend's transport-config nature
-    // (non-undoable); landing/comping a take IS a document edit (undoable).
+    // act on that tree. arm, monitor, and take landing mirror the backend's
+    // non-undoable recording lifecycle; later comp selection remains undoable.
     case "arm_track": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
       t.armed = Boolean(args.armed); invalidate();

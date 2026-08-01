@@ -346,6 +346,63 @@ describe("runAction — transport", () => {
     ]);
   });
 
+  it("uses live recording intent when transport telemetry is stale", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      currentMode: () => "recording",
+      transport: { playing: false, recording: false, position: 3 },
+    });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
+  it("serializes rapid menu Record actions before choosing start or finalize", async () => {
+    let releaseStart: (() => void) | undefined;
+    let mode: "idle" | "recording" = "idle";
+    const enterRecord = vi.fn(async () => {
+      await new Promise<void>((resolve) => { releaseStart = resolve; });
+      mode = "recording";
+    });
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      currentMode: () => mode,
+      transport: { playing: false, recording: false, position: 3 },
+    });
+
+    const first = runAction("record", ctx);
+    await vi.waitFor(() => expect(releaseStart).toBeTypeOf("function"));
+    const second = runAction("record", ctx);
+    expect(enterRecord).toHaveBeenCalledOnce();
+    releaseStart!();
+    await Promise.all([first, second]);
+
+    expect(enterRecord).toHaveBeenCalledOnce();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
+  it("does not run transport or recording actions during a project transition", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      projectTransitioning: true,
+    });
+
+    await runAction("record", ctx);
+    await runAction("play_pause", ctx);
+    await runAction("to_start", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
+  });
+
   it("seek and loop_region preserve ruler set_transport payloads", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("seek", ctx, { position: 2.25 });

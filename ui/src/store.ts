@@ -36,6 +36,7 @@ import { createMpSlice, type MpSlice } from "./store/mp";
 import { createJobsSlice, type JobsSlice } from "./store/jobs";
 import { createCatalogsSlice, type CatalogsSlice } from "./store/catalogs";
 import { landedRecordingClipIds, type RecordingCommandData } from "./recordingLifecycle";
+import { cancelTransportActions, enqueueTransportAction } from "./transportActionQueue";
 
 export type Tool = "move" | "split" | "range";
 export type View = "arrange" | "mixer";
@@ -49,6 +50,7 @@ export type TimeRange = { start: number; end: number };
 export type State = {
   snapshot: Snapshot | null;
   projectEpoch: number;
+  projectTransitioning: boolean;
   connected: boolean;
   lastError: string | null;
   // A2 — UI-local: the crash-recovery notice is dismissed for this session (view state, not
@@ -188,6 +190,7 @@ export type State = {
   lastTakeClipId: string | null;
   currentMode: () => "idle" | "recording" | "reviewing";
   enterRecord: (bar?: number) => Promise<void>;
+  toggleRecord: () => Promise<void>;
   stopRecord: () => Promise<void>;
   keepTake: () => Promise<void>;
   navTake: (delta: number) => Promise<void>;
@@ -196,6 +199,86 @@ export type State = {
   // never crosses the bridge. Applied via document zoom so the whole WebView reflows.
   uiScale: number;
 } & TelemetrySlice & MpSlice & JobsSlice & CatalogsSlice;
+
+type StateGet = () => State;
+type StateSet = (state: Partial<State>) => void;
+
+async function startRecording(get: StateGet, set: StateSet, projectEpoch: number, bar?: number): Promise<void> {
+  if (get().projectEpoch !== projectEpoch) return;
+  if (get().projectTransitioning) {
+    set({ lastError: "Wait for the project to finish opening before recording." });
+    return;
+  }
+  const s = get();
+  const snap = s.snapshot;
+  const armedTrack = snap?.tracks.find((track) => track.armed);
+  const trackId = armedTrack?.id
+    ?? s.selectedTrackId
+    ?? snap?.tracks.find((track) => track.type === "audio")?.id
+    ?? snap?.tracks[0]?.id;
+  if (!trackId) {
+    s.pushAgentUtter("HUH", "no track to record into");
+    set({ lastError: "Add a track before recording." });
+    return;
+  }
+  if (!armedTrack) {
+    const arm = await s.exec("arm_track", { trackId, armed: true });
+    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+    const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
+    if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
+      s.pushAgentUtter("UHOH", "can't — no input");
+      set({ lastError: "No audio input available — check your microphone connection and permissions." });
+      return;
+    }
+  }
+  set({ lastError: null });
+  if (bar && bar > 0 && snap) {
+    const tempo = snap.session?.tempo ?? 120;
+    const num = snap.session?.timeSigNumerator ?? 4;
+    await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
+    if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  }
+  const record = await s.exec("set_transport", { action: "record" });
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  const recordState = record.data as { playing?: boolean; recording?: boolean } | undefined;
+  if (!record.ok || record.command !== "set_transport" || recordState?.recording !== true) {
+    set({ lastError: record.error ?? "Could not start recording." });
+    return;
+  }
+  set({
+    takeDecisionPending: false,
+    transport: {
+      ...get().transport,
+      recording: true,
+      ...(typeof recordState.playing === "boolean" ? { playing: recordState.playing } : {}),
+    },
+  });
+  await s.refresh();
+}
+
+async function stopRecording(get: StateGet, set: StateSet, projectEpoch: number): Promise<void> {
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  const s = get();
+  const res = await s.exec("stop_recording", {});
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  const stopData = res.data as RecordingCommandData | undefined;
+  const landedIds = landedRecordingClipIds(res);
+  if (!landedIds) {
+    set({ lastError: res.error ?? stopData?.reason ?? "Could not land the recording take." });
+    return;
+  }
+  await s.refresh();
+  if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
+  const projectClipIds = new Set(
+    (get().snapshot?.tracks ?? []).flatMap((track) => track.clips.map((clip) => clip.id)),
+  );
+  const landed = landedIds.find((id) => projectClipIds.has(id));
+  if (!landed) {
+    set({ lastError: "Could not find the landed recording take." });
+    return;
+  }
+  set({ takeDecisionPending: true, lastTakeClipId: landed });
+}
 
 export const useStore = create<State>((set, get, api) => ({
   // RFC 004 slices — field groups + their actions along the existing rails.
@@ -207,6 +290,7 @@ export const useStore = create<State>((set, get, api) => ({
 
   snapshot: null,
   projectEpoch: 0,
+  projectTransitioning: false,
   connected: isNative(),
   lastError: null,
   recoveryDismissed: false,
@@ -231,9 +315,11 @@ export const useStore = create<State>((set, get, api) => ({
   clipboard: null,
 
   refresh: async () => {
-    if (!isNative()) return;
+    if (!isNative() || get().projectTransitioning) return;
+    const projectEpoch = get().projectEpoch;
     try {
       const snap = await getSnapshot<Snapshot>();
+      if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
       set({ snapshot: snap, connected: true, transport: snap.transport });
       // PRJ-FMT — surface a version banner (file-format refusal or snapshot-schema mismatch).
       const banner = versionBannerError(snap);
@@ -270,21 +356,34 @@ export const useStore = create<State>((set, get, api) => ({
       });
       for (const t of snap.tracks) for (const c of t.clips) get().ensurePeaks(c.id);
     } catch (e) {
+      if (get().projectEpoch !== projectEpoch || get().projectTransitioning) return;
       set({ lastError: String(e) });
     }
   },
 
   exec: async (command, args = {}, transaction) => {
-    if (["new_project", "open_project", "open_recent", "reload", "recover_session"].includes(command)) {
+    const replacesProject = ["new_project", "open_project", "open_recent", "reload", "recover_session"].includes(command);
+    let transitionEpoch: number | undefined;
+    if (replacesProject) {
+      cancelTransportActions();
       set((state) => ({
         projectEpoch: state.projectEpoch + 1,
+        projectTransitioning: true,
         takeDecisionPending: false,
         lastTakeClipId: null,
       }));
+      transitionEpoch = get().projectEpoch;
     }
-    const res = await executeCommand<CommandResult>(
-      transaction ? { command, args, transaction } : { command, args },
-    );
+    let res: CommandResult;
+    try {
+      res = await executeCommand<CommandResult>(
+        transaction ? { command, args, transaction } : { command, args },
+      );
+    } finally {
+      if (replacesProject && get().projectEpoch === transitionEpoch)
+        set({ projectTransitioning: false });
+    }
+    if (replacesProject) void get().refresh();
     recordSessionCommand(command, args, res.ok);
     if (!res.ok) set({ lastError: res.error ?? `${command} failed` });
     else {
@@ -545,68 +644,38 @@ export const useStore = create<State>((set, get, api) => ({
     if (s.takeDecisionPending) return "reviewing";
     return "idle";
   },
-  enterRecord: async (bar) => {
-    const s = get();
-    const projectEpoch = s.projectEpoch;
-    const snap = s.snapshot;
-    const trackId = s.selectedTrackId ?? snap?.tracks.find((t) => t.type === "audio")?.id ?? snap?.tracks[0]?.id;
-    if (!trackId) {
-      s.pushAgentUtter("HUH", "no track to record into");
-      set({ lastError: "Add a track before recording." });
-      return;
-    }
-    const arm = await s.exec("arm_track", { trackId, armed: true });
-    if (get().projectEpoch !== projectEpoch) return;
-    // No-input / mic-permission UX (G2a): arming fails in two distinct ways —
-    // ok:false (a live device rejected the target) OR ok:true with applied:false
-    // (the graceful headless/no-device no-op proven by the "no fake clip" conformance
-    // invariant). Either way, surface a clear, persistent error and DON'T start a
-    // doomed record (which would land nothing and leave the user with no feedback).
-    const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
-    if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
-      s.pushAgentUtter("UHOH", "can't — no input");
-      set({ lastError: "No audio input available — check your microphone connection and permissions." });
-      return;
-    }
-    set({ lastError: null }); // armed cleanly — clear any stale no-input error
-    if (bar && bar > 0 && snap) {
-      const tempo = snap.session?.tempo ?? 120;
-      const num = snap.session?.timeSigNumerator ?? 4;
-      await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
-      if (get().projectEpoch !== projectEpoch) return;
-    }
-    const record = await s.exec("set_transport", { action: "record" });
-    if (get().projectEpoch !== projectEpoch) return;
-    const recordState = record.data as { recording?: boolean } | undefined;
-    if (!record.ok || record.command !== "set_transport" || recordState?.recording !== true) {
-      set({ lastError: record.error ?? "Could not start recording." });
-      return;
-    }
-    set({ takeDecisionPending: false });
-    await s.refresh();
+  enterRecord: (bar) => {
+    const projectEpoch = get().projectEpoch;
+    return enqueueTransportAction(() => startRecording(get, set, projectEpoch, bar));
   },
-  stopRecord: async () => {
-    const s = get();
-    const projectEpoch = s.projectEpoch;
-    const res = await s.exec("stop_recording", {});
-    if (get().projectEpoch !== projectEpoch) return;
-    const stopData = res.data as RecordingCommandData | undefined;
-    const landedIds = landedRecordingClipIds(res);
-    if (!landedIds) {
-      set({ lastError: res.error ?? stopData?.reason ?? "Could not land the recording take." });
-      return;
-    }
-    await s.refresh();
-    if (get().projectEpoch !== projectEpoch) return;
-    const projectClipIds = new Set(
-      (get().snapshot?.tracks ?? []).flatMap((track) => track.clips.map((clip) => clip.id)),
-    );
-    const landed = landedIds.find((id) => projectClipIds.has(id));
-    if (!landed) {
-      set({ lastError: "Could not find the landed recording take." });
-      return;
-    }
-    set({ takeDecisionPending: true, lastTakeClipId: landed });
+  toggleRecord: () => {
+    const projectEpoch = get().projectEpoch;
+    return enqueueTransportAction(async () => {
+      if (get().projectEpoch !== projectEpoch) return;
+      if (get().projectTransitioning) {
+        set({ lastError: "Wait for the project to finish opening before recording." });
+        return;
+      }
+      if (get().currentMode() === "recording") {
+        const result = await get().exec("set_transport", { action: "record" });
+        const transport = result.data as { playing?: boolean; recording?: boolean } | undefined;
+        if (result.ok && result.command === "set_transport" && typeof transport?.recording === "boolean") {
+          set({
+            transport: {
+              ...get().transport,
+              recording: transport.recording,
+              ...(typeof transport.playing === "boolean" ? { playing: transport.playing } : {}),
+            },
+          });
+        }
+        return;
+      }
+      await startRecording(get, set, projectEpoch);
+    });
+  },
+  stopRecord: () => {
+    const projectEpoch = get().projectEpoch;
+    return enqueueTransportAction(() => stopRecording(get, set, projectEpoch));
   },
   keepTake: async () => {
     const s = get();

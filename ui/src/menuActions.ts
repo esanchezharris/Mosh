@@ -12,6 +12,7 @@ import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 // below, and sessionSummary.ts's own header for the design).
 import { getSessionLog, clearSessionLog } from "./agent/memory/sessionLog";
 import { buildSessionDigest, polishSessionSummary, type ChatFn } from "./agent/memory/sessionSummary";
+import { enqueueTransportAction } from "./transportActionQueue";
 
 export type { ActionId };
 
@@ -33,7 +34,10 @@ export interface ActionStore {
   clearSelection: () => void;
   selection: Set<string>;
   transport: { playing: boolean; recording?: boolean; position?: number };
+  projectTransitioning?: boolean;
+  currentMode?: () => "idle" | "recording" | "reviewing";
   enterRecord?: (bar?: number) => Promise<void>;
+  toggleRecord?: () => Promise<void>;
   snapshot?: Snapshot | null;
   clipboard?: unknown;
   setTool?: (tool: "move" | "split" | "range") => void;
@@ -107,6 +111,28 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
   if (ext === "aiff" || ext === "aif") return "aiff";
   if (ext === "flac") return "flac";
   return "wav";
+}
+
+function runRecordAction(store: ActionStore): Promise<void> {
+  if (store.toggleRecord) return store.toggleRecord();
+  return enqueueTransportAction(async () => {
+    if (store.projectTransitioning) return;
+    const recording = store.currentMode
+      ? store.currentMode() === "recording"
+      : store.transport.recording === true;
+    if (store.enterRecord && !recording) {
+      await store.enterRecord();
+      return;
+    }
+    await store.exec("set_transport", { action: "record" });
+  });
+}
+
+function runTransportAction(store: ActionStore, args: Record<string, unknown>): Promise<void> {
+  return enqueueTransportAction(async () => {
+    if (store.projectTransitioning) return;
+    await store.exec("set_transport", args);
+  });
 }
 
 /** Dispatch a logical action. `opts.file` lets `open_project` open a known path without
@@ -208,20 +234,16 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     }
 
     case "play_pause":
-      await store.exec("set_transport", { action: "toggle" });
+      await runTransportAction(store, { action: "toggle" });
       return;
     case "record":
-      if (store.enterRecord && !store.transport.recording) {
-        await store.enterRecord();
-        return;
-      }
-      await store.exec("set_transport", { action: "record" });
+      await runRecordAction(store);
       return;
     case "to_start":
-      await store.exec("set_transport", { action: "to_start" });
+      await runTransportAction(store, { action: "to_start" });
       return;
     case "to_end":
-      await store.exec("set_transport", { action: "to_end" });
+      await runTransportAction(store, { action: "to_end" });
       return;
     case "duplicate":
       for (const clipId of [...store.selection]) await store.exec("duplicate_clip", { clipId });

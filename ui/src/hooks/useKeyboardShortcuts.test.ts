@@ -67,7 +67,7 @@ describe("useKeyboardShortcuts", () => {
     vi.restoreAllMocks();
   });
 
-  it("dispatches Space to the transport from the app-level shortcut hook", () => {
+  it("dispatches Space to the transport from the app-level shortcut hook", async () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -76,10 +76,12 @@ describe("useKeyboardShortcuts", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+    await vi.waitFor(() =>
+      expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } }),
+    );
   });
 
-  it("dispatches Space from the focused empty Moshi prompt", () => {
+  it("dispatches Space from the focused empty Moshi prompt", async () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -94,7 +96,9 @@ describe("useKeyboardShortcuts", () => {
       prompt.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
     });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+    await vi.waitFor(() =>
+      expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } }),
+    );
     promptWrap.remove();
   });
 

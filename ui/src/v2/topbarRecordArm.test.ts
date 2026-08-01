@@ -3,8 +3,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TopBar } from "./TopBar";
 import { useStore } from "../store";
-import { __resetMockForTests, mockSnapshot } from "../bridge.mock";
+import { __resetMockForTests, mockExecute, mockSnapshot } from "../bridge.mock";
 import type { CommandResult, Snapshot } from "../types";
+import { runAction } from "../menuActions";
 
 // The app/session tool cluster pulls in bridge side effects we don't care about
 // here; stub it to keep the test focused on the transport controls (mirrors
@@ -84,19 +85,19 @@ describe("v2 TopBar Record button — arms the selected track before recording (
   async function clickRecord(expectedExecs = 1) {
     const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
     const settledTarget = settledExecCount + expectedExecs;
-    act(() => {
+    await act(async () => {
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
     });
-    await waitForSettledExecs(settledTarget);
   }
 
   async function clickTransport(selector: string, expectedExecs = 1) {
     const btn = host.querySelector<HTMLButtonElement>(selector)!;
     const settledTarget = settledExecCount + expectedExecs;
-    act(() => {
+    await act(async () => {
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
     });
-    await waitForSettledExecs(settledTarget);
   }
 
   async function flushQueuedTransport() {
@@ -141,6 +142,21 @@ describe("v2 TopBar Record button — arms the selected track before recording (
 
     expect(execCalls).toEqual([]);
     expect(useStore.getState().lastError).toBe("Add a track before recording.");
+  });
+
+  it("does not enter recording while a project replacement is pending", async () => {
+    useStore.setState({ projectTransitioning: true });
+    render(useStore.getState().snapshot!);
+
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([]);
+    expect(useStore.getState().lastError).toBe("Wait for the project to finish opening before using transport controls.");
+    useStore.setState({ projectTransitioning: false });
   });
 
   it("does not re-arm a track when one is already armed — just starts recording", async () => {
@@ -299,11 +315,11 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     const settledTarget = settledExecCount + 3;
     const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
     const stop = host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!;
-    act(() => {
+    await act(async () => {
       record.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
     });
-    await waitForSettledExecs(settledTarget);
     await flushQueuedTransport();
 
     expect(execCalls).toEqual([
@@ -332,11 +348,17 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     };
 
     await clickRecord();
-    expect(useStore.getState().transport.recording).toBe(false);
+    await mockExecute({ command: "set_transport", args: { action: "record" } });
+    await flushQueuedTransport();
+    expect(useStore.getState().transport.recording).toBe(true);
     act(() => {
       useStore.setState({ agentBusy: true });
     });
-    await clickTransport('[data-testid="v2-stop"]', 2);
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushQueuedTransport();
 
     expect(execCalls).toEqual([
       { command: "set_transport", args: { action: "record" } },
@@ -358,11 +380,11 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     const settledTarget = settledExecCount + 2;
     const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
     const play = host.querySelector<HTMLButtonElement>('[data-testid="v2-play"]')!;
-    act(() => {
+    await act(async () => {
       record.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       play.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await waitForSettledExecs(settledTarget);
     });
-    await waitForSettledExecs(settledTarget);
 
     expect(execCalls).toEqual([
       { command: "set_transport", args: { action: "record" } },
@@ -462,6 +484,70 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     await flushQueuedTransport();
 
     expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+  });
+
+  it("serializes a menu Play action behind a delayed TopBar arm", async () => {
+    let releaseArm: ((result: CommandResult) => void) | undefined;
+    vi.mocked(useStore.getState().exec).mockImplementationOnce(
+      async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        execCalls.push({ command, args });
+        return new Promise((resolve) => { releaseArm = resolve; });
+      },
+    );
+    render(useStore.getState().snapshot!);
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(releaseArm).toBeTypeOf("function"));
+
+    const play = runAction("play_pause", {
+      store: useStore.getState(),
+      pickFiles: vi.fn(async () => ({ ok: false, files: [] })),
+      pickSaveFile: vi.fn(async () => ({ ok: false, file: "" })),
+    });
+    await Promise.resolve();
+    expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+
+    await act(async () => {
+      releaseArm!({ ok: true, command: "arm_track", data: { applied: true } });
+      await play;
+    });
+    await vi.waitFor(() => expect(execCalls.map((call) => call.command)).toEqual([
+      "arm_track",
+      "set_transport",
+      "set_transport",
+    ]));
+    expect(execCalls[1]?.args).toEqual({ action: "record" });
+    expect(execCalls[2]?.args).toEqual({ action: "toggle" });
+  });
+
+  it("shares a confirmed TopBar recording state with menu Record before telemetry", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]!.id;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await useStore.getState().refresh();
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    await clickRecord();
+    await flushQueuedTransport();
+    await act(async () => {
+      await runAction("record", {
+        store: useStore.getState(),
+        pickFiles: vi.fn(async () => ({ ok: false, files: [] })),
+        pickSaveFile: vi.fn(async () => ({ ok: false, file: "" })),
+      });
+    });
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+    expect(useStore.getState().lastError).toBeNull();
+    const after = await mockSnapshot<Snapshot>();
+    expect(after.transport.recording).toBe(false);
+    expect(after.tracks[0]!.clips.some((clip) => (clip.numTakes ?? 0) > 0)).toBe(true);
   });
 
   it("keeps a rejected recording start visible", async () => {
