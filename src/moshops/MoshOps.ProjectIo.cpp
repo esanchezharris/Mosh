@@ -1427,12 +1427,12 @@ juce::var MoshOps::cmdCreateRepairCheckpoint (const juce::var& args)
     ::chmod (directory.getFullPathName().toRawUTF8(), S_IRWXU);
    #endif
 
-    auto* saveArgs = new DynamicObject();
     const auto checkpoint = directory.getChildFile ("project.tracktionedit");
-    saveArgs->setProperty ("file", checkpoint.getFullPathName());
-    const auto saved = cmdSaveAs (var (saveArgs));
-    if (! (bool) saved.getProperty ("ok", false))
+    if (! tracktion::engine::EditFileOperations (eng.edit()).writeToFile (checkpoint, false))
+    {
+        directory.deleteRecursively();
         return errResult ("create_repair_checkpoint", "repair checkpoint save failed");
+    }
    #if JUCE_MAC
     ::chmod (checkpoint.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR);
    #endif

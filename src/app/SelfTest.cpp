@@ -9768,11 +9768,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     section ("Owner repair checkpoint and audio handoff");
     {
+        const auto activeProject = eng.editFile();
         const auto checkpoint = cmd (ops, "create_repair_checkpoint");
         const auto checkpointPath = checkpoint["data"].getProperty ("checkpointPath", var()).toString();
         const auto priorAppPath = checkpoint["data"].getProperty ("priorAppPath", var()).toString();
         check (ok (checkpoint) && File (checkpointPath).existsAsFile(),
                "repair swap: MoshOps persists a concrete project checkpoint");
+        check (eng.editFile() == activeProject,
+               "repair swap: checkpoint does not replace the active project");
         check (File (priorAppPath).isDirectory() && priorAppPath.endsWith (".app"),
                "repair swap: checkpoint records the installed app for rollback");
         const auto released = cmd (ops, "release_audio_device");
