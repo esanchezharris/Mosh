@@ -192,16 +192,17 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
             session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }
 
-    session.createDirectory();
+    if (useOwnerSession)
+        session.createDirectory();
     if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
         && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
-        && ! mosh::sessionpaths::markOwnedHarnessSession (moshDir, session))
+        && ! mosh::sessionpaths::createOwnedHarnessSession (moshDir, session))
     {
         session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }
     if (mosh::sessionpaths::isAutoSessionDirectory (moshDir, session)
         && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session)
-        && ! mosh::sessionpaths::markOwnedAutoSession (moshDir, session))
+        && ! mosh::sessionpaths::createOwnedAutoSession (moshDir, session))
     {
         session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
     }

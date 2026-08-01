@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(mktemp -d)"
 export MOSH_APP_DATA_DIR="$ROOT/Mosh"
 mkdir -p "$MOSH_APP_DATA_DIR/_harness/owned" "$MOSH_APP_DATA_DIR/_harness/unowned"
+mkdir -p "$MOSH_APP_DATA_DIR/_harness/.mosh-reset.KEEP"
 printf '%s' 'Mosh isolated harness session v1' > "$MOSH_APP_DATA_DIR/_harness/owned/.mosh-harness-owned-v1"
 printf '%s' 'stale' > "$MOSH_APP_DATA_DIR/_harness/owned/stale.txt"
 printf '%s' 'owner data' > "$MOSH_APP_DATA_DIR/_harness/unowned/keep.txt"
@@ -12,6 +13,8 @@ source "$(cd "$(dirname "$0")" && pwd)/harness-session.sh"
 
 mosh_reset_owned_harness_session "_harness/owned"
 test ! -e "$MOSH_APP_DATA_DIR/_harness/owned"
+test -d "$MOSH_APP_DATA_DIR/_harness/.mosh-reset.KEEP"
+test -z "$(find "$MOSH_APP_DATA_DIR/_harness" -maxdepth 1 -type d -name '.mosh-reset.*' ! -name '.mosh-reset.KEEP' -print -quit)"
 if mosh_reset_owned_harness_session "_harness/unowned"; then
   echo "unowned harness reset unexpectedly succeeded" >&2
   exit 1

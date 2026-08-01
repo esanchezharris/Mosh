@@ -122,11 +122,9 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 - **Branch protection vs the loops:** `enforce_admins` is on, so **`gh pr merge --admin` cannot
   bypass a required check**; `merge-one.sh` waits for the check and merges without `--admin`.
   Don't reintroduce `--admin` — it will just fail.
-  **Since 2026-07-24 the required `cheap gate` context is REMOVED** (GitHub Actions billing is
-  dead — every check fails in 1–3s, which is the tell), so merges go through on the local gate.
-  Verify with `gh api repos/zeke431/Mosh/branches/main/protection`; restore the context when
-  billing recovers. A 1-second "failure" is an outage, not a red test — but read the durations
-  before believing that.
+  GitHub Actions billing recovered on 2026-07-27, so a red hosted check is a real failure again.
+  Verify the current required contexts with
+  `gh api repos/zeke431/Mosh/branches/main/protection`; the local gate remains merge authority.
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.

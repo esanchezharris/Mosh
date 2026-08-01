@@ -96,8 +96,7 @@ TEST_CASE ("BrainProxy installId is minted once and reused, isolated from the re
                    .getChildFile ("Mosh")
                    .getChildFile ("_harness")
                    .getChildFile (name);
-    REQUIRE (dir.createDirectory());
-    REQUIRE (mosh::sessionpaths::markOwnedHarnessSession (
+    REQUIRE (mosh::sessionpaths::createOwnedHarnessSession (
         File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"), dir));
 
     const auto first = BrainProxy::installId();

@@ -3,7 +3,7 @@
 mosh_reset_owned_harness_session() {
   local session="${1:-}"
   local app_data="${MOSH_APP_DATA_DIR:-$HOME/Library/Mosh}"
-  local relative marker expected marker_size quarantine
+  local relative marker expected marker_size quarantine quarantined_target
   expected='Mosh isolated harness session v1'
 
   case "$session" in
@@ -42,17 +42,23 @@ mosh_reset_owned_harness_session() {
   [ "$marker_size" = "${#expected}" ] && [ "$(/bin/cat "$marker")" = "$expected" ] \
     || { printf 'refusing marker-mismatched harness reset: %s\n' "$session" >&2; return 2; }
 
-  quarantine="$app_data/_harness/.mosh-reset-${relative//\//-}-$$-$RANDOM"
-  /bin/mv -- "$target" "$quarantine"
-  marker="$quarantine/.mosh-harness-owned-v1"
-  if [ -L "$quarantine" ] || [ ! -f "$marker" ] || [ -L "$marker" ]; then
-    [ -e "$target" ] || /bin/mv -- "$quarantine" "$target"
+  quarantine="$(mktemp -d "$app_data/_harness/.mosh-reset.XXXXXX")" || return 2
+  quarantined_target="$quarantine/session"
+  if ! /bin/mv -- "$target" "$quarantined_target"; then
+    /bin/rmdir -- "$quarantine"
+    return 2
+  fi
+  marker="$quarantined_target/.mosh-harness-owned-v1"
+  if [ -L "$quarantined_target" ] || [ ! -f "$marker" ] || [ -L "$marker" ]; then
+    [ -e "$target" ] || /bin/mv -- "$quarantined_target" "$target"
+    /bin/rmdir -- "$quarantine" 2>/dev/null || true
     printf 'harness ownership changed during reset: %s\n' "$session" >&2
     return 2
   fi
   marker_size="$(wc -c < "$marker" | tr -d '[:space:]')"
   if [ "$marker_size" != "${#expected}" ] || [ "$(/bin/cat "$marker")" != "$expected" ]; then
-    [ -e "$target" ] || /bin/mv -- "$quarantine" "$target"
+    [ -e "$target" ] || /bin/mv -- "$quarantined_target" "$target"
+    /bin/rmdir -- "$quarantine" 2>/dev/null || true
     printf 'harness ownership changed during reset: %s\n' "$session" >&2
     return 2
   fi

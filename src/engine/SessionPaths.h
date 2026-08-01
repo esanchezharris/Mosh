@@ -2,6 +2,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include "SessionOwnership.h"
+
 #if JUCE_WINDOWS
  #include <process.h>
 #else
@@ -33,9 +35,6 @@ namespace mosh::sessionpaths
     // would destroy someone's project.
     inline constexpr const char* kAutoMarker = "-auto-";
     inline constexpr const char* kSafetyPrefix = "session-safety-auto-";
-    inline constexpr const char* kHarnessRootName = "_harness";
-    inline constexpr const char* kHarnessOwnershipFile = ".mosh-harness-owned-v1";
-    inline constexpr const char* kHarnessOwnershipContents = "Mosh isolated harness session v1";
 
     inline bool isAutoIsolatedLeaf (const juce::String& leafName)
     {
@@ -71,43 +70,10 @@ namespace mosh::sessionpaths
         return baseName + kAutoMarker + uniqueTag;
     }
 
-    inline bool isContainedWithoutSymlinks (const juce::File& root,
-                                            const juce::File& candidate)
-    {
-        if (! candidate.isAChildOf (root) || root.isSymbolicLink())
-            return false;
-
-        for (auto current = candidate; current != root; current = current.getParentDirectory())
-            if (current.isSymbolicLink())
-                return false;
-
-        return true;
-    }
-
     inline juce::File safetySessionDirectory (const juce::File& moshDir,
                                               const juce::String& uniqueTag)
     {
         return moshDir.getChildFile (kSafetyPrefix + uniqueTag);
-    }
-
-    inline bool hasIsolationOwnershipMarker (const juce::File& directory)
-    {
-        const auto marker = directory.getChildFile (kHarnessOwnershipFile);
-        return marker.existsAsFile()
-            && ! marker.isSymbolicLink()
-            && marker.loadFileAsString() == kHarnessOwnershipContents;
-    }
-
-    inline bool markEmptyIsolationDirectory (const juce::File& directory)
-    {
-        if (! directory.isDirectory())
-            return false;
-        if (hasIsolationOwnershipMarker (directory))
-            return true;
-        if (! directory.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty())
-            return false;
-        return directory.getChildFile (kHarnessOwnershipFile)
-                        .replaceWithText (kHarnessOwnershipContents);
     }
 
     inline juce::File prepareSafetySessionDirectory (const juce::File& moshDir,
@@ -127,9 +93,7 @@ namespace mosh::sessionpaths
                     return directory;
                 continue;
             }
-            if (directory.createDirectory().wasOk()
-                && isContainedWithoutSymlinks (moshDir, directory)
-                && markEmptyIsolationDirectory (directory))
+            if (createFreshOwnedIsolationDirectory (moshDir, directory))
                 return directory;
         }
         return {};
@@ -168,21 +132,12 @@ namespace mosh::sessionpaths
         return hasIsolationOwnershipMarker (directory);
     }
 
-    inline bool markOwnedAutoSession (const juce::File& moshDir,
-                                      const juce::File& directory)
+    inline bool createOwnedAutoSession (const juce::File& moshDir,
+                                        const juce::File& directory)
     {
-        if (! directory.isDirectory() || ! isAutoSessionDirectory (moshDir, directory))
+        if (! isAutoSessionDirectory (moshDir, directory))
             return false;
-        return markEmptyIsolationDirectory (directory);
-    }
-
-    inline bool isEmptyHarnessSession (const juce::File& moshDir,
-                                       const juce::File& directory)
-    {
-        return directory.isDirectory()
-            && isHarnessSessionDirectory (moshDir, directory)
-            && directory.findChildFiles (
-                   juce::File::findFilesAndDirectories, false).isEmpty();
+        return createFreshOwnedIsolationDirectory (moshDir, directory);
     }
 
     /** Marks a newly-created, empty `_harness` directory as disposable.
@@ -190,19 +145,21 @@ namespace mosh::sessionpaths
         Refusing non-empty directories is deliberate: an arbitrary existing directory
         can contain owner data regardless of its name, and must never be claimed merely
         because a caller supplied its path in MOSH_SELFTEST_SESSION. */
-    inline bool markOwnedHarnessSession (const juce::File& moshDir,
-                                         const juce::File& directory)
+    inline bool createOwnedHarnessSession (const juce::File& moshDir,
+                                           const juce::File& directory)
     {
-        if (! directory.isDirectory() || ! isHarnessSessionDirectory (moshDir, directory))
+        if (! isHarnessSessionDirectory (moshDir, directory))
             return false;
-        return markEmptyIsolationDirectory (directory);
+        return createFreshOwnedIsolationDirectory (
+            moshDir.getChildFile (kHarnessRootName), directory);
     }
 
     inline bool resetOwnedHarnessSession (const juce::File& moshDir,
                                           const juce::File& directory)
     {
         return isOwnedHarnessSession (moshDir, directory)
-            && directory.deleteRecursively();
+            && resetOwnedIsolationDirectory (
+                moshDir.getChildFile (kHarnessRootName), directory);
     }
 
     /** Resolves the project directory without allowing an environment-controlled
@@ -224,8 +181,7 @@ namespace mosh::sessionpaths
         if (explicitOverride
             && isHarnessSessionDirectory (moshDir, requested)
             && (! requested.exists()
-                || isOwnedHarnessSession (moshDir, requested)
-                || isEmptyHarnessSession (moshDir, requested)))
+                || isOwnedHarnessSession (moshDir, requested)))
             return requested;
 
         if (! explicitOverride
@@ -250,10 +206,8 @@ namespace mosh::sessionpaths
         if (directory == safetySessionDirectory (moshDir, uniqueTag))
             return prepareSafetySessionDirectory (moshDir, uniqueTag);
 
-        if (! directory.exists() && directory.createDirectory().failed())
-            return prepareSafetySessionDirectory (moshDir, uniqueTag);
         if (! isOwnedHarnessSession (moshDir, directory)
-            && ! markOwnedHarnessSession (moshDir, directory))
+            && ! createOwnedHarnessSession (moshDir, directory))
             return prepareSafetySessionDirectory (moshDir, uniqueTag);
         return directory;
     }
