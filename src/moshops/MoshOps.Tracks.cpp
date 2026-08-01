@@ -10,6 +10,7 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "RecordingLanding.h"
 #include "state/Ids.h"
 #include "multiplayer/LogicalId.h"
 
@@ -640,11 +641,21 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                         armedTracks.add (t);
     }
 
-    juce::HashMap<juce::String, juce::String> beforeClipStates;
+    juce::HashMap<juce::String, int> beforeIds;
+    juce::HashMap<juce::String, juce::String> beforeMidiNotes;
     for (auto* t : armedTracks)
         for (auto* c : t->getClips())
             if (c != nullptr)
-                beforeClipStates.set (c->itemID.toString(), JSON::toString (clipToVar (*c), false));
+            {
+                const auto id = c->itemID.toString();
+                beforeIds.set (id, 1);
+                if (dynamic_cast<te::MidiClip*> (c) != nullptr)
+                {
+                    const auto serialized = clipToVar (*c);
+                    beforeMidiNotes.set (id, JSON::toString (
+                        serialized.getProperty ("notes", var()), false));
+                }
+            }
 
     // Stop, KEEPING takes (unless asked to discard). clearDevices=false preserves the
     // graph. Take landing is SYNCHRONOUS inside transport.stop() (performStop() ->
@@ -669,8 +680,13 @@ juce::var MoshOps::cmdStopRecording (const juce::var& args)
                 {
                     const auto id = c->itemID.toString();
                     const auto serialized = clipToVar (*c);
-                    if (! beforeClipStates.contains (id)
-                        || beforeClipStates[id] != JSON::toString (serialized, false))
+                    const auto midiNotes = dynamic_cast<te::MidiClip*> (c) != nullptr
+                        ? JSON::toString (serialized.getProperty ("notes", var()), false)
+                        : juce::String();
+                    if (recording::didLandClip (beforeIds.contains (id),
+                                                dynamic_cast<te::MidiClip*> (c) != nullptr,
+                                                beforeMidiNotes[id],
+                                                midiNotes))
                         landed.add (serialized);
                 }
 

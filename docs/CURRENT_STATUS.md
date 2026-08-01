@@ -71,10 +71,12 @@ build).
   is `docs/playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`. PR #560 fixed the
   audit-settings and identity isolation blocker with exact native, Computer Use,
   hosted, and five-lane evidence before merging. Draft PR #558 is now rebased on
-  that merge and must regenerate every SHA-bound gate and native artifact before
-  review. Recorded-source placement #545 remains independent. PR #523 is outside
-  this campaign and must not be merged by the audit loop [measured: issue/PR state,
-  2026-08-01]. The earlier
+  that merge and is actively regenerating its SHA-bound gate, review, and native
+  artifacts after each review repair. The live PR body and issue #531 carry the
+  authoritative exact head and external manifest because a commit cannot embed
+  its own final SHA. Recorded-source placement #545 remains independent. PR #523
+  is outside this campaign and must not be merged by the audit loop [measured:
+  issue/PR state, 2026-08-01]. The earlier
   architecture-improvement Wave 0 landed
   2026-07-28: #486 (worklog INDEX repair + RED-proven guard) and #487
   (`docs/rfc/` decision-log scaffold, RFCs 001–004) are MERGED; #489

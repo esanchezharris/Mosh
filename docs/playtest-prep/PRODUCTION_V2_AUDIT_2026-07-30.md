@@ -161,7 +161,7 @@ not a finding.
 | Settings hangs after a bounded audio-startup timeout | BLOCKER | The old in-process timeout abandoned a thread inside CoreAudio, leaving process-local HAL state poisoned; Settings then synchronously re-entered device scanning. PR #528 moves the complete saved/default setup preflight into a killable child, suppresses degraded enumeration, and rejects DTD/entity declarations before JUCE parses persisted or child setup XML. Exact gate, native UI, hosted, and five-lane verdicts live outside the repository because a commit cannot embed its own final SHA. | [#527](https://github.com/zeke431/Mosh/issues/527) | [#528](https://github.com/zeke431/Mosh/pull/528) | PASS only when external manifest matches PR head; owner-ordered rebase/merged-Release rerun pending |
 | Named audit/harness launches mutate owner Tracktion settings; arbitrary explicit leaves can target owner data | BLOCKER | PR #560 preserves the normal installed-app default, gives every non-owner process separate property storage, requires exact-marker ownership, and retains reset quarantines recoverably. Native, Python, and Vite identity consumers share the same boundary. The exact candidate kept installed-owner Settings, identity, session tree, and PID invariant while all local/hosted gates and five review lanes passed. | [#557](https://github.com/zeke431/Mosh/issues/557) | [#560](https://github.com/zeke431/Mosh/pull/560) | PASS exact head; merged at `06dea1c1`; signed Release + hardware remain pending |
 | Failed audio Retry duplicates the persistent degraded-audio warning | MINOR | Retry is bounded and truthful, but its failure notification repeats the existing banner and remains visible; separate presentation/accessibility root cause parked behind #528 | [#529](https://github.com/zeke431/Mosh/issues/529) | pending | FAIL candidate; does not block #527 |
-| Primary Stop exits recording without surfacing the take | BLOCKER | The v2 Stop and To-start controls used generic transport stop instead of the take-aware `stop_recording` lifecycle. Draft PR #558 routes every recording-ending transport control through MoshOps, serializes rapid actions, and preserves non-recording behavior. Prior proof lands, saves, and reloads a non-silent take; the rebased exact head requires a new gate and native rerun. | [#531](https://github.com/zeke431/Mosh/issues/531) | [#558](https://github.com/zeke431/Mosh/pull/558) | Rebased candidate; exact-head acceptance pending |
+| Primary Stop exits recording without surfacing the take | BLOCKER | The v2 Stop and To-start controls used generic transport stop instead of the take-aware `stop_recording` lifecycle. Draft PR #558 routes recording-ending controls through MoshOps, serializes rapid actions, rejects missing tracks and refused starts, and recognizes both new audio clips and existing MIDI clips changed by merge recording. Prior proof lands, saves, and reloads a non-silent take; only the live PR head's external manifest can satisfy exact-head acceptance. | [#531](https://github.com/zeke431/Mosh/issues/531) | [#558](https://github.com/zeke431/Mosh/pull/558) | Exact-head CoreAudio/UI acceptance pending |
 | Recorded take can persist with its source offset at EOF | BLOCKER | Dedicated lifecycle proof exposed a distinct placement defect: a non-zero timeline recording can reference the end of its source and render silent. This is not fixed by #531. | [#545](https://github.com/zeke431/Mosh/issues/545) | pending | FAIL frozen reproduction |
 | Master plugin picker may omit visible rows from AX | MAJOR | Black-box evidence is inconclusive; reproduce with exact visual and AX snapshots | pending | — | pending |
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
@@ -178,10 +178,11 @@ fresh PASS reviews. The installed owner settings, identity, session tree, and PI
 remained invariant. This coexistence proof does not certify signed Release audio
 or hardware routing.
 
-Draft PR #558 is the active serial candidate. Its rebase onto `06dea1c1`
-invalidates every predecessor SHA-bound gate, runtime artifact, review, ledger,
-and manifest. Those must be regenerated before review or merge; old hosted checks
-are supporting history only. Recorded-source placement #545 remains an independent
+Draft PR #558 is the active serial candidate. Its rebase onto `06dea1c1` and each
+review repair invalidate predecessor SHA-bound gates, runtime artifacts, reviews,
+and manifests. The PR body and issue #531 publish the live exact head, current
+external manifest, and remaining CoreAudio/native barrier; old hosted checks are
+supporting history only. Recorded-source placement #545 remains an independent
 blocker and is not fixed by #558. PR #523 is outside this audit path and must not
 be merged by this campaign. Issue #529 remains separately parked.
 

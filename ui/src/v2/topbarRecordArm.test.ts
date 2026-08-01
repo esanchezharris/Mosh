@@ -128,6 +128,21 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(after.transport.recording).toBe(true);
   });
 
+  it("does not enter recording when the project has no track", async () => {
+    const snapshot = useStore.getState().snapshot!;
+    useStore.setState({ selectedTrackId: null });
+    render({ ...snapshot, tracks: [] });
+
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
+    act(() => {
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([]);
+    expect(useStore.getState().lastError).toBe("Add a track before recording.");
+  });
+
   it("does not re-arm a track when one is already armed — just starts recording", async () => {
     const snap0 = useStore.getState().snapshot!;
     const trackId = snap0.tracks[0]?.id!;
@@ -447,6 +462,14 @@ describe("v2 TopBar Record button — arms the selected track before recording (
 
     expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
     expect(useStore.getState().lastError).toBe("no audio device");
+
+    await clickTransport('[data-testid="v2-play"]');
+    await flushQueuedTransport();
+
+    expect(execCalls).toEqual([
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { action: "toggle" } },
+    ]);
   });
 
   it("does not seek when stop_recording lands no take", async () => {

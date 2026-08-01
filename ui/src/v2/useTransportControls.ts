@@ -62,11 +62,15 @@ export function useTransportControls({
   async function stopRecording(): Promise<boolean> {
     const result = await exec("stop_recording");
     const data = result.data as RecordingCommandData | undefined;
-    if (!result.ok || data?.applied === false) {
+    if (!result.ok) {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
     recordingIntent.current = false;
+    if (data?.applied === false) {
+      showFailure(failureMessage(result, "Could not land the recording take."));
+      return false;
+    }
     const landedNoTake = Array.isArray(data?.clips) && data.clips.length === 0;
     if (landedNoTake) {
       showFailure(failureMessage(result, "Could not land the recording take."));
@@ -81,7 +85,11 @@ export function useTransportControls({
         await stopRecording();
         return;
       }
-      if (!anyArmed && fallbackTrackId) {
+      if (!anyArmed) {
+        if (!fallbackTrackId) {
+          showFailure("Add a track before recording.");
+          return;
+        }
         const arm = await exec("arm_track", { trackId: fallbackTrackId, armed: true });
         const armData = arm.data as RecordingCommandData | undefined;
         if (!arm.ok || armData?.applied === false) {
