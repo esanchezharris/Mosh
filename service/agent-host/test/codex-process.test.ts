@@ -143,6 +143,22 @@ describe("Codex child process boundary", () => {
     child.reply(1, {});
     await initializing;
     const starting = process.adapter.startThread({ mode: "workspace-write", cwd: "/worktree" });
+    expect(child.writes[1]).toMatchObject({
+      method: "thread/start",
+      params: {
+        cwd: "/worktree",
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        config: {
+          sandbox_workspace_write: {
+            network_access: false,
+            writable_roots: ["/worktree"],
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: true,
+          },
+        },
+      },
+    });
     child.reply(2, repairThread);
     expect(await starting).toBe("repair-thread");
     const turning = process.adapter.startTurn({
@@ -182,6 +198,21 @@ describe("Codex child process boundary", () => {
       sandbox: { ...repairThread.sandbox, writableRoots: ["/worktree", "/repo"] },
     });
     await expect(starting).rejects.toMatchObject({ code: "codex_policy_mismatch" });
+    process.close();
+  });
+
+  it("accepts current Codex workspace policy with implicit cwd and no extra writable roots", async () => {
+    const child = new FakeChild();
+    const process = spawnCodexAppServer({ spawn: () => child, environment: {} });
+    const initializing = process.adapter.initialize();
+    child.reply(1, {});
+    await initializing;
+    const starting = process.adapter.startThread({ mode: "workspace-write", cwd: "/worktree" });
+    child.reply(2, {
+      ...repairThread,
+      sandbox: { ...repairThread.sandbox, writableRoots: [] },
+    });
+    await expect(starting).resolves.toBe("repair-thread");
     process.close();
   });
 

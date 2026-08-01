@@ -41,9 +41,11 @@ export class RepairSwap {
       if (validatedBuild !== result.buildPath) {
         throw failure("repair_build_mismatch", "Launch build does not match the validated repair result");
       }
-      const recoverable = new Set(["checkpointed", "stopping"]);
+      const recoverable = new Set(["checkpointed", "stopping", "rolled_back"]);
       const failedBeforeCheckpoint = current.swap?.state === "failed" && !current.checkpoint;
-      if (current.status !== "full_gate_pending"
+      const relaunchAfterRollback = current.status === "failed"
+        && current.swap?.state === "rolled_back";
+      if ((current.status !== "full_gate_pending" && !relaunchAfterRollback)
         || (current.swap && !recoverable.has(current.swap.state) && !failedBeforeCheckpoint)
         || (current.swap?.buildPath && current.swap.buildPath !== buildPath && !failedBeforeCheckpoint)) {
         throw failure("repair_swap_state", "Repair build is not ready for launch");

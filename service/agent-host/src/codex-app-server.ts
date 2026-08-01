@@ -125,21 +125,35 @@ export class CodexAppServerAdapter implements AppServerAdapter {
     onEvent?: (event: AppServerEvent) => Promise<void> | void,
   ): Promise<string> {
     if (!this.initialized) await this.initialize();
-    const result = threadStarted.parse(await this.transport.request("thread/start", {
+    const params: Record<string, unknown> = {
       cwd: input.cwd,
       sandbox: input.mode,
       approvalPolicy: input.mode === "read-only" ? "never" : "on-request",
-    }));
+    };
+    if (input.mode === "workspace-write") {
+      params.config = {
+        sandbox_workspace_write: {
+          network_access: false,
+          writable_roots: [input.cwd],
+          exclude_tmpdir_env_var: true,
+          exclude_slash_tmp: true,
+        },
+      };
+    }
+    const result = threadStarted.parse(await this.transport.request("thread/start", params));
     if (result.cwd !== input.cwd) throw policyFailure();
     if (input.mode === "read-only") {
       if (result.approvalPolicy !== "never" || result.sandbox.type !== "readOnly") {
         throw policyFailure();
       }
     } else {
+      const onlyImplicitOrExplicitCwd = result.sandbox.type === "workspaceWrite"
+        && (result.sandbox.writableRoots.length === 0
+          || (result.sandbox.writableRoots.length === 1
+            && result.sandbox.writableRoots[0] === input.cwd));
       if (result.approvalPolicy !== "on-request"
         || result.sandbox.type !== "workspaceWrite"
-        || result.sandbox.writableRoots.length !== 1
-        || result.sandbox.writableRoots[0] !== input.cwd) {
+        || !onlyImplicitOrExplicitCwd) {
         throw policyFailure();
       }
     }

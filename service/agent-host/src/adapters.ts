@@ -260,6 +260,19 @@ const nativeControlResult = z.object({
     data: z.unknown().optional(),
   }),
 });
+const helperFailureResult = z.object({
+  ok: z.literal(false),
+  code: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/u),
+});
+
+function helperFailureCode(stderr: string): string {
+  const firstLine = stderr.split(/\r?\n/u, 1)[0] ?? "";
+  try {
+    const parsed = helperFailureResult.safeParse(JSON.parse(firstLine));
+    if (parsed.success) return `repair_helper_${parsed.data.code}`;
+  } catch {}
+  return "repair_process_failed";
+}
 
 export class RepairControlAdapter implements ProcessAdapter {
   constructor(
@@ -310,7 +323,7 @@ export class RepairControlAdapter implements ProcessAdapter {
     await this.verifyHelper();
     const result = await this.runner.run(this.helperPath, [name, ...arguments_]);
     if (result.exitCode !== 0) {
-      throw codedError("repair_process_failed", `Repair process action failed: ${name}`);
+      throw codedError(helperFailureCode(result.stderr), `Repair process action failed: ${name}`);
     }
     return result;
   }

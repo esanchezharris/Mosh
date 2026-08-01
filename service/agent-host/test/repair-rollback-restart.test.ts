@@ -67,3 +67,29 @@ describe("persisted rolling_back restart recovery", () => {
     expect(types.slice(-rollbackEvents.length)).toEqual(rollbackEvents);
   });
 });
+
+describe("persisted rolled_back relaunch", () => {
+  it("reuses the existing checkpoint without overlapping app processes", async () => {
+    const { fakes, store, report, repair } = await persistedSwapFixture("repair_running");
+    const restarted = restartedService(store, fakes);
+    await restarted.initialize();
+    await restarted.rollbackRepair(repair.id, "owner requested rollback");
+    fakes.processCalls.length = 0;
+
+    const relaunched = await restarted.launchRepairBuild(repair.id, "/build/Mosh.app");
+
+    expect(fakes.processCalls).toEqual([
+      "stop_transport",
+      "release_audio",
+      "handoff_repair",
+    ]);
+    expect(relaunched.swap?.state).toBe("repair_running");
+    const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
+    expect(types.slice(-4)).toEqual([
+      "repair.swap.recovered",
+      "repair.transport.stopped",
+      "repair.audio.released",
+      "repair.build.handoff_accepted",
+    ]);
+  });
+});

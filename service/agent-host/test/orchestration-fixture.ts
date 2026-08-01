@@ -214,7 +214,7 @@ export function restartedService(
 }
 
 export async function persistedSwapFixture(
-  state: "checkpointed" | "stopping" | "rolling_back",
+  state: "checkpointed" | "stopping" | "repair_running" | "rolling_back" | "rolled_back",
 ) {
   const context = await orchestrationFixture();
   await context.service.approveReport(context.report.id);
