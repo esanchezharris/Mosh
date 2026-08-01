@@ -140,32 +140,28 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // Resolve both project and Tracktion-preference storage before constructing the
     // Engine: its constructor may read/write Settings.xml. The GUI keeps the historic
     // ~/Library/Mosh/Settings.xml location; every named harness/audit leaf is isolated.
+    const auto explicitSession =
+        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+    const auto uniqueTag = mosh::sessionpaths::processTag();
     const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
         freshSessionName,
-        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
-        mosh::sessionpaths::processTag());
+        explicitSession,
+        uniqueTag);
     const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                              .getChildFile ("Mosh");
-    session = moshDir.getChildFile (sessionLeaf);
+    const bool useOwnerSession = ! freshSession
+                              && freshSessionName.isEmpty()
+                              && explicitSession.isEmpty();
+    session = mosh::sessionpaths::resolveSessionDirectory (
+        moshDir, sessionLeaf, uniqueTag, useOwnerSession);
     const auto propertyStorageDir =
-        mosh::sessionpaths::resolvePropertyStorageDir (moshDir, sessionLeaf);
+        mosh::sessionpaths::resolvePropertyStorageDir (
+            moshDir, sessionLeaf, uniqueTag, useOwnerSession);
 
-    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project or
-    // preferences. One guard covers both isolated directories.
-    const bool mayWipe = freshSession && sessionLeaf != "session";
+    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project.
+    const bool mayWipe = freshSession && ! useOwnerSession;
     if (mayWipe)
-    {
         session.deleteRecursively();
-        propertyStorageDir.deleteRecursively();
-    }
-    else if (freshSession)
-        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
-        // runs — so the refusal was invisible exactly where it matters. And refusing is
-        // not the end of it: the run then starts WARM off the GUI's existing project, so
-        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
-        // only: this is printed, and a redirected Windows console defaults to cp1252.
-        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
-                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
     session.createDirectory();
     propertyStorageDir.createDirectory();
 

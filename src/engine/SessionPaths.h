@@ -57,30 +57,54 @@ namespace mosh::sessionpaths
         return baseName + kAutoMarker + uniqueTag;
     }
 
+    inline bool isContainedWithoutSymlinks (const juce::File& root,
+                                            const juce::File& candidate)
+    {
+        if (! candidate.isAChildOf (root) || root.isSymbolicLink())
+            return false;
+
+        for (auto current = candidate; current != root; current = current.getParentDirectory())
+            if (current.isSymbolicLink())
+                return false;
+
+        return true;
+    }
+
+    /** Resolves the project directory without allowing an environment-controlled
+        leaf or a symlinked ancestor to escape the Mosh application-data root. */
+    inline juce::File resolveSessionDirectory (const juce::File& moshDir,
+                                               const juce::String& sessionLeaf,
+                                               const juce::String& uniqueTag,
+                                               bool useOwnerSession)
+    {
+        const auto requested = moshDir.getChildFile (sessionLeaf);
+        if ((useOwnerSession || sessionLeaf != "session")
+            && isContainedWithoutSymlinks (moshDir, requested))
+            return requested;
+
+        return moshDir.getChildFile ("session-safety-auto-" + uniqueTag);
+    }
+
     /** Resolves Tracktion's property-storage directory for this launch.
 
-        The interactive GUI deliberately keeps the legacy ~/Library/Mosh/Settings.xml
-        path. Every named harness/audit session gets a sibling directory instead, so
-        tests and candidate apps cannot read or rewrite the owner's device/plugin
-        preferences while the installed app is open.
+        Only a true interactive GUI launch keeps the legacy ~/Library/Mosh/Settings.xml
+        path. Named harness/audit sessions, including an explicit reserved "session"
+        override, cannot read or rewrite the owner's device/plugin preferences.
     */
     inline juce::File resolvePropertyStorageDir (const juce::File& moshDir,
-                                                 const juce::String& sessionLeaf)
+                                                 const juce::String& sessionLeaf,
+                                                 const juce::String& uniqueTag,
+                                                 bool useOwnerStorage)
     {
-        if (sessionLeaf.isEmpty() || sessionLeaf == "session")
+        if (useOwnerStorage)
             return moshDir;
 
         const auto root = moshDir.getChildFile ("_settings");
         const auto requested = root.getChildFile (sessionLeaf);
-        if (requested.isAChildOf (root))
+        if (isContainedWithoutSymlinks (root, requested))
             return requested;
 
-        const auto escapedLeaf = sessionLeaf.replace ("%", "%25")
-                                            .replace (".", "%2E")
-                                            .replace ("/", "%2F")
-                                            .replace ("\\", "%5C")
-                                            .replace (":", "%3A");
-        return root.getChildFile (escapedLeaf);
+        return moshDir.getChildFile ("_settings-safety-auto-" + uniqueTag);
     }
 
     /** Which non-interactive mode (if any) this launch is. Mirrors Main.cpp's flags. */
