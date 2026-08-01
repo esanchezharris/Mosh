@@ -9918,16 +9918,19 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             speech->stopContinuous();
         }
 
-        check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before explicit stop");
-        auto stop = cmd (ops, "stop_recording");
-        check (ok (stop), "GAP2: stop_recording ok");
-        check ((bool) stop["data"].getProperty ("applied", false), "GAP2: stop_recording applied");
-        if (! (bool) stop["data"].getProperty ("applied", false))
-            std::cerr << "  ..   GAP2 stop reason: "
-                      << stop["data"].getProperty ("reason", var()).toString() << "\n";
-        auto landed = stop["data"].getProperty ("clips", var());
+        check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
+        auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (ok (stop), "GAP2: generic transport stop finalized the recording");
+        check (! (bool) stop["data"].getProperty ("recording", true),
+               "GAP2: generic transport stop exited recording state");
+
+        var landed;
+        if (auto* tracks = ops.snapshot().getProperty ("tracks", var()).getArray())
+            for (auto& trackState : *tracks)
+                if (trackState.getProperty ("id", var()).toString() == recTrackId)
+                    landed = trackState.getProperty ("clips", var());
         const int nLanded = landed.isArray() ? landed.size() : 0;
-        check (nLanded > 0, "GAP2: a take clip landed on the armed track");
+        check (nLanded > 0, "GAP2: generic transport stop landed a take on the armed track");
         if (nLanded > 0)
         {
             const auto srcPath = landed[0].getProperty ("sourceFile", var()).toString();

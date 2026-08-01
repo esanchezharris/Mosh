@@ -76,4 +76,35 @@ describe("enterRecord — no-input / mic-permission failure UX (G2a)", () => {
     expect(s.lastError).toBeNull();
     expect(s.snapshot?.transport.recording ?? false).toBe(true);
   });
+
+  it("does not start recording from a malformed arm success", async () => {
+    const orig = useStore.getState().exec;
+    const spy = vi.spyOn(useStore.getState(), "exec").mockImplementation(
+      async (command: string, args?: Record<string, unknown>): Promise<CommandResult> =>
+        command === "arm_track" ? { ok: true, command, data: {} } : orig(command, args),
+    );
+
+    await useStore.getState().enterRecord();
+
+    expect(useStore.getState().lastError).toMatch(/input/i);
+    expect(useStore.getState().snapshot?.transport.recording ?? false).toBe(false);
+    spy.mockRestore();
+  });
+
+  it("does not accept a transport response that failed to enter recording", async () => {
+    const orig = useStore.getState().exec;
+    const spy = vi.spyOn(useStore.getState(), "exec").mockImplementation(
+      async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
+        if (command === "set_transport" && args?.action === "record")
+          return { ok: true, command, data: { recording: false } };
+        return orig(command, args);
+      },
+    );
+
+    await useStore.getState().enterRecord();
+
+    expect(useStore.getState().lastError).toBe("Could not start recording.");
+    expect(useStore.getState().snapshot?.transport.recording ?? false).toBe(false);
+    spy.mockRestore();
+  });
 });

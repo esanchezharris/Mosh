@@ -33,6 +33,7 @@ export interface ActionStore {
   clearSelection: () => void;
   selection: Set<string>;
   transport: { playing: boolean; position?: number };
+  enterRecord?: (bar?: number) => Promise<void>;
   snapshot?: Snapshot | null;
   clipboard?: unknown;
   setTool?: (tool: "move" | "split" | "range") => void;
@@ -210,6 +211,10 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       await store.exec("set_transport", { action: "toggle" });
       return;
     case "record":
+      if (store.enterRecord) {
+        await store.enterRecord();
+        return;
+      }
       await store.exec("set_transport", { action: "record" });
       return;
     case "to_start":

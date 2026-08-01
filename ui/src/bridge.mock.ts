@@ -1698,7 +1698,8 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // (non-undoable); landing/comping a take IS a document edit (undoable).
     case "arm_track": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      t.armed = Boolean(args.armed); invalidate(); return ok(command, { armed: t.armed });
+      t.armed = Boolean(args.armed); invalidate();
+      return ok(command, { trackId: t.id, armed: t.armed, applied: true });
     }
     case "set_input_monitor": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
@@ -1717,7 +1718,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       stopPlayback();
       snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
       emit("transport", snapshot.transport);
-      if (Boolean(args.discardRecordings)) { invalidate(); return ok(command, { clips: [] }); }
+      if (Boolean(args.discardRecordings)) {
+        invalidate();
+        return ok(command, { applied: true, discarded: true, clips: [] });
+      }
       pushUndo(); // bracket only the actual take landing (the undoable document edit)
       const armed = snapshot.tracks.filter((t) => t.armed);
       const targets = armed.length ? armed : snapshot.tracks[0] ? [snapshot.tracks[0]] : [];
@@ -1740,7 +1744,13 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
           landed.push({ id: c.id });
         }
       }
-      invalidate(); return ok(command, { clips: landed });
+      invalidate();
+      return ok(command, {
+        applied: landed.length > 0,
+        discarded: false,
+        clips: landed,
+        ...(landed.length > 0 ? {} : { reason: "no take captured (no live input)" }),
+      });
     }
     case "list_takes": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");

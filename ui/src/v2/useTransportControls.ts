@@ -62,16 +62,16 @@ export function useTransportControls({
   async function stopRecording(): Promise<boolean> {
     const result = await exec("stop_recording");
     const data = result.data as RecordingCommandData | undefined;
-    if (!result.ok) {
+    if (!result.ok || result.command !== "stop_recording") {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
     recordingIntent.current = false;
-    if (data?.applied === false) {
+    if (data?.applied !== true || !Array.isArray(data.clips)) {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
     }
-    const landedNoTake = Array.isArray(data?.clips) && data.clips.length === 0;
+    const landedNoTake = data.clips.length === 0;
     if (landedNoTake) {
       showFailure(failureMessage(result, "Could not land the recording take."));
       return false;
@@ -92,13 +92,13 @@ export function useTransportControls({
         }
         const arm = await exec("arm_track", { trackId: fallbackTrackId, armed: true });
         const armData = arm.data as RecordingCommandData | undefined;
-        if (!arm.ok || armData?.applied === false) {
+        if (!arm.ok || arm.command !== "arm_track" || armData?.applied !== true) {
           showFailure(failureMessage(arm, "No audio input available — check your microphone connection and permissions."));
           return;
         }
       }
       const result = await exec("set_transport", { action: "record" });
-      if (!result.ok) {
+      if (!result.ok || result.command !== "set_transport") {
         showFailure(failureMessage(result, "Could not start recording."));
         return;
       }

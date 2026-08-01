@@ -321,6 +321,16 @@ describe("runAction — transport", () => {
     ]);
   });
 
+  it("record uses the store recording lifecycle when available", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, { enterRecord });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).toHaveBeenCalledOnce();
+    expect(execCalls).toEqual([]);
+  });
+
   it("seek and loop_region preserve ruler set_transport payloads", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("seek", ctx, { position: 2.25 });

@@ -6,17 +6,28 @@ namespace mosh::recording
 {
 
 inline bool didLandClip (bool existedBefore,
-                         bool isMidi,
-                         const juce::String& beforeMidiNotes,
-                         const juce::String& afterMidiNotes)
+                         const juce::String& beforeCaptureState,
+                         const juce::String& afterCaptureState)
 {
     if (! existedBefore)
         return true;
 
-    return isMidi
-        && beforeMidiNotes.isNotEmpty()
-        && afterMidiNotes.isNotEmpty()
-        && beforeMidiNotes != afterMidiNotes;
+    return beforeCaptureState.isNotEmpty()
+        && afterCaptureState.isNotEmpty()
+        && beforeCaptureState != afterCaptureState;
+}
+
+inline bool captureApplied (int armedTrackCount, int landedTrackCount, bool discarded)
+{
+    return discarded || (armedTrackCount > 0 && landedTrackCount == armedTrackCount);
+}
+
+inline bool shouldFinalizeBeforeTransportAction (bool isRecording,
+                                                 const juce::String& action)
+{
+    return isRecording
+        && (action == "stop" || action == "toggle"
+            || action == "record" || action == "to_start");
 }
 
 }

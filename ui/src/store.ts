@@ -539,7 +539,11 @@ export const useStore = create<State>((set, get, api) => ({
     const s = get();
     const snap = s.snapshot;
     const trackId = s.selectedTrackId ?? snap?.tracks.find((t) => t.type === "audio")?.id ?? snap?.tracks[0]?.id;
-    if (!trackId) { s.pushAgentUtter("HUH", "no track to record into"); return; }
+    if (!trackId) {
+      s.pushAgentUtter("HUH", "no track to record into");
+      set({ lastError: "Add a track before recording." });
+      return;
+    }
     const arm = await s.exec("arm_track", { trackId, armed: true });
     // No-input / mic-permission UX (G2a): arming fails in two distinct ways —
     // ok:false (a live device rejected the target) OR ok:true with applied:false
@@ -547,7 +551,7 @@ export const useStore = create<State>((set, get, api) => ({
     // invariant). Either way, surface a clear, persistent error and DON'T start a
     // doomed record (which would land nothing and leave the user with no feedback).
     const armApplied = (arm.data as { applied?: boolean } | undefined)?.applied;
-    if (!arm.ok || armApplied === false) {
+    if (!arm.ok || arm.command !== "arm_track" || armApplied !== true) {
       s.pushAgentUtter("UHOH", "can't — no input");
       set({ lastError: "No audio input available — check your microphone connection and permissions." });
       return;
@@ -558,7 +562,12 @@ export const useStore = create<State>((set, get, api) => ({
       const num = snap.session?.timeSigNumerator ?? 4;
       await s.exec("set_transport", { position: (bar - 1) * num * (60 / tempo) });
     }
-    await s.exec("set_transport", { action: "record" });
+    const record = await s.exec("set_transport", { action: "record" });
+    const recordState = record.data as { recording?: boolean } | undefined;
+    if (!record.ok || record.command !== "set_transport" || recordState?.recording !== true) {
+      set({ lastError: record.error ?? "Could not start recording." });
+      return;
+    }
     set({ takeDecisionPending: false });
     await s.refresh();
   },
@@ -567,8 +576,14 @@ export const useStore = create<State>((set, get, api) => ({
     const trackOf = () => get().snapshot?.tracks.find((t) => t.id === get().selectedTrackId);
     const before = new Set((trackOf()?.clips ?? []).map((c) => c.id));
     const res = await s.exec("stop_recording", {});
+    const stopData = res.data as { applied?: boolean; clips?: { id: string }[]; reason?: string } | undefined;
+    if (!res.ok || res.command !== "stop_recording" || stopData?.applied !== true
+        || !Array.isArray(stopData.clips) || stopData.clips.length === 0) {
+      set({ lastError: res.error ?? stopData?.reason ?? "Could not land the recording take." });
+      return;
+    }
     await s.refresh();
-    const landed = (res.data as { clips?: { id: string }[] } | undefined)?.clips?.[0]?.id;
+    const landed = stopData.clips[0]?.id;
     const after = trackOf()?.clips ?? [];
     const fresh = after.find((c) => !before.has(c.id))?.id;
     set({ takeDecisionPending: true, lastTakeClipId: landed ?? fresh ?? after[after.length - 1]?.id ?? null });

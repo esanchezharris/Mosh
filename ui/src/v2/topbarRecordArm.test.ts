@@ -412,6 +412,17 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     expect(useStore.getState().lastError).toBe("No input available");
   });
 
+  it("does not start recording when automatic arming returns a malformed success", async () => {
+    render(useStore.getState().snapshot!);
+    nextExecResult = { ok: true, command: "arm_track", data: {} };
+
+    await clickRecord();
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["arm_track"]);
+    expect(useStore.getState().lastError).toBe("No audio input available — check your microphone connection and permissions.");
+  });
+
   it("does not start recording when automatic arming is not applied", async () => {
     render(useStore.getState().snapshot!);
     nextExecResult = {
@@ -520,6 +531,44 @@ describe("v2 TopBar Record button — arms the selected track before recording (
 
     expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
     expect(useStore.getState().lastError).toBe("no take captured (no live input)");
+  });
+
+  it("does not seek when stop_recording returns a malformed success", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = { ok: true, command: "stop_recording" };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("Could not land the recording take.");
+  });
+
+  it("does not seek when stop_recording returns the wrong command envelope", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord(2);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "set_transport",
+      data: { applied: true, clips: [{ id: "take-wrong-envelope" }] },
+    };
+
+    await clickTransport('[data-testid="v2-stop"]');
+    await flushQueuedTransport();
+
+    expect(execCalls.map((call) => call.command)).toEqual(["stop_recording"]);
+    expect(useStore.getState().lastError).toBe("Could not land the recording take.");
   });
 
   it("clears recording intent after an applied stop that reports no new clip", async () => {

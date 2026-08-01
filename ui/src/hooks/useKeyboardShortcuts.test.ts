@@ -45,6 +45,10 @@ describe("useKeyboardShortcuts", () => {
     useStore.setState({
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
+        if (command === "arm_track")
+          return { ok: true, command, data: { applied: true, armed: true } };
+        if (command === "set_transport" && args?.action === "record")
+          return { ok: true, command, data: { recording: true } };
         return { ok: true, command };
       }),
     });
@@ -141,7 +145,14 @@ describe("useKeyboardShortcuts", () => {
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
   });
 
-  it("dispatches Record through the app action dispatcher", () => {
+  it("dispatches Record through the app action dispatcher", async () => {
+    useStore.setState({
+      selectedTrackId: "record-track",
+      snapshot: {
+        session: {},
+        tracks: [{ id: "record-track", type: "audio", clips: [] }],
+      } as unknown as import("../types").Snapshot,
+    });
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -149,8 +160,14 @@ describe("useKeyboardShortcuts", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "R", bubbles: true }));
     });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "record" } });
+    expect(execCalls).toEqual([
+      { command: "arm_track", args: { trackId: "record-track", armed: true } },
+      { command: "set_transport", args: { action: "record" } },
+    ]);
   });
 
   it("dispatches Duplicate through the app action dispatcher", () => {
