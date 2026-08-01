@@ -237,6 +237,24 @@ describe("owner cockpit runtime presentation", () => {
     });
   });
 
+  it("keeps rollback available when the rollback handoff itself fails", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    cockpit.resumeInstalledRepair("repair-1");
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 9,
+      type: "repair.swap.failed",
+      data: {
+        repairId: "repair-1",
+        fromState: "rolling_back",
+        hasCheckpoint: true,
+        code: "repair_process_failed",
+      },
+    });
+    expect(cockpit.getSnapshot().repair?.status).toBe("failed");
+  });
+
   it("restores one-click rollback when the installed repair app starts", async () => {
     const { cockpit, client } = runtime();
     cockpit.resumeInstalledRepair("repair-1");

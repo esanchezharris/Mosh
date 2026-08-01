@@ -46,6 +46,15 @@ describe("persisted rolling_back restart recovery", () => {
       "repair.swap.recovered",
       "repair.swap.failed",
     ]);
+    expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
+      type: "repair.swap.failed",
+      data: {
+        repairId: repair.id,
+        fromState: "rolling_back",
+        hasCheckpoint: true,
+        code: "injected",
+      },
+    });
 
     const firstAttemptCount = fakes.processCalls.length;
     const secondRestart = restartedService(store, fakes);

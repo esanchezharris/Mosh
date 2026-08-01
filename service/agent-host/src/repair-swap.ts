@@ -191,6 +191,7 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.swap.failed", {
         repairId,
         fromState: "rolling_back",
+        hasCheckpoint: true,
         code: rollbackFailure.code,
       });
       throw failure(rollbackFailure.code, rollbackFailure.message);
