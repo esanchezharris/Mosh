@@ -857,29 +857,29 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         snapshot.transport = { ...t, playing };
         playing ? startPlayback() : stopPlayback();
         emit("transport", snapshot.transport);
-        return ok(command, { playing });
+        return ok(command, snapshot.transport);
       }
       if (action === "stop") {
         stopPlayback();
         snapshot.transport = { ...t, playing: false, recording: false, position: num(args.position, 0) };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "to_end") {
         snapshot.transport = { ...t, position: snapshot.session.length ?? 16 };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "to_start") {
         snapshot.transport = { ...t, position: 0 };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "record") {
         snapshot.transport = { ...t, recording: !t.recording, playing: true };
         startPlayback();
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       // direct field sets: position / loop
       const next: Transport = { ...t };
@@ -887,7 +887,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if ("loop" in args) { next.looping = Boolean(args.loop); next.loopStart = num(args.loopStart, t.loopStart); next.loopEnd = num(args.loopEnd, t.loopEnd); }
       snapshot.transport = next;
       emit("transport", snapshot.transport);
-      return ok(command);
+      return ok(command, snapshot.transport);
     }
 
     case "create_track": {

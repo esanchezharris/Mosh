@@ -23,6 +23,8 @@ describe("v2 TopBar Record button — arms the selected track before recording (
   let execCalls: { command: string; args?: Record<string, unknown> }[];
   let settledExecCount: number;
   let settleWaiters: { target: number; resolve: () => void }[];
+  let nextExecResult: CommandResult | null;
+  let nextExecError: Error | null;
 
   beforeEach(async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,16 +35,27 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     execCalls = [];
     settledExecCount = 0;
     settleWaiters = [];
+    nextExecResult = null;
+    nextExecError = null;
     const orig = useStore.getState().exec;
     vi.spyOn(useStore.getState(), "exec").mockImplementation(
       async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
-        const result = await orig(command, args);
-        settledExecCount += 1;
-        const ready = settleWaiters.filter((waiter) => waiter.target <= settledExecCount);
-        settleWaiters = settleWaiters.filter((waiter) => waiter.target > settledExecCount);
-        ready.forEach((waiter) => waiter.resolve());
-        return result;
+        try {
+          if (nextExecError) {
+            const error = nextExecError;
+            nextExecError = null;
+            throw error;
+          }
+          const result = nextExecResult ?? await orig(command, args);
+          nextExecResult = null;
+          return result;
+        } finally {
+          settledExecCount += 1;
+          const ready = settleWaiters.filter((waiter) => waiter.target <= settledExecCount);
+          settleWaiters = settleWaiters.filter((waiter) => waiter.target > settledExecCount);
+          ready.forEach((waiter) => waiter.resolve());
+        }
       },
     );
     host = document.createElement("div");
@@ -258,6 +271,8 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     });
     render(useStore.getState().snapshot!);
     execCalls = [];
+    const clipsBefore = useStore.getState().snapshot!.tracks
+      .find((track) => track.id === trackId)?.clips.length ?? 0;
 
     const settledTarget = settledExecCount + 3;
     const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
@@ -275,5 +290,83 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     ]);
     const after = await mockSnapshot<Snapshot>();
     expect(after.transport).toMatchObject({ recording: false, position: 0 });
+    expect(after.tracks.find((track) => track.id === trackId)?.clips).toHaveLength(clipsBefore + 1);
+  });
+
+  it("serializes a rapid Record then Play before recording telemetry arrives", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    const settledTarget = settledExecCount + 2;
+    const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
+    const play = host.querySelector<HTMLButtonElement>('[data-testid="v2-play"]')!;
+    act(() => {
+      record.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      play.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await waitForSettledExecs(settledTarget);
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "stop_recording", args: undefined },
+    ]);
+    const after = await mockSnapshot<Snapshot>();
+    expect(after.transport).toMatchObject({ playing: false, recording: false });
+  });
+
+  it("keeps Stop on the generic path when record returns recording false", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecResult = {
+      ok: true,
+      command: "set_transport",
+      data: { playing: false, recording: false, position: 0 },
+    };
+
+    await clickRecord();
+    await clickTransport('[data-testid="v2-stop"]');
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "stop", position: 0 } },
+    ]);
+  });
+
+  it("continues with the next queued transport action after a bridge rejection", async () => {
+    const snap0 = useStore.getState().snapshot!;
+    const trackId = snap0.tracks[0]?.id!;
+    await useStore.getState().exec("arm_track", { trackId, armed: true });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    nextExecError = new Error("bridge rejected record");
+
+    const settledTarget = settledExecCount + 2;
+    const record = host.querySelector<HTMLButtonElement>('[data-testid="v2-record"]')!;
+    const stop = host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!;
+    act(() => {
+      record.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await waitForSettledExecs(settledTarget);
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+      { command: "set_transport", args: { action: "stop", position: 0 } },
+    ]);
   });
 });

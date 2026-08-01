@@ -4,7 +4,7 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
@@ -12,6 +12,8 @@ import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { useTransportControls } from "./useTransportControls";
+import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "../ui/RecentProjectList";
@@ -30,18 +32,16 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
-  const recordingIntent = useRef(t.recording);
-  const transportQueue = useRef<Promise<void>>(Promise.resolve());
-
-  useEffect(() => {
-    recordingIntent.current = t.recording;
-  }, [t.recording]);
-
-  function enqueueTransport(action: () => Promise<void>): Promise<void> {
-    const next = transportQueue.current.then(action, action);
-    transportQueue.current = next.catch(() => {});
-    return next;
-  }
+  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
+  const fallbackTrackId = selectedTrackId
+    ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id
+    ?? snapshot.tracks[0]?.id;
+  const transport = useTransportControls({
+    exec,
+    recording: t.recording,
+    anyArmed,
+    fallbackTrackId,
+  });
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
@@ -57,37 +57,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   // track): arm it via arm_track ONLY when starting a fresh recording and no track
   // is armed yet — an already-armed track (or an in-progress recording, where the
   // click just stops it) is left untouched.
-  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
-  function handleRecord(): Promise<void> {
-    return enqueueTransport(async () => {
-      if (recordingIntent.current) {
-        const result = await exec("stop_recording");
-        if (result.ok) recordingIntent.current = false;
-        return;
-      }
-      if (!anyArmed) {
-        const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
-        if (trackId) await exec("arm_track", { trackId, armed: true });
-      }
-      const result = await exec("set_transport", { action: "record" });
-      const applied = (result.data as { applied?: boolean } | undefined)?.applied;
-      if (result.ok && applied !== false) recordingIntent.current = true;
-    });
-  }
-
-  function handleStop(): Promise<void> {
-    return enqueueTransport(async () => {
-      if (recordingIntent.current) {
-        const result = await exec("stop_recording");
-        if (result.ok) recordingIntent.current = false;
-        await exec("set_transport", { position: 0 });
-        return;
-      }
-      const result = await exec("set_transport", { action: "stop", position: 0 });
-      if (result.ok) recordingIntent.current = false;
-    });
-  }
-
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
       <div className="v2-brand">
@@ -137,14 +106,14 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-center">
         <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
           <button className="v2-tbtn" title="To start" aria-label="To start"
-            onClick={() => void handleStop()}><IconSkipStart size={15} /></button>
+            onClick={() => void transport.stop()}><IconSkipStart size={15} /></button>
           <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
             aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
-            onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
+            onClick={() => void transport.togglePlay()}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
-            onClick={() => void handleStop()}><IconStop size={15} /></button>
+            onClick={() => void transport.stop()}><IconStop size={15} /></button>
           <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
-            onClick={() => void handleRecord()}><span className="dot" /></button>
+            onClick={() => void transport.record()}><span className="dot" /></button>
         </div>
 
         <div className="v2-readout">
@@ -174,28 +143,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         <OverflowMenu />
       </div>
     </header>
-  );
-}
-
-// Compact collaborator preview near the invite button — initials circles tinted with each
-// peer's color, mirroring the full Collaborators rail. Reads the same store.peers; hidden
-// solo (renders nothing until someone else is in the session).
-function AvatarCluster() {
-  const peers = useStore((s) => s.peers);
-  const selfPeer = useStore((s) => s.mp.selfPeer);
-  const others = Object.entries(peers).filter(([id]) => id !== selfPeer);
-  if (others.length === 0) return null;
-  const shown = others.slice(0, 4);
-  const extra = others.length - shown.length;
-  return (
-    <div className="v2-avatars" data-testid="v2-avatars" title={`${others.length} in the session`}>
-      {shown.map(([id, p]) => (
-        <span key={id} className="v2-avatar" style={{ background: p.color }} title={p.name} aria-label={p.name}>
-          {(p.name || "?").charAt(0).toUpperCase()}
-        </span>
-      ))}
-      {extra > 0 && <span className="v2-avatar more" aria-label={`${extra} more`}>+{extra}</span>}
-    </div>
   );
 }
 
