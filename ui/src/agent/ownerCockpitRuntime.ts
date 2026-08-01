@@ -222,9 +222,7 @@ export class OwnerCockpitRuntime {
       this.update({ lastEvent: event.type, repair: { ...this.state.repair, status: "rolled_back" } });
     else if (event.type === "repair.swap.failed" && this.state.repair) {
       const code = typeof event.data.code === "string" ? ` (${event.data.code})` : "";
-      const hasCheckpoint = typeof event.data.fromState === "string"
-        && ["checkpointed", "stopping", "repair_running", "rolling_back", "failed"]
-          .includes(event.data.fromState);
+      const hasCheckpoint = event.data.hasCheckpoint === true;
       this.update({
         lastEvent: event.type,
         error: `Repair swap failed${code}.`,

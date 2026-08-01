@@ -165,16 +165,46 @@ describe("owner cockpit runtime presentation", () => {
     onEvent?.({
       sequence: 9,
       type: "repair.swap.failed",
-      data: { repairId: "repair-1", fromState: "preflight", code: "repair_build_mismatch" },
+      data: {
+        repairId: "repair-1",
+        fromState: "preflight",
+        hasCheckpoint: false,
+        code: "repair_build_mismatch",
+      },
     });
     expect(cockpit.getSnapshot().repair?.status).toBe("launch_failed");
 
     onEvent?.({
       sequence: 10,
       type: "repair.swap.failed",
-      data: { repairId: "repair-1", fromState: "stopping", code: "repair_process_failed" },
+      data: {
+        repairId: "repair-1",
+        fromState: "stopping",
+        hasCheckpoint: true,
+        code: "repair_process_failed",
+      },
     });
     expect(cockpit.getSnapshot().repair?.status).toBe("failed");
+  });
+
+  it("does not invent rollback after consecutive preflight failures", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 8,
+      type: "repair.full_gate_pending",
+      data: { repairId: "repair-1", buildPath: "/worktree/build/Mosh.app" },
+    });
+    for (const [sequence, fromState] of [[9, "preflight"], [10, "failed"]] as const) {
+      onEvent?.({
+        sequence,
+        type: "repair.swap.failed",
+        data: { repairId: "repair-1", fromState, hasCheckpoint: false, code: "repair_build_mismatch" },
+      });
+      expect(cockpit.getSnapshot().repair?.status).toBe("launch_failed");
+    }
+    expect(client.rollbackRepair).not.toHaveBeenCalled();
   });
 
   it("preserves rollback when the checkpointed failure event beats launch rejection", async () => {
@@ -190,7 +220,12 @@ describe("owner cockpit runtime presentation", () => {
       onEvent?.({
         sequence: 9,
         type: "repair.swap.failed",
-        data: { repairId: "repair-1", fromState: "stopping", code: "repair_process_failed" },
+        data: {
+          repairId: "repair-1",
+          fromState: "stopping",
+          hasCheckpoint: true,
+          code: "repair_process_failed",
+        },
       });
       throw new AgentHostApiError("Repair handoff failed", "repair_process_failed", false);
     });

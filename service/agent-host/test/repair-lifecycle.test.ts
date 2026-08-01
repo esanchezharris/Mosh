@@ -259,7 +259,24 @@ describe("repair worktree and app lifecycle", () => {
     });
     expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
       type: "repair.swap.failed",
-      data: { repairId: repair.id, fromState: "preflight", code: "repair_build_mismatch" },
+      data: {
+        repairId: repair.id,
+        fromState: "preflight",
+        hasCheckpoint: false,
+        code: "repair_build_mismatch",
+      },
+    });
+
+    await expect(service.launchRepairBuild(repair.id, "/outside/Evil.app"))
+      .rejects.toMatchObject({ code: "repair_build_mismatch" });
+    expect((await store.loadEvents(report.playtestId)).at(-1)).toMatchObject({
+      type: "repair.swap.failed",
+      data: {
+        repairId: repair.id,
+        fromState: "failed",
+        hasCheckpoint: false,
+        code: "repair_build_mismatch",
+      },
     });
 
     await expect(service.rollbackRepair(repair.id, "no checkpoint exists"))

@@ -123,6 +123,7 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.swap.failed", {
         repairId,
         fromState: current.swap?.state ?? "preflight",
+        hasCheckpoint: Boolean(current.checkpoint),
         code: swapFailure.code,
       });
       throw failure(swapFailure.code, swapFailure.message);
