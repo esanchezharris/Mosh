@@ -149,7 +149,6 @@ private:
     te::EngineBehaviour*        behaviourPtr = nullptr;
     juce::File session;
     juce::File editPath;
-    void applyRequestedAudioOutputDevice();
     juce::String openAudioDeviceBounded();                     // AUD-017 — the one, bounded, device open
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
     void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local

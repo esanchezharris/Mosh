@@ -703,9 +703,7 @@ private:
         if (! inBatch) undoManager().beginNewTransaction (name);
     }
 
-    /** The JUCE device manager under Tracktion's wrapper — the object the device
-        picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice
-        uses). */
+    /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
     juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
     juce::var currentAudioSelection();   // small {type,outputDevice,...} summary block
     // Applies a device-setup patch; returns the error string (empty == success). No

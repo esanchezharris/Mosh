@@ -896,21 +896,22 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     auto& dm = adm();
 
     Array<var> types;
-    for (auto* type : dm.getAvailableDeviceTypes())
-    {
-        if (type == nullptr) continue;
-        type->scanForDevices();                          // required before getDeviceNames
+    if (eng.hasAudio())
+        for (auto* type : dm.getAvailableDeviceTypes())
+        {
+            if (type == nullptr) continue;
+            type->scanForDevices();                          // required before getDeviceNames
 
-        Array<var> outputs, inputs;
-        for (auto& n : type->getDeviceNames (false)) outputs.add (n);
-        for (auto& n : type->getDeviceNames (true))  inputs.add (n);
+            Array<var> outputs, inputs;
+            for (auto& n : type->getDeviceNames (false)) outputs.add (n);
+            for (auto& n : type->getDeviceNames (true))  inputs.add (n);
 
-        auto* to = new DynamicObject();
-        to->setProperty ("name", type->getTypeName());
-        to->setProperty ("outputs", outputs);
-        to->setProperty ("inputs", inputs);
-        types.add (var (to));
-    }
+            auto* to = new DynamicObject();
+            to->setProperty ("name", type->getTypeName());
+            to->setProperty ("outputs", outputs);
+            to->setProperty ("inputs", inputs);
+            types.add (var (to));
+        }
 
     // Valid sample-rate / buffer-size lists are only meaningful when a device is
     // open (null headless → empty arrays).
@@ -1138,8 +1139,7 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
     if (args.hasProperty ("inputDevice"))
     {
         setup.inputDeviceName = args.getProperty ("inputDevice", var()).toString();
-        // Match the existing working rule (MoshEngine applyRequestedAudioOutputDevice):
-        // only request default input channels when an input device is selected.
+        // Only request default input channels when an input device is selected.
         setup.inputChannels.clear();
         setup.useDefaultInputChannels = setup.inputDeviceName.isNotEmpty();
     }
@@ -1155,7 +1155,7 @@ juce::String MoshOps::applyAudioDeviceSetup (const juce::var& args)
         return err;
 
     // Rebuild Tracktion's wave-device wrappers + flush the async device update
-    // before the next snapshot (mirrors MoshEngine.cpp applyRequestedAudioOutputDevice).
+    // before the next snapshot.
     eng.engine().getDeviceManager().rescanWaveDeviceList();
     if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
         mm->runDispatchLoopUntil (50);
