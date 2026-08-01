@@ -12,6 +12,7 @@
 #include "brain/BrainProxy.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
+#include <csignal>
 #include <iostream>
 #include <thread>
 
@@ -21,6 +22,36 @@ namespace te = tracktion::engine;
 
 namespace
 {
+   #if JUCE_MAC || JUCE_LINUX
+    volatile std::sig_atomic_t gracefulTerminationRequested = 0;
+
+    void requestGracefulTermination (int) noexcept
+    {
+        gracefulTerminationRequested = 1;
+    }
+
+    void installGracefulTerminationHandler()
+    {
+        gracefulTerminationRequested = 0;
+        struct sigaction action {};
+        action.sa_handler = &requestGracefulTermination;
+        sigemptyset (&action.sa_mask);
+        action.sa_flags = 0;
+        ::sigaction (SIGTERM, &action, nullptr);
+    }
+
+    bool consumeGracefulTerminationRequest() noexcept
+    {
+        if (gracefulTerminationRequested == 0)
+            return false;
+        gracefulTerminationRequested = 0;
+        return true;
+    }
+   #else
+    void installGracefulTerminationHandler() {}
+    bool consumeGracefulTerminationRequest() noexcept { return false; }
+   #endif
+
     juce::String valueAfter (
         const juce::StringArray& arguments,
         const juce::String& option)
@@ -358,6 +389,10 @@ public:
             return;
         }
 
+        // The signed repair helper requests process handoff with SIGTERM. Convert
+        // that asynchronous signal into an ordinary message-thread quit so JUCE's
+        // shutdown path saves the project and clears the session-running sentinel.
+        installGracefulTerminationHandler();
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
 
         // Wire the swappable seam to the MoshOps spine (the ONLY backend coupling).
@@ -418,6 +453,12 @@ public:
         // harnesses return/quit before reaching here, so the timer is never armed.
         autoSave.onTick = [this] { if (engine != nullptr) engine->saveIfDirty(); };
         autoSave.startTimer (30000);
+        terminationWatch.onTick = []
+        {
+            if (consumeGracefulTerminationRequest())
+                quit();
+        };
+        terminationWatch.startTimer (50);
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
         // editor, then leave the GUI running for visual verification.
@@ -431,6 +472,7 @@ public:
 
     void shutdown() override
     {
+        terminationWatch.stopTimer();
         autoSave.stopTimer();
         // gap 1 — save-on-quit: persist any unsaved work before teardown (GUI only;
         // headless harnesses have no mainWindow and manage their own isolated session).
@@ -465,6 +507,7 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
     AutoSaveTimer autoSave;
+    AutoSaveTimer terminationWatch;
 };
 
 } // namespace mosh

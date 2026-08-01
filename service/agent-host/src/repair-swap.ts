@@ -88,15 +88,20 @@ export class RepairSwap {
       await this.emit(current.playtestId, "repair.transport.stopped", { repairId });
       await this.dependencies.processes.releaseAudio();
       await this.emit(current.playtestId, "repair.audio.released", { repairId });
+      const checkpoint = current.checkpoint;
+      if (!checkpoint) {
+        throw failure("checkpoint_missing", "Repair checkpoint is missing");
+      }
       await this.dependencies.processes.handoffRepairBuild({
         repairId,
         buildPath: validatedBuild,
         worktreePath,
         sourceSha: result.sourceSha,
-        checkpointPath: current.checkpoint!.checkpointPath,
+        checkpointPath: checkpoint.checkpointPath,
       });
       current = {
         ...current,
+        status: "full_gate_pending",
         swap: { state: "repair_running", buildPath },
         updatedAt: new Date().toISOString(),
       };

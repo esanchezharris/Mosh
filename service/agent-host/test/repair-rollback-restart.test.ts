@@ -89,7 +89,10 @@ describe("persisted rolled_back relaunch", () => {
       "release_audio",
       "handoff_repair",
     ]);
+    expect(relaunched.status).toBe("full_gate_pending");
     expect(relaunched.swap?.state).toBe("repair_running");
+    await expect(restarted.createRepair(report.id))
+      .rejects.toMatchObject({ code: "repair_active" });
     const types = (await store.loadEvents(report.playtestId)).map((event) => event.type);
     expect(types.slice(-4)).toEqual([
       "repair.swap.recovered",
