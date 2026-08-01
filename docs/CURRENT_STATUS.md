@@ -1,6 +1,6 @@
 # Mosh Current Status And Architecture Map
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 
 > **This is the only rolling status doc.** Dated snapshots live in
 > [`docs/resumption/`](resumption/). History lives in [`docs/worklog/`](worklog/INDEX.md).
@@ -9,7 +9,7 @@ This is the short handoff for the current `main` program seat at **`~/Mosh`**
 (the git object store lives at `~/Library/Mosh/repo/ClaudeMosh.git`; see Branch
 And Worktree Boundaries below). It points to the live docs that matter and calls
 out what is current versus historical. Claims are tagged **[measured]** (ran or
-read this session, through 2026-07-31) or **[cited]** (a dated doc/worklog note).
+read in the dated status pass) or **[cited]** (a dated doc/worklog note).
 
 ## Start Here
 
@@ -58,53 +58,48 @@ neural insert was removed (2026-06-21); the only real-time neural path is an
 optional RAVE insert gated behind `-DMOSH_ENABLE_ANIRA` (off in the default
 build).
 
-## Current Status (as of 2026-07-31)
+## Current Status (as of 2026-08-01)
 
-- **Owner cockpit handoff is implemented on `codex/moshi-owner-cockpit`, not
-  merged.** The disabled-by-default v2 surface, private loopback Agent Host,
-  bounded capability retrieval, explicit provider failures, GPT Realtime PTT,
-  durable approval inbox, immutable evidence/GitHub adapters, read-only Codex
-  coordinator, and isolated draft-only repair lane are integrated. Task 5 adds
-  a bundled real-loopback fake-external lifecycle and exact-SHA offline
-  benchmark diagnostics. The owner-only follow-through now includes deployed
-  digest-authenticated Supabase evidence upload/preview, native MoshOps
-  checkpoint and audio release, a signed repair/rollback helper, stable repair
-  identity across the app restart, and an interactive single-instance guard.
-  The tracked, redacted verification handoff is
-  [`docs/owner-cockpit/EVIDENCE_HANDOFF.md`](owner-cockpit/EVIDENCE_HANDOFF.md);
-  exact run logs and screenshots must be attached to draft PR #524. A
-  human-spoken Realtime semantic turn and the physical installed-app
-  swap/rollback remain owner gates. See [`OWNER_COCKPIT.md`](OWNER_COCKPIT.md).
-  This branch supersedes only PR #478's agent-facing hunks; keep it draft and
-  parked behind #523, then rebase onto the resulting `main` and rerun every
-  SHA-bound gate before merge review.
-
-- **Trunk:** `origin/main` @ `e520550b` (merge of #528, 2026-07-31)
-  [measured: `git log --oneline origin/main`]. The two most recent landed
+- **Trunk:** `origin/main` @ `06dea1c1` (merge of #560) [measured:
+  `git rev-parse origin/main` and `gh pr view 560`, 2026-08-01]. The recent landed
   campaigns: the **v2 deslop pass** (#479, #481–#485, merged 2026-07-28) — CSS
   partials + shell baselines groundwork, bevel-border removal, accent
   reservation, bloom removal, density (64→72px lanes) — and the
   **architecture-improvement program** below [measured: merge commits on
   `origin/main`].
-- **The First-Stranger program is the active push.** Its decision-complete
-  entry point is `docs/first-stranger-program/README.md`; ready lanes use
-  isolated worktrees and the native gate, and only the owner merges. The
-  architecture-improvement waves are supporting, mostly landed work. Wave 0
-  landed 2026-07-28/29: #486 (worklog INDEX repair + RED-proven guard), #487
-  (`docs/rfc/` decision-log scaffold, RFCs 001–004), and #489 (glob-aware
-  god-file guards + the lock-scope golden ledger) are merged. Wave 1 landed
-  2026-07-28/29: #490 (PROGRESS
+- **Owner cockpit remains isolated on draft PR #524.** It adds the loopback-only
+  Agent Host, capability retrieval, explicit provider failures, GPT Realtime
+  push-to-talk, durable approved reports, private Supabase evidence, read-only
+  Codex coordination, isolated draft-only repair jobs, MoshOps checkpoint/audio
+  release, and signed installed-app repair/rollback handoff. The branch is now
+  integrated with current `origin/main`; its final exact-SHA native, signed
+  lifecycle, five-lane, and owner-feel evidence must be regenerated before it
+  can leave draft. See `docs/OWNER_COCKPIT.md` and
+  `docs/owner-cockpit/EVIDENCE_HANDOFF.md`. Never merge it from an agent loop.
+- **The production-v2 end-to-end audit is the active push.** The durable ledger
+  is `docs/playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`. PR #560 fixed the
+  audit-settings and identity isolation blocker with exact native, Computer Use,
+  hosted, and five-lane evidence before merging. Draft PR #558 is now rebased on
+  that merge and is actively regenerating its SHA-bound gate, review, and native
+  artifacts after each review repair. The live PR body and issue #531 carry the
+  authoritative exact head and external manifest because a commit cannot embed
+  its own final SHA. Recorded-source placement #545 remains independent. PR #523
+  is outside this campaign and must not be merged by the audit loop [measured:
+  issue/PR state, 2026-08-01]. The earlier
+  architecture-improvement Wave 0 landed
+  2026-07-28: #486 (worklog INDEX repair + RED-proven guard) and #487
+  (`docs/rfc/` decision-log scaffold, RFCs 001–004) are MERGED; #489
+  (glob-aware god-file guards + the 209-row lock-scope golden ledger) merged
+  2026-07-29. Wave 1 landed 2026-07-28/29: #490 (PROGRESS
   retirement), #491 (PluginBrowser dedupe), #493 (store event-rail
   extraction), #494 (Rack/GenDrawer out of Dock.tsx), #495 (classic-shell
   audit — owner decision pending, feeds RFC 005), and this status
-  consolidation (#492). Follow-on PRs (clipRenderers probe change #497 —
-  owner-merge; store slices #498; RFC 005 draft) are in the queue
-  [measured: `gh pr view` per PR].
-- **Open PRs: 25** [measured 2026-07-31: `gh pr list --state open --limit 100 --json number | jq
-  length`]. The bulk are the reviewed First-Stranger / fix backlog awaiting
-  merge (#462–#478 range) plus the program's owner-merge PRs and three
-  long-running WIP drafts (#322/#358/#363).
-- **MoshOps dispatch table: 209 command entries** in `src/moshops/MoshOps.cpp`
+  consolidation (#492), and store slices #498. Follow-on PRs #497 and its
+  stacked reachability/refactor sequence #500/#507/#508/#510 remain open;
+  RFC 005 remains a draft [measured: `gh pr view` per PR, 2026-08-01].
+- **The open PR queue is volatile.** It includes reviewed First-Stranger/fix work
+  plus long-running drafts; query GitHub rather than freezing a count here.
+- **MoshOps dispatch table: 212 command entries** in `src/moshops/MoshOps.cpp`
   [measured: `grep -c 'if (name == "' src/moshops/MoshOps.cpp`]. Selftest check
   counts are deliberately **not** quoted here: they are environment-dependent
   (a dev Mac with SA3/RAVE/whisper weights, hermetic CI, and a Release bundle
@@ -143,6 +138,9 @@ build).
 
 ## Active Programs
 
+- [`playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md`](playtest-prep/PRODUCTION_V2_AUDIT_2026-07-30.md)
+  — the active production-v2 UI, backend, collaboration, export, and final
+  merged-SHA campaign. Evidence is SHA-bound; #558 is the current serial candidate.
 - [`first-stranger-program/`](first-stranger-program/) — the push to the first
   non-owner playtest. Its [STATUS.md](first-stranger-program/STATUS.md) board is
   machine-regenerated by `scripts/first-stranger/status.sh` (never hand-edit).
@@ -225,6 +223,6 @@ Then add the matching real-surface proof:
   active.
 - Type-beat LoRA has a rights-cleared scaffold and fake backend plumbing; real
   on-device training and vector layering remain deferred.
-- A large reviewed-PR queue (23 open, measured 2026-07-30) is waiting on merges now that Actions
+- A large reviewed-PR queue (25 open, measured 2026-07-29) is waiting on merges now that Actions
   billing is back; until the required check is restored, the local gate is the
   only merge authority — do not treat a green GitHub page as a gate result.

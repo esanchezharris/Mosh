@@ -63,7 +63,7 @@ def main():
         opath.unlink()
     env = dict(os.environ)
     env.update({"MOSH_RUN_SCRIPT": str(spath), "MOSH_RUN_SCRIPT_OUT": str(opath),
-                "MOSH_SELFTEST_SESSION": "snapshot-bench", "MOSH_NO_AUDIO": "1"})
+                "MOSH_SELFTEST_SESSION": "_harness/snapshot-bench", "MOSH_NO_AUDIO": "1"})
     subprocess.run([str(binary), "--run-script"], env=env, capture_output=True, text=True, timeout=300)
 
     bench, fails = None, 0

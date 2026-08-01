@@ -66,7 +66,7 @@ run_selftest_x3() {
   local all_ok=true rows=() i log ok n failed asserts session port
   for i in 1 2 3; do
     log="$(mktemp)"
-    session="installed-app-gate-$i-$$"
+    session="_harness/installed-app-gate-$i-$$"
     port="$((8900 + i + ($$ % 50)))"
     ok=true
     MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$session" MOSH_SERVICE_PORT="$port" "$BIN" --selftest >"$log" 2>&1 || ok=false

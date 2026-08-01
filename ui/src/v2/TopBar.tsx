@@ -12,6 +12,8 @@ import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { useTransportControls } from "./useTransportControls";
+import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "../ui/RecentProjectList";
@@ -30,6 +32,15 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
+  const fallbackTrackId = selectedTrackId
+    ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id
+    ?? snapshot.tracks[0]?.id;
+  const transport = useTransportControls({
+    exec,
+    anyArmed,
+    fallbackTrackId,
+  });
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
@@ -45,15 +56,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   // track): arm it via arm_track ONLY when starting a fresh recording and no track
   // is armed yet — an already-armed track (or an in-progress recording, where the
   // click just stops it) is left untouched.
-  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
-  async function handleRecord() {
-    if (!t.recording && !anyArmed) {
-      const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
-      if (trackId) await exec("arm_track", { trackId, armed: true });
-    }
-    await exec("set_transport", { action: "record" });
-  }
-
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
       <div className="v2-brand">
@@ -103,14 +105,14 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-center">
         <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
           <button className="v2-tbtn" title="To start" aria-label="To start"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconSkipStart size={15} /></button>
+            onClick={() => void transport.stop()}><IconSkipStart size={15} /></button>
           <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
             aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
-            onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
+            onClick={() => void transport.togglePlay()}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconStop size={15} /></button>
+            onClick={() => void transport.stop()}><IconStop size={15} /></button>
           <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
-            onClick={() => void handleRecord()}><span className="dot" /></button>
+            onClick={() => void transport.record()}><span className="dot" /></button>
         </div>
 
         <div className="v2-readout">
@@ -140,28 +142,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
         <OverflowMenu />
       </div>
     </header>
-  );
-}
-
-// Compact collaborator preview near the invite button — initials circles tinted with each
-// peer's color, mirroring the full Collaborators rail. Reads the same store.peers; hidden
-// solo (renders nothing until someone else is in the session).
-function AvatarCluster() {
-  const peers = useStore((s) => s.peers);
-  const selfPeer = useStore((s) => s.mp.selfPeer);
-  const others = Object.entries(peers).filter(([id]) => id !== selfPeer);
-  if (others.length === 0) return null;
-  const shown = others.slice(0, 4);
-  const extra = others.length - shown.length;
-  return (
-    <div className="v2-avatars" data-testid="v2-avatars" title={`${others.length} in the session`}>
-      {shown.map(([id, p]) => (
-        <span key={id} className="v2-avatar" style={{ background: p.color }} title={p.name} aria-label={p.name}>
-          {(p.name || "?").charAt(0).toUpperCase()}
-        </span>
-      ))}
-      {extra > 0 && <span className="v2-avatar more" aria-label={`${extra} more`}>+{extra}</span>}
-    </div>
   );
 }
 

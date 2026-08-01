@@ -13,15 +13,33 @@
 #include <catch2/catch_test_macros.hpp>
 #include <juce_core/juce_core.h>
 
+#include <cstdlib>
+#include <filesystem>
+
 #include "engine/SessionPaths.h"
+#include "engine/SessionMaintenance.h"
 
 using namespace mosh::sessionpaths;
 
-TEST_CASE ("an explicit session override always wins verbatim", "[sessionpaths]")
+TEST_CASE ("test Mosh root override is absolute and opt-in", "[sessionpaths][security]")
 {
-    // The documented MOSH_SELFTEST_SESSION contract: gate.sh / verify.py /
-    // installed-app-gate.sh pass a known leaf and then read artifacts back out of it.
-    // Auto-isolation must never rewrite an explicitly requested name.
+    const auto requested = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                               .getChildFile ("mosh-sessionpaths-test-root");
+    REQUIRE (::setenv ("MOSH_TEST_MOSH_DIR",
+                       requested.getFullPathName().toRawUTF8(), 1) == 0);
+    REQUIRE (::setenv ("MOSH_ENABLE_TEST_MOSH_DIR", "1", 1) == 0);
+
+    REQUIRE (moshDataDirectory (true) == requested);
+    REQUIRE (moshDataDirectory (false) != requested);
+
+    ::unsetenv ("MOSH_TEST_MOSH_DIR");
+    ::unsetenv ("MOSH_ENABLE_TEST_MOSH_DIR");
+}
+
+TEST_CASE ("an explicit session override is retained for directory validation", "[sessionpaths]")
+{
+    // The resolver retains the raw value so directory validation can accept a safe
+    // _harness path or route every other value to per-process safety storage.
     REQUIRE (resolveSessionLeaf ("session-selftest", "gate-worktree-7", "pid1-aaaa") == "gate-worktree-7");
     REQUIRE (resolveSessionLeaf ("session-run-script", "verify-123", "pid1-aaaa") == "verify-123");
 
@@ -69,6 +87,267 @@ TEST_CASE ("the interactive GUI session leaf is never auto-isolated", "[sessionp
     REQUIRE (resolveSessionLeaf ("session", "", "pid1-aaaa") == "session");
 }
 
+TEST_CASE ("only the interactive GUI uses the owner property-storage directory", "[sessionpaths]")
+{
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-property-root");
+    const auto sessionDir = moshDir.getChildFile ("_harness/audit-run");
+
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", true).value() == moshDir);
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", false).value()
+             == sessionDir.getChildFile ("_settings/run-pid1-aaaa"));
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid2-bbbb", false).value()
+             == sessionDir.getChildFile ("_settings/run-pid2-bbbb"));
+}
+
+TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[sessionpaths]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-ownership-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    const auto fallback = moshDir.getChildFile ("session-safety-auto-pid1-aaaa");
+    REQUIRE (moshDir.createDirectory());
+
+    REQUIRE (resolveSessionDirectory (moshDir, "session", "pid1-aaaa", true, false)
+             == moshDir.getChildFile ("session"));
+    REQUIRE (resolveSessionDirectory (moshDir, "session", "pid1-aaaa", false, true) == fallback);
+    REQUIRE (resolveSessionDirectory (moshDir, "loras", "pid1-aaaa", false, true) == fallback);
+    REQUIRE (resolveSessionDirectory (moshDir, "../owner", "pid1-aaaa", false, true) == fallback);
+
+    const auto generated = resolveSessionLeaf ("session-selftest", "", "pid1-aaaa");
+    REQUIRE (resolveSessionDirectory (moshDir, generated, "pid1-aaaa", false, false)
+             == moshDir.getChildFile (generated));
+
+    const auto unowned = moshDir.getChildFile ("_harness").getChildFile ("collision");
+    REQUIRE (unowned.createDirectory());
+    const auto precious = unowned.getChildFile ("keep.txt");
+    REQUIRE (precious.replaceWithText ("owner data"));
+    REQUIRE (resolveSessionDirectory (moshDir, "_harness/collision", "pid1-aaaa", false, true)
+             == fallback);
+    REQUIRE_FALSE (createOwnedHarnessSession (moshDir, unowned));
+    REQUIRE_FALSE (resetOwnedHarnessSession (moshDir, unowned));
+    REQUIRE (precious.loadFileAsString() == "owner data");
+
+    const auto empty = moshDir.getChildFile ("_harness").getChildFile ("empty");
+    REQUIRE (empty.createDirectory());
+    REQUIRE (resolveSessionDirectory (moshDir, "_harness/empty", "pid1-aaaa", false, true)
+             == fallback);
+    REQUIRE_FALSE (isOwnedHarnessSession (moshDir, empty));
+    REQUIRE_FALSE (empty.getChildFile (kHarnessOwnershipFile).exists());
+
+    const auto fresh = moshDir.getChildFile ("_harness").getChildFile ("fresh");
+    REQUIRE (createOwnedHarnessSession (moshDir, fresh));
+    REQUIRE (isOwnedHarnessSession (moshDir, fresh));
+
+    const auto owned = moshDir.getChildFile ("_harness").getChildFile ("owned");
+    REQUIRE (owned.createDirectory());
+    REQUIRE (owned.getChildFile (kHarnessOwnershipFile)
+                  .replaceWithText (kHarnessOwnershipContents));
+    REQUIRE (isOwnedHarnessSession (moshDir, owned));
+    REQUIRE (owned.getChildFile ("stale.txt").replaceWithText ("stale harness data"));
+    REQUIRE (resolveSessionDirectory (moshDir, "_harness/owned", "pid1-aaaa", false, true)
+             == owned);
+    REQUIRE (resetOwnedHarnessSession (moshDir, owned));
+    REQUIRE_FALSE (owned.exists());
+    const auto recoveries = moshDir.getChildFile ("_harness")
+                                .findChildFiles (juce::File::findDirectories, false,
+                                                 ".mosh-reset-*");
+    REQUIRE (recoveries.size() == 1);
+    REQUIRE (recoveries[0].getChildFile ("session/stale.txt").loadFileAsString()
+             == "stale harness data");
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("safety session preparation never claims a populated unowned collision", "[sessionpaths]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-safety-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    REQUIRE (moshDir.createDirectory());
+
+    const auto collision = safetySessionDirectory (moshDir, "pid1-aaaa");
+    REQUIRE (collision.createDirectory());
+    const auto precious = collision.getChildFile ("keep.txt");
+    REQUIRE (precious.replaceWithText ("owner data"));
+
+    const auto prepared = prepareSafetySessionDirectory (moshDir, "pid1-aaaa");
+    REQUIRE (prepared.has_value());
+    REQUIRE (*prepared != collision);
+    REQUIRE (precious.loadFileAsString() == "owner data");
+    REQUIRE (isOwnedAutoSession (moshDir, *prepared));
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("ownership creation stays bound to the directory it opened", "[sessionpaths][race]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-create-race-" + juce::Uuid().toString());
+    const auto root = sandbox.getChildFile ("Mosh");
+    const auto target = root.getChildFile ("session-selftest-auto-pid1-aaaa");
+    const auto displaced = root.getChildFile ("displaced-created-directory");
+    REQUIRE (root.createDirectory());
+
+    IsolationOwnershipTestHooks hooks;
+    hooks.afterDirectoryOpened = [&]
+    {
+        std::filesystem::rename (target.getFullPathName().toStdString(),
+                                 displaced.getFullPathName().toStdString());
+        REQUIRE (target.createDirectory());
+        REQUIRE (target.getChildFile ("keep.txt").replaceWithText ("replacement data"));
+    };
+
+    REQUIRE_FALSE (createFreshOwnedIsolationDirectory (root, target, &hooks));
+    REQUIRE (target.getChildFile ("keep.txt").loadFileAsString() == "replacement data");
+    REQUIRE_FALSE (target.getChildFile (kHarnessOwnershipFile).exists());
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("ownership reset never deletes a replacement after quarantine verification",
+           "[sessionpaths][race]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-reset-race-" + juce::Uuid().toString());
+    const auto root = sandbox.getChildFile ("Mosh");
+    const auto target = root.getChildFile ("session-selftest-auto-pid1-aaaa");
+    REQUIRE (root.createDirectory());
+    REQUIRE (createFreshOwnedIsolationDirectory (root, target));
+    REQUIRE (target.getChildFile ("old.txt").replaceWithText ("owned stale data"));
+
+    juce::File replacement;
+    IsolationOwnershipTestHooks hooks;
+    hooks.afterQuarantinedDirectoryOpened = [&] (const juce::File& quarantined)
+    {
+        const auto displaced = quarantined.getSiblingFile ("displaced-owned-directory");
+        std::filesystem::rename (quarantined.getFullPathName().toStdString(),
+                                 displaced.getFullPathName().toStdString());
+        REQUIRE (quarantined.createDirectory());
+        replacement = quarantined;
+        REQUIRE (replacement.getChildFile ("keep.txt").replaceWithText ("replacement data"));
+    };
+
+    REQUIRE_FALSE (resetOwnedIsolationDirectory (root, target, &hooks));
+    REQUIRE (replacement.getChildFile ("keep.txt").loadFileAsString() == "replacement data");
+    REQUIRE_FALSE (replacement.getChildFile (kHarnessOwnershipFile).exists());
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("ownership reset retains replaced quarantine children for recovery",
+           "[sessionpaths][race]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-child-race-" + juce::Uuid().toString());
+    const auto root = sandbox.getChildFile ("Mosh");
+    const auto target = root.getChildFile ("session-selftest-auto-pid1-aaaa");
+    REQUIRE (root.createDirectory());
+    REQUIRE (createFreshOwnedIsolationDirectory (root, target));
+
+    const auto staleFile = target.getChildFile ("render.wav");
+    const auto staleDirectory = target.getChildFile ("exports");
+    REQUIRE (staleFile.replaceWithText ("owned stale file"));
+    REQUIRE (staleDirectory.createDirectory());
+    REQUIRE (staleDirectory.getChildFile ("old.wav").replaceWithText ("owned stale directory"));
+
+    juce::File quarantined;
+    IsolationOwnershipTestHooks hooks;
+    hooks.afterQuarantinedDirectoryOpened = [&] (const juce::File& directory)
+    {
+        quarantined = directory;
+        REQUIRE (directory.getChildFile ("render.wav").deleteFile());
+        REQUIRE (directory.getChildFile ("render.wav").replaceWithText ("replacement file"));
+        REQUIRE (directory.getChildFile ("exports").deleteRecursively());
+        REQUIRE (directory.getChildFile ("exports").createDirectory());
+        REQUIRE (directory.getChildFile ("exports/keep.wav")
+                     .replaceWithText ("replacement directory"));
+    };
+
+    REQUIRE (resetOwnedIsolationDirectory (root, target, &hooks));
+    REQUIRE_FALSE (target.exists());
+    REQUIRE (quarantined.getChildFile ("render.wav").loadFileAsString()
+             == "replacement file");
+    REQUIRE (quarantined.getChildFile ("exports/keep.wav").loadFileAsString()
+             == "replacement directory");
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("failed safety allocation is explicit and cannot form cwd-relative children",
+           "[sessionpaths][security]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-allocation-" + juce::Uuid().toString());
+    const auto outside = sandbox.getChildFile ("outside");
+    const auto linkedRoot = sandbox.getChildFile ("Mosh");
+    REQUIRE (outside.createDirectory());
+    REQUIRE (juce::File::createSymbolicLink (linkedRoot, outside.getFullPathName(), true));
+
+    const auto prepared = prepareSafetySessionDirectory (linkedRoot, "pid1-aaaa");
+    REQUIRE_FALSE (prepared.has_value());
+    REQUIRE (outside.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty());
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("symlinked session and settings ancestors use safety directories", "[sessionpaths]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    const auto outside = sandbox.getChildFile ("outside");
+    REQUIRE (moshDir.getChildFile ("_harness/audit-run/_settings").createDirectory());
+    REQUIRE (outside.createDirectory());
+
+    const auto sessionDir = moshDir.getChildFile ("_harness/audit-run");
+    const auto settingsRoot = sessionDir.getChildFile ("_settings");
+    REQUIRE (settingsRoot.deleteRecursively());
+    REQUIRE (juce::File::createSymbolicLink (settingsRoot,
+                                             outside.getFullPathName(), true));
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", false).value()
+             == moshDir.getChildFile ("session-safety-auto-pid1-aaaa/_settings/run-pid1-aaaa"));
+
+    const auto sessionLink = moshDir.getChildFile ("nested");
+    REQUIRE (juce::File::createSymbolicLink (sessionLink,
+                                             outside.getFullPathName(), true));
+    REQUIRE (resolveSessionDirectory (moshDir, "nested/run", "pid1-aaaa", false, true)
+             == moshDir.getChildFile ("session-safety-auto-pid1-aaaa"));
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
+TEST_CASE ("brain identity storage uses the same resolved harness boundary", "[sessionpaths][brain]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-identity-" + juce::Uuid().toString());
+    const auto moshDir = sandbox.getChildFile ("Mosh");
+    REQUIRE (moshDir.createDirectory());
+
+    const auto empty = moshDir.getChildFile ("_harness/identity-empty");
+    REQUIRE (empty.createDirectory());
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "_harness/identity-empty", "pid1-aaaa").value()
+             == moshDir.getChildFile ("session-safety-auto-pid1-aaaa"));
+    REQUIRE_FALSE (isOwnedHarnessSession (moshDir, empty));
+    REQUIRE_FALSE (empty.getChildFile (kHarnessOwnershipFile).exists());
+
+    const auto unowned = moshDir.getChildFile ("_harness/identity-unowned");
+    REQUIRE (unowned.createDirectory());
+    REQUIRE (unowned.getChildFile ("keep.txt").replaceWithText ("owner data"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "_harness/identity-unowned", "pid2-bbbb").value()
+             == moshDir.getChildFile ("session-safety-auto-pid2-bbbb"));
+    REQUIRE_FALSE (unowned.getChildFile ("identity.json").exists());
+
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "session", "pid3-cccc").value()
+             == moshDir.getChildFile ("session-safety-auto-pid3-cccc"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "../outside", "pid4-dddd").value()
+             == moshDir.getChildFile ("session-safety-auto-pid4-dddd"));
+    REQUIRE (resolveIdentitySessionDirectory (moshDir, "", "pid5-eeee").value()
+             == moshDir.getChildFile ("session"));
+
+    REQUIRE (sandbox.deleteRecursively());
+}
+
 TEST_CASE ("the interactive GUI is never handed a harness session base", "[sessionpaths]")
 {
     // REGRESSION (#246 inverted the precedence): Main.cpp's ternary chain fell through
@@ -114,15 +393,53 @@ TEST_CASE ("auto-isolated leaves are identifiable so stale ones can be pruned", 
     REQUIRE_FALSE (isAutoIsolatedLeaf ("gate-worktree-7"));
 }
 
-TEST_CASE ("a populated legacy dir at the pointer path is PRESERVED, never deleted", "[sessionpaths]")
+TEST_CASE ("stale auto-session pruning requires the exact ownership marker", "[sessionpaths]")
+{
+    const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+    moshDir.createDirectory();
+
+    const auto actual = moshDir.getChildFile ("session-selftest-auto-3-cccccccc");
+    actual.createDirectory();
+    actual.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
+
+    const auto unowned = moshDir.getChildFile ("session-selftest-auto-1-aaaaaaaa");
+    unowned.createDirectory();
+    const auto ownerArtifact = unowned.getChildFile ("session.tracktionedit");
+    ownerArtifact.replaceWithText ("<EDIT>not harness-owned</EDIT>");
+
+    const auto owned = moshDir.getChildFile ("session-selftest-auto-2-bbbbbbbb");
+    owned.createDirectory();
+    owned.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
+    owned.getChildFile ("mosh-log.jsonl").replaceWithText ("{\"seq\":1}");
+
+    const auto stale = juce::Time::getCurrentTime() - juce::RelativeTime::days (2.0);
+    unowned.setLastModificationTime (stale);
+    owned.setLastModificationTime (stale);
+
+    publishLatestPointer (moshDir, "session-selftest", actual);
+
+    REQUIRE (ownerArtifact.existsAsFile());
+    REQUIRE (ownerArtifact.loadFileAsString() == "<EDIT>not harness-owned</EDIT>");
+    REQUIRE_FALSE (owned.exists());
+    const auto recoveries = moshDir.findChildFiles (
+        juce::File::findDirectories, false, ".mosh-reset-*");
+    REQUIRE (recoveries.size() == 1);
+    REQUIRE (recoveries[0].getChildFile ("session/mosh-log.jsonl").loadFileAsString()
+             == "{\"seq\":1}");
+
+    moshDir.deleteRecursively();
+}
+
+TEST_CASE ("an unowned directory at the pointer path is left byte-identical", "[sessionpaths]")
 {
     // The regression this guards: SLF-CONC-001 established that since #246 the
     // interactive GUI ALSO resolved to "session-selftest". So a real directory at a
     // legacy harness path can hold the owner's actual project, and publishLatestPointer
     // keys off the directory's NAME -- which says nothing about its CONTENTS. Deleting
     // it (the original behaviour) was silent, permanent data loss on the first ordinary
-    // --selftest after upgrading. RED-proof: swap preserveLegacyDir back for
-    // deleteRecursively() and the "survives" REQUIREs below fail.
+    // --selftest after upgrading. Relocating it is also mutation: publication must fail
+    // closed until the existing pointer is independently proven feature-owned.
     const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
                              .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
     moshDir.createDirectory();
@@ -136,23 +453,56 @@ TEST_CASE ("a populated legacy dir at the pointer path is PRESERVED, never delet
 
     publishLatestPointer (moshDir, "session-selftest", actual);
 
-    // The project survived, byte-for-byte, under a clearly-labelled name.
-    REQUIRE_FALSE (precious.existsAsFile());          // it MOVED (not still under the pointer)
+    REQUIRE (pointer.isDirectory());
+    REQUIRE_FALSE (pointer.isSymbolicLink());
+    REQUIRE (precious.existsAsFile());
+    REQUIRE (precious.loadFileAsString() == "<EDIT>the owner's real project</EDIT>");
     juce::Array<juce::File> rescued;
     moshDir.findChildFiles (rescued, juce::File::findDirectories, false, "session-selftest-legacy-*");
-    REQUIRE (rescued.size() == 1);
-    const auto survivor = rescued[0].getChildFile ("session.tracktionedit");
-    REQUIRE (survivor.existsAsFile());
-    REQUIRE (survivor.loadFileAsString() == "<EDIT>the owner's real project</EDIT>");
-
-    // ...and the pointer still does its job.
-    REQUIRE (pointer.isSymbolicLink());
-    REQUIRE (pointer.getLinkedTarget() == actual);
-
-    // A rescued dir must NOT look like prunable garbage, or the next run deletes it anyway.
-    REQUIRE_FALSE (isAutoIsolatedLeaf (rescued[0].getFileName()));
+    REQUIRE (rescued.isEmpty());
 
     moshDir.deleteRecursively();
+}
+
+TEST_CASE ("unowned file and symlink pointer collisions are never replaced", "[sessionpaths]")
+{
+    const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("mosh-sessionpaths-test-" + juce::Uuid().toString());
+
+    for (const bool useSymlink : { false, true })
+    {
+        const auto moshDir = sandbox.getChildFile (useSymlink ? "symlink" : "file");
+        REQUIRE (moshDir.createDirectory());
+        const auto actual = moshDir.getChildFile ("session-selftest-auto-999-deadbeef");
+        REQUIRE (actual.createDirectory());
+        REQUIRE (actual.getChildFile (kHarnessOwnershipFile)
+                     .replaceWithText (kHarnessOwnershipContents));
+
+        const auto pointer = moshDir.getChildFile ("session-selftest");
+        const auto ownerData = moshDir.getChildFile ("owner-state");
+        REQUIRE (ownerData.replaceWithText ("owner data"));
+        if (useSymlink)
+            REQUIRE (juce::File::createSymbolicLink (
+                pointer, ownerData.getFullPathName(), true));
+        else
+            REQUIRE (pointer.replaceWithText ("owner pointer file"));
+
+        publishLatestPointer (moshDir, "session-selftest", actual);
+
+        if (useSymlink)
+        {
+            REQUIRE (pointer.isSymbolicLink());
+            REQUIRE (pointer.getLinkedTarget() == ownerData);
+        }
+        else
+        {
+            REQUIRE (pointer.existsAsFile());
+            REQUIRE (pointer.loadFileAsString() == "owner pointer file");
+        }
+        REQUIRE (ownerData.loadFileAsString() == "owner data");
+    }
+
+    REQUIRE (sandbox.deleteRecursively());
 }
 
 TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved", "[sessionpaths]")
@@ -167,6 +517,8 @@ TEST_CASE ("a stale symlink at the pointer path is just replaced, not preserved"
     const auto newRun = moshDir.getChildFile ("session-selftest-auto-2-bbbbbbbb");
     oldRun.createDirectory();
     newRun.createDirectory();
+    oldRun.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
+    newRun.getChildFile (kHarnessOwnershipFile).replaceWithText (kHarnessOwnershipContents);
 
     // Populate the old run so "replaced" can be told apart from "followed". An empty
     // target would pass this test even if the pointer were cleared with a symlink-

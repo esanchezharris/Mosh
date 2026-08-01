@@ -12,13 +12,19 @@ import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 // below, and sessionSummary.ts's own header for the design).
 import { getSessionLog, clearSessionLog } from "./agent/memory/sessionLog";
 import { buildSessionDigest, polishSessionSummary, type ChatFn } from "./agent/memory/sessionSummary";
+import { enqueueTransportAction } from "./transportActionQueue";
 
 export type { ActionId };
 
 /** The store surface runAction reads. The real Zustand store satisfies this
  *  structurally; tests pass a fake so each action's command is asserted directly. */
 export interface ActionStore {
-  exec: (command: string, args?: Record<string, unknown>) => Promise<{ ok: boolean }>;
+  exec: (command: string, args?: Record<string, unknown>) => Promise<{
+    ok: boolean;
+    command?: string;
+    data?: unknown;
+    error?: string;
+  }>;
   refresh: () => Promise<void>;
   // AGT-MEM (M3) — drops the cached agent-memory pools (agent/memory/hydrate.ts) so
   // the NEXT retrieval re-fetches for whichever project is open. Optional so
@@ -32,7 +38,12 @@ export interface ActionStore {
   pasteClipboard: () => Promise<void>;
   clearSelection: () => void;
   selection: Set<string>;
-  transport: { playing: boolean; position?: number };
+  transport: { playing: boolean; recording?: boolean; position?: number };
+  reconcileTransport?: (transport: Partial<ActionStore["transport"]>) => void;
+  projectTransitioning?: boolean;
+  currentMode?: () => "idle" | "recording" | "reviewing";
+  enterRecord?: (bar?: number) => Promise<void>;
+  toggleRecord?: () => Promise<void>;
   snapshot?: Snapshot | null;
   clipboard?: unknown;
   setTool?: (tool: "move" | "split" | "range") => void;
@@ -106,6 +117,35 @@ function formatForFile(path: string): "wav" | "aiff" | "flac" {
   if (ext === "aiff" || ext === "aif") return "aiff";
   if (ext === "flac") return "flac";
   return "wav";
+}
+
+function runRecordAction(store: ActionStore): Promise<void> {
+  if (store.toggleRecord) return store.toggleRecord();
+  return enqueueTransportAction(async () => {
+    if (store.projectTransitioning) return;
+    const recording = store.currentMode
+      ? store.currentMode() === "recording"
+      : store.transport.recording === true;
+    if (store.enterRecord && !recording) {
+      await store.enterRecord();
+      return;
+    }
+    await store.exec("set_transport", { action: "record" });
+  });
+}
+
+function runTransportAction(store: ActionStore, args: Record<string, unknown>): Promise<void> {
+  return enqueueTransportAction(async () => {
+    if (store.projectTransitioning) return;
+    const result = await store.exec("set_transport", args);
+    if (!result.ok || !result.data || typeof result.data !== "object") return;
+    const data = result.data as Record<string, unknown>;
+    const transport: Partial<ActionStore["transport"]> = {};
+    if (typeof data.playing === "boolean") transport.playing = data.playing;
+    if (typeof data.recording === "boolean") transport.recording = data.recording;
+    if (typeof data.position === "number") transport.position = data.position;
+    if (Object.keys(transport).length) store.reconcileTransport?.(transport);
+  });
 }
 
 /** Dispatch a logical action. `opts.file` lets `open_project` open a known path without
@@ -207,16 +247,16 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     }
 
     case "play_pause":
-      await store.exec("set_transport", { action: "toggle" });
+      await runTransportAction(store, { action: "toggle" });
       return;
     case "record":
-      await store.exec("set_transport", { action: "record" });
+      await runRecordAction(store);
       return;
     case "to_start":
-      await store.exec("set_transport", { action: "to_start" });
+      await runTransportAction(store, { action: "to_start" });
       return;
     case "to_end":
-      await store.exec("set_transport", { action: "to_end" });
+      await runTransportAction(store, { action: "to_end" });
       return;
     case "duplicate":
       for (const clipId of [...store.selection]) await store.exec("duplicate_clip", { clipId });

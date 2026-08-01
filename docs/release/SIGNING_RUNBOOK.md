@@ -100,7 +100,7 @@ the first step `./run-mosh.sh release` runs internally.
 ```
 
 This builds a Release app, stages it, bundles the Python service + your `ui/.env.local`
-brain key (if you have one — see the note in §6), signs it (Hardened Runtime +
+brain proxy configuration (if present — see the note in §6), signs it (Hardened Runtime +
 `scripts/release/entitlements.plist`), notarizes it, staples the ticket, packages a
 drag-to-Applications DMG, signs/notarizes/staples *that* too, and zips the app for
 AirDrop. Output lands in `~/Desktop/Mosh-share/` (override with `MOSH_RELEASE_DIR`).
@@ -197,24 +197,22 @@ Optional:
 | Secret | What it is |
 |---|---|
 | `MOSH_SIGN_IDENTITY` | pin an exact identity string instead of auto-discovery (only useful if the imported `.p12` somehow yields more than one Developer ID Application identity — a single cert export won't) |
-| `MOSH_RELEASE_BRAIN_ENV_BASE64` | base64 of a `ui/.env.local`-shaped dotenv, to bundle a brain key into the *publicly distributed* app — see the callout below before setting this |
+| `MOSH_RELEASE_BRAIN_ENV_BASE64` | base64 of a proxy-only dotenv containing `MOSH_BRAIN_PROXY_URL` and `MOSH_BRAIN_PROXY_APIKEY` |
 
 The workflow's own first step (**"Check required release secrets"**) fails fast with
 the exact list of anything missing, before spending any build time.
 
-### ⚠️ Brain key: local sharing vs. a public CI release are different risk profiles
+### Brain proxy configuration
 
-`./run-mosh.sh release` run locally bundles your `ui/.env.local` brain key into the
-notarized app by default — accepted, documented behavior for the owner sharing a build
-directly with friends (a small, known audience, with a spend limit set on the LLM
-provider key). **The CI workflow does NOT do this by default.** A tag push potentially
-reaches anyone with push access to the repo, and the resulting GitHub Release is
-public — bundling a real API key into that artifact is a materially larger exposure
-than a personal AirDrop. `MOSH_RELEASE_BRAIN_ENV_BASE64` exists as an explicit opt-in
-if you decide the tradeoff is worth it (e.g. a capped, disposable key made just for
-this); leaving it unset ships every CI release **keyless** — the app still works, the
-brain just falls back to the offline mock until the person running it supplies their
-own key.
+`./run-mosh.sh release` bundles only `MOSH_BRAIN_PROXY_URL` and the publishable/anon
+`MOSH_BRAIN_PROXY_APIKEY`. It refuses to continue when `ui/.env.local` contains a
+direct-provider `*_API_KEY`; provider secrets must stay server-side.
+
+**The CI workflow does NOT bundle brain configuration by default.** A tag push can
+produce a public GitHub Release, so `MOSH_RELEASE_BRAIN_ENV_BASE64` is an explicit
+opt-in. When used, it must decode to a complete proxy-only dotenv or the workflow
+fails. Leaving it unset ships the DAW without Moshi brain configuration, and Moshi
+fails visibly without editing until the proxy is configured.
 
 ### Triggering a release
 
@@ -266,8 +264,8 @@ the signing scripts, without touching what the public sees.
   for. Run `scripts/release/sign-and-notarize.sh --preflight-only` locally once the
   cert + keychain profile exist (§1–§2) to confirm the credentials resolve, then a full
   `./run-mosh.sh release` for the real end-to-end proof.
-- **Deciding whether to bundle a brain key into a CI release** (§5's callout) — a
-  product/security tradeoff, not something this pipeline should default into silently.
+- **Supplying the proxy URL and publishable proxy credential for a CI release**
+  (§5's callout).
 
 ## 7. Deliberately out of scope here
 

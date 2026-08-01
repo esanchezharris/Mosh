@@ -58,27 +58,36 @@ describe("createBrain injects producer knowledge for the user's turn", () => {
   });
 });
 
-describe("createBrain failure posture", () => {
+describe("createBrain provider failures", () => {
   beforeEach(() => {
     brainChatMock.mockReset();
     demoBrainAvailableMock.mockReset();
-  });
-
-  it("returns an explicit unavailable reply when the production brain fails", async () => {
     demoBrainAvailableMock.mockReturnValue(false);
-    brainChatMock.mockRejectedValue(new Error("unavailable"));
-
-    const reply = await createBrain(() => snap).send("set the tempo to 120");
-
-    expect(reply).toEqual({ intent: "UHOH", say: "brain unavailable", commands: [] });
   });
 
-  it("uses the demo brain only when the existing demo surface is enabled", async () => {
+  it("does not execute demo commands when the provider is unavailable", async () => {
+    brainChatMock.mockRejectedValue(new Error("no brain provider configured"));
+    const brain = createBrain(() => snap);
+
+    const reply = await brain.send("add a bass track");
+
+    expect(reply).toEqual({
+      intent: "UHOH",
+      say: "can't reach my brain — check setup and try again",
+    });
+  });
+
+  it("keeps the demo brain on the explicit dev and e2e mock surface", async () => {
     demoBrainAvailableMock.mockReturnValue(true);
-    brainChatMock.mockRejectedValue(new Error("unavailable"));
+    brainChatMock.mockRejectedValue(new Error("no brain provider configured"));
+    const brain = createBrain(() => snap);
 
-    const reply = await createBrain(() => snap).send("click please");
+    const reply = await brain.send("turn the click on");
 
-    expect(reply.commands).toEqual([{ command: "set_metronome", args: { enabled: true } }]);
+    expect(reply).toEqual({
+      intent: "ACK_GOT_IT",
+      say: "click on",
+      commands: [{ command: "set_metronome", args: { enabled: true } }],
+    });
   });
 });

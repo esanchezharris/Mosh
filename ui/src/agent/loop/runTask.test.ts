@@ -1,5 +1,5 @@
 // The full app-side loop integration, hermetic: runLoopTask → chatWithFallback
-// (the explicit Vitest dev-mock surface permits the deterministic loopBrainMock) → the
+// (the explicit Vitest dev surface permits the deterministic loopBrainMock) → the
 // loop FSM → the TASK-scoped executor → the dev mock backend. One ask becomes a
 // real two-step task, the store view fills in, and ONE undo reverts everything.
 

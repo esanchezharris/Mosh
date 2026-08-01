@@ -608,7 +608,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // against the raw env value would fail for any nested value. `fromLastOccurrenceOf`
     // returns the whole string when there is no '/', so a flat value behaves exactly as before.
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
-        check (eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
+        check (mosh::sessionpaths::isSafetyIsolatedLeaf (eng.sessionDir().getFileName())
+                   || eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
                "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
 
     // 1a'. ALWAYS: whichever route got us here, this run must own its session dir. A bare
@@ -621,7 +622,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Same leaf-vs-path point as 1a: an explicit MOSH_SELFTEST_SESSION may nest.
         const auto explicitLeaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {})
                                       .trim().fromLastOccurrenceOf ("/", false, false);
-        check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf) || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
+        check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf)
+                   || mosh::sessionpaths::isSafetyIsolatedLeaf (leaf)
+                   || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
                "session dir is private to this run, not a shared fixed path (" + leaf + ")");
     }
 
@@ -6006,8 +6009,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── A2 — crash-recovery liveness sentinel ───
     // The GUI writes a session.running sentinel once the window is live and deletes it on a
     // clean quit; its presence at the next launch flags an unclean exit (a prior crash). The
-    // headless harness uses a wiped freshSession dir + never marks it, so it always reads
-    // clean. We exercise the mark/clear primitives + the clean-start read directly (the
+    // headless harness uses a cold isolated session, so it always reads clean. We exercise
+    // the mark/clear primitives + the clean-start read directly (the
     // ctor latch is GUI-only). Self-contained: leaves the sentinel cleared.
     section ("A2: crash-recovery liveness sentinel");
     {
@@ -9855,6 +9858,7 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     section ("live-audio CoreAudio callback smoke");
 
     auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto& tracktionDeviceManager = eng.engine().getDeviceManager();
     auto* device = deviceManager.getCurrentAudioDevice();
     check (eng.hasAudio(), "audio mode is enabled");
     check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
@@ -9873,12 +9877,17 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (device->getName().equalsIgnoreCase (requested), "current output matches MOSH_AUDIO_OUTPUT_DEVICE");
     }
 
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    tracktionDeviceManager.rescanMidiDeviceList();
+    if (mm != nullptr)
+        mm->runDispatchLoopUntil (100);
+
     auto track = cmd (ops, "create_track", args1 ("name", "Live Smoke"));
     check (ok (track), "create_track ok");
     const auto trackId = track["data"].getProperty ("trackId", var()).toString();
 
     check (ok (cmd (ops, "add_test_tone_clip",
-                   objN ({{ "trackId", trackId }, { "seconds", 2.0 }, { "freq", 440.0 }}))),
+                   objN ({{ "trackId", trackId }, { "seconds", 6.0 }, { "freq", 440.0 }}))),
            "add_test_tone_clip ok");
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
@@ -9938,7 +9947,6 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     LiveAudioProbe probe;
     deviceManager.addAudioCallback (&probe);
 
-    auto* mm = MessageManager::getInstanceWithoutCreating();
     auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
     smokeMs = jlimit (500, 15000, smokeMs);
     const auto end = Time::getMillisecondCounter() + (uint32) smokeMs;
@@ -9992,8 +10000,14 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (hasInput, "GAP2: armed track reports hasInput");
         }
 
-        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "GAP2: seek to 0 ok");
-        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "GAP2: set_transport record ok");
+        auto recordSeek = cmd (ops, "set_transport", args1 ("position", 0.0));
+        check (ok (recordSeek), "GAP2: seek to 0 ok");
+        check (std::abs ((double) recordSeek["data"].getProperty ("position", -1.0)) < 0.01,
+               "GAP2: transport reached 0 before recording");
+        auto recordStart = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (recordStart), "GAP2: set_transport record ok");
+        check ((bool) recordStart["data"].getProperty ("recording", false),
+               "GAP2: record command entered recording state");
 
         // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
         // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
@@ -10043,11 +10057,20 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             speech->stopContinuous();
         }
 
-        auto stop = cmd (ops, "stop_recording");
-        check (ok (stop), "GAP2: stop_recording ok");
-        auto landed = stop["data"].getProperty ("clips", var());
+        check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
+        auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (ok (stop), "GAP2: generic transport stop finalized the recording");
+        check (! (bool) stop["data"].getProperty ("recording", true),
+               "GAP2: generic transport stop exited recording state");
+
+        var landed;
+        const auto tracksState = ops.snapshot().getProperty ("tracks", var());
+        if (auto* tracks = tracksState.getArray())
+            for (auto& trackState : *tracks)
+                if (trackState.getProperty ("id", var()).toString() == recTrackId)
+                    landed = trackState.getProperty ("clips", var());
         const int nLanded = landed.isArray() ? landed.size() : 0;
-        check (nLanded > 0, "GAP2: a take clip landed on the armed track");
+        check (nLanded > 0, "GAP2: generic transport stop landed a take on the armed track");
         if (nLanded > 0)
         {
             const auto srcPath = landed[0].getProperty ("sourceFile", var()).toString();

@@ -9,6 +9,7 @@
 // stay in MoshOps.cpp (one mutation path, by construction).
 
 #include "MoshOps.h"
+#include "RecordingLanding.h"
 #include "state/Ids.h"
 #include "state/CountIn.h"
 #include "state/Migrations.h"
@@ -21,18 +22,41 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
 {
     auto& transport = eng.edit().getTransport();
     const auto action = args.getProperty ("action", var()).toString();
+    bool finalizedRecording = false;
+
+    if (recording::shouldFinalizeBeforeTransportAction (transport.isRecording(), action))
+    {
+        const auto stopResult = cmdStopRecording (var (new DynamicObject()));
+        const auto stopData = stopResult.getProperty ("data", var());
+        const bool stopped = stopResult.isObject()
+            && (bool) stopResult.getProperty ("ok", false)
+            && stopData.isObject()
+            && (bool) stopData.getProperty ("applied", false);
+        if (! stopped)
+        {
+            auto reason = stopResult.getProperty ("error", var()).toString();
+            if (reason.isEmpty())
+                reason = stopData.getProperty ("reason", "could not land recording take").toString();
+            logLine ("set_transport", args, false, reason, false);
+            return errResult ("set_transport", reason);
+        }
+        finalizedRecording = true;
+    }
 
     // Play/record touch the audio device; skip them in no-audio (headless) mode.
-    if ((action == "play" || (action == "toggle" && ! transport.isPlaying())) && eng.hasAudio())
+    if (! finalizedRecording
+        && (action == "play" || (action == "toggle" && ! transport.isPlaying()))
+        && eng.hasAudio())
     {
         eng.ensurePlaybackContext();
         transport.play (false);
     }
-    else if (action == "stop" || (action == "toggle" && transport.isPlaying()))
+    else if (! finalizedRecording
+             && (action == "stop" || (action == "toggle" && transport.isPlaying())))
     {
         transport.stop (false, false);
     }
-    else if (action == "record" && eng.hasAudio())
+    else if (! finalizedRecording && action == "record" && eng.hasAudio())
     {
         // G2b — re-sync the live Edit's pre-roll to the stored project preference
         // right before every record start, so a save/reload that swapped in a

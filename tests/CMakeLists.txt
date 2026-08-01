@@ -26,6 +26,7 @@ target_sources(MoshTests PRIVATE
     test_agent_txn.cpp
     test_annotations.cpp
     test_remote_companion.cpp
+    test_recording_landing.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
@@ -82,6 +83,22 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
+add_test(NAME HarnessSessionShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME HarnessSessionPython
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
+if (TARGET Mosh)
+    add_test(NAME AudioRecoverySmoke
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh
+                          $<TARGET_FILE:Mosh>)
+    add_test(NAME SessionAllocationFailure
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/session-allocation-failure-test.sh
+                          $<TARGET_FILE:Mosh>)
+    set_tests_properties(AudioRecoverySmoke PROPERTIES
+        TIMEOUT 15)
+    set_tests_properties(SessionAllocationFailure PROPERTIES
+        TIMEOUT 15)
+endif()
 # test_training.cpp shells out to service/training relative to the CWD, so ctest
 # must run the suite from the repo root.
 set_tests_properties(MoshTests PROPERTIES

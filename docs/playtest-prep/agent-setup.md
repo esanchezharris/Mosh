@@ -1,9 +1,9 @@
 # Moshi agent (brain) — how to turn it on for the playtest
 
 The Moshi agent turns natural language ("make a 4-bar drum loop", "add reverb to the bass")
-into validated MoshOps commands. It's **fully wired** but needs an **LLM API key**. With no
-key it falls back to a **demo mock-brain** that pretends to act — fine for a UI demo, useless
-for real control.
+into validated MoshOps commands. It's **fully wired** but needs a usable **LLM provider**.
+Without one, the packaged app reports the setup failure and makes no edit. The deterministic
+demo brain is limited to Vite development and browser e2e.
 
 > **Verified 2026-06-21:** the agent command catalog/contract passes
 > (`ui/src/agent/commands.contract.test.ts`, part of the green vitest run — 423 passed).
@@ -31,9 +31,10 @@ loads `ui/.env.local` and exec's the binary with the env set:
 ```bash
 ./run-mosh.sh            # launches the built app with brain keys loaded
 ```
-- A plain double-click of `/Applications/Mosh.app` from Finder will **not** see the key →
-  Moshi stays on the mock brain. (To use Moshi from the Dock you'd have to export the keys
-  into a login/launchd environment — not worth it for the playtest; use `./run-mosh.sh`.)
+- A plain double-click of `/Applications/Mosh.app` sees only proxy configuration bundled
+  for that build. Direct-provider secrets are never bundled. If no proxy pair is present,
+  Moshi fails visibly without editing the project. For
+  local playtests, use `./run-mosh.sh` so the configured provider reaches the app.
 - Quick check without the GUI: `./run-mosh.sh smoke` prints a native brain round-trip
   (`--brain-smoke`), confirming the provider/key resolve.
 

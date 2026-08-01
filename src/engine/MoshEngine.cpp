@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
 #include "SourceRef.h"
@@ -6,12 +7,20 @@
 
 #include <atomic>
 #include <iostream>
-#include <thread>
+#include <stdexcept>
 
 namespace mosh
 {
 namespace
 {
+    juce::File requireAllocatedDirectory (std::optional<juce::File> directory,
+                                          const char* purpose)
+    {
+        if (! directory)
+            throw std::runtime_error (std::string ("Unable to allocate isolated ") + purpose);
+        return *directory;
+    }
+
     // AUD-017 — Mosh ALWAYS suppresses the engine's automatic audio-device init and
     // opens the device itself, bounded (openAudioDeviceBounded below). The te::Engine
     // ctor calls Engine::initialise() → DeviceManager::initialise() → JUCE
@@ -64,132 +73,98 @@ namespace
         }
     };
 
-    /** AUD-017 — a bounded PROBE of the audio hardware, run on a worker thread.
+    struct MoshPropertyStorage final : te::PropertyStorage
+    {
+        MoshPropertyStorage (juce::File appDataDirectory,
+                             juce::File sessionDirectory,
+                             juce::File directory,
+                             juce::String tag,
+                             bool ownerStorage)
+            : te::PropertyStorage ("Mosh"),
+              moshDirectory (std::move (appDataDirectory)),
+              storageSessionDirectory (std::move (sessionDirectory)),
+              prefsDirectory (std::move (directory)),
+              uniqueTag (std::move (tag)),
+              useOwnerStorage (ownerStorage)
+        {
+        }
 
-        It opens and starts a throwaway device via the platform AudioIODeviceType
-        directly — NOT juce::AudioDeviceManager. That matters twice over:
+        juce::File getAppPrefsFolder() override
+        {
+            if (! useOwnerStorage
+                && (! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)
+                    || prefsDirectory.createDirectory().failed()
+                    || ! mosh::sessionpaths::isContainedWithoutSymlinks (
+                        storageSessionDirectory, prefsDirectory)))
+            {
+                uniqueTag += "-" + juce::Uuid().toString().substring (0, 8);
+                storageSessionDirectory = requireAllocatedDirectory (
+                    mosh::sessionpaths::prepareSafetySessionDirectory (
+                        moshDirectory, uniqueTag),
+                    "settings session");
+                prefsDirectory = storageSessionDirectory.getChildFile (
+                    "_settings/run-" + uniqueTag);
+            }
+            if (prefsDirectory.createDirectory().failed())
+                throw std::runtime_error ("Unable to create isolated settings directory");
+            return prefsDirectory;
+        }
 
-          - ADM::initialise() also opens MIDI (openLastRequestedMidiDevices →
-            MidiInput::getAvailableDevices), which touches a process-wide singleton
-            guarded by JUCE_ASSERT_MESSAGE_THREAD. Driving it off the message thread is
-            a real data race, not just a Debug assert (it aborts a Debug GUI launch).
-          - The device type owns nothing shared: if the open never returns, the stuck
-            thread holds only this object. Nothing engine-owned is half-initialised, so
-            ~te::Engine → closeDevices() has nothing to block on and the app stays
-            quittable.
+        juce::File moshDirectory;
+        juce::File storageSessionDirectory;
+        juce::File prefsDirectory;
+        juce::String uniqueTag;
+        bool useOwnerStorage = false;
+    };
 
-        `start()` is deliberately included: the AUD-017 stack wedged inside
-        AudioDeviceCreateIOProcID / _TellServerAboutStreamUsage, which is reached from
-        start(), not open(). A probe that only opened would have missed it.
+    /** AUD-017 — the exact JUCE audio setup, opened only in a child process.
 
-        On timeout the object is abandoned and LEAKED on purpose — freeing a device
-        stuck inside mach_msg would just move the hang into the destructor. One leaked
-        probe per wedged launch is a trade we take. */
+        Tracktion's DeviceManager::loadSettings delegates its audio open to these same
+        AudioDeviceManager entry points. Passing the complete saved XML preserves the
+        device type, names, sample rate, buffer, and channel masks; passing null takes
+        the same default-device path. AudioDeviceManager also starts the IO proc, which
+        reaches the AudioDeviceStart frame that wedged in the original failure.
+
+        If CoreAudio never returns, the parent terminates this entire process. No
+        blocked HAL call or half-initialised device survives in the UI process. */
     struct BoundedDeviceOpen
     {
-        std::unique_ptr<juce::AudioIODeviceType> type;
-        juce::String wantedOutput, wantedInput;   // from the saved setup; empty == default
-        int stallMs = 0;                          // test hook — force the timeout path
-        juce::String error;                       // empty == the HAL answered and played
-        juce::WaitableEvent done;
-        std::atomic<bool> abandoned { false };
-
-        // Writes silence. The probe must actually run the IO proc to prove the device
-        // is alive, and a real DAW's first sound must not be a burst of garbage.
-        struct SilentCallback final : juce::AudioIODeviceCallback
-        {
-            void audioDeviceIOCallbackWithContext (const float* const*, int,
-                                                   float* const* out, int numOut, int numSamples,
-                                                   const juce::AudioIODeviceCallbackContext&) override
-            {
-                for (int c = 0; c < numOut; ++c)
-                    if (out[c] != nullptr)
-                        juce::FloatVectorOperations::clear (out[c], numSamples);
-            }
-            void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
-            void audioDeviceStopped() override {}
-        };
+        std::unique_ptr<juce::XmlElement> setupXml;
+        int numInputChannels = 0;
+        int numOutputChannels = 0;
+        int stallMs = 0;
+        juce::String error;
 
         void run()
         {
-            // MOSH_AUDIO_OPEN_STALL_MS makes the worker sleep before opening, so the
+            // The test hook sleeps before touching hardware, so the request/argv and
             // timeout branch is reachable on healthy hardware. Without it the failure
             // path could only be "verified" by wedging a real HAL — i.e. not verified.
             if (stallMs > 0)
                 juce::Thread::sleep (stallMs);
 
-            if (type == nullptr)
-            {
-                done.signal();      // no probe on this platform — treated as "answered"
-                return;
-            }
-
-            type->scanForDevices();
-
-            auto pick = [this] (bool input, const juce::String& wanted)
-            {
-                auto names = type->getDeviceNames (input);
-                if (wanted.isNotEmpty() && names.contains (wanted))
-                    return wanted;
-                const int idx = type->getDefaultDeviceIndex (input);
-                return juce::isPositiveAndBelow (idx, names.size()) ? names[idx] : juce::String();
-            };
-
-            const auto outName = pick (false, wantedOutput);
-            // Only probe an input when one is actually configured. The AUD-017 wedge was
-            // an input/output PAIRING (AudioIODeviceCombiner), so when there IS one it
-            // must be part of the probe or the probe proves the wrong thing.
-            const auto inName = wantedInput.isNotEmpty() ? pick (true, wantedInput) : juce::String();
-
-            std::unique_ptr<juce::AudioIODevice> dev (type->createDevice (outName, inName));
-            if (dev == nullptr)
-            {
-                error = "no audio device available";
-                done.signal();
-                return;
-            }
-
-            juce::BigInteger inChans, outChans;
-            outChans.setRange (0, juce::jmin (2, dev->getOutputChannelNames().size()), true);
-            if (inName.isNotEmpty())
-                inChans.setRange (0, juce::jmin (2, dev->getInputChannelNames().size()), true);
-
-            auto rates = dev->getAvailableSampleRates();
-            const double rate = rates.contains (48000.0) ? 48000.0
-                              : (! rates.isEmpty() ? rates[0] : 44100.0);
-
-            error = dev->open (inChans, outChans, rate, dev->getDefaultBufferSize());
-            if (error.isEmpty())
-            {
-                SilentCallback cb;
-                dev->start (&cb);   // the frame AUD-017 wedged in
-                dev->stop();        // both complete before cb leaves scope
-            }
-            dev->close();
-
-            // The waiter owns the object and destroys it after this signal. When it
-            // gave up (abandoned) nobody destroys it — that is the intentional leak;
-            // this thread must NOT free it either, because the device is by definition
-            // in a state we could not wait for.
-            done.signal();
+            juce::AudioDeviceManager manager;
+            error = setupXml != nullptr
+                        ? manager.initialise (numInputChannels, numOutputChannels,
+                                              setupXml.get(), true)
+                        : manager.initialiseWithDefaultDevices (numInputChannels,
+                                                                numOutputChannels);
+            manager.closeAudioDevice();
         }
     };
+}
 
-    /** The platform's default audio device type, or null where we have no probe. A null
-        type means the open runs UNBOUNDED, exactly as it always did — a missing probe
-        must never mean "no audio". */
-    std::unique_ptr<juce::AudioIODeviceType> makeProbeDeviceType()
-    {
-       #if JUCE_MAC
-        return std::unique_ptr<juce::AudioIODeviceType> (
-            juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
-       #elif JUCE_WINDOWS
-        return std::unique_ptr<juce::AudioIODeviceType> (
-            juce::AudioIODeviceType::createAudioIODeviceType_WASAPI (juce::WASAPIDeviceMode::shared));
-       #else
-        return {};
-       #endif
-    }
+juce::String audiostartup::runProbeChild (const ProbeRequest& request)
+{
+    BoundedDeviceOpen job;
+    if (! request.useDefaultSetup)
+        job.setupXml = juce::XmlDocument::parse (request.setupXml);
+    job.numInputChannels = request.numInputChannels;
+    job.numOutputChannels = request.numOutputChannels;
+    job.stallMs = request.stallMs;
+    job.run();
+    return job.error;
 }
 
 MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::String& freshSessionName)
@@ -201,6 +176,73 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // separates "degraded, offer a retry" from "headless, never touch hardware".
     audioWanted = audioOpen;
 
+    // Resolve both project and Tracktion-preference storage before constructing the
+    // Engine: its constructor may read/write Settings.xml. The GUI keeps the historic
+    // ~/Library/Mosh/Settings.xml location; every named harness/audit leaf is isolated.
+    const auto explicitSession =
+        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
+    const auto uniqueTag = mosh::sessionpaths::processTag();
+    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
+        freshSessionName,
+        explicitSession,
+        uniqueTag);
+    const bool useOwnerSession = ! freshSession
+                              && freshSessionName.isEmpty()
+                              && explicitSession.isEmpty();
+    const auto moshDir = mosh::sessionpaths::moshDataDirectory (! useOwnerSession);
+    session = mosh::sessionpaths::resolveSessionDirectory (
+        moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
+    if (session == mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag))
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session");
+    bool didResetHarnessSession = false;
+    if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
+    {
+        didResetHarnessSession = mosh::sessionpaths::resetOwnedHarnessSession (moshDir, session);
+        if (! didResetHarnessSession)
+            session = requireAllocatedDirectory (
+                mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+                "safety session after reset failure");
+    }
+
+    if (useOwnerSession)
+    {
+        if (session.createDirectory().failed())
+            throw std::runtime_error ("Unable to create owner session directory");
+    }
+    if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::createOwnedHarnessSession (moshDir, session))
+    {
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after harness ownership failure");
+    }
+    if (mosh::sessionpaths::isAutoSessionDirectory (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session)
+        && ! mosh::sessionpaths::createOwnedAutoSession (moshDir, session))
+    {
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after automatic ownership failure");
+    }
+
+    if (! useOwnerSession
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session))
+        throw std::runtime_error ("Isolated session ownership could not be verified");
+
+    const auto propertyStorageDir = requireAllocatedDirectory (
+        mosh::sessionpaths::resolvePropertyStorageDir (
+            moshDir, session, uniqueTag, useOwnerSession),
+        "settings directory");
+    if (propertyStorageDir.createDirectory().failed())
+        throw std::runtime_error ("Unable to create settings directory");
+    const auto propertyStorageSession = useOwnerSession
+        ? moshDir
+        : propertyStorageDir.getParentDirectory().getParentDirectory();
+
     // 3-arg construction so we can disable auto device-init in no-audio mode
     // (the device opens during the Engine ctor otherwise — 01 §5).
     // te::Engine takes ownership of the behaviour unique_ptr; capture the raw
@@ -209,7 +251,8 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     auto behaviour = std::make_unique<MoshEngineBehaviour> (audioOpen);
     behaviourPtr = behaviour.get();
     enginePtr = std::make_unique<te::Engine> (
-        juce::String ("Mosh"),
+        std::make_unique<MoshPropertyStorage> (
+            moshDir, propertyStorageSession, propertyStorageDir, uniqueTag, useOwnerSession),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
 
@@ -218,36 +261,10 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // GUI session, or another concurrent harness — see freshSession below. Established
     // BEFORE the device init so PRE-001 can restore the persisted device setup from it.
     // freshSessionName is a BASE leaf ("session-selftest", ...); empty means the GUI.
-    // resolveSessionLeaf applies the MOSH_SELFTEST_SESSION override (explicit always wins
-    // verbatim — gate.sh/verify.py read artifacts back out of that exact path) and otherwise
-    // auto-isolates headless runs per process, so two concurrent harnesses can no longer
-    // wipe each other's session dir mid-test. See src/engine/SessionPaths.h.
-    const auto sessionLeaf = mosh::sessionpaths::resolveSessionLeaf (
-        freshSessionName,
-        juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}),
-        mosh::sessionpaths::processTag());
-    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("Mosh");
-    session = moshDir.getChildFile (sessionLeaf);
-    // Fail-closed: a cold-start wipe must NEVER land on the owner's GUI project. Nothing
-    // should route "session" here with freshSession set, but this is a data-loss class —
-    // guard it rather than trust every caller. ONE boolean covers EVERY destructive step
-    // below (the dir wipe AND the edit-file delete): guarding only the first left
-    // `MOSH_SELFTEST_SESSION=session` + any headless mode still deleting the GUI's
-    // session.tracktionedit, which is exactly what this guard exists to prevent.
-    const bool mayWipe = freshSession && sessionLeaf != "session";
-    if (mayWipe)
-        session.deleteRecursively();
-    else if (freshSession)
-        // Loud, not DBG. DBG compiles out in Release — the build every harness actually
-        // runs — so the refusal was invisible exactly where it matters. And refusing is
-        // not the end of it: the run then starts WARM off the GUI's existing project, so
-        // the harness fails downstream on unrelated-looking assertions. Say so. ASCII
-        // only: this is printed, and a redirected Windows console defaults to cp1252.
-        std::cerr << "MoshEngine: refusing to wipe the GUI \"session\" dir "
-                     "(MOSH_SELFTEST_SESSION=session?) - this run starts WARM\n";
-    session.createDirectory();
-    if (mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
+    // resolveSessionLeaf captures MOSH_SELFTEST_SESSION; resolveSessionDirectory then
+    // accepts it only inside the marker-owned _harness namespace. Unset overrides still
+    // auto-isolate per process. See src/engine/SessionPaths.h.
+    if (explicitSession.isEmpty() && mosh::sessionpaths::isAutoIsolatedLeaf (sessionLeaf))
         mosh::sessionpaths::publishLatestPointer (moshDir, freshSessionName, session);
     session.getChildFile ("audio").createDirectory();
     // A2 — latch the prior session's liveness sentinel BEFORE this run overwrites it. Present
@@ -260,8 +277,6 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     editPath = freshSession ? session.getChildFile ("session.tracktionedit")
                             : startupEditFile();
 
-    // AUD-017 — the ONE audio-device open, bounded. Must precede every other device
-    // touch below (applyRequestedAudioOutputDevice restores the persisted setup).
     if (auto err = openAudioDeviceBounded(); err.isNotEmpty())
     {
         audioError = err;
@@ -270,12 +285,9 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         std::cerr << "MoshEngine: " << err.toRawUTF8() << "\n";
     }
 
-    applyRequestedAudioOutputDevice();
-
     // The harness saves + reloads internally; wipe any prior run's persisted edit
     // so it always starts cold and is idempotent across repeated --selftest runs.
-    // Shares mayWipe with the dir wipe above — never `freshSession` alone.
-    if (mayWipe)
+    if (didResetHarnessSession)
         editPath.deleteFile();
 
     bool loadedFromFile = false;
@@ -385,58 +397,108 @@ juce::String MoshEngine::openAudioDeviceBounded()
         juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_TIMEOUT_MS", {}));
 
     // Probe EXACTLY the setup that is about to be opened for real, or the probe proves
-    // nothing: the session's persisted device first (PRE-001 — what
-    // applyRequestedAudioOutputDevice restores below), then the engine's own stored
-    // setup (what te::DeviceManager::loadSettings reads), else the system defaults.
+    // nothing: the session's persisted device first (PRE-001), then the engine's own
+    // stored setup (what te::DeviceManager::loadSettings reads), else system defaults.
     std::unique_ptr<juce::XmlElement> setupXml;
     if (auto persisted = session.getChildFile ("audio-device.xml"); persisted.existsAsFile())
-        setupXml = juce::XmlDocument::parse (persisted);
+    {
+        auto loaded = audiostartup::loadBoundedDeviceSetup (persisted);
+        if (! loaded.valid)
+        {
+            audioOpen = false;
+            return "The saved audio device setup is invalid or too large. Running "
+                   "WITHOUT audio — playback and recording are off. Reset the "
+                   "audio device, then press Retry.";
+        }
+        setupXml = std::move (loaded.xml);
+    }
     if (setupXml == nullptr)
         setupXml = enginePtr->getPropertyStorage().getXmlProperty (te::SettingID::audio_device_setup);
+
+    const auto requestedOutput = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
+    const auto requestedInput = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_AUDIO_INPUT_DEVICE", {}).trim();
+    if (requestedOutput.isNotEmpty() || requestedInput.isNotEmpty())
+    {
+        if (setupXml == nullptr)
+            setupXml = std::make_unique<juce::XmlElement> ("DEVICESETUP");
+        setupXml->setAttribute ("deviceType", audiostartup::probeDeviceTypeName());
+        if (requestedOutput.isNotEmpty())
+            setupXml->setAttribute ("audioOutputDeviceName", requestedOutput);
+        if (requestedInput.isNotEmpty())
+            setupXml->setAttribute ("audioInputDeviceName", requestedInput);
+    }
 
     const auto label = audiostartup::deviceLabel (setupXml.get());
     const int numIn  = enginePtr->getEngineBehaviour().shouldOpenAudioInputByDefault()
                            ? te::DeviceManager::defaultNumChannelsToOpen : 0;
     const int numOut = te::DeviceManager::defaultNumChannelsToOpen;
 
-    auto* job = new BoundedDeviceOpen();
-    job->type         = makeProbeDeviceType();
-    job->wantedOutput = audiostartup::outputNameFromSetup (setupXml.get());
-    job->wantedInput  = audiostartup::inputNameFromSetup (setupXml.get());
-    job->stallMs      = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
-                            .trim().getIntValue();
+    const auto nonce = juce::Uuid().toString();
+    const auto probeArguments = audiostartup::probeChildArguments (
+        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+        nonce,
+        setupXml.get(),
+        numIn,
+        numOut,
+        juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OPEN_STALL_MS", {})
+            .trim().getIntValue());
 
-    std::thread worker ([job] { job->run(); });
-
-    if (! job->done.wait (timeoutMs))
+    if (probeArguments.isEmpty())
     {
-        // The HAL never answered. Give up on audio for this session rather than block
-        // the message thread forever with no window and no message. The engine's OWN
-        // DeviceManager was never initialised, so we land in precisely the headless
-        // no-audio state every harness already exercises — playback is off, the command
-        // surface is intact, and quitting works.
-        job->abandoned.store (true, std::memory_order_release);
-        worker.detach();          // `job` is leaked on purpose — see BoundedDeviceOpen
+        audioOpen = false;
+        return "The saved audio device setup is invalid or too large. Running WITHOUT "
+               "audio — playback and recording are off. Reset the audio device, then "
+               "press Retry.";
+    }
+
+    const auto probe = audiostartup::runProbeProcess (probeArguments, timeoutMs);
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToStart)
+    {
+        audioOpen = false;
+        return "Audio device " + label + " could not start the safety probe. "
+               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
+
+    if (probe.status == audiostartup::ProbeProcessStatus::timedOut)
+    {
         audioOpen = false;
         return audiostartup::timeoutMessage (label, timeoutMs);
     }
 
-    worker.join();                // run() has already signalled, so this returns at once
-    const auto probeError = job->error;
-    delete job;                   // the probe device is already stopped + closed
+    if (probe.status == audiostartup::ProbeProcessStatus::failedToTerminate)
+    {
+        audioOpen = false;
+        return "Audio device " + label + " safety probe could not be terminated. "
+               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
+
+    const auto response = audiostartup::parseProbeResponse (probe.output, nonce);
+    const bool exitMatches = (probe.exitCode == 0) == response.error.isEmpty();
+    if (! response.valid || ! exitMatches)
+    {
+        audioOpen = false;
+        return "Audio device " + label + " safety probe exited without a valid result. "
+               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
+
+    if (response.error.isNotEmpty())
+    {
+        audioOpen = false;
+        return "Audio device " + label + " could not open: " + response.error
+             + ". Running WITHOUT audio — playback and recording are off. Press Retry.";
+    }
 
     // The HAL answered within the bound, so the real open is safe to do inline, exactly
     // where Tracktion has always done it (message thread, all its device bookkeeping in
     // the order it expects). Residual risk is the millisecond gap between probe and
     // open; the failure this guards against was persistent (reproducible 3/3, >63s), so
     // the probe catches it.
+    if (setupXml != nullptr)
+        enginePtr->getPropertyStorage().setXmlProperty (
+            te::SettingID::audio_device_setup, *setupXml);
     enginePtr->getDeviceManager().initialise (numIn, numOut);
-
-    // A probe error means the HAL is alive but refused this setup (e.g. a saved device
-    // that is no longer plugged in). Tracktion's own init falls back to a default
-    // device, so audio still works — report it, don't disable audio.
-    if (probeError.isNotEmpty())
-        audioError = "Audio device " + label + ": " + probeError;
 
     return {};
 }
@@ -459,7 +521,6 @@ juce::String MoshEngine::retryAudioDevice()
         return err;
     }
 
-    applyRequestedAudioOutputDevice();
     ensurePlaybackContext();
     return {};
 }
@@ -479,119 +540,6 @@ juce::String MoshEngine::releaseAudioDeviceForRepair()
     inputsConfigured = false;
     audioError = "audio device released for repair handoff";
     return {};
-}
-
-void MoshEngine::applyRequestedAudioOutputDevice()
-{
-    if (! audioOpen)
-        return;
-
-    // PRE-001 — restore the persisted device setup (written by set_audio_device /
-    // set_buffer_size into the session dir) BEFORE the env-var fallback, so a saved
-    // device choice survives an app restart. The env vars below still override it
-    // (they are an explicit per-launch request). Missing/invalid XML is a no-op.
-    // NB: Mosh disables Tracktion's autoInitialiseDeviceManager and manages the device
-    // itself, so this raw JUCE initialise() is the single active restore (there is no
-    // competing Tracktion PropertyStorage auto-apply here). It deliberately accepts
-    // skipping te::DeviceManager::loadSettings()'s extra channel-enable / defaultWaveID
-    // restore; full cross-restart fidelity is hardware-gated and verified on a real device.
-    if (auto deviceXmlFile = session.getChildFile ("audio-device.xml"); deviceXmlFile.existsAsFile())
-        if (auto deviceXml = juce::XmlDocument::parse (deviceXmlFile))
-            enginePtr->getDeviceManager().deviceManager.initialise (256, 256, deviceXml.get(), true);
-
-    const auto requested = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_OUTPUT_DEVICE", {}).trim();
-    const auto requestedInput = juce::SystemStats::getEnvironmentVariable ("MOSH_AUDIO_INPUT_DEVICE", {}).trim();
-    if (requested.isEmpty() && requestedInput.isEmpty())
-        return;
-
-    auto& tracktionDevices = enginePtr->getDeviceManager();
-    auto& devices = tracktionDevices.deviceManager;
-
-    juce::String matchedType;
-    juce::String matchedOutput;
-    juce::String matchedInput;
-    for (auto* type : devices.getAvailableDeviceTypes())
-    {
-        type->scanForDevices();
-        if (requested.isNotEmpty())
-        {
-            auto outputs = type->getDeviceNames (false);
-            auto index = outputs.indexOf (requested);
-            if (index < 0)
-            {
-                for (int i = 0; i < outputs.size(); ++i)
-                    if (outputs[i].equalsIgnoreCase (requested))
-                    {
-                        index = i;
-                        break;
-                    }
-            }
-            if (index >= 0)
-            {
-                matchedType = type->getTypeName();
-                matchedOutput = outputs[index];
-            }
-        }
-
-        if (requestedInput.isNotEmpty())
-        {
-            auto inputs = type->getDeviceNames (true);
-            auto index = inputs.indexOf (requestedInput);
-            if (index < 0)
-            {
-                for (int i = 0; i < inputs.size(); ++i)
-                    if (inputs[i].equalsIgnoreCase (requestedInput))
-                    {
-                        index = i;
-                        break;
-                    }
-            }
-            if (index >= 0)
-            {
-                if (matchedType.isEmpty())
-                    matchedType = type->getTypeName();
-                if (matchedType == type->getTypeName())
-                    matchedInput = inputs[index];
-            }
-        }
-
-        if ((requested.isEmpty() || matchedOutput.isNotEmpty())
-            && (requestedInput.isEmpty() || matchedInput.isNotEmpty()))
-            break;
-    }
-
-    if (requested.isNotEmpty() && matchedOutput.isEmpty())
-    {
-        audioError = "Requested audio output device not found: " + requested;
-        DBG (audioError);
-        return;
-    }
-    if (requestedInput.isNotEmpty() && matchedInput.isEmpty())
-    {
-        audioError = "Requested audio input device not found: " + requestedInput;
-        DBG (audioError);
-        return;
-    }
-
-    auto setup = devices.getAudioDeviceSetup();
-    devices.setCurrentAudioDeviceType (matchedType, true);
-    if (matchedOutput.isNotEmpty())
-        setup.outputDeviceName = matchedOutput;
-    setup.inputDeviceName = matchedInput;
-    setup.inputChannels.clear();
-    setup.useDefaultInputChannels = matchedInput.isNotEmpty();
-    setup.useDefaultOutputChannels = true;
-
-    if (auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
-    {
-        audioError = "Could not open requested audio output device '" + matchedOutput + "': " + error;
-        DBG (audioError);
-        return;
-    }
-
-    tracktionDevices.rescanWaveDeviceList();
-    if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-        mm->runDispatchLoopUntil (50);
 }
 
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)

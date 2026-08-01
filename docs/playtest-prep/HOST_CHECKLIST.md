@@ -9,42 +9,48 @@ this doc doesn't repeat that content, it points at it.*
 Run exactly this:
 
 ```bash
-MOSH_BRAIN_ENV=ui/.env.local bash scripts/playtest/package-guest-zip.sh
+MOSH_BRAIN_ENV_ZIP=ui/.env.local bash scripts/playtest/package-guest-zip.sh
 ```
 
-**Why the `MOSH_BRAIN_ENV=ui/.env.local` prefix is required, not optional:** the owner's
+**Why the `MOSH_BRAIN_ENV_ZIP=ui/.env.local` prefix is explicit:** the owner's
 shell profile exports `MOSH_BRAIN_ENV` to a path that no longer exists (the
 2026-07-16 checkout-move landmine — see CLAUDE.md's working notes). If you run the
 script bare, `package-guest-zip.sh` still protects itself (it explicitly `unset`s any
 inherited `MOSH_BRAIN_ENV` and reads `ui/.env.local` directly — see the script's own
 "CRITICAL landmine" comment), so a bare run is actually *safe by construction* against that
-specific landmine. The prefix above is belt-and-suspenders and makes the intent explicit at
-the call site; it's cheap, so just always type it.
+specific landmine. `MOSH_BRAIN_ENV_ZIP` is the script's dedicated override and makes the
+chosen proxy dotenv explicit at the call site.
 
-**What the script does (10 steps, all fail-closed — see the script for the authoritative
+**What the script does (10 steps — see the script for the authoritative
 list):** builds a fresh Release `Mosh.app` (or reuses one with `SKIP_BUILD=1`); stages a
 *copy* under `dist/stage/` — it never touches `/Applications/Mosh.app`; bundles the Python
-service + the brain key (loaded from `ui/.env.local`, never the ambient env) by reusing the
+service and, when both proxy fields are present, proxy configuration (loaded from the
+`MOSH_BRAIN_ENV_ZIP` path, never the ambient `MOSH_BRAIN_ENV`) by reusing the
 literal functions out of `run-mosh.sh` (so this can't drift from the real deploy path);
 strips every machine-local `.*.env` pointer file so the zip never pins the guest's Mac to
 your paths; copies `setup-guest.sh` + `collect-diagnostics.sh` into
-`Contents/Resources/`; re-signs ad-hoc; verifies the bundle (TCC plist key, brain key
-present, all service module dirs non-empty, vendored SA3 files present); runs `--selftest`
+`Contents/Resources/`; re-signs ad-hoc; verifies the bundle (TCC plist key, proxy-only
+`brain.env` when supplied, no `brain.env` when proxy configuration is missing, all service
+module dirs non-empty, vendored SA3 files present); runs `--selftest`
 on the staged app; zips to `dist/Mosh-guest-<YYYYMMDD>-<shortsha>.zip`; then — the important
 part — **extracts that exact zip into a scratch dir, attaches a synthetic quarantine flag,
 runs `unquarantine.sh` against it, and re-runs `--selftest` from the extracted copy** (the
-"guest simulation," step 9/10). If anything in verification or the guest simulation fails,
-the script refuses to produce a zip (or deletes the one it just wrote) rather than hand you
-something broken — a zip existing on disk is itself proof it passed everything.
+"guest simulation," step 9/10). Required package-integrity checks fail closed. Missing proxy
+configuration is an intentional brainless package state, not a package-integrity failure.
+An incomplete proxy pair is treated the same way: `brain.env` is omitted and the package
+succeeds brainless. Multiline values and direct-provider keys are refused. If any required
+verification or the guest simulation fails, the script refuses to produce a zip (or deletes
+the one it just wrote) rather than hand you something broken — a zip existing on disk is
+itself proof it passed everything.
 
 **Output:** `dist/Mosh-guest-<date>-<sha>.zip`, plus a paste-ready Discord message printed
 at the end and a copy of `docs/TESTER_QUICKSTART.md` at `dist/READ-ME-FIRST.txt`.
 
-⚠️ **The zip embeds your API keys** (whatever's in `ui/.env.local` — DeepSeek/OpenAI/xAI,
-whichever you have configured). They're extractable by anyone who receives the zip. This is
-by design (so the guest's Moshi/agent features work with zero setup) but means:
-- Set **spend limits** on those provider keys before sending the zip.
-- Only send it to **one trusted tester** for this playtest, not a public link.
+The zip may embed `MOSH_BRAIN_PROXY_URL` plus a scoped publishable
+`MOSH_BRAIN_PROXY_APIKEY`. Both remain extractable by anyone who receives the zip, so scope
+and revoke the proxy credential for the playtest. The packager refuses direct-provider API
+keys and multiline proxy values. If the proxy pair is missing, the zip ships without
+`brain.env` and Moshi edits fail visibly without mutation.
 
 ## 2. Verify before sending
 

@@ -87,9 +87,10 @@
   border: 1px solid var(--v2-line); border-radius: var(--v2-radius);
   background: var(--v2-surface); box-shadow: var(--v2-glow);
   padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  opacity: 1;
   animation: v2AgentDrawerIn 160ms ease-out;
 }
-@keyframes v2AgentDrawerIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes v2AgentDrawerIn { from { transform: translateY(6px); } to { transform: none; } }
 .v2-agent-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .v2-agent-head-title { font-size: 12px; font-weight: 600; color: var(--v2-text); }
 .v2-agent-drawer.live .v2-agent-head-title { color: var(--v2-accent); }

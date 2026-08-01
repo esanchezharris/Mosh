@@ -8,7 +8,8 @@ APP="${1:-}"
 }
 
 SESSION_LEAF="session-selftest-auto-graceful-term-$$-$(date +%s)"
-SESSION_DIR="$HOME/Library/Mosh/$SESSION_LEAF"
+SESSION_OVERRIDE="_harness/$SESSION_LEAF"
+SESSION_DIR="$HOME/Library/Mosh/$SESSION_OVERRIDE"
 LOG_PATH="$HOME/Library/Mosh/$SESSION_LEAF.log"
 APP_PID=""
 
@@ -24,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SESSION_LEAF" \
+MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SESSION_OVERRIDE" \
   "$APP" >"$LOG_PATH" 2>&1 &
 APP_PID=$!
 

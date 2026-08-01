@@ -1,9 +1,9 @@
 // The app-side glue for an agentic task: composer text in → the loop runs over
 // the TASK-scoped executor (one undo unit), progress streams into the task
 // store (the drawer renders it), Moshi utters only at the beats (ACK_WORKING on
-// start, DONE/HUH/UHOH at the end — no per-step creature spam), and provider
-// failure is explicit in production. The deterministic loop mock is limited to the
-// existing dev/e2e surface, exactly like the single-shot brain.
+// start, DONE/HUH/UHOH at the end — no per-step creature spam). Provider failure
+// is explicit in packaged builds; only the existing dev/e2e surface may use the
+// deterministic loop brain, matching the single-shot posture.
 //
 // Loop tasks deliberately do NOT set agentChangeSet — the drawer carries the
 // per-step detail, so the ChangeToast stays quiet for them by construction.
@@ -58,16 +58,18 @@ export type TaskUi = {
   utter(intent: string, say?: string): void;
 };
 
+const BRAIN_UNAVAILABLE_SAY = "can't reach my brain — check setup and try again";
+
 const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string }> = {
   done: { intent: "DONE" },
   need_user: { intent: "HUH" },
   budget: { intent: "UHOH", fallback: "ran out of road — want me to keep going?" },
-  unavailable: { intent: "UHOH", fallback: "brain unavailable" },
+  unavailable: { intent: "UHOH", fallback: BRAIN_UNAVAILABLE_SAY },
   error: { intent: "UHOH", fallback: "hmm — that broke partway" },
   aborted: { intent: "IDLE_MURMUR", fallback: "stopped — kept what's done" },
 };
 
-export async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
+async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   try {
     return await brainChat(messages);
   } catch {
