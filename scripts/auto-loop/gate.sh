@@ -142,7 +142,7 @@ ensure_node_modules() {
 run_py_tests() {
   # Run any test_*.py / *_test.py under dirs that this branch touched (relay/, service/).
   local changed; changed="$( ( cd "$WT" && git diff --name-only "$BASE...HEAD" 2>/dev/null ) || true )"
-  echo "$changed" | grep -qE '^(relay|service)/' || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
+  grep -qE '^(relay|service)/' <<< "$changed" || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
   local found=0 ok=true failed_tests="" log; log="$(mktemp)"
   local t
   for t in $( cd "$WT" && git ls-files 'relay/*test*.py' 'relay/test_*.py' 'service/**/*_test.py' 'service/scripts/*test*.py' 2>/dev/null | sort -u ); do
@@ -197,12 +197,12 @@ gate_cheap() {
 runbook_advisory() {
   local changed rows=""
   changed="$(cd "$WT" && git diff --name-only "$BASE"...HEAD 2>/dev/null)" || return 0
-  echo "$changed" | grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" && rows="$rows REC-mic,REC-latency,REC-monitor"
-  echo "$changed" | grep -qE "fade|crossfade|Crossfade|Fade" && rows="$rows EAR-fades"
-  echo "$changed" | grep -qiE "warp|stretch|autoTempo" && rows="$rows EAR-warp"
-  echo "$changed" | grep -qE "export_stems|Stem|Renderer|export_audio" && rows="$rows EAR-stems"
-  echo "$changed" | grep -qE "midi_input|MidiInput" && rows="$rows MIDI-in"
-  echo "$changed" | grep -qE "^relay/|multiplayer|LockManager" && rows="$rows MP-two-mac"
+  grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" <<< "$changed" && rows="$rows REC-mic,REC-latency,REC-monitor"
+  grep -qE "fade|crossfade|Crossfade|Fade" <<< "$changed" && rows="$rows EAR-fades"
+  grep -qiE "warp|stretch|autoTempo" <<< "$changed" && rows="$rows EAR-warp"
+  grep -qE "export_stems|Stem|Renderer|export_audio" <<< "$changed" && rows="$rows EAR-stems"
+  grep -qE "midi_input|MidiInput" <<< "$changed" && rows="$rows MIDI-in"
+  grep -qE "^relay/|multiplayer|LockManager" <<< "$changed" && rows="$rows MP-two-mac"
   if [ -n "$rows" ]; then
     emit_step "runbook_advisory" true "{\"note\":\"owner hands-on rows affected:$rows — docs/VERIFICATION.md parity checklist\"}"
   fi
