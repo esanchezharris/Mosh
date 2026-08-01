@@ -190,11 +190,12 @@ String BrainProxy::installId()
     // proxy directly. Only an absent/empty or exact marker-owned `_harness` request is
     // persisted there; unsafe values resolve to the same per-process safety session.
     const auto leaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
-    const auto moshDir = File::getSpecialLocation (File::userApplicationDataDirectory)
-                             .getChildFile ("Mosh");
+    const auto moshDir = mosh::sessionpaths::moshDataDirectory (leaf.isNotEmpty());
     const auto identityDirectory = mosh::sessionpaths::resolveIdentitySessionDirectory (
         moshDir, leaf, mosh::sessionpaths::processTag());
-    const auto identityFile = identityDirectory.getChildFile ("identity.json");
+    if (! identityDirectory)
+        return Uuid().toString();
+    const auto identityFile = identityDirectory->getChildFile ("identity.json");
 
     if (identityFile.existsAsFile())
     {

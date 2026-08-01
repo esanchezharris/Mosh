@@ -7,11 +7,20 @@
 
 #include <atomic>
 #include <iostream>
+#include <stdexcept>
 
 namespace mosh
 {
 namespace
 {
+    juce::File requireAllocatedDirectory (std::optional<juce::File> directory,
+                                          const char* purpose)
+    {
+        if (! directory)
+            throw std::runtime_error (std::string ("Unable to allocate isolated ") + purpose);
+        return *directory;
+    }
+
     // AUD-017 — Mosh ALWAYS suppresses the engine's automatic audio-device init and
     // opens the device itself, bounded (openAudioDeviceBounded below). The te::Engine
     // ctor calls Engine::initialise() → DeviceManager::initialise() → JUCE
@@ -90,13 +99,15 @@ namespace
                         storageSessionDirectory, prefsDirectory)))
             {
                 uniqueTag += "-" + juce::Uuid().toString().substring (0, 8);
-                storageSessionDirectory =
+                storageSessionDirectory = requireAllocatedDirectory (
                     mosh::sessionpaths::prepareSafetySessionDirectory (
-                        moshDirectory, uniqueTag);
+                        moshDirectory, uniqueTag),
+                    "settings session");
                 prefsDirectory = storageSessionDirectory.getChildFile (
                     "_settings/run-" + uniqueTag);
             }
-            prefsDirectory.createDirectory();
+            if (prefsDirectory.createDirectory().failed())
+                throw std::runtime_error ("Unable to create isolated settings directory");
             return prefsDirectory;
         }
 
@@ -175,42 +186,59 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         freshSessionName,
         explicitSession,
         uniqueTag);
-    const auto moshDir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("Mosh");
     const bool useOwnerSession = ! freshSession
                               && freshSessionName.isEmpty()
                               && explicitSession.isEmpty();
+    const auto moshDir = mosh::sessionpaths::moshDataDirectory (! useOwnerSession);
     session = mosh::sessionpaths::resolveSessionDirectory (
         moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
     if (session == mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag))
-        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session");
     bool didResetHarnessSession = false;
     if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
     {
         didResetHarnessSession = mosh::sessionpaths::resetOwnedHarnessSession (moshDir, session);
         if (! didResetHarnessSession)
-            session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
+            session = requireAllocatedDirectory (
+                mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+                "safety session after reset failure");
     }
 
     if (useOwnerSession)
-        session.createDirectory();
+    {
+        if (session.createDirectory().failed())
+            throw std::runtime_error ("Unable to create owner session directory");
+    }
     if (mosh::sessionpaths::isHarnessSessionDirectory (moshDir, session)
         && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
         && ! mosh::sessionpaths::createOwnedHarnessSession (moshDir, session))
     {
-        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after harness ownership failure");
     }
     if (mosh::sessionpaths::isAutoSessionDirectory (moshDir, session)
         && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session)
         && ! mosh::sessionpaths::createOwnedAutoSession (moshDir, session))
     {
-        session = mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag);
+        session = requireAllocatedDirectory (
+            mosh::sessionpaths::prepareSafetySessionDirectory (moshDir, uniqueTag),
+            "safety session after automatic ownership failure");
     }
 
-    const auto propertyStorageDir =
+    if (! useOwnerSession
+        && ! mosh::sessionpaths::isOwnedHarnessSession (moshDir, session)
+        && ! mosh::sessionpaths::isOwnedAutoSession (moshDir, session))
+        throw std::runtime_error ("Isolated session ownership could not be verified");
+
+    const auto propertyStorageDir = requireAllocatedDirectory (
         mosh::sessionpaths::resolvePropertyStorageDir (
-            moshDir, session, uniqueTag, useOwnerSession);
-    propertyStorageDir.createDirectory();
+            moshDir, session, uniqueTag, useOwnerSession),
+        "settings directory");
+    if (propertyStorageDir.createDirectory().failed())
+        throw std::runtime_error ("Unable to create settings directory");
     const auto propertyStorageSession = useOwnerSession
         ? moshDir
         : propertyStorageDir.getParentDirectory().getParentDirectory();

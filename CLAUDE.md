@@ -111,9 +111,11 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   Same class: `preview_start` resolves `.claude/launch.json` from the *session's* cwd, so a dev
   server can silently serve a different worktree. Probe the served tree before believing a screenshot.
 - **`--selftest` sessions:** headless runs auto-isolate. An explicit `MOSH_SELFTEST_SESSION`
-  is honored only under `_harness/`; an existing leaf must be empty or carry the exact
-  `.mosh-harness-owned-v1` marker. Unsafe, escaping, symlinked, or unowned values fall
-  back to a unique safety session. Two runs must still use distinct harness leaves.
+  is honored only under `_harness/`. An absent leaf is created and marker-owned by Mosh;
+  an existing leaf is accepted only when it already carries the exact
+  `.mosh-harness-owned-v1` marker. Existing empty, populated, unsafe, escaping,
+  symlinked, or otherwise unowned paths fall back to a unique safety session. Two runs
+  must still use distinct harness leaves.
   `commandLine.contains("--selftest")` is also true for `--selftest-undo`; match undo FIRST.
   ([SLF-CONC-001](docs/worklog/2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md))
 - **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`; changing

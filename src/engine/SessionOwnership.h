@@ -1,14 +1,26 @@
 #pragma once
 
-#include <filesystem>
-
 #include <juce_core/juce_core.h>
+
+#if MOSH_TESTING
+ #include <functional>
+#endif
+
+#include "SessionOwnershipPosix.h"
 
 namespace mosh::sessionpaths
 {
     inline constexpr const char* kHarnessRootName = "_harness";
     inline constexpr const char* kHarnessOwnershipFile = ".mosh-harness-owned-v1";
     inline constexpr const char* kHarnessOwnershipContents = "Mosh isolated harness session v1";
+
+   #if MOSH_TESTING
+    struct IsolationOwnershipTestHooks
+    {
+        std::function<void()> afterDirectoryOpened;
+        std::function<void(const juce::File&)> afterQuarantinedDirectoryOpened;
+    };
+   #endif
 
     inline bool isContainedWithoutSymlinks (const juce::File& root,
                                             const juce::File& candidate)
@@ -25,95 +37,131 @@ namespace mosh::sessionpaths
 
     inline bool hasIsolationOwnershipMarker (const juce::File& directory)
     {
+       #if JUCE_WINDOWS
         const auto marker = directory.getChildFile (kHarnessOwnershipFile);
-        return marker.existsAsFile()
-            && ! marker.isSymbolicLink()
+        return marker.existsAsFile() && ! marker.isSymbolicLink()
             && marker.loadFileAsString() == kHarnessOwnershipContents;
+       #else
+        auto opened = detail::openAbsoluteDirectory (directory, false);
+        return opened && detail::markerMatches (
+            opened.get(), kHarnessOwnershipFile, kHarnessOwnershipContents);
+       #endif
     }
 
-    inline bool createFreshOwnedIsolationDirectory (const juce::File& containmentRoot,
-                                                     const juce::File& directory)
+    inline bool createFreshOwnedIsolationDirectory (
+        const juce::File& containmentRoot, const juce::File& directory
+       #if MOSH_TESTING
+        , const IsolationOwnershipTestHooks* hooks = nullptr
+       #endif
+    )
     {
-        if (directory.exists() || directory.isSymbolicLink()
-            || ! isContainedWithoutSymlinks (containmentRoot, directory))
+       #if JUCE_WINDOWS
+        // Fail closed until the Windows port has an equivalent reparse-point-safe,
+        // handle-relative ownership implementation.
+        juce::ignoreUnused (containmentRoot, directory);
+       #if MOSH_TESTING
+        juce::ignoreUnused (hooks);
+       #endif
+        return false;
+       #else
+        auto parent = detail::openParent (containmentRoot, directory, true, true);
+        if (! parent || ::mkdirat (parent->fd.get(), parent->leaf.c_str(), 0700) != 0)
             return false;
 
-        if (directory.getParentDirectory().createDirectory().failed()
-            || ! isContainedWithoutSymlinks (containmentRoot, directory))
+        auto opened = detail::openChildDirectory (parent->fd.get(), parent->leaf);
+        const auto openedIdentity = opened ? detail::identityForFd (opened.get()) : std::nullopt;
+        if (! openedIdentity)
             return false;
 
-        std::error_code error;
-        const auto created = std::filesystem::create_directory (
-            std::filesystem::path (directory.getFullPathName().toStdString()), error);
-        if (! created || error || directory.isSymbolicLink()
-            || ! isContainedWithoutSymlinks (containmentRoot, directory))
+       #if MOSH_TESTING
+        if (hooks != nullptr && hooks->afterDirectoryOpened)
+            hooks->afterDirectoryOpened();
+       #endif
+
+        if (! detail::writeMarker (
+                opened.get(), kHarnessOwnershipFile, kHarnessOwnershipContents))
             return false;
 
-        const auto marker = directory.getChildFile (kHarnessOwnershipFile);
-        return marker.replaceWithText (kHarnessOwnershipContents)
-            && hasIsolationOwnershipMarker (directory);
+        const auto namedIdentity = detail::identityAt (parent->fd.get(), parent->leaf);
+        if (! namedIdentity || ! detail::sameIdentity (*openedIdentity, *namedIdentity))
+        {
+            ::unlinkat (opened.get(), kHarnessOwnershipFile, 0);
+            return false;
+        }
+        return detail::markerMatches (
+            opened.get(), kHarnessOwnershipFile, kHarnessOwnershipContents);
+       #endif
     }
 
-    inline bool resetOwnedIsolationDirectory (const juce::File& containmentRoot,
-                                               const juce::File& directory)
+    inline bool resetOwnedIsolationDirectory (
+        const juce::File& containmentRoot, const juce::File& directory
+       #if MOSH_TESTING
+        , const IsolationOwnershipTestHooks* hooks = nullptr
+       #endif
+    )
     {
-        if (! directory.isDirectory() || directory.isSymbolicLink()
-            || ! isContainedWithoutSymlinks (containmentRoot, directory)
-            || ! hasIsolationOwnershipMarker (directory))
+       #if JUCE_WINDOWS
+        juce::ignoreUnused (containmentRoot, directory);
+       #if MOSH_TESTING
+        juce::ignoreUnused (hooks);
+       #endif
+        return false;
+       #else
+        auto root = detail::openAbsoluteDirectory (containmentRoot, false);
+        auto parent = detail::openParent (containmentRoot, directory, false, false);
+        if (! root || ! parent)
             return false;
 
-        const auto quarantine = containmentRoot.getChildFile (
-            ".mosh-reset-" + juce::Uuid().toString());
-        std::error_code error;
-        const auto quarantinePath = std::filesystem::path (
-            quarantine.getFullPathName().toStdString());
-        if (! std::filesystem::create_directory (quarantinePath, error) || error)
+        auto owned = detail::openChildDirectory (parent->fd.get(), parent->leaf);
+        const auto ownedIdentity = owned ? detail::identityForFd (owned.get()) : std::nullopt;
+        if (! ownedIdentity || ! detail::markerMatches (
+                owned.get(), kHarnessOwnershipFile, kHarnessOwnershipContents))
             return false;
-        std::filesystem::permissions (
-            quarantinePath,
-            std::filesystem::perms::owner_all,
-            std::filesystem::perm_options::replace,
-            error);
-        if (error)
+
+        const auto quarantineName = std::string (".mosh-reset-")
+            + juce::Uuid().toString().toStdString();
+        if (::mkdirat (root.get(), quarantineName.c_str(), 0700) != 0)
+            return false;
+        auto quarantine = detail::openChildDirectory (root.get(), quarantineName);
+        if (! quarantine)
         {
-            std::filesystem::remove (quarantinePath, error);
+            ::unlinkat (root.get(), quarantineName.c_str(), AT_REMOVEDIR);
             return false;
         }
 
-        const auto quarantined = quarantine.getChildFile ("session");
-        std::filesystem::rename (
-            std::filesystem::path (directory.getFullPathName().toStdString()),
-            std::filesystem::path (quarantined.getFullPathName().toStdString()),
-            error);
-        if (error)
+        constexpr const char* movedName = "session";
+        if (::renameat (parent->fd.get(), parent->leaf.c_str(),
+                        quarantine.get(), movedName) != 0)
         {
-            std::filesystem::remove (quarantinePath, error);
+            ::unlinkat (root.get(), quarantineName.c_str(), AT_REMOVEDIR);
             return false;
         }
 
-        if (! quarantined.isDirectory() || quarantined.isSymbolicLink()
-            || ! isContainedWithoutSymlinks (quarantine, quarantined)
-            || ! hasIsolationOwnershipMarker (quarantined))
-        {
-            if (! directory.exists() && ! directory.isSymbolicLink())
-            {
-                error.clear();
-                std::filesystem::rename (
-                    std::filesystem::path (quarantined.getFullPathName().toStdString()),
-                    std::filesystem::path (directory.getFullPathName().toStdString()),
-                    error);
-            }
-            if (! quarantined.exists() && ! quarantined.isSymbolicLink())
-            {
-                error.clear();
-                std::filesystem::remove (quarantinePath, error);
-            }
+        auto moved = detail::openChildDirectory (quarantine.get(), movedName);
+        const auto movedIdentity = moved ? detail::identityForFd (moved.get()) : std::nullopt;
+        if (! movedIdentity || ! detail::sameIdentity (*ownedIdentity, *movedIdentity)
+            || ! detail::markerMatches (
+                moved.get(), kHarnessOwnershipFile, kHarnessOwnershipContents))
             return false;
-        }
 
-        if (! quarantined.deleteRecursively())
+       #if MOSH_TESTING
+        if (hooks != nullptr && hooks->afterQuarantinedDirectoryOpened)
+            hooks->afterQuarantinedDirectoryOpened (
+                containmentRoot.getChildFile (quarantineName).getChildFile (movedName));
+       #endif
+
+        if (! detail::removeDirectoryContents (moved.get()))
             return false;
-        error.clear();
-        return std::filesystem::remove (quarantinePath, error) && ! error;
+
+        const auto currentName = detail::nameForIdentity (quarantine.get(), *movedIdentity);
+        if (! currentName)
+            return false;
+        const auto currentIdentity = detail::identityAt (quarantine.get(), *currentName);
+        if (! currentIdentity || ! detail::sameIdentity (*movedIdentity, *currentIdentity)
+            || ::unlinkat (quarantine.get(), currentName->c_str(), AT_REMOVEDIR) != 0)
+            return false;
+
+        return ::unlinkat (root.get(), quarantineName.c_str(), AT_REMOVEDIR) == 0;
+       #endif
     }
 }

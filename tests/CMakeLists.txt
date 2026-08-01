@@ -89,7 +89,12 @@ if (TARGET Mosh)
     add_test(NAME AudioRecoverySmoke
              COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh
                           $<TARGET_FILE:Mosh>)
+    add_test(NAME SessionAllocationFailure
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/session-allocation-failure-test.sh
+                          $<TARGET_FILE:Mosh>)
     set_tests_properties(AudioRecoverySmoke PROPERTIES
+        TIMEOUT 15)
+    set_tests_properties(SessionAllocationFailure PROPERTIES
         TIMEOUT 15)
 endif()
 # test_training.cpp shells out to service/training relative to the CWD, so ctest

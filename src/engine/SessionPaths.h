@@ -2,6 +2,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <optional>
+
 #include "SessionOwnership.h"
 
 #if JUCE_WINDOWS
@@ -35,6 +37,20 @@ namespace mosh::sessionpaths
     // would destroy someone's project.
     inline constexpr const char* kAutoMarker = "-auto-";
     inline constexpr const char* kSafetyPrefix = "session-safety-auto-";
+
+    inline juce::File moshDataDirectory (bool allowTestRoot)
+    {
+        const auto requested = juce::SystemStats::getEnvironmentVariable (
+            "MOSH_TEST_MOSH_DIR", {}).trim();
+        if (allowTestRoot
+            && juce::SystemStats::getEnvironmentVariable (
+                   "MOSH_ENABLE_TEST_MOSH_DIR", {}) == "1"
+            && juce::File::isAbsolutePath (requested))
+            return juce::File (requested);
+
+        return juce::File::getSpecialLocation (
+            juce::File::userApplicationDataDirectory).getChildFile ("Mosh");
+    }
 
     inline bool isAutoIsolatedLeaf (const juce::String& leafName)
     {
@@ -76,8 +92,8 @@ namespace mosh::sessionpaths
         return moshDir.getChildFile (kSafetyPrefix + uniqueTag);
     }
 
-    inline juce::File prepareSafetySessionDirectory (const juce::File& moshDir,
-                                                      const juce::String& uniqueTag)
+    inline std::optional<juce::File> prepareSafetySessionDirectory (
+        const juce::File& moshDir, const juce::String& uniqueTag)
     {
         for (int attempt = 0; attempt < 4; ++attempt)
         {
@@ -194,9 +210,9 @@ namespace mosh::sessionpaths
         return safetySessionDirectory (moshDir, uniqueTag);
     }
 
-    inline juce::File resolveIdentitySessionDirectory (const juce::File& moshDir,
-                                                        const juce::String& explicitOverride,
-                                                        const juce::String& uniqueTag)
+    inline std::optional<juce::File> resolveIdentitySessionDirectory (
+        const juce::File& moshDir, const juce::String& explicitOverride,
+        const juce::String& uniqueTag)
     {
         if (explicitOverride.trim().isEmpty())
             return moshDir.getChildFile ("session");
@@ -218,10 +234,9 @@ namespace mosh::sessionpaths
         path. Named harness/audit sessions, including an explicit reserved "session"
         override, cannot read or rewrite the owner's device/plugin preferences.
     */
-    inline juce::File resolvePropertyStorageDir (const juce::File& moshDir,
-                                                 const juce::File& sessionDirectory,
-                                                 const juce::String& uniqueTag,
-                                                 bool useOwnerStorage)
+    inline std::optional<juce::File> resolvePropertyStorageDir (
+        const juce::File& moshDir, const juce::File& sessionDirectory,
+        const juce::String& uniqueTag, bool useOwnerStorage)
     {
         if (useOwnerStorage)
             return moshDir;
@@ -229,7 +244,9 @@ namespace mosh::sessionpaths
         if (! isContainedWithoutSymlinks (moshDir, sessionDirectory))
         {
             const auto safeSession = prepareSafetySessionDirectory (moshDir, uniqueTag);
-            return safeSession.getChildFile ("_settings/run-" + uniqueTag);
+            if (! safeSession)
+                return std::nullopt;
+            return safeSession->getChildFile ("_settings/run-" + uniqueTag);
         }
 
         const auto root = sessionDirectory.getChildFile ("_settings");
@@ -238,7 +255,9 @@ namespace mosh::sessionpaths
             return requested;
 
         const auto safeSession = prepareSafetySessionDirectory (moshDir, uniqueTag);
-        return safeSession.getChildFile ("_settings/run-" + uniqueTag);
+        if (! safeSession)
+            return std::nullopt;
+        return safeSession->getChildFile ("_settings/run-" + uniqueTag);
     }
 
     /** Which non-interactive mode (if any) this launch is. Mirrors Main.cpp's flags. */
