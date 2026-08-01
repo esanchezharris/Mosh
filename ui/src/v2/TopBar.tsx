@@ -47,11 +47,24 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   // click just stops it) is left untouched.
   const anyArmed = snapshot.tracks.some((tr) => tr.armed);
   async function handleRecord() {
-    if (!t.recording && !anyArmed) {
+    if (t.recording) {
+      await exec("stop_recording");
+      return;
+    }
+    if (!anyArmed) {
       const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
       if (trackId) await exec("arm_track", { trackId, armed: true });
     }
     await exec("set_transport", { action: "record" });
+  }
+
+  async function handleStop() {
+    if (t.recording) {
+      await exec("stop_recording");
+      await exec("set_transport", { position: 0 });
+      return;
+    }
+    await exec("set_transport", { action: "stop", position: 0 });
   }
 
   return (
@@ -103,12 +116,12 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-center">
         <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
           <button className="v2-tbtn" title="To start" aria-label="To start"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconSkipStart size={15} /></button>
+            onClick={() => void handleStop()}><IconSkipStart size={15} /></button>
           <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
             aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
             onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconStop size={15} /></button>
+            onClick={() => void handleStop()}><IconStop size={15} /></button>
           <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
             onClick={() => void handleRecord()}><span className="dot" /></button>
         </div>
