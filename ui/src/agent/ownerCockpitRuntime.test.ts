@@ -177,6 +177,31 @@ describe("owner cockpit runtime presentation", () => {
     expect(cockpit.getSnapshot().repair?.status).toBe("failed");
   });
 
+  it("preserves rollback when the checkpointed failure event beats launch rejection", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.start();
+    const onEvent = client.watchEvents.mock.calls[0]?.[0];
+    onEvent?.({
+      sequence: 8,
+      type: "repair.full_gate_pending",
+      data: { repairId: "repair-1", buildPath: "/worktree/build/Mosh.app" },
+    });
+    client.launchRepair.mockImplementationOnce(async () => {
+      onEvent?.({
+        sequence: 9,
+        type: "repair.swap.failed",
+        data: { repairId: "repair-1", fromState: "stopping", code: "repair_process_failed" },
+      });
+      throw new AgentHostApiError("Repair handoff failed", "repair_process_failed", false);
+    });
+
+    await expect(cockpit.launchRepair()).rejects.toMatchObject({ code: "repair_process_failed" });
+    expect(cockpit.getSnapshot()).toMatchObject({
+      error: "Repair handoff failed",
+      repair: { id: "repair-1", status: "failed" },
+    });
+  });
+
   it("restores one-click rollback when the installed repair app starts", async () => {
     const { cockpit, client } = runtime();
     cockpit.resumeInstalledRepair("repair-1");

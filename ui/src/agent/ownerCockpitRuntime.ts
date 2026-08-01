@@ -153,7 +153,10 @@ export class OwnerCockpitRuntime {
       try {
         await this.client.launchRepair(repair.id, repair.buildPath);
       } catch (error) {
-        this.update({ repair: { ...repair, status: "launch_failed" } });
+        const current = this.state.repair;
+        if (current?.id === repair.id
+          && (current.status === "ready" || current.status === "launch_failed"))
+          this.update({ repair: { ...current, status: "launch_failed" } });
         throw error;
       }
       this.update({ lastEvent: "repair.build.handoff_accepted", repair: { ...repair, status: "repair_running" } });
