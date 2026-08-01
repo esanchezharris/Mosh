@@ -1,11 +1,3 @@
-// CONF-RECORD-ARM — the v2 topbar Record button used to toggle
-// set_transport{action:"record"} with nothing armed, so a mouse-only user (no
-// keyboard/agent arm step) recorded silence. It now arms the selected track via
-// arm_track first, whenever no track is armed yet, then starts/stops recording via
-// set_transport. These specs run against the REAL dev-mock backend (bridge.mock) —
-// the same one store.exec routes through outside the JUCE WebView — so they prove
-// the actual arm_track + set_transport round-trip, not just a stubbed exec.
-
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +59,14 @@ describe("v2 TopBar Record button — arms the selected track before recording (
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       // Flush the handler's sequential `await exec(...)` chain (arm_track, then
       // set_transport) — a macrotask boundary drains the whole microtask queue.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  async function clickTransport(selector: string) {
+    const btn = host.querySelector<HTMLButtonElement>(selector)!;
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
@@ -159,11 +159,7 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     execCalls = [];
     const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
 
-    const stop = host.querySelector<HTMLButtonElement>('[data-testid="v2-stop"]')!;
-    await act(async () => {
-      stop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await clickTransport('[data-testid="v2-stop"]');
 
     expect(execCalls).toEqual([
       { command: "stop_recording", args: undefined },
@@ -175,5 +171,67 @@ describe("v2 TopBar Record button — arms the selected track before recording (
     });
     expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
     expect(useStore.getState().snapshot!.tracks.flatMap((track) => track.clips)).toHaveLength(clipsBefore + 1);
+  });
+
+  it("the visible Stop button keeps the ordinary non-recording stop-and-return behavior", async () => {
+    await useStore.getState().exec("set_transport", { position: 6 });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    await clickTransport('[data-testid="v2-stop"]');
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "stop", position: 0 } },
+    ]);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
+  });
+
+  it("To start lands the active take before returning to project start", async () => {
+    render(useStore.getState().snapshot!);
+    await clickRecord();
+    await act(async () => {
+      await useStore.getState().exec("set_transport", { position: 6 });
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+    const clipsBefore = useStore.getState().snapshot!.tracks.flatMap((track) => track.clips).length;
+
+    await clickTransport('[aria-label="To start"]');
+
+    expect(execCalls).toEqual([
+      { command: "stop_recording", args: undefined },
+      { command: "set_transport", args: { position: 0 } },
+    ]);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
+    expect(useStore.getState().snapshot!.tracks.flatMap((track) => track.clips)).toHaveLength(clipsBefore + 1);
+  });
+
+  it("To start keeps the ordinary non-recording jump-to-start behavior", async () => {
+    await useStore.getState().exec("set_transport", { position: 6 });
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    render(useStore.getState().snapshot!);
+    execCalls = [];
+
+    await clickTransport('[aria-label="To start"]');
+
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "stop", position: 0 } },
+    ]);
+    await act(async () => {
+      await useStore.getState().refresh();
+    });
+    expect(useStore.getState().transport).toMatchObject({ recording: false, position: 0 });
   });
 });
