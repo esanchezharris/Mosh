@@ -72,19 +72,13 @@ TEST_CASE ("only the interactive GUI uses the owner property-storage directory",
 {
     const auto moshDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
                              .getChildFile ("mosh-property-root");
+    const auto sessionDir = moshDir.getChildFile ("_harness/audit-run");
 
-    REQUIRE (resolvePropertyStorageDir (moshDir, "session", "pid1-aaaa", true) == moshDir);
-    REQUIRE (resolvePropertyStorageDir (moshDir, "session", "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid1-aaaa"));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "audit/run-7", "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid1-aaaa"));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "session-selftest-auto-2-bbbb",
-                                        "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid1-aaaa"));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "audit/run-7", "pid2-bbbb", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid2-bbbb"));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "../Settings.xml", "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid1-aaaa"));
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", true) == moshDir);
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", false)
+             == sessionDir.getChildFile ("_settings/run-pid1-aaaa"));
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid2-bbbb", false)
+             == sessionDir.getChildFile ("_settings/run-pid2-bbbb"));
 }
 
 TEST_CASE ("only marker-owned harness sessions can be selected for reset", "[sessionpaths]")
@@ -134,19 +128,15 @@ TEST_CASE ("symlinked session and settings ancestors use safety directories", "[
                              .getChildFile ("mosh-sessionpaths-" + juce::Uuid().toString());
     const auto moshDir = sandbox.getChildFile ("Mosh");
     const auto outside = sandbox.getChildFile ("outside");
-    REQUIRE (moshDir.getChildFile ("_settings").createDirectory());
+    REQUIRE (moshDir.getChildFile ("_harness/audit-run/_settings").createDirectory());
     REQUIRE (outside.createDirectory());
 
-    const auto settingsLink = moshDir.getChildFile ("_settings").getChildFile ("audit");
-    REQUIRE (juce::File::createSymbolicLink (settingsLink,
+    const auto sessionDir = moshDir.getChildFile ("_harness/audit-run");
+    const auto settingsRoot = sessionDir.getChildFile ("_settings");
+    REQUIRE (settingsRoot.deleteRecursively());
+    REQUIRE (juce::File::createSymbolicLink (settingsRoot,
                                              outside.getFullPathName(), true));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "audit/run", "pid1-aaaa", false)
-             == moshDir.getChildFile ("_settings").getChildFile ("run-pid1-aaaa"));
-    REQUIRE (settingsLink.deleteFile());
-    REQUIRE (moshDir.getChildFile ("_settings").deleteRecursively());
-    REQUIRE (juce::File::createSymbolicLink (moshDir.getChildFile ("_settings"),
-                                             outside.getFullPathName(), true));
-    REQUIRE (resolvePropertyStorageDir (moshDir, "audit/run", "pid1-aaaa", false)
+    REQUIRE (resolvePropertyStorageDir (moshDir, sessionDir, "pid1-aaaa", false)
              == moshDir.getChildFile ("_settings-safety-auto-pid1-aaaa"));
 
     const auto sessionLink = moshDir.getChildFile ("nested");

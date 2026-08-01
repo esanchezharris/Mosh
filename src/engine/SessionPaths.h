@@ -172,15 +172,17 @@ namespace mosh::sessionpaths
         override, cannot read or rewrite the owner's device/plugin preferences.
     */
     inline juce::File resolvePropertyStorageDir (const juce::File& moshDir,
-                                                 const juce::String& sessionLeaf,
+                                                 const juce::File& sessionDirectory,
                                                  const juce::String& uniqueTag,
                                                  bool useOwnerStorage)
     {
         if (useOwnerStorage)
             return moshDir;
 
-        juce::ignoreUnused (sessionLeaf);
-        const auto root = moshDir.getChildFile ("_settings");
+        if (! isContainedWithoutSymlinks (moshDir, sessionDirectory))
+            return moshDir.getChildFile ("_settings-safety-auto-" + uniqueTag);
+
+        const auto root = sessionDirectory.getChildFile ("_settings");
         const auto requested = root.getChildFile ("run-" + uniqueTag);
         if (isContainedWithoutSymlinks (root, requested))
             return requested;

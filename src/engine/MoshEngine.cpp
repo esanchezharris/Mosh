@@ -154,10 +154,6 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
                               && explicitSession.isEmpty();
     session = mosh::sessionpaths::resolveSessionDirectory (
         moshDir, sessionLeaf, uniqueTag, useOwnerSession, explicitSession.isNotEmpty());
-    const auto propertyStorageDir =
-        mosh::sessionpaths::resolvePropertyStorageDir (
-            moshDir, sessionLeaf, uniqueTag, useOwnerSession);
-
     bool didResetHarnessSession = false;
     if (freshSession && mosh::sessionpaths::isOwnedHarnessSession (moshDir, session))
     {
@@ -174,6 +170,10 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
         session = mosh::sessionpaths::safetySessionDirectory (moshDir, uniqueTag);
         session.createDirectory();
     }
+
+    const auto propertyStorageDir =
+        mosh::sessionpaths::resolvePropertyStorageDir (
+            moshDir, session, uniqueTag, useOwnerSession);
     propertyStorageDir.createDirectory();
 
     // 3-arg construction so we can disable auto device-init in no-audio mode
