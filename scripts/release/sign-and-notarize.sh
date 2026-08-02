@@ -429,6 +429,11 @@ if [ "$IS_APP" -eq 1 ]; then
 fi
 
 log "signing…"
+# codesign refuses bundles carrying resource forks / Finder info / quarantine xattrs
+# ("detritus"), which staged resources routinely pick up in transit. Strip before
+# signing — content-preserving, removes only extended attributes.
+xattr -cr "$TARGET" 2>/dev/null || true
+find "$TARGET" -name '._*' -delete 2>/dev/null || true
 if [ "$IS_APP" -eq 1 ]; then
   sign_app_bundle "$TARGET"
   log "plist check (post-sign):"
