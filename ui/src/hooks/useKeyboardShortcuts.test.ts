@@ -63,6 +63,8 @@ describe("useKeyboardShortcuts", () => {
       editingClipId: null,
       automationTrackId: null,
       snapshot: null,
+      clipboard: null,
+      selectedTrackId: null,
     });
     vi.restoreAllMocks();
   });
@@ -185,6 +187,33 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "duplicate_clip", args: { clipId: "clip-1" } });
+  });
+
+  it("copies the selected arrangement clip and pastes it at the playhead", async () => {
+    const clip = { id: "clip-1", name: "Hook", type: "block", start: 2, length: 2 };
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      selectedTrackId: "t1",
+      clipboard: null,
+      transport: { playing: false, recording: false, position: 6, looping: false, loopStart: 0, loopEnd: 0 },
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [clip] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => root.render(React.createElement(Harness)));
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", metaKey: true, bubbles: true }));
+    });
+    expect(useStore.getState().clipboard?.clip.id).toBe("clip-1");
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "v", metaKey: true, bubbles: true }));
+    });
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "paste_clip",
+      args: { trackId: "t1", start: 6, clip },
+    }));
   });
 
   // FU-CLIP-NUDGE — fine clip nudge: fixed-increment move_clip, independent of
