@@ -46,6 +46,21 @@ safe_tail() {
     | LC_ALL=C tr -cd '[:print:] ' || true
 }
 
+# A compiler failure can be followed by thousands of bytes of warnings from
+# already-running parallel jobs. A tail alone then hides the actionable line
+# and CI deletes the temporary raw log. Preserve bounded error context plus the
+# ordinary tail so a hosted red remains diagnosable from gate-native.json.
+safe_failure_excerpt() {
+  {
+    LC_ALL=C grep -nE -B 3 -A 3 \
+      '(^|[[:space:]])(fatal )?error:|FAILED:|Subprocess killed|Killed:|undefined symbols?|ld: ' \
+      "$1" 2>/dev/null | LC_ALL=C tail -c 6000 || true
+    printf '%s' ' --- log tail --- '
+    LC_ALL=C tail -c 2000 "$1" 2>/dev/null || true
+  } | LC_ALL=C tr '\n\t' '  ' \
+    | LC_ALL=C tr -cd '[:print:] ' || true
+}
+
 # Append one step record. $1 name, $2 ok(true/false), $3 detail-json (default {}).
 emit_step() {
   local name="$1" ok="$2" detail="${3:-{\}}"
@@ -59,7 +74,10 @@ run_step() {
   local log; log="$(mktemp)"
   local ok=true
   ( cd "$WT" && "$@" ) >"$log" 2>&1 || ok=false
-  emit_step "$name" "$ok" "$(jq -nc --arg log "$(safe_tail "$log" 1200)" '{log:$log}')"
+  local excerpt
+  if [ "$ok" = true ]; then excerpt="$(safe_tail "$log" 1200)"
+  else excerpt="$(safe_failure_excerpt "$log")"; fi
+  emit_step "$name" "$ok" "$(jq -nc --arg log "$excerpt" '{log:$log}')"
   rm -f "$log"
   [ "$ok" = true ]
 }
@@ -81,7 +99,7 @@ run_selftest_x3() {
     # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
     # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
     # (cost a 2h hang once). NSUserDefaults reads the flag from argv, suppressing it.
-    MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest -ApplePersistenceIgnoreState YES >"$log" 2>&1
+    MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest -ApplePersistenceIgnoreState YES >"$log" 2>&1
     rc=$?
     kill_stray_services "$sport"; sleep 1   # let this run's service die before the next
     read n f < <(parse_selftest_tally "$log")

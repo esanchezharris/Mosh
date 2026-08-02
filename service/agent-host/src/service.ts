@@ -1,0 +1,282 @@
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import {
+  PlaytestReportSchema,
+  RealtimeClientSecretSchema,
+  SupervisorTurnSchema,
+  type AuditEvent,
+  type PlaytestReport,
+  type PlaytestSession,
+  type RepairJob,
+  type SupervisorPlan,
+} from "./contracts.js";
+import {
+  supervisorTraceInput,
+  validateSupervisorPlan,
+  type RealtimeSecretAdapter,
+  type SupervisorModelAdapter,
+} from "./openai.js";
+import { FileAgentSession, PlaytestStore } from "./persistence.js";
+import { OwnerOrchestrator } from "./orchestration.js";
+import { sanitizeAuditData } from "./audit-boundary.js";
+import { MutationQueue } from "./mutation-queue.js";
+import {
+  OpenAIUnavailableError,
+  OrchestrationUnavailableError,
+} from "./service-errors.js";
+
+export { OpenAIUnavailableError, OrchestrationUnavailableError } from "./service-errors.js";
+
+export class AgentHostService {
+  readonly events = new EventEmitter();
+  private readonly mutations = new MutationQueue();
+
+  constructor(
+    readonly store: PlaytestStore,
+    private readonly supervisor?: SupervisorModelAdapter,
+    private readonly realtime?: RealtimeSecretAdapter,
+    private readonly orchestration?: OwnerOrchestrator,
+  ) {
+    this.orchestration?.setEventSink((playtestId, type, data) =>
+      this.emit(playtestId, type, data));
+  }
+
+  async initialize(): Promise<void> {
+    await this.store.initialize();
+    for (const repair of await this.store.listRepairs()) {
+      if (repair.status === "queued" || repair.status === "running") {
+        await this.emit(repair.playtestId, "repair.recovered", {
+          repairId: repair.id,
+          status: repair.status,
+          worktreePath: repair.worktreePath ?? "",
+          repairThreadId: repair.repairThreadId ?? "",
+        });
+      }
+    }
+  }
+
+  async createPlaytest(input: { retainTranscript?: boolean | undefined }): Promise<PlaytestSession> {
+    const at = new Date().toISOString();
+    const session: PlaytestSession = {
+      version: 1,
+      id: randomUUID(),
+      status: "active",
+      retainTranscript: input.retainTranscript ?? false,
+      createdAt: at,
+      updatedAt: at,
+    };
+    return this.serializeMutation(session.id, async () => {
+      await this.store.saveSession(session);
+      await this.emitUnlocked(session.id, "playtest.created", {
+        retainTranscript: session.retainTranscript,
+      });
+      return session;
+    });
+  }
+
+  async closePlaytest(playtestId: string, retainTranscript?: boolean): Promise<PlaytestSession> {
+    return this.serializeMutation(playtestId, async () => {
+      const current = await this.store.loadSession(playtestId);
+      const at = new Date().toISOString();
+      const retained = retainTranscript ?? current.retainTranscript;
+      const closed: PlaytestSession = {
+        ...current,
+        status: "closed",
+        retainTranscript: retained,
+        updatedAt: at,
+        closedAt: at,
+      };
+      await this.store.saveSession(closed);
+      if (!retained) await this.store.purgeTranscript(playtestId);
+      await this.emitUnlocked(playtestId, "playtest.closed", { retainTranscript: retained });
+      return closed;
+    });
+  }
+
+  async resumePlaytest(playtestId: string, retainTranscript?: boolean): Promise<PlaytestSession> {
+    return this.serializeMutation(playtestId, async () => {
+      const current = await this.store.loadSession(playtestId);
+      if (current.status !== "active") {
+        throw Object.assign(new Error("Playtest is closed"), { code: "playtest_closed" });
+      }
+      const resumed: PlaytestSession = {
+        ...current,
+        retainTranscript: retainTranscript ?? current.retainTranscript,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveSession(resumed);
+      await this.emitUnlocked(playtestId, "playtest.resumed", {
+        retainTranscript: resumed.retainTranscript,
+      });
+      return resumed;
+    });
+  }
+
+  async supervisorTurn(input: unknown): Promise<SupervisorPlan> {
+    if (!this.supervisor) {
+      throw new OpenAIUnavailableError("OpenAI supervisor is unavailable: OPENAI_API_KEY is not configured");
+    }
+    const turn = SupervisorTurnSchema.parse(input);
+    return this.serializeMutation(turn.playtestId, async () => {
+      const playtest = await this.store.loadSession(turn.playtestId);
+      if (playtest.status !== "active") throw new Error("Playtest is closed");
+      const transcript = await this.store.loadTranscript(turn.playtestId);
+      transcript.push({ role: "user", text: turn.message, at: new Date().toISOString() });
+      await this.store.saveTranscript(turn.playtestId, transcript);
+      const output = await this.supervisor!.run(
+        supervisorTraceInput(turn),
+        new FileAgentSession(this.store, turn.playtestId),
+        { playtest_id: turn.playtestId },
+      );
+      const plan = validateSupervisorPlan(output, turn);
+      transcript.push({ role: "assistant", text: plan.say, at: new Date().toISOString() });
+      await this.store.saveTranscript(turn.playtestId, transcript);
+      await this.emitUnlocked(turn.playtestId, "supervisor.turn.completed", {
+        needsClarification: plan.needsClarification,
+        selectedCapabilityIds: plan.selectedCapabilityIds,
+        commandCount: plan.commands.length,
+      });
+      return plan;
+    });
+  }
+
+  async mintRealtimeSecret(): Promise<unknown> {
+    if (!this.realtime) {
+      throw new OpenAIUnavailableError("OpenAI Realtime is unavailable: OPENAI_API_KEY is not configured");
+    }
+    const secret = RealtimeClientSecretSchema.parse(await this.realtime.mint());
+    return { value: secret.value, expires_at: secret.expires_at };
+  }
+
+  async createReport(input: unknown): Promise<PlaytestReport> {
+    const object = input as Record<string, unknown>;
+    const playtestId = String(object.playtestId ?? "");
+    return this.serializeMutation(playtestId, async () => {
+      await this.store.loadSession(playtestId);
+      const at = new Date().toISOString();
+      const reportId = randomUUID();
+      const evidence = Array.isArray(object.evidence)
+        ? object.evidence.map((candidate) => ({
+            ...(candidate as Record<string, unknown>),
+            version: 1,
+            id: randomUUID(),
+            playtestId,
+            reportId,
+            createdAt: at,
+          }))
+        : [];
+      const report = PlaytestReportSchema.parse({
+        ...object,
+        version: 1,
+        id: reportId,
+        status: "draft",
+        evidence,
+        createdAt: at,
+        updatedAt: at,
+      });
+      await this.store.saveReport(report);
+      await this.emitUnlocked(report.playtestId, "report.created", {
+        reportId: report.id,
+        kind: report.kind,
+      });
+      return report;
+    });
+  }
+
+  async listReports(playtestId: string): Promise<PlaytestReport[]> {
+    await this.store.loadSession(playtestId);
+    return this.store.listReports(playtestId);
+  }
+
+  async approveReport(reportId: string): Promise<PlaytestReport> {
+    const located = await this.store.loadReport(reportId);
+    const approved = await this.serializeMutation(located.playtestId, async () => {
+      const current = await this.store.loadReport(reportId);
+      const at = new Date().toISOString();
+      const approved: PlaytestReport = {
+        ...current,
+        status: "approved",
+        updatedAt: at,
+        approvedAt: at,
+      };
+      await this.store.saveReport(approved);
+      await this.emitUnlocked(approved.playtestId, "report.approved", { reportId });
+      return approved;
+    });
+    if (!this.orchestration) {
+      const pending: PlaytestReport = {
+        ...approved,
+        status: "approved_pending_sync",
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveReport(pending);
+      await this.emit(pending.playtestId, "report.sync.pending", {
+        reportId,
+        reason: "orchestration_unavailable",
+      });
+      return pending;
+    }
+    const synced = await this.orchestration.syncApprovedReport(approved);
+    if (synced.status === "approved") await this.orchestration.coordinateReport(synced);
+    return synced;
+  }
+
+  async createRepair(reportId: string): Promise<RepairJob> {
+    if (this.orchestration) {
+      return this.orchestration.createRepair(await this.store.loadReport(reportId));
+    }
+    throw new OrchestrationUnavailableError("Repair orchestration is not configured");
+  }
+
+  async coordinateReport(reportId: string): Promise<void> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const report = await this.store.loadReport(reportId);
+    await this.orchestration.coordinateReport(report);
+  }
+
+  async completeRepair(repairId: string, result: NonNullable<RepairJob["result"]>): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.completeRepair(repair, result);
+  }
+
+  async launchRepairBuild(repairId: string, buildPath: string): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.launchRepairBuild(repair, buildPath);
+  }
+
+  async rollbackRepair(repairId: string, reason: string): Promise<RepairJob> {
+    if (!this.orchestration) throw new OrchestrationUnavailableError("Codex orchestration is unavailable");
+    const repair = await this.store.loadRepair(repairId);
+    return this.orchestration.rollbackRepair(repair, reason);
+  }
+
+  async emit(playtestId: string, type: string, data: Record<string, unknown>): Promise<AuditEvent> {
+    return this.serializeMutation(playtestId, () => this.emitUnlocked(playtestId, type, data));
+  }
+
+  private async emitUnlocked(
+    playtestId: string,
+    type: string,
+    data: Record<string, unknown>,
+  ): Promise<AuditEvent> {
+    const existing = await this.store.loadEvents(playtestId);
+    const event: AuditEvent = {
+      version: 1,
+      id: randomUUID(),
+      playtestId,
+      sequence: (existing.at(-1)?.sequence ?? 0) + 1,
+      type,
+      at: new Date().toISOString(),
+      data: sanitizeAuditData(data),
+    };
+    await this.store.appendEvent(event);
+    this.events.emit(playtestId, event);
+    return event;
+  }
+
+  private async serializeMutation<T>(playtestId: string, operation: () => Promise<T>): Promise<T> {
+    return this.mutations.run(playtestId, operation);
+  }
+}

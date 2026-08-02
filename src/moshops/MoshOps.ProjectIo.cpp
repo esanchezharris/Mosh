@@ -22,6 +22,9 @@
 #include "engine/RenderArtifacts.h"
 #include "multiplayer/LogicalId.h"
 #include <thread>
+#if JUCE_MAC
+ #include <sys/stat.h>
+#endif
 
 namespace mosh
 {
@@ -1579,6 +1582,60 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("file", eng.editFile().getFullPathName());
     return okResult ("save_as", var (data));
+}
+
+juce::var MoshOps::cmdCreateRepairCheckpoint (const juce::var& args)
+{
+    if (eng.edit().getTransport().isRecording())
+        return errResult ("create_repair_checkpoint", "stop recording before launching a repair build");
+
+    // Tracktion edit files may refer to source media relative to their own directory.
+    // A checkpoint in a central Library folder therefore opens successfully while its
+    // clips silently lose `audio/...` sources. Keep the checkpoint beside the active
+    // edit so repair and rollback launches resolve the exact same relative media tree.
+    const auto activeProject = eng.editFile();
+    const auto directory = activeProject.getParentDirectory();
+    if (! directory.isDirectory())
+        return errResult ("create_repair_checkpoint", "project directory is unavailable");
+
+    const auto token = String::toHexString (Time::currentTimeMillis()) + "-"
+        + String::toHexString (Random::getSystemRandom().nextInt64());
+    const auto checkpoint = directory.getNonexistentChildFile (
+        activeProject.getFileNameWithoutExtension() + ".mosh-repair-checkpoint-" + token,
+        ".tracktionedit", false);
+    if (! tracktion::engine::EditFileOperations (eng.edit()).writeToFile (checkpoint, false))
+    {
+        checkpoint.deleteFile();
+        return errResult ("create_repair_checkpoint", "repair checkpoint save failed");
+    }
+   #if JUCE_MAC
+    if (::chmod (checkpoint.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) != 0)
+    {
+        checkpoint.deleteFile();
+        return errResult ("create_repair_checkpoint", "could not secure repair checkpoint");
+    }
+   #endif
+
+    auto* data = new DynamicObject();
+    data->setProperty ("checkpointPath", checkpoint.getFullPathName());
+    data->setProperty ("priorAppPath", File::getSpecialLocation (File::currentApplicationFile).getFullPathName());
+    logLine ("create_repair_checkpoint", args, true, {}, false);
+    return okResult ("create_repair_checkpoint", var (data));
+}
+
+juce::var MoshOps::cmdReleaseAudioDevice (const juce::var& args)
+{
+    const auto failure = eng.releaseAudioDeviceForRepair();
+    if (failure.isNotEmpty())
+    {
+        logLine ("release_audio_device", args, false, failure, false);
+        return errResult ("release_audio_device", failure);
+    }
+    logLine ("release_audio_device", args, true, {}, false);
+    emitSnapshotInvalidated();
+    auto* data = new DynamicObject();
+    data->setProperty ("audioEnabled", eng.hasAudio());
+    return okResult ("release_audio_device", var (data));
 }
 
 } // namespace mosh

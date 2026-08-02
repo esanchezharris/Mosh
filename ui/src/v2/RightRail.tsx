@@ -6,6 +6,7 @@
 // fallback ladder. Video tiles land in the collaborators slice.
 
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { Moshi } from "../ui/Moshi";
@@ -19,17 +20,38 @@ import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
 import type { Plugin } from "../types";
+import { canLaunchRepair, ownerCockpitRuntime, useOwnerCockpit } from "../agent/ownerCockpitRuntime";
+import { useSettings } from "../settings/store";
+import { ping } from "../bridge";
 
 export function RightRail() {
   const open = useShell((s) => s.rightOpen);
   const setOpen = useShell((s) => s.setRightOpen);
   const toggle = useShell((s) => s.toggleRight);
+  const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
+  const [repairSourceSha, setRepairSourceSha] = useState<string | null>(null);
+  // This runs even while the rail is collapsed. A signed swap must resume its
+  // durable owner playtest without requiring the owner to reopen a panel first.
+  useEffect(() => {
+    void ping()
+      .then((info) => {
+        setRepairSourceSha(info.repairSourceSha ?? null);
+        if (info.repairId)
+          void ownerCockpitRuntime.resumeInstalledRepairSession(info.repairId).catch(() => undefined);
+        else if (info.rolledBackRepairId && info.rolledBackRepairBuildPath)
+          void ownerCockpitRuntime.resumeRolledBackRepairSession(
+            info.rolledBackRepairId,
+            info.rolledBackRepairBuildPath,
+          ).catch(() => undefined);
+      })
+      .catch((error: unknown) => ownerCockpitRuntime.surfaceStartupOutage(error));
+  }, [ownerCockpitEnabled]);
 
   return (
     <div className={`v2-dock v2-dock-right${open ? " open" : ""}`} data-testid="v2-right-dock">
       {open ? (
         <aside className="v2-rail" data-testid="v2-rail">
-          <MoshCard onCollapse={() => setOpen(false)} />
+          <MoshCard onCollapse={() => setOpen(false)} repairSourceSha={repairSourceSha} />
           <Inspector />
           <MasterCard />
           <CollaboratorsCard />
@@ -46,7 +68,11 @@ export function RightRail() {
   );
 }
 
-function MoshCard({ onCollapse }: { onCollapse: () => void }) {
+function MoshCard({ onCollapse, repairSourceSha }: {
+  onCollapse: () => void;
+  repairSourceSha: string | null;
+}) {
+  const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
   return (
     <section className="v2-card v2-mosh-card" data-testid="v2-mosh-card">
       <div className="v2-card-head">
@@ -59,7 +85,104 @@ function MoshCard({ onCollapse }: { onCollapse: () => void }) {
       </div>
       <div className="v2-mosh-stage"><Moshi /></div>
       <MoshStatusLine />
+      {ownerCockpitEnabled && <OwnerCockpitCard repairSourceSha={repairSourceSha} />}
     </section>
+  );
+}
+
+export function OwnerCockpitCard({ repairSourceSha = null }: { repairSourceSha?: string | null }) {
+  const state = useOwnerCockpit();
+  const playing = useStore((store) => store.transport.playing);
+  const active = state.status === "active";
+  const busy = state.status === "starting" || state.status === "closing";
+  useEffect(() => {
+    if (!playing && state.pendingNotes > 0) ownerCockpitRuntime.flushQuietReports();
+  }, [playing, state.pendingNotes]);
+  const style = active
+    ? ({ "--v2-accent": "var(--v2-accent-agentic)" } as CSSProperties & Record<"--v2-accent", string>)
+    : undefined;
+  return (
+    <div className="v2-owner-cockpit" data-testid="v2-owner-cockpit" data-active={active} style={style}>
+      <div className="v2-owner-row">
+        <strong>Owner playtest</strong>
+        <span role="status" aria-live="polite">{state.status}</span>
+      </div>
+      {repairSourceSha && (
+        <div className="v2-owner-alert" role="status" data-testid="v2-repair-banner">
+          Repair build {repairSourceSha.slice(0, 8)} · rollback remains available
+        </div>
+      )}
+      <div className="v2-owner-actions">
+        {!active ? (
+          <button type="button" className="v2-btn" disabled={busy}
+            onClick={() => void ownerCockpitRuntime.start().catch(() => undefined)}>
+            Start
+          </button>
+        ) : (
+          <button type="button" className="v2-btn" disabled={busy}
+            onClick={() => void ownerCockpitRuntime.close().catch(() => undefined)}>
+            Close
+          </button>
+        )}
+        <label>
+          <input type="checkbox" checked={state.retainTranscript}
+            onChange={(event) => ownerCockpitRuntime.setRetainTranscript(event.currentTarget.checked)} />
+          Retain transcript
+        </label>
+      </div>
+      {state.disclosure && (
+        <div className="v2-owner-disclosure" role="status" aria-live="polite" data-testid="v2-trace-disclosure">
+          {state.disclosure}
+        </div>
+      )}
+      {state.lastEvent && <div className="v2-owner-event" role="status" aria-live="polite">{state.lastEvent}</div>}
+      {state.error && <div className="v2-owner-error" role="alert">{state.error}</div>}
+      {state.repair && (
+        <div className="v2-owner-actions" data-testid="v2-repair-controls">
+          <span>Repair: {state.repair.status.replace(/_/g, " ")}</span>
+          {canLaunchRepair(state.repair.status) && (
+            <button type="button" className="v2-btn"
+              onClick={() => void ownerCockpitRuntime.launchRepair().catch(() => undefined)}>
+              Launch Repair
+            </button>
+          )}
+          {(state.repair.status === "repair_running" || state.repair.status === "failed") && (
+            <button type="button" className="v2-btn"
+              onClick={() => void ownerCockpitRuntime.rollbackRepair().catch(() => undefined)}>
+              Roll Back
+            </button>
+          )}
+        </div>
+      )}
+      {state.urgentMessage && (
+        <div className="v2-owner-alert" role="alert">
+          <span>{state.urgentMessage}</span>
+          <button type="button" className="v2-btn icon" aria-label="Dismiss report alert"
+            onClick={() => ownerCockpitRuntime.clearUrgent()}>×</button>
+        </div>
+      )}
+      {state.reports.length > 0 && (
+        <div className="v2-owner-inbox" aria-label="Report approval inbox" data-testid="v2-report-inbox">
+          <strong>Approval inbox</strong>
+          {state.reports.map((report) => (
+            <div className="v2-owner-report" key={report.id}>
+              <span><b>{report.kind}</b> {report.title}</span>
+              <button type="button" className="v2-btn"
+                disabled={report.status === "approved"}
+                onClick={() => void ownerCockpitRuntime.approve(report.id).catch(() => undefined)}>
+                {report.status === "draft" ? "Approve" : report.status === "approved_pending_sync" ? "Retry Sync" : "Approved"}
+              </button>
+              {report.kind !== "note" && report.status === "approved" && (
+                <button type="button" className="v2-btn"
+                  onClick={() => void ownerCockpitRuntime.fixNow(report.id).catch(() => undefined)}>
+                  Fix Now
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

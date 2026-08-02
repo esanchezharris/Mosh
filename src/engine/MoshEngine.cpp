@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "OwnerCheckpointSave.h"
 #include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
@@ -8,6 +9,9 @@
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
+#if JUCE_MAC
+ #include <sys/stat.h>
+#endif
 
 namespace mosh
 {
@@ -525,6 +529,23 @@ juce::String MoshEngine::retryAudioDevice()
     return {};
 }
 
+juce::String MoshEngine::releaseAudioDeviceForRepair()
+{
+    auto& transport = edit().getTransport();
+    if (transport.isRecording())
+        return "stop recording before launching a repair build";
+
+    transport.stop (false, false);
+    transport.freePlaybackContext();
+    if (audioOpen)
+        enginePtr->getDeviceManager().deviceManager.closeAudioDevice();
+    audioOpen = false;
+    audioWanted = false;
+    inputsConfigured = false;
+    audioError = "audio device released for repair handoff";
+    return {};
+}
+
 juce::File MoshEngine::generateTestTone (double seconds, double freqHz, const juce::String& name)
 {
     auto file = session.getChildFile ("audio")
@@ -579,7 +600,29 @@ bool MoshEngine::save()
         return false;
 
     stampFormatVersion();                  // PRJ-FMT — always current on disk
-    const bool ok = te::EditFileOperations (edit()).save (false, true, false);
+    const bool isOwnerCheckpoint = ! ownerCheckpointPath.getFullPathName().isEmpty()
+        && editPath == ownerCheckpointPath;
+    bool wrote = false;
+    if (isOwnerCheckpoint)
+    {
+        te::CustomControlSurface::saveAllSettings (*enginePtr);
+        edit().getParameterControlMappings().saveToEdit();
+        wrote = ownercheckpoint::savePrivateReplacement (
+            editPath, [this] (const juce::File& staged)
+            {
+                return te::EditFileOperations (edit()).writeToFile (staged, false);
+            });
+    }
+    else
+    {
+        wrote = te::EditFileOperations (edit()).save (false, true, false);
+    }
+    if (wrote && isOwnerCheckpoint)
+    {
+        edit().resetChangedStatus();
+        enginePtr->getEngineBehaviour().editHasBeenSaved (edit(), editPath);
+    }
+    const bool ok = wrote && enforceOwnerCheckpointPermissions();
     if (ok)
     {
         dirty = false;                     // on-disk now matches in-memory (gap 1)
@@ -590,6 +633,33 @@ bool MoshEngine::save()
         session.getChildFile ("recovery-journal.jsonl").deleteFile();
     }
     return ok;
+}
+
+bool MoshEngine::protectOwnerCheckpoint (const juce::File& file)
+{
+    if (! file.existsAsFile() || file.isSymbolicLink()
+        || ! file.getFileName().contains (".mosh-repair-checkpoint-")
+        || file.getFileExtension() != ".tracktionedit")
+        return false;
+
+   #if JUCE_MAC
+    if (::chmod (file.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) != 0)
+        return false;
+   #endif
+    ownerCheckpointPath = file;
+    return editPath != ownerCheckpointPath || enforceOwnerCheckpointPermissions();
+}
+
+bool MoshEngine::enforceOwnerCheckpointPermissions() const
+{
+    if (ownerCheckpointPath.getFullPathName().isEmpty() || editPath != ownerCheckpointPath)
+        return true;
+
+   #if JUCE_MAC
+    return ::chmod (editPath.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) == 0;
+   #else
+    return true;
+   #endif
 }
 
 // gap 1 — unsaved-changes flag. markDirty on every mutation; cleared on a successful
@@ -829,7 +899,8 @@ juce::String MoshEngine::openProject (const juce::File& file)
     editPtr->getTransport().freePlaybackContext();
     editPtr = std::move (fresh);
     adoptEditFile (file);
-    save();                                  // gap 2 — parity with newProject: persist on adopt (also clears dirty)
+    if (! save())                            // gap 2 — parity with newProject: persist on adopt (also clears dirty)
+        return "project could not be saved securely";
     rememberProject (file);                  // gap 2 — record as last/recent project
     return {};
 }

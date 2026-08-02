@@ -58,21 +58,23 @@ export type TaskUi = {
   utter(intent: string, say?: string): void;
 };
 
+const BRAIN_UNAVAILABLE_SAY = "can't reach my brain — check setup and try again";
+
 const END_UTTER: Record<LoopRun["outcome"], { intent: string; fallback?: string }> = {
   done: { intent: "DONE" },
   need_user: { intent: "HUH" },
   budget: { intent: "UHOH", fallback: "ran out of road — want me to keep going?" },
+  unavailable: { intent: "UHOH", fallback: BRAIN_UNAVAILABLE_SAY },
   error: { intent: "UHOH", fallback: "hmm — that broke partway" },
   aborted: { intent: "IDLE_MURMUR", fallback: "stopped — kept what's done" },
 };
-const BRAIN_UNAVAILABLE_SAY = "can't reach my brain — check setup and try again";
 
 async function chatWithFallback(messages: ChatMessage[]): Promise<{ content: string; ms?: number }> {
   try {
     return await brainChat(messages);
   } catch {
     if (demoBrainAvailable()) return mockLoopChat(messages);
-    throw new Error(BRAIN_UNAVAILABLE_SAY);
+    throw new Error("brain unavailable");
   }
 }
 
@@ -114,7 +116,7 @@ export async function runLoopTask(text: string, ui: TaskUi): Promise<LoopRun> {
   }).catch(() => { /* archival must never affect the task */ });
 
   const end = END_UTTER[run.outcome];
-  const sayText = run.say ?? (run.error?.includes(BRAIN_UNAVAILABLE_SAY) ? BRAIN_UNAVAILABLE_SAY : end.fallback);
+  const sayText = run.say ?? end.fallback;
   ui.say(sayText ?? null);
   ui.utter(end.intent, sayText);
   return run;

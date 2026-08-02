@@ -44,7 +44,7 @@ describe("runLoopTask provider failures", () => {
     });
 
     await useStore.getState().refresh();
-    expect(run.outcome).toBe("error");
+    expect(run.outcome).toBe("unavailable");
     expect(run.stepCount).toBe(0);
     expect(JSON.stringify(snapshot())).toBe(before);
     expect(says.at(-1)).toBe("can't reach my brain — check setup and try again");

@@ -155,11 +155,43 @@ juce::var RemoteCompanionServer::startLabFeed (const juce::String& token)
     return ok (juce::var (data));
 }
 
+juce::var RemoteCompanionServer::startOwnerControl (const juce::String& token)
+{
+    if (token.isEmpty())
+        return err ("owner control token is required");
+
+    const juce::ScopedLock sl (lock);
+    if (running && ! ownerControl)
+        return err ("remote companion server is already running");
+    if (! running)
+    {
+        listener = std::make_unique<juce::StreamingSocket>();
+        if (! listener->createListener (0, "127.0.0.1"))
+        {
+            listener.reset();
+            return err ("could not start owner control server");
+        }
+        port = listener->getBoundPort();
+        running = true;
+        ownerControl = true;
+        startThread();
+    }
+
+    protocol.beginPairing ("127.0.0.1", port, juce::Time::currentTimeMillis(),
+                           token, 24 * 60 * 60 * 1000LL);
+    auto* data = new juce::DynamicObject();
+    data->setProperty ("running", true);
+    data->setProperty ("port", port);
+    data->setProperty ("origin", "http://127.0.0.1:" + juce::String (port));
+    return ok (juce::var (data));
+}
+
 juce::var RemoteCompanionServer::stopServer()
 {
     {
         const juce::ScopedLock sl (lock);
         running = false;
+        ownerControl = false;
         protocol.clearPairing();
         stopBonjour();
         if (listener != nullptr)
@@ -241,7 +273,12 @@ void RemoteCompanionServer::handleClient (std::unique_ptr<juce::StreamingSocket>
         return;
     }
 
-    if (request.method == "GET" && request.path == "/web")
+    bool isOwnerControl = false;
+    {
+        const juce::ScopedLock sl (lock);
+        isOwnerControl = ownerControl;
+    }
+    if (! isOwnerControl && request.method == "GET" && request.path == "/web")
     {
         writeTextResponse (*client, 200, "text/html; charset=utf-8", webCompanionHtml());
         return;
@@ -255,7 +292,12 @@ void RemoteCompanionServer::handleClient (std::unique_ptr<juce::StreamingSocket>
 
 juce::var RemoteCompanionServer::handleRequest (const Request& request)
 {
-    if (request.method == "GET" && request.path == "/web")
+    bool isOwnerControl = false;
+    {
+        const juce::ScopedLock sl (lock);
+        isOwnerControl = ownerControl;
+    }
+    if (! isOwnerControl && request.method == "GET" && request.path == "/web")
     {
         auto* data = new juce::DynamicObject();
         data->setProperty ("html", webCompanionHtml());
@@ -269,9 +311,12 @@ juce::var RemoteCompanionServer::handleRequest (const Request& request)
     if (body.isVoid())
         return err ("invalid json");
 
-    const auto auth = authorizeRequest (body);
+    const auto auth = authorizeRequest (request, body);
     if (! auth.ok)
         return err (auth.error);
+
+    if (isOwnerControl && request.path != "/snapshot" && request.path != "/command")
+        return err ("unknown owner control endpoint");
 
     if (request.method == "POST" && request.path == "/snapshot")
         return ok (callOnMessageThread ([this] { return snapshotProvider ? snapshotProvider() : juce::var(); }));
@@ -814,9 +859,10 @@ juce::var RemoteCompanionServer::callOnMessageThread (const std::function<juce::
     return shared->result;
 }
 
-RemoteAuthResult RemoteCompanionServer::authorizeRequest (const juce::var& body) const
+RemoteAuthResult RemoteCompanionServer::authorizeRequest (const Request& request,
+                                                          const juce::var& body) const
 {
-    const auto token = propString (body, "token");
+    const auto token = request.authToken.isNotEmpty() ? request.authToken : propString (body, "token");
     const juce::ScopedLock sl (lock);
     return protocol.authorize (token, juce::Time::currentTimeMillis());
 }

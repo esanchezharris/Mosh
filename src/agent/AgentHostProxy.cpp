@@ -1,0 +1,674 @@
+#include "AgentHostProxy.h"
+#include "../remote/RemoteCompanionServer.h"
+#include "../util/Env.h"
+
+#if JUCE_MAC
+#include <Security/Security.h>
+#endif
+
+namespace mosh
+{
+namespace
+{
+    constexpr int kStartupTimeoutMs = 10000;
+    constexpr int kRequestTimeoutMs = 12000;
+    constexpr auto kHandoffPlaytestEnvironment = "MOSH_OWNER_PLAYTEST_HANDOFF_ID";
+    constexpr auto kResumePlaytestEnvironment = "MOSH_OWNER_PLAYTEST_RESUME_ID";
+    constexpr auto kRepairHelperIdentifier = "MoshRepairHelper";
+
+    struct SigningIdentity
+    {
+        juce::String identifier;
+        juce::String team;
+    };
+
+#if JUCE_MAC
+    class CfReleaseGuard
+    {
+    public:
+        explicit CfReleaseGuard (CFTypeRef valueToRelease) noexcept
+            : value (valueToRelease) {}
+
+        ~CfReleaseGuard()
+        {
+            if (value != nullptr)
+                CFRelease (value);
+        }
+
+        CfReleaseGuard (const CfReleaseGuard&) = delete;
+        CfReleaseGuard& operator= (const CfReleaseGuard&) = delete;
+
+    private:
+        CFTypeRef value;
+    };
+
+    juce::String cfString (CFTypeRef value)
+    {
+        if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
+            return {};
+        const auto text = static_cast<CFStringRef> (value);
+        const auto maximum = CFStringGetMaximumSizeForEncoding (
+            CFStringGetLength (text), kCFStringEncodingUTF8) + 1;
+        juce::HeapBlock<char> buffer (static_cast<size_t> (maximum));
+        if (! CFStringGetCString (text, buffer.get(), maximum, kCFStringEncodingUTF8))
+            return {};
+        return juce::String::fromUTF8 (buffer.get());
+    }
+
+    std::optional<SigningIdentity> guestSigningIdentity (int senderPid)
+    {
+        if (senderPid <= 1)
+            return std::nullopt;
+        const auto rawPid = senderPid;
+        const auto rawNumber = CFNumberCreate (
+            kCFAllocatorDefault, kCFNumberIntType, &rawPid);
+        if (rawNumber == nullptr)
+            return std::nullopt;
+        const CfReleaseGuard releaseNumber (rawNumber);
+        const void* keys[] = { kSecGuestAttributePid };
+        const void* values[] = { rawNumber };
+        const auto rawAttributes = CFDictionaryCreate (
+            kCFAllocatorDefault, keys, values, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        if (rawAttributes == nullptr)
+            return std::nullopt;
+        const CfReleaseGuard releaseAttributes (rawAttributes);
+        SecCodeRef rawCode = nullptr;
+        if (SecCodeCopyGuestWithAttributes (
+                nullptr, rawAttributes, kSecCSDefaultFlags, &rawCode) != errSecSuccess)
+            return std::nullopt;
+        const CfReleaseGuard releaseCode (rawCode);
+        if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
+            return std::nullopt;
+        CFDictionaryRef rawInformation = nullptr;
+        if (SecCodeCopySigningInformation (
+                rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
+            return std::nullopt;
+        const CfReleaseGuard releaseInformation (rawInformation);
+        return SigningIdentity {
+            cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoIdentifier)),
+            cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier)),
+        };
+    }
+#endif
+
+    juce::var error (const juce::String& message = "agent host unavailable",
+                     const juce::String& code = {},
+                     bool retryable = true)
+    {
+        auto* value = new juce::DynamicObject();
+        value->setProperty ("ok", false);
+        value->setProperty ("error", message);
+        if (code.isNotEmpty()) value->setProperty ("code", code);
+        value->setProperty ("retryable", retryable);
+        return juce::var (value);
+    }
+
+    juce::File appResource (const juce::String& relative)
+    {
+        return juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+            .getChildFile ("Contents/Resources")
+            .getChildFile (relative);
+    }
+
+    juce::String currentSigningTeam()
+    {
+#if JUCE_MAC
+        SecCodeRef rawCode = nullptr;
+        if (SecCodeCopySelf (kSecCSDefaultFlags, &rawCode) != errSecSuccess)
+            return {};
+        const CfReleaseGuard releaseCode (rawCode);
+        if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
+            return {};
+        CFDictionaryRef rawInformation = nullptr;
+        if (SecCodeCopySigningInformation (
+                rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
+            return {};
+        const CfReleaseGuard releaseInformation (rawInformation);
+        const auto value = CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier);
+        if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
+            return {};
+        char buffer[128] {};
+        if (! CFStringGetCString (static_cast<CFStringRef> (value), buffer,
+                                  sizeof (buffer), kCFStringEncodingUTF8))
+            return {};
+        return juce::String::fromUTF8 (buffer);
+#else
+        return {};
+#endif
+    }
+}
+
+AgentHostProxy::AgentHostProxy (RemoteCompanionServer* ownerControl)
+    : resumePlaytestId (juce::SystemStats::getEnvironmentVariable (
+          kResumePlaytestEnvironment, {})),
+      ownerControlServer (ownerControl)
+{
+    // A repair launch consumes this one-shot handoff value. Leaving it in the
+    // replacement process would allow a later, unrelated proxy restart to
+    // attach to an old playtest.
+    mosh::unsetEnvVar (kResumePlaytestEnvironment);
+}
+
+AgentHostProxy::~AgentHostProxy()
+{
+    const juce::ScopedLock guard (lock);
+    stop();
+}
+
+std::optional<AgentHostProxy::StartupEnvelope> AgentHostProxy::parseStartupEnvelope (const juce::String& line)
+{
+    const auto value = juce::JSON::parse (line);
+    if (! value.isObject()
+        || value.getProperty ("type", juce::var()).toString() != "mosh.agent-host.ready"
+        || (int) value.getProperty ("version", 0) != 1)
+        return std::nullopt;
+
+    StartupEnvelope envelope {
+        value.getProperty ("host", juce::var()).toString(),
+        (int) value.getProperty ("port", 0),
+        value.getProperty ("capability", juce::var()).toString(),
+    };
+    if (envelope.host != "127.0.0.1" || envelope.port <= 0 || envelope.port > 65535
+        || envelope.capability.isEmpty())
+        return std::nullopt;
+    return envelope;
+}
+
+juce::var AgentHostProxy::parseHostFailure (const juce::var& response,
+                                            const juce::String& fallbackMessage,
+                                            const juce::String& fallbackCode,
+                                            int statusCode)
+{
+    const auto hostError = response.getProperty ("error", juce::var());
+    const auto message = hostError.getProperty ("message", fallbackMessage).toString();
+    const auto code = hostError.getProperty ("code", fallbackCode).toString();
+    return error (message.isNotEmpty() ? message : fallbackMessage,
+                  code.isNotEmpty() ? code : fallbackCode,
+                  statusCode >= 500);
+}
+
+juce::File AgentHostProxy::locateEntry() const
+{
+    if (const auto configured = juce::SystemStats::getEnvironmentVariable ("MOSH_AGENT_HOST_ENTRY", {});
+        configured.isNotEmpty())
+    {
+        juce::File entry (configured);
+        if (entry.existsAsFile()) return entry;
+    }
+
+    // Deployed apps use the deterministic bundle first. The development checkout
+    // fallback stays useful for a source-tree executable but cannot mask a missing
+    // packaged runtime in a built app.
+    auto bundled = appResource ("agent-host/agent-host.mjs");
+    if (bundled.existsAsFile()) return bundled;
+
+    auto dev = juce::File::getCurrentWorkingDirectory().getChildFile ("service/agent-host/src/main.ts");
+    if (dev.existsAsFile()) return dev;
+    return {};
+}
+
+void AgentHostProxy::stop()
+{
+    const auto handoffPlaytestId = juce::SystemStats::getEnvironmentVariable (
+        kHandoffPlaytestEnvironment, {});
+    const auto preservePlaytest = handoffTerminationConfirmed && playtestId.isNotEmpty()
+        && handoffPlaytestId == playtestId;
+    if (process.isRunning() && origin.isNotEmpty() && capability.isNotEmpty()
+        && playtestId.isNotEmpty() && ! preservePlaytest)
+    {
+        auto* request = new juce::DynamicObject();
+        request->setProperty ("retainTranscript", retainTranscript);
+        int ignoredStatus = 0;
+        post ("/v1/playtests/" + playtestId + "/close", juce::var (request), ignoredStatus);
+    }
+    // The marker is process-local handoff intent, never durable state. Once this
+    // proxy actually stops, discard it regardless of whether an older failure
+    // left a mismatched value behind.
+    mosh::unsetEnvVar (kHandoffPlaytestEnvironment);
+    if (process.isRunning())
+    {
+        process.kill();
+        // ChildProcess::kill() signals only; wait briefly so its direct Node child
+        // is reaped before this proxy can be destroyed or restarted.
+        process.waitForProcessToFinish (1000);
+    }
+    origin.clear();
+    capability.clear();
+    playtestId.clear();
+    retainTranscript = false;
+    disclosureDelivered = false;
+    handoffTerminationConfirmed = false;
+    if (ownerControlServer != nullptr)
+        ownerControlServer->stopServer();
+}
+
+bool AgentHostProxy::ensureStarted()
+{
+    if (origin.isNotEmpty() && capability.isNotEmpty() && process.isRunning())
+        return true;
+
+    // A crashed helper process must not silently fork the owner's context into
+    // a fresh playtest. Reattach the replacement host to the durable active id.
+    const auto interruptedPlaytestId = ! process.isRunning() ? playtestId : juce::String();
+    stop();
+    if (interruptedPlaytestId.isNotEmpty())
+        resumePlaytestId = interruptedPlaytestId;
+    const auto entry = locateEntry();
+    if (! entry.existsAsFile()) return false;
+
+    juce::String ownerControlOrigin;
+    if (ownerControlServer != nullptr)
+    {
+        auto& random = juce::Random::getSystemRandom();
+        const auto bootstrapToken = juce::String::toHexString (random.nextInt64())
+            + juce::String::toHexString (random.nextInt64());
+        const auto control = ownerControlServer->startOwnerControl (bootstrapToken);
+        if (! (bool) control.getProperty ("ok", false)) return false;
+        ownerControlOrigin = control.getProperty ("data", juce::var())
+            .getProperty ("origin", juce::var()).toString();
+        if (ownerControlOrigin.isEmpty()) return false;
+    }
+
+    juce::StringArray command;
+    // `/usr/bin/env PORT=0 …` supplies no secret through argv. The Agent Host
+    // generates its capability and prints one startup envelope that is consumed
+    // below into this native object's memory only.
+    command.addArray ({ "/usr/bin/env", "PORT=0" });
+    if (ownerControlOrigin.isNotEmpty())
+        command.add ("MOSH_REPAIR_CONTROL_URL=" + ownerControlOrigin);
+    const auto helper = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+        .getChildFile ("Contents/Helpers/MoshRepairHelper");
+    if (helper.existsAsFile())
+    {
+        command.add ("MOSH_REPAIR_CONTROL_HELPER=" + helper.getFullPathName());
+        if (const auto team = currentSigningTeam(); team.isNotEmpty())
+            command.add ("MOSH_REPAIR_CONTROL_TEAM_ID=" + team);
+    }
+    command.add ("node");
+    if (entry.hasFileExtension (".ts"))
+    {
+        const auto hostRoot = entry.getParentDirectory().getParentDirectory(); // src/main.ts -> agent-host
+        const auto tsxDist = hostRoot.getChildFile ("node_modules/tsx/dist");
+        const auto preflight = tsxDist.getChildFile ("preflight.cjs");
+        const auto loader = tsxDist.getChildFile ("loader.mjs");
+        if (! preflight.existsAsFile() || ! loader.existsAsFile()) return false;
+        // Do not invoke node_modules/.bin/tsx: it forks the real Node host, which
+        // would escape ChildProcess::kill() on app shutdown. Loading tsx directly
+        // makes this tracked child the HTTP server and gives stop() full ownership.
+        command.addArray ({ "--require", preflight.getFullPathName(), "--import",
+                            "file://" + loader.getFullPathName() });
+    }
+    command.add (entry.getFullPathName());
+    if (! process.start (command, juce::ChildProcess::wantStdOut)) return false;
+
+    juce::String line;
+    const auto deadline = juce::Time::getMillisecondCounter() + kStartupTimeoutMs;
+    while (process.isRunning() && juce::Time::getMillisecondCounter() < deadline)
+    {
+        char character = 0;
+        const auto read = process.readProcessOutput (&character, 1);
+        // A process can be alive before its stdout pipe has a complete line. Do
+        // not mistake that transient zero-byte read for startup failure: tolerate
+        // it until the deadline (or a real child exit) so slow Node/tsx startup is
+        // still bounded by kStartupTimeoutMs.
+        if (read <= 0)
+        {
+            if (! process.isRunning()) break;
+            juce::Thread::sleep (10);
+            continue;
+        }
+        if (character != '\n')
+        {
+            if (line.length() < 4096) line += juce::String::charToString (character);
+            continue;
+        }
+        if (const auto envelope = parseStartupEnvelope (line))
+        {
+            origin = "http://127.0.0.1:" + juce::String (envelope->port);
+            capability = envelope->capability;
+            if (ownerControlServer != nullptr)
+            {
+                const auto control = ownerControlServer->startOwnerControl (capability);
+                if (! (bool) control.getProperty ("ok", false))
+                {
+                    origin.clear();
+                    capability.clear();
+                }
+            }
+            break;
+        }
+        line.clear();
+    }
+    if (origin.isEmpty() || capability.isEmpty())
+    {
+        stop();
+        return false;
+    }
+
+    return true;
+}
+
+bool AgentHostProxy::ensurePlaytest()
+{
+    const auto requestedRetention = retainTranscript;
+    if (! ensureStarted()) return false;
+    retainTranscript = requestedRetention;
+    if (playtestId.isNotEmpty()) return true;
+    int statusCode = 0;
+    if (resumePlaytestId.isNotEmpty())
+    {
+        auto* request = new juce::DynamicObject();
+        request->setProperty ("retainTranscript", retainTranscript);
+        const auto resumed = post ("/v1/playtests/" + resumePlaytestId + "/resume",
+                                   juce::var (request), statusCode);
+        if (statusCode != 200
+            || resumed.getProperty ("status", juce::var()).toString() != "active")
+            return false;
+        playtestId = resumePlaytestId;
+        resumePlaytestId.clear();
+        // The hosted-trace disclosure is once per playtest, not once per app
+        // process. The outgoing process already displayed it before handoff.
+        disclosureDelivered = true;
+        return true;
+    }
+    auto* request = new juce::DynamicObject();
+    request->setProperty ("retainTranscript", retainTranscript);
+    const auto playtest = post ("/v1/playtests", juce::var (request), statusCode);
+    playtestId = playtest.getProperty ("id", juce::var()).toString();
+    disclosureDelivered = false;
+    return statusCode == 201 && playtestId.isNotEmpty();
+}
+
+juce::var AgentHostProxy::post (const juce::String& path, const juce::var& body, int& statusCode) const
+{
+    juce::StringArray headers;
+    headers.add ("Content-Type: application/json");
+    headers.add ("Authorization: Bearer " + capability);
+    const auto url = juce::URL (origin + path).withPOSTData (juce::JSON::toString (body));
+    const auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inPostData)
+        .withConnectionTimeoutMs (kRequestTimeoutMs)
+        .withExtraHeaders (headers.joinIntoString ("\r\n"))
+        .withStatusCode (&statusCode);
+    const auto stream = url.createInputStream (options);
+    if (stream == nullptr) return {};
+    return juce::JSON::parse (stream->readEntireStreamAsString());
+}
+
+juce::String AgentHostProxy::getEventStream (const juce::String& path, int& statusCode) const
+{
+    juce::StringArray headers;
+    headers.add ("Authorization: Bearer " + capability);
+    const auto options = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+        .withConnectionTimeoutMs (kRequestTimeoutMs)
+        .withExtraHeaders (headers.joinIntoString ("\r\n"))
+        .withStatusCode (&statusCode);
+    const auto stream = juce::URL (origin + path).createInputStream (options);
+    if (stream == nullptr) return {};
+    return stream->readEntireStreamAsString();
+}
+
+juce::var AgentHostProxy::sessionResult (bool disclosureRequired) const
+{
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("active", playtestId.isNotEmpty());
+    result->setProperty ("retainTranscript", retainTranscript);
+    result->setProperty ("disclosureRequired", disclosureRequired);
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::startPlaytest (bool shouldRetain)
+{
+    const juce::ScopedLock guard (lock);
+    retainTranscript = shouldRetain;
+    if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto persisted = juce::JSON::parse (getEventStream (
+        "/v1/playtests/" + playtestId + "/reports", statusCode));
+    if (statusCode != 200 || ! persisted.isArray())
+        return error ("report recovery unavailable", "report_recovery_failed", true);
+    juce::Array<juce::var> reports;
+    for (const auto& candidate : *persisted.getArray())
+    {
+        if (! candidate.isObject())
+            return error ("invalid recovered report", "invalid_response", false);
+        auto* report = new juce::DynamicObject();
+        report->setProperty ("id", candidate.getProperty ("id", juce::var()));
+        report->setProperty ("kind", candidate.getProperty ("kind", juce::var()));
+        report->setProperty ("title", candidate.getProperty ("title", juce::var()));
+        report->setProperty ("body", candidate.getProperty ("body", juce::var()));
+        report->setProperty ("status", candidate.getProperty ("status", juce::var()));
+        reports.add (juce::var (report));
+    }
+    const auto disclosure = ! disclosureDelivered;
+    disclosureDelivered = true;
+    auto result = sessionResult (disclosure);
+    result.getDynamicObject()->setProperty ("reports", juce::var (reports));
+    return result;
+}
+
+juce::var AgentHostProxy::closePlaytest (bool shouldRetain)
+{
+    const juce::ScopedLock guard (lock);
+    retainTranscript = shouldRetain;
+    if (playtestId.isEmpty()) return sessionResult (false);
+    if (! ensureStarted()) return error();
+    auto* request = new juce::DynamicObject();
+    request->setProperty ("retainTranscript", shouldRetain);
+    int statusCode = 0;
+    const auto result = post ("/v1/playtests/" + playtestId + "/close", juce::var (request), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! result.isObject()) return error();
+    mosh::unsetEnvVar (kHandoffPlaytestEnvironment);
+    playtestId.clear();
+    disclosureDelivered = false;
+    return sessionResult (false);
+}
+
+juce::var AgentHostProxy::realtimeSecret()
+{
+    const juce::ScopedLock guard (lock);
+    if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto result = post ("/v1/realtime/client-secret", juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! result.isObject())
+        return error ("OpenAI Realtime unavailable",
+                      result.getProperty ("error", juce::var()).getProperty ("code", juce::var()).toString());
+    auto* response = new juce::DynamicObject();
+    response->setProperty ("ok", true);
+    response->setProperty ("value", result.getProperty ("value", juce::var()));
+    response->setProperty ("expiresAt", result.getProperty ("expires_at", juce::var()));
+    return juce::var (response);
+}
+
+bool AgentHostProxy::hasActivePlaytest() const
+{
+    const juce::ScopedLock guard (lock);
+    return playtestId.isNotEmpty()
+        && origin.isNotEmpty()
+        && capability.isNotEmpty()
+        && process.isRunning();
+}
+
+void AgentHostProxy::confirmHandoffTermination (int senderPid)
+{
+    const juce::ScopedLock guard (lock);
+    handoffTerminationConfirmed = false;
+#if JUCE_MAC
+    const auto sender = guestSigningIdentity (senderPid);
+    const auto team = currentSigningTeam();
+    if (! sender.has_value()
+        || sender->identifier != kRepairHelperIdentifier
+        || sender->team.isEmpty()
+        || team.isEmpty()
+        || sender->team != team)
+        return;
+    const auto handoffPlaytestId = juce::SystemStats::getEnvironmentVariable (
+        kHandoffPlaytestEnvironment, {});
+    handoffTerminationConfirmed = playtestId.isNotEmpty()
+        && handoffPlaytestId == playtestId;
+#else
+    juce::ignoreUnused (senderPid);
+#endif
+}
+
+juce::var AgentHostProxy::createReport (const juce::var& request)
+{
+    const juce::ScopedLock guard (lock);
+    if (! request.isObject()) return error ("invalid report request", "invalid_response", false);
+    if (playtestId.isEmpty()) return error ("playtest not started", "playtest_not_started", false);
+    if (origin.isEmpty() || capability.isEmpty() || ! process.isRunning()) return error();
+    auto body = juce::JSON::parse (juce::JSON::toString (request));
+    body.getDynamicObject()->setProperty ("playtestId", playtestId);
+    int statusCode = 0;
+    const auto report = post ("/v1/reports", body, statusCode);
+    if (statusCode != 201 || ! report.isObject()) return error ("report persistence failed");
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", report.getProperty ("id", juce::var()));
+    result->setProperty ("kind", report.getProperty ("kind", juce::var()));
+    result->setProperty ("title", report.getProperty ("title", juce::var()));
+    result->setProperty ("body", report.getProperty ("body", juce::var()));
+    result->setProperty ("status", report.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::approveReport (const juce::String& reportId)
+{
+    const juce::ScopedLock guard (lock);
+    if (reportId.isEmpty() || ! ensureStarted()) return error();
+    int statusCode = 0;
+    const auto report = post ("/v1/reports/" + reportId + "/approve",
+                              juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! report.isObject())
+        return error ("report approval failed");
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", report.getProperty ("id", juce::var()));
+    result->setProperty ("status", report.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::createRepair (const juce::String& reportId)
+{
+    const juce::ScopedLock guard (lock);
+    if (reportId.isEmpty() || ! ensureStarted()) return error();
+    int statusCode = 0;
+    const auto repair = post ("/v1/reports/" + reportId + "/repairs",
+                              juce::var (new juce::DynamicObject()), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+        return parseHostFailure (repair, "repair start failed", "repair_start_failed", statusCode);
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("status", repair.getProperty ("status", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::launchRepair (const juce::String& repairId,
+                                        const juce::String& buildPath)
+{
+    const juce::ScopedLock guard (lock);
+    if (repairId.isEmpty() || buildPath.isEmpty()) return error();
+    if (playtestId.isEmpty() && resumePlaytestId.isEmpty())
+        return error ("playtest not started", "playtest_not_started", false);
+    if (! ensurePlaytest()) return error();
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("buildPath", buildPath);
+    mosh::setEnvVar (kHandoffPlaytestEnvironment, playtestId.toRawUTF8());
+    int statusCode = 0;
+    const auto repair = post ("/v1/repairs/" + repairId + "/launch", juce::var (body), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+    {
+        // A missing HTTP response is ambiguous: the signed worker may already
+        // have been accepted and be about to signal us. Keep the marker until
+        // SIGTERM provenance or ordinary shutdown resolves that race.
+        return parseHostFailure (repair, "repair build launch failed", "repair_swap_failed", statusCode);
+    }
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("state", repair.getProperty ("swap", juce::var()).getProperty ("state", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::rollbackRepair (const juce::String& repairId,
+                                          const juce::String& reason)
+{
+    const juce::ScopedLock guard (lock);
+    if (repairId.isEmpty() || reason.isEmpty()) return error();
+    if (playtestId.isEmpty() && resumePlaytestId.isEmpty())
+        return error ("playtest not started", "playtest_not_started", false);
+    if (! ensurePlaytest()) return error();
+    auto* body = new juce::DynamicObject();
+    body->setProperty ("reason", reason);
+    mosh::setEnvVar (kHandoffPlaytestEnvironment, playtestId.toRawUTF8());
+    int statusCode = 0;
+    const auto repair = post ("/v1/repairs/" + repairId + "/rollback", juce::var (body), statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+    {
+        // As above, request failure cannot prove the signed worker did not start.
+        return parseHostFailure (repair, "repair rollback failed", "repair_rollback_failed", statusCode);
+    }
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("id", repair.getProperty ("id", juce::var()));
+    result->setProperty ("state", repair.getProperty ("swap", juce::var()).getProperty ("state", juce::var()));
+    return juce::var (result);
+}
+
+juce::var AgentHostProxy::events (int afterSequence)
+{
+    const juce::ScopedLock guard (lock);
+    if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto stream = getEventStream ("/v1/playtests/" + playtestId
+        + "/events?afterSequence=" + juce::String (juce::jmax (0, afterSequence))
+        + "&windowMs=150", statusCode);
+    if (statusCode < 200 || statusCode >= 300)
+        return error ("event delivery unavailable");
+    juce::Array<juce::var> events;
+    for (const auto& line : juce::StringArray::fromLines (stream))
+    {
+        if (! line.startsWith ("data:")) continue;
+        const auto event = juce::JSON::parse (line.substring (5).trim());
+        if (event.isObject()
+            && (int) event.getProperty ("sequence", 0) > afterSequence
+            && events.size() < 100)
+            events.add (event);
+    }
+    auto* response = new juce::DynamicObject();
+    response->setProperty ("ok", true);
+    response->setProperty ("events", juce::var (events));
+    return juce::var (response);
+}
+
+juce::var AgentHostProxy::supervisorTurn (const juce::var& request)
+{
+    const juce::ScopedLock guard (lock);
+    if (! request.isObject()) return error ("invalid supervisor request", "invalid_response", false);
+    if (playtestId.isEmpty())
+        return error ("Start an owner playtest before asking the supervisor.",
+                      "playtest_not_started", false);
+    if (origin.isEmpty() || capability.isEmpty() || ! process.isRunning()) return error();
+
+    // Round-trip through JSON before appending the private playtest id so this
+    // never mutates the WebView's request object.
+    auto body = juce::JSON::parse (juce::JSON::toString (request));
+    if (auto* object = body.getDynamicObject()) object->setProperty ("playtestId", playtestId);
+    else return error();
+
+    int statusCode = 0;
+    const auto plan = post ("/v1/supervisor/turns", body, statusCode);
+    if (statusCode < 200 || statusCode >= 300 || ! plan.isObject())
+    {
+        const auto hostError = plan.getProperty ("error", juce::var());
+        const auto code = hostError.getProperty ("code", juce::var()).toString();
+        return error ("agent host unavailable", code);
+    }
+    auto* result = new juce::DynamicObject();
+    result->setProperty ("ok", true);
+    result->setProperty ("plan", plan);
+    return juce::var (result);
+}
+} // namespace mosh

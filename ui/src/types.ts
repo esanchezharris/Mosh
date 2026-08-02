@@ -557,6 +557,7 @@ export type Snapshot = {
     length?: number;
     editFile: string;
     dirty?: boolean;           // gap 1 — unsaved changes (drives auto-save; advisory in UI)
+    repairCheckpointActive?: boolean; // signed repair/rollback already restored the intended edit
     // PRJ-FMT — cold-start refusal: the launch session file was made by a NEWER Mosh than
     // this build. A safe empty fallback is live; this is the blocking "please update Mosh"
     // reason the UI surfaces. Absent ⇒ the project loaded fine.

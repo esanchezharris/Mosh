@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { buildLoopSystemPrompt, renderTaskContext, LOOP_RULES } from "./loopPrompt";
 import { renderSession } from "../sessionRender";
 import { systemPrompt } from "../brainCore";
+import { retrieveCapabilities, supervisorCapabilitySchemas } from "../capability";
+import { isDirectSafeCall } from "../capabilityRuntime";
 import type { Snapshot } from "../../types";
 
 const SNAP: Snapshot = {
@@ -61,6 +63,18 @@ describe("buildLoopSystemPrompt", () => {
   it("injects producer knowledge for the ask, like the single-shot path", () => {
     expect(buildLoopSystemPrompt(SNAP, "put a compressor on the master bus")).toContain("Producer knowledge");
     expect(buildLoopSystemPrompt(SNAP)).not.toContain("Producer knowledge");
+  });
+
+  it("retrieves a bounded typed schema and keeps execution behind the direct-safe allowlist", () => {
+    const capabilities = retrieveCapabilities("turn on the metronome");
+    const ids = capabilities.map((capability) => capability.id);
+    const schemas = supervisorCapabilitySchemas(capabilities);
+
+    expect(ids).toContain("set_metronome");
+    expect(ids).not.toContain("remove_track");
+    expect(schemas.map((schema) => schema.id)).toEqual(ids);
+    expect(isDirectSafeCall({ command: "set_metronome", args: { enabled: true } })).toBe(true);
+    expect(isDirectSafeCall({ command: "remove_track", args: { trackId: "17" } })).toBe(false);
   });
 });
 

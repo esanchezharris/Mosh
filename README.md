@@ -61,9 +61,12 @@ Three pieces behind one seam (the `execute_command` + snapshot/events contract):
 ./run-mosh.sh smoke     # non-interactive native brain round-trip
 ```
 
-Brain LLM keys (optional — voice falls back to an offline mock without them) go in
-`ui/.env.local` (see [`ui/.env.example`](ui/.env.example)). The generative model is
-wired with [`service/setup-sa3.sh`](service/setup-sa3.sh).
+OpenAI-backed Moshi voice and reasoning read `OPENAI_API_KEY` only from
+`~/.config/mosh/env` (mode `0600`); the key never enters the WebView or app bundle.
+If OpenAI is unavailable, Mosh reports that state explicitly. Deterministic local
+commands remain usable, but there is no silent production mock. Provider and mock
+adapters remain evaluation-only. The generative model is wired with
+[`service/setup-sa3.sh`](service/setup-sa3.sh).
 
 ## Verify
 

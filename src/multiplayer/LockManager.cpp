@@ -31,7 +31,8 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
-        "open_project", "set_transport", "stop_recording", "undo", "redo",
+        "open_project", "create_repair_checkpoint", "set_transport", "stop_recording",
+        "release_audio_device", "undo", "redo",
         "mark_take", "batch_begin", "batch_end",
         // FS-B2a — batch_status is a pure read; batch_rollback undoes exactly the agent
         // transaction the CALLER owns (proven by undo-head + fingerprint), so like

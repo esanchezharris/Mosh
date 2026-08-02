@@ -48,6 +48,8 @@ public:
         hardware-free error when this session never wanted audio. */
     juce::String retryAudioDevice();
 
+    juce::String releaseAudioDeviceForRepair();
+
     juce::File sessionDir() const { return session; }
     juce::File editFile()   const { return editPath; }
 
@@ -106,6 +108,11 @@ public:
     juce::String openProject (const juce::File& file);  // save current, then load the Edit at file (PRJ-FMT: non-empty ⇒ refused, current kept)
     bool saveProjectAs (const juce::File& file); // saveAs to file + adopt it as the backing file
 
+    /** Marks the explicitly launched repair checkpoint as owner-private. Tracktion
+        replaces an Edit file during save, which resets a one-time chmod; every later
+        save of this exact backing file therefore re-applies mode 0600. */
+    bool protectOwnerCheckpoint (const juce::File& file);
+
     /** gap 2 — reopen the last project on relaunch. rememberProject persists the
         current project path + a recent list to session/last-project.json on every
         new/open/save-as; startupEditFile() (called by the ctor) resolves the edit to
@@ -153,6 +160,8 @@ private:
     void wireEditResolvers();                                  // gap 3 — editFileRetriever + filePathResolver
     void consolidateAudioInto (const juce::File& projectDir);  // gap 3 — copy referenced audio project-local
     void stampFormatVersion();                                 // PRJ-FMT — write moshFormatVersion on save
+    bool enforceOwnerCheckpointPermissions() const;
+    juce::File ownerCheckpointPath;
     bool       audioOpen = false;
     bool       audioWanted = false;        // AUD-017 — audio was requested (see audioRequested())
     bool       dirty = false;              // unsaved-changes flag (gap 1)

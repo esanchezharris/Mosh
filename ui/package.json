@@ -35,9 +35,11 @@
     "synthesize": "tsx scripts/synthesizeDriver.mts"
   },
   "dependencies": {
+    "@openai/agents": "0.14.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "zod": "4.4.3",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

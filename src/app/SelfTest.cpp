@@ -8,6 +8,8 @@
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
+#include "agent/AgentHostProxy.h"
+#include "webview/WebBridge.h"
 #include "voice/NativeSpeech.h"
 #include "util/Env.h"
 #include <juce_cryptography/juce_cryptography.h>
@@ -18,6 +20,10 @@
 #include <map>
 #include <thread>
 #include <vector>
+#include <sys/stat.h>
+#if JUCE_MAC || JUCE_LINUX
+#include <unistd.h>
+#endif
 
 namespace mosh
 {
@@ -7291,6 +7297,182 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     section ("Moshi brain proxy + native voice (packaged-app pieces)");
     {
+        const auto startup = AgentHostProxy::parseStartupEnvelope (
+            "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"127.0.0.1\",\"port\":8787,\"capability\":\"native-only\"}");
+        check (startup.has_value() && startup->port == 8787 && startup->host == "127.0.0.1",
+               "agent host: accepts a loopback startup envelope without surfacing its capability");
+        check (! AgentHostProxy::parseStartupEnvelope (
+                   "{\"type\":\"mosh.agent-host.ready\",\"version\":1,\"host\":\"0.0.0.0\",\"port\":8787,\"capability\":\"x\"}").has_value(),
+               "agent host: rejects a non-loopback startup envelope");
+        const auto typedRepairFailure = AgentHostProxy::parseHostFailure (
+            JSON::parse ("{\"error\":{\"code\":\"repair_build_mismatch\",\"message\":\"Launch build does not match the validated repair result\"}}"),
+            "repair build launch failed", "repair_swap_failed", 409);
+        check (! (bool) typedRepairFailure.getProperty ("ok", true)
+                   && typedRepairFailure.getProperty ("code", var()).toString() == "repair_build_mismatch"
+                   && typedRepairFailure.getProperty ("error", var()).toString()
+                        == "Launch build does not match the validated repair result"
+                   && ! (bool) typedRepairFailure.getProperty ("retryable", true),
+               "agent host: typed repair preflight failure survives native bridge envelope");
+        auto permissionDirectory = File::createTempFile ("mosh-evidence-permissions");
+        permissionDirectory.deleteFile();
+        permissionDirectory.createDirectory();
+        const auto permissionFile = permissionDirectory.getChildFile ("window.png");
+        permissionFile.replaceWithData ("x", 1);
+        struct stat directoryStat {};
+        struct stat fileStat {};
+        check (WebBridge::enforceOwnerOnlyEvidencePermissions (permissionDirectory, true)
+                   && WebBridge::enforceOwnerOnlyEvidencePermissions (permissionFile, false)
+                   && ::stat (permissionDirectory.getFullPathName().toRawUTF8(), &directoryStat) == 0
+                   && ::stat (permissionFile.getFullPathName().toRawUTF8(), &fileStat) == 0
+                   && (directoryStat.st_mode & 0777) == 0700
+                   && (fileStat.st_mode & 0777) == 0600,
+               "owner cockpit: screenshot evidence uses 0700 directories and 0600 files");
+        permissionDirectory.deleteRecursively();
+
+        // Packaged-app lifecycle: run from a non-repository current directory and
+        // leave the entry override absent. This forces lookup of the CMake-staged
+        // single-file bundle in Contents/Resources/agent-host.
+        const auto hostEntry = File::getSpecialLocation (File::currentApplicationFile)
+            .getChildFile ("Contents/Resources/agent-host/agent-host.mjs");
+        check (hostEntry.existsAsFile(), "agent host: packaged single-file entry is staged in app resources");
+        if (hostEntry.existsAsFile())
+        {
+            auto hostData = File::createTempFile ("mosh-agent-host-selftest");
+            hostData.deleteFile();
+            hostData.createDirectory();
+            const auto hostDataUtf8 = hostData.getFullPathName().toStdString();
+            mosh::setEnvVar ("MOSH_AGENT_HOST_DATA_DIR", hostDataUtf8.c_str());
+            mosh::setEnvVar ("OPENAI_API_KEY", "");
+            mosh::unsetEnvVar ("MOSH_AGENT_HOST_ENTRY");
+            const auto repositoryCwd = File::getCurrentWorkingDirectory();
+            const auto outsideRepository = File::getSpecialLocation (File::tempDirectory);
+            check (outsideRepository.setAsCurrentWorkingDirectory(),
+                   "agent host: packaged probe runs with a cwd outside the repository");
+            // Keep one owning var alive across both supervisor calls. Re-wrapping the
+            // same raw DynamicObject pointer transfers ownership to a temporary; its
+            // destruction leaves the second call with freed storage.
+            var hostRequest (new DynamicObject());
+            auto* hostRequestObject = hostRequest.getDynamicObject();
+            hostRequestObject->setProperty ("message", "check lazy startup");
+            auto* schema = new DynamicObject();
+            schema->setProperty ("id", "set_metronome");
+            schema->setProperty ("description", "Toggle click");
+            schema->setProperty ("inputSchema", JSON::parse ("{\"type\":\"object\"}"));
+            hostRequestObject->setProperty ("capabilitySchemas", var (Array<var> { var (schema) }));
+            hostRequestObject->setProperty ("stateDigest", var (new DynamicObject()));
+            hostRequestObject->setProperty ("recentResults", var (Array<var>()));
+            hostRequestObject->setProperty ("conversationContext", var (Array<var>()));
+            juce::var hostResult;
+            {
+                AgentHostProxy host;
+                auto* inactiveReportRequest = new DynamicObject();
+                inactiveReportRequest->setProperty ("kind", "bug");
+                inactiveReportRequest->setProperty ("title", "Inactive report");
+                inactiveReportRequest->setProperty ("body", "must not persist");
+                const auto inactiveReport = host.createReport (var (inactiveReportRequest));
+                check (! (bool) inactiveReport.getProperty ("ok", true)
+                           && inactiveReport.getProperty ("code", var()).toString() == "playtest_not_started"
+                           && ! (bool) inactiveReport.getProperty ("retryable", true),
+                       "agent host: report creation requires an explicitly active playtest");
+                check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
+                       "agent host: inactive report creates no persisted host artifact");
+                const auto inactiveTurn = host.supervisorTurn (hostRequest);
+                check (! (bool) inactiveTurn.getProperty ("ok", true)
+                           && inactiveTurn.getProperty ("code", var()).toString() == "playtest_not_started"
+                           && ! (bool) inactiveTurn.getProperty ("retryable", true),
+                       "agent host: supervisor never starts a playtest implicitly");
+                check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
+                       "agent host: rejected supervisor turn creates no trace before disclosure");
+                const auto started = host.startPlaytest (false);
+                check ((bool) started.getProperty ("active", false)
+                           && (bool) started.getProperty ("disclosureRequired", false)
+                           && started.getProperty ("reports", var()).isArray(),
+                       "agent host: explicit playtest start returns the once-per-session disclosure");
+                auto* recoveredReportRequest = new DynamicObject();
+                recoveredReportRequest->setProperty ("kind", "blocker");
+                recoveredReportRequest->setProperty ("title", "Recover this blocker");
+                recoveredReportRequest->setProperty ("body", "The inbox must survive a WebView restart");
+                const auto recoveredReport = host.createReport (var (recoveredReportRequest));
+                check ((bool) recoveredReport.getProperty ("ok", false),
+                       "agent host: recovery fixture report persists through the native proxy");
+                const auto startedAgain = host.startPlaytest (false);
+                const auto recoveredReports = startedAgain.getProperty ("reports", var());
+                check (! (bool) startedAgain.getProperty ("disclosureRequired", true)
+                           && recoveredReports.isArray()
+                           && recoveredReports.getArray()->size() == 1
+                           && recoveredReports[0].getProperty ("title", var()).toString()
+                               == "Recover this blocker",
+                       "agent host: repeated start recovers the durable report without repeating disclosure");
+                const auto browserEnvelope = JSON::toString (started);
+                check (! browserEnvelope.containsIgnoreCase ("capability")
+                           && ! browserEnvelope.contains ("127.0.0.1")
+                           && ! browserEnvelope.containsIgnoreCase ("bearer"),
+                       "agent host: browser session envelope contains no loopback credential");
+                const auto delivered = host.events (0);
+                check ((bool) delivered.getProperty ("ok", false)
+                           && delivered.getProperty ("events", var()).isArray(),
+                       "agent host: authenticated event replay is delivered through the native proxy");
+                const auto closed = host.closePlaytest (true);
+                check (! (bool) closed.getProperty ("active", true)
+                           && (bool) closed.getProperty ("retainTranscript", false),
+                       "agent host: explicit close honors transcript retention");
+                hostResult = host.supervisorTurn (hostRequest);
+            }
+            check (! (bool) hostResult.getProperty ("ok", false)
+                       && hostResult.getProperty ("code", var()).toString() == "playtest_not_started",
+                   "agent host: closed playtest cannot produce a supervisor trace");
+
+            String failedHandoffPlaytestId;
+            {
+                AgentHostProxy survivingCaller;
+                check ((bool) survivingCaller.startPlaytest (false).getProperty ("active", false),
+                       "agent host: failed-handoff fixture starts an active owner playtest");
+                const auto sessions = hostData.getChildFile ("sessions")
+                    .findChildFiles (File::findDirectories, false);
+                for (const auto& directory : sessions)
+                {
+                    const auto record = JSON::parse (
+                        directory.getChildFile ("session.json").loadFileAsString());
+                    if (record.getProperty ("status", var()).toString() == "active")
+                        failedHandoffPlaytestId = directory.getFileName();
+                }
+                mosh::setEnvVar ("MOSH_OWNER_PLAYTEST_HANDOFF_ID",
+                                 failedHandoffPlaytestId.toRawUTF8());
+                const auto ambiguousLaunch = survivingCaller.launchRepair (
+                    "11111111-1111-4111-8111-111111111111",
+                    hostData.getChildFile ("missing-repair.app").getFullPathName());
+                check (! (bool) ambiguousLaunch.getProperty ("ok", true)
+                           && juce::SystemStats::getEnvironmentVariable (
+                               "MOSH_OWNER_PLAYTEST_HANDOFF_ID", {}) == failedHandoffPlaytestId,
+                       "agent host: failed handoff response retains intent until signal provenance resolves it");
+                // An acknowledged worker that failed before its signal may leave
+                // a marker behind. A later SIGTERM from any ordinary process must
+                // not authenticate that stale handoff.
+#if JUCE_MAC || JUCE_LINUX
+                survivingCaller.confirmHandoffTermination (static_cast<int> (::getpid()));
+#else
+                survivingCaller.confirmHandoffTermination (0);
+#endif
+            }
+            check (JSON::parse (hostData.getChildFile ("sessions")
+                                    .getChildFile (failedHandoffPlaytestId)
+                                    .getChildFile ("session.json").loadFileAsString())
+                           .getProperty ("status", var()).toString() == "closed",
+                   "agent host: unrelated SIGTERM cannot authenticate a stale handoff marker");
+            check (juce::SystemStats::getEnvironmentVariable (
+                       "MOSH_OWNER_PLAYTEST_HANDOFF_ID", {}).isEmpty(),
+                   "agent host: failed handoff marker is cleared on ordinary shutdown");
+            check (repositoryCwd.setAsCurrentWorkingDirectory(),
+                   "agent host: packaged probe restores the repository working directory");
+            ChildProcess pgrep;
+            const auto pgrepStarted = pgrep.start (StringArray { "/usr/bin/pgrep", "-f", hostEntry.getFullPathName() },
+                                                    ChildProcess::wantStdOut);
+            const auto hostPids = pgrepStarted ? pgrep.readAllProcessOutput().trim() : String();
+            check (hostPids.isEmpty(), "agent host: packaged lazy launch leaves no host child behind");
+            mosh::unsetEnvVar ("MOSH_AGENT_HOST_DATA_DIR");
+            hostData.deleteRecursively();
+        }
+
         // Deterministic provider resolution — set known env, no network calls.
         mosh::setEnvVar ("MOSH_IGNORE_BUNDLED_BRAIN_CONFIG", "1");
         mosh::setEnvVar ("DEEPSEEK_BASE_URL", "https://api.deepseek.test");
@@ -9910,6 +10092,52 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         // Clean up the fixture track so the harness leaves the session as it found it.
         cmd (ops, "remove_track", objN ({ { "trackId", tid } }));
+    }
+
+    section ("Owner repair checkpoint and audio handoff");
+    {
+        const auto activeProject = eng.editFile();
+        const auto checkpoint = cmd (ops, "create_repair_checkpoint");
+        const auto checkpointPath = checkpoint["data"].getProperty ("checkpointPath", var()).toString();
+        const auto priorAppPath = checkpoint["data"].getProperty ("priorAppPath", var()).toString();
+        check (ok (checkpoint) && File (checkpointPath).existsAsFile(),
+               "repair swap: MoshOps persists a concrete project checkpoint");
+        check (eng.editFile() == activeProject,
+               "repair swap: checkpoint does not replace the active project");
+        check (File (checkpointPath).getParentDirectory() == activeProject.getParentDirectory(),
+               "repair swap: checkpoint preserves relative media resolution");
+       #if JUCE_MAC
+        struct stat checkpointStat {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: fresh checkpoint is owner-only");
+       #endif
+        check (File (priorAppPath).isDirectory() && priorAppPath.endsWith (".app"),
+               "repair swap: checkpoint records the installed app for rollback");
+        const auto released = cmd (ops, "release_audio_device");
+        check (ok (released) && ! (bool) released["data"].getProperty ("audioEnabled", true),
+               "repair swap: MoshOps releases the audio device before handoff");
+
+        check (eng.protectOwnerCheckpoint (File (checkpointPath))
+                   && ok (cmd (ops, "open_project", objN ({ { "file", checkpointPath } }))),
+               "repair swap: launch secures checkpoint before the first open/save");
+       #if JUCE_MAC
+        checkpointStat = {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: launch-time open/save preserves owner-only mode");
+       #endif
+        check (ok (cmd (ops, "save")),
+               "repair swap: launched checkpoint survives a private atomic replacement save");
+       #if JUCE_MAC
+        checkpointStat = {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: replacement save preserves owner-only mode");
+       #endif
+        check (ok (cmd (ops, "open_project", objN ({ { "file", activeProject.getFullPathName() } }))),
+               "repair swap: checkpoint test restores the active project");
+        File (checkpointPath).deleteFile();
     }
 
     finishSection();

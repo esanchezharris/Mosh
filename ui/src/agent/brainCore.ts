@@ -4,6 +4,7 @@
 // createBrain() on top of this; the benchmark scores the EXACT prompt + parser here.
 
 import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
+import { capabilityCatalogPrompt, retrieveCapabilities } from "./capability";
 import { retrieveCards, knowledgePromptSection } from "./knowledge";
 import { renderSession } from "./sessionRender";
 import type { Snapshot } from "../types";
@@ -72,6 +73,15 @@ export function buildSystemPrompt(
 export function systemPrompt(snap: Snapshot | null, query?: string, memory?: string): string {
   const knowledge = query ? knowledgePromptSection(retrieveCards(query)) : "";
   return buildSystemPrompt(DEFAULT_RULES, snap, undefined, knowledge, memory);
+}
+
+/** Production prompt assembly. The benchmark-compatible `systemPrompt` above keeps
+ * rendering the complete catalog; interactive turns receive only deterministic,
+ * retrieved capability schemas. */
+export function supervisorSystemPrompt(snap: Snapshot | null, query: string, memory?: string): string {
+  const knowledge = knowledgePromptSection(retrieveCards(query));
+  const catalog = capabilityCatalogPrompt(retrieveCapabilities(query));
+  return buildSystemPrompt(DEFAULT_RULES, snap, catalog, knowledge, memory);
 }
 
 // Coerce a string token ("17", 132, true) to the type an arg expects.

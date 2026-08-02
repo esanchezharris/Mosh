@@ -64,6 +64,10 @@ export type AppInfo = {
   version: string;
   stage: number;
   backend: string;
+  repairSourceSha?: string;
+  repairId?: string;
+  rolledBackRepairId?: string;
+  rolledBackRepairBuildPath?: string;
 };
 
 export type RemotePairingInfo = {
@@ -136,6 +140,47 @@ export async function brainChat(messages: BrainMessage[], provider?: string): Pr
   if (!r.ok) throw new Error(j?.error ? String(j.error) : `brain proxy ${r.status}`);
   return { content: String(j.content ?? "") };
 }
+
+/** Owner-cockpit supervisor transport. The WebView never receives a host URL,
+ * capability, or playtest id: native starts and authenticates the loopback host,
+ * then returns only its plan. There is deliberately no web/dev fallback. */
+export async function agentHostSupervisorTurn(request: unknown): Promise<unknown> {
+  if (!realNative()) throw new Error("agent host unavailable");
+  const result = (await native("agent_host_supervisor_turn")(request)) as { ok?: boolean; plan?: unknown; error?: unknown };
+  if (!result || result.ok !== true || !result.plan) {
+    throw new Error(typeof result?.error === "string" ? result.error : "agent host unavailable");
+  }
+  return result.plan;
+}
+
+async function ownerHostNative(name: string, request: unknown = {}): Promise<unknown> {
+  if (!realNative()) return {
+    ok: false,
+    code: "host_unavailable",
+    error: "Owner playtest host is available in the packaged app.",
+    retryable: false,
+  };
+  return native(name)(request);
+}
+
+export const agentHostStartPlaytest = (retainTranscript: boolean): Promise<unknown> =>
+  ownerHostNative("agent_host_start_playtest", { retainTranscript });
+export const agentHostClosePlaytest = (retainTranscript: boolean): Promise<unknown> =>
+  ownerHostNative("agent_host_close_playtest", { retainTranscript });
+export const agentHostRealtimeSecret = (): Promise<unknown> =>
+  ownerHostNative("agent_host_realtime_secret");
+export const agentHostCreateReport = (report: unknown): Promise<unknown> =>
+  ownerHostNative("agent_host_create_report", report);
+export const agentHostApproveReport = (reportId: string): Promise<unknown> =>
+  ownerHostNative("agent_host_approve_report", { reportId });
+export const agentHostCreateRepair = (reportId: string): Promise<unknown> =>
+  ownerHostNative("agent_host_create_repair", { reportId });
+export const agentHostLaunchRepair = (repairId: string, buildPath: string): Promise<unknown> =>
+  ownerHostNative("agent_host_launch_repair", { repairId, buildPath });
+export const agentHostRollbackRepair = (repairId: string, reason: string): Promise<unknown> =>
+  ownerHostNative("agent_host_rollback_repair", { repairId, reason });
+export const agentHostEvents = (afterSequence: number): Promise<unknown> =>
+  ownerHostNative("agent_host_events", { afterSequence });
 
 // WP-11 best-of-n relays (native-only — the WebView reaches the generative service
 // through the app, never directly; same layering as brain_chat). In dev/mock there

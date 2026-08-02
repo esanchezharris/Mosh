@@ -71,6 +71,10 @@ describe("shouldShowSessionPicker", () => {
     // That notice is a decision about THIS project and has to be answered first.
     expect(shouldShowSessionPicker(snap({ recoveryAvailable: true }), false, true)).toBe(false);
   });
+
+  it("stays hidden when a signed repair handoff already restored its checkpoint", () => {
+    expect(shouldShowSessionPicker(snap({ repairCheckpointActive: true }), false, true)).toBe(false);
+  });
 });
 
 describe("visibleTrackCount", () => {

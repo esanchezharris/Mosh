@@ -44,6 +44,7 @@ create_annotation	SessionGlobal
 create_bus	SessionGlobal
 create_group_track	SessionGlobal
 create_lyric_sheet	Track
+create_repair_checkpoint	Unguarded
 create_render_layer	Clip
 create_section	SessionGlobal
 create_track	SessionGlobal
@@ -126,6 +127,7 @@ reject_render	Clip
 relink_clip	Clip
 reload	Unguarded
 remove_annotation	SessionGlobal
+release_audio_device	Unguarded
 remove_automation_point	Track
 remove_bus	SessionGlobal
 remove_clip	Clip

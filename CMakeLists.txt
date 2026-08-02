@@ -118,6 +118,25 @@ endif()
 
 # ── The app target ───────────────────────────────────────────────────────────
 if (MOSH_BUILD_APP)
+    find_package(Git QUIET)
+    set(MOSH_BUILD_SHA "unknown")
+    set(MOSH_DIRTY_DIGEST "clean")
+    if (GIT_FOUND)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE MOSH_BUILD_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" diff --binary HEAD
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE _mosh_dirty_diff ERROR_QUIET)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain --untracked-files=normal
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE _mosh_dirty_state ERROR_QUIET)
+        if (_mosh_dirty_diff OR _mosh_dirty_state)
+            string(SHA256 _mosh_diff_digest "${_mosh_dirty_diff}")
+            string(SHA256 _mosh_untracked_digest "${_mosh_dirty_state}")
+            string(SHA256 MOSH_DIRTY_DIGEST "${_mosh_diff_digest}:${_mosh_untracked_digest}")
+        endif()
+    endif()
     set(MOSH_APP_EXTRA_ARGS "")
     if (APPLE)
         list(APPEND MOSH_APP_EXTRA_ARGS
@@ -150,6 +169,9 @@ if (MOSH_BUILD_APP)
         src/app/WebViewShell.cpp
         src/app/SelfTest.cpp
         src/webview/WebBridge.cpp
+        # Owner cockpit: private loopback Node Agent Host proxy. Its generated
+        # capability is retained only in native memory, never in the UI bundle.
+        src/agent/AgentHostProxy.cpp
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
         src/webview/UiResourcePathGuard.cpp
@@ -168,6 +190,7 @@ if (MOSH_BUILD_APP)
         src/telemetry/CrashHandler.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
+        src/engine/OwnerCheckpointSave.cpp
         src/moshops/MoshOps.cpp
         src/moshops/MoshOps.Lyrics.cpp
         src/moshops/MoshOps.Notes.cpp
@@ -230,6 +253,8 @@ if (MOSH_BUILD_APP)
         TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1
         # Mosh build identity / stage flags
         MOSH_VERSION_STRING="${PROJECT_VERSION}"
+        MOSH_BUILD_SHA="${MOSH_BUILD_SHA}"
+        MOSH_DIRTY_DIGEST="${MOSH_DIRTY_DIGEST}"
         # RT-safety tripwire — Debug ONLY. Release leaves MOSH_RT_GUARD undefined so the
         # guard header collapses to inline no-ops and RealtimeAudioGuard.cpp compiles to
         # nothing (no global operator new override) → Release binary byte-unaffected.
@@ -295,6 +320,7 @@ if (MOSH_BUILD_APP)
     # ── Native voice: macOS Speech (SFSpeechRecognizer + AVAudioEngine) ───────
     # Obj-C++ with ARC; the browser Web Speech API covers the Vite dev path.
     if (APPLE)
+        target_link_libraries(Mosh PRIVATE "-framework Security")
         target_sources(Mosh PRIVATE src/voice/NativeSpeech.mm)
         set_source_files_properties(src/voice/NativeSpeech.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
         target_link_libraries(Mosh PRIVATE "-framework Speech" "-framework AVFoundation")
@@ -395,6 +421,11 @@ if (MOSH_BUILD_APP)
         include(cmake/BuildCompanion.cmake)
     endif()
 
+    # Native Owner Cockpit bridge: bundle/stage the Node application code, while
+    # leaving the Node executable itself as the current owner-installed runtime.
+    include(cmake/BuildAgentHost.cmake)
+    include(cmake/BuildRepairHelper.cmake)
+
     if (APPLE)
         add_custom_target(MoshRefreshBundleMetadata ALL
             COMMAND ${CMAKE_COMMAND}
@@ -409,6 +440,12 @@ if (MOSH_BUILD_APP)
         endif()
         if (TARGET MoshStageCompanion)
             add_dependencies(MoshRefreshBundleMetadata MoshStageCompanion)
+        endif()
+        if (TARGET MoshStageAgentHost)
+            add_dependencies(MoshRefreshBundleMetadata MoshStageAgentHost)
+        endif()
+        if (TARGET MoshStageRepairHelper)
+            add_dependencies(MoshRefreshBundleMetadata MoshStageRepairHelper)
         endif()
     endif()
 endif()

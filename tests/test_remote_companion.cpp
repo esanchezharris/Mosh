@@ -401,3 +401,37 @@ TEST_CASE ("monitoring endpoints require auth and persist reports", "[remote][mo
     REQUIRE (juce::File (reportFile).loadFileAsString().contains ("networkMedianMs"));
     server.stopServer();
 }
+
+TEST_CASE ("owner control is loopback-only and routes only snapshot and MoshOps commands", "[remote][owner]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+        .getChildFile ("mosh-owner-control-test");
+    RemoteCompanionServer server (root);
+    server.setCommandHandler ([] (const juce::var& command) {
+        auto* result = new juce::DynamicObject();
+        result->setProperty ("ok", command.getProperty ("command", {}).toString() == "set_transport");
+        return juce::var (result);
+    });
+
+    const auto started = server.startOwnerControl ("owner-token");
+    REQUIRE ((bool) started.getProperty ("ok", false));
+    REQUIRE (started.getProperty ("data", {}).getProperty ("origin", {}).toString()
+        .startsWith ("http://127.0.0.1:"));
+
+    auto* bodyObject = new juce::DynamicObject();
+    bodyObject->setProperty ("token", "owner-token");
+    auto* command = new juce::DynamicObject();
+    command->setProperty ("command", "set_transport");
+    command->setProperty ("args", juce::var (new juce::DynamicObject()));
+    bodyObject->setProperty ("command", juce::var (command));
+    const juce::var body (bodyObject);
+    const auto routed = server.handleTestRequest ("POST", "/command", body);
+    REQUIRE ((bool) routed.getProperty ("ok", false));
+    REQUIRE ((bool) routed.getProperty ("data", {}).getProperty ("ok", false));
+    REQUIRE_FALSE ((bool) server.handleTestRequest ("POST", "/events", body)
+        .getProperty ("ok", true));
+    REQUIRE_FALSE ((bool) server.handleTestRequest ("GET", "/web", body)
+        .getProperty ("ok", true));
+    server.stopServer();
+}

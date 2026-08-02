@@ -135,7 +135,8 @@
       "targets": [
         "Mosh",
         "MoshStageUI",
-        "MoshFixInfoPlist"
+        "MoshFixInfoPlist",
+        "MoshRefreshBundleMetadata"
       ]
     },
     {
@@ -161,7 +162,8 @@
       "targets": [
         "Mosh",
         "MoshStageUI",
-        "MoshFixInfoPlist"
+        "MoshFixInfoPlist",
+        "MoshRefreshBundleMetadata"
       ]
     },
     {

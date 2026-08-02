@@ -1,6 +1,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 #include "app/MainWindow.h"
+#include "app/InstancePolicy.h"
 #include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
@@ -12,8 +13,10 @@
 #include "brain/BrainProxy.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
+#include <csignal>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <thread>
 
 namespace mosh
@@ -22,6 +25,66 @@ namespace te = tracktion::engine;
 
 namespace
 {
+   #if JUCE_MAC || JUCE_LINUX
+    volatile std::sig_atomic_t gracefulTerminationRequested = 0;
+    volatile std::sig_atomic_t gracefulTerminationSenderPid = 0;
+
+    void requestGracefulTermination (int, siginfo_t* information, void*) noexcept
+    {
+        gracefulTerminationSenderPid = information != nullptr
+            ? static_cast<std::sig_atomic_t> (information->si_pid)
+            : 0;
+        gracefulTerminationRequested = 1;
+    }
+
+    void installGracefulTerminationHandler()
+    {
+        gracefulTerminationRequested = 0;
+        gracefulTerminationSenderPid = 0;
+        struct sigaction action {};
+        action.sa_sigaction = &requestGracefulTermination;
+        sigemptyset (&action.sa_mask);
+        action.sa_flags = SA_SIGINFO;
+        ::sigaction (SIGTERM, &action, nullptr);
+    }
+
+    std::optional<int> consumeGracefulTerminationRequest() noexcept
+    {
+        if (gracefulTerminationRequested == 0)
+            return std::nullopt;
+        const auto senderPid = static_cast<int> (gracefulTerminationSenderPid);
+        gracefulTerminationRequested = 0;
+        gracefulTerminationSenderPid = 0;
+        return senderPid;
+    }
+   #else
+    void installGracefulTerminationHandler() {}
+    std::optional<int> consumeGracefulTerminationRequest() noexcept { return std::nullopt; }
+   #endif
+
+    juce::String valueAfter (
+        const juce::StringArray& arguments,
+        const juce::String& option)
+    {
+        const auto index = arguments.indexOf (option);
+        return index >= 0 && index + 1 < arguments.size()
+            ? arguments[index + 1] : juce::String();
+    }
+
+    bool isStableId (const juce::String& value)
+    {
+        if (value.length() != 36) return false;
+        for (int index = 0; index < value.length(); ++index)
+        {
+            const bool separator = index == 8 || index == 13 || index == 18 || index == 23;
+            const auto character = value[index];
+            if (separator ? character != '-'
+                          : ! juce::String ("0123456789abcdefABCDEF").containsChar (character))
+                return false;
+        }
+        return true;
+    }
+
     // Non-interactive live brain round-trip — the command-line smoke for the native
     // brain_chat proxy. Resolves the provider from the env and prints the reply (or a
     // clean error). Returns 0 on a successful round-trip, 1 otherwise.
@@ -71,7 +134,10 @@ public:
 
     const juce::String getApplicationName() override    { return "Mosh"; }
     const juce::String getApplicationVersion() override { return MOSH_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override          { return true; }   // allow scan children + headless runs
+    bool moreThanOneInstanceAllowed() override
+    {
+        return mosh::instancepolicy::allowsMultipleInstances (getCommandLineParameterArray());
+    }
 
     void initialise (const juce::String& commandLine) override
     {
@@ -210,10 +276,93 @@ public:
             return;
         }
         moshOps = std::make_unique<MoshOps> (*engine);
+        const auto repairSourceSha = valueAfter (
+            commandLineParameters, "--mosh-repair-source-sha");
+        const auto repairId = valueAfter (
+            commandLineParameters, "--mosh-repair-id");
+        const auto rolledBackRepairId = valueAfter (
+            commandLineParameters, "--mosh-rolled-back-repair-id");
+        const auto rolledBackRepairBuild = valueAfter (
+            commandLineParameters, "--mosh-rolled-back-repair-build");
+        const auto ownerPlaytestId = valueAfter (
+            commandLineParameters, "--mosh-owner-playtest-id");
+        if (repairSourceSha.isEmpty() != repairId.isEmpty())
+        {
+            std::cerr << "repair launch refused: incomplete repair identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        if (rolledBackRepairId.isEmpty() != rolledBackRepairBuild.isEmpty()
+            || (repairId.isNotEmpty() && rolledBackRepairId.isNotEmpty()))
+        {
+            std::cerr << "repair launch refused: incomplete recovery identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        const bool repairHandoffLaunch = repairId.isNotEmpty() || rolledBackRepairId.isNotEmpty();
+        if (ownerPlaytestId.isNotEmpty() != repairHandoffLaunch
+            || (ownerPlaytestId.isNotEmpty() && ! isStableId (ownerPlaytestId)))
+        {
+            std::cerr << "repair launch refused: invalid owner playtest identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        if (repairSourceSha.isNotEmpty() && repairSourceSha != MOSH_BUILD_SHA)
+        {
+            std::cerr << "repair launch refused: source SHA does not match this build" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        if (repairSourceSha.isNotEmpty())
+        {
+            mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_SOURCE_SHA", repairSourceSha.toRawUTF8());
+            mosh::setEnvVar ("MOSH_ACTIVE_REPAIR_ID", repairId.toRawUTF8());
+        }
+        if (rolledBackRepairId.isNotEmpty())
+        {
+            mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_ID", rolledBackRepairId.toRawUTF8());
+            mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_BUILD_PATH", rolledBackRepairBuild.toRawUTF8());
+        }
+        mosh::unsetEnvVar ("MOSH_OWNER_PLAYTEST_RESUME_ID");
+        if (ownerPlaytestId.isNotEmpty())
+            mosh::setEnvVar ("MOSH_OWNER_PLAYTEST_RESUME_ID", ownerPlaytestId.toRawUTF8());
+        const auto ownerCheckpoint = valueAfter (
+            commandLineParameters, "--mosh-owner-checkpoint");
+        if (ownerCheckpoint.isNotEmpty())
+        {
+            if (! engine->protectOwnerCheckpoint (juce::File (ownerCheckpoint)))
+            {
+                std::cerr << "repair launch refused: checkpoint could not be secured" << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
+            auto* args = new juce::DynamicObject();
+            args->setProperty ("file", ownerCheckpoint);
+            auto* command = new juce::DynamicObject();
+            command->setProperty ("command", "open_project");
+            command->setProperty ("args", juce::var (args));
+            const auto result = moshOps->execute (juce::var (command));
+            if (! (bool) result.getProperty ("ok", false))
+            {
+                std::cerr << "repair launch refused: checkpoint could not be opened" << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
+        }
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
+        ownerControlServer = std::make_unique<RemoteCompanionServer> (
+            engine->sessionDir().getChildFile ("owner-control"));
+        ownerControlServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
+        ownerControlServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
 
         if (audioRecoverySmoke)
         {
@@ -437,6 +586,10 @@ public:
             return;
         }
 
+        // The signed repair helper requests process handoff with SIGTERM. Convert
+        // that asynchronous signal into an ordinary message-thread quit so JUCE's
+        // shutdown path saves the project and clears the session-running sentinel.
+        installGracefulTerminationHandler();
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
 
         // Wire the swappable seam to the MoshOps spine (the ONLY backend coupling).
@@ -446,6 +599,7 @@ public:
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });
         bridge.setRemoteStatusProvider ([this] { return remoteServer->status(); });
+        bridge.setOwnerControlServer (ownerControlServer.get());
         // WP-11 best-of-n relays (brain traffic is UI-domain — same layering as
         // brain_chat, NOT MoshOps commands; the bridge runs these off-thread).
         bridge.setEscalateHandler ([this] (const juce::var& p) { return moshOps->escalateCandidates (p); });
@@ -496,6 +650,16 @@ public:
         // harnesses return/quit before reaching here, so the timer is never armed.
         autoSave.onTick = [this] { if (engine != nullptr) engine->saveIfDirty(); };
         autoSave.startTimer (30000);
+        terminationWatch.onTick = [this]
+        {
+            if (const auto senderPid = consumeGracefulTerminationRequest())
+            {
+                if (mainWindow != nullptr)
+                    mainWindow->shell().bridge().confirmOwnerPlaytestHandoffTermination (*senderPid);
+                quit();
+            }
+        };
+        terminationWatch.startTimer (50);
 
         // Scripted Stage 3 demo: build a hosted-plugin session + open a native
         // editor, then leave the GUI running for visual verification.
@@ -509,6 +673,7 @@ public:
 
     void shutdown() override
     {
+        terminationWatch.stopTimer();
         autoSave.stopTimer();
         // gap 1 — save-on-quit: persist any unsaved work before teardown (GUI only;
         // headless harnesses have no mainWindow and manage their own isolated session).
@@ -519,6 +684,7 @@ public:
         }
         menuController.reset();   // tears down the macOS main menu before the window
         mainWindow.reset();
+        ownerControlServer.reset();
         remoteServer.reset();
         moshOps.reset();
         engine.reset();
@@ -538,9 +704,11 @@ private:
     std::unique_ptr<MoshEngine> engine;
     std::unique_ptr<MoshOps>    moshOps;
     std::unique_ptr<RemoteCompanionServer> remoteServer;
+    std::unique_ptr<RemoteCompanionServer> ownerControlServer;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<MenuController> menuController;
     AutoSaveTimer autoSave;
+    AutoSaveTimer terminationWatch;
 };
 
 } // namespace mosh
