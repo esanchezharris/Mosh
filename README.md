@@ -80,3 +80,7 @@ lives in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 Playtest builds have shipped to external testers; a signed, notarized v0.1 build and a
 demo film are landing shortly — join the [waitlist](https://mosh-landing-two.vercel.app)
 for the first public wave.
+
+## License
+
+Mosh is released under the GNU AGPL-3.0 (see [LICENSE](LICENSE)) — matching the open-source tiers of its foundations, JUCE 8 (AGPLv3) and Tracktion Engine (GPLv3 for open-source projects).
