@@ -33,6 +33,8 @@ export function AppV2() {
   const peers = useStore((s) => s.peers);
   // #40 — show peer display names, not raw UUIDs, in lock-denied errors.
   const displayError = lastError ? formatPeerError(lastError, peers) : null;
+  // Own the Browser state here and pass the same render value into LeftDrawer. Keeping one
+  // subscription makes the shell width and the drawer contents an atomic React update.
   const leftOpen = useShell((s) => s.browserOpen);  // LEFT push-dock (browser)
   const rightOpen = useShell((s) => s.rightOpen);   // RIGHT push-dock (agent rail)
 
@@ -70,7 +72,7 @@ export function AppV2() {
           plugins); CENTER = section-nav · arrangement · composer; RIGHT = agent rail
           (maximized Moshi · inspector · collaborators). */}
       <div className="v2-body">
-        <LeftDrawer />
+        <LeftDrawer open={leftOpen} />
         <div className="v2-main">
           {snapshot
             ? <TrackLaneList snapshot={snapshot} dragging={dragging} />
