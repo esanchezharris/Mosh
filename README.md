@@ -81,6 +81,9 @@ v0.1.0 is out: a signed, notarized macOS (Apple Silicon) build on the
 [releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0). A demo film is landing shortly — join the [waitlist](https://mosh-landing-two.vercel.app)
 for the first public wave.
 
+For the live engineering state, open PR dispositions, and ownership-transfer
+queue, read [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).
+
 ## License
 
 Mosh is released under the GNU AGPL-3.0 (see [LICENSE](LICENSE)) — matching the open-source tiers of its foundations, JUCE 8 (AGPLv3) and Tracktion Engine (GPLv3 for open-source projects).
