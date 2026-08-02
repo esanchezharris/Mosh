@@ -537,6 +537,32 @@ function mockAnalysis(line: LyricLine, sheet: LyricSheet) {
     complete: analyzed === "text" && !hasGap, endInDict: !!endWord,
   };
 }
+function mockAnalysisFingerprint(sheet: LyricSheet): string {
+  return JSON.stringify({
+    grid: sheet.grid,
+    topic: sheet.topic,
+    mood: sheet.mood,
+    explicit: sheet.explicit,
+    rhymeStrictness: sheet.rhymeStrictness,
+    styleBias: !!sheet.styleBias,
+    lines: sheet.lines.map((line) => ({
+      index: line.index,
+      role: line.role,
+      seedText: line.seedText,
+      text: line.text,
+      syllableTarget: line.syllableTarget,
+      syllableTol: line.syllableTol,
+      stress: line.stress,
+      rhymeGroup: line.rhymeGroup,
+      rhymeStrictness: line.rhymeStrictness,
+      locked: line.locked,
+    })),
+  });
+}
+function clearAnalysisIfChanged(sheet: LyricSheet, before: string): void {
+  if (mockAnalysisFingerprint(sheet) !== before)
+    sheet.lines.forEach((line) => { delete line.analysis; });
+}
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
   if (ls) for (const fn of ls) fn({ type, payload });
@@ -1231,12 +1257,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
       pushUndo();
       const s = t.lyricSheet;
+      const analysisBefore = mockAnalysisFingerprint(s);
       if (args.grid != null) s.grid = str(args.grid, s.grid);
       if (args.topic != null) s.topic = str(args.topic, s.topic);
       if (args.mood != null) s.mood = str(args.mood, s.mood);
       if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
       if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
       if (args.styleBias != null) s.styleBias = !!args.styleBias;
+      clearAnalysisIfChanged(s, analysisBefore);
       invalidate(); return ok(command);
     }
     case "set_lyric_line": {
@@ -1247,6 +1275,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const lines = t.lyricSheet.lines;
       if (idx > lines.length) return err(command, "lineIndex out of range");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(t.lyricSheet);
       let line = lines.find((l) => l.index === idx);
       if (!line) {
         line = { index: idx, role: str(args.role, "verse"), seedText: "", text: "", syllableTarget: 0, syllableTol: 1, stress: "", rhymeGroup: "", rhymeStrictness: "", locked: false, sectionId: "", status: "empty" };
@@ -1274,6 +1303,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // while the producer edits the grid (the +/- syllable stepper) — confirm_skeleton flips it.
       if ((args.text != null || args.seedText != null) && line.status !== "skeleton" && (line.text || line.seedText)) line.status = "seed";
       refreshSingable(line);
+      clearAnalysisIfChanged(t.lyricSheet, analysisBefore);
       invalidate(); return ok(command, { lineIndex: idx });
     }
     case "remove_lyric_line": {
@@ -1283,8 +1313,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const at = t.lyricSheet.lines.findIndex((l) => l.index === idx);
       if (at < 0) return err(command, "no line at index " + idx);
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(t.lyricSheet);
       t.lyricSheet.lines.splice(at, 1);
       t.lyricSheet.lines.forEach((l, i) => (l.index = i)); // keep dense
+      clearAnalysisIfChanged(t.lyricSheet, analysisBefore);
       invalidate(); return ok(command);
     }
     case "get_rhymes": {
@@ -1326,12 +1358,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "accept_lyric_proposal": {
       const t = findTrack(str(args.trackId));
-      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      const sheet = t?.lyricSheet;
+      const l = sheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
       const pi = num(args.proposalIndex, 0);
-      if (!l) return err(command, "no line at index");
+      if (!sheet || !l) return err(command, "no line at index");
       const p = l.proposals?.[pi];
       if (!p) return err(command, "no proposal at that index");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(sheet);
       l.text = p.text;
       l.status = "asserted";
       // Native parity (approximation — the mock has no heard blob): a line whose take
@@ -1339,21 +1373,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       l.origin = l.origin === "partial" ? "mixed" : "generated";
       delete l.proposals;
       refreshSingable(l);
+      clearAnalysisIfChanged(sheet, analysisBefore);
       mockCorpusLines += 1; // §7 — auto-accumulate the accepted line into the voice corpus
       invalidate();
       return ok(command, { text: p.text });
     }
     case "assert_lyric_line": {
       const t = findTrack(str(args.trackId));
-      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
-      if (!l) return err(command, "no line at index");
+      const sheet = t?.lyricSheet;
+      const l = sheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      if (!sheet || !l) return err(command, "no line at index");
       const text = args.text != null ? str(args.text) : l.text;
       if (!completeLyricText(text)) return err(command, "line needs complete words before it can be asserted");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(sheet);
       l.text = text.trim();
       l.status = "asserted";
       delete l.proposals;
       refreshSingable(l);
+      clearAnalysisIfChanged(sheet, analysisBefore);
       invalidate();
       return ok(command, { text: l.text });
     }
