@@ -630,6 +630,8 @@ private:
     // commands.contract.test.ts's handler-body scan only sees getProperty calls literally
     // inside each cmdXxx handler's own source span, not inside a shared helper it calls.
     te::AutomatableParameter* findParam (const juce::String& trackId, int pluginIndex, int paramIndex);
+    bool mirrorTrackEditorParameter (const juce::String& trackId,
+                                     te::AutomatableParameter&, float before, float after);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
     int                  allocateBusNumber();
@@ -661,6 +663,7 @@ private:
     // master signal.
     int              masterVisibleBoundary();
     te::Plugin*      findMasterPlugin (int index);
+    bool             mirrorMasterEditorParameter (te::AutomatableParameter&, float before, float after);
     void  emitSpectrum (bool playing);                    // drain tap → Goertzel bands → emit
     std::array<float, 1024> spectralRing {};              // rolling mono history
     int   spectralRingPos = 0;
