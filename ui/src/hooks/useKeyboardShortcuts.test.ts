@@ -227,6 +227,38 @@ describe("useKeyboardShortcuts", () => {
     expect(execCalls).toContainEqual({ command: "move_clip", args: { clipId: "clip-1", start: 0 } });
   });
 
+  it("does not nudge a selected clip when a range slider owns focus but WebKit targets window", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.setAttribute("aria-label", "Send level");
+    document.body.appendChild(slider);
+    slider.focus();
+
+    // The packaged WKWebView can report this keydown at window even though the range
+    // input remains document.activeElement. The focused inspector control owns arrows;
+    // the app-level clip-nudge layer must yield to it.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    const activeElement = document.activeElement;
+    const movedClip = execCalls.some((c) => c.command === "move_clip");
+    slider.remove();
+    expect(activeElement).toBe(slider);
+    expect(movedClip).toBe(false);
+  });
+
   it("nudge is a no-op with nothing selected", () => {
     act(() => {
       root.render(React.createElement(Harness));
