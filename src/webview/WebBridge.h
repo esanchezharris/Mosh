@@ -29,6 +29,7 @@ public:
     /** A command handler: takes a JSON command object, returns a JSON result
         envelope. Injected by the app once MoshOps exists (Stage 1). */
     using CommandHandler = std::function<juce::var (const juce::var& command)>;
+    using AsyncCommandHandler = std::function<juce::var (const juce::var& command)>;
 
     /** A snapshot provider: returns the full session snapshot as JSON. */
     using SnapshotProvider = std::function<juce::var()>;
@@ -36,6 +37,7 @@ public:
     using RemoteStatusProvider = std::function<juce::var()>;
 
     void setCommandHandler (CommandHandler h)   { commandHandler = std::move (h); }
+    void setAsyncCommandHandler (AsyncCommandHandler h) { asyncCommandHandler = std::move (h); }
     void setSnapshotProvider (SnapshotProvider p) { snapshotProvider = std::move (p); }
     void setRemoteStartHandler (RemoteHandler h) { remoteStartHandler = std::move (h); }
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
@@ -81,6 +83,7 @@ private:
     juce::WebBrowserComponent::Resource serveUiResource (const juce::String& url);
 
     CommandHandler    commandHandler;
+    AsyncCommandHandler asyncCommandHandler;
     SnapshotProvider  snapshotProvider;
     RemoteHandler     remoteStartHandler;
     RemoteHandler     remoteStopHandler;

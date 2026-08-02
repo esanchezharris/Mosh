@@ -436,6 +436,9 @@ export type DirListing = {
   error: string | null;  // human-readable reason when exists==false
   roots: { name: string; path: string }[]; // always present (recovery targets)
   entries: DirEntry[];
+  truncated?: boolean;   // true when the native bounded scan found more rows
+  limit?: number;        // maximum rows returned by this listing
+  visited?: number;      // filesystem entries inspected before the bound stopped it
 };
 
 // Musical key for the session (Moshi sings in-key). ALWAYS present in the snapshot,

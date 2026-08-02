@@ -442,6 +442,11 @@ public:
         // Wire the swappable seam to the MoshOps spine (the ONLY backend coupling).
         auto& bridge = mainWindow->shell().bridge();
         bridge.setCommandHandler  ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
+        const auto browserSessionDir = engine->sessionDir();
+        bridge.setAsyncCommandHandler ([browserSessionDir] (const juce::var& cmd)
+        {
+            return MoshOps::executeFileBrowserReadOnly (browserSessionDir, cmd);
+        });
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });

@@ -5708,6 +5708,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sawTxt, "list_directory filters out the .txt (extension filter excludes non-audio)");
         check (sawDir, "list_directory lists the subfolder (isDir:true)");
 
+        // A browser must not materialise an unbounded directory on the WebView/message
+        // thread. Seed one entry beyond the production page limit: the response must be
+        // explicitly truncated instead of returning every row and freezing the surface.
+        auto boundedDir = eng.sessionDir().getChildFile ("browse-bounded-test");
+        boundedDir.deleteRecursively();
+        boundedDir.createDirectory();
+        for (int i = 0; i < 513; ++i)
+            boundedDir.getChildFile ("folder-" + String (i).paddedLeft ('0', 4)).createDirectory();
+        auto bounded = cmd (ops, "list_directory", args1 ("path", boundedDir.getFullPathName()));
+        auto boundedData = bounded["data"];
+        check (ok (bounded) && boundedData.getProperty ("entries", var()).size() == 512,
+               "list_directory caps a large folder at 512 visible entries");
+        check ((bool) boundedData.getProperty ("truncated", false),
+               "list_directory reports when a large folder was truncated");
+        check ((int) boundedData.getProperty ("limit", 0) == 512,
+               "list_directory publishes its visible-entry limit");
+
         // Folder navigation: descend into the child, parent points back at browseDir.
         auto into = cmd (ops, "list_directory", args1 ("path", childDir.getFullPathName()));
         check (ok (into) && (bool) into["data"].getProperty ("exists", false), "list_directory into subfolder exists:true");

@@ -12,6 +12,7 @@
 // anonymous namespace, verbatim.
 
 #include "MoshOps.h"
+#include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
 #include "ExportRange.h"
@@ -1153,110 +1154,7 @@ juce::var MoshOps::cmdListDirectory (const juce::var& args)
     // a missing / not-a-directory / permission-denied path: returns ok:true with
     // exists:false + an error string + the well-known roots so the UI can recover.
     // errResult is reserved for a genuinely malformed request.
-    using TFTF = File::TypesOfFileToFind;
-    static const StringArray audioExts { ".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg" };
-
-    // Well-known roots — ALWAYS returned regardless of path validity, so the browser
-    // always has sane recovery targets. Skip-if-absent keeps this strictly read-only
-    // (we never create the imports dir just to advertise it).
-    Array<var> roots;
-    auto addRoot = [&] (const String& name, const File& dir)
-    {
-        if (dir.isDirectory())
-        {
-            auto* o = new DynamicObject();
-            o->setProperty ("name", name);
-            o->setProperty ("path", dir.getFullPathName());
-            roots.add (var (o));
-        }
-    };
-    addRoot ("Home",     File::getSpecialLocation (File::userHomeDirectory));
-    addRoot ("Music",    File::getSpecialLocation (File::userMusicDirectory));
-    addRoot ("Desktop",  File::getSpecialLocation (File::userDesktopDirectory));
-    addRoot ("Documents",File::getSpecialLocation (File::userDocumentsDirectory));
-    addRoot ("Imports",  eng.sessionDir().getChildFile ("imports"));
-
-    auto makeResult = [&] (const File& dir, bool exists, const String& error,
-                           const Array<var>& entries, const File* parentForUp) -> juce::var
-    {
-        auto* data = new DynamicObject();
-        data->setProperty ("path", dir.getFullPathName());
-        // parent drives the Up button; null at the filesystem root.
-        if (parentForUp != nullptr && *parentForUp != dir && parentForUp->isDirectory())
-            data->setProperty ("parent", parentForUp->getFullPathName());
-        else
-            data->setProperty ("parent", var());   // null
-        data->setProperty ("exists", exists);
-        data->setProperty ("error", error.isNotEmpty() ? var (error) : var());
-        data->setProperty ("roots", roots);
-        data->setProperty ("entries", entries);
-        return okResult ("list_directory", var (data));
-    };
-
-    const auto req = args.getProperty ("path", var()).toString();
-
-    // Resolve the target. Empty -> default to Home. NEVER resolve a relative path
-    // against the (unstable) process cwd, and NEVER construct File() with a non-absolute
-    // path (that trips a JUCE assertion) — guard with isAbsolutePath first.
-    File dir;
-    if (req.isEmpty())
-    {
-        dir = File::getSpecialLocation (File::userHomeDirectory);
-    }
-    else if (! File::isAbsolutePath (req))
-    {
-        // Malformed/relative request: return the home dir's parent? No — just report
-        // invalid with roots so the UI recovers, without ever building a relative File.
-        auto* data = new DynamicObject();
-        data->setProperty ("path", req);
-        data->setProperty ("parent", var());
-        data->setProperty ("exists", false);
-        data->setProperty ("error", "invalid path (must be absolute)");
-        data->setProperty ("roots", roots);
-        data->setProperty ("entries", Array<var>());
-        return okResult ("list_directory", var (data));
-    }
-    else
-    {
-        dir = File (req);
-    }
-
-    File parent = dir.getParentDirectory();
-
-    if (! dir.isDirectory())
-        return makeResult (dir, false, "not a directory or not found", Array<var>(), &parent);
-    if (! dir.hasReadAccess())
-        return makeResult (dir, false, "permission denied", Array<var>(), &parent);
-
-    // Gather sub-directories then audio files, each sorted case-insensitively, dirs
-    // first. ignoreHiddenFiles keeps dotfiles / .DS_Store out. searchRecursively=false.
-    Array<File> dirs  = dir.findChildFiles (TFTF::findDirectories | TFTF::ignoreHiddenFiles, false, "*");
-    Array<File> files = dir.findChildFiles (TFTF::findFiles       | TFTF::ignoreHiddenFiles, false, "*");
-
-    struct ByName { int compareElements (const File& a, const File& b) const {
-        return a.getFileName().compareIgnoreCase (b.getFileName()); } } byName;
-    dirs.sort (byName);
-    files.sort (byName);
-
-    Array<var> entries;
-    auto addEntry = [&] (const File& f, bool isDir)
-    {
-        auto* o = new DynamicObject();
-        o->setProperty ("name", f.getFileName());
-        o->setProperty ("path", f.getFullPathName());
-        o->setProperty ("isDir", isDir);
-        // File::getSize() is int64; juce::var has no int64 ctor — store as double to
-        // avoid overflow on large files (formatted in the UI).
-        o->setProperty ("size", isDir ? var() : var ((double) f.getSize()));
-        entries.add (var (o));
-    };
-
-    for (auto& d : dirs)  addEntry (d, true);
-    for (auto& f : files)
-        if (audioExts.contains (f.getFileExtension().toLowerCase()))
-            addEntry (f, false);
-
-    return makeResult (dir, true, {}, entries, &parent);
+    return okResult ("list_directory", directory_listing::buildData (eng.sessionDir(), args));
 }
 
 juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
