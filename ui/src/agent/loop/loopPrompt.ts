@@ -6,6 +6,7 @@
 import { commandCatalogPrompt } from "../commands";
 import { retrieveCards, knowledgePromptSection } from "../knowledge";
 import { INTENTS } from "../brainCore";
+import { MUSICAL_TIME_RULE } from "../musicalTime";
 import { renderSession } from "../sessionRender";
 import type { Snapshot } from "../../types";
 import type { StepRecord } from "../loopSeam";
@@ -26,6 +27,7 @@ export const LOOP_RULES = [
   "- Plan first: a few short steps, never padded. Put concrete commands ON a step whenever you already know them — steps with commands run without asking you again.",
   '- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.',
   '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17.',
+  MUSICAL_TIME_RULE,
   "- Each message shows the CURRENT session and the results of prior steps — trust them over memory; ids and positions may have changed since you planned.",
   "- A failed command's error is shown VERBATIM. Fix the call or route around it; never repeat a failed command unchanged.",
   '- Stop with status "done" the moment the request is satisfied.',

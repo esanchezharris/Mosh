@@ -20,6 +20,7 @@
 
 import { AGENT_COMMANDS, type AgentCommand } from "./commands";
 import { WORKED_EXAMPLES } from "./fewshot";
+import { MUSICAL_TIME_RULE } from "./musicalTime";
 
 // 51 of 81: the 41 eval-gold commands + 10 product-core keeps (clip editing,
 // load_builtin, quantize, accept_render). Dropped (30): annotation edits, clip
@@ -94,6 +95,7 @@ export function smallModelCatalogPrompt(): string {
 export const SMALL_MODEL_RULES = [
   "Rules:",
   '- Use the REAL ids from the session for trackId/clipId, always as a JSON string — "trackId": "17", never the bare number 17.',
+  MUSICAL_TIME_RULE,
   "- One request can produce several commands (they apply together as one undoable change).",
   "- ACT by default. If the user names the target and the values (e.g. a track + a file + a note), emit the command — do not ask.",
   "- Set intent HUH and ask in `say` ONLY when a required value is missing or two session objects match the request equally.",
