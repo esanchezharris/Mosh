@@ -7090,16 +7090,20 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             const auto outsideRepository = File::getSpecialLocation (File::tempDirectory);
             check (outsideRepository.setAsCurrentWorkingDirectory(),
                    "agent host: packaged probe runs with a cwd outside the repository");
-            auto* hostRequest = new DynamicObject();
-            hostRequest->setProperty ("message", "check lazy startup");
+            // Keep one owning var alive across both supervisor calls. Re-wrapping the
+            // same raw DynamicObject pointer transfers ownership to a temporary; its
+            // destruction leaves the second call with freed storage.
+            var hostRequest (new DynamicObject());
+            auto* hostRequestObject = hostRequest.getDynamicObject();
+            hostRequestObject->setProperty ("message", "check lazy startup");
             auto* schema = new DynamicObject();
             schema->setProperty ("id", "set_metronome");
             schema->setProperty ("description", "Toggle click");
             schema->setProperty ("inputSchema", JSON::parse ("{\"type\":\"object\"}"));
-            hostRequest->setProperty ("capabilitySchemas", var (Array<var> { var (schema) }));
-            hostRequest->setProperty ("stateDigest", var (new DynamicObject()));
-            hostRequest->setProperty ("recentResults", var (Array<var>()));
-            hostRequest->setProperty ("conversationContext", var (Array<var>()));
+            hostRequestObject->setProperty ("capabilitySchemas", var (Array<var> { var (schema) }));
+            hostRequestObject->setProperty ("stateDigest", var (new DynamicObject()));
+            hostRequestObject->setProperty ("recentResults", var (Array<var>()));
+            hostRequestObject->setProperty ("conversationContext", var (Array<var>()));
             juce::var hostResult;
             {
                 AgentHostProxy host;
@@ -7114,7 +7118,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        "agent host: report creation requires an explicitly active playtest");
                 check (hostData.findChildFiles (File::findFiles, true).isEmpty(),
                        "agent host: inactive report creates no persisted host artifact");
-                const auto inactiveTurn = host.supervisorTurn (var (hostRequest));
+                const auto inactiveTurn = host.supervisorTurn (hostRequest);
                 check (! (bool) inactiveTurn.getProperty ("ok", true)
                            && inactiveTurn.getProperty ("code", var()).toString() == "playtest_not_started"
                            && ! (bool) inactiveTurn.getProperty ("retryable", true),
@@ -7141,7 +7145,7 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (! (bool) closed.getProperty ("active", true)
                            && (bool) closed.getProperty ("retainTranscript", false),
                        "agent host: explicit close honors transcript retention");
-                hostResult = host.supervisorTurn (var (hostRequest));
+                hostResult = host.supervisorTurn (hostRequest);
             }
             check (! (bool) hostResult.getProperty ("ok", false)
                        && hostResult.getProperty ("code", var()).toString() == "playtest_not_started",
