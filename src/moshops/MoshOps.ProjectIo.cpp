@@ -87,12 +87,22 @@ namespace
         return result;
     }
 
-    juce::String invalidRenderSourceWindow (te::AudioTrack& track)
+    juce::String invalidRenderSourceWindow (te::AudioTrack& track,
+                                             double renderStartSeconds,
+                                             double renderEndSeconds)
     {
         for (auto* rawClip : track.getClips())
         {
             auto* clip = dynamic_cast<te::AudioClipBase*> (rawClip);
             if (clip == nullptr)
+                continue;
+
+            // Custom/loop exports render only this timeline window. An invalid
+            // clip wholly outside it cannot enter the render graph and must not
+            // prevent the user from exporting an unaffected section.
+            const auto clipPosition = clip->getPosition();
+            if (clipPosition.getEnd().inSeconds() <= renderStartSeconds
+                || clipPosition.getStart().inSeconds() >= renderEndSeconds)
                 continue;
 
             const auto window = renderSourceWindowFor (*clip);
@@ -113,11 +123,14 @@ namespace
         return {};
     }
 
-    juce::String invalidRenderSourceWindow (te::Edit& edit)
+    juce::String invalidRenderSourceWindow (te::Edit& edit,
+                                             double renderStartSeconds,
+                                             double renderEndSeconds)
     {
         for (auto* track : te::getAudioTracks (edit))
             if (track != nullptr)
-                if (auto error = invalidRenderSourceWindow (*track); error.isNotEmpty())
+                if (auto error = invalidRenderSourceWindow (*track, renderStartSeconds, renderEndSeconds);
+                    error.isNotEmpty())
                     return error;
         return {};
     }
@@ -516,7 +529,7 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     // otherwise renders false-success silence, and its warped form can leave the
     // render graph waiting until the watchdog. Looping virtual phases are accepted
     // by hasRenderableAudioSourceWindow and continue to wrap normally.
-    if (auto sourceError = invalidRenderSourceWindow (edit); sourceError.isNotEmpty())
+    if (auto sourceError = invalidRenderSourceWindow (edit, rStart, rEnd); sourceError.isNotEmpty())
         return errResult ("export_audio", sourceError);
 
     // Validation failures must not destroy a previous successful export at the
@@ -830,7 +843,8 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
         const auto clips = track->getClips();
         if (! includeEmpty && clips.isEmpty()) continue;
 
-        if (auto sourceError = invalidRenderSourceWindow (*track); sourceError.isNotEmpty())
+        if (auto sourceError = invalidRenderSourceWindow (*track, 0.0, edit.getLength().inSeconds());
+            sourceError.isNotEmpty())
             return errResult ("export_stems", sourceError);
 
         plannedStems.push_back ({ track, trackIndex, clips,

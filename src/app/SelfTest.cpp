@@ -3866,6 +3866,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (previousMixFile.loadFileAsString() == previousMixSentinel,
                "source-window: validation failure preserves the previous export bytes");
 
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 2.0 }}))),
+               "source-window: invalid fixture moved outside custom export range");
+        auto unaffectedRangeFile = outDir.getChildFile ("unaffected-custom-range.wav");
+        auto unaffectedRange = cmd (ops, "export_audio",
+                                    objN ({{ "file", unaffectedRangeFile.getFullPathName() },
+                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }}));
+        check (ok (unaffectedRange),
+               "source-window: invalid clip outside the custom range does not block export");
+        check (unaffectedRangeFile.existsAsFile() && unaffectedRangeFile.getSize() > 0,
+               "source-window: unaffected custom range writes audio");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 0.0 }}))),
+               "source-window: invalid fixture restored inside full export range");
+
         auto invalidStemDir = outDir.getChildFile ("invalid-stems");
         invalidStemDir.deleteRecursively();
         const double stemsStartMs = Time::getMillisecondCounterHiRes();
