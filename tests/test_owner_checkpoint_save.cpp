@@ -2,7 +2,7 @@
 
 #include "engine/OwnerCheckpointSave.h"
 
-#if JUCE_MAC
+#if JUCE_MAC || JUCE_LINUX
  #include <sys/stat.h>
 #endif
 
@@ -10,7 +10,7 @@ namespace
 {
     int modeOf (const juce::File& file)
     {
-       #if JUCE_MAC
+       #if JUCE_MAC || JUCE_LINUX
         struct stat info {};
         return ::stat (file.getFullPathName().toRawUTF8(), &info) == 0
             ? (int) (info.st_mode & 0777) : -1;
@@ -30,7 +30,7 @@ TEST_CASE ("owner checkpoint save commits a private atomic replacement",
     REQUIRE (root.createDirectory());
     const auto target = root.getChildFile ("project.mosh-repair-checkpoint-test.tracktionedit");
     REQUIRE (target.replaceWithText ("old"));
-   #if JUCE_MAC
+   #if JUCE_MAC || JUCE_LINUX
     REQUIRE (::chmod (target.getFullPathName().toRawUTF8(), 0600) == 0);
    #endif
 
@@ -52,7 +52,7 @@ TEST_CASE ("owner checkpoint save leaves the private original on secure-stage fa
     REQUIRE (root.createDirectory());
     const auto target = root.getChildFile ("project.mosh-repair-checkpoint-test.tracktionedit");
     REQUIRE (target.replaceWithText ("old"));
-   #if JUCE_MAC
+   #if JUCE_MAC || JUCE_LINUX
     REQUIRE (::chmod (target.getFullPathName().toRawUTF8(), 0600) == 0);
    #endif
 

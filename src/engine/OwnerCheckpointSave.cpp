@@ -1,6 +1,6 @@
 #include "OwnerCheckpointSave.h"
 
-#if JUCE_MAC
+#if JUCE_MAC || JUCE_LINUX
  #include <sys/stat.h>
  #include <unistd.h>
 #endif
@@ -11,7 +11,7 @@ namespace
 {
     bool secureOwnerFile (const juce::File& file)
     {
-       #if JUCE_MAC
+       #if JUCE_MAC || JUCE_LINUX
         struct stat info {};
         const auto* path = file.getFullPathName().toRawUTF8();
         if (::lstat (path, &info) != 0 || ! S_ISREG (info.st_mode)
@@ -38,7 +38,7 @@ bool savePrivateReplacement (
     if (! writer || ! target.existsAsFile() || target.isSymbolicLink())
         return false;
 
-   #if JUCE_MAC
+   #if JUCE_MAC || JUCE_LINUX
     const auto parent = target.getParentDirectory();
     if (! parent.isDirectory())
         return false;
