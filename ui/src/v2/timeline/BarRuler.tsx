@@ -1,7 +1,7 @@
 // The bar-number ruler. Draws bar lines + numbers from the canonical tempo map
 // (time.ts gridLines) and seeks on click. Shares the seconds x-axis with the lanes.
 //
-// UIREACH-TIMERANGE — shift-drag defines a time-range SPAN (bar-snapped both edges),
+// UIREACH-TIMERANGE — shift-drag defines a time-range SPAN (grid-snapped edges),
 // held UI-local in shellState and rendered as a cross-lane band by TimeRangeBand. This
 // is the only way a mouse-only v2 user can reach delete_time_range: the command has
 // existed since ARR-011 with full mock/native parity, but no shell — classic included —
@@ -24,7 +24,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
 import type { Snapshot } from "../../types";
-import { tempoMapFrom, snapTimeMap, gridLines, type TempoMap } from "../../time";
+import { tempoMapFrom, snapTimeMap, gridLines, type SnapDiv, type TempoMap } from "../../time";
 import { contentSeconds } from "./geom";
 import { usePointerScrub } from "./usePointerScrub";
 
@@ -46,17 +46,27 @@ const releasePointer = (element: HTMLElement, pointerId: number) => {
   }
 };
 
-/** Pixel-x within the ruler -> bar-snapped seconds, via the PIECEWISE tempo map.
+/** Pixel-x within the ruler -> active-grid seconds, via the PIECEWISE tempo map.
  *  Exported so BarRuler.test.ts can pin this against the flat geom.ts helpers without
  *  driving a full pointer gesture through jsdom. */
-export function snappedSecAt(map: TempoMap, pxPerSec: number, clientX: number, rectLeft: number): number {
+export function snappedSecAt(
+  map: TempoMap,
+  pxPerSec: number,
+  clientX: number,
+  rectLeft: number,
+  division: SnapDiv = "bar",
+  snap = true,
+  bypass = false,
+): number {
   const raw = Math.max(0, (clientX - rectLeft) / Math.max(1e-6, pxPerSec));
-  return snapTimeMap(map, raw, "bar");
+  return snap && !bypass ? snapTimeMap(map, raw, division) : raw;
 }
 
 export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: number }) {
   const exec = useStore((s) => s.exec);
   const pxPerSec = useStore((s) => s.pxPerSec);
+  const snap = useStore((s) => s.snap);
+  const snapDivision = useStore((s) => s.snapDivision);
   const setTimeRange = useShell((s) => s.setTimeRange);
   const setTimeRangeDragging = useShell((s) => s.setTimeRangeDragging);
   const map = tempoMapFrom(snapshot.session);
@@ -93,7 +103,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
     if (rangePointer.current != null || scrub.isActive()) return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (e.shiftKey) {
-      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
+      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left, snapDivision, snap, e.altKey);
       anchor.current = sec;
       rangePointer.current = e.pointerId;
       rangeElement.current = e.currentTarget;
@@ -109,7 +119,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
     if (anchor.current != null) {
       if (rangePointer.current !== e.pointerId) return;
       const rect = e.currentTarget.getBoundingClientRect();
-      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left);
+      const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left, snapDivision, snap, e.altKey);
       setTimeRange({ start: Math.min(anchor.current, sec), end: Math.max(anchor.current, sec) });
       return;
     }
@@ -153,7 +163,7 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
       onLostPointerCapture={onPointerCancel}
-      title="Click or drag to scrub — shift-drag to select a time range"
+      title="Click or drag to scrub — Shift-drag selects a snapped time range; hold Option to bypass snap"
     >
       {bars.map((b, i) => (
         <div key={b.label} className="v2-ruler-bar" style={{ left: b.sec * pxPerSec }}>

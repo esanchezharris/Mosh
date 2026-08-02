@@ -7,7 +7,7 @@
 import { useCallback, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
+import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
@@ -31,6 +31,10 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const t = useStore((s) => s.transport);
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
+  const snap = useStore((s) => s.snap);
+  const setSnap = useStore((s) => s.setSnap);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const anyArmed = snapshot.tracks.some((tr) => tr.armed);
   const fallbackTrackId = selectedTrackId
@@ -98,6 +102,16 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
               <option value={1}>Count-in: 1 bar</option>
               <option value={2}>Count-in: 2 bars</option>
             </select>
+            <span className="v2-snap-controls" role="group" aria-label="Snap controls">
+              <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
+                data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
+                onClick={() => setSnap(!snap)}>Snap</button>
+              <select className="v2-chip v2-chip-sel" aria-label="Snap division" value={snapDivision}
+                title="Musical grid division — hold Option while dragging to bypass"
+                onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}>
+                {SNAP_DIVISIONS.map((division) => <option key={division} value={division}>{division}</option>)}
+              </select>
+            </span>
           </div>
         </div>
       </div>
