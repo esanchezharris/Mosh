@@ -105,11 +105,6 @@
     "expires": "2026-08-15"
   },
   {
-    "command": "mp_claim_track",
-    "reason": "MP lane: native lock behavior covered by LockManager Catch2 units + vitest MP store tests; dispatch-level exercise is a P6 matrix:locks target.",
-    "expires": "2026-08-15"
-  },
-  {
     "command": "mp_send_signal",
     "reason": "MP lane: covered by vitest MP store tests only; dispatch-level exercise is a P6 matrix:locks target.",
     "expires": "2026-08-15"

@@ -180,6 +180,23 @@ namespace
                    .getChildFile ("mosh-selftest-" + tag + "-" + leafName);
     }
 
+    bool commandLogHasRecord (const MoshEngine& eng, const juce::String& command,
+                              bool expectedOk, bool expectedUndoable)
+    {
+        const auto lines = juce::StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString());
+        for (const auto& line : lines)
+        {
+            const auto record = juce::JSON::parse (line);
+            if (record.isObject()
+                && record.getProperty ("command", juce::var()).toString() == command
+                && (bool) record.getProperty ("ok", ! expectedOk) == expectedOk
+                && (bool) record.getProperty ("undoable", ! expectedUndoable) == expectedUndoable)
+                return true;
+        }
+        return false;
+    }
+
     class LiveAudioProbe final : public juce::AudioIODeviceCallback
     {
     public:
@@ -7975,12 +7992,53 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (restoredName == "Net Src", "track restored from the relayed commit (end-to-end over HTTP)");
 
         // Exercise the NATIVE session command path (MultiplayerSession lifecycle:
-        // create -> background poll thread starts -> leave -> thread joins).
-        auto created = cmd (ops, "mp_create_session", objN ({ { "name", "Cy" }, { "color", "#00ff88" } }));
+        // failed join -> create -> background poll thread starts -> leave -> thread joins).
+        // These sentinel values are intentionally private and must never reach JSONL.
+        const juce::String privateBadCode = "private-room-code-issue-542";
+        const juce::String privateName = "private-display-name-issue-542";
+        const juce::String privateColor = "#542542";
+        check (! ok (cmd (ops, "mp_join_session",
+                          objN ({ { "code", privateBadCode }, { "name", privateName }, { "color", privateColor } }))),
+               "mp_join_session rejects an unknown room");
+        check (! ok (cmd (ops, "mp_claim_track", args1 ("trackId", "missing-track-issue-542"))),
+               "mp_claim_track missing-track failure is graceful");
+        check (! ok (cmd (ops, "mp_commit_track", args1 ("trackId", "missing-track-issue-542"))),
+               "mp_commit_track missing-track failure is graceful");
+
+        auto created = cmd (ops, "mp_create_session",
+                            objN ({ { "name", privateName }, { "color", privateColor } }));
         check (ok (created), "mp_create_session (native session) ok");
-        check (created.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString().isNotEmpty(),
+        const auto privateCreatedCode = created.getProperty ("data", juce::var())
+                                               .getProperty ("code", juce::var()).toString();
+        check (privateCreatedCode.isNotEmpty(),
                "native session returned a room code");
+        const auto logClaimTrack = cmd (ops, "create_track", args1 ("name", "MP Log Claim"));
+        const auto logClaimTrackId = logClaimTrack.getProperty ("data", juce::var())
+                                                  .getProperty ("trackId", juce::var()).toString();
+        auto successfulClaim = cmd (ops, "mp_claim_track", args1 ("trackId", logClaimTrackId));
+        check (ok (successfulClaim)
+                   && (bool) successfulClaim.getProperty ("data", juce::var()).getProperty ("granted", false),
+               "mp_claim_track grants a real track for the audit-log probe");
         check (ok (cmd (ops, "mp_leave_session")), "mp_leave_session ok (poll thread joined)");
+
+        check (commandLogHasRecord (eng, "mp_join_session", false, false),
+               "JSONL records failed mp_join_session with undoable:false");
+        check (commandLogHasRecord (eng, "mp_claim_track", false, false),
+               "JSONL records failed mp_claim_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_commit_track", false, false),
+               "JSONL records failed mp_commit_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_create_session", true, false),
+               "JSONL records successful mp_create_session with undoable:false");
+        check (commandLogHasRecord (eng, "mp_claim_track", true, false),
+               "JSONL records successful mp_claim_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_leave_session", true, false),
+               "JSONL records successful mp_leave_session with undoable:false");
+        const auto privateSessionLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (! privateSessionLog.contains (privateBadCode)
+                   && ! privateSessionLog.contains (privateName)
+                   && ! privateSessionLog.contains (privateColor)
+                   && ! privateSessionLog.contains (privateCreatedCode),
+               "multiplayer JSONL omits private room, name, color, and returned-code values");
 
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
         // relay; the upload/peer-download round-trip now runs against WHATEVER
@@ -8050,6 +8108,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             peer.leave();
         }
         cmd (ops, "mp_leave_session");
+        check (commandLogHasRecord (eng, "mp_commit_track", true, false),
+               "JSONL records successful mp_commit_track with undoable:false");
 
         // PR-2 — stem transfer off the message thread. Proves global apply ORDER
         // survives two quick successive commits of the SAME track (a fast second
@@ -8142,6 +8202,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
             cmd (ordGuestOps, "mp_leave_session");
             cmd (ordHostOps, "mp_leave_session");
+            check (commandLogHasRecord (ordGuestEng, "mp_join_session", true, false),
+                   "guest JSONL records successful mp_join_session with undoable:false");
+            check (commandLogHasRecord (ordGuestEng, "mp_leave_session", true, false),
+                   "guest JSONL records successful mp_leave_session with undoable:false");
+            const auto guestLog = ordGuestEng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (! guestLog.contains (ordCode)
+                       && ! guestLog.contains ("OrdGuest")
+                       && ! guestLog.contains ("#202020"),
+                   "guest JSONL omits room code, display name, and color");
         }
 
         // PR-2 — no-freeze proxy. Gated additionally on MOSH_RELAY_BLOB_DELAY_MS (set

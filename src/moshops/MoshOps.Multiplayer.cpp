@@ -21,6 +21,23 @@ namespace mosh
 {
 using namespace juce;
 
+namespace
+{
+    var redactedMpSessionLogArgs()
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("session", "[redacted]");
+        return var (o);
+    }
+
+    var mpTrackLogArgs (const var& args)
+    {
+        auto* o = new DynamicObject();
+        o->setProperty ("trackId", args.getProperty ("trackId", var()).toString());
+        return var (o);
+    }
+}
+
 void MoshOps::applyMultiplayerCommitForSelfTest (const juce::var& msg)
 {
     applyMultiplayerCommitMessage (msg);
@@ -131,53 +148,75 @@ juce::var MoshOps::cmdMpSyncLocks (const juce::var& args)
 
 juce::var MoshOps::cmdMpCreateSession (const juce::var& args)
 {
+    const auto logArgs = redactedMpSessionLogArgs();
     const auto code = mpSession_->createSession (args.getProperty ("name", var()).toString(),
                                                  args.getProperty ("color", var()).toString());
     if (code.isEmpty())
-        return errResult ("mp_create_session", "could not reach the relay (MOSH_RELAY_URL)");
+    {
+        const juce::String error = "could not reach the relay (MOSH_RELAY_URL)";
+        logLine ("mp_create_session", logArgs, false, error, false);
+        return errResult ("mp_create_session", error);
+    }
     refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("code", code);
     o->setProperty ("selfPeer", mpSession_->selfPeer());
+    logLine ("mp_create_session", logArgs, true, {}, false);
     return okResult ("mp_create_session", var (o));
 }
 
 juce::var MoshOps::cmdMpJoinSession (const juce::var& args)
 {
+    const auto logArgs = redactedMpSessionLogArgs();
     if (! mpSession_->joinSession (args.getProperty ("code", var()).toString(),
                                    args.getProperty ("name", var()).toString(),
                                    args.getProperty ("color", var()).toString()))
-        return errResult ("mp_join_session", "join failed (bad code / relay unreachable)");
+    {
+        const juce::String error = "join failed (bad code / relay unreachable)";
+        logLine ("mp_join_session", logArgs, false, error, false);
+        return errResult ("mp_join_session", error);
+    }
     refreshMpStemDir();   // PR-2: defensive re-stamp (also done at construction + project-file changes)
     auto* o = new DynamicObject();
     o->setProperty ("selfPeer", mpSession_->selfPeer());
+    logLine ("mp_join_session", logArgs, true, {}, false);
     return okResult ("mp_join_session", var (o));
 }
 
 juce::var MoshOps::cmdMpLeaveSession (const juce::var&)
 {
     mpSession_->leaveSession();
+    logLine ("mp_leave_session", var (new DynamicObject()), true, {}, false);
     return okResult ("mp_leave_session");
 }
 
 juce::var MoshOps::cmdMpClaimTrack (const juce::var& args)
 {
+    const auto logArgs = mpTrackLogArgs (args);
     auto* t = findTrack (args.getProperty ("trackId", var()).toString());
     if (t == nullptr)
+    {
+        logLine ("mp_claim_track", logArgs, false, "no track", false);
         return errResult ("mp_claim_track", "no track");
+    }
     const auto lid = logicalid::ensureTrack (t->state);
     const int epoch = mpSession_->claim (lid);
     auto* o = new DynamicObject();
     o->setProperty ("granted", epoch >= 0);
     o->setProperty ("logicalId", lid);
+    logLine ("mp_claim_track", logArgs, true, {}, false);
     return okResult ("mp_claim_track", var (o));
 }
 
 juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
 {
+    const auto logArgs = mpTrackLogArgs (args);
     auto* t = findTrack (args.getProperty ("trackId", var()).toString());
     if (t == nullptr)
+    {
+        logLine ("mp_commit_track", logArgs, false, "no track", false);
         return errResult ("mp_commit_track", "no track");
+    }
 
     // P4 — content-address each wave clip's audio into <editDir>/audio/by-hash/ and
     // rewrite the clip to that RELATIVE ref, so the serialized state + the peer
@@ -231,6 +270,7 @@ juce::var MoshOps::cmdMpCommitTrack (const juce::var& args)
     o->setProperty ("logicalId", lid);
     o->setProperty ("audioRefs", var (audioRefs));
     o->setProperty ("status", asyncTransfer ? "uploading" : "committed");
+    logLine ("mp_commit_track", logArgs, true, {}, false);
     return okResult ("mp_commit_track", var (o));
 }
 
