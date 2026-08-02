@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { OwnerCockpitRuntime } from "./ownerCockpitRuntime";
 import { AgentHostApiError, type HostEvent } from "./agentHostClient";
-import type { DraftReportInput } from "./ownerCockpit";
+import type { DraftReport, DraftReportInput } from "./ownerCockpit";
 
-function runtime() {
+function runtime(recoveredReports: readonly DraftReport[] = []) {
   let report = 0;
   const client = {
     start: vi.fn(async (retainTranscript: boolean) => ({
       active: true,
       retainTranscript,
       disclosureRequired: true,
+      reports: recoveredReports,
     })),
     close: vi.fn(async (retainTranscript: boolean) => ({ active: false, retainTranscript })),
     watchEvents: vi.fn((_onEvent: (event: HostEvent) => void) => () => undefined),
@@ -28,6 +29,23 @@ function runtime() {
 }
 
 describe("owner cockpit runtime presentation", () => {
+  it("recovers the durable approval inbox when the WebView restarts", async () => {
+    const recovered: DraftReport = {
+      id: "report-recovered",
+      kind: "blocker",
+      title: "Playback is silent",
+      body: "The transport moves but no audio is heard.",
+      status: "approved",
+    };
+    const { cockpit, client } = runtime([recovered]);
+
+    await cockpit.start();
+
+    expect(cockpit.getSnapshot().reports).toEqual([recovered]);
+    await cockpit.fixNow(recovered.id);
+    expect(client.createRepair).toHaveBeenCalledWith(recovered.id);
+  });
+
   it("shows the hosted-trace disclosure only when the host marks this session", async () => {
     const { cockpit } = runtime();
     await cockpit.start(true);

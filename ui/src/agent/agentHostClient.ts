@@ -9,7 +9,7 @@ import {
   agentHostRollbackRepair,
   agentHostStartPlaytest,
 } from "../bridge";
-import type { DraftReportInput } from "./ownerCockpit";
+import type { DraftReport, DraftReportInput } from "./ownerCockpit";
 
 export type HostEvent = {
   readonly sequence: number;
@@ -93,6 +93,25 @@ function parseHostEvent(value: unknown): HostEvent | null {
   };
 }
 
+function parseReport(value: unknown): DraftReport {
+  if (!isRecord(value)
+    || typeof value.id !== "string"
+    || (value.kind !== "blocker" && value.kind !== "bug" && value.kind !== "note")
+    || typeof value.title !== "string"
+    || typeof value.body !== "string"
+    || (value.status !== "draft"
+      && value.status !== "approved"
+      && value.status !== "approved_pending_sync"))
+    return invalidResponse("Invalid recovered report");
+  return {
+    id: value.id,
+    kind: value.kind,
+    title: value.title,
+    body: value.body,
+    status: value.status,
+  };
+}
+
 export class AgentHostClient {
   constructor(
     private readonly bridge: AgentHostBridge = nativeBridge,
@@ -103,12 +122,15 @@ export class AgentHostClient {
     active: boolean;
     retainTranscript: boolean;
     disclosureRequired: boolean;
+    reports: readonly DraftReport[];
   }> {
     const value = unwrap(await this.bridge.start(retainTranscript));
+    if (!Array.isArray(value.reports)) invalidResponse("Invalid recovered report list");
     return {
       active: value.active === true,
       retainTranscript: value.retainTranscript === true,
       disclosureRequired: value.disclosureRequired === true,
+      reports: value.reports.map(parseReport),
     };
   }
 

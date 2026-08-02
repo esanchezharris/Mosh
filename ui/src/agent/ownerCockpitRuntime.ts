@@ -64,9 +64,16 @@ export class OwnerCockpitRuntime {
     this.update({ status: "starting", error: null, retainTranscript });
     try {
       const session = await this.client.start(retainTranscript);
+      this.allReports = [...session.reports];
+      this.quietReportIds.clear();
+      for (const report of this.allReports) {
+        if (report.kind === "note") this.quietReportIds.add(report.id);
+      }
       this.update({
         status: "active",
         retainTranscript: session.retainTranscript,
+        reports: this.allReports.filter((report) => !this.quietReportIds.has(report.id)),
+        pendingNotes: this.quietReportIds.size,
         disclosure: session.disclosureRequired
           ? "Hosted text and tool traces may outlive a locally purged transcript. Audio, screenshots, media, credentials, and project files are excluded."
           : this.state.disclosure,

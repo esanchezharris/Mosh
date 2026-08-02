@@ -2,9 +2,50 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentHostApiError, AgentHostClient, type HostEvent } from "./agentHostClient";
 
 describe("owner cockpit Agent Host client", () => {
+  it("recovers only validated durable reports from the native start envelope", async () => {
+    const client = new AgentHostClient({
+      start: vi.fn(async () => ({
+        ok: true,
+        active: true,
+        retainTranscript: false,
+        disclosureRequired: false,
+        reports: [{
+          version: 1,
+          id: "report-1",
+          playtestId: "private-playtest-id",
+          kind: "blocker",
+          title: "Playback is silent",
+          body: "The transport moves but no audio is heard.",
+          status: "approved",
+          evidence: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:01:00.000Z",
+        }],
+      })),
+      close: vi.fn(),
+      events: vi.fn(),
+      secret: vi.fn(),
+      createReport: vi.fn(),
+      approveReport: vi.fn(),
+    });
+
+    expect(await client.start(false)).toEqual({
+      active: true,
+      retainTranscript: false,
+      disclosureRequired: false,
+      reports: [{
+        id: "report-1",
+        kind: "blocker",
+        title: "Playback is silent",
+        body: "The transport moves but no audio is heard.",
+        status: "approved",
+      }],
+    });
+  });
+
   it("starts and closes an explicit playtest without browser host credentials", async () => {
     const bridge = {
-      start: vi.fn(async () => ({ ok: true, active: true, retainTranscript: false, disclosureRequired: true })),
+      start: vi.fn(async () => ({ ok: true, active: true, retainTranscript: false, disclosureRequired: true, reports: [] })),
       close: vi.fn(async () => ({ ok: true, active: false, retainTranscript: true })),
       events: vi.fn(),
       secret: vi.fn(),
@@ -14,7 +55,7 @@ describe("owner cockpit Agent Host client", () => {
     const client = new AgentHostClient(bridge);
     const started = await client.start(false);
     const closed = await client.close(true);
-    expect(started).toEqual({ active: true, retainTranscript: false, disclosureRequired: true });
+    expect(started).toEqual({ active: true, retainTranscript: false, disclosureRequired: true, reports: [] });
     expect(closed).toEqual({ active: false, retainTranscript: true });
     expect(JSON.stringify([started, closed])).not.toMatch(/bearer|capability|127\\.0\\.0\\.1|https?:/i);
   });

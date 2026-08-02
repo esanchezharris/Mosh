@@ -302,9 +302,29 @@ juce::var AgentHostProxy::startPlaytest (bool shouldRetain)
     const juce::ScopedLock guard (lock);
     retainTranscript = shouldRetain;
     if (! ensurePlaytest()) return error();
+    int statusCode = 0;
+    const auto persisted = juce::JSON::parse (getEventStream (
+        "/v1/playtests/" + playtestId + "/reports", statusCode));
+    if (statusCode != 200 || ! persisted.isArray())
+        return error ("report recovery unavailable", "report_recovery_failed", true);
+    juce::Array<juce::var> reports;
+    for (const auto& candidate : *persisted.getArray())
+    {
+        if (! candidate.isObject())
+            return error ("invalid recovered report", "invalid_response", false);
+        auto* report = new juce::DynamicObject();
+        report->setProperty ("id", candidate.getProperty ("id", juce::var()));
+        report->setProperty ("kind", candidate.getProperty ("kind", juce::var()));
+        report->setProperty ("title", candidate.getProperty ("title", juce::var()));
+        report->setProperty ("body", candidate.getProperty ("body", juce::var()));
+        report->setProperty ("status", candidate.getProperty ("status", juce::var()));
+        reports.add (juce::var (report));
+    }
     const auto disclosure = ! disclosureDelivered;
     disclosureDelivered = true;
-    return sessionResult (disclosure);
+    auto result = sessionResult (disclosure);
+    result.getDynamicObject()->setProperty ("reports", juce::var (reports));
+    return result;
 }
 
 juce::var AgentHostProxy::closePlaytest (bool shouldRetain)

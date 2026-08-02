@@ -52,6 +52,12 @@ export interface AppServerAdapter {
 
 export interface GitAdapter {
   inspectBase(repositoryPath: string): Promise<{ sha: string; clean: boolean }>;
+  inspectMain(repositoryPath: string): Promise<{ sha: string }>;
+  inspectWorktreeAgainst(worktreePath: string, targetSha: string): Promise<{
+    sha: string;
+    clean: boolean;
+    basedOnTarget: boolean;
+  }>;
   createWorktree(input: {
     repositoryPath: string;
     baseSha: string;

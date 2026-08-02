@@ -164,6 +164,11 @@ export class AgentHostService {
     });
   }
 
+  async listReports(playtestId: string): Promise<PlaytestReport[]> {
+    await this.store.loadSession(playtestId);
+    return this.store.listReports(playtestId);
+  }
+
   async approveReport(reportId: string): Promise<PlaytestReport> {
     const located = await this.store.loadReport(reportId);
     const approved = await this.serializeMutation(located.playtestId, async () => {

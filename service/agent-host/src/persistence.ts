@@ -127,6 +127,24 @@ export class PlaytestStore {
     throw Object.assign(new Error("Report not found"), { code: "ENOENT" });
   }
 
+  async listReports(playtestId: string): Promise<PlaytestReport[]> {
+    const directory = path.join(this.sessionDirectory(playtestId), "reports");
+    let names: string[];
+    try {
+      names = await readdir(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const reports = await Promise.all(
+      names
+        .filter((candidate) => candidate.endsWith(".json"))
+        .map(async (name) => PlaytestReportSchema.parse(await readJson(path.join(directory, name)))),
+    );
+    return reports.sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  }
+
   async saveRepair(repair: RepairJob): Promise<void> {
     await atomicWrite(
       path.join(this.sessionDirectory(repair.playtestId), "repairs", `${repair.id}.json`),

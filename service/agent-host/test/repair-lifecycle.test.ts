@@ -57,6 +57,90 @@ describe("repair worktree and app lifecycle", () => {
     expect((await store.loadRepair(repair.id)).result?.merged).toBe(false);
   });
 
+  it("briefs Codex to reproduce at the tested SHA, transfer to current origin/main, and rerun GREEN", async () => {
+    const testedSha = "1".repeat(40);
+    const targetMainSha = "2".repeat(40);
+    const git = {
+      inspectBase: async () => ({ sha: testedSha, clean: true }),
+      inspectMain: async () => ({ sha: targetMainSha }),
+      inspectWorktreeAgainst: async () => ({
+        sha: "3".repeat(40),
+        clean: true,
+        basedOnTarget: true,
+      }),
+      createWorktree: async () => undefined,
+      removeWorktree: async () => undefined,
+    };
+    const { fakes, service, report } = await orchestrationFixture({ git, buildSha: testedSha });
+    await service.approveReport(report.id);
+
+    await service.createRepair(report.id);
+
+    const prompt = fakes.appCalls.find((call) =>
+      call.kind === "turn"
+      && (call.value as { mode?: string }).mode === "workspace-write")?.value as { prompt?: string };
+    expect(prompt.prompt).toContain(`tested build SHA ${testedSha}`);
+    expect(prompt.prompt).toContain(`current origin/main ${targetMainSha}`);
+    expect(prompt.prompt).toContain("rerun the focused GREEN");
+  });
+
+  it("refuses full_gate_pending until the clean repair HEAD descends current origin/main", async () => {
+    const testedSha = "1".repeat(40);
+    const targetMainSha = "2".repeat(40);
+    const sourceSha = "3".repeat(40);
+    const git = {
+      inspectBase: async (repositoryPath: string) => ({
+        sha: repositoryPath === "/repo" ? testedSha : sourceSha,
+        clean: true,
+      }),
+      inspectMain: async () => ({ sha: targetMainSha }),
+      inspectWorktreeAgainst: async () => ({
+        sha: sourceSha,
+        clean: true,
+        basedOnTarget: false,
+      }),
+      createWorktree: async () => undefined,
+      removeWorktree: async () => undefined,
+    };
+    const { service, report } = await orchestrationFixture({ git, buildSha: testedSha });
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+
+    await expect(service.completeRepair(repair.id, { ...repairResult, sourceSha }))
+      .rejects.toMatchObject({ code: "repair_main_transfer_required" });
+  });
+
+  it("records the current origin/main SHA after accepting a transferred repair", async () => {
+    const testedSha = "1".repeat(40);
+    const targetMainSha = "2".repeat(40);
+    const sourceSha = "3".repeat(40);
+    const git = {
+      inspectBase: async (repositoryPath: string) => ({
+        sha: repositoryPath === "/repo" ? testedSha : sourceSha,
+        clean: true,
+      }),
+      inspectMain: async () => ({ sha: targetMainSha }),
+      inspectWorktreeAgainst: async () => ({
+        sha: sourceSha,
+        clean: true,
+        basedOnTarget: true,
+      }),
+      createWorktree: async () => undefined,
+      removeWorktree: async () => undefined,
+    };
+    const { service, report } = await orchestrationFixture({ git, buildSha: testedSha });
+    await service.approveReport(report.id);
+    const repair = await service.createRepair(report.id);
+
+    await expect(service.completeRepair(repair.id, { ...repairResult, sourceSha }))
+      .resolves.toMatchObject({
+        status: "full_gate_pending",
+        baseSha: testedSha,
+        targetBaseSha: targetMainSha,
+        result: { sourceSha },
+      });
+  });
+
   it("preserves the queued crash-window reservation when worktree creation itself fails", async () => {
     const { fakes, service, store, report } = await orchestrationFixture();
     await service.approveReport(report.id);
@@ -115,6 +199,12 @@ describe("repair worktree and app lifecycle", () => {
         "-c", "user.email=mosh-test@example.invalid",
         "commit", "-m", "fixture",
       ]);
+      await runGit(runner, repository, ["branch", "-M", "main"]);
+      const remote = path.join(root, "remote.git");
+      await mkdir(remote);
+      await runGit(runner, remote, ["init", "--bare"]);
+      await runGit(runner, repository, ["remote", "add", "origin", remote]);
+      await runGit(runner, repository, ["push", "--set-upstream", "origin", "main"]);
       const baseSha = await runGit(runner, repository, ["rev-parse", "HEAD"]);
       const git = new GitCliAdapter(runner);
       const context = await orchestrationFixture({

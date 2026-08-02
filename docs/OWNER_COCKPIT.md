@@ -92,6 +92,11 @@ Each playtest lives under
 `$MOSH_AGENT_HOST_DATA_DIR/sessions/<playtest-id>/`:
 
 - `session.json`, `reports/*.json`, and `repairs/*.json` use atomic replacement.
+- Starting or reconnecting the owner cockpit reloads the playtest's durable
+  reports through the authenticated report-list endpoint. Only each report's
+  ID, kind, title, body, and approval state cross into the WebView, so an app or
+  Agent Host restart restores the approval inbox without exposing evidence or
+  host-only metadata.
 - `events.jsonl` is append-only and intentionally contains no transcript text.
 - `transcript.json` and `sdk-session.json` are removed when a non-retained
   session closes. Reports, repair metadata, and non-transcript audit events
@@ -128,6 +133,7 @@ Expected explicit failures:
 | --- | --- |
 | No `OPENAI_API_KEY` | Supervisor and Realtime return typed `openai_unavailable`; health, start/close, local report persistence, and purge continue. |
 | Host missing/crashed/timeout | Cockpit shows an outage/typed host error; no mock success and no hidden fallback for complex turns. |
+| Report recovery unavailable or malformed | Cockpit startup fails visibly instead of presenting an empty, false-success inbox. The durable records remain on disk for the next retry. |
 | Realtime failure | Mic tracks are released. Apple speech may run deterministic direct-safe commands and report drafting only; complex reasoning says unavailable. |
 | Recording active | Spoken replies and mutating voice tools are refused until recording stops. |
 | Evidence checksum/identity mismatch | Approval synchronization fails before GitHub. |
@@ -146,12 +152,18 @@ base whose SHA matches the report evidence, no active repair, and the configured
 process helper. It creates one isolated
 `codex/playtest-<issue>-<slug>` worktree, starts a network-off
 workspace-write Codex thread, and may produce only a draft PR. A successful
-repair records targeted RED/GREEN evidence, diagnostics, bundle/build paths,
-the exact `sourceSha`, and `full_gate_pending`; it never merges. Every result
-path must already exist as a canonical, non-symlink descendant of the recorded
-repair worktree. The build must be a `studio.mosh.app` bundle whose Mosh
-executable embeds that same source SHA. The launch request is accepted only
-when its canonical path exactly equals the validated result build.
+repair first reproduces the problem and proves focused RED/GREEN at the tested
+build SHA, then transfers the minimal fix onto the current `origin/main` and
+reruns focused GREEN and diagnostics. The host refreshes `origin/main` both
+when reserving the repair and when accepting its result. Completion requires a
+clean final worktree whose exact `sourceSha` descends from that refreshed main,
+and records both the tested base SHA and target base SHA together with
+diagnostics, bundle/build paths, and `full_gate_pending`; it never merges. Every
+result path must already exist as a canonical, non-symlink descendant of the
+recorded repair worktree. The build must be a `studio.mosh.app` bundle whose
+Mosh executable embeds that same final source SHA. The launch request is
+accepted only when its canonical path exactly equals the validated result
+build.
 
 Launching a repair build is a separate owner action. The full process controller
 now checkpoints through MoshOps, stops transport, releases the audio device, and

@@ -84,6 +84,7 @@ export const RepairJobSchema = z.object({
   reportId: id,
   status: z.enum(["queued", "running", "full_gate_pending", "failed", "cancelled"]),
   baseSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
+  targetBaseSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
   branch: z.string().min(1).optional(),
   worktreePath: z.string().min(1).optional(),
   repairThreadId: z.string().min(1).optional(),

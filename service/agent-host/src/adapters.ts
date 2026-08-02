@@ -208,6 +208,50 @@ export class GitCliAdapter implements GitAdapter {
     return { sha, clean: status.stdout.length === 0 };
   }
 
+  async inspectMain(repositoryPath: string): Promise<{ sha: string }> {
+    const fetched = await this.runner.run("git", [
+      "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "origin",
+      "+refs/heads/main:refs/remotes/origin/main",
+    ]);
+    if (fetched.exitCode !== 0) {
+      throw codedError("git_main_fetch_failed", "Could not refresh origin/main for repair transfer");
+    }
+    const resolved = await this.runner.run("git", [
+      "-C", repositoryPath, "rev-parse", "refs/remotes/origin/main",
+    ]);
+    const sha = resolved.stdout.trim();
+    if (resolved.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sha)) {
+      throw codedError("git_main_inspect_failed", "Could not resolve current origin/main");
+    }
+    return { sha };
+  }
+
+  async inspectWorktreeAgainst(worktreePath: string, targetSha: string): Promise<{
+    sha: string;
+    clean: boolean;
+    basedOnTarget: boolean;
+  }> {
+    const [head, status] = await Promise.all([
+      this.runner.run("git", ["-C", worktreePath, "rev-parse", "HEAD"]),
+      this.runner.run("git", ["-C", worktreePath, "status", "--porcelain=v1", "--untracked-files=normal"]),
+    ]);
+    const sha = head.stdout.trim();
+    if (head.exitCode !== 0 || status.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sha)) {
+      throw codedError("git_transfer_inspect_failed", "Could not inspect transferred repair HEAD");
+    }
+    const ancestry = await this.runner.run("git", [
+      "-C", worktreePath, "merge-base", "--is-ancestor", targetSha, sha,
+    ]);
+    if (ancestry.exitCode !== 0 && ancestry.exitCode !== 1) {
+      throw codedError("git_transfer_inspect_failed", "Could not verify repair ancestry");
+    }
+    return {
+      sha,
+      clean: status.stdout.length === 0,
+      basedOnTarget: ancestry.exitCode === 0,
+    };
+  }
+
   async createWorktree(input: {
     repositoryPath: string;
     baseSha: string;

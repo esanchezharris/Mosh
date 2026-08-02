@@ -54,11 +54,16 @@ export class RepairManager {
     if (reportedSha !== base.sha) {
       throw failure("base_sha_mismatch", "Report build SHA does not match the clean committed base");
     }
+    const target = await this.dependencies.git.inspectMain(this.dependencies.repositoryPath);
     const name = `playtest-${report.external.issueNumber}-${slug(report.title)}`;
     const branch = `codex/${name}`;
     const worktreePath = path.join(this.dependencies.worktreeRoot, name);
     const sessionText = await this.store.loadTranscript(report.playtestId);
-    const prompt = `${reportContext(report, sessionText)}\nReproduce with a focused RED, implement the smallest GREEN, capture diagnostics and a repair bundle, then open a draft PR. Never merge.`;
+    const prompt = [
+      reportContext(report, sessionText),
+      `First reproduce the defect at tested build SHA ${base.sha} with a focused RED and implement the smallest GREEN.`,
+      `Then transfer only that minimal fix onto current origin/main ${target.sha} so the final worktree HEAD descends it, rerun the focused GREEN and diagnostics on the transferred HEAD, build that exact HEAD, and open a draft PR. Never merge.`,
+    ].join("\n");
     const at = new Date().toISOString();
     let repair: RepairJob = {
       version: 1,
@@ -67,6 +72,7 @@ export class RepairManager {
       reportId: report.id,
       status: "queued",
       baseSha: base.sha,
+      targetBaseSha: target.sha,
       branch,
       worktreePath,
       createdAt: at,
@@ -79,6 +85,7 @@ export class RepairManager {
       branch,
       worktreePath,
       baseSha: base.sha,
+      targetBaseSha: target.sha,
     });
     let repairThreadId: string;
     let worktreeCreated = false;
@@ -141,6 +148,7 @@ export class RepairManager {
       branch,
       worktreePath,
       baseSha: base.sha,
+      targetBaseSha: target.sha,
       repairThreadId,
     });
     try {
@@ -191,14 +199,25 @@ export class RepairManager {
     if (!repair.worktreePath) {
       throw failure("repair_worktree_path", "Repair worktree is missing");
     }
-    const source = await this.dependencies.git.inspectBase(repair.worktreePath);
+    const target = await this.dependencies.git.inspectMain(this.dependencies.repositoryPath);
+    const source = await this.dependencies.git.inspectWorktreeAgainst(repair.worktreePath, target.sha);
+    if (!source.clean) {
+      throw failure("repair_dirty_worktree", "Transferred repair worktree must be clean");
+    }
     if (source.sha !== result.sourceSha) {
       throw failure("repair_source_mismatch", "Repair source SHA does not match its worktree HEAD");
+    }
+    if (!source.basedOnTarget) {
+      throw failure(
+        "repair_main_transfer_required",
+        "Transfer the minimal fix onto current origin/main and rerun focused validation",
+      );
     }
     const validated = await this.dependencies.artifacts.validateResult(repair.worktreePath, result);
     const completed: RepairJob = {
       ...repair,
       status: "full_gate_pending",
+      targetBaseSha: target.sha,
       result: validated,
       updatedAt: new Date().toISOString(),
     };
@@ -211,6 +230,8 @@ export class RepairManager {
       bundlePath: validated.bundlePath,
       buildPath: validated.buildPath,
       sourceSha: validated.sourceSha,
+      testedBaseSha: repair.baseSha ?? "",
+      targetBaseSha: target.sha,
       draftPrUrl: validated.draftPrUrl,
       draft: true,
       merged: false,

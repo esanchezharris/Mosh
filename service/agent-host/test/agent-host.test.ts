@@ -181,6 +181,40 @@ describe("contracts and persistence", () => {
     await expect(stat(path.join(dataDirectory, "sessions", created.id, "session.json"))).resolves.toBeTruthy();
   });
 
+  it("recovers the active playtest report inbox after an Agent Host restart", async () => {
+    const dataDirectory = await mkdtemp(path.join(tmpdir(), "mosh-agent-report-restart-"));
+    const first = await fixture({ dataDirectory });
+    const playtest = await createPlaytest(first.origin);
+    const created = await post(first.origin, "/v1/reports", {
+      playtestId: playtest.id,
+      kind: "blocker",
+      title: "Playback is silent",
+      body: "The transport moves but no audio is heard.",
+    });
+    expect(created.status).toBe(201);
+    const report = await created.json() as { id: string };
+    await first.close();
+    closing.pop();
+
+    const restarted = await fixture({ dataDirectory });
+    const response = await fetch(
+      `${restarted.origin}/v1/playtests/${playtest.id}/reports`,
+      { headers: auth },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      expect.objectContaining({
+        id: report.id,
+        playtestId: playtest.id,
+        kind: "blocker",
+        title: "Playback is silent",
+        body: "The transport moves but no audio is heard.",
+        status: "draft",
+      }),
+    ]);
+  });
+
   it("persists the Agents SDK session for each playtest across service instances", async () => {
     const dataDirectory = await mkdtemp(path.join(tmpdir(), "mosh-agent-sdk-session-"));
     const store = new PlaytestStore(dataDirectory);

@@ -33,6 +33,10 @@ export class OrchestrationFakes {
   failAppError: (Error & { code?: string }) | undefined;
   failProcessAction: string | undefined;
   failProcessError: (Error & { code?: string }) | undefined;
+  targetMainSha = "1".repeat(40);
+  worktreeSha = "1".repeat(40);
+  worktreeClean = true;
+  worktreeBasedOnTarget = true;
 
   evidence: EvidenceAdapter = {
     uploadPng: async (input) => {
@@ -92,6 +96,12 @@ export class OrchestrationFakes {
 
   git: GitAdapter = {
     inspectBase: async () => ({ sha: "1".repeat(40), clean: this.clean }),
+    inspectMain: async () => ({ sha: this.targetMainSha }),
+    inspectWorktreeAgainst: async () => ({
+      sha: this.worktreeSha,
+      clean: this.worktreeClean,
+      basedOnTarget: this.worktreeBasedOnTarget,
+    }),
     createWorktree: async (input) => {
       this.gitCalls.push(JSON.stringify(input));
       if (this.failWorktree) {

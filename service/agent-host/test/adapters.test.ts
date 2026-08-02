@@ -226,6 +226,40 @@ describe("authenticated gh adapter", () => {
 });
 
 describe("repair git branch boundary", () => {
+  it("refreshes origin/main and proves the final repair HEAD descends it", async () => {
+    const targetSha = "2".repeat(40);
+    const sourceSha = "3".repeat(40);
+    const runner = new FakeRunner();
+    runner.responses.push(
+      { exitCode: 0, stdout: "", stderr: "" },
+      { exitCode: 0, stdout: `${targetSha}\n`, stderr: "" },
+      { exitCode: 0, stdout: `${sourceSha}\n`, stderr: "" },
+      { exitCode: 0, stdout: "", stderr: "" },
+      { exitCode: 0, stdout: "", stderr: "" },
+    );
+    const adapter = new GitCliAdapter(runner) as GitCliAdapter & {
+      inspectMain(repositoryPath: string): Promise<{ sha: string }>;
+      inspectWorktreeAgainst(worktreePath: string, target: string): Promise<{
+        sha: string;
+        clean: boolean;
+        basedOnTarget: boolean;
+      }>;
+    };
+
+    const target = await adapter.inspectMain("/repo");
+    const source = await adapter.inspectWorktreeAgainst("/worktree", target.sha);
+
+    expect(target).toEqual({ sha: targetSha });
+    expect(source).toEqual({ sha: sourceSha, clean: true, basedOnTarget: true });
+    expect(runner.calls).toEqual([
+      ["git", "-C", "/repo", "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
+      ["git", "-C", "/repo", "rev-parse", "refs/remotes/origin/main"],
+      ["git", "-C", "/worktree", "rev-parse", "HEAD"],
+      ["git", "-C", "/worktree", "status", "--porcelain=v1", "--untracked-files=normal"],
+      ["git", "-C", "/worktree", "merge-base", "--is-ancestor", targetSha, sourceSha],
+    ]);
+  });
+
   it("refuses branch cleanup outside the owned codex/playtest namespace before running git", async () => {
     const runner = new FakeRunner();
     const adapter = new GitCliAdapter(runner);

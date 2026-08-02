@@ -67,6 +67,7 @@ function errorStatus(error: unknown): number {
   if (code === "repair_active" || code === "dirty_base" || code === "base_sha_mismatch") return 409;
   if (code === "github_sync_required" || code === "checkpoint_missing") return 409;
   if (code === "repair_build_mismatch" || code === "repair_swap_state") return 409;
+  if (code === "repair_main_transfer_required" || code === "repair_dirty_worktree") return 409;
   return 500;
 }
 
@@ -128,6 +129,11 @@ export async function startAgentHost(options: AgentHostServerOptions) {
       }
       if (url.pathname === "/v1/reports" && request.method === "POST") {
         sendJson(response, 201, await options.service.createReport(await readBody(request)));
+        return;
+      }
+      const reportsMatch = url.pathname.match(/^\/v1\/playtests\/([^/]+)\/reports$/);
+      if (reportsMatch && request.method === "GET") {
+        sendJson(response, 200, await options.service.listReports(routeId.parse(reportsMatch[1])));
         return;
       }
       const approveMatch = url.pathname.match(/^\/v1\/reports\/([^/]+)\/approve$/);

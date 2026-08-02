@@ -7127,11 +7127,24 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                        "agent host: rejected supervisor turn creates no trace before disclosure");
                 const auto started = host.startPlaytest (false);
                 check ((bool) started.getProperty ("active", false)
-                           && (bool) started.getProperty ("disclosureRequired", false),
+                           && (bool) started.getProperty ("disclosureRequired", false)
+                           && started.getProperty ("reports", var()).isArray(),
                        "agent host: explicit playtest start returns the once-per-session disclosure");
+                auto* recoveredReportRequest = new DynamicObject();
+                recoveredReportRequest->setProperty ("kind", "blocker");
+                recoveredReportRequest->setProperty ("title", "Recover this blocker");
+                recoveredReportRequest->setProperty ("body", "The inbox must survive a WebView restart");
+                const auto recoveredReport = host.createReport (var (recoveredReportRequest));
+                check ((bool) recoveredReport.getProperty ("ok", false),
+                       "agent host: recovery fixture report persists through the native proxy");
                 const auto startedAgain = host.startPlaytest (false);
-                check (! (bool) startedAgain.getProperty ("disclosureRequired", true),
-                       "agent host: repeated start does not repeat the hosted-trace disclosure");
+                const auto recoveredReports = startedAgain.getProperty ("reports", var());
+                check (! (bool) startedAgain.getProperty ("disclosureRequired", true)
+                           && recoveredReports.isArray()
+                           && recoveredReports.getArray()->size() == 1
+                           && recoveredReports[0].getProperty ("title", var()).toString()
+                               == "Recover this blocker",
+                       "agent host: repeated start recovers the durable report without repeating disclosure");
                 const auto browserEnvelope = JSON::toString (started);
                 check (! browserEnvelope.containsIgnoreCase ("capability")
                            && ! browserEnvelope.contains ("127.0.0.1")

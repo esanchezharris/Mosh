@@ -70,6 +70,12 @@ export function createFixtureAdapters(calls: IntegrationCalls) {
   };
   const git: GitAdapter = {
     inspectBase: async () => ({ sha: INTEGRATION_BUILD_SHA, clean: true }),
+    inspectMain: async () => ({ sha: INTEGRATION_BUILD_SHA }),
+    inspectWorktreeAgainst: async () => ({
+      sha: INTEGRATION_BUILD_SHA,
+      clean: true,
+      basedOnTarget: true,
+    }),
     createWorktree: async (input) => {
       calls.git.push(`${input.branch}:${input.path}`);
     },
