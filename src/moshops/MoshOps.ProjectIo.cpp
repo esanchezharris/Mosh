@@ -48,20 +48,34 @@ namespace
         double playedSourceSpan = 0.0;
     };
 
-    RenderSourceWindow renderSourceWindowFor (te::AudioClipBase& clip)
+    RenderSourceWindow renderSourceWindowFor (te::AudioClipBase& clip,
+                                               double renderStartSeconds,
+                                               double renderEndSeconds)
     {
         RenderSourceWindow result;
         result.sourceLength = clip.getSourceLength().inSeconds();
 
         const auto position = clip.getPosition();
+        const double clipStartSeconds = position.getStart().inSeconds();
+        const double windowStartSeconds = std::max (clipStartSeconds, renderStartSeconds);
+        const double windowEndSeconds = std::min (position.getEnd().inSeconds(), renderEndSeconds);
         if (clip.getAutoTempo())
         {
             const auto info = clip.getWaveInfo();
             const double sourceBeatsPerSecond = clip.getLoopInfo().getBeatsPerSecond (info);
             if (sourceBeatsPerSecond > 0.0)
             {
-                result.sourceStart = clip.getOffsetInBeats().inBeats() / sourceBeatsPerSecond;
-                result.playedSourceSpan = clip.getLengthInBeats().inBeats() / sourceBeatsPerSecond;
+                auto& tempoSequence = clip.edit.tempoSequence;
+                const auto clipStartBeat = tempoSequence.toBeats (position.getStart());
+                const auto windowStartBeat = tempoSequence.toBeats (
+                    tracktion::TimePosition::fromSeconds (windowStartSeconds));
+                const auto windowEndBeat = tempoSequence.toBeats (
+                    tracktion::TimePosition::fromSeconds (windowEndSeconds));
+                result.sourceStart = (clip.getOffsetInBeats().inBeats()
+                                      + (windowStartBeat - clipStartBeat).inBeats())
+                                   / sourceBeatsPerSecond;
+                result.playedSourceSpan = (windowEndBeat - windowStartBeat).inBeats()
+                                        / sourceBeatsPerSecond;
 
                 // AudioSegmentList adds the LoopInfo in-marker when mapping an
                 // auto-tempo offset to source samples. Mirror that boundary here.
@@ -73,15 +87,17 @@ namespace
                 // Malformed/unknown tempo metadata is not this guard's concern;
                 // use the linear fallback and let the renderer report media errors.
                 const double speed = clip.getSpeedRatio();
-                result.sourceStart = position.getOffset().inSeconds() * speed;
-                result.playedSourceSpan = position.getLength().inSeconds() * speed;
+                result.sourceStart = (position.getOffset().inSeconds()
+                                      + windowStartSeconds - clipStartSeconds) * speed;
+                result.playedSourceSpan = (windowEndSeconds - windowStartSeconds) * speed;
             }
         }
         else
         {
             const double speed = clip.getSpeedRatio();
-            result.sourceStart = position.getOffset().inSeconds() * speed;
-            result.playedSourceSpan = position.getLength().inSeconds() * speed;
+            result.sourceStart = (position.getOffset().inSeconds()
+                                  + windowStartSeconds - clipStartSeconds) * speed;
+            result.playedSourceSpan = (windowEndSeconds - windowStartSeconds) * speed;
         }
 
         return result;
@@ -105,7 +121,7 @@ namespace
                 || clipPosition.getStart().inSeconds() >= renderEndSeconds)
                 continue;
 
-            const auto window = renderSourceWindowFor (*clip);
+            const auto window = renderSourceWindowFor (*clip, renderStartSeconds, renderEndSeconds);
             if (hasRenderableAudioSourceWindow (window.sourceLength,
                                                 window.sourceStart,
                                                 window.playedSourceSpan,

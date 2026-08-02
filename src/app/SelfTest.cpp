@@ -3913,6 +3913,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (tailFile.existsAsFile() && tailFile.getSize() > 0,
                "source-window: valid past-EOF tail writes audio");
 
+        auto emptyTailRangeFile = outDir.getChildFile ("invalid-tail-only-range.wav");
+        auto emptyTailRange = cmd (ops, "export_audio",
+                                   objN ({{ "file", emptyTailRangeFile.getFullPathName() },
+                                          { "range", "custom" }, { "start", 0.3 }, { "end", 0.5 }}));
+        check (! ok (emptyTailRange),
+               "source-window: custom range containing only a beyond-EOF tail is rejected");
+        check (! emptyTailRangeFile.existsAsFile(),
+               "source-window: rejected tail-only range leaves no output file");
+
         check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 0.0 }, { "length", 1.0 }}))),
                "source-window: full in-range fixture restored for normal Warp control");
         check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", true },
