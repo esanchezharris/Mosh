@@ -90,10 +90,28 @@ namespace mosh::audiostartup
     inline juce::String timeoutMessage (const juce::String& device, int timeoutMs)
     {
         return "Audio device " + device + " did not open within "
-             + juce::String (timeoutMs / 1000.0, 1) + "s. Running WITHOUT audio — "
+             + juce::String (timeoutMs / 1000.0, 1) + "s. Running WITHOUT audio - "
              "playback and recording are off. Disconnect or change the device in "
              "system audio settings, then "
              "press Retry.";
+    }
+
+    struct RecoveryGateEvidence
+    {
+        bool degradedBeforeRetry = false;
+        bool retryOk = false;
+        bool audioEnabledAfterRetry = false;
+        int deviceTypeCountAfterRetry = 0;
+        int liveAudioFailures = 1;
+    };
+
+    inline bool physicalRecoveryPassed (const RecoveryGateEvidence& evidence)
+    {
+        return evidence.degradedBeforeRetry
+            && evidence.retryOk
+            && evidence.audioEnabledAfterRetry
+            && evidence.deviceTypeCountAfterRetry > 0
+            && evidence.liveAudioFailures == 0;
     }
 
     struct ProbeRequest
@@ -133,6 +151,10 @@ namespace mosh::audiostartup
     {
         BoundedDeviceSetup result;
         if (data == nullptr || size == 0 || size > kMaxProbeSetupBytes)
+            return result;
+
+        if (! juce::CharPointer_UTF8::isValidString (
+                static_cast<const char*> (data), static_cast<int> (size)))
             return result;
 
         const auto xmlText = juce::String::fromUTF8 (

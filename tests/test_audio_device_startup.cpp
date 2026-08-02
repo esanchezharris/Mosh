@@ -98,6 +98,22 @@ TEST_CASE ("the timeout message is actionable, not a shrug", "[audiostartup]")
     CHECK (timeoutMessage (deviceLabel (&xml), 2500).contains ("2.5s"));
 }
 
+TEST_CASE ("physical recovery requires reacquisition and live callbacks",
+           "[audiostartup][recovery]")
+{
+    RecoveryGateEvidence evidence;
+    evidence.degradedBeforeRetry = true;
+
+    CHECK_FALSE (physicalRecoveryPassed (evidence));
+
+    evidence.retryOk = true;
+    evidence.audioEnabledAfterRetry = true;
+    evidence.deviceTypeCountAfterRetry = 1;
+    evidence.liveAudioFailures = 0;
+
+    CHECK (physicalRecoveryPassed (evidence));
+}
+
 TEST_CASE ("the hardware probe is a separate killable process", "[audiostartup]")
 {
     const juce::File executable ("/Applications/Mosh Audit.app/Contents/MacOS/Mosh");

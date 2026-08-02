@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-app="${1:?usage: audio-recovery-isolation-test.sh /path/to/Mosh}"
+app="${1:?usage: audio-recovery-physical-test.sh /path/to/Mosh [evidence-log]}"
+evidence_log="${2:-}"
 app_data="$HOME/Library/Mosh"
 owner_settings="$app_data/Settings.xml"
-session="_harness/ctest-audio-recovery-isolation-$$-$RANDOM"
+session="_harness/physical-audio-recovery-$$-$RANDOM"
 session_dir="$app_data/$session"
 scratch="$(mktemp -d)"
 output="$scratch/audio-recovery.log"
@@ -33,8 +34,9 @@ PY
 before="$(snapshot_owner_settings)"
 MOSH_AUDIO_OPEN_STALL_MS=60000 \
 MOSH_AUDIO_OPEN_TIMEOUT_MS=250 \
+MOSH_LIVE_AUDIO_SMOKE_MS=750 \
 MOSH_SELFTEST_SESSION="$session" \
-  "$app" --audio-recovery-isolation-smoke > "$output" 2>&1
+  "$app" --audio-recovery-smoke > "$output" 2>&1
 after="$(snapshot_owner_settings)"
 
 if [ "$before" != "$after" ]; then
@@ -63,33 +65,40 @@ for offset, character in enumerate(text):
         break
 
 if evidence is None:
-    raise SystemExit("audio recovery evidence JSON was not emitted")
+    raise SystemExit("physical audio recovery evidence JSON was not emitted")
 
 problems = []
-if evidence.get("mode") != "isolation":
-    problems.append("mode was not isolation")
-if evidence.get("isolationPass") is not True:
-    problems.append("isolationPass was not true")
-if "pass" in evidence:
-    problems.append("isolation evidence must not claim physical recovery")
-if evidence.get("retryOk") is not False:
-    problems.append("injected retry unexpectedly succeeded")
-if evidence.get("audioEnabled") is not False:
-    problems.append("audio was enabled during the injected stall")
-if evidence.get("deviceTypeCount") != 0:
-    problems.append("device types were exposed during the injected stall")
+if evidence.get("mode") != "physical_recovery":
+    problems.append("mode was not physical_recovery")
+if evidence.get("pass") is not True:
+    problems.append("pass was not true")
+if evidence.get("retryOk") is not True:
+    problems.append("retry did not reacquire the device")
+if evidence.get("audioEnabled") is not True:
+    problems.append("audio was not enabled after retry")
+if evidence.get("deviceTypeCount", 0) <= 0:
+    problems.append("no physical audio device type was enumerated")
+if evidence.get("liveAudioFailures") != 0:
+    problems.append("CoreAudio callback smoke failed")
 if "did not open within" not in evidence.get("startupAudioDeviceError", ""):
     problems.append("startup timeout was not reproduced")
-if "did not open within" not in evidence.get("audioDeviceError", ""):
-    problems.append("bounded retry timeout was not retained")
+if evidence.get("audioDeviceError"):
+    problems.append("audio device error remained after retry")
 
 if problems:
     print(json.dumps(evidence, indent=2), file=sys.stderr)
     raise SystemExit("; ".join(problems))
+
+print(json.dumps(evidence, indent=2, sort_keys=True))
 PY
 test ! -e "$session_dir/session.running"
 test "$(find "$session_dir/_settings" -type f -name Settings.xml | wc -l | tr -d '[:space:]')" = "1"
 
+if [ -n "$evidence_log" ]; then
+  mkdir -p "$(dirname "$evidence_log")"
+  cp "$output" "$evidence_log"
+fi
+
 helper="$(cd "$(dirname "$0")/../scripts/lib" && pwd)/harness-session.sh"
 bash -c 'source "$1"; mosh_reset_owned_harness_session "$2"' _ "$helper" "$session"
-printf 'audio recovery isolation lifecycle passed; owner hash and mtime unchanged\n'
+printf 'physical audio recovery passed; owner hash and mtime unchanged\n'

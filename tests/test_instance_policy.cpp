@@ -13,6 +13,7 @@ TEST_CASE ("interactive Mosh is single-instance while harness children remain in
     REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--selftest-undo" }));
     REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--run-script" }));
     REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--audio-probe", "nonce" }));
+    REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--audio-recovery-isolation-smoke" }));
     REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--audio-recovery-smoke" }));
     REQUIRE (mosh::instancepolicy::allowsMultipleInstances ({ "--PluginScan:pipe-token" }));
 }
