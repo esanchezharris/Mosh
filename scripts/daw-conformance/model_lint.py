@@ -14,7 +14,7 @@ Checks:
                  valid, sorted; every `gap` entry carries a backlog_ref resolving to a
                  backlog item that is NOT done (a done item with a still-gap verdict is
                  exactly the staleness class this program exists to kill)
-  backlog        docs/auto-loop/backlog.jsonl lines are valid JSON with id+status
+  backlog        parity_backlog.jsonl lines are valid JSON with id+status
   matrix         docs/reality-pack/daw_capability_matrix.csv (once it exists, P2):
                  required columns, unique cap_ids, valid tier/disposition values,
                  backlog_ref + eval_rows references resolve
@@ -33,7 +33,7 @@ EVAL_CSV = REPO / "docs" / "reality-pack" / "mosh_daw_eval_suite.csv"
 MATRIX_CSV = REPO / "docs" / "reality-pack" / "daw_capability_matrix.csv"
 CONFORMANCE = SELF / "conformance.py"
 VERDICTS = SELF / "verdicts.json"
-BACKLOG = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+BACKLOG = SELF / "parity_backlog.jsonl"
 
 REQUIRED_EVAL_COLS = ["id", "area", "user_action", "initial_state", "expected_state",
                       "expected_audio", "expected_ui", "expected_log_event",
