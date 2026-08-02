@@ -56,6 +56,7 @@
 .v2-field { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--v2-dim); }
 .v2-field > span:first-child { flex: 0 0 30px; }
 .v2-field input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--v2-accent); }
+.v2-field input[type="number"] { flex: 1 1 48px; width: 48px; min-width: 0; }
 .v2-field select { flex: 1 1 auto; min-width: 0; }
 .v2-field input[type="text"] {
   flex: 1 1 auto; min-width: 0; font: inherit; color: var(--v2-text);
@@ -205,4 +206,3 @@
 }
 .v2-invite:hover { color: var(--v2-text); border-color: var(--v2-accent); }
 .v2-invite svg { flex: 0 0 auto; }
-
