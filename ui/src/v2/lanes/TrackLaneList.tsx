@@ -384,26 +384,30 @@ function TrackLaneHeader({ track }: { track: Track }) {
   return (
     <div
       className={`v2-lhead${sel ? " sel" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-label={`Select track ${track.name}`}
-      aria-pressed={sel}
-      onClick={selectTrack}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(); }
-      }}
+      role="group"
+      aria-label={`${track.name} track`}
       data-testid="v2-track-header"
       data-track-id={track.id}
     >
-      <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
-      <span className="v2-lmeta">
-        <span className="v2-lrow">
-          <span className="v2-lname" title={track.name}>{track.name}</span>
+      <button
+        type="button"
+        className="v2-lhead-select"
+        aria-label={`Select track ${track.name}`}
+        aria-pressed={sel}
+        onClick={selectTrack}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(); }
+        }}
+      >
+        <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
+        <span className="v2-lmeta">
+          <span className="v2-lrow">
+            <span className="v2-lname" title={track.name}>{track.name}</span>
+          </span>
+          {preset && <span className="v2-lpreset">{preset}</span>}
         </span>
-        {preset && <span className="v2-lpreset">{preset}</span>}
-      </span>
-      <TrackMeterBar trackId={track.id} />
+        <TrackMeterBar trackId={track.id} />
+      </button>
       <span className="v2-ms">
         <button
           className={`m${track.mute ? " on" : ""}`}
