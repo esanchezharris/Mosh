@@ -47,6 +47,9 @@ export class AgentBatchBoundaryError extends Error {
 
 type IndexedCommandCall = AgentCommandCall & { readonly index: number };
 
+const HISTORY_CONTROL_COMMANDS = new Set(["undo", "redo"]);
+export const HISTORY_CONTROL_BATCH_REASON = "undo and redo must run alone";
+
 // Provenance for the harvested-trajectory dataset (Phase 0). It rides the
 // existing batch_begin args — which the backend logs verbatim — so the harvester
 // can group a turn's commands under the utterance that triggered them. Pure
@@ -105,6 +108,13 @@ function changeSet(label: string, entries: readonly ChangeEntry[]): ChangeSet {
   };
 }
 
+function historyControlApplied(command: string, data: unknown): boolean {
+  if (data === true) return true;
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
+  const result = data as Record<string, unknown>;
+  return command === "undo" ? result.undone === true : result.redone === true;
+}
+
 export async function runAgentBatch(
   label: string,
   calls: readonly AgentCommandCall[],
@@ -113,6 +123,20 @@ export async function runAgentBatch(
   const { exec, refresh } = useStore.getState();
   const entries: ChangeEntry[] = [];
   const valid: IndexedCommandCall[] = [];
+
+  // History controls must never share the transaction they are meant to walk.
+  // Opening batch_begin before undo/redo creates a new undo head, so the command
+  // consumes that fresh boundary instead of reverting the user's prior edit.
+  // Reject a mixed plan before pseudo-commands or seam calls can mutate anything.
+  if (calls.some((call) => HISTORY_CONTROL_COMMANDS.has(call.command)) && calls.length !== 1) {
+    return changeSet(label, calls.map((call, index) => ({
+      index,
+      command: call.command,
+      summary: describeCommand(call.command, call.args ?? {}),
+      ok: false,
+      error: HISTORY_CONTROL_BATCH_REASON,
+    })));
+  }
 
   for (const [index, c] of calls.entries()) {
     // AGT-MEM (M3) — remember_preference is a PSEUDO-command: intercepted here,
@@ -157,6 +181,26 @@ export async function runAgentBatch(
   const seamCalls = calls.filter((c) => !MEMORY_COMMANDS.has(c.command)).length;
   if (allowed.length === 0 && seamCalls > 0) await logAgentTurn(label, meta);
 
+  // Undo/redo are history navigation, not edits to collect into a new history
+  // unit. Dispatch the one allowed control directly and carry the same turn
+  // provenance in its own logged args. Both native (boolean data) and the mock
+  // ({undone|redone}) report whether anything actually changed; surface a no-op
+  // honestly instead of calling the turn successful.
+  if (allowed.length === 1 && HISTORY_CONTROL_COMMANDS.has(allowed[0].command)) {
+    const c = allowed[0];
+    const res = await exec(c.command, { ...(c.args ?? {}), ...turnMarkerArgs(label, meta) });
+    const applied = res.ok && historyControlApplied(c.command, res.data);
+    entries.push({
+      index: c.index,
+      command: c.command,
+      summary: describeCommand(c.command, c.args ?? {}),
+      ok: applied,
+      error: applied ? undefined : (res.ok ? `nothing to ${c.command}` : res.error),
+    });
+    await refresh();
+    return changeSet(label, entries);
+  }
+
   if (allowed.length > 0) {
     const begin = await exec("batch_begin", turnMarkerArgs(label, meta));
     if (!begin.ok)
@@ -198,8 +242,5 @@ export async function undoAgentBatch(): Promise<boolean> {
   const result = await exec("undo");
   await refresh();
   if (!result.ok) return false;
-  if (result.data === true) return true;
-  if (result.data === null || typeof result.data !== "object" || Array.isArray(result.data))
-    return false;
-  return "undone" in result.data && result.data.undone === true;
+  return historyControlApplied("undo", result.data);
 }
