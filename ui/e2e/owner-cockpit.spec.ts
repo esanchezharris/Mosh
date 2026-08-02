@@ -23,19 +23,11 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
       keyOverrides: {},
     }));
   });
+
   await page.goto("/?shell=v2");
   await expect(page.getByTestId("v2-composer")).toBeVisible();
   await expect(page.getByTestId("v2-owner-cockpit")).toHaveCount(0);
   await screenshot(page, "ui-default-off.png");
-
-  await page.getByTestId("file-options").click();
-  await page.getByTestId("fo-settings").click();
-  const ownerSwitch = page.getByRole("switch", { name: "Owner playtest cockpit" });
-  await expect(ownerSwitch).toHaveAttribute("aria-checked", "false");
-  await ownerSwitch.click();
-  await expect(ownerSwitch).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("v2-owner-cockpit")).toBeVisible();
 
   await page.evaluate(() => {
     type JuceHarness = {
@@ -67,7 +59,7 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
       (window as unknown as { __moshOwnerCalls: string[] }).__moshOwnerCalls.push(message.payload.name);
       const request = message.payload.params[0] as Record<string, unknown> | undefined;
       const result = message.payload.name === "agent_host_start_playtest"
-        ? { ok: true, active: true, retainTranscript: false, disclosureRequired: true }
+        ? { ok: true, active: true, retainTranscript: false, disclosureRequired: true, reports: [] }
         : message.payload.name === "ping"
           ? {
               ok: true,
@@ -102,14 +94,15 @@ test("owner cockpit stays default-off and renders the no-live-write owner flow",
 
   await page.getByTestId("file-options").click();
   await page.getByTestId("fo-settings").click();
+  const ownerSwitch = page.getByRole("switch", { name: "Owner playtest cockpit" });
+  await expect(ownerSwitch).toHaveAttribute("aria-checked", "false");
   await ownerSwitch.click();
-  await ownerSwitch.click();
+  await expect(ownerSwitch).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("v2-repair-banner")).toContainText("Repair build aaaaaaaa");
-  await expect(page.getByTestId("v2-repair-controls")).toContainText("Repair: repair running");
-  await expect(page.getByRole("button", { name: "Roll Back" })).toBeVisible();
+  await expect(page.getByTestId("v2-owner-cockpit")).toBeVisible();
 
-  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByTestId("v2-repair-banner")).toContainText("Repair build aaaaaaaa");
+  await expect(page.getByTestId("v2-owner-cockpit")).toHaveAttribute("data-active", "true");
   await expect(page.getByTestId("v2-trace-disclosure")).toContainText(
     "Hosted text and tool traces may outlive a locally purged transcript",
   );

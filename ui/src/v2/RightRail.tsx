@@ -28,6 +28,7 @@ export function RightRail() {
   const open = useShell((s) => s.rightOpen);
   const setOpen = useShell((s) => s.setRightOpen);
   const toggle = useShell((s) => s.toggleRight);
+  const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
   const [repairSourceSha, setRepairSourceSha] = useState<string | null>(null);
   // This runs even while the rail is collapsed. A signed swap must resume its
   // durable owner playtest without requiring the owner to reopen a panel first.
@@ -44,7 +45,7 @@ export function RightRail() {
           ).catch(() => undefined);
       })
       .catch((error: unknown) => ownerCockpitRuntime.surfaceStartupOutage(error));
-  }, []);
+  }, [ownerCockpitEnabled]);
 
   return (
     <div className={`v2-dock v2-dock-right${open ? " open" : ""}`} data-testid="v2-right-dock">
