@@ -11,6 +11,7 @@ target_sources(MoshTests PRIVATE
     test_session_paths.cpp
     test_instance_policy.cpp
     test_audio_device_startup.cpp
+    test_owner_checkpoint_save.cpp
     test_drum_pattern.cpp
     test_automation_mode.cpp
     test_automation_curve_write.cpp
@@ -47,6 +48,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/brain/BrainProxy.cpp
     ${CMAKE_SOURCE_DIR}/src/generative/GenerativeJobManager.cpp
     ${CMAKE_SOURCE_DIR}/src/audio/RealtimeAudioGuard.cpp
+    ${CMAKE_SOURCE_DIR}/src/engine/OwnerCheckpointSave.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/LockManager.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/OutboundQueue.cpp
     ${CMAKE_SOURCE_DIR}/src/multiplayer/TransferQueue.cpp

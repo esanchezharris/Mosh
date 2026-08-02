@@ -298,6 +298,13 @@ public:
             commandLineParameters, "--mosh-owner-checkpoint");
         if (ownerCheckpoint.isNotEmpty())
         {
+            if (! engine->protectOwnerCheckpoint (juce::File (ownerCheckpoint)))
+            {
+                std::cerr << "repair launch refused: checkpoint could not be secured" << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
             auto* args = new juce::DynamicObject();
             args->setProperty ("file", ownerCheckpoint);
             auto* command = new juce::DynamicObject();
@@ -307,13 +314,6 @@ public:
             if (! (bool) result.getProperty ("ok", false))
             {
                 std::cerr << "repair launch refused: checkpoint could not be opened" << std::endl;
-                setApplicationReturnValue (1);
-                quit();
-                return;
-            }
-            if (! engine->protectOwnerCheckpoint (juce::File (ownerCheckpoint)))
-            {
-                std::cerr << "repair launch refused: checkpoint could not be secured" << std::endl;
                 setApplicationReturnValue (1);
                 quit();
                 return;

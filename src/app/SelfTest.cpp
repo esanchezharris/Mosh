@@ -9802,11 +9802,17 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (released) && ! (bool) released["data"].getProperty ("audioEnabled", true),
                "repair swap: MoshOps releases the audio device before handoff");
 
-        check (ok (cmd (ops, "open_project", objN ({ { "file", checkpointPath } })))
-                   && eng.protectOwnerCheckpoint (File (checkpointPath)),
-               "repair swap: launched checkpoint enables persistent owner-only protection");
+        check (eng.protectOwnerCheckpoint (File (checkpointPath))
+                   && ok (cmd (ops, "open_project", objN ({ { "file", checkpointPath } }))),
+               "repair swap: launch secures checkpoint before the first open/save");
+       #if JUCE_MAC
+        checkpointStat = {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: launch-time open/save preserves owner-only mode");
+       #endif
         check (ok (cmd (ops, "save")),
-               "repair swap: launched checkpoint survives a replacement save");
+               "repair swap: launched checkpoint survives a private atomic replacement save");
        #if JUCE_MAC
         checkpointStat = {};
         check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0

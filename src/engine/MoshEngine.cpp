@@ -1,4 +1,5 @@
 #include "MoshEngine.h"
+#include "OwnerCheckpointSave.h"
 #include "SessionMaintenance.h"
 #include "AudioDeviceStartup.h"
 #include "SessionPaths.h"
@@ -599,7 +600,28 @@ bool MoshEngine::save()
         return false;
 
     stampFormatVersion();                  // PRJ-FMT — always current on disk
-    const bool wrote = te::EditFileOperations (edit()).save (false, true, false);
+    const bool isOwnerCheckpoint = ! ownerCheckpointPath.getFullPathName().isEmpty()
+        && editPath == ownerCheckpointPath;
+    bool wrote = false;
+    if (isOwnerCheckpoint)
+    {
+        te::CustomControlSurface::saveAllSettings (*enginePtr);
+        edit().getParameterControlMappings().saveToEdit();
+        wrote = ownercheckpoint::savePrivateReplacement (
+            editPath, [this] (const juce::File& staged)
+            {
+                return te::EditFileOperations (edit()).writeToFile (staged, false);
+            });
+    }
+    else
+    {
+        wrote = te::EditFileOperations (edit()).save (false, true, false);
+    }
+    if (wrote && isOwnerCheckpoint)
+    {
+        edit().resetChangedStatus();
+        enginePtr->getEngineBehaviour().editHasBeenSaved (edit(), editPath);
+    }
     const bool ok = wrote && enforceOwnerCheckpointPermissions();
     if (ok)
     {
@@ -615,13 +637,17 @@ bool MoshEngine::save()
 
 bool MoshEngine::protectOwnerCheckpoint (const juce::File& file)
 {
-    if (file != editPath || ! file.existsAsFile()
+    if (! file.existsAsFile() || file.isSymbolicLink()
         || ! file.getFileName().contains (".mosh-repair-checkpoint-")
         || file.getFileExtension() != ".tracktionedit")
         return false;
 
+   #if JUCE_MAC
+    if (::chmod (file.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) != 0)
+        return false;
+   #endif
     ownerCheckpointPath = file;
-    return enforceOwnerCheckpointPermissions();
+    return editPath != ownerCheckpointPath || enforceOwnerCheckpointPermissions();
 }
 
 bool MoshEngine::enforceOwnerCheckpointPermissions() const
@@ -873,7 +899,8 @@ juce::String MoshEngine::openProject (const juce::File& file)
     editPtr->getTransport().freePlaybackContext();
     editPtr = std::move (fresh);
     adoptEditFile (file);
-    save();                                  // gap 2 — parity with newProject: persist on adopt (also clears dirty)
+    if (! save())                            // gap 2 — parity with newProject: persist on adopt (also clears dirty)
+        return "project could not be saved securely";
     rememberProject (file);                  // gap 2 — record as last/recent project
     return {};
 }

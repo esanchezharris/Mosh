@@ -190,6 +190,7 @@ if (MOSH_BUILD_APP)
         src/telemetry/CrashHandler.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
+        src/engine/OwnerCheckpointSave.cpp
         src/moshops/MoshOps.cpp
         src/moshops/MoshOps.Lyrics.cpp
         src/moshops/MoshOps.Notes.cpp
