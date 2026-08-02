@@ -2,6 +2,7 @@
 
 #include <tracktion_engine/tracktion_engine.h>
 #include <atomic>
+#include <functional>
 
 namespace mosh
 {
@@ -84,9 +85,17 @@ public:
         opt-in via MOSH_SCAN_SLOW_VST3=1. Returns false if unknown. */
     bool findDescription (const juce::String& pluginId, juce::PluginDescription& out);
 
-    /** Open (or focus) the native editor window for a hosted plugin (03 §4). */
-    void openEditor (te::Plugin&);
+    /** Called after a distinct user change in a native editor. Returning false means
+        the mutation was rejected by the command seam and the listener must resync to
+        `before` (for example, a collaborator currently owns the track). */
+    using EditorParameterCallback =
+        std::function<bool (te::AutomatableParameter&, float before, float after)>;
+
+    /** Open (or focus) the native editor window for a hosted plugin (03 §4).
+        Parameter gestures are mirrored through callback for the lifetime of the window. */
+    void openEditor (te::Plugin&, EditorParameterCallback = {});
     void closeEditor (te::Plugin&);
+    void closeAllEditors();
 
     static juce::String idFor (const juce::PluginDescription&);
 

@@ -1,10 +1,13 @@
 #include "PluginHost.h"
+#include "PluginEditorParamGesture.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #if MOSH_HAVE_ANIRA
  #include "plugins/transform/RaveInsertPlugin.h"
 #endif
 #include <thread>
+#include <memory>
+#include <vector>
 #if ! JUCE_WINDOWS
  #include <unistd.h>   // getpid (POSIX scan-watchdog kill)
 #endif
@@ -44,10 +47,86 @@ namespace
        #endif
     }
 
+    // One listener per Tracktion parameter. ExternalAutomatableParameter already
+    // converts processor callbacks to message-thread parameterChanged/gesture calls;
+    // this layer only coalesces them and hands the exact before/after pair back to
+    // MoshOps. Holding the ref-counted parameter keeps listener teardown safe until
+    // the editor window is closed (remove_plugin closes it before deleting the plugin).
+    struct EditorParameterWatcher final : te::AutomatableParameter::Listener
+    {
+        EditorParameterWatcher (te::AutomatableParameter::Ptr parameter,
+                                PluginHost::EditorParameterCallback callbackToUse)
+            : param (std::move (parameter)), callback (std::move (callbackToUse)),
+              gesture (param->getCurrentValue())
+        {
+            param->addListener (this);
+        }
+
+        ~EditorParameterWatcher() override
+        {
+            param->removeListener (this);
+            deliver (gesture.finish());
+        }
+
+        void curveHasChanged (te::AutomatableParameter&) override {}
+        void parameterChanged (te::AutomatableParameter&, float newValue) override
+        {
+            deliver (gesture.valueChanged (newValue));
+        }
+        void parameterChangeGestureBegin (te::AutomatableParameter&) override
+        {
+            gesture.begin();
+        }
+        void parameterChangeGestureEnd (te::AutomatableParameter&) override
+        {
+            deliver (gesture.end());
+        }
+
+        void deliver (const std::optional<PluginEditorParamGesture::Change>& change)
+        {
+            if (! change.has_value() || ! callback)
+                return;
+            if (! callback (*param, change->before, change->after))
+                gesture.sync (change->before);
+        }
+
+        void cancelPending()
+        {
+            callback = {};
+            gesture.cancel();
+        }
+
+        te::AutomatableParameter::Ptr param;
+        PluginHost::EditorParameterCallback callback;
+        PluginEditorParamGesture gesture;
+    };
+
+    struct EditorParameterMirror
+    {
+        EditorParameterMirror (te::Plugin& plugin,
+                               const PluginHost::EditorParameterCallback& callback)
+        {
+            if (! callback)
+                return;
+            for (int i = 0; i < plugin.getNumAutomatableParameters(); ++i)
+                if (auto param = plugin.getAutomatableParameter (i))
+                    watchers.push_back (std::make_unique<EditorParameterWatcher> (param, callback));
+        }
+
+        void cancelPending()
+        {
+            for (auto& watcher : watchers)
+                watcher->cancelPending();
+        }
+
+        std::vector<std::unique_ptr<EditorParameterWatcher>> watchers;
+    };
+
     // A native plugin-editor pop-out (03 §4) that notifies on close.
     struct EditorWindow : DocumentWindow
     {
         std::function<void()> onClose;
+        std::unique_ptr<EditorParameterMirror> parameterMirror;
         EditorWindow (const String& name) : DocumentWindow (name, Colours::black, closeButton)
         {
             setUsingNativeTitleBar (true);
@@ -586,7 +665,7 @@ bool PluginHost::findDescription (const String& pluginId, PluginDescription& out
     return false;
 }
 
-void PluginHost::openEditor (te::Plugin& plugin)
+void PluginHost::openEditor (te::Plugin& plugin, EditorParameterCallback onParameterChanged)
 {
     const auto key = keyFor (plugin);
     if (windowByPlugin.contains (key))
@@ -604,6 +683,9 @@ void PluginHost::openEditor (te::Plugin& plugin)
     AudioProcessorEditor* ed = inst->hasEditor() ? inst->createEditorIfNeeded() : nullptr;
     if (ed != nullptr) win->setContentOwned (ed, true);
     else               win->setContentOwned (new GenericAudioProcessorEditor (*inst), true);
+    // Attach only after editor creation: several plugins emit harmless setup callbacks
+    // from createEditorIfNeeded(), which are not user mutations and must not enter JSONL.
+    win->parameterMirror = std::make_unique<EditorParameterMirror> (plugin, onParameterChanged);
 
     win->onClose = [this, key] { closeEditorByKey (key); };
     win->centreWithSize (jmax (320, win->getWidth()), jmax (240, win->getHeight()));
@@ -616,6 +698,19 @@ void PluginHost::openEditor (te::Plugin& plugin)
 void PluginHost::closeEditor (te::Plugin& plugin)
 {
     closeEditorByKey (keyFor (plugin));
+}
+
+void PluginHost::closeAllEditors()
+{
+    // Full-app teardown happens after MainWindow (and therefore the WebView bridge)
+    // is gone. Do not flush an in-flight native-editor gesture into a dead event sink;
+    // an ordinary user close still goes through closeEditor() and flushes normally.
+    for (auto* window : editorWindows)
+        if (auto* editorWindow = dynamic_cast<EditorWindow*> (window))
+            if (editorWindow->parameterMirror)
+                editorWindow->parameterMirror->cancelPending();
+    windowByPlugin.clear();
+    editorWindows.clear();
 }
 
 void PluginHost::closeEditorByKey (const juce::String& key)

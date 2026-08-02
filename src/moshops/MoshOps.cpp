@@ -228,6 +228,11 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
 
 MoshOps::~MoshOps()
 {
+    // Editor parameter mirrors capture this MoshOps instance. Cancel any in-flight
+    // gesture and detach the listeners before other MoshOps members are destroyed.
+    // MainWindow/the WebView bridge is already gone at this point, so teardown must not
+    // flush a late editor callback into the event sink. Ordinary editor close still does.
+    pluginHost.closeAllEditors();
     stopTimer();
     unregisterAllMeterClients();       // balances addClient() for the per-track meter taps only —
                                         // masterClient is a separate registration (see below)
