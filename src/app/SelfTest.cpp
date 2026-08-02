@@ -4,6 +4,7 @@
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "state/Lyrics.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
@@ -2539,6 +2540,49 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "create_lyric_sheet", args1 ("trackId", vt))), "create_lyric_sheet ok");
         check (ok (cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "hold the flame" }}))),
                "set_lyric_line ok");
+
+        // #535 — a flow analysis belongs to the exact sheet spec that produced it.
+        // Editing words, changing a sheet constraint, or asserting different words must
+        // remove the stale payload before the next snapshot/save can expose it.
+        const auto lyricLineState = [&]() -> juce::ValueTree
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->itemID.toString() == vt)
+                    if (auto sheet = t->state.getChildWithName (mosh::ids::MOSH_LYRICSHEET); sheet.isValid())
+                        return mosh::LyricSheet::lines (sheet).getChildWithProperty (mosh::ids::lyricIndex, 0);
+            return {};
+        };
+        const auto plantLyricAnalysis = [&]
+        {
+            auto line = lyricLineState();
+            if (line.isValid())
+                line.setProperty (mosh::ids::lyricAnalysis,
+                                  R"({"syllables":3,"target":16,"hasGap":true,"complete":false})", nullptr);
+        };
+        plantLyricAnalysis();
+        check (lyricLineState().hasProperty (mosh::ids::lyricAnalysis), "stale-analysis fixture planted");
+        check (ok (cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 },
+                                                        { "text", "hold the bright flame" },
+                                                        { "seedText", "hold the bright flame" }}))),
+               "editing an analyzed lyric line ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "editing lyric words invalidates stale analysis before snapshot/save");
+
+        plantLyricAnalysis();
+        check (ok (cmd (ops, "set_lyric_constraint", objN ({{ "trackId", vt }, { "grid", "1/8" }}))),
+               "changing an analyzed lyric constraint ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "changing sheet constraints invalidates stale analysis");
+        cmd (ops, "set_lyric_constraint", objN ({{ "trackId", vt }, { "grid", "1/16" }}));
+
+        plantLyricAnalysis();
+        check (ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 },
+                                                           { "text", "hold the final flame" }}))),
+               "asserting different analyzed words ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "asserting different words invalidates stale analysis");
+        check (ok (cmd (ops, "undo")), "undo pre-score analysis invalidation fixture");
+
         const juce::String scoreBlob =
             R"({"v":1,"algo":"v3","bar":0,"bpm":120.0,"timeSig":[4,4],"grid":"1/16","clamped":false,)"
             R"("slots":[{"start":0.0,"end":0.5,"velocity":90,"kind":"attack","segments":[{"start":0.0,"end":0.5,"pitch":57}]},)"

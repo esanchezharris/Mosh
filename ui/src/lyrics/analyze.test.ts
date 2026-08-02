@@ -57,6 +57,43 @@ describe("analyze_lyrics (mock seam)", () => {
     expect(gappedLine.analysis!.complete).toBe(false); // gaps remain
   });
 
+  it("invalidates every sheet analysis when lyrics or flow constraints change", async () => {
+    const trackId = await trackWithSheet();
+    await mockExecute<CommandResult>({ command: "set_lyric_line", args: { trackId, lineIndex: 0, text: "lighting up the flame", rhymeGroup: "A" } });
+    await mockExecute<CommandResult>({ command: "set_lyric_line", args: { trackId, lineIndex: 1, seedText: "rising up the ___", rhymeGroup: "A" } });
+    await mockExecute<CommandResult>({ command: "analyze_lyrics", args: { trackId } });
+    expect((await lyricLines(trackId)).every((line) => line.analysis)).toBe(true);
+
+    // This is the native #535 journey: editing a previously analyzed gap line to final
+    // words must remove the stale hasGap/syllable payload immediately, including the
+    // other line because the edit can change a rhyme-group anchor.
+    await mockExecute<CommandResult>({
+      command: "set_lyric_line",
+      args: { trackId, lineIndex: 1, text: "rising through the night", seedText: "rising through the night" },
+    });
+    expect((await lyricLines(trackId)).every((line) => line.analysis == null)).toBe(true);
+
+    await mockExecute<CommandResult>({ command: "analyze_lyrics", args: { trackId } });
+    expect((await lyricLines(trackId)).every((line) => line.analysis)).toBe(true);
+    await mockExecute<CommandResult>({ command: "set_lyric_constraint", args: { trackId, grid: "1/8" } });
+    expect((await lyricLines(trackId)).every((line) => line.analysis == null)).toBe(true);
+  });
+
+  it("invalidates analysis when Assert commits different final words", async () => {
+    const trackId = await trackWithSheet();
+    await mockExecute<CommandResult>({ command: "set_lyric_line", args: { trackId, lineIndex: 0, text: "lighting up the flame" } });
+    await mockExecute<CommandResult>({ command: "analyze_lyrics", args: { trackId } });
+    expect((await lyricLines(trackId))[0].analysis).toBeTruthy();
+
+    await mockExecute<CommandResult>({
+      command: "assert_lyric_line",
+      args: { trackId, lineIndex: 0, text: "lighting up the skyline" },
+    });
+    const [asserted] = await lyricLines(trackId);
+    expect(asserted.text).toBe("lighting up the skyline");
+    expect(asserted.analysis).toBeUndefined();
+  });
+
   it("errors cleanly when the track has no lyric sheet", async () => {
     __resetMockForTests();
     const created = await mockExecute<CommandResult<{ trackId: string }>>({ command: "create_track", args: { name: "NoSheet" } });

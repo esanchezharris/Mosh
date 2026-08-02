@@ -15,6 +15,16 @@ namespace mosh
 {
 using namespace juce;
 
+namespace
+{
+void clearLyricAnalysis (const juce::ValueTree& sheet)
+{
+    auto lines = mosh::LyricSheet::lines (sheet);
+    for (int i = 0; i < lines.getNumChildren(); ++i)
+        lines.getChild (i).removeProperty (ids::lyricAnalysis, nullptr);
+}
+}
+
 // ── LYR-001 — Finish-My-Song lyric sheet (per-track MOSH_LYRICSHEET) ───────────
 
 juce::var MoshOps::cmdCreateLyricSheet (const juce::var& args)
@@ -66,6 +76,7 @@ juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
     if (t == nullptr) return errResult ("set_lyric_constraint", "no track: " + trackId);
     auto sheet = t->state.getChildWithName (ids::MOSH_LYRICSHEET);
     if (! sheet.isValid()) return errResult ("set_lyric_constraint", "track has no lyric sheet");
+    const auto analysisBefore = mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t));
 
     beginTxn ("set_lyric_constraint");
     if (args.hasProperty ("grid"))            sheet.setProperty (ids::lyricGrid,            args.getProperty ("grid", var()), &undoManager());
@@ -74,6 +85,8 @@ juce::var MoshOps::cmdSetLyricConstraint (const juce::var& args)
     if (args.hasProperty ("explicit"))        sheet.setProperty (ids::lyricExplicit,        args.getProperty ("explicit", var()), &undoManager());
     if (args.hasProperty ("rhymeStrictness")) sheet.setProperty (ids::lyricRhymeStrictness, args.getProperty ("rhymeStrictness", var()), &undoManager());
     if (args.hasProperty ("styleBias"))       sheet.setProperty (ids::lyricStyleBias,       (bool) args.getProperty ("styleBias", false), &undoManager());
+    if (analysisBefore != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t)))
+        clearLyricAnalysis (sheet);
     logLine ("set_lyric_constraint", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("set_lyric_constraint");
@@ -92,6 +105,7 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
     if (lineIndex < 0) return errResult ("set_lyric_line", "lineIndex required (>= 0)");
     if (lineIndex > lines.getNumChildren())
         return errResult ("set_lyric_line", "lineIndex out of range (lines are kept dense)");
+    const auto analysisBefore = mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t));
 
     beginTxn ("set_lyric_line");
     auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
@@ -146,6 +160,11 @@ juce::var MoshOps::cmdSetLyricLine (const juce::var& args)
         && (line[ids::lyricText].toString().isNotEmpty() || line[ids::lyricSeedText].toString().isNotEmpty()))
         line.setProperty (ids::status, "seed", &undoManager());
 
+    // Analysis is sheet-wide: changing one line may change the rhyme anchor/grade of
+    // another. Clear every cached blob only when an actual service input changed.
+    if (analysisBefore != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t)))
+        clearLyricAnalysis (sheet);
+
     auto* data = new DynamicObject();
     data->setProperty ("lineIndex", lineIndex);
     data->setProperty ("lineId", line[ids::id].toString());
@@ -166,12 +185,15 @@ juce::var MoshOps::cmdRemoveLyricLine (const juce::var& args)
     const int lineIndex = (int) args.getProperty ("lineIndex", -1);
     auto line = lines.getChildWithProperty (ids::lyricIndex, lineIndex);
     if (! line.isValid()) return errResult ("remove_lyric_line", "no line at index " + juce::String (lineIndex));
+    const auto analysisBefore = mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t));
 
     beginTxn ("remove_lyric_line");
     lines.removeChild (line, &undoManager());
     // Keep indices dense: renumber the surviving lines by their child order.
     for (int i = 0; i < lines.getNumChildren(); ++i)
         lines.getChild (i).setProperty (ids::lyricIndex, i, &undoManager());
+    if (analysisBefore != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t)))
+        clearLyricAnalysis (sheet);
     logLine ("remove_lyric_line", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("remove_lyric_line");
@@ -444,6 +466,7 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
     const auto chosen = props[proposalIndex].getProperty ("text", var()).toString();
     if (! lyricTextIsCompleteForSing (chosen))
         return errResult ("accept_lyric_proposal", "proposal has unresolved words");
+    const auto analysisBefore = mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t));
 
     beginTxn ("accept_lyric_proposal");
     node.setProperty (ids::lyricText, chosen, &undoManager());     // the COMMIT (undoable)
@@ -472,6 +495,8 @@ juce::var MoshOps::cmdAcceptLyricProposal (const juce::var& args)
         }
         node.setProperty (ids::lyricOrigin, heardKept ? "mixed" : "generated", &undoManager());
     }
+    if (analysisBefore != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t)))
+        clearLyricAnalysis (sheet);
     logLine ("accept_lyric_proposal", args, true, {}, true);       // explicit TASTE label (positive)
     emitSnapshotInvalidated();
 
@@ -512,11 +537,14 @@ juce::var MoshOps::cmdAssertLyricLine (const juce::var& args)
         : node[ids::lyricText].toString();
     if (! lyricTextIsCompleteForSing (assertedText))
         return errResult ("assert_lyric_line", "line needs complete words before it can be asserted");
+    const auto analysisBefore = mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t));
 
     beginTxn ("assert_lyric_line");
     node.setProperty (ids::lyricText, assertedText.trim(), &undoManager());
     node.setProperty (ids::status, "asserted", &undoManager());
     node.removeProperty (ids::lyricProposals, nullptr);
+    if (analysisBefore != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*t)))
+        clearLyricAnalysis (sheet);
     logLine ("assert_lyric_line", args, true, {}, true);
     emitSnapshotInvalidated();
 
@@ -544,8 +572,8 @@ juce::var MoshOps::cmdRejectLyricProposal (const juce::var& args)
 
 // LYR-L1 — precise per-line phonology for the flow visualizer. Service-backed (no LLM),
 // idempotent + read-only: the analysis is a recomputable JSON blob landed per line →
-// snapshot. NON-undoable; no epoch guard (landing a stale analysis is harmless — it just
-// re-marks the same content, and a missing line is skipped on re-lookup).
+// snapshot. NON-undoable. A sheet-spec fingerprint prevents a late result from attaching
+// old words/gaps/rhyme anchors after the producer edits while the request is in flight.
 juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
 {
     const auto trackId = args.getProperty ("trackId", var()).toString();
@@ -555,12 +583,20 @@ juce::var MoshOps::cmdAnalyzeLyrics (const juce::var& args)
         return errResult ("analyze_lyrics", "track has no lyric sheet");
 
     const auto spec = lyricSpecForTrack (*t);
+    const auto specFingerprint = mosh::LyricSheet::analysisFingerprint (spec);
 
-    auto land = [this, trackId] (const juce::var& result) -> juce::var
+    auto land = [this, trackId, specFingerprint] (const juce::var& result) -> juce::var
     {
         auto* tt = findTrack (trackId);
         auto sheet = tt != nullptr ? tt->state.getChildWithName (ids::MOSH_LYRICSHEET) : juce::ValueTree();
         if (! sheet.isValid()) return errResult ("analyze_lyrics", "lyric sheet gone");
+        if (specFingerprint != mosh::LyricSheet::analysisFingerprint (lyricSpecForTrack (*tt)))
+        {
+            auto* d = new DynamicObject();
+            d->setProperty ("status", "stale");
+            d->setProperty ("lineCount", 0);
+            return okResult ("analyze_lyrics", var (d));
+        }
         if (! result.isObject() || ! (bool) result.getProperty ("ok", false))
             return errResult ("analyze_lyrics", "lyric service unavailable (start the generative service)");
         auto lines = mosh::LyricSheet::lines (sheet);
