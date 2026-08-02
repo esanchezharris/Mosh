@@ -50,7 +50,10 @@ working on a track and, when you move to a different track, it **commits** the o
 (serializes it + publishes) and releases the lock so your peer can take it. There's also an
 idle checkpoint (~5 s) so edits get published even if you don't switch tracks. Locks carry a
 monotonic **epoch** (fencing token); a stale commit is rejected (409). A crashed peer's lock
-auto-frees after a ~90 s lease.
+auto-frees after a ~90 s lease. Presence uses the same grace: an active peer's poll keeps its
+membership alive, while a peer that stays silent for 90 s is removed from the roster, releases
+its locks, and stops occupying one of the two room slots. Rejoining with the same peer id inside
+the grace window is idempotent; after expiry the peer must join the room again.
 
 **Practical consequence:** your peer sees your work on a track **when you finish with it /
 move off it**, not keystroke-by-keystroke. Park on a track and your changes checkpoint after

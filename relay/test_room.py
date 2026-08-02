@@ -48,6 +48,62 @@ def test_leave_removes_peer_and_frees_a_slot():
     assert r.peer_count() == 2
 
 
+def _clocked_membership_room(start=1000.0, peer_lease=90):
+    clk = [start]
+    r = Room("ABCD", now_fn=lambda: clk[0], peer_lease_s=peer_lease)
+    r.join("a", name="Ada")
+    r.join("b", name="Bo")
+    return r, clk
+
+
+def test_silent_peer_expires_and_releases_its_locks():
+    r, clk = _clocked_membership_room()
+    r.try_lock("b", "track-b")
+    clk[0] += 60
+    r.touch("a")                                  # host stays active
+    clk[0] += 31                                  # guest is now beyond 90s
+
+    assert r.sweep_peers() == 1
+    assert set(r.peers()) == {"a"}
+    assert "track-b" not in r.locks()
+
+
+def test_join_sweeps_a_stale_peer_before_enforcing_capacity():
+    r, clk = _clocked_membership_room(peer_lease=10)
+    clk[0] += 6
+    r.touch("a")                                  # only b will expire
+    clk[0] += 5
+
+    r.join("c", name="Cy")                       # stale b no longer owns a slot
+    assert set(r.peers()) == {"a", "c"}
+
+
+def test_rejoin_within_lease_refreshes_profile_and_deadline():
+    r, clk = _clocked_membership_room(peer_lease=10)
+    clk[0] += 9
+    r.touch("a")
+    r.join("b", name="Bo back")                  # reconnect within grace
+    clk[0] += 9
+
+    assert r.sweep_peers() == 0
+    assert r.peers()["b"]["name"] == "Bo back"
+
+
+def test_expired_peer_cannot_resume_without_rejoining():
+    r, clk = _clocked_membership_room(peer_lease=10)
+    clk[0] += 6
+    r.touch("a")
+    clk[0] += 5
+
+    with pytest.raises(UnknownPeer):
+        r.publish("b", {"type": "presence"})
+    with pytest.raises(UnknownPeer):
+        r.try_lock("b", "track-b")
+
+    r.join("b", name="Bo rejoined")
+    assert r.publish("b", {"type": "presence"})["from"] == "b"
+
+
 # ── Sequence + ring + catch-up ──────────────────────────────────────────────
 
 def test_publish_assigns_monotonic_seq_and_frames():
@@ -225,7 +281,10 @@ def test_commit_epoch_fencing():
 
 def _clocked_room(start=1000.0, lease=90):
     clk = [start]
-    r = Room("ABCD", now_fn=lambda: clk[0], lock_lease_s=lease)
+    # These cases isolate lock expiry; keep membership live much longer so a
+    # lock-only test does not accidentally exercise the separate peer lease.
+    r = Room("ABCD", now_fn=lambda: clk[0], lock_lease_s=lease,
+             peer_lease_s=lease * 10)
     r.join("a")
     r.join("b")
     return r, clk

@@ -43,7 +43,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from room import RoomRegistry, RoomError, RoomFull, UnknownPeer, StaleCommit
+from room import (RoomRegistry, RoomError, RoomFull, UnknownPeer, StaleCommit,
+                  LOCK_LEASE_S, PEER_LEASE_S)
 
 DEFAULT_PORT = 8771
 
@@ -179,8 +180,10 @@ class RelayState:
     """Thread-safe wrapper around the RoomRegistry (ThreadingHTTPServer serves
     each request on its own thread)."""
 
-    def __init__(self):
-        self._reg = RoomRegistry()
+    def __init__(self, now_fn=None, lock_lease_s=LOCK_LEASE_S,
+                 peer_lease_s=PEER_LEASE_S):
+        self._reg = RoomRegistry(now_fn=now_fn, lock_lease_s=lock_lease_s,
+                                 peer_lease_s=peer_lease_s)
         self._lock = threading.Lock()
         # P4 self-heal (PR-1): the blob store is process-global (content-addressed,
         # not per-room — mirrors the cloud's single `mp-stems` bucket), so it lives
@@ -216,7 +219,7 @@ class RelayState:
                 key = msg.get("logicalId")
                 if key and not room.commit_allowed(peer_id, key, msg.get("epoch", 0)):
                     raise StaleCommit(f"commit for {key} fenced (stale epoch / not owner)")
-            room.touch(peer_id)   # publishing is liveness — refresh this peer's lock leases
+            # Room.publish is the liveness heartbeat (membership + held locks).
             return room.publish(peer_id, msg)["seq"]
 
     def lock(self, code, peer_id, key, steal=False):
