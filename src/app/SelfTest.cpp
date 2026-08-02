@@ -3826,6 +3826,185 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         stemDir.deleteRecursively();
     }
 
+    // --- EXP-EOF-001 / #538: fail known-empty audio source windows before render ---
+    section ("Export rejects empty audio source windows atomically (#538)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "export-source-window-selftest"))),
+               "source-window: fresh project ok");
+        const auto validTrack = cmd (ops, "create_track", args1 ("name", "Valid Source"))["data"]
+                                    .getProperty ("trackId", var()).toString();
+        const auto invalidTrack = cmd (ops, "create_track", args1 ("name", "Invalid Source"))["data"]
+                                      .getProperty ("trackId", var()).toString();
+        const auto validClip = cmd (ops, "add_test_tone_clip",
+                                    objN ({{ "trackId", validTrack }, { "seconds", 1.0 }, { "freq", 271.0 }}))["data"]
+                                   .getProperty ("clipId", var()).toString();
+        const auto invalidClip = cmd (ops, "add_test_tone_clip",
+                                      objN ({{ "trackId", invalidTrack }, { "seconds", 1.0 }, { "freq", 379.0 }}))["data"]
+                                     .getProperty ("clipId", var()).toString();
+        check (validClip.isNotEmpty() && invalidClip.isNotEmpty(),
+               "source-window: valid and invalid fixtures created");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", invalidClip }, { "offset", 1.0 }, { "length", 1.0 }}))),
+               "source-window: exact-EOF fixture set");
+
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("source-window-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+        auto invalidMixFile = outDir.getChildFile ("invalid-mix.wav");
+        const int mixLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                              .getProperty ("total", -1);
+        const double mixStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidMix = cmd (ops, "export_audio", args1 ("file", invalidMixFile.getFullPathName()));
+        const double mixElapsedMs = Time::getMillisecondCounterHiRes() - mixStartMs;
+        const auto mixError = invalidMix.getProperty ("error", var()).toString();
+        check (! ok (invalidMix), "source-window: exact-EOF mix export rejected");
+        check (mixElapsedMs < 1000.0, "source-window: mix rejection is pre-render and under one second");
+        check (mixError.contains ("Invalid Source") && mixError.contains (invalidClip)
+               && mixError.containsIgnoreCase ("effective offset")
+               && mixError.containsIgnoreCase ("source length")
+               && mixError.containsIgnoreCase ("trim"),
+               "source-window: mix error names the track, clip, measured window, and repair action");
+        check (! invalidMixFile.existsAsFile(), "source-window: rejected mix leaves no output file");
+        auto invalidMixLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidMixLog.getProperty ("total", -1) == mixLogTotalBefore + 1,
+               "source-window: rejected mix appends one command-log record");
+        if (auto* entries = invalidMixLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_audio"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected mix log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected mix log exposes an entries array");
+        }
+
+        auto previousMixFile = outDir.getChildFile ("previous-good-mix.wav");
+        const juce::String previousMixSentinel = "previous successful export must survive validation failure";
+        check (previousMixFile.replaceWithText (previousMixSentinel),
+               "source-window: previous export sentinel created");
+        auto rejectedOverwrite = cmd (ops, "export_audio", args1 ("file", previousMixFile.getFullPathName()));
+        check (! ok (rejectedOverwrite), "source-window: invalid mix cannot overwrite an existing export");
+        check (previousMixFile.loadFileAsString() == previousMixSentinel,
+               "source-window: validation failure preserves the previous export bytes");
+
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 2.0 }}))),
+               "source-window: invalid fixture moved outside custom export range");
+        auto unaffectedRangeFile = outDir.getChildFile ("unaffected-custom-range.wav");
+        auto unaffectedRange = cmd (ops, "export_audio",
+                                    objN ({{ "file", unaffectedRangeFile.getFullPathName() },
+                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }}));
+        check (ok (unaffectedRange),
+               "source-window: invalid clip outside the custom range does not block export");
+        check (unaffectedRangeFile.existsAsFile() && unaffectedRangeFile.getSize() > 0,
+               "source-window: unaffected custom range writes audio");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 0.0 }}))),
+               "source-window: invalid fixture restored inside full export range");
+
+        auto invalidStemDir = outDir.getChildFile ("invalid-stems");
+        invalidStemDir.deleteRecursively();
+        const int stemLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                               .getProperty ("total", -1);
+        const double stemsStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidStems = cmd (ops, "export_stems", args1 ("dir", invalidStemDir.getFullPathName()));
+        const double stemsElapsedMs = Time::getMillisecondCounterHiRes() - stemsStartMs;
+        const auto stemsError = invalidStems.getProperty ("error", var()).toString();
+        check (! ok (invalidStems), "source-window: stem set rejects one invalid non-empty track");
+        check (stemsElapsedMs < 1000.0, "source-window: stem rejection is pre-render and under one second");
+        check (stemsError.contains ("Invalid Source") && stemsError.contains (invalidClip),
+               "source-window: stem error identifies the omitted track and clip");
+        check (invalidStemDir.findChildFiles (File::findFiles, false).isEmpty(),
+               "source-window: failed stem command leaves no partial stem files");
+        auto invalidStemLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidStemLog.getProperty ("total", -1) == stemLogTotalBefore + 1,
+               "source-window: rejected stem set appends one command-log record");
+        if (auto* entries = invalidStemLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_stems"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected stem log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected stem log exposes an entries array");
+        }
+
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", invalidClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 120.0 }}))),
+               "source-window: invalid fixture Warp on ok");
+        auto invalidWarpFile = outDir.getChildFile ("invalid-warp.wav");
+        const double warpStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidWarp = cmd (ops, "export_audio", args1 ("file", invalidWarpFile.getFullPathName()));
+        const double warpElapsedMs = Time::getMillisecondCounterHiRes() - warpStartMs;
+        check (! ok (invalidWarp), "source-window: warped exact-EOF mix rejected");
+        check (warpElapsedMs < 1000.0, "source-window: warped rejection avoids the 20-second watchdog");
+        check (! invalidWarpFile.existsAsFile(), "source-window: rejected warped mix leaves no output file");
+
+        check (ok (cmd (ops, "remove_clip", args1 ("clipId", invalidClip))),
+               "source-window: invalid fixture removed");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 0.75 }, { "length", 0.5 }}))),
+               "source-window: in-range remainder fixture set");
+        auto tailFile = outDir.getChildFile ("valid-past-eof-tail.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", tailFile.getFullPathName()))),
+               "source-window: clip length may extend past EOF when an in-range remainder exists");
+        check (tailFile.existsAsFile() && tailFile.getSize() > 0,
+               "source-window: valid past-EOF tail writes audio");
+
+        auto emptyTailRangeFile = outDir.getChildFile ("invalid-tail-only-range.wav");
+        auto emptyTailRange = cmd (ops, "export_audio",
+                                   objN ({{ "file", emptyTailRangeFile.getFullPathName() },
+                                          { "range", "custom" }, { "start", 0.3 }, { "end", 0.5 }}));
+        check (! ok (emptyTailRange),
+               "source-window: custom range containing only a beyond-EOF tail is rejected");
+        check (! emptyTailRangeFile.existsAsFile(),
+               "source-window: rejected tail-only range leaves no output file");
+
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 0.0 }, { "length", 1.0 }}))),
+               "source-window: full in-range fixture restored for normal Warp control");
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 120.0 }}))),
+               "source-window: valid remainder Warp on ok");
+        // Warp proxy creation is asynchronous in the real UI.  Match the frozen
+        // reproduction's two-second wait while continuing to pump the JUCE message
+        // loop so this control proves a ready proxy rather than racing its creation.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            const auto deadline = Time::getMillisecondCounter() + 3000;
+            while (Time::getMillisecondCounter() < deadline)
+            {
+                if (mm != nullptr)
+                    mm->runDispatchLoopUntil (50);
+                else
+                    Thread::sleep (50);
+            }
+        }
+        auto validWarpFile = outDir.getChildFile ("valid-warp.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", validWarpFile.getFullPathName()))),
+               "source-window: normal warped clip still exports");
+        check (validWarpFile.existsAsFile() && validWarpFile.getSize() > 0,
+               "source-window: normal warped export writes audio");
+
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", false }}))),
+               "source-window: Warp off for virtual-phase fixture");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 12.75 }, { "length", 1.0 }}))),
+               "source-window: large virtual offset fixture set");
+        check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", validClip }, { "enabled", true },
+                                                        { "start", 0.0 }, { "length", 1.0 }}))),
+               "source-window: virtual-phase loop on ok");
+        auto loopFile = outDir.getChildFile ("valid-loop-phase.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", loopFile.getFullPathName()))),
+               "source-window: looping clip with a large virtual phase remains valid");
+        check (loopFile.existsAsFile() && loopFile.getSize() > 0,
+               "source-window: looping virtual phase writes audio");
+
+        outDir.deleteRecursively();
+    }
+
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
     // Same shape as the SA3 "differs from input / silence stays silent" gate, but for
     // the drum instrument: a programmed beat exports NON-SILENT audio, an empty drum
