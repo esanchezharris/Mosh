@@ -15,6 +15,7 @@
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
 #include "ExportRange.h"
+#include "RenderSourceWindow.h"
 #include "StemExport.h"
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
@@ -38,6 +39,116 @@ namespace
                && t.contains ("\"command\"")
                && t.contains ("\"ok\"")
                && t.contains ("\"undoable\"");
+    }
+
+    struct RenderSourceWindow
+    {
+        double sourceLength = 0.0;
+        double sourceStart = 0.0;
+        double playedSourceSpan = 0.0;
+    };
+
+    RenderSourceWindow renderSourceWindowFor (te::AudioClipBase& clip,
+                                               double renderStartSeconds,
+                                               double renderEndSeconds)
+    {
+        RenderSourceWindow result;
+        result.sourceLength = clip.getSourceLength().inSeconds();
+
+        const auto position = clip.getPosition();
+        const double clipStartSeconds = position.getStart().inSeconds();
+        const double windowStartSeconds = std::max (clipStartSeconds, renderStartSeconds);
+        const double windowEndSeconds = std::min (position.getEnd().inSeconds(), renderEndSeconds);
+        if (clip.getAutoTempo())
+        {
+            const auto info = clip.getWaveInfo();
+            const double sourceBeatsPerSecond = clip.getLoopInfo().getBeatsPerSecond (info);
+            if (sourceBeatsPerSecond > 0.0)
+            {
+                auto& tempoSequence = clip.edit.tempoSequence;
+                const auto clipStartBeat = tempoSequence.toBeats (position.getStart());
+                const auto windowStartBeat = tempoSequence.toBeats (
+                    tracktion::TimePosition::fromSeconds (windowStartSeconds));
+                const auto windowEndBeat = tempoSequence.toBeats (
+                    tracktion::TimePosition::fromSeconds (windowEndSeconds));
+                result.sourceStart = (clip.getOffsetInBeats().inBeats()
+                                      + (windowStartBeat - clipStartBeat).inBeats())
+                                   / sourceBeatsPerSecond;
+                result.playedSourceSpan = (windowEndBeat - windowStartBeat).inBeats()
+                                        / sourceBeatsPerSecond;
+
+                // AudioSegmentList adds the LoopInfo in-marker when mapping an
+                // auto-tempo offset to source samples. Mirror that boundary here.
+                if (info.sampleRate > 0.0 && clip.getLoopInfo().getInMarker() > 0)
+                    result.sourceStart += (double) clip.getLoopInfo().getInMarker() / info.sampleRate;
+            }
+            else
+            {
+                // Malformed/unknown tempo metadata is not this guard's concern;
+                // use the linear fallback and let the renderer report media errors.
+                const double speed = clip.getSpeedRatio();
+                result.sourceStart = (position.getOffset().inSeconds()
+                                      + windowStartSeconds - clipStartSeconds) * speed;
+                result.playedSourceSpan = (windowEndSeconds - windowStartSeconds) * speed;
+            }
+        }
+        else
+        {
+            const double speed = clip.getSpeedRatio();
+            result.sourceStart = (position.getOffset().inSeconds()
+                                  + windowStartSeconds - clipStartSeconds) * speed;
+            result.playedSourceSpan = (windowEndSeconds - windowStartSeconds) * speed;
+        }
+
+        return result;
+    }
+
+    juce::String invalidRenderSourceWindow (te::AudioTrack& track,
+                                             double renderStartSeconds,
+                                             double renderEndSeconds)
+    {
+        for (auto* rawClip : track.getClips())
+        {
+            auto* clip = dynamic_cast<te::AudioClipBase*> (rawClip);
+            if (clip == nullptr)
+                continue;
+
+            // Custom/loop exports render only this timeline window. An invalid
+            // clip wholly outside it cannot enter the render graph and must not
+            // prevent the user from exporting an unaffected section.
+            const auto clipPosition = clip->getPosition();
+            if (clipPosition.getEnd().inSeconds() <= renderStartSeconds
+                || clipPosition.getStart().inSeconds() >= renderEndSeconds)
+                continue;
+
+            const auto window = renderSourceWindowFor (*clip, renderStartSeconds, renderEndSeconds);
+            if (hasRenderableAudioSourceWindow (window.sourceLength,
+                                                window.sourceStart,
+                                                window.playedSourceSpan,
+                                                clip->isLooping()))
+                continue;
+
+            return "clip \"" + clip->getName() + "\" (" + clip->itemID.toString()
+                 + ") on track \"" + track.getName() + "\" (" + track.itemID.toString()
+                 + ") has an empty audio source window: effective offset "
+                 + juce::String (window.sourceStart, 6) + " s, source length "
+                 + juce::String (window.sourceLength, 6)
+                 + " s. Trim, relink, or repair the clip before export.";
+        }
+
+        return {};
+    }
+
+    juce::String invalidRenderSourceWindow (te::Edit& edit,
+                                             double renderStartSeconds,
+                                             double renderEndSeconds)
+    {
+        for (auto* track : te::getAudioTracks (edit))
+            if (track != nullptr)
+                if (auto error = invalidRenderSourceWindow (*track, renderStartSeconds, renderEndSeconds);
+                    error.isNotEmpty())
+                    return error;
+        return {};
     }
 }
 
@@ -351,9 +462,6 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     if (audioFormat == nullptr)   // belt-and-braces: never render with a null format
         audioFormat = afm.getDefaultFormat();
 
-    file.getParentDirectory().createDirectory();
-    file.deleteFile();
-
     // ── Bit depth ────────────────────────────────────────────────────────────
     // Validate the requested depth against what this format can actually write
     // (getPossibleBitDepths). Reject an unsupported depth rather than silently
@@ -431,6 +539,23 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     const double rStart = rangeRes.rangeStart, rEnd = rangeRes.rangeEnd;
     const juce::String rangeKind = rangeRes.rangeKind, tailKind = rangeRes.tailKind;
     const double tailSeconds = rangeRes.tailSeconds;
+
+    // Reject known-empty source windows before playback-context teardown or
+    // Renderer construction. A readable file with an unlooped offset at/past EOF
+    // otherwise renders false-success silence, and its warped form can leave the
+    // render graph waiting until the watchdog. Looping virtual phases are accepted
+    // by hasRenderableAudioSourceWindow and continue to wrap normally.
+    if (auto sourceError = invalidRenderSourceWindow (edit, rStart, rEnd); sourceError.isNotEmpty())
+    {
+        logLine ("export_audio", args, false, sourceError, false);
+        return errResult ("export_audio", sourceError);
+    }
+
+    // Validation failures must not destroy a previous successful export at the
+    // requested destination. Only prepare/replace the file once all fail-fast
+    // checks above have accepted the render.
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
 
     // Render exclusivity (01 §5): detach the Edit from the device before an
     // offline/realtime export render (asserts otherwise). No-op when no device
@@ -717,6 +842,45 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 
     const bool includeEmpty = (bool) args.getProperty ("includeEmpty", false);
 
+    // Freeze the requested set and validate every non-empty track before touching
+    // playback or writing any file. This makes a stem set atomic: an invalid
+    // source window cannot be silently omitted while other tracks report success.
+    struct PlannedStem
+    {
+        te::AudioTrack* track = nullptr;
+        int index = -1;
+        juce::Array<te::Clip*> clips;
+        juce::File file;
+    };
+    std::vector<PlannedStem> plannedStems;
+    int index = 0;   // matches snapshot()'s track index (moshHidden filtered)
+    for (auto* track : te::getAudioTracks (edit))
+    {
+        if (track == nullptr) continue;
+        if ((bool) track->state.getProperty (ids::moshHidden, false)) continue;
+        const int trackIndex = index++;
+        const auto clips = track->getClips();
+        if (! includeEmpty && clips.isEmpty()) continue;
+
+        if (auto sourceError = invalidRenderSourceWindow (*track, 0.0, edit.getLength().inSeconds());
+            sourceError.isNotEmpty())
+        {
+            logLine ("export_stems", args, false, sourceError, false);
+            return errResult ("export_stems", sourceError);
+        }
+
+        plannedStems.push_back ({ track, trackIndex, clips,
+            dir.getChildFile (stemFileBaseName (trackIndex, track->getName())).withFileExtension (extension) });
+    }
+
+    if (plannedStems.empty())
+        return errResult ("export_stems", "no renderable tracks (all empty or hidden)");
+
+    // Clear every requested destination up front. If a later runtime render fails,
+    // the cleanup below removes the entire planned set, including earlier successes.
+    for (auto& plan : plannedStems)
+        plan.file.deleteFile();
+
     // Render exclusivity (01 §5), done ONCE for the whole stem set — mirrors
     // cmdExportAudio's teardown so the master meter re-attaches to the NEXT context.
     unregisterAllMeterClients();
@@ -736,18 +900,13 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 
     juce::Array<var> stems;
     juce::String firstError;
-    int index = 0;   // matches snapshot()'s track index (te::getAudioTracks, moshHidden filtered)
 
-    for (auto* t : te::getAudioTracks (edit))
+    for (auto& plan : plannedStems)
     {
-        if (t == nullptr) continue;
-        if ((bool) t->state.getProperty (ids::moshHidden, false)) continue;   // Phase-2 hidden beneath-render track — never a stem
-        const int myIndex = index++;
-        const juce::Array<te::Clip*> trackClips = t->getClips();             // THIS track's own clips (may be empty)
-        if (! includeEmpty && trackClips.isEmpty()) continue;                // skip silent tracks by default
-
-        auto file = dir.getChildFile (stemFileBaseName (myIndex, t->getName())).withFileExtension (extension);
-        file.deleteFile();
+        auto* t = plan.track;
+        const int myIndex = plan.index;
+        const auto& trackClips = plan.clips;
+        auto file = plan.file;
 
         juce::String renderError;
 
@@ -825,11 +984,8 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 
         if (renderError.isNotEmpty())
         {
-            // Best-effort: one bad track must not abort the whole stem set — record the
-            // first failure (surfaced only if EVERY track ends up failing) and continue.
-            if (firstError.isEmpty())
-                firstError = t->getName() + ": " + renderError;
-            continue;
+            firstError = t->getName() + ": " + renderError;
+            break;
         }
 
         if (file.existsAsFile() && file.getSize() > 0)
@@ -843,13 +999,29 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
             so->setProperty ("bytes",     (juce::int64) file.getSize());
             stems.add (var (so));
         }
+        else
+        {
+            firstError = t->getName() + ": render produced no stem file";
+            break;
+        }
     }
 
-    const bool ok = ! stems.isEmpty();
-    logLine ("export_stems", args, ok, ok ? String() : (firstError.isNotEmpty() ? firstError : String ("no renderable tracks")), false);
+    if (firstError.isNotEmpty())
+    {
+        for (auto& plan : plannedStems)
+            plan.file.deleteFile();
+        logLine ("export_stems", args, false, firstError, false);
+        return errResult ("export_stems", firstError);
+    }
+
+    const bool ok = stems.size() == (int) plannedStems.size();
+    logLine ("export_stems", args, ok, ok ? String() : String ("incomplete stem set"), false);
     if (! ok)
-        return errResult ("export_stems", firstError.isNotEmpty() ? firstError
-                          : String ("no renderable tracks (all empty or hidden)"));
+    {
+        for (auto& plan : plannedStems)
+            plan.file.deleteFile();
+        return errResult ("export_stems", "incomplete stem set");
+    }
 
     auto* data = new DynamicObject();
     data->setProperty ("dir",        dir.getFullPathName());
