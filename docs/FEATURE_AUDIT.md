@@ -95,7 +95,7 @@ _From `docs/reality-pack/daw_capability_matrix.csv` — the sourced enumeration 
 
 ## Conventional-parity backlog (drives the auto-loop)
 
-Read live from `docs/auto-loop/backlog.jsonl` (the single source of truth — items are G-prefixed). `cheap` = UI/agent wiring (auto-mergeable); `native` = MoshOps/engine.
+Read live from `scripts/daw-conformance/parity_backlog.jsonl` (the minimal G-prefixed conventional-parity registry). `cheap` = UI/agent wiring; `native` = MoshOps/engine.
 
 | id | status | class | size | Gap |
 |---|---|---|---|---|
