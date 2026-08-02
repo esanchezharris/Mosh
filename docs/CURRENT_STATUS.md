@@ -1,6 +1,6 @@
 # Mosh current status and ownership handoff
 
-Last refreshed: **2026-08-02 13:50 PDT**
+Last refreshed: **2026-08-02 14:04 PDT**
 
 Canonical trunk: `origin/main` at `01adca369f20a1a96e3d34e2d9c6b4aaf2f5a9b9`
 
@@ -47,11 +47,12 @@ draft-state field.
 
 ## Open PR catalog
 
-Complete as of the refresh timestamp: **27 open PRs**. “Ready” below means only
+Complete as of the refresh timestamp: **28 open PRs**. “Ready” below means only
 that the PR is not marked draft on GitHub.
 
 | PR | GitHub state | Relationship | Transfer disposition |
 |---|---|---|---|
+| [#599](https://github.com/EmilioSzH/Mosh/pull/599) ownership handoff catalog | Draft | Documentation-only; based on `01adca36` | This PR. Merge it first if the handoff catalog is accepted; no build or test suite was run. |
 | [#598](https://github.com/EmilioSzH/Mosh/pull/598) rapid slider intent | Draft | Based on `01adca36`; closes #597 | Active handoff candidate. Cheap and Linux checks passed; focused tests, typecheck, and 2,314 UI tests passed. Native AX retest/native gate were intentionally skipped. Keep draft until the next owner accepts that waiver or supplies the native evidence. |
 | [#581](https://github.com/EmilioSzH/Mosh/pull/581) bounded startup recovery | Draft | Stacked on #524; issue #578 | **Protected owner gate. Do not merge.** Preserve for physical-device review. |
 | [#575](https://github.com/EmilioSzH/Mosh/pull/575) physical recovery gate | Draft | Stacked on #524; issue #574 | **Protected owner gate. Do not merge.** Preserve for physical-device review. |
