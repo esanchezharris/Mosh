@@ -1437,7 +1437,11 @@ juce::var MoshOps::cmdCreateRepairCheckpoint (const juce::var& args)
         return errResult ("create_repair_checkpoint", "repair checkpoint save failed");
     }
    #if JUCE_MAC
-    ::chmod (checkpoint.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR);
+    if (::chmod (checkpoint.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) != 0)
+    {
+        checkpoint.deleteFile();
+        return errResult ("create_repair_checkpoint", "could not secure repair checkpoint");
+    }
    #endif
 
     auto* data = new DynamicObject();

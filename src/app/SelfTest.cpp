@@ -9790,11 +9790,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "repair swap: checkpoint does not replace the active project");
         check (File (checkpointPath).getParentDirectory() == activeProject.getParentDirectory(),
                "repair swap: checkpoint preserves relative media resolution");
+       #if JUCE_MAC
+        struct stat checkpointStat {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: fresh checkpoint is owner-only");
+       #endif
         check (File (priorAppPath).isDirectory() && priorAppPath.endsWith (".app"),
                "repair swap: checkpoint records the installed app for rollback");
         const auto released = cmd (ops, "release_audio_device");
         check (ok (released) && ! (bool) released["data"].getProperty ("audioEnabled", true),
                "repair swap: MoshOps releases the audio device before handoff");
+
+        check (ok (cmd (ops, "open_project", objN ({ { "file", checkpointPath } })))
+                   && eng.protectOwnerCheckpoint (File (checkpointPath)),
+               "repair swap: launched checkpoint enables persistent owner-only protection");
+        check (ok (cmd (ops, "save")),
+               "repair swap: launched checkpoint survives a replacement save");
+       #if JUCE_MAC
+        checkpointStat = {};
+        check (::stat (checkpointPath.toRawUTF8(), &checkpointStat) == 0
+                   && (checkpointStat.st_mode & 0777) == 0600,
+               "repair swap: replacement save preserves owner-only mode");
+       #endif
+        check (ok (cmd (ops, "open_project", objN ({ { "file", activeProject.getFullPathName() } }))),
+               "repair swap: checkpoint test restores the active project");
         File (checkpointPath).deleteFile();
     }
 

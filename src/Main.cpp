@@ -311,6 +311,13 @@ public:
                 quit();
                 return;
             }
+            if (! engine->protectOwnerCheckpoint (juce::File (ownerCheckpoint)))
+            {
+                std::cerr << "repair launch refused: checkpoint could not be secured" << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
         }
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));

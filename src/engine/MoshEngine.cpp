@@ -8,6 +8,9 @@
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
+#if JUCE_MAC
+ #include <sys/stat.h>
+#endif
 
 namespace mosh
 {
@@ -596,7 +599,8 @@ bool MoshEngine::save()
         return false;
 
     stampFormatVersion();                  // PRJ-FMT — always current on disk
-    const bool ok = te::EditFileOperations (edit()).save (false, true, false);
+    const bool wrote = te::EditFileOperations (edit()).save (false, true, false);
+    const bool ok = wrote && enforceOwnerCheckpointPermissions();
     if (ok)
     {
         dirty = false;                     // on-disk now matches in-memory (gap 1)
@@ -607,6 +611,29 @@ bool MoshEngine::save()
         session.getChildFile ("recovery-journal.jsonl").deleteFile();
     }
     return ok;
+}
+
+bool MoshEngine::protectOwnerCheckpoint (const juce::File& file)
+{
+    if (file != editPath || ! file.existsAsFile()
+        || ! file.getFileName().contains (".mosh-repair-checkpoint-")
+        || file.getFileExtension() != ".tracktionedit")
+        return false;
+
+    ownerCheckpointPath = file;
+    return enforceOwnerCheckpointPermissions();
+}
+
+bool MoshEngine::enforceOwnerCheckpointPermissions() const
+{
+    if (ownerCheckpointPath.getFullPathName().isEmpty() || editPath != ownerCheckpointPath)
+        return true;
+
+   #if JUCE_MAC
+    return ::chmod (editPath.getFullPathName().toRawUTF8(), S_IRUSR | S_IWUSR) == 0;
+   #else
+    return true;
+   #endif
 }
 
 // gap 1 — unsaved-changes flag. markDirty on every mutation; cleared on a successful
