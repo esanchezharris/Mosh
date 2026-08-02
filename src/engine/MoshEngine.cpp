@@ -411,7 +411,7 @@ juce::String MoshEngine::openAudioDeviceBounded()
         {
             audioOpen = false;
             return "The saved audio device setup is invalid or too large. Running "
-                   "WITHOUT audio — playback and recording are off. Reset the "
+                   "WITHOUT audio - playback and recording are off. Reset the "
                    "audio device, then press Retry.";
         }
         setupXml = std::move (loaded.xml);
@@ -453,7 +453,7 @@ juce::String MoshEngine::openAudioDeviceBounded()
     {
         audioOpen = false;
         return "The saved audio device setup is invalid or too large. Running WITHOUT "
-               "audio — playback and recording are off. Reset the audio device, then "
+               "audio - playback and recording are off. Reset the audio device, then "
                "press Retry.";
     }
 
@@ -462,7 +462,7 @@ juce::String MoshEngine::openAudioDeviceBounded()
     {
         audioOpen = false;
         return "Audio device " + label + " could not start the safety probe. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+               "Running WITHOUT audio - playback and recording are off. Press Retry.";
     }
 
     if (probe.status == audiostartup::ProbeProcessStatus::timedOut)
@@ -475,7 +475,7 @@ juce::String MoshEngine::openAudioDeviceBounded()
     {
         audioOpen = false;
         return "Audio device " + label + " safety probe could not be terminated. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+               "Running WITHOUT audio - playback and recording are off. Press Retry.";
     }
 
     const auto response = audiostartup::parseProbeResponse (probe.output, nonce);
@@ -484,14 +484,14 @@ juce::String MoshEngine::openAudioDeviceBounded()
     {
         audioOpen = false;
         return "Audio device " + label + " safety probe exited without a valid result. "
-               "Running WITHOUT audio — playback and recording are off. Press Retry.";
+               "Running WITHOUT audio - playback and recording are off. Press Retry.";
     }
 
     if (response.error.isNotEmpty())
     {
         audioOpen = false;
         return "Audio device " + label + " could not open: " + response.error
-             + ". Running WITHOUT audio — playback and recording are off. Press Retry.";
+             + ". Running WITHOUT audio - playback and recording are off. Press Retry.";
     }
 
     // The HAL answered within the bound, so the real open is safe to do inline, exactly
