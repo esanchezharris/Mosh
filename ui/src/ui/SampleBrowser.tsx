@@ -50,6 +50,8 @@ export function SampleBrowser() {
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(() => loadRecents());
   const [auditioning, setAuditioning] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const navigationId = useRef(0);
   // UI-REACH (sketch_beatbox) — cmdSketchBeatbox takes an absolute path, not a clipId, so
   // this file browser (where a real path already exists, from list_directory) is the entry
   // point rather than the clipId-based clip menu. Holds the target path while the bpm/bars
@@ -57,10 +59,20 @@ export function SampleBrowser() {
   const [sketchTarget, setSketchTarget] = useState<string | null>(null);
 
   const navigate = async (path?: string) => {
-    const r = await exec("list_directory", path ? { path } : {});
-    if (r.ok && r.data) { setListing(r.data as DirListing); setQuery(""); }
+    const requestId = ++navigationId.current;
+    setLoading(true);
+    try {
+      const r = await exec("list_directory", path ? { path } : {});
+      if (requestId !== navigationId.current) return;
+      if (r.ok && r.data) { setListing(r.data as DirListing); setQuery(""); }
+    } finally {
+      if (requestId === navigationId.current) setLoading(false);
+    }
   };
-  useEffect(() => { void navigate(); /* initial load on open */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void navigate(); // initial load on open
+    return () => { ++navigationId.current; }; // discard an obsolete worker result after Close
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Stop any preview when the browser closes (unmounts).
   useEffect(() => () => { void exec("stop_audition"); }, [exec]);
 
@@ -127,13 +139,15 @@ export function SampleBrowser() {
         </div>
       </div>
       <div className="pop-row sb-location">
-        <button className="btn" disabled={!listing?.parent} onClick={() => void navigate(listing?.parent ?? undefined)}>
+        <button className="btn" disabled={loading || !listing?.parent} onClick={() => void navigate(listing?.parent ?? undefined)}>
           <IconArrowUp size={14} />
           <span>Up</span>
         </button>
         <div className="sb-location-copy">
           <span className="sb-location-label">Current folder</span>
-          <span className="pop-note sb-path" title={listing?.path}>{listing?.path ?? "Loading sounds..."}</span>
+          <span className="pop-note sb-path" title={listing?.path}>
+            {loading ? "Loading sounds..." : (listing?.path ?? "Loading sounds...")}
+          </span>
         </div>
       </div>
       <label className="sb-search-field">
@@ -168,6 +182,11 @@ export function SampleBrowser() {
         </section>
       )}
       <div className="modal-list sb-list" data-testid="content-browser">
+        {listing?.truncated && (
+          <div className="rack-empty sb-limit-note" role="status" data-testid="sample-browser-limit">
+            Showing the first {listing.limit ?? entries.length} items. Open a narrower folder to see more.
+          </div>
+        )}
         {dirs.length > 0 && (
           <section className="plugin-group sb-section" aria-label="Folders">
             <div className="pg-label">
@@ -175,7 +194,7 @@ export function SampleBrowser() {
               <span className="sb-section-count">{dirs.length}</span>
             </div>
             {dirs.map((d) => (
-              <button key={d.path} className="plugin-row" onClick={() => void navigate(d.path)} title={d.path}>
+              <button key={d.path} className="plugin-row" disabled={loading} onClick={() => void navigate(d.path)} title={d.path}>
                 <span className="sb-row-icon" aria-hidden><IconFolder size={14} /></span>
                 <div className="pr-name sb-row-copy">
                   <span className="sb-row-title">{d.name}</span>

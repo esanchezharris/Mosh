@@ -51,6 +51,12 @@ public:
         executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
 
+    /** Browser-only read path. list_directory is pure filesystem I/O and may block on
+        a large, cloud-backed, or disconnected directory, so WebBridge invokes this
+        method on a worker instead of the audio/message thread. */
+    static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
+                                                  const juce::var& command);
+
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 

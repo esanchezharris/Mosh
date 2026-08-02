@@ -1,4 +1,5 @@
 #include "MoshOps.h"
+#include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
 #include "DrumPattern.h"
@@ -384,6 +385,17 @@ juce::var MoshOps::execute (const juce::var& command)
         appendRecoveryJournal (command.getProperty ("command", var()).toString(),
                                command.getProperty ("args", var()), result);
     return result;
+}
+
+juce::var MoshOps::executeFileBrowserReadOnly (const juce::File& sessionDir,
+                                                const juce::var& command)
+{
+    const auto name = command.getProperty ("command", var()).toString();
+    if (name != "list_directory")
+        return errResult (name, "command is not safe for the file-browser worker");
+
+    const auto args = command.getProperty ("args", var (new DynamicObject()));
+    return okResult (name, directory_listing::buildData (sessionDir, args));
 }
 
 juce::var MoshOps::executeImpl (const juce::var& command)
