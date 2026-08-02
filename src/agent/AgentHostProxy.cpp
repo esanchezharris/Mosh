@@ -23,6 +23,25 @@ namespace
     };
 
 #if JUCE_MAC
+    class CfReleaseGuard
+    {
+    public:
+        explicit CfReleaseGuard (CFTypeRef valueToRelease) noexcept
+            : value (valueToRelease) {}
+
+        ~CfReleaseGuard()
+        {
+            if (value != nullptr)
+                CFRelease (value);
+        }
+
+        CfReleaseGuard (const CfReleaseGuard&) = delete;
+        CfReleaseGuard& operator= (const CfReleaseGuard&) = delete;
+
+    private:
+        CFTypeRef value;
+    };
+
     juce::String cfString (CFTypeRef value)
     {
         if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
@@ -45,7 +64,7 @@ namespace
             kCFAllocatorDefault, kCFNumberIntType, &rawPid);
         if (rawNumber == nullptr)
             return std::nullopt;
-        const auto releaseNumber = juce::ScopeGuard ([rawNumber] { CFRelease (rawNumber); });
+        const CfReleaseGuard releaseNumber (rawNumber);
         const void* keys[] = { kSecGuestAttributePid };
         const void* values[] = { rawNumber };
         const auto rawAttributes = CFDictionaryCreate (
@@ -53,21 +72,19 @@ namespace
             &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         if (rawAttributes == nullptr)
             return std::nullopt;
-        const auto releaseAttributes = juce::ScopeGuard (
-            [rawAttributes] { CFRelease (rawAttributes); });
+        const CfReleaseGuard releaseAttributes (rawAttributes);
         SecCodeRef rawCode = nullptr;
         if (SecCodeCopyGuestWithAttributes (
                 nullptr, rawAttributes, kSecCSDefaultFlags, &rawCode) != errSecSuccess)
             return std::nullopt;
-        const auto releaseCode = juce::ScopeGuard ([rawCode] { CFRelease (rawCode); });
+        const CfReleaseGuard releaseCode (rawCode);
         if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
             return std::nullopt;
         CFDictionaryRef rawInformation = nullptr;
         if (SecCodeCopySigningInformation (
                 rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
             return std::nullopt;
-        const auto releaseInformation = juce::ScopeGuard (
-            [rawInformation] { CFRelease (rawInformation); });
+        const CfReleaseGuard releaseInformation (rawInformation);
         return SigningIdentity {
             cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoIdentifier)),
             cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier)),
@@ -100,15 +117,14 @@ namespace
         SecCodeRef rawCode = nullptr;
         if (SecCodeCopySelf (kSecCSDefaultFlags, &rawCode) != errSecSuccess)
             return {};
-        const auto releaseCode = juce::ScopeGuard ([rawCode] { CFRelease (rawCode); });
+        const CfReleaseGuard releaseCode (rawCode);
         if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
             return {};
         CFDictionaryRef rawInformation = nullptr;
         if (SecCodeCopySigningInformation (
                 rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
             return {};
-        const auto releaseInformation = juce::ScopeGuard (
-            [rawInformation] { CFRelease (rawInformation); });
+        const CfReleaseGuard releaseInformation (rawInformation);
         const auto value = CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier);
         if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
             return {};
