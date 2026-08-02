@@ -66,7 +66,8 @@ function uiSource(): string {
   return srcBlob;
 }
 
-function backlogStatuses(): Map<string, string> {
+function backlogStatuses(): Map<string, string> | null {
+  if (!existsSync(BACKLOG)) return null;
   const map = new Map<string, string>();
   for (const line of readFileSync(BACKLOG, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -110,11 +111,13 @@ describe("REACHABILITY ledger", () => {
     }
   });
 
-  it("every gap: row references a LIVE backlog item (a shipped item must flip its row)", () => {
+  it("every gap row has a valid reference, and a live item when the private backlog is present", () => {
     const statuses = backlogStatuses();
-    for (const r of rows) {
-      if (!r.status.startsWith("gap:")) continue;
+    const gaps = rows.filter((r) => r.status.startsWith("gap:"));
+    for (const r of gaps) {
       const id = r.status.slice("gap:".length);
+      expect(id).toMatch(/^G[0-9]+[A-Za-z0-9-]*$/);
+      if (statuses === null) continue;
       expect(statuses.has(id), `${r.capability}: backlog item '${id}' not in backlog.jsonl`).toBe(true);
       expect(statuses.get(id) !== "done",
         `${r.capability}: backlog item '${id}' is DONE — flip this row to 'reachable' (and un-fixme its spec)`).toBe(true);
