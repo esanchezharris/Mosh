@@ -134,3 +134,20 @@ brain.env
 # Vector sample palette artifact (owner-private library paths + resampled audio)
 service/palette/palette/
 service/teardown/probe/.assets/
+
+# Agent skills installed via `npx skills add` (jakubkrehel/skills, uizze.com).
+# .agents/skills/ holds the real SKILL.md files; the rest are symlink farms the
+# installer creates for every agent tool it knows about. Local tooling, not source.
+.agents/
+.claude/skills/
+/skills/
+skills-lock.json
+
+# public-cleanup
+.claude/
+.omo/
+.debug-journal.md
+.od-skills/
+.playwright-cli/
+.clangd
+.scratch-v2/
