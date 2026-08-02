@@ -19,6 +19,11 @@ sweep-specific items and the "why" behind each one.*
   `clearUndoHistory()` call) is unchanged — see the next section. **Guidance: join on an
   empty or throwaway project** so the confirm dialog is a formality, not a real choice
   between two pieces of work.
+- **A crashed peer now expires after the 90-second reconnect grace.** The local and cloud
+  relays remove a peer that stops polling, release its locks, and free its room slot before
+  returning the next roster or admitting a replacement. Rejoining with the same identity
+  inside the grace remains idempotent; after expiry, join the room again. This replaces the
+  old indefinite stale-roster behavior tracked by issue #556.
 
 ## Still open — deferred post-playtest (documented, not code-fixed)
 
@@ -29,9 +34,6 @@ sweep-specific items and the "why" behind each one.*
   straightens it back out). **Guidance:** don't reach for Cmd+Z immediately after you see a
   peer's change arrive; if something looks off, keep working — the next commit/resync
   corrects it.
-- **If your app crashes, wait ~90 seconds before rejoining.** A crashed peer's row lingers in
-  the relay's peer table and counts against the 2-person room cap until a lease sweep clears
-  it. Rejoining immediately can read as "room full" or a stale roster entry.
 - **Selecting a peer's idle track can silently claim it after ~90 seconds.** Lock leases
   aren't renewed just because you're still looking at (not actively editing) a track — if
   your peer merely clicks the same track after your lease lapses, they can take it out from

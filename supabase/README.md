@@ -39,7 +39,12 @@ The native delta to support both is two lines in `src/multiplayer/MultiplayerCli
 
 ## GC (optional)
 
-Bounded growth via `pg_cron`:
+Presence is also reclaimed lazily by every room join/poll, so the UI does not wait for cron:
+after 90 seconds without a heartbeat, the peer disappears from the roster, its locks are
+released, and its room slot is free. The additive
+`20260802080000_mp_peer_lease.sql` migration must be applied to an existing project.
+
+`pg_cron` remains the bounded-growth backstop for rooms with no further traffic:
 ```sql
 create extension if not exists pg_cron;
 select cron.schedule('mp_sweep', '*/5 * * * *', $$ select mp.sweep(); $$);
