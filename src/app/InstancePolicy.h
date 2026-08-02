@@ -8,6 +8,7 @@ inline bool allowsMultipleInstances (const juce::StringArray& arguments)
 {
     static const juce::StringArray independentModes {
         "--audio-probe",
+        "--audio-recovery-isolation-smoke",
         "--audio-recovery-smoke",
         "--brain-smoke",
         "--golden-selftest",
