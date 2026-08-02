@@ -218,6 +218,10 @@ jobs:
       - name: Run native gate
         env:
           MOSH_AUTOLOOP_HOME: ${{ runner.temp }}/mosh-autoloop
+          # Standard hosted Apple-Silicon runners have limited RAM. The owner
+          # cockpit adds another substantial translation unit; unbounded Ninja
+          # parallelism can OOM one compiler while later warnings hide the kill.
+          CMAKE_BUILD_PARALLEL_LEVEL: 2
           # Anti-vacuity RATCHET. gate.sh only reds on "the 3 runs disagree" and
           # "a check failed" — so a change that silently stops RUNNING a whole
           # selftest section is green, because all 3 runs agree on the new, lower
