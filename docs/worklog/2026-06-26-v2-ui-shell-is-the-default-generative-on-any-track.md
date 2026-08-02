@@ -1,5 +1,0 @@
-# v2 UI shell is the default + generative on ANY track (2026-06-26/27)
-
-_Working note, 2026-06-26. Moved verbatim out of CLAUDE.md; content unchanged._
-
-**v2 UI shell is the default + generative on ANY track (2026-06-26/27).** A from-scratch **v2 shell** (`ui/src/v2/`) replaced the classic UI as the default via a `uiShell: "classic"|"v2"` setting; `App.tsx` is a thin router, the classic shell preserved verbatim in `AppLegacy.tsx`; pure swappable-seam work (C++ **byte-identical**, zero new MoshOps commands) — then in-ribbon song-section editing (#135), a two-pane plugin browser (#136), and a cream redesign + presence-driven agent/rail modes (#139). Separately, **generative render layers now run on any track** (#137/#138): non-wave (MIDI/drum) clips auto-BOUNCE to audio (`bounceClipToWav`, mirrors `cmdExportAudio`) so re-imagine/transform works on any clip; the source MIDI is untouched; cache keyed by a `stableSourceSig` (notes + instrument/FX names+enabled + automation values), not the non-deterministic bounce. vitest 584, e2e 92.

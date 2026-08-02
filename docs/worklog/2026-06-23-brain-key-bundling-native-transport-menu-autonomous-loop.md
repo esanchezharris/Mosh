@@ -1,5 +1,0 @@
-# Brain-key bundling + native Transport menu + autonomous loop (2026-06-23 → 06-25)
-
-_Working note, 2026-06-23. Moved verbatim out of CLAUDE.md; content unchanged._
-
-**Brain-key bundling + native Transport menu + autonomous loop (2026-06-23 → 06-25).** The packaged app always has a brain — `BrainProxy` reads a bundled `Contents/Resources/brain.env` fallback when the env var is absent (written by `run-mosh.sh deploy` from `ui/.env.local`, gitignored, deploy-only) (#129). Added a native Transport menu (Play/Pause = Space) + deploy re-sign + keyboard-handler consolidation into one shared hook (#131), late-join-guest audio bootstrap over the relay (#127), and iPhone-companion controller + latency gates (#132/#133). The **autonomous deferred-work loop** (#113, `docs/auto-loop/`) — parallel worktrees → PRs → gated auto-merge (fail-closed) — cleared nine backlog items (AL-001..AL-009: shared Escape stack, per-template rebind persistence, prompt-concision rewriter, relay slow-POST fix, `open_recent`, `bypass_layer` real re-route, Save-As consolidation, judge-panel quality readout, LoRA-popover progress UI).

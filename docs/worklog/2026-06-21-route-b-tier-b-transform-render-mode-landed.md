@@ -1,5 +1,0 @@
-# Route B — Tier-B `transform` render mode landed (2026-06-21)
-
-_Working note, 2026-06-21. Moved verbatim out of CLAUDE.md; content unchanged._
-
-**Route B — Tier-B `transform` render mode landed (2026-06-21).** Native timbre/instrument transfer as a new render-layer `mode:"transform"` behind the existing model-agnostic adapter contract — reuses RenderLayer / full-fingerprint cache / accept→Neural-Renders lane / drawer / QA. Surface: `target` (instrument or free-text) + `strength` (0–100), in the fingerprint. **Fake-first** (`service/adapters/transform_adapter.py`, stdlib, deterministic) reachable with zero install; `_adapter_for("transform")` degrades real→fake exactly like `stable_audio3→fake`. UI: a "+ Transform" create button + `TransformControls` (target picker + free-text + strength) branched in the generative drawer; read-only `list_transform_targets` mirrors `list_colors`. No new mutation commands. Verified: selftest **888/888 ×3** (Route B section 11 checks), Catch2 162, vitest 421, e2e 39, `tsc` clean, render-to-WAV transform diff-from-input RMS 0.270. Spec/plan: `docs/superpowers/specs|plans/2026-06-21-route-b-*`.
