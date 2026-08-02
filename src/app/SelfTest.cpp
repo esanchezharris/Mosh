@@ -750,6 +750,107 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     cmd (ops, "undo");
     check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
 
+    // Issue #532 — a legacy Moshi batch around an AUDIO-clip move must leave exactly
+    // one user-visible history step. The native UI refreshes the snapshot and may
+    // autosave while the person reads Moshi's result. Neither operation may hide the
+    // move from history: one standalone Undo must restore the clip.
+    section ("AGT-UNDO: audio-clip batch survives autosave");
+    {
+        auto& undo = eng.edit().getUndoManager();
+        // Plugin persistence mirrors used to write through the Edit's UndoManager.
+        // That makes a normal save/autosave place one or more unnamed transactions
+        // above the producer's last edit.
+        const auto flushTrack = cmd (ops, "create_track", args1 ("name", "AGT Undo Flush Fixture"))
+                                    ["data"].getProperty ("trackId", var()).toString();
+        const auto loadFlushPlugin = cmd (ops, "load_builtin",
+                                          objN ({ { "trackId", flushTrack }, { "type", "4osc" } }));
+        check (ok (loadFlushPlugin), "AGT-UNDO flush fixture has a stateful built-in plugin");
+
+        // A save flush is only observable when a plugin has live state that is not
+        // already mirrored into its ValueTree. An automated parameter naturally has
+        // exactly that posture while playback follows its curve. Build the curve via
+        // MoshOps, then advance it below after the user's move transaction has closed.
+        const int flushPluginIndex = (int) loadFlushPlugin["data"].getProperty ("index", -1);
+        te::AutomatableParameter* flushParam = nullptr;
+        for (auto* t : te::getAudioTracks (eng.edit()))
+            if (t->itemID.toString() == flushTrack)
+                if (flushPluginIndex >= 0 && flushPluginIndex < t->pluginList.getPlugins().size())
+                    if (auto p = t->pluginList.getPlugins()[flushPluginIndex])
+                        if (p->getNumAutomatableParameters() > 0)
+                            flushParam = p->getAutomatableParameter (0).get();
+        check (flushParam != nullptr, "AGT-UNDO flush fixture exposes an automatable parameter");
+        const float explicitNorm = flushParam != nullptr
+                                     ? flushParam->valueRange.convertTo0to1 (flushParam->getCurrentExplicitValue())
+                                     : 0.0f;
+        const double curveNorm = explicitNorm < 0.5f ? 0.9 : 0.1;
+        check (ok (cmd (ops, "add_automation_point",
+                        objN ({ { "trackId", flushTrack }, { "pluginIndex", flushPluginIndex },
+                                { "paramIndex", 0 }, { "time", 1.0 }, { "value", curveNorm } }))),
+               "AGT-UNDO flush fixture has a non-default automation value");
+
+        // Edit installs its undo-transaction change listener asynchronously during
+        // construction. A GUI has long since completed that startup task; explicitly
+        // drain it here before the move so the real 350 ms close timer observes it.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (20);
+        undo.clearUndoHistory();
+
+        const auto audioClipId = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+        const double before = (double) firstTrack (ops)["clips"][0].getProperty ("start", 0.0);
+        const double moved = before + 1.25;
+
+        check (ok (cmd (ops, "batch_begin", objN ({ { "name", "Move audio clip" } }))),
+               "AGT-UNDO legacy batch_begin ok");
+        check (ok (cmd (ops, "move_clip", objN ({ { "clipId", audioClipId }, { "start", moved } }))),
+               "AGT-UNDO audio clip move ok");
+        check (ok (cmd (ops, "batch_end")), "AGT-UNDO legacy batch_end ok");
+
+        // Match the three full refreshes observed in the production WebView path.
+        for (int i = 0; i < 3; ++i)
+            (void) ops.snapshot();
+
+        // Tracktion closes a user transaction 350 ms after its final change. Let
+        // that real timer fire before saving, as it does while a person reads the
+        // Moshi result and reaches for Undo. Without this boundary, persistence
+        // mirror writes are folded into the named move and cannot expose #532.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (500);
+        else
+            juce::Thread::sleep (500);
+
+        // Match an automated plugin's live value at autosave time. Do this after
+        // the timer boundary and save synchronously, before its asynchronous state
+        // mirror catches up, which is the real state Edit::flushState must persist.
+        if (flushParam != nullptr)
+            flushParam->updateToFollowCurve (tracktion::TimePosition::fromSeconds (1.0));
+        check (flushParam != nullptr
+                 && std::abs (flushParam->getCurrentValue() - flushParam->getCurrentExplicitValue()) > 0.0001f,
+               "AGT-UNDO flush fixture has divergent live and explicit parameter state");
+
+        // Match the GUI autosave that can land between an agent edit and the user's
+        // immediate Undo. Saving must not add a housekeeping transaction.
+        check (ok (cmd (ops, "save")), "AGT-UNDO autosave fixture saved");
+
+        const auto descriptions = undo.getUndoDescriptions();
+        std::cerr << "  AGT-UNDO heads before Undo: " << descriptions.joinIntoString (" | ") << "\n";
+        check (descriptions.size() == 1,
+               "AGT-UNDO save/autosave adds no history above the audio move");
+
+        const auto undone = cmd (ops, "undo");
+        check ((bool) undone.getProperty ("data", false), "AGT-UNDO standalone Undo reports a real change");
+        const double afterOneUndo = (double) firstTrack (ops)["clips"][0].getProperty ("start", -1.0);
+        check (std::abs (afterOneUndo - before) < 0.001,
+               "AGT-UNDO ONE standalone Undo restores the audio clip after UI refreshes and autosave");
+
+        // Keep the remainder of the long selftest deterministic even on the RED side:
+        // drain only this isolated fixture, then restore an empty history.
+        for (int i = 0; i < 8 && std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("start", -1.0) - before) >= 0.001; ++i)
+            (void) cmd (ops, "undo");
+        undo.clearUndoHistory();
+        (void) cmd (ops, "remove_track", args1 ("trackId", flushTrack));
+        undo.clearUndoHistory();
+    }
+
     // ─── AGT-PROV (FS-B2a): the ASK is recoverable from mosh-log.jsonl ───────────
     // Real-session skill mining needs the natural-language ask, not just the commands
     // it produced. The utterance rides the EXISTING batch_begin marker (no new command,

@@ -1,0 +1,52 @@
+diff --git a/modules/tracktion_engine/model/automation/tracktion_AutomatableEditItem.cpp b/modules/tracktion_engine/model/automation/tracktion_AutomatableEditItem.cpp
+index 5b994dd085c..dc5711bb570 100644
+--- a/modules/tracktion_engine/model/automation/tracktion_AutomatableEditItem.cpp
++++ b/modules/tracktion_engine/model/automation/tracktion_AutomatableEditItem.cpp
+@@ -319 +319,4 @@ void AutomatableEditItem::saveChangedParametersToState()
+-    auto um = &edit.getUndoManager();
++    // This method mirrors live parameter state into the ValueTree immediately
++    // before serialisation. It is save housekeeping, not a user edit, and must
++    // not place an unnamed transaction above the producer's last command.
++    juce::UndoManager* const um = nullptr;
+diff --git a/modules/tracktion_engine/plugins/airwindows/tracktion_AirWindowsBase.cpp b/modules/tracktion_engine/plugins/airwindows/tracktion_AirWindowsBase.cpp
+index 5494c524112..5923b18a1b0 100644
+--- a/modules/tracktion_engine/plugins/airwindows/tracktion_AirWindowsBase.cpp
++++ b/modules/tracktion_engine/plugins/airwindows/tracktion_AirWindowsBase.cpp
+@@ -206 +206,3 @@ void AirWindowsPlugin::flushPluginStateToValueTree()
+-    auto* um = getUndoManager();
++    // The AirWindows chunk is a persistence mirror. Saving it must not create
++    // an unnamed Edit transaction that hides the last user command from Undo.
++    juce::UndoManager* const um = nullptr;
+diff --git a/modules/tracktion_engine/plugins/effects/tracktion_FourOscPlugin.cpp b/modules/tracktion_engine/plugins/effects/tracktion_FourOscPlugin.cpp
+index aaa345118e2..b11f3fc791d 100644
+--- a/modules/tracktion_engine/plugins/effects/tracktion_FourOscPlugin.cpp
++++ b/modules/tracktion_engine/plugins/effects/tracktion_FourOscPlugin.cpp
+@@ -1397 +1397,4 @@ void FourOscPlugin::flushPluginStateToValueTree()
+-    auto um = getUndoManager();
++    // Rebuilding the serialised modulation matrix is save housekeeping, not a
++    // user edit. Using the Edit UndoManager here adds an unnamed transaction on
++    // every save even when the audible matrix is unchanged.
++    juce::UndoManager* const um = nullptr;
+diff --git a/modules/tracktion_engine/plugins/external/tracktion_ExternalPlugin.cpp b/modules/tracktion_engine/plugins/external/tracktion_ExternalPlugin.cpp
+index 9a644f35b99..404549b984a 100644
+--- a/modules/tracktion_engine/plugins/external/tracktion_ExternalPlugin.cpp
++++ b/modules/tracktion_engine/plugins/external/tracktion_ExternalPlugin.cpp
+@@ -1004 +1004,4 @@ void ExternalPlugin::flushPluginStateToValueTree()
+-    auto* um = getUndoManager();
++    // Plugin descriptors/chunks are mirrored for persistence. The parameter
++    // gesture that changed them already owns its user-facing transaction; Save
++    // itself must not append an unnamed transaction above that gesture.
++    juce::UndoManager* const um = nullptr;
+@@ -1046 +1049,2 @@ void ExternalPlugin::flushBusesLayoutToValueTree()
+-        auto* um = getUndoManager();
++        // Bus layout serialisation is part of Save, not a user edit.
++        juce::UndoManager* const um = nullptr;
+diff --git a/modules/tracktion_engine/plugins/tracktion_Plugin.cpp b/modules/tracktion_engine/plugins/tracktion_Plugin.cpp
+index d2552355469..f4129dc5e95 100644
+--- a/modules/tracktion_engine/plugins/tracktion_Plugin.cpp
++++ b/modules/tracktion_engine/plugins/tracktion_Plugin.cpp
+@@ -930 +930,3 @@ void Plugin::flushPluginStateToValueTree()
+-        auto um = getUndoManager();
++        // Window bounds are mirrored only for serialisation. Recording this in
++        // the Edit's UndoManager makes Save/Auto-save consume the next Undo.
++        juce::UndoManager* const um = nullptr;
