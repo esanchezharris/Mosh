@@ -110,6 +110,8 @@ scripts/compiler-eval/artifacts/
 .omo/
 .refclone/
 .cache/
+/docs/auto-loop/.merge-queue.lock
+/docs/auto-loop/shlock*
 
 # macOS
 .DS_Store

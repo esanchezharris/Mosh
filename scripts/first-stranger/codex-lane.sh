@@ -10,10 +10,19 @@
 # Bash 3.2 compatible.
 set -euo pipefail
 
-REPO="$(git rev-parse --show-toplevel)"
+CALLER_REPO="$(git rev-parse --show-toplevel)"
+AL_ROOT="$CALLER_REPO"
+AL_PROGRAM_STOP="$CALLER_REPO/docs/first-stranger-program/STOP"
+. "$CALLER_REPO/scripts/auto-loop/lib.sh"
+REPO="$(al_main_worktree)"
 PROG="$REPO/docs/first-stranger-program"
 BL="$PROG/backlog.jsonl"
 CODEX_BIN="${CODEX_BIN:-codex}"
+
+if al_stop_requested; then
+  echo "codex-lane.sh: STOP sentinel present — First-Stranger is paused." >&2
+  exit 1
+fi
 
 LANE=""; EXEC=0
 for a in "$@"; do case "$a" in

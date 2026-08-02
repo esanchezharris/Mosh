@@ -11,7 +11,11 @@
 # The nightly job is a PLAN-ONLY rehearsal until you `touch docs/first-stranger-program/ARMED`.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/../.." && git rev-parse --show-toplevel)"
+CALLER_REPO="$(cd "$(dirname "$0")/../.." && git rev-parse --show-toplevel)"
+AL_ROOT="$CALLER_REPO"
+AL_PROGRAM_STOP="$CALLER_REPO/docs/first-stranger-program/STOP"
+. "$CALLER_REPO/scripts/auto-loop/lib.sh"
+REPO="$(al_main_worktree)"
 LABEL="com.mosh.stranger-loop"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 NIGHTLY="$REPO/scripts/first-stranger/nightly.sh"
@@ -23,6 +27,11 @@ if [ "${1:-}" = "--uninstall" ]; then
   rm -f "$PLIST"
   echo "uninstalled $LABEL (removed $PLIST)."
   exit 0
+fi
+
+if al_stop_requested; then
+  echo "install-launchd.sh: STOP sentinel present — First-Stranger is paused." >&2
+  exit 1
 fi
 
 [ -f "$NIGHTLY" ] || { echo "nightly.sh not found at $NIGHTLY" >&2; exit 1; }

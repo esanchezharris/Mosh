@@ -26,6 +26,19 @@ BASE_SHA="$(git -C "$WT" rev-parse "$BASE" 2>/dev/null || printf unknown)"
 TREE_CLEAN=true
 [ -z "$(git -C "$WT" status --porcelain 2>/dev/null)" ] || TREE_CLEAN=false
 
+GATE_BRANCH="$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+case "$(basename "$WT"):$GATE_BRANCH" in
+  auto-[Ff][Ss]-*:*|mosh-[Ff][Ss]-*:*|*:claude/auto-[Ff][Ss]-*|*:codex/[Ff][Ss]-*)
+    AL_PROGRAM_ACTIVE=1
+    AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-$AL_CANONICAL_PROGRAM_STOP}"
+    ;;
+esac
+if al_stop_requested; then
+  jq -nc --arg class "$CLASS" \
+    '{pass:false,class:$class,stopped:true,reason:"STOP sentinel present — gate not started"}'
+  exit 1
+fi
+
 al_load_cache_env
 SESS_BASE="$(unique_session "gate")"
 PORT="$(unique_port)"
@@ -176,10 +189,17 @@ run_parity_checks() {
   run_step "parity_scoreboard" bash -c 'python3 scripts/daw-conformance/scoreboard.py --check'
 }
 
+run_loop_control_checks() {
+  run_step "program_stop" bash scripts/auto-loop/program-stop-selftest.sh
+  run_step "program_control_stop" bash scripts/auto-loop/program-control-stop-selftest.sh
+  run_step "merge_head" bash scripts/auto-loop/merge-head-selftest.sh
+}
+
 # ── cheap lane ───────────────────────────────────────────────────────────────────
 gate_cheap() {
   ensure_node_modules
   run_parity_checks
+  run_loop_control_checks
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
   run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
@@ -212,6 +232,7 @@ runbook_advisory() {
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
   run_parity_checks
+  run_loop_control_checks
   runbook_advisory
 
   # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step), and

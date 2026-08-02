@@ -6,12 +6,14 @@
 #                                 (exclusion) → gate.sh. Emits a verdict JSON. Merges
 #                                 NOTHING. ready:true ⇔ not excluded + clean rebase +
 #                                 gate passed (and a human/agent review still required).
-#   finalize <slug> <pr> <base_sha> [review_note]
+#   finalize <slug> <pr> <base_sha> <head_sha> [review_note]
 #                                 re-check kill-switch + origin/main UNMOVED since
-#                                 base_sha → wait for the required "cheap gate" check →
-#                                 gh pr merge --squash (NO --admin) → ledger →
-#                                 remove worktree. Holds an flock so two finalizes can
-#                                 never overlap.
+#                                 base_sha + PR head EXACTLY matches the locally gated
+#                                 head_sha → wait for the explicit "cheap gate" check →
+#                                 re-check head → gh pr merge --squash with GitHub's
+#                                 atomic head-match guard (NO --admin) → ledger → remove
+#                                 worktree. Holds a macOS single-flight lock so two
+#                                 finalizes never overlap.
 #   reject   <slug> <pr> <sublabel> <reason>
 #                                 leave PR open, label needs-human + <sublabel>, comment,
 #                                 ledger a REJECTED entry. Never merges.
@@ -23,17 +25,32 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set +e   # we record failures, never abort mid-sequence
 
 MAIN="$(al_main_worktree)"; [ -n "$MAIN" ] || al_die "no main worktree"
-LOCK="$AL_DOCS_DIR/.merge-queue.lock"; mkdir -p "$AL_DOCS_DIR"
+LOCK="$AL_CONTROL_DOCS_DIR/.merge-queue.lock"; mkdir -p "$AL_CONTROL_DOCS_DIR"
+SHLOCK="/usr/bin/shlock"
 
 slug_wt() { printf '%s/.claude/worktrees/auto-%s\n' "$MAIN" "$1"; }
 branch_of() { printf 'claude/auto-%s\n' "$1"; }
 
 ensure_label() { gh label create "$1" --color "${2:-EDEDED}" --force >/dev/null 2>&1 || true; }
 
+acquire_merge_lock() {
+  [ -x "$SHLOCK" ] || return 2
+  "$SHLOCK" -f "$LOCK" -p "$$" >/dev/null 2>&1 && return 0
+  sleep 1
+  "$SHLOCK" -f "$LOCK" -p "$$" >/dev/null 2>&1
+}
+
+release_merge_lock() {
+  local owner
+  owner="$(cat "$LOCK" 2>/dev/null || true)"
+  [ "$owner" = "$$" ] || return 0
+  rm -f "$LOCK" || al_warn "merge lock release failed: $LOCK"
+}
+
 # ── required-check wait ──────────────────────────────────────────────────────────
-# main requires the "cheap gate" status check, and branch protection has
-# enforce_admins:true — so `gh pr merge --admin` CANNOT bypass it and would just
-# fail. We therefore wait for the check to go green and then merge normally.
+# The loop explicitly requires the "cheap gate" status check even though branch
+# protection currently has no required status context. enforce_admins:true means
+# `gh pr merge --admin` is not an escape hatch if that policy is restored.
 #
 # This is strictly stronger than the old --admin merge: a loop merge is now gated
 # by the same check a human merge is. The local gate.sh run in `prepare` stays as
@@ -69,9 +86,19 @@ required_check_state() {
 wait_for_required_check() {
   local pr="$1" waited=0 st
   while [ "$waited" -lt "$AL_CHECK_TIMEOUT_S" ]; do
+    if al_stop_requested; then
+      printf 'STOP sentinel present — not merging\n'
+      return 2
+    fi
     st="$(required_check_state "$pr")"
     case "$st" in
-      SUCCESS) return 0 ;;
+      SUCCESS)
+        if al_stop_requested; then
+          printf 'STOP sentinel present — not merging\n'
+          return 2
+        fi
+        return 0
+        ;;
       FAILURE) printf 'required check "%s*" failed on PR #%s\n' "$AL_REQUIRED_CHECK_PREFIX" "$pr"; return 1 ;;
       *)       sleep "$AL_CHECK_POLL_S"; waited=$(( waited + AL_CHECK_POLL_S )) ;;
     esac
@@ -87,10 +114,17 @@ cmd_prepare() {
   local slug="$1" pr="$2" base="${3:-origin/main}"
   local wt; wt="$(slug_wt "$slug")"
 
-  if al_stop_requested; then jq -nc '{ready:false,phase:"prepare",reason:"STOP sentinel present"}'; return; fi
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not preparing"}'
+    return
+  fi
   [ -d "$wt" ] || { jq -nc --arg r "no worktree auto-$slug" '{ready:false,phase:"prepare",reason:$r}'; return; }
 
   git -C "$wt" fetch --quiet origin main || true
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not rebasing"}'
+    return
+  fi
   local base_sha; base_sha="$(git -C "$wt" rev-parse origin/main)"
 
   # Rebase onto latest origin/main — no stale-green merges.
@@ -100,6 +134,10 @@ cmd_prepare() {
     return
   fi
   local head_sha; head_sha="$(git -C "$wt" rev-parse HEAD)"
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not classifying"}'
+    return
+  fi
 
   # Classify + exclusion (fail-closed). Non-empty diff required.
   local cj; cj="$("$SELF_DIR/classify.sh" origin/main "$wt")"
@@ -125,11 +163,28 @@ cmd_prepare() {
   fi
 
   # Push the rebased branch so the PR reflects exactly what we gate.
-  git -C "$wt" push --force-with-lease >/dev/null 2>&1 || al_warn "push --force-with-lease failed for $(branch_of "$slug")"
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not pushing"}'
+    return
+  fi
+  if ! git -C "$wt" push --force-with-lease >/dev/null 2>&1; then
+    jq -nc --arg b "$base_sha" --arg h "$head_sha" \
+      '{ready:false,phase:"prepare",reason:"push --force-with-lease failed",baseSha:$b,headSha:$h}'
+    return
+  fi
+
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — not gating"}'
+    return
+  fi
 
   # THE GATE (authoritative: ×3 selftest + verify.py run here for native).
   local gate_json gate_rc
   gate_json="$("$SELF_DIR/gate.sh" "$class" "$wt" origin/main)"; gate_rc=$?
+  if al_stop_requested; then
+    jq -nc '{ready:false,phase:"prepare",stopped:true,reason:"STOP sentinel present — gate result discarded"}'
+    return
+  fi
   local ready=false; [ "$gate_rc" -eq 0 ] && ready=true
 
   # One-line digest of the gate result for the ledger / reviewer.
@@ -147,15 +202,14 @@ cmd_prepare() {
 }
 
 # ── finalize ─────────────────────────────────────────────────────────────────────
-cmd_finalize() {
-  local slug="$1" pr="$2" base_sha="$3" note="${4:-}"
+cmd_finalize_locked() {
+  local slug="$1" pr="$2" base_sha="$3" expected_head="$4" note="${5:-}"
   local wt br; wt="$(slug_wt "$slug")"; br="$(branch_of "$slug")"
 
-  # Single-flight: never let two finalizes overlap (backstop to the serial queue).
-  exec 9>"$LOCK"
-  if ! flock -n 9; then jq -nc '{merged:false,phase:"finalize",reason:"another finalize holds the lock"}'; return; fi
-
-  if al_stop_requested; then jq -nc '{merged:false,phase:"finalize",reason:"STOP sentinel present — not merging"}'; return; fi
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+    return
+  fi
 
   git -C "$MAIN" fetch --quiet origin main || true
   local cur; cur="$(git -C "$MAIN" rev-parse origin/main)"
@@ -165,59 +219,161 @@ cmd_finalize() {
     return
   fi
 
-  local mlog; mlog="$(mktemp)"
+  local pr_head
+  pr_head="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)"
+  if [ -z "$pr_head" ]; then
+    jq -nc '{merged:false,phase:"finalize",reason:"unable to verify current PR head"}'
+    return
+  fi
+  if [ "$pr_head" != "$expected_head" ]; then
+    jq -nc --arg c "$pr_head" --arg e "$expected_head" \
+      '{merged:false,phase:"finalize",reason:"PR head differs from locally gated head — re-prepare required",current:$c,expected:$e}'
+    return
+  fi
+
+  local wlog wrc; wlog="$(wait_for_required_check "$pr")"; wrc=$?
+  if [ "$wrc" -ne 0 ]; then
+    if al_stop_requested; then
+      jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+      return
+    fi
+    jq -nc --arg r "$wlog" '{merged:false,phase:"finalize",reason:$r}'
+    return
+  fi
+
+  pr_head="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)"
+  if [ "$pr_head" != "$expected_head" ]; then
+    jq -nc --arg c "$pr_head" --arg e "$expected_head" \
+      '{merged:false,phase:"finalize",reason:"PR head changed after required check — re-prepare required",current:$c,expected:$e}'
+    return
+  fi
+
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not readying"}'
+    return
+  fi
   gh pr ready "$pr" >/dev/null 2>&1 || true   # a draft PR can't be merged
 
-  # main REQUIRES the cheap gate and enforces protection on admins, so --admin is
-  # not an escape hatch any more — wait for the real signal, fail-closed.
-  local wlog; wlog="$(wait_for_required_check "$pr")"
-  if [ $? -ne 0 ]; then
-    jq -nc --arg r "$wlog" '{merged:false,phase:"finalize",reason:$r}'
-    rm -f "$mlog"; return
+  if al_stop_requested; then
+    jq -nc '{merged:false,phase:"finalize",stopped:true,reason:"STOP sentinel present — not merging"}'
+    return
+  fi
+
+  pr_head="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)"
+  if [ "$pr_head" != "$expected_head" ]; then
+    jq -nc --arg c "$pr_head" --arg e "$expected_head" \
+      '{merged:false,phase:"finalize",reason:"PR head changed before merge — re-prepare required",current:$c,expected:$e}'
+    return
   fi
 
   # NOT --delete-branch: the branch is checked out in a worktree, so gh's delete step
   # returns non-zero even though the MERGE succeeded (a false failure). We delete it
   # ourselves after removing the worktree, below.
-  gh pr merge "$pr" --squash >"$mlog" 2>&1
+  local mlog; mlog="$(mktemp)"
+  gh pr merge "$pr" --squash --match-head-commit "$expected_head" >"$mlog" 2>&1
   local mrc=$?
   if [ "$mrc" -ne 0 ]; then
     jq -nc --arg log "$(LC_ALL=C tr -cd '[:print:] ' <"$mlog")" '{merged:false,phase:"finalize",reason:"gh pr merge failed",log:$log}'
     rm -f "$mlog"; return
   fi
   rm -f "$mlog"
+  if al_stop_requested; then
+    jq -nc '{merged:true,phase:"finalize",stopped:true,reason:"STOP sentinel present after merge command — post-merge bookkeeping skipped"}'
+    return
+  fi
 
   # Advance local main in the MAIN worktree.
   git -C "$MAIN" fetch --quiet origin main || true
+  if al_stop_requested; then
+    jq -nc '{merged:true,phase:"finalize",stopped:true,reason:"STOP sentinel present after post-merge fetch — remaining bookkeeping skipped"}'
+    return
+  fi
   local merge_sha; merge_sha="$(git -C "$MAIN" rev-parse origin/main)"
+  if al_stop_requested; then
+    jq -nc '{merged:true,phase:"finalize",stopped:true,reason:"STOP sentinel present before ledger — remaining bookkeeping skipped"}'
+    return
+  fi
 
   ledger_append "### $(al_now) — PR #$pr: $br  [MERGED ✅]
 - **Branch:** $br → PR #$pr
 - **Base:** origin/main @ ${base_sha:0:9} → squash-merged as ${merge_sha:0:9}
 - **Review:** ${note:-APPROVE (adversarial self-review)}
-- **Outcome:** auto-merged by the unattended loop; branch + worktree removed
+- **Outcome:** auto-merged by the unattended loop; branch + worktree cleanup authorized after this entry
 "
+  if al_stop_requested; then
+    jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m,stopped:true,reason:"STOP sentinel present after ledger — cleanup skipped"}'
+    return
+  fi
   # Cleanup — PR is CONFIRMED merged, so force-remove regardless of squash ancestry
   # (rm-worktree.sh's is-ancestor guard would refuse, since a squash commit isn't an
   # ancestor of the branch tip).
   # Silence STDOUT too: `git branch -D` prints "Deleted branch …" to stdout, which would
   # pollute this function's JSON result (the Workflow's finalize agent parses it).
   git -C "$MAIN" worktree remove --force "$wt" >/dev/null 2>&1 || al_warn "worktree remove failed: auto-$slug"
+  if al_stop_requested; then
+    jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m,stopped:true,reason:"STOP sentinel present after worktree removal — branch cleanup skipped"}'
+    return
+  fi
   git -C "$MAIN" branch -D "$br" >/dev/null 2>&1 || true
+  if al_stop_requested; then
+    jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m,stopped:true,reason:"STOP sentinel present after local branch removal — remote cleanup skipped"}'
+    return
+  fi
   git -C "$MAIN" push origin --delete "$br" >/dev/null 2>&1 || true
 
   jq -nc --arg m "$merge_sha" '{merged:true,phase:"finalize",merge_sha:$m}'
+}
+
+cmd_finalize() {
+  local lock_rc
+  acquire_merge_lock
+  lock_rc=$?
+  if [ "$lock_rc" -ne 0 ]; then
+    if [ "$lock_rc" -eq 2 ]; then
+      jq -nc '{merged:false,phase:"finalize",reason:"macOS shlock is unavailable"}'
+    else
+      jq -nc '{merged:false,phase:"finalize",reason:"another finalize holds the lock"}'
+    fi
+    return
+  fi
+
+  trap 'release_merge_lock' EXIT
+  cmd_finalize_locked "$@"
+  local rc=$?
+  trap - EXIT
+  release_merge_lock
+  return "$rc"
 }
 
 # ── reject ───────────────────────────────────────────────────────────────────────
 cmd_reject() {
   local slug="$1" pr="$2" sublabel="$3" reason="$4"
   local br; br="$(branch_of "$slug")"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not rejecting"}'
+    return
+  fi
   ensure_label "needs-human" "B60205"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   ensure_label "$sublabel" "FBCA04"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   gh pr edit "$pr" --add-label "needs-human" --add-label "$sublabel" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not commenting"}'
+    return
+  fi
   gh pr comment "$pr" --body "Auto-loop held this PR for a human: **$sublabel**. $reason" >/dev/null 2>&1 || true
 
+  if al_stop_requested; then
+    jq -nc '{rejected:false,phase:"reject",stopped:true,reason:"STOP sentinel present — not writing ledger"}'
+    return
+  fi
   ledger_append "### $(al_now) — PR #$pr: $br  [REJECTED ⛔ $sublabel]
 - **Branch:** $br → PR #$pr
 - **Reason:** $reason
@@ -235,24 +391,52 @@ cmd_reject() {
 cmd_route_owner() {
   local slug="$1" pr="$2" lane="$3" gsum="$4" note="${5:-APPROVE (adversarial self-review)}" flagged="${6:-0}"
   local br; br="$(branch_of "$slug")"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not routing"}'
+    return
+  fi
   ensure_label "needs-owner-merge" "5319E7"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   ensure_label "program:$lane" "0E8A16"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not readying"}'
+    return
+  fi
   gh pr ready "$pr" >/dev/null 2>&1 || true   # undraft → the owner can merge it
   local labels=(--add-label "needs-owner-merge" --add-label "program:$lane")
   local caution=""
   if [ "$flagged" = "1" ]; then
+    if al_stop_requested; then
+      jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+      return
+    fi
     ensure_label "review-flagged" "D93F0B"
     labels+=(--add-label "review-flagged")
     caution="⚠️ **The hostile review flagged concerns — read them before merging.**
 "
   fi
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not labeling"}'
+    return
+  fi
   gh pr edit "$pr" "${labels[@]}" >/dev/null 2>&1 || al_warn "label failed (pr #$pr)"
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not commenting"}'
+    return
+  fi
   gh pr comment "$pr" --body "${caution}**Ready for owner merge** — high-stakes lane (\`$lane\`); the stranger-loop never auto-merges these.
 - **Gate:** $gsum
 - **Review:** $note
 
 This PR is gated + reviewed. Merge it when you're satisfied." >/dev/null 2>&1 || true
 
+  if al_stop_requested; then
+    jq -nc '{routed:false,phase:"route-owner",stopped:true,reason:"STOP sentinel present — not writing ledger"}'
+    return
+  fi
   ledger_append "### $(al_now) — PR #$pr: $br  [AWAITING-OWNER 🔒 program:$lane]
 - **Branch:** $br → PR #$pr
 - **Gate:** $gsum
@@ -264,6 +448,13 @@ This PR is gated + reviewed. Merge it when you're satisfied." >/dev/null 2>&1 ||
 }
 
 SUB="${1:?usage: merge-one.sh <prepare|finalize|reject|route-owner> ...}"; shift
+case "${1:-}" in
+  [Ff][Ss]-*)
+    AL_PROGRAM_ACTIVE=1
+    AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-$AL_CANONICAL_PROGRAM_STOP}"
+    export AL_PROGRAM_ACTIVE AL_PROGRAM_STOP
+    ;;
+esac
 case "$SUB" in
   prepare)     cmd_prepare      "$@" ;;
   finalize)    cmd_finalize     "$@" ;;

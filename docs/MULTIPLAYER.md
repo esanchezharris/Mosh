@@ -88,7 +88,7 @@ reach a peer's machine anyway.
 
 ## Connecting (the UX)
 
-The session control lives in the topbar's **2-player (B-5) pop**
+The session control lives in the topbar's **2-player Moshi pop**
 ([ui/src/ui/MultiplayerPanel.tsx](ui/src/ui/MultiplayerPanel.tsx)).
 
 - **Host:** open the pop → set your name + colour → **Create session** → a **room code**
@@ -254,8 +254,8 @@ The session control lives in the topbar's **2-player (B-5) pop**
 ## Running a live session (cloud, recommended)
 
 1. Both install Mosh (`docs/PLAYTEST_SETUP.md`).
-2. Host: B-5 pop → Create → copy room code → paste into Discord.
-3. Guest: B-5 pop → paste code → Join.
+2. Host: Moshi pop → Create → copy room code → paste into Discord.
+3. Guest: Moshi pop → paste code → Join.
 4. Agree on a tempo/key over Discord. Build the song — MIDI parts sync instantly; commit a
    track (move off it) to flush; share audio/SA3 clips knowing they ride the cloud relay.
 5. Each person plays back locally. Talk over Discord.

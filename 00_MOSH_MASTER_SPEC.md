@@ -16,7 +16,7 @@
 
 **Is:** a fully functional DAW — import/record audio and MIDI, arrange clips on a timeline, host VST3 instruments/effects, mix, export — with a **non-destructive neural transform layer** woven into the same signal model. Neural processing is just another kind of insert/layer in a track, never a separate mode.
 
-**Is not (in v0):** multiplayer; an AI-operator ("B-5"/Monster) app; a pixel-final UI. Those are deferred. v0 is single-player and driven by direct manipulation through the UI. The architecture must not *preclude* the deferred layers — and the MoshOps spine is precisely what keeps them cheap to add later — but must not *build* them now.
+**Is not (in v0):** multiplayer; an AI-operator (Moshi) app; a pixel-final UI. Those are deferred. v0 is single-player and driven by direct manipulation through the UI. The architecture must not *preclude* the deferred layers — and the MoshOps spine is precisely what keeps them cheap to add later — but must not *build* them now.
 
 **The non-destructive principle (the spine of the audio model).** Every neural edit is one of three things, never a silent flatten:
 1. a **reversible real-time insert** (Tier A) — a plugin in the track chain; the source clip is untouched;
@@ -46,7 +46,7 @@ The source of truth is always the upstream source (synth preset / MIDI / automat
 | Safety | **ASTD clamp by default + a Lab-mode escape hatch** | Trusted "never sounds broken" default; unlock the broken/alien range deliberately. `04 §6`, `05 §6`. |
 | Collaboration | **None in v0** | Single-player. Deferred (MoshOps log is the future substrate). |
 
-**Explicitly NOT in v0:** B-5/Monster operator behavior (reserved UI slot only); full multiplayer / CRDT op-log (MoshOps JSONL is a semantic audit trail, not yet a CRDT); on-device generative tier (SAO-Small) and Medium→Small vector transfer; LoRA-base + vector layering; timestep-scheduled steering; the full bespoke Context-Drawers system (a simple panel/drawer set is fine); **Magenta RealTime 2 (MRT2)** as a live generative-instrument lane (now *more* viable since we're Mac-only, but not core v0 — see `07`).
+**Explicitly NOT in v0:** Moshi operator behavior (reserved UI slot only); full multiplayer / CRDT op-log (MoshOps JSONL is a semantic audit trail, not yet a CRDT); on-device generative tier (SAO-Small) and Medium→Small vector transfer; LoRA-base + vector layering; timestep-scheduled steering; the full bespoke Context-Drawers system (a simple panel/drawer set is fine); **Magenta RealTime 2 (MRT2)** as a live generative-instrument lane (now *more* viable since we're Mac-only, but not core v0 — see `07`).
 
 ---
 
@@ -64,7 +64,7 @@ The source of truth is always the upstream source (synth preset / MIDI / automat
 │ MoshOps / DslExecutor  (C++)                                                         │
 │   typed commands · validation · undo transactions · structured results · JSONL log   │
 │   get_snapshot() + event emitter (snapshot+events) · same surface for UI / tests /   │
-│   future Monster / future MCP / future multiplayer                                   │
+│   future Moshi / future MCP / future multiplayer                                     │
 └───────────────┬───────────────────────────────────────┬──────────────────────────────┘
                 │                                         │
 ┌───────────────▼───────────────┐         ┌───────────────▼────────────────────────────┐
@@ -130,7 +130,7 @@ Each stage must pass its gate before the next. The "MVP in a night" caveat stand
   - *Gate (Fake):* full generative loop via commands — submit job → progress events → render → audition → A/B vs source → accept-as-layer or reject; cache hit/miss correct; source change → dirty → re-render; the JSONL log records accept/reject as **taste labels**.
   - *Gate (SA3):* a real color and a real re-imagine render commit as an auditionable layer/take with a quality readout; `/colors` drives the knobs and their ASTD clamps; init-latent cache reports a hit on seed-only change.
 
-- **Stage 6 — Consolidation (`03`,`04`,`05`).** Mixer polish, two-theme system, reserved B-5 slot, optional prompt-concision rewriter and quality readout.
+- **Stage 6 — Consolidation (`03`,`04`,`05`).** Mixer polish, two-theme system, reserved Moshi slot, optional prompt-concision rewriter and quality readout.
   - *Gate:* full producer loop from the UI with no code — import/record → arrange → host VST3 → Tier-A insert → generative transform → mix → export; undo/redo correct throughout (everything routes through MoshOps).
 
 Within Stage 2/6 build the arrangement incrementally (static clips → drag/move → trim/split → zoom/snap → marquee). It's lower-risk than the prior plan because it's React over a clean contract, not raw-JUCE from scratch.

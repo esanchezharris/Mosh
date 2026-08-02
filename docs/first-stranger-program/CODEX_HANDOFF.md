@@ -1,5 +1,11 @@
 # Codex handoff — driving the First-Stranger Program
 
+> **Historical only.** First-Stranger was paused and superseded on 2026-07-30.
+> Do not execute the lane instructions below. The tracked [`STOP`](STOP)
+> blocks the remaining launchers and mutation helpers; public cleanup removed
+> the `stranger-loop` workflow entirely. Start from
+> [`../vocal-map-program/STATUS.md`](../vocal-map-program/STATUS.md) instead.
+
 This is the entry point for **Codex** (or any agent that isn't the Claude `stranger-loop`) to do
 the program work. The work is agent-agnostic on purpose: the spec, the backlog, and the per-lane
 plans are plain files, and the gate is a shell command. You don't need the Claude Workflow runtime.

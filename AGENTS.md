@@ -14,8 +14,8 @@ behind `MOSH_ENABLE_ANIRA`), **Finish-My-Song Phases 1–3** (lyrics → skeleto
 the re-imagine overhaul (in-place apply + reactive re-render), the real-recipes
 beat generator (`generate_beat_recipe`), `add_drum_pattern` (DRM-002), and the additive
 **Windows + NVIDIA/CUDA port** (refreshed 2026-07-07, FIT-010 #245; the Windows build
-itself is the owner's step). For the live status read `docs/CURRENT_STATUS.md`
-(the one rolling status doc).
+itself is the owner's step). During the active vocal-first program, live status
+is `docs/vocal-map-program/STATUS.md`.
 
 **Mission:** keep the DAW correct and verified — intensive testing, verification,
 and hardening. New features land additively (snapshot/events stay
@@ -25,18 +25,21 @@ backward-compatible) and behind the same MoshOps seam.
 (`docs/archive/hardening/2026-06-12-pause-alignment.md`) is **archived/historical** —
 useful for old branch boundaries and parked work, not current status.
 
-## First-Stranger Program (active — the current work)
-The 6-week push to the first non-owner playtest. Entry point:
-`docs/first-stranger-program/README.md` + `SPEC.md` (decision-complete; §1–§2 are settled —
-do not re-open). Lanes (T/K/S/B/ST) live in `docs/first-stranger-program/backlog.jsonl`; each
-has a gate-registered plan in `docs/first-stranger-program/lanes/FS-*.md`; the live board is
-`docs/first-stranger-program/STATUS.md`.
+## Vocal Map Playtest Program (active — the current work)
+The focused vocal-first push to a solo-novice playtest on 2026-09-17. Entry
+point: `docs/vocal-map-program/README.md`; `SPEC.md` is decision-complete,
+`STATUS.md` names the only active serial seat, and `DECISIONS.md` is append-only.
 
-**Picking up a lane? Read `docs/first-stranger-program/CODEX_HANDOFF.md`.** In one line: choose a
-`ready` lane, read its `lanes/FS-*.md` plan, implement it in **its own git worktree** obeying
-SPEC §0, run `scripts/auto-loop/gate.sh native <worktree> origin/main`, open a PR — **never merge.**
-The owner merges; most lanes touch engine/auth/packaging/relay/state and are owner-gated by design.
-(`scripts/first-stranger/codex-lane.sh <FS-ID>` prints a ready-to-paste prompt for exactly this.)
+**Picking up work? Read `docs/vocal-map-program/STATUS.md` first.** Work only the
+single `in progress` seat in its own git worktree. Run the complete class-correct
+local gate, open a PR, and stop — never merge. The owner merges each PR before
+the next serial seat starts. Research may accumulate evidence, but the roster
+freezes 2026-08-13 and the stack freezes 2026-08-27.
+
+The former First-Stranger automation is paused by its tracked
+`docs/first-stranger-program/STOP` sentinel. Preserve its backlog, lane plans,
+status board, and evidence as historical program state. Its configured ledger
+target never became a tracked file before the pause.
 
 ## Verify before any merge
 ```sh

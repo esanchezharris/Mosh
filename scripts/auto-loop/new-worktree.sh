@@ -18,11 +18,27 @@ MAIN="$(al_main_worktree)"; [ -n "$MAIN" ] || al_die "no main worktree"
 WT="$MAIN/.claude/worktrees/auto-$SLUG"
 BR="claude/auto-$SLUG"
 
+case "$SLUG" in
+  [Ff][Ss]-*)
+    AL_PROGRAM_ACTIVE=1
+    AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-$MAIN/docs/first-stranger-program/STOP}"
+    ;;
+esac
+
+if al_stop_requested; then
+  al_die "STOP sentinel present — worktree not created"
+fi
 git -C "$MAIN" fetch --quiet origin || al_warn "git fetch origin failed (offline?)"
+if al_stop_requested; then
+  al_die "STOP sentinel present — worktree not created"
+fi
 
 if [ -d "$WT" ]; then
   al_log "worktree exists, reusing: $WT"
 else
+  if al_stop_requested; then
+    al_die "STOP sentinel present — worktree not created"
+  fi
   # Fresh branch off BASE_REF. If the branch already exists, reuse it. Redirect git's
   # output to stderr — `git worktree add -b` off a REMOTE ref prints "branch '…' set up to
   # track …" to STDOUT, which would pollute the worktree path this script echoes.
@@ -31,6 +47,10 @@ else
   else
     git -C "$MAIN" worktree add -b "$BR" "$WT" "$BASE_REF" 1>&2
   fi
+fi
+
+if al_stop_requested; then
+  al_die "STOP sentinel present — worktree created, no dependency link or implementation authorized"
 fi
 
 # Speed up the cheap (TS) lane: reuse the main checkout's node_modules + Playwright
@@ -43,6 +63,9 @@ fi
 # `npm ci`, may declare the deps in-sync. See lib.sh deps_need_install / deps_write_stamp.
 if [ -d "$MAIN/ui/node_modules" ] && [ ! -e "$WT/ui/node_modules" ]; then
   if diff -q "$MAIN/ui/package-lock.json" "$WT/ui/package-lock.json" >/dev/null 2>&1; then
+    if al_stop_requested; then
+      al_die "STOP sentinel present — dependency link not created"
+    fi
     ln -s "$MAIN/ui/node_modules" "$WT/ui/node_modules"
     al_log "linked ui/node_modules from main (lockfile matches)"
   fi

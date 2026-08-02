@@ -1,6 +1,6 @@
 // The executor turns the brain's planned commands into real edits — run as ONE
 // undo step via the backend batch_begin/batch_end pair, so a single "Undo" in
-// Monster changes reverts the whole thing. Every call is validated against the
+// Moshi changes reverts the whole thing. Every call is validated against the
 // curated catalog before it reaches the command seam; invalid calls are recorded
 // as failures and never sent.
 

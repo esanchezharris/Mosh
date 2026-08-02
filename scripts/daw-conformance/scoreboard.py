@@ -101,7 +101,7 @@ def render():
     L.append(f"- **{by_status.get('gap', 0)} gap** rows — tracked, attributed backlog items.")
     L.append(f"- **{by_status.get('hardware', 0)} hardware** rows — need a live device "
              f"(Phase-1 hardware pass).")
-    L.append(f"- **{by_status.get('out-of-scope', 0)} out-of-scope** rows — Monster / Arena / "
+    L.append(f"- **{by_status.get('out-of-scope', 0)} out-of-scope** rows — Moshi / Arena / "
              "Collaboration (outside the conventional-parity pass).")
     L.append(f"- Command-surface coverage: **{n_cov} / {cov['total']}** dispatch commands "
              f"exercised by ≥1 test surface; {len(cov['waived'])} waived (reasoned, expiring — "
@@ -205,7 +205,6 @@ def render():
              "return codes.")
     L.append("- Hardware-only behavior (mic capture, live meters, MIDI input, multi-out, loop "
              "playback) is confirmed in the Phase-1 hardware pass — see `docs/VERIFICATION.md`.")
-    L.append("")
     return "\n".join(L) + "\n"
 
 

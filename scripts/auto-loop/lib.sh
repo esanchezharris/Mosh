@@ -14,16 +14,46 @@ AL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AL_ROOT_DEFAULT="$(cd "$AL_LIB_DIR/../.." && pwd)"
 # Callers may override ROOT to point at a specific worktree.
 AL_ROOT="${AL_ROOT:-$AL_ROOT_DEFAULT}"
+AL_COMMON_DIR="$(git -C "$AL_ROOT" rev-parse --path-format=absolute \
+  --git-common-dir 2>/dev/null || true)"
+AL_PRIMARY_ROOT=""
+if [ -n "$AL_COMMON_DIR" ]; then
+  AL_PRIMARY_CONFIG="$(git --git-dir="$AL_COMMON_DIR" config --worktree \
+    --get core.worktree 2>/dev/null || true)"
+  if [ -n "$AL_PRIMARY_CONFIG" ]; then
+    AL_PRIMARY_ROOT="$(git --git-dir="$AL_COMMON_DIR" rev-parse \
+      --path-format=absolute --show-toplevel 2>/dev/null || true)"
+    [ -d "$AL_PRIMARY_ROOT" ] || AL_PRIMARY_ROOT=""
+  fi
+fi
+if [ -z "$AL_PRIMARY_ROOT" ]; then
+  AL_PRIMARY_ROOT="$(git -C "$AL_ROOT" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree / && !found {sub(/^worktree /, ""); print; found=1}')"
+fi
+[ -n "$AL_PRIMARY_ROOT" ] || AL_PRIMARY_ROOT="$AL_ROOT"
 
 AL_DOCS_DIR="$AL_ROOT/docs/auto-loop"
+AL_CONTROL_DOCS_DIR="$AL_PRIMARY_ROOT/docs/auto-loop"
 # AL_LEDGER + AL_BACKLOG_JSONL accept an environment override so a SIBLING loop (the
 # First-Stranger "stranger-loop") can keep its own audit trail + backlog while sharing
-# the same scripts, STOP switch, and merge-queue lock. Unset ⇒ the classic auto-loop
-# paths, byte-identical to before.
+# the same scripts and merge-queue lock. Unset ⇒ the classic auto-loop paths.
 AL_LEDGER="${AL_LEDGER:-$AL_DOCS_DIR/LEDGER.md}"
 AL_BACKLOG="$AL_DOCS_DIR/BACKLOG.md"                 # human-readable companion (classic)
 AL_BACKLOG_JSONL="${AL_BACKLOG_JSONL:-$AL_DOCS_DIR/backlog.jsonl}"   # machine source of truth
-AL_STOP="$AL_DOCS_DIR/STOP"
+AL_CANONICAL_STOP="$AL_CONTROL_DOCS_DIR/STOP"
+AL_STOP="${AL_STOP:-$AL_CANONICAL_STOP}"
+AL_CANONICAL_PROGRAM_STOP="$AL_PRIMARY_ROOT/docs/first-stranger-program/STOP"
+AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-}"
+AL_PROGRAM_ACTIVE=0
+[ -n "$AL_PROGRAM_STOP" ] && AL_PROGRAM_ACTIVE=1
+AL_BACKLOG_PARENT="$(cd "$(dirname "$AL_BACKLOG_JSONL")" 2>/dev/null && pwd -P || true)"
+if [ "$(basename "$AL_BACKLOG_JSONL")" = "backlog.jsonl" ] &&
+   { [ "$(basename "$(dirname "$AL_BACKLOG_JSONL")")" = "first-stranger-program" ] ||
+     [ "$(basename "$AL_BACKLOG_PARENT")" = "first-stranger-program" ]; }; then
+  AL_PROGRAM_ACTIVE=1
+fi
+[ "$AL_PROGRAM_ACTIVE" = 0 ] ||
+  AL_PROGRAM_STOP="${AL_PROGRAM_STOP:-$AL_CANONICAL_PROGRAM_STOP}"
 AL_PAUSE="$AL_DOCS_DIR/PAUSE"
 
 # Machine-local home for the shared build cache + config. Lives OUTSIDE any git
@@ -33,8 +63,7 @@ AL_ENV="$AL_HOME/auto-loop.env"          # written by seed-cache.sh, sourced by 
 
 # The primary (main) git worktree — where the seeded dep cache + tracktion source live.
 al_main_worktree() {
-  git -C "$AL_ROOT" worktree list --porcelain 2>/dev/null \
-    | awk '/^worktree /{print $2; exit}'
+  printf '%s\n' "$AL_PRIMARY_ROOT"
 }
 
 # Load the seeded cache config (AL_CPM_CACHE, AL_TRACTION_SRC) if present.
@@ -48,7 +77,13 @@ al_die()  { printf '[auto-loop][die] %s\n' "$*" >&2; exit 1; }
 # ── kill switch ─────────────────────────────────────────────────────────────────
 # Returns 0 (true) if the loop must stop. Checked at every iteration boundary AND
 # immediately before any merge. A human drops the STOP file to halt instantly.
-al_stop_requested() { [ -e "$AL_STOP" ]; }
+al_stop_requested() {
+  [ -e "$AL_CANONICAL_STOP" ] || [ -e "$AL_STOP" ] || {
+    [ "$AL_PROGRAM_ACTIVE" = 1 ] &&
+      { [ -e "$AL_CANONICAL_PROGRAM_STOP" ] ||
+        { [ -n "$AL_PROGRAM_STOP" ] && [ -e "$AL_PROGRAM_STOP" ]; }; }
+  }
+}
 al_pause_requested() { [ -e "$AL_PAUSE" ]; }
 
 # ── binary resolution ───────────────────────────────────────────────────────────

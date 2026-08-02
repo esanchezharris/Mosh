@@ -11,11 +11,21 @@
 # Bash 3.2 compatible. Never mutates anything but STATUS.md.
 set -uo pipefail
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+CALLER_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+REQUESTED_BACKLOG="${AL_BACKLOG_JSONL:-}"
+AL_ROOT="$CALLER_ROOT"
+AL_PROGRAM_STOP="$CALLER_ROOT/docs/first-stranger-program/STOP"
+. "$CALLER_ROOT/scripts/auto-loop/lib.sh"
+ROOT="$(al_main_worktree)"
 PROG="$ROOT/docs/first-stranger-program"
-BL="${AL_BACKLOG_JSONL:-$PROG/backlog.jsonl}"
+BL="${REQUESTED_BACKLOG:-$PROG/backlog.jsonl}"
 OUT="$PROG/STATUS.md"
 NOW="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+if al_stop_requested; then
+  echo "status.sh: STOP sentinel present — preserving the paused dashboard."
+  exit 0
+fi
 
 [ -f "$BL" ] || { echo "status.sh: no backlog at $BL" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "status.sh: jq required" >&2; exit 1; }
@@ -106,7 +116,7 @@ tmp="$(mktemp)"
   echo "| O6 | $O6 | - |"
   echo "| hw | 2 machines + a live relay (S0 sizing spike) | $(_blocks_for 'owner-hardware') |"
   echo ""
-  echo "> To unblock a lane once its O-task is done: \`AL_BACKLOG_JSONL=$PROG/backlog.jsonl scripts/auto-loop/discover.sh set-status <id> ready\`"
+  echo "> To unblock a lane once its O-task is done: \`AL_PROGRAM_STOP=$PROG/STOP AL_BACKLOG_JSONL=$PROG/backlog.jsonl scripts/auto-loop/discover.sh set-status <id> ready\`"
   echo ""
 
   done_rows="$(_rows done)"

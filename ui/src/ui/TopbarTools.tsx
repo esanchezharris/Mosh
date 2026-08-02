@@ -674,7 +674,7 @@ export function MemoryTool({ label, title, className, ariaLabel, testId }: ToolC
   );
 }
 
-// MP-001 — 2-player session entry (the reserved B-5 slot). `on` lights when a
+// MP-001 — 2-player session entry (the reserved Moshi slot). `on` lights when a
 // session is active so the topbar shows the live-collaboration state at a glance.
 export function MultiplayerTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const active = useStore((s) => s.mp.active);

@@ -22,7 +22,17 @@ set +e
 # Machine source of truth. Defaults to docs/auto-loop/backlog.jsonl, but honors an
 # AL_BACKLOG_JSONL override (set by the stranger-loop to point at its own backlog).
 BL="$AL_BACKLOG_JSONL"
-mkdir -p "$(dirname "$BL")"; [ -f "$BL" ] || : > "$BL"
+
+_require_mutation_allowed() {
+  if al_stop_requested; then
+    al_die "STOP sentinel present — backlog unchanged"
+  fi
+}
+
+_ensure_backlog() {
+  mkdir -p "$(dirname "$BL")"
+  [ -f "$BL" ] || : > "$BL"
+}
 
 # Strip blank lines, parse each as JSON, collect into an array.
 _all() { grep -v '^[[:space:]]*$' "$BL" 2>/dev/null | jq -sc '.'; }
@@ -55,7 +65,9 @@ cmd_next_id() {
 
 cmd_add() {
   local obj="$1"
+  _require_mutation_allowed
   echo "$obj" | jq -e . >/dev/null 2>&1 || al_die "discover add: argument is not valid JSON"
+  _ensure_backlog
   local id; id="$(echo "$obj" | jq -r '.id // empty')"
   [ -z "$id" ] && id="$(cmd_next_id)"
   # Default order = 1000 + numeric id, so auto-discovered items always sort AFTER the
@@ -69,7 +81,10 @@ cmd_add() {
 }
 
 cmd_set_status() {
-  local id="$1" status="$2" tmp; tmp="$(mktemp)"
+  local id="$1" status="$2" tmp
+  _require_mutation_allowed
+  [ -f "$BL" ] || { al_warn "set-status: backlog not found: $BL"; return 1; }
+  tmp="$(mktemp)"
   local found=0
   while IFS= read -r line; do
     [ -z "$line" ] && continue

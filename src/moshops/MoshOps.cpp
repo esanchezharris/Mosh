@@ -709,7 +709,7 @@ juce::var MoshOps::cmdRedo (const juce::var& args)
 
 // Agent batch grouping: batch_begin opens ONE undo transaction; every command run
 // while inBatch skips its own beginNewTransaction (see beginTxn), so the whole batch
-// is a single undo step. batch_end closes it. The agent ("Monster changes") brackets
+// is a single undo step. batch_end closes it. The agent ("Moshi changes") brackets
 // its edits with these so one Undo reverts the entire batch.
 //
 // FS-B2a — TWO MODES, and the split is the safety property of the whole change:

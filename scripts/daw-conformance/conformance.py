@@ -8,7 +8,7 @@ eval-id that shares that scenario. Reuses scripts/verify-hardware/verify.py's ru
 + WAV helpers (and the `__snapshot` run-script directive) so state/audio/undo assertions
 hit the SAME snapshot() and rendered audio the app produces — no privileged backdoor.
 
-Scope: CONVENTIONAL DAW PARITY (locked 2026-06-26). The Monster / Arena / Collaboration
+Scope: CONVENTIONAL DAW PARITY (locked 2026-06-26). The Moshi / Arena / Collaboration
 areas (and the battle-submission bespoke row) are reported `out-of-scope`, not failed.
 
 Verdict statuses:
@@ -16,7 +16,7 @@ Verdict statuses:
   fail         in-scope capability BROKE — a regression. The only status that fails the gate.
   gap          in-scope capability ABSENT (a known backlog item, e.g. export range/tail). Tracked, not failed.
   hardware     needs a live audio device / mic / MIDI — proven in the Phase 1 hardware pass, not here.
-  out-of-scope Monster/Arena/Collaboration/battle — outside this parity pass.
+  out-of-scope Moshi/Arena/Collaboration/battle — outside this parity pass.
 
 Usage:
     python3 scripts/daw-conformance/conformance.py [--bin <Mosh>] [--json out.json]
@@ -41,7 +41,7 @@ EVAL_CSV = PACK / "mosh_daw_eval_suite.csv"
 SELF = Path(__file__).resolve().parent
 ARTDIR = REPO / "verify-artifacts" / "conformance"
 
-OUT_OF_SCOPE_AREAS = {"Monster", "Arena", "Collaboration"}
+OUT_OF_SCOPE_AREAS = {"Moshi", "Arena", "Collaboration"}
 
 PASS, FAIL, GAP, HARDWARE, OOS = "pass", "fail", "gap", "hardware", "out-of-scope"
 
@@ -1232,7 +1232,7 @@ FAMILIES = {
     ("Recording", "Deny mic permission and try to record"): fam_record_no_fake_clip,
     ("Clip editing", "Move vocal clip to hook marker"): fam_clip_move,
     ("Clip editing", "Split selected clip at the playhead and duplicate second half"): fam_clip_split_dup,
-    ("Mixer", "Monster: turn vocal up"): fam_mixer_gain,
+    ("Mixer", "Moshi: turn vocal up"): fam_mixer_gain,
     ("Mixer", "Mute then solo the same track according to Mosh solo policy"): fam_mixer_mute_solo,
     ("Effects", "Add reverb to vocal"): fam_effects_add,
     ("Effects", "Bypass then re-enable an inserted delay effect"): fam_effects_bypass,
@@ -1410,7 +1410,7 @@ def main():
         "generated_by": "scripts/daw-conformance/conformance.py",
         "binary": str(ctx.bin),
         "eval_total": len(rows),
-        "scope": "conventional DAW parity (Monster/Arena/Collaboration out-of-scope)",
+        "scope": "conventional DAW parity (Moshi/Arena/Collaboration out-of-scope)",
         "summary": {
             "by_status": by_status,
             "by_priority": tally(per_id, lambda it: it["priority"]),

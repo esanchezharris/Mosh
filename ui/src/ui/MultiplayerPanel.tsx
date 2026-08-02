@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import { loadMpIdentity, saveMpIdentity } from "../multiplayer/identity";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-// MP-001 — session entry + roster. Lives in a topbar Pop (the reserved B-5 slot) in
+// MP-001 — session entry + roster. Lives in a topbar Pop (the reserved Moshi slot) in
 // the classic shell, and in a modal from the v2 shell's prominent Invite affordances
 // (MultiplayerLauncher). Create a session (share the code) or join one; once
 // connected, shows the peer roster + the room code (always re-visible/copyable, so

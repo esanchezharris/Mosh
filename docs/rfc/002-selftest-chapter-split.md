@@ -83,3 +83,7 @@ silent). The guards-first PR (RFC 001's A-PR0) already widens that surface to
 
 - 2026-07-28 — accepted (owner approved the program plan).
 - 2026-07-29 — implementation gated + hostile-reviewed, **queued for owner merge**: #507 (scaffolding — `SelfTestCtx` + gCtx shims; `runSelfTest` byte-identical at 8,514 lines) → #508 (chapters 1/2 — 45 of 94 sections into 5 TUs, only 4 in-section lines adapted, all declaring sites). #510 (chapters 2/2 — the remaining 49 sections into 6 TUs) completes it: **ZERO** ctx additions needed (`SelfTestSupport.h` byte-untouched) and zero in-section edits, so `runSelfTest` is now a 116-LOC spine of 11 chapter calls (9,738 → 116). The identity oracle held at every step: normalized `--selftest` transcript byte-identical to the base build, ×3 runs, and the oracle itself RED-proven against a one-line perturbation. Normalization patterns are published verbatim on #507 (a reviewer correctly refused to accept them described in prose).
+- 2026-07-30 — the Vocal Map Playtest Program became the only active serial
+  implementation train. PRs #507/#508/#510 remain preserved but parked; their
+  stack must be regenerated on the then-current trunk and fully re-gated before
+  any owner merge.

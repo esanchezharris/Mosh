@@ -697,7 +697,7 @@ private:
 
     juce::UndoManager& undoManager() { return eng.edit().getUndoManager(); }
 
-    // Agent "Monster changes": inside a batch (batch_begin..batch_end) every command
+    // Agent "Moshi changes": inside a batch (batch_begin..batch_end) every command
     // coalesces into the ONE transaction batch_begin opened, so the whole batch undoes
     // as a single step. Outside a batch this is identical to the old per-command call.
     //

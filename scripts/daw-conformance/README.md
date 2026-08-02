@@ -34,7 +34,7 @@ run disagrees with `verdicts.json`** — a behavior change must land its verdict
 | `fail` | in-scope capability **regressed** (was green, now broken) | ❌ blocks |
 | `gap` | in-scope capability **absent** — attributed to a LIVE backlog item via `backlog_ref` | ✅ tracked |
 | `hardware` | needs a live audio device / mic / MIDI — proven in the Phase-1 hardware pass | ✅ |
-| `out-of-scope` | Monster / Arena / Collaboration / battle-submission — outside the conventional-parity pass | ✅ |
+| `out-of-scope` | Moshi / Arena / Collaboration / battle-submission — outside the conventional-parity pass | ✅ |
 
 A parity fix that closes a gap flips that family from `gap` → `pass`; the harness is the
 proof the backlog item actually landed. An eval row may be authored AHEAD of its
@@ -58,7 +58,7 @@ conventional-parity registry) + the coverage ledger.
 
 Conventional DAW parity only (locked 2026-06-26; expansion governed by the DAW-parity
 program — see `docs/reality-pack/missing_capabilities_2026-07-18.md` and the capability
-matrix once it lands). The Monster, Arena, and Collaboration areas are reported
+matrix once it lands). The Moshi, Arena, and Collaboration areas are reported
 `out-of-scope`, not failed — see `docs/reality-pack/INDEX.md`.
 
 ## Baseline (2026-07-18, fresh Debug binary)
