@@ -170,14 +170,18 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     // silently straightened to the grid by a drag that never really travelled.
     if (Math.abs(dx) <= threshold) { setPreview(null); return; }
     const delta = pxToSec(dx), o = d.orig;
+    // Option is the temporary, gesture-local snap bypass. Read it on every move so
+    // the producer can press or release the modifier while already dragging; the
+    // shared snap toggle/division remains unchanged for the next edit.
+    const gestureTime = (raw: number) => e.altKey ? raw : snapTime(raw);
     if (d.kind === "move") {
-      setPreview({ ...o, start: Math.max(0, snapTime(o.start + delta)) });
+      setPreview({ ...o, start: Math.max(0, gestureTime(o.start + delta)) });
     } else if (d.kind === "trim-r" || d.kind === "stretch") {
       // Both drag the right edge to a new length; the commit differs (trim vs warp).
-      const end = snapTime(o.start + o.length + delta);
+      const end = gestureTime(o.start + o.length + delta);
       setPreview({ ...o, length: Math.max(MIN_LEN, end - o.start) });
     } else {
-      const start = Math.max(0, Math.min(o.start + o.length - MIN_LEN, snapTime(o.start + delta)));
+      const start = Math.max(0, Math.min(o.start + o.length - MIN_LEN, gestureTime(o.start + delta)));
       const used = start - o.start;
       setPreview({ start, length: o.length - used, offset: Math.max(0, o.offset + used) });
     }
@@ -225,7 +229,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     if (action !== EA.CONTEXT_MENU) return;
     e.preventDefault();
     selectClip(false);
-    setMenu({ x: e.clientX, y: e.clientY, time: snapTime(clip.start + pxToSec(localX)), splitLabel: "Split here" });
+    const rawTime = clip.start + pxToSec(localX);
+    setMenu({ x: e.clientX, y: e.clientY, time: e.altKey ? rawTime : snapTime(rawTime), splitLabel: "Split here" });
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

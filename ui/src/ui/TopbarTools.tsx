@@ -427,7 +427,8 @@ export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChr
     ["Space", "Play / pause"],
     ["Delete  ⌫", "Remove selected clip"],
     ["Drag clip", "Move · drag an edge to trim"],
-    ["Click ruler", "Seek · ⇧-drag sets the loop"],
+    ["⌥-drag", "Temporarily bypass Snap"],
+    ["Click ruler", "Seek · ⇧-drag selects a range"],
   ];
   return (
     <Pop
@@ -445,7 +446,7 @@ export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChr
               <div className="pop-row" key={k}><span className="tc">{k}</span><span className="pop-note">{d}</span></div>
             ))}
           </div>
-          <div className="pop-note">Tools (Move / Split / Range) &amp; Snap live in the toolbar.</div>
+          <div className="pop-note">Tools (Move / Split / Range) &amp; Snap live in the toolbar. Hold Option during a drag for free placement.</div>
         </>
       )}
     </Pop>

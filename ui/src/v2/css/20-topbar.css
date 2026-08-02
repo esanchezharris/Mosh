@@ -28,6 +28,7 @@
 .v2-chip-num { width: 52px; text-align: center; -moz-appearance: textfield; }
 .v2-chip-num::-webkit-outer-spin-button, .v2-chip-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .v2-chip-sel { background: var(--v2-ground-card); }
+.v2-snap-controls { display: inline-flex; align-items: center; gap: 3px; }
 .v2-timesig { display: inline-flex; align-items: center; gap: 2px; }
 .v2-timesig .v2-chip-num { width: 34px; }
 .v2-timesig-slash { color: var(--v2-ground-dim); opacity: 0.7; }
@@ -221,4 +222,3 @@
    child of .v2-tl and the "empty" trigger is a flex child of .v2-stage-empty — in both
    cases an intervening div would take over the layout slot. */
 .v2-addtrack { display: contents; }
-

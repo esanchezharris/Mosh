@@ -68,22 +68,33 @@ describe("piano-roll drag axis independence", () => {
    * `selector` names — the note body ("move") or its resize grip ("resize").
    * Returns the committed `set_note` args, or undefined if nothing was committed.
    */
-  const drag = (selector: string, dxPx: number, semitones: number) => {
+  const drag = (selector: string, dxPx: number, semitones: number, altKey = false) => {
     const handle = host.querySelector(selector);
     if (!handle) throw new Error(`piano-roll ${selector} did not render`);
     const x0 = 10, x1 = x0 + dxPx;
     const y0 = 200, y1 = y0 + semitones * ROW_H; // +y is downward = lower pitch
     act(() => {
       handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 3, clientX: x0, clientY: y0 }));
-      handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 3, clientX: x1, clientY: y1, buttons: 1 }));
+      handle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 3, clientX: x1, clientY: y1, buttons: 1, altKey }));
       handle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 3, clientX: x1, clientY: y1 }));
     });
     const call = exec.mock.calls.find((c) => c[0] === "set_note");
     return call ? (call[1] as { start?: number; pitch?: number; length?: number }) : undefined;
   };
 
-  const dragNote = (dxPx: number, semitones: number) => drag(".pr-note", dxPx, semitones);
-  const dragGrip = (dxPx: number, semitones: number) => drag(".pr-note-grip", dxPx, semitones);
+  const dragNote = (dxPx: number, semitones: number, altKey = false) => drag(".pr-note", dxPx, semitones, altKey);
+  const dragGrip = (dxPx: number, semitones: number, altKey = false) => drag(".pr-note-grip", dxPx, semitones, altKey);
+
+  const clickGrid = (beat: number, altKey = false) => {
+    const grid = host.querySelector(".pr-grid");
+    if (!grid) throw new Error("piano-roll grid did not render");
+    const x = beat * BEAT_PX, y = 200;
+    act(() => {
+      grid.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 11, clientX: x, clientY: y, altKey }));
+      grid.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 11, clientX: x, clientY: y, altKey }));
+    });
+    return exec.mock.calls.find((c) => c[0] === "add_note")?.[1] as { start?: number } | undefined;
+  };
 
   /**
    * Drag out to `viaPx` and then back to `endPx` before releasing — the "I changed
@@ -145,6 +156,24 @@ describe("piano-roll drag axis independence", () => {
     mount();
     // A full beat to the right: 1.3 + 1.0 = 2.3, which the 1-beat grid rounds to 2.
     expect(dragNote(BEAT_PX, 0)?.start).toBe(2);
+  });
+
+  it("Option-drag moves a note off-grid without disabling snap", () => {
+    mount();
+    expect(dragNote(BEAT_PX, 0, true)?.start).toBeCloseTo(OFF_GRID_START + 1, 6);
+    expect(useStore.getState().snap).toBe(true);
+  });
+
+  it("Option-drag resizes a note off-grid", () => {
+    mount();
+    expect(dragGrip(BEAT_PX, 0, true)?.length).toBeCloseTo(OFF_GRID_LENGTH + 1, 6);
+  });
+
+  it("snaps a drawn note normally but Option-click can place it off-grid", () => {
+    mount();
+    expect(clickGrid(1.3)?.start).toBe(1);
+    exec.mockClear();
+    expect(clickGrid(1.3, true)?.start).toBeCloseTo(1.3, 6);
   });
 
   it("a vertical wiggle on the resize grip does not quantize an off-grid length", () => {

@@ -67,11 +67,11 @@ describe("BarRuler — shift-drag time-range gesture", () => {
   const ruler = () => host.querySelector('[data-testid="v2-ruler"]') as HTMLElement;
 
   // clientX in PX-per-second units; rect.left is 0 under jsdom's default zero DOMRect.
-  const down = (sec: number, shiftKey: boolean, pointerId = 1) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: sec * PX, shiftKey, buttons: 1 }));
+  const down = (sec: number, shiftKey: boolean, pointerId = 1, altKey = false) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, clientX: sec * PX, shiftKey, altKey, buttons: 1 }));
   });
-  const move = (sec: number, pointerId = 1) => act(() => {
-    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: sec * PX, buttons: 1 }));
+  const move = (sec: number, pointerId = 1, altKey = false) => act(() => {
+    ruler().dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, clientX: sec * PX, altKey, buttons: 1 }));
   });
   const up = (sec: number, pointerId = 1) => act(() => {
     ruler().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, clientX: sec * PX }));
@@ -101,7 +101,7 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     root = createRoot(host);
     mounted = true;
     exec = vi.fn(async () => ({ ok: true }));
-    useStore.setState({ exec, pxPerSec: PX, snapshot: snap() } as never);
+    useStore.setState({ exec, pxPerSec: PX, snapshot: snap(), snap: true, snapDivision: "bar" } as never);
     useShell.setState({ timeRange: null, timeRangeDragging: false });
     render(snap());
   });
@@ -225,5 +225,32 @@ describe("BarRuler — shift-drag time-range gesture", () => {
     expect(r.start).toBeCloseTo(0, 6);
     expect(r.end).toBeCloseTo(5, 6);
     up(5.4);
+  });
+
+  it("uses the selected division for range edges", () => {
+    act(() => useStore.setState({ snap: true, snapDivision: "1/8" }));
+    down(4.13, true);
+    move(5.37);
+    expect(useShell.getState().timeRange).toEqual({ start: 4.25, end: 5.25 });
+    up(5.37);
+  });
+
+  it("leaves range edges unsnapped when snap is off", () => {
+    act(() => useStore.setState({ snap: false, snapDivision: "1/4" }));
+    down(4.13, true);
+    move(5.37);
+    expect(useShell.getState().timeRange?.start).toBeCloseTo(4.13, 6);
+    expect(useShell.getState().timeRange?.end).toBeCloseTo(5.37, 6);
+    up(5.37);
+  });
+
+  it("Option temporarily bypasses range snapping", () => {
+    act(() => useStore.setState({ snap: true, snapDivision: "1/4" }));
+    down(4.13, true, 1, true);
+    move(5.37, 1, true);
+    expect(useShell.getState().timeRange?.start).toBeCloseTo(4.13, 6);
+    expect(useShell.getState().timeRange?.end).toBeCloseTo(5.37, 6);
+    up(5.37);
+    expect(useStore.getState().snap).toBe(true);
   });
 });
