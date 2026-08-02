@@ -290,6 +290,39 @@ describe("owner cockpit runtime presentation", () => {
     expect(cockpit.getSnapshot().repair?.status).toBe("rolled_back");
   });
 
+  it("automatically resumes the same owner playtest when the repair app starts", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.resumeInstalledRepairSession("repair-1");
+    expect(client.start).toHaveBeenCalledTimes(1);
+    expect(cockpit.getSnapshot()).toMatchObject({
+      status: "active",
+      repair: { id: "repair-1", status: "repair_running" },
+    });
+  });
+
+  it("automatically resumes the same owner playtest after rollback", async () => {
+    const { cockpit, client } = runtime();
+    await cockpit.resumeRolledBackRepairSession("repair-1", "/worktree/build/Mosh.app");
+    expect(client.start).toHaveBeenCalledTimes(1);
+    expect(cockpit.getSnapshot()).toMatchObject({
+      status: "active",
+      repair: {
+        id: "repair-1",
+        status: "rolled_back",
+        buildPath: "/worktree/build/Mosh.app",
+      },
+    });
+  });
+
+  it("surfaces a launch-identity probe failure instead of silently losing repair context", () => {
+    const { cockpit } = runtime();
+    cockpit.surfaceStartupOutage(new Error("Native repair identity unavailable"));
+    expect(cockpit.getSnapshot()).toMatchObject({
+      status: "outage",
+      error: "Native repair identity unavailable",
+    });
+  });
+
   it("restores one-click relaunch when the prior app starts after rollback", async () => {
     const { cockpit, client } = runtime();
     cockpit.resumeRolledBackRepair("repair-1", "/worktree/build/Mosh.app");

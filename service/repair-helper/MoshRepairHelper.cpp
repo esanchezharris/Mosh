@@ -230,18 +230,28 @@ pid_t parsePid (const char* value)
     }
 }
 
-std::string repairId (const char* value)
+std::string stableId (const char* value, const char* failure)
 {
     const std::string id (value);
     if (id.size() != 36)
-        throw std::runtime_error ("repair_id_invalid");
+        throw std::runtime_error (failure);
     for (size_t index = 0; index < id.size(); ++index)
     {
         const bool separator = index == 8 || index == 13 || index == 18 || index == 23;
         if (separator ? id[index] != '-' : ! std::isxdigit (static_cast<unsigned char> (id[index])))
-            throw std::runtime_error ("repair_id_invalid");
+            throw std::runtime_error (failure);
     }
     return id;
+}
+
+std::string repairId (const char* value)
+{
+    return stableId (value, "repair_id_invalid");
+}
+
+std::string playtestId (const char* value)
+{
+    return stableId (value, "playtest_id_invalid");
 }
 
 void rejectSymlinks (const fs::path& candidate)
@@ -583,6 +593,30 @@ int main (int argc, char** argv)
         const std::string action (argv[1]);
         if (action == "__worker-repair")
         {
+            if (argc != 12) workerExit (75);
+            const auto callerPid = parsePid (argv[8]);
+            const ProcessToken callerToken {
+                parseTokenPart (argv[9]),
+                parseTokenPart (argv[10]),
+            };
+            const auto parentHelperPid = parsePid (argv[11]);
+            runWorker (
+                parentHelperPid,
+                callerPid,
+                callerToken,
+                canonicalPath (argv[2], true),
+                { "--mosh-repair-source-sha", argv[4],
+                  "--mosh-owner-checkpoint", argv[5],
+                  "--mosh-repair-id", repairId (argv[6]),
+                  "--mosh-owner-playtest-id", playtestId (argv[7]) },
+                [=] { validateCallerIdentity (callerPid, helper); },
+                [=] {
+                    repairTarget (argv[2], argv[3], argv[4], helper);
+                    canonicalPath (argv[5], false);
+                });
+        }
+        if (action == "__worker-prior")
+        {
             if (argc != 11) workerExit (75);
             const auto callerPid = parsePid (argv[7]);
             const ProcessToken callerToken {
@@ -594,37 +628,16 @@ int main (int argc, char** argv)
                 parentHelperPid,
                 callerPid,
                 callerToken,
-                canonicalPath (argv[2], true),
-                { "--mosh-repair-source-sha", argv[4],
-                  "--mosh-owner-checkpoint", argv[5],
-                  "--mosh-repair-id", repairId (argv[6]) },
-                [=] { validateCallerIdentity (callerPid, helper); },
-                [=] {
-                    repairTarget (argv[2], argv[3], argv[4], helper);
-                    canonicalPath (argv[5], false);
-                });
-        }
-        if (action == "__worker-prior")
-        {
-            if (argc != 10) workerExit (75);
-            const auto callerPid = parsePid (argv[6]);
-            const ProcessToken callerToken {
-                parseTokenPart (argv[7]),
-                parseTokenPart (argv[8]),
-            };
-            const auto parentHelperPid = parsePid (argv[9]);
-            runWorker (
-                parentHelperPid,
-                callerPid,
-                callerToken,
                 canonicalPath (argv[3], true),
                 { "--mosh-owner-checkpoint", argv[2],
                   "--mosh-rolled-back-repair-id", repairId (argv[4]),
-                  "--mosh-rolled-back-repair-build", argv[5] },
+                  "--mosh-rolled-back-repair-build", argv[5],
+                  "--mosh-owner-playtest-id", playtestId (argv[6]) },
                 [=] { validateCallerIdentity (callerPid, helper); },
                 [=] {
                     priorTarget (argv[2], argv[3], helper);
                     repairId (argv[4]);
+                    playtestId (argv[6]);
                     recoverableRepairBuild (argv[5], helper);
                 });
         }
@@ -637,10 +650,11 @@ int main (int argc, char** argv)
         }
         if (action == "handoff-repair")
         {
-            if (argc != 8)
-                fail ("usage", "handoff-repair requires app, worktree, sourceSha, checkpoint, repairId, callerPid");
+            if (argc != 9)
+                fail ("usage", "handoff-repair requires app, worktree, sourceSha, checkpoint, repairId, playtestId, callerPid");
             const auto id = repairId (argv[6]);
-            const auto callerPid = parsePid (argv[7]);
+            const auto sessionId = playtestId (argv[7]);
+            const auto callerPid = parsePid (argv[8]);
             validateCaller (callerPid, helper);
             const auto callerToken = processToken (callerPid);
             if (! callerToken.has_value())
@@ -651,17 +665,19 @@ int main (int argc, char** argv)
                 callerPid,
                 target.app,
                 { "__worker-repair", target.app.string(), target.worktree.string(),
-                  target.sourceSha, checkpoint.string(), id, std::to_string (callerPid),
+                  target.sourceSha, checkpoint.string(), id, sessionId,
+                  std::to_string (callerPid),
                   std::to_string (callerToken->seconds),
                   std::to_string (callerToken->microseconds) });
             return 0;
         }
         if (action == "handoff-prior")
         {
-            if (argc != 7)
-                fail ("usage", "handoff-prior requires checkpoint, app, repairId, repairBuild, callerPid");
+            if (argc != 8)
+                fail ("usage", "handoff-prior requires checkpoint, app, repairId, repairBuild, playtestId, callerPid");
             const auto id = repairId (argv[4]);
-            const auto callerPid = parsePid (argv[6]);
+            const auto sessionId = playtestId (argv[6]);
+            const auto callerPid = parsePid (argv[7]);
             validateCaller (callerPid, helper);
             const auto callerToken = processToken (callerPid);
             if (! callerToken.has_value())
@@ -673,6 +689,7 @@ int main (int argc, char** argv)
                 target.app,
                 { "__worker-prior", target.checkpoint.string(), target.app.string(),
                   id, repairBuild.string(),
+                  sessionId,
                   std::to_string (callerPid),
                   std::to_string (callerToken->seconds),
                   std::to_string (callerToken->microseconds) });

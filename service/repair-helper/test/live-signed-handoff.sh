@@ -42,6 +42,7 @@ STATUS="$FIXTURE/worker-status.txt"
 CHECKPOINT="$(mktemp "$FIXTURE/checkpoint.XXXXXX.tracktionedit")"
 SHA="0123456789abcdef0123456789abcdef01234567"
 REPAIR_ID="11111111-1111-4111-8111-111111111111"
+PLAYTEST_ID="22222222-2222-4222-8222-222222222222"
 
 mkdir -p "$MACOS"
 mkdir -p "$PRIOR_MACOS"
@@ -107,14 +108,27 @@ if "$HELPER" probe "$$" >/dev/null 2>&1; then
   exit 5
 fi
 if "$HELPER" __worker-repair \
-  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$$" "$$" >/dev/null 2>&1; then
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$PLAYTEST_ID" \
+  "$$" "$$" "$$" "$$" >/dev/null 2>&1; then
   echo "Unbound worker invocation was accepted." >&2
   exit 7
+fi
+if "$CALLER" "$HELPER" handoff-repair \
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ \
+  >/dev/null 2>&1; then
+  echo "Repair handoff without a playtest ID was accepted." >&2
+  exit 15
+fi
+if "$CALLER" "$HELPER" handoff-repair \
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" not-a-playtest __CALLER_PID__ \
+  >/dev/null 2>&1; then
+  echo "Repair handoff with a malformed playtest ID was accepted." >&2
+  exit 16
 fi
 
 codesign --remove-signature "$APP"
 if "$CALLER" "$HELPER" handoff-repair \
-  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ >/dev/null 2>&1; then
+  "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$PLAYTEST_ID" __CALLER_PID__ >/dev/null 2>&1; then
   echo "Unsigned repair target was accepted." >&2
   exit 6
 fi
@@ -124,7 +138,7 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 
 MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
   "$CALLER" "$HELPER" handoff-repair \
-    "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ &
+    "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$PLAYTEST_ID" __CALLER_PID__ &
 CALLER_PID=$!
 
 for _ in {1..350}; do
@@ -145,7 +159,7 @@ MOSH_ACTIVE_REPAIR_SOURCE_SHA="$SHA" \
 MOSH_ACTIVE_REPAIR_ID="$REPAIR_ID" \
 MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
   "$CALLER" "$HELPER" handoff-prior \
-    "$CHECKPOINT" "$PRIOR_APP" "$REPAIR_ID" "$APP" __CALLER_PID__ &
+    "$CHECKPOINT" "$PRIOR_APP" "$REPAIR_ID" "$APP" "$PLAYTEST_ID" __CALLER_PID__ &
 ROLLBACK_CALLER_PID=$!
 
 for _ in {1..350}; do
@@ -177,10 +191,10 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 MOSH_REPAIR_HELPER_TEST_STATUS="$STATUS" \
   "$CALLER" __RACE_HANDOFFS__ \
     "$HELPER" handoff-repair \
-      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" __CALLER_PID__ \
+      "$APP" "$WORKTREE" "$SHA" "$CHECKPOINT" "$REPAIR_ID" "$PLAYTEST_ID" __CALLER_PID__ \
     __SECOND_HANDOFF__ \
     "$HELPER" handoff-prior \
-      "$CHECKPOINT" "$PRIOR_APP" "$REPAIR_ID" "$APP" __CALLER_PID__ &
+      "$CHECKPOINT" "$PRIOR_APP" "$REPAIR_ID" "$APP" "$PLAYTEST_ID" __CALLER_PID__ &
 RACE_CALLER_PID=$!
 
 for _ in {1..350}; do

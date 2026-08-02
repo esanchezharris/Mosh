@@ -16,6 +16,7 @@
 #include <csignal>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <thread>
 
 namespace mosh
@@ -26,32 +27,39 @@ namespace
 {
    #if JUCE_MAC || JUCE_LINUX
     volatile std::sig_atomic_t gracefulTerminationRequested = 0;
+    volatile std::sig_atomic_t gracefulTerminationSenderPid = 0;
 
-    void requestGracefulTermination (int) noexcept
+    void requestGracefulTermination (int, siginfo_t* information, void*) noexcept
     {
+        gracefulTerminationSenderPid = information != nullptr
+            ? static_cast<std::sig_atomic_t> (information->si_pid)
+            : 0;
         gracefulTerminationRequested = 1;
     }
 
     void installGracefulTerminationHandler()
     {
         gracefulTerminationRequested = 0;
+        gracefulTerminationSenderPid = 0;
         struct sigaction action {};
-        action.sa_handler = &requestGracefulTermination;
+        action.sa_sigaction = &requestGracefulTermination;
         sigemptyset (&action.sa_mask);
-        action.sa_flags = 0;
+        action.sa_flags = SA_SIGINFO;
         ::sigaction (SIGTERM, &action, nullptr);
     }
 
-    bool consumeGracefulTerminationRequest() noexcept
+    std::optional<int> consumeGracefulTerminationRequest() noexcept
     {
         if (gracefulTerminationRequested == 0)
-            return false;
+            return std::nullopt;
+        const auto senderPid = static_cast<int> (gracefulTerminationSenderPid);
         gracefulTerminationRequested = 0;
-        return true;
+        gracefulTerminationSenderPid = 0;
+        return senderPid;
     }
    #else
     void installGracefulTerminationHandler() {}
-    bool consumeGracefulTerminationRequest() noexcept { return false; }
+    std::optional<int> consumeGracefulTerminationRequest() noexcept { return std::nullopt; }
    #endif
 
     juce::String valueAfter (
@@ -61,6 +69,20 @@ namespace
         const auto index = arguments.indexOf (option);
         return index >= 0 && index + 1 < arguments.size()
             ? arguments[index + 1] : juce::String();
+    }
+
+    bool isStableId (const juce::String& value)
+    {
+        if (value.length() != 36) return false;
+        for (int index = 0; index < value.length(); ++index)
+        {
+            const bool separator = index == 8 || index == 13 || index == 18 || index == 23;
+            const auto character = value[index];
+            if (separator ? character != '-'
+                          : ! juce::String ("0123456789abcdefABCDEF").containsChar (character))
+                return false;
+        }
+        return true;
     }
 
     // Non-interactive live brain round-trip — the command-line smoke for the native
@@ -262,6 +284,8 @@ public:
             commandLineParameters, "--mosh-rolled-back-repair-id");
         const auto rolledBackRepairBuild = valueAfter (
             commandLineParameters, "--mosh-rolled-back-repair-build");
+        const auto ownerPlaytestId = valueAfter (
+            commandLineParameters, "--mosh-owner-playtest-id");
         if (repairSourceSha.isEmpty() != repairId.isEmpty())
         {
             std::cerr << "repair launch refused: incomplete repair identity" << std::endl;
@@ -273,6 +297,15 @@ public:
             || (repairId.isNotEmpty() && rolledBackRepairId.isNotEmpty()))
         {
             std::cerr << "repair launch refused: incomplete recovery identity" << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+        const bool repairHandoffLaunch = repairId.isNotEmpty() || rolledBackRepairId.isNotEmpty();
+        if (ownerPlaytestId.isNotEmpty() != repairHandoffLaunch
+            || (ownerPlaytestId.isNotEmpty() && ! isStableId (ownerPlaytestId)))
+        {
+            std::cerr << "repair launch refused: invalid owner playtest identity" << std::endl;
             setApplicationReturnValue (1);
             quit();
             return;
@@ -294,6 +327,9 @@ public:
             mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_ID", rolledBackRepairId.toRawUTF8());
             mosh::setEnvVar ("MOSH_ROLLED_BACK_REPAIR_BUILD_PATH", rolledBackRepairBuild.toRawUTF8());
         }
+        mosh::unsetEnvVar ("MOSH_OWNER_PLAYTEST_RESUME_ID");
+        if (ownerPlaytestId.isNotEmpty())
+            mosh::setEnvVar ("MOSH_OWNER_PLAYTEST_RESUME_ID", ownerPlaytestId.toRawUTF8());
         const auto ownerCheckpoint = valueAfter (
             commandLineParameters, "--mosh-owner-checkpoint");
         if (ownerCheckpoint.isNotEmpty())
@@ -614,10 +650,14 @@ public:
         // harnesses return/quit before reaching here, so the timer is never armed.
         autoSave.onTick = [this] { if (engine != nullptr) engine->saveIfDirty(); };
         autoSave.startTimer (30000);
-        terminationWatch.onTick = []
+        terminationWatch.onTick = [this]
         {
-            if (consumeGracefulTerminationRequest())
+            if (const auto senderPid = consumeGracefulTerminationRequest())
+            {
+                if (mainWindow != nullptr)
+                    mainWindow->shell().bridge().confirmOwnerPlaytestHandoffTermination (*senderPid);
                 quit();
+            }
         };
         terminationWatch.startTimer (50);
 

@@ -194,12 +194,24 @@ export class OwnerCockpitRuntime {
     });
   }
 
+  async resumeInstalledRepairSession(repairId: string): Promise<void> {
+    this.resumeInstalledRepair(repairId);
+    if (this.state.status === "inactive" || this.state.status === "outage")
+      await this.start();
+  }
+
   resumeRolledBackRepair(repairId: string, buildPath: string): void {
     if (!repairId || !buildPath || this.state.repair?.id === repairId) return;
     this.update({
       lastEvent: "repair.swap.recovered",
       repair: { id: repairId, buildPath, status: "rolled_back" },
     });
+  }
+
+  async resumeRolledBackRepairSession(repairId: string, buildPath: string): Promise<void> {
+    this.resumeRolledBackRepair(repairId, buildPath);
+    if (this.state.status === "inactive" || this.state.status === "outage")
+      await this.start();
   }
 
   flushQuietReports(): void {
@@ -209,6 +221,13 @@ export class OwnerCockpitRuntime {
 
   clearUrgent(): void {
     this.update({ urgentMessage: null });
+  }
+
+  surfaceStartupOutage(error: unknown): void {
+    this.update({
+      status: "outage",
+      error: error instanceof Error ? error.message : "Owner playtest startup unavailable",
+    });
   }
 
   private async runOwnerAction<T>(fallback: string, action: () => Promise<T>): Promise<T> {

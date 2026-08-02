@@ -323,6 +323,7 @@ describe("native MoshOps repair control", () => {
     }, artifacts);
 
     await adapter.handoffRepairBuild({
+      playtestId: "22222222-2222-4222-8222-222222222222",
       repairId: "11111111-1111-4111-8111-111111111111",
       buildPath: "/worktree/build/Mosh.app",
       worktreePath: "/worktree",
@@ -347,6 +348,7 @@ describe("native MoshOps repair control", () => {
         "a".repeat(40),
         "/tmp/checkpoint.tracktionedit",
         "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
         String(process.ppid),
       ],
     ]);
@@ -361,6 +363,7 @@ describe("native MoshOps repair control", () => {
     });
 
     await adapter.handoffPriorApp({
+      playtestId: "22222222-2222-4222-8222-222222222222",
       checkpointPath: "/tmp/checkpoint.tracktionedit",
       priorAppPath: "/Applications/Mosh.app",
       repairId: "11111111-1111-4111-8111-111111111111",
@@ -383,6 +386,7 @@ describe("native MoshOps repair control", () => {
         "/Applications/Mosh.app",
         "11111111-1111-4111-8111-111111111111",
         "/worktree/build/Mosh.app",
+        "22222222-2222-4222-8222-222222222222",
         String(process.ppid),
       ],
     ]);
@@ -400,6 +404,7 @@ describe("native MoshOps repair control", () => {
     }, artifacts);
 
     await expect(adapter.handoffRepairBuild({
+      playtestId: "22222222-2222-4222-8222-222222222222",
       repairId: "11111111-1111-4111-8111-111111111111",
       buildPath: "/worktree/build/Mosh.app",
       worktreePath: "/worktree",
@@ -429,6 +434,7 @@ describe("native MoshOps repair control", () => {
     }, artifacts);
 
     await expect(adapter.handoffRepairBuild({
+      playtestId: "22222222-2222-4222-8222-222222222222",
       repairId: "11111111-1111-4111-8111-111111111111",
       buildPath: "/worktree/build/Mosh.app",
       worktreePath: "/worktree",
@@ -459,6 +465,7 @@ describe("native MoshOps repair control", () => {
     }, artifacts);
 
     await expect(adapter.handoffRepairBuild({
+      playtestId: "22222222-2222-4222-8222-222222222222",
       repairId: "11111111-1111-4111-8111-111111111111",
       buildPath: "/worktree/build/Mosh.app",
       worktreePath: "/worktree",

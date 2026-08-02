@@ -21,6 +21,9 @@
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
+#if JUCE_MAC || JUCE_LINUX
+#include <unistd.h>
+#endif
 
 namespace mosh
 {
@@ -7239,6 +7242,47 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (! (bool) hostResult.getProperty ("ok", false)
                        && hostResult.getProperty ("code", var()).toString() == "playtest_not_started",
                    "agent host: closed playtest cannot produce a supervisor trace");
+
+            String failedHandoffPlaytestId;
+            {
+                AgentHostProxy survivingCaller;
+                check ((bool) survivingCaller.startPlaytest (false).getProperty ("active", false),
+                       "agent host: failed-handoff fixture starts an active owner playtest");
+                const auto sessions = hostData.getChildFile ("sessions")
+                    .findChildFiles (File::findDirectories, false);
+                for (const auto& directory : sessions)
+                {
+                    const auto record = JSON::parse (
+                        directory.getChildFile ("session.json").loadFileAsString());
+                    if (record.getProperty ("status", var()).toString() == "active")
+                        failedHandoffPlaytestId = directory.getFileName();
+                }
+                mosh::setEnvVar ("MOSH_OWNER_PLAYTEST_HANDOFF_ID",
+                                 failedHandoffPlaytestId.toRawUTF8());
+                const auto ambiguousLaunch = survivingCaller.launchRepair (
+                    "11111111-1111-4111-8111-111111111111",
+                    hostData.getChildFile ("missing-repair.app").getFullPathName());
+                check (! (bool) ambiguousLaunch.getProperty ("ok", true)
+                           && juce::SystemStats::getEnvironmentVariable (
+                               "MOSH_OWNER_PLAYTEST_HANDOFF_ID", {}) == failedHandoffPlaytestId,
+                       "agent host: failed handoff response retains intent until signal provenance resolves it");
+                // An acknowledged worker that failed before its signal may leave
+                // a marker behind. A later SIGTERM from any ordinary process must
+                // not authenticate that stale handoff.
+#if JUCE_MAC || JUCE_LINUX
+                survivingCaller.confirmHandoffTermination (static_cast<int> (::getpid()));
+#else
+                survivingCaller.confirmHandoffTermination (0);
+#endif
+            }
+            check (JSON::parse (hostData.getChildFile ("sessions")
+                                    .getChildFile (failedHandoffPlaytestId)
+                                    .getChildFile ("session.json").loadFileAsString())
+                           .getProperty ("status", var()).toString() == "closed",
+                   "agent host: unrelated SIGTERM cannot authenticate a stale handoff marker");
+            check (juce::SystemStats::getEnvironmentVariable (
+                       "MOSH_OWNER_PLAYTEST_HANDOFF_ID", {}).isEmpty(),
+                   "agent host: failed handoff marker is cleared on ordinary shutdown");
             check (repositoryCwd.setAsCurrentWorkingDirectory(),
                    "agent host: packaged probe restores the repository working directory");
             ChildProcess pgrep;

@@ -23,6 +23,12 @@ using Resource = juce::WebBrowserComponent::Resource;
 WebBridge::WebBridge() = default;
 WebBridge::~WebBridge() = default;   // NativeSpeech is complete here → unique_ptr can destroy it
 
+void WebBridge::confirmOwnerPlaytestHandoffTermination (int senderPid)
+{
+    if (agentHost != nullptr)
+        agentHost->confirmHandoffTermination (senderPid);
+}
+
 namespace
 {
     juce::String mimeForExtension (const juce::String& ext)

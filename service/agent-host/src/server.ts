@@ -10,6 +10,7 @@ import {
 
 const createPlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
 const closePlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
+const resumePlaytestInput = z.object({ retainTranscript: z.boolean().optional() }).strict();
 const routeId = z.uuid();
 const repairCompletionInput = z.object({
   redEvidencePath: z.string().min(1),
@@ -68,6 +69,7 @@ function errorStatus(error: unknown): number {
   if (code === "github_sync_required" || code === "checkpoint_missing") return 409;
   if (code === "repair_build_mismatch" || code === "repair_swap_state") return 409;
   if (code === "repair_main_transfer_required" || code === "repair_dirty_worktree") return 409;
+  if (code === "playtest_closed") return 409;
   return 500;
 }
 
@@ -116,6 +118,15 @@ export async function startAgentHost(options: AgentHostServerOptions) {
       if (closeMatch && request.method === "POST") {
         const body = closePlaytestInput.parse(await readBody(request));
         sendJson(response, 200, await options.service.closePlaytest(routeId.parse(closeMatch[1]), body.retainTranscript));
+        return;
+      }
+      const resumeMatch = url.pathname.match(/^\/v1\/playtests\/([^/]+)\/resume$/);
+      if (resumeMatch && request.method === "POST") {
+        const body = resumePlaytestInput.parse(await readBody(request));
+        sendJson(response, 200, await options.service.resumePlaytest(
+          routeId.parse(resumeMatch[1]),
+          body.retainTranscript,
+        ));
         return;
       }
       if (url.pathname === "/v1/supervisor/turns" && request.method === "POST") {

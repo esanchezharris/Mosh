@@ -43,6 +43,7 @@ public:
     void setRemoteStopHandler (RemoteHandler h) { remoteStopHandler = std::move (h); }
     void setRemoteStatusProvider (RemoteStatusProvider p) { remoteStatusProvider = std::move (p); }
     void setOwnerControlServer (RemoteCompanionServer* server) { ownerControlServer = server; }
+    void confirmOwnerPlaytestHandoffTermination (int senderPid);
 
     /** WP-11 best-of-n relays: UI → generative service, via native (the WebView
         cannot reach the service port itself). Same layering as brain_chat — brain

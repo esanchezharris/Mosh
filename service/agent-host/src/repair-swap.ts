@@ -101,6 +101,7 @@ export class RepairSwap {
         throw failure("checkpoint_missing", "Repair checkpoint is missing");
       }
       await this.dependencies.processes.handoffRepairBuild({
+        playtestId: current.playtestId,
         repairId,
         buildPath: validatedBuild,
         worktreePath,
@@ -176,6 +177,7 @@ export class RepairSwap {
         });
       }
       await this.dependencies.processes.handoffPriorApp({
+        playtestId: current.playtestId,
         checkpointPath: checkpoint.checkpointPath,
         priorAppPath: checkpoint.priorAppPath,
         repairId,

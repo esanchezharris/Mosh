@@ -28,12 +28,29 @@ export function RightRail() {
   const open = useShell((s) => s.rightOpen);
   const setOpen = useShell((s) => s.setRightOpen);
   const toggle = useShell((s) => s.toggleRight);
+  const [repairSourceSha, setRepairSourceSha] = useState<string | null>(null);
+  // This runs even while the rail is collapsed. A signed swap must resume its
+  // durable owner playtest without requiring the owner to reopen a panel first.
+  useEffect(() => {
+    void ping()
+      .then((info) => {
+        setRepairSourceSha(info.repairSourceSha ?? null);
+        if (info.repairId)
+          void ownerCockpitRuntime.resumeInstalledRepairSession(info.repairId).catch(() => undefined);
+        else if (info.rolledBackRepairId && info.rolledBackRepairBuildPath)
+          void ownerCockpitRuntime.resumeRolledBackRepairSession(
+            info.rolledBackRepairId,
+            info.rolledBackRepairBuildPath,
+          ).catch(() => undefined);
+      })
+      .catch((error: unknown) => ownerCockpitRuntime.surfaceStartupOutage(error));
+  }, []);
 
   return (
     <div className={`v2-dock v2-dock-right${open ? " open" : ""}`} data-testid="v2-right-dock">
       {open ? (
         <aside className="v2-rail" data-testid="v2-rail">
-          <MoshCard onCollapse={() => setOpen(false)} />
+          <MoshCard onCollapse={() => setOpen(false)} repairSourceSha={repairSourceSha} />
           <Inspector />
           <MasterCard />
           <CollaboratorsCard />
@@ -50,7 +67,10 @@ export function RightRail() {
   );
 }
 
-function MoshCard({ onCollapse }: { onCollapse: () => void }) {
+function MoshCard({ onCollapse, repairSourceSha }: {
+  onCollapse: () => void;
+  repairSourceSha: string | null;
+}) {
   const ownerCockpitEnabled = useSettings((state) => state.get("ownerCockpit") === true);
   return (
     <section className="v2-card v2-mosh-card" data-testid="v2-mosh-card">
@@ -64,28 +84,16 @@ function MoshCard({ onCollapse }: { onCollapse: () => void }) {
       </div>
       <div className="v2-mosh-stage"><Moshi /></div>
       <MoshStatusLine />
-      {ownerCockpitEnabled && <OwnerCockpitCard />}
+      {ownerCockpitEnabled && <OwnerCockpitCard repairSourceSha={repairSourceSha} />}
     </section>
   );
 }
 
-export function OwnerCockpitCard() {
+export function OwnerCockpitCard({ repairSourceSha = null }: { repairSourceSha?: string | null }) {
   const state = useOwnerCockpit();
   const playing = useStore((store) => store.transport.playing);
   const active = state.status === "active";
   const busy = state.status === "starting" || state.status === "closing";
-  const [repairSourceSha, setRepairSourceSha] = useState<string | null>(null);
-  useEffect(() => {
-    void ping().then((info) => {
-      setRepairSourceSha(info.repairSourceSha ?? null);
-      if (info.repairId) ownerCockpitRuntime.resumeInstalledRepair(info.repairId);
-      else if (info.rolledBackRepairId && info.rolledBackRepairBuildPath)
-        ownerCockpitRuntime.resumeRolledBackRepair(
-          info.rolledBackRepairId,
-          info.rolledBackRepairBuildPath,
-        );
-    });
-  }, []);
   useEffect(() => {
     if (!playing && state.pendingNotes > 0) ownerCockpitRuntime.flushQuietReports();
   }, [playing, state.pendingNotes]);

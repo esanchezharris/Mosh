@@ -2213,6 +2213,15 @@ juce::var MoshOps::snapshot()
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
     session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)
+    // The signed swap already opened the exact checkpoint before the WebView
+    // appeared. Suppress the ordinary choose-a-session overlay so repair and
+    // rollback launches land directly on that restored project.
+    const auto activeRepairId = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_ACTIVE_REPAIR_ID", {});
+    const auto rolledBackRepairId = juce::SystemStats::getEnvironmentVariable (
+        "MOSH_ROLLED_BACK_REPAIR_ID", {});
+    if (activeRepairId.isNotEmpty() || rolledBackRepairId.isNotEmpty())
+        session->setProperty ("repairCheckpointActive", true);
     // PRJ-FMT — cold-start refusal: the launch session file was made by a newer Mosh, so a
     // safe empty fallback is live. The UI shows this as a blocking "please update Mosh" banner.
     if (eng.hasProjectLoadError())

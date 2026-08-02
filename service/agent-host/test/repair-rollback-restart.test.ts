@@ -75,6 +75,7 @@ describe("persisted rolled_back relaunch", () => {
     await restarted.initialize();
     await restarted.rollbackRepair(repair.id, "owner requested rollback");
     expect(fakes.priorHandoffs).toEqual([{
+      playtestId: repair.playtestId,
       checkpointPath: "/tmp/checkpoint.mosh",
       priorAppPath: "/Applications/Mosh.app",
       repairId: repair.id,

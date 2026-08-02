@@ -360,6 +360,7 @@ export class RepairControlAdapter implements ProcessAdapter {
       context.sourceSha,
       context.checkpointPath,
       context.repairId,
+      context.playtestId,
       String(process.ppid),
     ]);
   }
@@ -369,6 +370,7 @@ export class RepairControlAdapter implements ProcessAdapter {
       context.priorAppPath,
       context.repairId,
       context.buildPath,
+      context.playtestId,
       String(process.ppid),
     ]);
   }

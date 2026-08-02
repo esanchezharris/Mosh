@@ -15,8 +15,7 @@ class RemoteCompanionServer;
 class AgentHostProxy
 {
 public:
-    explicit AgentHostProxy (RemoteCompanionServer* ownerControl = nullptr)
-        : ownerControlServer (ownerControl) {}
+    explicit AgentHostProxy (RemoteCompanionServer* ownerControl = nullptr);
 
     struct StartupEnvelope
     {
@@ -37,6 +36,10 @@ public:
     juce::var rollbackRepair (const juce::String& repairId, const juce::String& reason);
     juce::var events (int afterSequence);
     bool hasActivePlaytest() const;
+    /** Called only after the application consumes SIGTERM. The sender must be
+        the running, same-team Developer-ID repair helper; request acknowledgement
+        or an unrelated later SIGTERM is insufficient proof of handoff. */
+    void confirmHandoffTermination (int senderPid);
 
     /** Blocking; callers must invoke this away from JUCE's message thread.
         Returns { ok:true, plan } or a deliberately token-free error envelope. */
@@ -64,8 +67,10 @@ private:
     juce::String origin;
     juce::String capability;
     juce::String playtestId;
+    juce::String resumePlaytestId;
     bool retainTranscript = false;
     bool disclosureDelivered = false;
+    bool handoffTerminationConfirmed = false;
     RemoteCompanionServer* ownerControlServer = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AgentHostProxy)

@@ -1,5 +1,6 @@
 #include "AgentHostProxy.h"
 #include "../remote/RemoteCompanionServer.h"
+#include "../util/Env.h"
 
 #if JUCE_MAC
 #include <Security/Security.h>
@@ -11,6 +12,68 @@ namespace
 {
     constexpr int kStartupTimeoutMs = 10000;
     constexpr int kRequestTimeoutMs = 12000;
+    constexpr auto kHandoffPlaytestEnvironment = "MOSH_OWNER_PLAYTEST_HANDOFF_ID";
+    constexpr auto kResumePlaytestEnvironment = "MOSH_OWNER_PLAYTEST_RESUME_ID";
+    constexpr auto kRepairHelperIdentifier = "MoshRepairHelper";
+
+    struct SigningIdentity
+    {
+        juce::String identifier;
+        juce::String team;
+    };
+
+#if JUCE_MAC
+    juce::String cfString (CFTypeRef value)
+    {
+        if (value == nullptr || CFGetTypeID (value) != CFStringGetTypeID())
+            return {};
+        const auto text = static_cast<CFStringRef> (value);
+        const auto maximum = CFStringGetMaximumSizeForEncoding (
+            CFStringGetLength (text), kCFStringEncodingUTF8) + 1;
+        juce::HeapBlock<char> buffer (static_cast<size_t> (maximum));
+        if (! CFStringGetCString (text, buffer.get(), maximum, kCFStringEncodingUTF8))
+            return {};
+        return juce::String::fromUTF8 (buffer.get());
+    }
+
+    std::optional<SigningIdentity> guestSigningIdentity (int senderPid)
+    {
+        if (senderPid <= 1)
+            return std::nullopt;
+        const auto rawPid = senderPid;
+        const auto rawNumber = CFNumberCreate (
+            kCFAllocatorDefault, kCFNumberIntType, &rawPid);
+        if (rawNumber == nullptr)
+            return std::nullopt;
+        const auto releaseNumber = juce::ScopeGuard ([rawNumber] { CFRelease (rawNumber); });
+        const void* keys[] = { kSecGuestAttributePid };
+        const void* values[] = { rawNumber };
+        const auto rawAttributes = CFDictionaryCreate (
+            kCFAllocatorDefault, keys, values, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        if (rawAttributes == nullptr)
+            return std::nullopt;
+        const auto releaseAttributes = juce::ScopeGuard (
+            [rawAttributes] { CFRelease (rawAttributes); });
+        SecCodeRef rawCode = nullptr;
+        if (SecCodeCopyGuestWithAttributes (
+                nullptr, rawAttributes, kSecCSDefaultFlags, &rawCode) != errSecSuccess)
+            return std::nullopt;
+        const auto releaseCode = juce::ScopeGuard ([rawCode] { CFRelease (rawCode); });
+        if (SecCodeCheckValidity (rawCode, kSecCSStrictValidate, nullptr) != errSecSuccess)
+            return std::nullopt;
+        CFDictionaryRef rawInformation = nullptr;
+        if (SecCodeCopySigningInformation (
+                rawCode, kSecCSSigningInformation, &rawInformation) != errSecSuccess)
+            return std::nullopt;
+        const auto releaseInformation = juce::ScopeGuard (
+            [rawInformation] { CFRelease (rawInformation); });
+        return SigningIdentity {
+            cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoIdentifier)),
+            cfString (CFDictionaryGetValue (rawInformation, kSecCodeInfoTeamIdentifier)),
+        };
+    }
+#endif
 
     juce::var error (const juce::String& message = "agent host unavailable",
                      const juce::String& code = {},
@@ -58,6 +121,17 @@ namespace
         return {};
 #endif
     }
+}
+
+AgentHostProxy::AgentHostProxy (RemoteCompanionServer* ownerControl)
+    : resumePlaytestId (juce::SystemStats::getEnvironmentVariable (
+          kResumePlaytestEnvironment, {})),
+      ownerControlServer (ownerControl)
+{
+    // A repair launch consumes this one-shot handoff value. Leaving it in the
+    // replacement process would allow a later, unrelated proxy restart to
+    // attach to an old playtest.
+    mosh::unsetEnvVar (kResumePlaytestEnvironment);
 }
 
 AgentHostProxy::~AgentHostProxy()
@@ -120,13 +194,22 @@ juce::File AgentHostProxy::locateEntry() const
 
 void AgentHostProxy::stop()
 {
-    if (process.isRunning() && origin.isNotEmpty() && capability.isNotEmpty() && playtestId.isNotEmpty())
+    const auto handoffPlaytestId = juce::SystemStats::getEnvironmentVariable (
+        kHandoffPlaytestEnvironment, {});
+    const auto preservePlaytest = handoffTerminationConfirmed && playtestId.isNotEmpty()
+        && handoffPlaytestId == playtestId;
+    if (process.isRunning() && origin.isNotEmpty() && capability.isNotEmpty()
+        && playtestId.isNotEmpty() && ! preservePlaytest)
     {
         auto* request = new juce::DynamicObject();
         request->setProperty ("retainTranscript", retainTranscript);
         int ignoredStatus = 0;
         post ("/v1/playtests/" + playtestId + "/close", juce::var (request), ignoredStatus);
     }
+    // The marker is process-local handoff intent, never durable state. Once this
+    // proxy actually stops, discard it regardless of whether an older failure
+    // left a mismatched value behind.
+    mosh::unsetEnvVar (kHandoffPlaytestEnvironment);
     if (process.isRunning())
     {
         process.kill();
@@ -139,6 +222,7 @@ void AgentHostProxy::stop()
     playtestId.clear();
     retainTranscript = false;
     disclosureDelivered = false;
+    handoffTerminationConfirmed = false;
     if (ownerControlServer != nullptr)
         ownerControlServer->stopServer();
 }
@@ -148,7 +232,12 @@ bool AgentHostProxy::ensureStarted()
     if (origin.isNotEmpty() && capability.isNotEmpty() && process.isRunning())
         return true;
 
+    // A crashed helper process must not silently fork the owner's context into
+    // a fresh playtest. Reattach the replacement host to the durable active id.
+    const auto interruptedPlaytestId = ! process.isRunning() ? playtestId : juce::String();
     stop();
+    if (interruptedPlaytestId.isNotEmpty())
+        resumePlaytestId = interruptedPlaytestId;
     const auto entry = locateEntry();
     if (! entry.existsAsFile()) return false;
 
@@ -251,6 +340,22 @@ bool AgentHostProxy::ensurePlaytest()
     retainTranscript = requestedRetention;
     if (playtestId.isNotEmpty()) return true;
     int statusCode = 0;
+    if (resumePlaytestId.isNotEmpty())
+    {
+        auto* request = new juce::DynamicObject();
+        request->setProperty ("retainTranscript", retainTranscript);
+        const auto resumed = post ("/v1/playtests/" + resumePlaytestId + "/resume",
+                                   juce::var (request), statusCode);
+        if (statusCode != 200
+            || resumed.getProperty ("status", juce::var()).toString() != "active")
+            return false;
+        playtestId = resumePlaytestId;
+        resumePlaytestId.clear();
+        // The hosted-trace disclosure is once per playtest, not once per app
+        // process. The outgoing process already displayed it before handoff.
+        disclosureDelivered = true;
+        return true;
+    }
     auto* request = new juce::DynamicObject();
     request->setProperty ("retainTranscript", retainTranscript);
     const auto playtest = post ("/v1/playtests", juce::var (request), statusCode);
@@ -338,6 +443,7 @@ juce::var AgentHostProxy::closePlaytest (bool shouldRetain)
     int statusCode = 0;
     const auto result = post ("/v1/playtests/" + playtestId + "/close", juce::var (request), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! result.isObject()) return error();
+    mosh::unsetEnvVar (kHandoffPlaytestEnvironment);
     playtestId.clear();
     disclosureDelivered = false;
     return sessionResult (false);
@@ -366,6 +472,28 @@ bool AgentHostProxy::hasActivePlaytest() const
         && origin.isNotEmpty()
         && capability.isNotEmpty()
         && process.isRunning();
+}
+
+void AgentHostProxy::confirmHandoffTermination (int senderPid)
+{
+    const juce::ScopedLock guard (lock);
+    handoffTerminationConfirmed = false;
+#if JUCE_MAC
+    const auto sender = guestSigningIdentity (senderPid);
+    const auto team = currentSigningTeam();
+    if (! sender.has_value()
+        || sender->identifier != kRepairHelperIdentifier
+        || sender->team.isEmpty()
+        || team.isEmpty()
+        || sender->team != team)
+        return;
+    const auto handoffPlaytestId = juce::SystemStats::getEnvironmentVariable (
+        kHandoffPlaytestEnvironment, {});
+    handoffTerminationConfirmed = playtestId.isNotEmpty()
+        && handoffPlaytestId == playtestId;
+#else
+    juce::ignoreUnused (senderPid);
+#endif
 }
 
 juce::var AgentHostProxy::createReport (const juce::var& request)
@@ -425,13 +553,22 @@ juce::var AgentHostProxy::launchRepair (const juce::String& repairId,
                                         const juce::String& buildPath)
 {
     const juce::ScopedLock guard (lock);
-    if (repairId.isEmpty() || buildPath.isEmpty() || ! ensureStarted()) return error();
+    if (repairId.isEmpty() || buildPath.isEmpty()) return error();
+    if (playtestId.isEmpty() && resumePlaytestId.isEmpty())
+        return error ("playtest not started", "playtest_not_started", false);
+    if (! ensurePlaytest()) return error();
     auto* body = new juce::DynamicObject();
     body->setProperty ("buildPath", buildPath);
+    mosh::setEnvVar (kHandoffPlaytestEnvironment, playtestId.toRawUTF8());
     int statusCode = 0;
     const auto repair = post ("/v1/repairs/" + repairId + "/launch", juce::var (body), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+    {
+        // A missing HTTP response is ambiguous: the signed worker may already
+        // have been accepted and be about to signal us. Keep the marker until
+        // SIGTERM provenance or ordinary shutdown resolves that race.
         return parseHostFailure (repair, "repair build launch failed", "repair_swap_failed", statusCode);
+    }
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));
@@ -443,13 +580,20 @@ juce::var AgentHostProxy::rollbackRepair (const juce::String& repairId,
                                           const juce::String& reason)
 {
     const juce::ScopedLock guard (lock);
-    if (repairId.isEmpty() || reason.isEmpty() || ! ensureStarted()) return error();
+    if (repairId.isEmpty() || reason.isEmpty()) return error();
+    if (playtestId.isEmpty() && resumePlaytestId.isEmpty())
+        return error ("playtest not started", "playtest_not_started", false);
+    if (! ensurePlaytest()) return error();
     auto* body = new juce::DynamicObject();
     body->setProperty ("reason", reason);
+    mosh::setEnvVar (kHandoffPlaytestEnvironment, playtestId.toRawUTF8());
     int statusCode = 0;
     const auto repair = post ("/v1/repairs/" + repairId + "/rollback", juce::var (body), statusCode);
     if (statusCode < 200 || statusCode >= 300 || ! repair.isObject())
+    {
+        // As above, request failure cannot prove the signed worker did not start.
         return parseHostFailure (repair, "repair rollback failed", "repair_rollback_failed", statusCode);
+    }
     auto* result = new juce::DynamicObject();
     result->setProperty ("ok", true);
     result->setProperty ("id", repair.getProperty ("id", juce::var()));

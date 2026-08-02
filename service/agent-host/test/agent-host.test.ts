@@ -215,6 +215,42 @@ describe("contracts and persistence", () => {
     ]);
   });
 
+  it("resumes one active playtest after an app handoff without creating or closing it", async () => {
+    const dataDirectory = await mkdtemp(path.join(tmpdir(), "mosh-agent-handoff-resume-"));
+    const first = await fixture({ dataDirectory });
+    const playtest = await createPlaytest(first.origin);
+    await first.close();
+    closing.pop();
+
+    const restarted = await fixture({ dataDirectory });
+    const response = await post(
+      restarted.origin,
+      `/v1/playtests/${playtest.id}/resume`,
+      { retainTranscript: true },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      id: playtest.id,
+      status: "active",
+      retainTranscript: true,
+    });
+    const recovered = await restarted.service.store.loadSession(playtest.id);
+    expect(recovered.status).toBe("active");
+    expect((await restarted.service.store.loadEvents(playtest.id)).map((event) => event.type))
+      .toEqual(["playtest.created", "playtest.resumed"]);
+  });
+
+  it("refuses to revive a playtest that the owner explicitly closed", async () => {
+    const host = await fixture();
+    const playtest = await createPlaytest(host.origin);
+    expect((await post(host.origin, `/v1/playtests/${playtest.id}/close`, {})).status).toBe(200);
+    const response = await post(host.origin, `/v1/playtests/${playtest.id}/resume`, {});
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "playtest_closed", message: "Playtest is closed" },
+    });
+  });
+
   it("persists the Agents SDK session for each playtest across service instances", async () => {
     const dataDirectory = await mkdtemp(path.join(tmpdir(), "mosh-agent-sdk-session-"));
     const store = new PlaytestStore(dataDirectory);

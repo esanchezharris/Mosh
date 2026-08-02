@@ -85,6 +85,7 @@ export interface RepairArtifactPolicy {
 }
 
 export type RepairLaunchContext = {
+  playtestId: string;
   repairId: string;
   buildPath: string;
   worktreePath: string;
@@ -93,6 +94,7 @@ export type RepairLaunchContext = {
 };
 
 export type PriorAppHandoffContext = {
+  playtestId: string;
   checkpointPath: string;
   priorAppPath: string;
   repairId: string;

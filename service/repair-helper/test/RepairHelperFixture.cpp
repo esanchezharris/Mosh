@@ -92,6 +92,7 @@ int main (int argc, char** argv)
     bool receivedSha = false;
     bool receivedCheckpoint = false;
     bool receivedRepairId = false;
+    bool receivedPlaytestId = false;
     bool receivedRolledBackRepairId = false;
     bool receivedRolledBackRepairBuild = false;
     for (int index = 1; index + 1 < argc; ++index)
@@ -104,6 +105,9 @@ int main (int argc, char** argv)
         if (std::string (argv[index]) == "--mosh-repair-id"
             && argv[index + 1] == repairId)
             receivedRepairId = true;
+        if (std::string (argv[index]) == "--mosh-owner-playtest-id"
+            && std::string (argv[index + 1]) == "22222222-2222-4222-8222-222222222222")
+            receivedPlaytestId = true;
         if (std::string (argv[index]) == "--mosh-rolled-back-repair-id"
             && argv[index + 1] == repairId)
             receivedRolledBackRepairId = true;
@@ -112,13 +116,15 @@ int main (int argc, char** argv)
             receivedRolledBackRepairBuild = true;
     }
    #if defined(MOSH_REPAIR_FIXTURE_PRIOR_TARGET)
-    if (! receivedCheckpoint || ! receivedRolledBackRepairId || ! receivedRolledBackRepairBuild)
+    if (! receivedCheckpoint || ! receivedRolledBackRepairId
+        || ! receivedRolledBackRepairBuild || ! receivedPlaytestId)
         return 6;
     if (std::getenv ("MOSH_ACTIVE_REPAIR_SOURCE_SHA") != nullptr
         || std::getenv ("MOSH_ACTIVE_REPAIR_ID") != nullptr)
         return 9;
    #else
-    if (! receivedSha || ! receivedCheckpoint || ! receivedRepairId) return 6;
+    if (! receivedSha || ! receivedCheckpoint || ! receivedRepairId || ! receivedPlaytestId)
+        return 6;
    #endif
     for (int descriptor = 3; descriptor < getdtablesize(); ++descriptor)
     {

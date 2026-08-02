@@ -35,6 +35,9 @@ export function shouldShowSessionPicker(
   eligible: boolean,
 ): boolean {
   if (!eligible || dismissed || !snapshot) return false;
+  // A signed repair/rollback handoff already selected and opened its protected
+  // checkpoint. Asking which project to open again defeats the atomic swap.
+  if (snapshot.session.repairCheckpointActive) return false;
   // A refused-newer-format project owns the screen — offering to "continue" into an
   // edit the engine declined to load would be a lie.
   if (snapshot.session.loadError) return false;

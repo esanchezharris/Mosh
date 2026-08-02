@@ -93,6 +93,25 @@ export class AgentHostService {
     });
   }
 
+  async resumePlaytest(playtestId: string, retainTranscript?: boolean): Promise<PlaytestSession> {
+    return this.serializeMutation(playtestId, async () => {
+      const current = await this.store.loadSession(playtestId);
+      if (current.status !== "active") {
+        throw Object.assign(new Error("Playtest is closed"), { code: "playtest_closed" });
+      }
+      const resumed: PlaytestSession = {
+        ...current,
+        retainTranscript: retainTranscript ?? current.retainTranscript,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.store.saveSession(resumed);
+      await this.emitUnlocked(playtestId, "playtest.resumed", {
+        retainTranscript: resumed.retainTranscript,
+      });
+      return resumed;
+    });
+  }
+
   async supervisorTurn(input: unknown): Promise<SupervisorPlan> {
     if (!this.supervisor) {
       throw new OpenAIUnavailableError("OpenAI supervisor is unavailable: OPENAI_API_KEY is not configured");
