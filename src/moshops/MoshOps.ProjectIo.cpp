@@ -546,7 +546,10 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     // render graph waiting until the watchdog. Looping virtual phases are accepted
     // by hasRenderableAudioSourceWindow and continue to wrap normally.
     if (auto sourceError = invalidRenderSourceWindow (edit, rStart, rEnd); sourceError.isNotEmpty())
+    {
+        logLine ("export_audio", args, false, sourceError, false);
         return errResult ("export_audio", sourceError);
+    }
 
     // Validation failures must not destroy a previous successful export at the
     // requested destination. Only prepare/replace the file once all fail-fast
@@ -861,7 +864,10 @@ juce::var MoshOps::cmdExportStems (const juce::var& args)
 
         if (auto sourceError = invalidRenderSourceWindow (*track, 0.0, edit.getLength().inSeconds());
             sourceError.isNotEmpty())
+        {
+            logLine ("export_stems", args, false, sourceError, false);
             return errResult ("export_stems", sourceError);
+        }
 
         plannedStems.push_back ({ track, trackIndex, clips,
             dir.getChildFile (stemFileBaseName (trackIndex, track->getName())).withFileExtension (extension) });

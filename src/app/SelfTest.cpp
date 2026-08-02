@@ -3844,6 +3844,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         outDir.deleteRecursively();
         outDir.createDirectory();
         auto invalidMixFile = outDir.getChildFile ("invalid-mix.wav");
+        const int mixLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                              .getProperty ("total", -1);
         const double mixStartMs = Time::getMillisecondCounterHiRes();
         auto invalidMix = cmd (ops, "export_audio", args1 ("file", invalidMixFile.getFullPathName()));
         const double mixElapsedMs = Time::getMillisecondCounterHiRes() - mixStartMs;
@@ -3856,6 +3858,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                && mixError.containsIgnoreCase ("trim"),
                "source-window: mix error names the track, clip, measured window, and repair action");
         check (! invalidMixFile.existsAsFile(), "source-window: rejected mix leaves no output file");
+        auto invalidMixLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidMixLog.getProperty ("total", -1) == mixLogTotalBefore + 1,
+               "source-window: rejected mix appends one command-log record");
+        if (auto* entries = invalidMixLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_audio"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected mix log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected mix log exposes an entries array");
+        }
 
         auto previousMixFile = outDir.getChildFile ("previous-good-mix.wav");
         const juce::String previousMixSentinel = "previous successful export must survive validation failure";
@@ -3881,6 +3899,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         auto invalidStemDir = outDir.getChildFile ("invalid-stems");
         invalidStemDir.deleteRecursively();
+        const int stemLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                               .getProperty ("total", -1);
         const double stemsStartMs = Time::getMillisecondCounterHiRes();
         auto invalidStems = cmd (ops, "export_stems", args1 ("dir", invalidStemDir.getFullPathName()));
         const double stemsElapsedMs = Time::getMillisecondCounterHiRes() - stemsStartMs;
@@ -3891,6 +3911,22 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "source-window: stem error identifies the omitted track and clip");
         check (invalidStemDir.findChildFiles (File::findFiles, false).isEmpty(),
                "source-window: failed stem command leaves no partial stem files");
+        auto invalidStemLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidStemLog.getProperty ("total", -1) == stemLogTotalBefore + 1,
+               "source-window: rejected stem set appends one command-log record");
+        if (auto* entries = invalidStemLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_stems"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected stem log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected stem log exposes an entries array");
+        }
 
         check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", invalidClip }, { "autoTempo", true },
                                                         { "sourceBpm", 120.0 }}))),
