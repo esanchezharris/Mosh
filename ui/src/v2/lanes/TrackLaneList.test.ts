@@ -101,6 +101,20 @@ describe("v2 TrackLaneList — aux/return tracks excluded from the arrangement",
     expect(host.querySelector('[data-track-id="t2"]')).toBeNull();
   });
 
+  it("exposes track selection as its own native button with no interactive descendants", () => {
+    render([audioTrack()]);
+
+    const header = host.querySelector<HTMLElement>('[data-testid="v2-track-header"]')!;
+    const select = header.querySelector<HTMLElement>('[aria-label="Select track Drums"]')!;
+
+    // A role=button container with Mute/Solo/Delete buttons nested inside it is invalid
+    // accessibility structure. WebKit exposes that parent as AXCheckBox and its AXPress
+    // can land on a nested mute button instead of selecting the track (#595).
+    expect(select.tagName).toBe("BUTTON");
+    expect(select.querySelector('button, [role="button"], input, select, textarea, a[href]')).toBeNull();
+    expect(header.getAttribute("role")).toBe("group");
+  });
+
   it("shows the empty-arrangement state when only a return track exists (no clip-lane-worthy tracks)", () => {
     render([returnTrack()]);
 
@@ -129,7 +143,7 @@ describe("v2 TrackLaneList — aux/return tracks excluded from the arrangement",
     useShell.setState({ selectedClipId: "midi-clip-1" });
     render([first, second]);
 
-    const secondHeader = host.querySelector<HTMLElement>('[data-track-id="t2"]')!;
+    const secondHeader = host.querySelector<HTMLElement>('[aria-label="Select track Hook"]')!;
     await act(async () => {
       secondHeader.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await useStore.getState().syncActiveTrack();
@@ -153,7 +167,7 @@ describe("v2 TrackLaneList — aux/return tracks excluded from the arrangement",
     useShell.setState({ selectedClipId: "midi-clip-1" });
     render([first, second]);
 
-    const secondHeader = host.querySelector<HTMLElement>('[data-track-id="t2"]')!;
+    const secondHeader = host.querySelector<HTMLElement>('[aria-label="Select track Hook"]')!;
     act(() => secondHeader.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })));
 
     expect(useStore.getState().selectedTrackId).toBe("t2");
