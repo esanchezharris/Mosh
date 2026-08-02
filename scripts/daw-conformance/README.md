@@ -32,28 +32,27 @@ run disagrees with `verdicts.json`** — a behavior change must land its verdict
 |---|---|---|
 | `pass` | in-scope capability proven headless (state/audio/undo asserted) | ✅ |
 | `fail` | in-scope capability **regressed** (was green, now broken) | ❌ blocks |
-| `gap` | in-scope capability **absent** — attributed through a stable `backlog_ref`; private checkouts also verify that item is live | ✅ tracked |
+| `gap` | in-scope capability **absent** — attributed to a LIVE backlog item via `backlog_ref` | ✅ tracked |
 | `hardware` | needs a live audio device / mic / MIDI — proven in the Phase-1 hardware pass | ✅ |
 | `out-of-scope` | Monster / Arena / Collaboration / battle-submission — outside the conventional-parity pass | ✅ |
 
 A parity fix that closes a gap flips that family from `gap` → `pass`; the harness is the
 proof the backlog item actually landed. An eval row may be authored AHEAD of its
-implementation by carrying a `backlog_ref` column. It reports `gap` until the item ships.
-When the private auto-loop ledger is available, a `backlog_ref` at a **done** item is a
-hard FAIL (the row must gain a family). Public source snapshots intentionally omit that
-execution journal and retain only the stable cross-reference identifiers.
+implementation by carrying a `backlog_ref` column pointing at a live backlog item — it
+reports `gap` until the item ships; a `backlog_ref` at a **done** item is a hard FAIL
+(the row must gain a family).
 
 ## Honesty tooling (DAW-parity program P1 — all pure-static, cheap-lane)
 
 | tool | what fails the gate |
 |---|---|
 | `coverage_check.py` | any MoshOps dispatch command exercised by **no** test surface (conformance / verify / selftest / e2e) and not waived in `coverage_waivers.json` (waivers are reasoned + **expiring**, fail when stale or no-longer-needed) |
-| `model_lint.py` | unmapped in-scope eval scenario; malformed or unresolved (when the private ledger is present) `backlog_ref`; verdicts.json out of sync with the CSV/`EXTRA_FAMILIES`; malformed backlog/matrix artifacts |
+| `model_lint.py` | unmapped in-scope eval scenario; `gap` verdict without a live `backlog_ref`; verdicts.json out of sync with the CSV/`EXTRA_FAMILIES`; malformed backlog/matrix artifacts |
 | `scoreboard.py --check` | a stale `docs/FEATURE_AUDIT.md` (regenerable byte-for-byte from committed inputs alone) |
 
-`scoreboard.py` (no flag) regenerates `docs/FEATURE_AUDIT.md` from `verdicts.json`, the
-eval CSV, capability matrix, and coverage ledger. A private checkout may additionally
-render its `docs/auto-loop/backlog.jsonl`; the public repository does not require it.
+`scoreboard.py` (no flag) regenerates `docs/FEATURE_AUDIT.md` from `verdicts.json` + the
+eval CSV + `scripts/daw-conformance/parity_backlog.jsonl` (the minimal G-prefixed
+conventional-parity registry) + the coverage ledger.
 
 ## Scope
 

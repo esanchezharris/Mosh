@@ -6508,6 +6508,82 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                && near ((double) clipById (lcid).getProperty ("length", -99.0), preLength),
                "loop: disabling the loop does NOT move or resize the clip");
 
+        // Regression #545: Tracktion may store the currently audible loop phase as a
+        // virtual offset. Removing the loop must materialise that phase, otherwise a
+        // whole-file EOF offset becomes literal and the clip renders as silence.
+        {
+            auto phase = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 337.0 }}));
+            const auto phaseCid = phase["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", phaseCid }, { "reversed", true }}))),
+                   "loop phase: reverse on ok");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", phaseCid }, { "enabled", true },
+                                                           { "start", 0.0 }, { "length", 4.0 }}))),
+                   "loop phase: whole-source loop on ok");
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", phaseCid }, { "reversed", false }}))),
+                   "loop phase: reverse off ok");
+            const auto virtualOffset = (double) clipById (phaseCid).getProperty ("offset", -1.0);
+            const auto phaseStart = (double) clipById (phaseCid).getProperty ("start", -1.0);
+            const auto phaseLength = (double) clipById (phaseCid).getProperty ("length", -1.0);
+            check (virtualOffset > 3.9,
+                   "loop phase: fixture holds a virtual EOF offset while looping");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", phaseCid }, { "enabled", false }}))),
+                   "loop phase: disable ok");
+            check (near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: disabling materialises EOF modulo loop length at source zero");
+            check (near ((double) clipById (phaseCid).getProperty ("start", -1.0), phaseStart)
+                    && near ((double) clipById (phaseCid).getProperty ("length", -1.0), phaseLength),
+                   "loop phase: materialising the phase does not move or resize the clip");
+
+            check (ok (cmd (ops, "undo")), "loop phase: one undo restores loop and virtual offset");
+            check ((bool) clipById (phaseCid).getProperty ("loopEnabled", false)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), virtualOffset),
+                   "loop phase: undo restores both fields from the same transaction");
+            check (ok (cmd (ops, "redo")), "loop phase: redo disable ok");
+            check (! (bool) clipById (phaseCid).getProperty ("loopEnabled", true)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: redo clears loop and materialises phase again");
+            cmd (ops, "save"); cmd (ops, "reload");
+            check (! (bool) clipById (phaseCid).getProperty ("loopEnabled", true)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: materialised offset persists across save/reload");
+        }
+
+        // The same rule applies when Reverse is still enabled: Loop-before-Reverse
+        // can also produce an exact EOF virtual phase.
+        {
+            auto reversed = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 389.0 }}));
+            const auto reversedCid = reversed["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", reversedCid }, { "enabled", true },
+                                                          { "start", 0.0 }, { "length", 4.0 }}))),
+                   "loop phase reverse-order: loop on ok");
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", reversedCid }, { "reversed", true }}))),
+                   "loop phase reverse-order: reverse on ok");
+            check ((double) clipById (reversedCid).getProperty ("offset", -1.0) > 3.9,
+                   "loop phase reverse-order: reverse stores virtual EOF while looped");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", reversedCid }, { "enabled", false }}))),
+                   "loop phase reverse-order: disable ok");
+            check (near ((double) clipById (reversedCid).getProperty ("offset", -1.0), 0.0)
+                    && (bool) clipById (reversedCid).getProperty ("reversed", false),
+                   "loop phase reverse-order: disabling materialises phase and preserves Reverse");
+        }
+
+        // A large virtual offset uses floating modulo, and a partial loop adds its
+        // source start after wrapping the phase. Negative modulo is covered by the
+        // pure unit test because Tracktion clamps real clip offsets to zero.
+        {
+            auto partial = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 431.0 }}));
+            const auto partialCid = partial["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", partialCid }, { "offset", 12.75 }, { "length", 2.0 }}))),
+                   "loop phase partial: virtual offset fixture set");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", partialCid }, { "enabled", true },
+                                                          { "start", 0.5 }, { "length", 1.0 }}))),
+                   "loop phase partial: loop on ok");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", partialCid }, { "enabled", false }}))),
+                   "loop phase partial: disable ok");
+            check (near ((double) clipById (partialCid).getProperty ("offset", -1.0), 1.25),
+                   "loop phase partial: large phase wraps inside the partial source loop");
+        }
+
         // enabled:true with a zero length is rejected (and mutates nothing).
         check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", lcid }, { "enabled", true }, { "length", 0.0 }}))),
                "loop: enabled with length 0 rejected");

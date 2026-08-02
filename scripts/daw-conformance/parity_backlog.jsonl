@@ -1,0 +1,23 @@
+{"id":"G5","title":"Sends / returns / bus UI + agent catalog","class":"cheap","size":"M","status":"done","order":100}
+{"id":"G6","title":"Tempo / time-sig / metronome GUI controls","class":"cheap","size":"S","status":"done","order":110}
+{"id":"G8","title":"Per-track output / multi-out routing UI","class":"cheap","size":"M","status":"done","order":120}
+{"id":"G9","title":"Audio warp / time-stretch GUI","class":"cheap","size":"M","status":"done","order":130}
+{"id":"G3","title":"Audio device + per-track input picker UI","class":"cheap","size":"M","status":"done","order":140}
+{"id":"G14","title":"set_track_volume / pan undo restores prior value","class":"native","size":"S","status":"done","order":150}
+{"id":"G1","title":"Export range/section + delay-tail policy","class":"native","size":"M","status":"done","order":160}
+{"id":"G7","title":"Stem export (per-track, common zero point)","class":"native","size":"M","status":"done","order":170}
+{"id":"G4a","title":"Clip inspector: gain / mute / rename UI","class":"cheap","size":"S","status":"done","order":180}
+{"id":"G4b","title":"Clip fades (fade-in / fade-out / crossfade)","class":"native","size":"L","status":"done","order":190}
+{"id":"G2a","title":"Recording permission / failure UX","class":"cheap","size":"S","status":"done","order":200}
+{"id":"G2b","title":"Recording count-in / pre-roll","class":"native","size":"M","status":"done","order":210}
+{"id":"G11","title":"MIDI-input picker + live-monitor surface","class":"cheap","size":"S","status":"done","order":220}
+{"id":"G13","title":"Missing-media on-load banner","class":"cheap","size":"S","status":"done","order":230}
+{"id":"G10","title":"Automation depth (write/touch/latch modes)","class":"native","size":"L","status":"done","order":240}
+{"id":"G10b","title":"Automation touch/latch modes + multi-target conflict policy","class":"native","size":"M","status":"ready","order":241}
+{"id":"G12","title":"Comping promote-to-main UX","class":"native","size":"M","status":"done","order":250}
+{"id":"G15","title":"v2 per-track record affordances (arm toggle, input monitor, input picker)","class":"cheap","size":"M","status":"ready","order":260}
+{"id":"G16","title":"v2 automation surface (write-arm control + lane editing)","class":"cheap","size":"M","status":"ready","order":261}
+{"id":"G17","title":"Ripple-delete UI affordance","class":"cheap","size":"S","status":"ready","order":262}
+{"id":"G18","title":"Group/ungroup track UI affordance","class":"cheap","size":"S","status":"ready","order":263}
+{"id":"G19","title":"Stem-export UI affordance in ExportControls","class":"cheap","size":"S","status":"ready","order":264}
+{"id":"G20","title":"stretch_clip fails on a just-reversed clip — it reads the proxy's length, not the source's","class":"native","size":"S","status":"ready","order":918}

@@ -14,9 +14,7 @@ Checks:
                  valid, sorted; every `gap` entry carries a backlog_ref resolving to a
                  backlog item that is NOT done (a done item with a still-gap verdict is
                  exactly the staleness class this program exists to kill)
-  backlog        when the private auto-loop ledger is present, its lines are valid
-                 JSON with id+status and every reference resolves; public source
-                 snapshots may omit it, in which case references remain syntax-checked
+  backlog        parity_backlog.jsonl lines are valid JSON with id+status
   matrix         docs/reality-pack/daw_capability_matrix.csv (once it exists, P2):
                  required columns, unique cap_ids, valid tier/disposition values,
                  backlog_ref + eval_rows references resolve
@@ -35,7 +33,7 @@ EVAL_CSV = REPO / "docs" / "reality-pack" / "mosh_daw_eval_suite.csv"
 MATRIX_CSV = REPO / "docs" / "reality-pack" / "daw_capability_matrix.csv"
 CONFORMANCE = SELF / "conformance.py"
 VERDICTS = SELF / "verdicts.json"
-BACKLOG = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+BACKLOG = SELF / "parity_backlog.jsonl"
 
 REQUIRED_EVAL_COLS = ["id", "area", "user_action", "initial_state", "expected_state",
                       "expected_audio", "expected_ui", "expected_log_event",
@@ -47,7 +45,6 @@ MATRIX_REQUIRED_COLS = ["cap_id", "name", "area", "tier", "live", "fl", "protool
 VALID_TIERS = {"T0", "T1", "T2", "X"}
 VALID_AXIS = {"shipped", "partial", "missing", "n/a"}
 VALID_DISPOSITIONS = {"SHIPPED", "PARTIAL", "MISSING", "REJECTED"}
-BACKLOG_REF_RE = re.compile(r"^G[0-9]+[A-Za-z0-9-]*$")
 
 
 def parse_conformance_source():
@@ -69,7 +66,8 @@ def parse_conformance_source():
 def load_backlog(problems):
     items = {}
     if not BACKLOG.exists():
-        return None
+        problems.append(f"backlog missing: {BACKLOG}")
+        return items
     for i, line in enumerate(BACKLOG.read_text().splitlines(), 1):
         line = line.strip()
         if not line:
@@ -94,9 +92,7 @@ def main():
     if not oos_areas or not families:
         problems.append("could not parse OUT_OF_SCOPE_AREAS / FAMILIES from conformance.py "
                         "— the regex contract broke; fix the parser, don't ship blind")
-    loaded_backlog = load_backlog(problems)
-    backlog_available = loaded_backlog is not None
-    backlog = loaded_backlog or {}
+    backlog = load_backlog(problems)
 
     # ── eval CSV ──────────────────────────────────────────────────────────────────
     rows = list(csv.DictReader(EVAL_CSV.open()))
@@ -129,10 +125,6 @@ def main():
                             f"— add a conformance family or author it against a live backlog item")
             continue
         for ref in sorted(refs):
-            if not backlog_available:
-                if not BACKLOG_REF_RE.fullmatch(ref):
-                    problems.append(f"{area} / {action}: malformed backlog_ref '{ref}'")
-                continue
             item = backlog.get(ref)
             if item is None:
                 problems.append(f"{area} / {action}: backlog_ref '{ref}' does not exist in backlog.jsonl")
@@ -165,10 +157,6 @@ def main():
                 if not ref:
                     problems.append(f"verdicts.json: gap without backlog_ref: {v.get('area')} / "
                                     f"{v.get('action')} — every tracked gap must be attributed")
-                elif not backlog_available and not BACKLOG_REF_RE.fullmatch(ref):
-                    problems.append(f"verdicts.json: malformed gap backlog_ref '{ref}'")
-                elif not backlog_available:
-                    pass  # Public source snapshots intentionally omit the private status ledger.
                 elif ref not in backlog:
                     problems.append(f"verdicts.json: gap backlog_ref '{ref}' not in backlog.jsonl")
                 elif backlog[ref].get("status") == "done":
@@ -197,9 +185,7 @@ def main():
             if (r.get("disposition") or "") not in VALID_DISPOSITIONS:
                 problems.append(f"capability matrix: {cid}: bad disposition '{r.get('disposition')}'")
             ref = (r.get("backlog_ref") or "").strip()
-            if ref and not BACKLOG_REF_RE.fullmatch(ref):
-                problems.append(f"capability matrix: {cid}: malformed backlog_ref '{ref}'")
-            elif ref and backlog_available and ref not in backlog:
+            if ref and ref not in backlog:
                 problems.append(f"capability matrix: {cid}: backlog_ref '{ref}' not in backlog.jsonl")
             for er in filter(None, (x.strip() for x in (r.get("eval_rows") or "").split(";"))):
                 if er not in seen_ids:
@@ -208,11 +194,9 @@ def main():
     for m in problems:
         print(f"  PROBLEM: {m}")
     n_extra = len(extras)
-    backlog_label = (f"{len(backlog)} backlog items" if backlog_available
-                     else "private backlog omitted")
     print(f"model_lint: {len(rows)} eval rows | {len(scenarios)} scenarios | "
           f"{len(families)} CSV families + {n_extra} post-pack | "
-          f"{backlog_label} | {'FAIL' if problems else 'PASS'}")
+          f"{len(backlog)} backlog items | {'FAIL' if problems else 'PASS'}")
     return 1 if problems else 0
 
 

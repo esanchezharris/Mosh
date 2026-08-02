@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const LEDGER = join(repo, "docs", "verification", "REACHABILITY.md");
 const E2E_DIR = join(repo, "ui", "e2e");
-const BACKLOG = join(repo, "docs", "auto-loop", "backlog.jsonl");
+const BACKLOG = join(repo, "scripts", "daw-conformance", "parity_backlog.jsonl");
 const SRC_DIR = join(repo, "ui", "src");
 
 interface Row {
@@ -66,8 +66,7 @@ function uiSource(): string {
   return srcBlob;
 }
 
-function backlogStatuses(): Map<string, string> | null {
-  if (!existsSync(BACKLOG)) return null;
+function backlogStatuses(): Map<string, string> {
   const map = new Map<string, string>();
   for (const line of readFileSync(BACKLOG, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -111,13 +110,11 @@ describe("REACHABILITY ledger", () => {
     }
   });
 
-  it("every gap row has a valid reference, and a live item when the private backlog is present", () => {
+  it("every gap: row references a LIVE backlog item (a shipped item must flip its row)", () => {
     const statuses = backlogStatuses();
-    const gaps = rows.filter((r) => r.status.startsWith("gap:"));
-    for (const r of gaps) {
+    for (const r of rows) {
+      if (!r.status.startsWith("gap:")) continue;
       const id = r.status.slice("gap:".length);
-      expect(id).toMatch(/^G[0-9]+[A-Za-z0-9-]*$/);
-      if (statuses === null) continue;
       expect(statuses.has(id), `${r.capability}: backlog item '${id}' not in backlog.jsonl`).toBe(true);
       expect(statuses.get(id) !== "done",
         `${r.capability}: backlog item '${id}' is DONE — flip this row to 'reachable' (and un-fixme its spec)`).toBe(true);
