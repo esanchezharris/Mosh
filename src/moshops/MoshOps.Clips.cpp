@@ -12,6 +12,7 @@
 
 #include "MoshOps.h"
 #include "MoshOpsInternal.h"
+#include "ClipLoopPhase.h"
 #include "state/Ids.h"
 #include "engine/SourceRef.h"
 
@@ -515,9 +516,13 @@ juce::var MoshOps::cmdSetClipCrossfade (const juce::var& args)
 // already keys off. So `enabled:false` writes an EMPTY range rather than inventing a
 // second flag, and the snapshot's loopEnabled reads back through isLooping().
 //
-// Deliberately NOT AudioClipBase::disableLooping(): that helper also REWRITES the
-// clip's position/offset to bake the loop away (tracktion_AudioClipBase.cpp:921).
-// Toggling a loop off must not move or resize the clip.
+// Deliberately NOT AudioClipBase::disableLooping(): that helper also resizes the
+// clip to one loop iteration. Toggling a loop off must not move or resize the clip.
+// We do, however, have to materialise the currently audible loop phase into the
+// source offset. Tracktion permits a looping clip to hold a virtual offset outside
+// the loop range (including an exact EOF offset); leaving that value untouched when
+// the wrapping loop is removed turns it into a literal source position and can make
+// the clip silent.
 //
 // Tracktion clamps what it stores (setLoopRange: start ≤ sourceLength/speed, length ≤
 // 50× sourceLength/speed; auto-tempo clips route to setLoopRangeBeats), so the result
@@ -540,12 +545,26 @@ juce::var MoshOps::cmdSetClipLoop (const juce::var& args)
     if (enabled && ! (length > 0.0))
         return errResult ("set_clip_loop", "loop length must be greater than 0 when enabled");
 
+    // Resolve the audible phase before clearing the range. This is the floating-
+    // point equivalent of LoopReader's negative-aware sample modulo. getLoopStart/
+    // getLoopLength are expressed in seconds even for beat-based auto-tempo loops,
+    // using the same clip-start tempo conversion as the stored offset.
+    double materialisedOffset = 0.0;
+    const bool materialisePhase = ! enabled && curLength > 0.0;
+    if (materialisePhase)
+        materialisedOffset = materialiseLoopSourceOffset (ac->getPosition().getOffset().inSeconds(),
+                                                          curStart, curLength);
+
     beginTxn ("set_clip_loop");
     if (enabled)
         ac->setLoopRange ({ tracktion::TimePosition::fromSeconds (start),
                             tracktion::TimeDuration::fromSeconds (length) });
     else
-        ac->setLoopRange ({});   // empty range ⇒ isLooping() false; position untouched
+    {
+        ac->setLoopRange ({});   // empty range ⇒ isLooping() false
+        if (materialisePhase)
+            ac->setOffset (tracktion::TimeDuration::fromSeconds (materialisedOffset));
+    }
 
     logLine ("set_clip_loop", args, true, {}, true);
     emitSnapshotInvalidated();
