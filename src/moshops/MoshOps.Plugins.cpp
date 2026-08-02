@@ -1148,10 +1148,14 @@ int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler)
         ++loaded;
     }
 
-    // Resolve sample files now (see the pump note in cmdAssignSample).
+    // Resolve sample files now (see the pump note in cmdAssignSample). The
+    // AsyncUpdater may need to open all eight sample readers, so the old 5 ms
+    // ceiling was occasionally too short under a loaded headless gate and the
+    // first offline render raced an empty soundList. This path is only used
+    // when the engine has no audio device; the normal app remains asynchronous.
     if (! eng.hasAudio())
         if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
-            mm->runDispatchLoopUntil (5);
+            mm->runDispatchLoopUntil (50);
 
     return loaded;
 }
