@@ -324,18 +324,18 @@ test("beatbox -> beat: the entry point is keyboard reachable, matching Import's 
   await expect.poll(() => sketchButton.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
 });
 
-test("the track header is keyboard-focusable and Enter selects it (a11y)", async ({ page }) => {
+test("the track header exposes a dedicated keyboard-select button (a11y)", async ({ page }) => {
   await bootV2(page);
   const head = page.getByTestId("v2-track-header").first();
-  await expect(head).toHaveAttribute("role", "button");
-  await expect(head).toHaveAttribute("tabindex", "0");
   const name = (await head.locator(".v2-lname").textContent())?.trim();
-  await expect(head).toHaveAttribute("aria-label", `Select track ${name}`);
-  // Focus via keyboard modality → the existing [tabindex]:focus-visible lime ring applies.
-  await head.focus();
-  await expect(head).toBeFocused();
+  await expect(head).toHaveAttribute("role", "group");
+  const select = head.getByRole("button", { name: `Select track ${name}` });
+  // Focus via keyboard modality → the dedicated native control owns the focus ring;
+  // Mute/Solo/Delete remain sibling buttons rather than nested interactive descendants.
+  await select.focus();
+  await expect(select).toBeFocused();
   await expect
-    .poll(() => head.evaluate((el) => getComputedStyle(el).outlineStyle))
+    .poll(() => select.evaluate((el) => getComputedStyle(el).outlineStyle))
     .toBe("solid");
   // Enter activates selection (no mouse) → the always-on inspector binds to that track.
   await page.keyboard.press("Enter");
