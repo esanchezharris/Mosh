@@ -293,6 +293,7 @@ private:
     juce::var cmdSetDrumPad     (const juce::var& args);
     juce::var cmdClearDrumPad   (const juce::var& args);
     juce::var cmdApplyChoke     (const juce::var& args);
+    juce::var cmdListDrumKits   (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
@@ -608,9 +609,12 @@ private:
     // drumKitDir(): the bundled default kit dir (env MOSH_DRUMKIT_DIR overrides;
     // else Mosh.app/Contents/Resources/drumkits/mosh-kit; else next to the exe).
     juce::File           drumKitDir() const;
+    // The library root (one folder per kit) and a named kit inside it.
+    juce::File           drumKitsRoot() const;
+    juce::File           drumKitDir (const juce::String& kitId) const;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
-    bool                 drumKitAvailable() const;
+    bool                 drumKitAvailable (const juce::String& kitId = {}) const;
     // ensureSampler(): the track's existing te::SamplerPlugin, or a fresh one
     // inserted at the front of the chain (instrument-first).
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
@@ -627,7 +631,7 @@ private:
     // loadDrumKitInto(): clear + load the 8 bundled pads onto a sampler, each
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.
-    int                  loadDrumKitInto (te::SamplerPlugin&);
+    int                  loadDrumKitInto (te::SamplerPlugin&, const juce::String& kitId = {});
     // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.

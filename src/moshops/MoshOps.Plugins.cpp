@@ -130,6 +130,9 @@ namespace
     struct DrumPad { const char* file; const char* name; int pitch; };
     // Row order mirrors DRUM_LANES exactly (so the indices line up 1:1, not just the
     // pitch set); the sampler still maps each pad by pitch, so order is cosmetic here.
+    // The folder name of the bundled kit — also the id list_drum_kits reports.
+    static constexpr const char* kDefaultKitId = "mosh-kit";
+
     static const DrumPad kDefaultKit[] = {
         { "kick.wav",       "Kick",       36 },
         { "snare.wav",      "Snare",      38 },
@@ -261,15 +264,20 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_drum_kit", "no track");
 
-    // Validate the kit is present BEFORE opening a transaction / inserting a sampler,
-    // so a missing kit is a clean error with no partial, un-emitted mutation.
-    if (! drumKitAvailable())
+    // Which kit — omit for the bundled default. Validate BEFORE opening a transaction or
+    // inserting a sampler, so an unknown kit is a clean error with no partial mutation.
+    const auto kitId = args.getProperty ("kit", var()).toString();
+    if (kitId.isNotEmpty() && ! drumKitDir (kitId).isDirectory())
+        return errResult ("load_drum_kit", "no kit: " + kitId);
+    if (! drumKitAvailable (kitId))
         return errResult ("load_drum_kit", "no kit samples found (is the kit bundled?)");
 
     beginTxn ("load_drum_kit");
     auto* sampler = ensureSampler (*track);
     if (sampler == nullptr) return errResult ("load_drum_kit", "could not create sampler");
-    const int pads = loadDrumKitInto (*sampler);
+    const int pads = loadDrumKitInto (*sampler, kitId);
+    // Record which kit is on the track so the picker can show it.
+    track->state.setProperty (ids::drumKitId, kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId), &undoManager());
     if (pads == 0) return errResult ("load_drum_kit", "no kit samples found (is the kit bundled?)");
     applyDrumLaneGains (*track);  // re-loaded pads land at 0 dB — re-silence muted lanes
 
@@ -277,6 +285,7 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("index", track->pluginList.indexOf (sampler));
     data->setProperty ("pads", pads);
+    data->setProperty ("kit", kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId));
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("load_drum_kit", var (data));
@@ -390,6 +399,39 @@ juce::var MoshOps::cmdClearDrumPad (const juce::var& args)
     emitSnapshotInvalidated();
     reactiveTouchTrack (args.getProperty ("trackId", var()).toString());
     return okResult ("clear_drum_pad", var (data));
+}
+
+// The kit LIBRARY. One folder per kit under drumkits/; a kit is "available" when at least
+// one of its pads actually resolves on disk, so a half-staged bundle shows as unavailable
+// rather than erroring at load time.
+juce::var MoshOps::cmdListDrumKits (const juce::var&)
+{
+    Array<var> kits;
+    auto root = drumKitsRoot();
+    if (root.isDirectory())
+    {
+        for (auto& d : juce::RangedDirectoryIterator (root, false, "*", juce::File::findDirectories))
+        {
+            const auto id = d.getFile().getFileName();
+            int pads = 0;
+            for (auto& pad : kDefaultKit)
+                if (d.getFile().getChildFile (pad.file).existsAsFile()) ++pads;
+            // A kit folder with none of the expected pad files is not a kit — most likely
+            // a stray directory — so it is listed as unavailable rather than hidden, which
+            // would leave a puzzled producer with no explanation.
+            auto* o = new DynamicObject();
+            o->setProperty ("id", id);
+            o->setProperty ("name", id.replaceCharacter ('-', ' '));
+            o->setProperty ("pads", pads);
+            o->setProperty ("path", d.getFile().getFullPathName());
+            o->setProperty ("available", pads > 0);
+            kits.add (var (o));
+        }
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("kits", kits);
+    data->setProperty ("defaultKit", kDefaultKitId);
+    return okResult ("list_drum_kits", var (data));   // read-only: no txn, no log, no event
 }
 
 // Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
@@ -1344,11 +1386,18 @@ bool MoshOps::mirrorMasterEditorParameter (te::AutomatableParameter& parameter,
 // lookup: an env override first (tests / dev), then the app-bundle Resources, then
 // next to the executable. Falls back to the bundle path so callers get a sensible
 // (if absent) File to test with existsAsFile().
-juce::File MoshOps::drumKitDir() const
+// The kit LIBRARY root — the directory that holds one folder per kit. CMake already
+// stages the whole `drumkits` tree into the bundle, so adding a kit is dropping a folder
+// in; no build change is needed.
+juce::File MoshOps::drumKitsRoot() const
 {
     using juce::File;
 
-    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKIT_DIR", {});
+    // MOSH_DRUMKITS_DIR (plural) points at the library. The older MOSH_DRUMKIT_DIR
+    // (singular) means "this directory IS the kit" and is handled by drumKitDir below —
+    // both are honoured, because the singular one has live consumers including the
+    // selftest's own resolver.
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKITS_DIR", {});
     if (env.isNotEmpty())
     {
         File d (env);
@@ -1356,17 +1405,35 @@ juce::File MoshOps::drumKitDir() const
     }
 
     auto appFile = File::getSpecialLocation (File::currentApplicationFile);
-    auto bundled = appFile.getChildFile ("Contents/Resources/drumkits/mosh-kit");
+    auto bundled = appFile.getChildFile ("Contents/Resources/drumkits");
     if (bundled.isDirectory()) return bundled;
 
     auto exeDir = File::getSpecialLocation (File::currentExecutableFile)
-                      .getParentDirectory().getChildFile ("drumkits/mosh-kit");
+                      .getParentDirectory().getChildFile ("drumkits");
     if (exeDir.isDirectory()) return exeDir;
 
     return bundled;   // best-effort; callers guard on existsAsFile()
 }
 
-bool MoshOps::drumKitAvailable() const
+juce::File MoshOps::drumKitDir (const juce::String& kitId) const
+{
+    using juce::File;
+
+    // BACKWARD COMPATIBILITY: MOSH_DRUMKIT_DIR (singular) has always meant "this directory
+    // is the kit", and both MoshOps and the selftest's resolver rely on that. Honour it for
+    // the default kit; a caller asking for a NAMED kit means the library.
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKIT_DIR", {});
+    if (env.isNotEmpty() && (kitId.isEmpty() || kitId == kDefaultKitId))
+    {
+        File d (env);
+        if (d.isDirectory()) return d;
+    }
+    return drumKitsRoot().getChildFile (kitId.isEmpty() ? kDefaultKitId : kitId);
+}
+
+juce::File MoshOps::drumKitDir() const { return drumKitDir (kDefaultKitId); }
+
+bool MoshOps::drumKitAvailable (const juce::String& kitId) const
 {
     const auto dir = drumKitDir();
     for (auto& pad : kDefaultKit)
@@ -1511,9 +1578,9 @@ juce::var MoshOps::cmdSetDrumLane (const juce::var& args)
 // DRM-001 — clear a sampler and load the 8 bundled pads, each mapped to its GM
 // pitch at unity (keyNote==minNote==maxNote) and open-ended (a short note rings the
 // whole one-shot). Returns the number of pads actually loaded (0 ⇒ kit not found).
-int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler)
+int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& kitId)
 {
-    const auto dir = drumKitDir();
+    const auto dir = drumKitDir (kitId);
 
     // Confirm at least one pad is actually loadable BEFORE destroying the current
     // sounds — a missing/broken kit dir must be a no-op, never a silent wipe.

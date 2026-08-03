@@ -9,7 +9,7 @@
 // Pads are addressed by the NOTE that triggers them, never by the sampler's sound index:
 // the index shifts whenever a kit is reloaded or a pad is cleared, the note does not.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { pickFiles } from "../../bridge";
 import { notePreview } from "../../audio/notePreview";
@@ -26,6 +26,15 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
   const exec = useStore((s) => s.exec);
   const [bank, setBank] = useState(GM_BANK);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  // Fetched lazily on mount, never at app init: execute_command is synchronous on the UI
+  // thread, so eager catalog reads are how the window ends up frozen at startup.
+  const [kits, setKits] = useState<{ id: string; name: string; available: boolean }[]>([]);
+  useEffect(() => {
+    void (async () => {
+      const r = await exec("list_drum_kits") as { ok?: boolean; data?: { kits?: typeof kits } };
+      if (r?.ok && r.data?.kits) setKits(r.data.kits.filter((k) => k.available));
+    })();
+  }, [exec]);
 
   const pads = track.drumPads ?? [];
   const byNote = new Map<number, DrumPad>();
@@ -61,9 +70,19 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
             disabled={bank >= BANKS - 1} onClick={() => setBank((b) => Math.min(BANKS - 1, b + 1))}>▴</button>
         </span>
         <span className="spacer" />
-        <button className="btn" data-testid="dp-reset-kit"
-          title="Reload the bundled kit onto every pad, discarding per-pad sample swaps"
-          onClick={() => exec("load_drum_kit", { trackId: track.id })}>Reset kit</button>
+        {kits.length > 1 ? (
+          <label className="dp-field">kit
+            <select data-testid="dp-kit" value={track.drumKit ?? kits[0]?.id ?? ""}
+              title="Load a whole kit onto this track. Replaces every pad, discarding per-pad sample swaps."
+              onChange={(e) => void exec("load_drum_kit", { trackId: track.id, kit: e.target.value })}>
+              {kits.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+            </select>
+          </label>
+        ) : (
+          <button className="btn" data-testid="dp-reset-kit"
+            title="Reload the bundled kit onto every pad, discarding per-pad sample swaps"
+            onClick={() => exec("load_drum_kit", { trackId: track.id })}>Reset kit</button>
+        )}
       </div>
 
       <div className="dp-grid" role="group" aria-label="Drum pads">

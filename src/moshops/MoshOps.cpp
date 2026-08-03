@@ -566,6 +566,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);
     if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
     if (name == "apply_choke")       return cmdApplyChoke (args);
+    if (name == "list_drum_kits")    return cmdListDrumKits (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -2573,6 +2574,8 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             pads.add (var (p));
         }
         o->setProperty ("drumPads", pads);
+        const auto kit = t.state.getProperty (ids::drumKitId, "").toString();
+        if (kit.isNotEmpty()) o->setProperty ("drumKit", kit);
     }
     // MIX-008 — a track nested under a group (submix folder) carries its parent's
     // id so the UI can indent it / show membership. Additive: flat consumers see

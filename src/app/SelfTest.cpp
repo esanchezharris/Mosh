@@ -4446,6 +4446,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 check (lengthOfPitch (46) > 3.9, "ONE undo restores the choked note's length");
             }
 
+            // ── kit library ──
+            // Two kits ship, deliberately: a one-entry list is a picker that cannot be
+            // wrong, and this check could not tell a real enumeration from a constant.
+            {
+                auto lk = cmd (ops, "list_drum_kits");
+                check (ok (lk), "list_drum_kits ok");
+                auto kitsVar = lk["data"].getProperty ("kits", var());
+                juce::StringArray ids;
+                if (auto* a = kitsVar.getArray())
+                    for (auto& k : *a)
+                        if ((bool) k.getProperty ("available", false))
+                            ids.add (k.getProperty ("id", var()).toString());
+                check (ids.contains ("mosh-kit"), "the bundled kit is listed as available");
+                check (ids.size() >= 2, "more than one kit is available (the picker has something to pick)");
+
+                auto other = ids.contains ("mosh-808") ? juce::String ("mosh-808") : juce::String();
+                if (other.isNotEmpty())
+                {
+                    auto ld2 = cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", other }}));
+                    check (ok (ld2) && (int) ld2["data"].getProperty ("pads", 0) == 8, "load_drum_kit loads a NAMED kit");
+                    check (trackById (pt).getProperty ("drumKit", var()).toString() == other,
+                           "the loaded kit rides the snapshot");
+                    // Prove the pads really changed source, not just the label: the two
+                    // kits are synthesised separately, so their files differ.
+                    auto padsVar = trackById (pt).getProperty ("drumPads", var());
+                    bool fromOther = false;
+                    if (auto* a = padsVar.getArray())
+                        for (auto& v : *a)
+                            if (v.getProperty ("file", var()).toString().contains (other)) { fromOther = true; break; }
+                    check (fromOther, "the pads actually point at the named kit's samples");
+                }
+
+                check (! ok (cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", "no-such-kit" }}))),
+                       "load_drum_kit errors on an unknown kit");
+                // …and the error must leave the sampler ALONE, not half-wiped.
+                check ((int) [&] { auto p = trackById (pt).getProperty ("drumPads", var());
+                                   return p.getArray() ? p.getArray()->size() : 0; }() == 8,
+                       "a failed kit load leaves the existing pads untouched");
+            }
+
             cmd (ops, "remove_track", args1 ("trackId", pt));
         }
 

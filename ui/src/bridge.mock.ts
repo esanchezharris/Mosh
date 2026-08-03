@@ -376,7 +376,7 @@ const MOCK_TXN_READS = new Set([
   "get_clip_peaks", "file_peaks", "get_command_log", "get_plugin_blocklist",
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
-  "list_track_outputs", "list_rave_models", "list_training_sources",
+  "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
   "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
@@ -2826,6 +2826,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     // Drum-rack pads. The mock keeps its own pad list on the track so the grid, the
     // per-pad mixer and the choke picker all round-trip in the browser.
+    case "list_drum_kits":
+      return ok(command, {
+        kits: [
+          { id: "mosh-kit", name: "mosh kit", pads: 8, path: "/kits/mosh-kit", available: true },
+          { id: "mosh-808", name: "mosh 808", pads: 8, path: "/kits/mosh-808", available: true },
+        ],
+        defaultKit: "mosh-kit",
+      });
     case "apply_choke": {
       const f = findClip(str(args.clipId));
       if (!f?.clip.notes) return err(command, "not a midi clip");

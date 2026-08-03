@@ -388,6 +388,8 @@ export type Track = {
   // gain is restored on unmute. minNote/maxNote span the whole keyboard for a sample
   // assigned in melodic mode, which is a pitched instrument rather than a pad.
   drumPads?: DrumPad[];
+  /** The kit id last loaded onto this track (list_drum_kits reports the available ids). */
+  drumKit?: string;
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;

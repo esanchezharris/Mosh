@@ -81,6 +81,7 @@ list_audio_devices	Unguarded
 list_builtins	Unguarded
 list_colors	Unguarded
 list_directory	Unguarded
+list_drum_kits	Unguarded
 list_lora_adapters	Unguarded
 list_loras	Unguarded
 list_midi_inputs	Unguarded
