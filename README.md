@@ -15,8 +15,7 @@
 
 Import/record, arrange, host **VST3/AU plugins**, mix, and export — plus a generative
 tier: an offline "re-imagine" / timbre-transform render layer with semantic controls
-that works on any track (MIDI/drum clips auto-bounce to audio first), with an optional
-real-time **RAVE** neural insert behind a build gate. A voice agent (**Moshi**) and
+that works on any track (MIDI/drum clips auto-bounce to audio first). A voice agent (**Moshi**) and
 2-player multiplayer ride on the same command spine.
 
 <p align="center">
@@ -36,8 +35,7 @@ Three pieces behind one seam (the `execute_command` + snapshot/events contract):
 
 - **Native engine** (`src/`, C++ / JUCE 8 + Tracktion Engine) — the audio engine, the
   **MoshOps** command spine (the single validated, undoable, audit-logged mutation
-  path), VST3/AU plugin hosting, and an optional gated real-time RAVE neural insert
-  (`-DMOSH_ENABLE_ANIRA`, off by default).
+  path), and VST3/AU plugin hosting.
 - **WebView UI** (`ui/`, React + Vite) — the arrangement/mixer/drawers, a pure client
   of MoshOps. Agents and the human UI execute the exact same commands.
 - **Generative service** (`service/`, Python + MLX) — the offline Tier-B "re-imagine"
@@ -78,7 +76,7 @@ lives in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 ## Status
 
 v0.1.0 is out: a signed, notarized macOS (Apple Silicon) build on the
-[releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0). A demo film is landing shortly.
+[releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0).
 
 ## License
 
