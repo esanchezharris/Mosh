@@ -88,10 +88,19 @@ export type State = {
   browserOpen: boolean;
   remoteStatus: RemoteStatus | null;       // iPhone companion server state
 
-  // Clip clipboard — pure UI-local view state. The captured clip descriptor only
-  // crosses the bridge on paste (paste_clip); copy/cut never touch the backend
-  // (swappable-seam rule). v1 holds a single clip; multi-clip copy is optional.
-  clipboard: { clip: Clip; sourceTrackId: string } | null;
+  // Clip clipboard — pure UI-local view state. The captured clip descriptors only
+  // cross the bridge on paste (paste_clip); copy/cut never touch the backend
+  // (swappable-seam rule).
+  //
+  // Holds the WHOLE selection. It used to hold one clip, with a written reason ("the
+  // single-clip clipboard must not delete more than it can restore") that was correct
+  // while nothing in the shipped shell could multi-select by mouse. Marquee select
+  // changed that: a lasso over 8 clips feeding a clipboard that copies 1 would be a new
+  // lie, so the two shipped together.
+  //
+  // `anchor` is the earliest start among the copied clips, so paste can rebuild their
+  // relative spacing from the playhead instead of stacking them.
+  clipboard: { clips: { clip: Clip; sourceTrackId: string }[]; anchor: number } | null;
 
   refresh: () => Promise<void>;
   // FS-B2a — the optional third argument is the agent-transaction envelope. It rides
@@ -129,6 +138,8 @@ export type State = {
   copySelection: () => void;
   cutSelection: () => Promise<void>;
   pasteClipboard: () => Promise<void>;
+  /** Run several commands as ONE undo step when the engine allows it; see the impl. */
+  runAtomic: (label: string, body: (exec: State["exec"]) => Promise<void>) => Promise<void>;
 
   setSelectedTrack: (id: string | null) => void;
   toggleTrackExpanded: (id: string) => void;
@@ -586,39 +597,82 @@ export const useStore = create<State>((set, get, api) => ({
     });
   },
 
-  // Find the first selected clip + its owning track in the current snapshot.
+  // Capture EVERY selected clip, in timeline order, with the track each came from.
   copySelection: () => {
     const { snapshot, selection } = get();
     if (!snapshot) return;
+    const clips: { clip: Clip; sourceTrackId: string }[] = [];
     for (const t of snapshot.tracks)
       for (const c of t.clips)
-        if (selection.has(c.id)) {
-          set({ clipboard: { clip: c, sourceTrackId: t.id } });
-          return;
-        }
+        if (selection.has(c.id)) clips.push({ clip: c, sourceTrackId: t.id });
+    if (clips.length === 0) return;                 // nothing selected: keep the old clipboard
+    clips.sort((a, b) => a.clip.start - b.clip.start);
+    set({ clipboard: { clips, anchor: clips[0].clip.start } });
   },
 
   cutSelection: async () => {
     if (!get().snapshot) return;
-    // Cut is a faithful inverse of paste: capture the primary (first-selected) clip,
-    // then remove exactly that clip. Multi-clip removal stays on the Delete key — the
-    // single-clip clipboard (v1) must not delete more than it can restore.
+    // Cut stays a faithful inverse of paste: capture exactly what will be removed, then
+    // remove exactly that. Both halves are the whole selection now, so the invariant the
+    // old single-clip comment protected ("must not delete more than it can restore")
+    // still holds — it just holds at a bigger size.
     get().copySelection();
     const cb = get().clipboard;
-    if (!cb) return;
-    await get().exec("remove_clip", { clipId: cb.clip.id });
+    if (!cb || cb.clips.length === 0) return;
+    await get().runAtomic("cut clips", async (exec) => {
+      for (const { clip } of cb.clips) await exec("remove_clip", { clipId: clip.id });
+    });
+    get().clearSelection();
     await get().refresh();
   },
 
   pasteClipboard: async () => {
-    const { clipboard, selectedTrackId } = get();
-    if (!clipboard) return;
-    await get().exec("paste_clip", {
-      trackId: selectedTrackId ?? clipboard.sourceTrackId,
-      start: get().transport.position,
-      clip: clipboard.clip,
+    const { clipboard, selectedTrackId, snapshot } = get();
+    if (!clipboard || clipboard.clips.length === 0) return;
+    const at = get().transport.position;
+    const trackExists = (id: string) => !!snapshot?.tracks.some((t) => t.id === id);
+
+    // ONE clip keeps the long-standing behaviour: it lands on the track you have
+    // selected, which is how you move a clip to another track by copy/paste.
+    if (clipboard.clips.length === 1) {
+      const { clip, sourceTrackId } = clipboard.clips[0];
+      await get().exec("paste_clip", {
+        trackId: selectedTrackId ?? sourceTrackId,
+        start: at,
+        clip,
+      });
+      await get().refresh();
+      return;
+    }
+
+    // MANY clips keep their own tracks and their relative spacing — re-homing a
+    // multi-track selection onto one track would scramble an arrangement. A source
+    // track that has since been deleted falls back to the selected track rather than
+    // erroring the whole paste.
+    await get().runAtomic("paste clips", async (exec) => {
+      for (const { clip, sourceTrackId } of clipboard.clips) {
+        const trackId = trackExists(sourceTrackId) ? sourceTrackId : (selectedTrackId ?? sourceTrackId);
+        await exec("paste_clip", { trackId, start: at + (clip.start - clipboard.anchor), clip });
+      }
     });
     await get().refresh();
+  },
+
+  // Run a multi-command edit as ONE undo step where possible.
+  //
+  // `batch_begin` (legacy mode — no transactionId) opens a single Tracktion transaction
+  // and fails closed with "a batch is already open" if the agent is mid-batch. That
+  // failure is not an error here: we simply run the commands unbatched, which is
+  // correct but costs N undo steps. Never leave a batch open — `batch_end` runs even if
+  // a command throws, or the next agent turn would inherit our transaction.
+  runAtomic: async (label, body) => {
+    const exec = get().exec;
+    const opened = (await exec("batch_begin", { name: label }))?.ok === true;
+    try {
+      await body(exec);
+    } finally {
+      if (opened) await exec("batch_end", {});
+    }
   },
 
   setSelectedTrack: (id) => { set({ selectedTrackId: id }); void get().syncActiveTrack(); },

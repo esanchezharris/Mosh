@@ -21,6 +21,8 @@ import { Playhead } from "../timeline/Playhead";
 import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
+import { useLaneMarquee } from "./useLaneMarquee";
+import { boundsOf } from "./marqueeHit";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
@@ -56,6 +58,8 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tlRef = useRef<HTMLDivElement>(null);
+  const marquee = useLaneMarquee(tlRef);
   // The navigator is a whole-song OVERVIEW (SongNav) — clicking it seeks and brings that
   // spot into view in the (zoomed) timeline below. Not synced to the timeline's scroll.
   const scrubTo = useCallback((sec: number) => {
@@ -165,7 +169,19 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
-          <div className="v2-tl">
+          {/* Empty-lane gestures (marquee / deselect / range) live on the grid rather
+              than per-lane: a lasso legitimately crosses lane boundaries, and pointer
+              capture has to belong to one element for the whole drag. Clips and the
+              ruler/ribbon rows own their own pointerdowns, so this only ever fires on
+              blank lane space — see useLaneMarquee's target test. */}
+          <div
+            className="v2-tl"
+            ref={tlRef}
+            onPointerDown={marquee.onPointerDown}
+            onPointerMove={marquee.onPointerMove}
+            onPointerUp={marquee.onPointerUp}
+            onPointerCancel={marquee.onPointerCancel}
+          >
             {/* Song-structure ribbon — the timeline's top row, above the ruler.
                 NOT the nav strip: PR #183 removed it from there because a ribbon sitting
                 beside the whole-song navigator "was misread as section editing", and
@@ -210,6 +226,21 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
             <TimeRangeBand />
             <Playhead />
+            {marquee.rect && (() => {
+              const b = boundsOf(marquee.rect);
+              return (
+                <div
+                  className="v2-marquee"
+                  data-testid="v2-marquee"
+                  style={{
+                    left: headW() + b.xMin,
+                    top: b.yMin,
+                    width: b.xMax - b.xMin,
+                    height: b.yMax - b.yMin,
+                  }}
+                />
+              );
+            })()}
           </div>
         </div>
         {dragging && (

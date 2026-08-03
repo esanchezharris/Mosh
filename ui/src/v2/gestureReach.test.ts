@@ -46,26 +46,21 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * implement. A RATCHET: entries may only be REMOVED. Adding one is a regression and
  * needs a reason a reviewer would accept, not a note that it was inconvenient.
  *
- * All three are the `empty` region — v2 has no empty-lane gesture handling at all.
- * Closing them is the marquee/selection wave.
+ * 3 -> 0 on 2026-08-03. All three were the `empty` region — v2 had no empty-lane
+ * pointer surface at all, so a producer on the shipped shell could not marquee-select,
+ * could not clear a selection by clicking away, and got nothing from the Range tool.
+ * Closed by `ui/src/v2/lanes/useLaneMarquee.ts` + `marqueeHit.ts`, which resolve the
+ * region through `resolveGesture(liveGestureTable(), ...)` rather than hardcoding — so
+ * the user's "Mouse gestures" DAW setting is honoured here, and the actions are named
+ * where this probe can see them.
+ *
+ * EMPTY IS THE GOAL, NOT THE END. `clip.header` / `clip.body` (Ableton's and Pro Tools'
+ * split) are still unimplemented in v2, which is why `ClipView.tsx` hardcodes
+ * `getGestureTable("mosh")` instead of honouring the setting. That is tracked as a
+ * separate finding, not hidden here: this map is about the MOSH table, and Mosh's own
+ * clip rules are all implemented.
  */
-export const GESTURE_GAPS: Readonly<Record<string, string>> = {
-  marquee:
-    "no marquee/lasso select anywhere in ui/src/v2 — it exists only in the classic shell "
-    + "(ui/src/ui/Arrange.tsx). A v2 producer cannot select more than one clip with the mouse, "
-    + "which also makes Cmd+C/X/V and Delete single-clip in practice regardless of what they "
-    + "support. This is the largest single beat-first gap.",
-  deselect:
-    "clicking an empty lane does not clear the selection in v2 — the empty region has no "
-    + "pointer handler, so a selection can only be replaced, never dropped. Ships with marquee: "
-    + "both need the same empty-lane gesture surface.",
-  time_select:
-    "the Range tool (keymap `3` -> tool_range) sets store.tool but v2 reads `tool` only in "
-    + "ClipView for CLIP-region gestures, so dragging an empty lane in the range tool does "
-    + "nothing and v2 shows no tool indicator to reveal the mode changed. Time selection IS "
-    + "reachable in v2 by dragging the bar ruler (v2/timeline/BarRuler.tsx:110) — so this is a "
-    + "missing lane gesture and an inert tool mode, not a missing capability.",
-};
+export const GESTURE_GAPS: Readonly<Record<string, string>> = {};
 
 function resolveImport(fromDir: string, spec: string): string | null {
   const base = resolve(fromDir, spec);
@@ -152,8 +147,8 @@ describe("gesture reachability — the shipped shell honours its gesture table (
   });
 
   it("the gap list only shrinks (ratchet)", () => {
-    // 3 on 2026-08-03 (marquee, deselect, time_select — the whole `empty` region).
-    // Lower this number when you close one; never raise it.
-    expect(Object.keys(GESTURE_GAPS).length).toBeLessThanOrEqual(3);
+    // 3 on 2026-08-03 (marquee, deselect, time_select — the whole `empty` region),
+    // closed to 0 the same day. Lower this number when you close one; never raise it.
+    expect(Object.keys(GESTURE_GAPS).length).toBeLessThanOrEqual(0);
   });
 });

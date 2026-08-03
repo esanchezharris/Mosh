@@ -205,7 +205,7 @@ describe("useKeyboardShortcuts", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", metaKey: true, bubbles: true }));
     });
-    expect(useStore.getState().clipboard?.clip.id).toBe("clip-1");
+    expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["clip-1"]);
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "v", metaKey: true, bubbles: true }));

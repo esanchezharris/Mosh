@@ -389,6 +389,18 @@
 }
 .v2-clip canvas { display: block; width: 100%; height: 100%; }
 
+/* marquee (lasso) overlay — GESTURE-REACH. The `empty` region of every DAW preset in
+   ui/src/interaction/gestureTables.ts promises drag-to-marquee; until this landed it was
+   implemented only in the classic shell, so a v2 producer could not select more than one
+   clip with the mouse. Sits under the playhead (z 7) and takes no pointer events, so the
+   box can never eat the drag that is drawing it. */
+.v2-marquee {
+  position: absolute; z-index: 6; pointer-events: none;
+  border: 1px solid var(--v2-accent);
+  background: color-mix(in srgb, var(--v2-accent) 14%, transparent);
+  border-radius: var(--v2-radius-xs);
+}
+
 /* playhead overlay */
 .v2-playhead-line {
   position: absolute; top: 0; bottom: 0; width: 2px; background: var(--v2-playhead);
