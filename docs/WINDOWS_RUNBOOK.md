@@ -27,7 +27,8 @@ natively (PowerShell), **not** under WSL. Companion decisions: [WINDOWS_PARITY.m
 ```
 
 `-Build` stages `ui\` and `drumkits\` next to `Mosh.exe` automatically (CMake targets).
-If `-Smoke` prints the offline-mock reply, no brain key was found — check `ui\.env.local`.
+If `-Smoke` reports that Moshi cannot reach its brain, no provider or proxy is configured —
+check `ui\.env.local`. Packaged builds never substitute demo commands.
 
 **After the first build, verify the exe-adjacent DLLs are present** (JUCE stages the WebView
 runtime; CMake stages the MSVC redist):
@@ -72,13 +73,18 @@ cd ui ; npm ci ; npm test ; npm run test:e2e ; cd ..
 
 This builds Release and stages `dist\Mosh\` — `Mosh.exe` + `ui\` + `drumkits\` + exe-adjacent
 DLLs + `service\` (the same subtree the macOS `deploy` bundles) + a `brain.env` written from
-your `ui\.env.local` keys (owner-only ACL). It then zips it to `dist\Mosh-win-x64.zip`.
+the complete `MOSH_BRAIN_PROXY_URL` and `MOSH_BRAIN_PROXY_APIKEY` pair in
+`ui\.env.local` (owner-only ACL). It then zips it to
+`dist\Mosh-win-x64.zip`.
 
 - The folder is portable: copy it anywhere and run `Mosh.exe`. The bundled `brain.env` (read
   by the BrainProxy Windows fallback next to the exe) means Moshi has a brain on any launch —
   including a double-click that inherits no shell environment.
-- **Security:** `brain.env` holds your provider key in cleartext. Anyone with the folder/zip
-  can read it. Keep a provider spend-limit set; don't post it publicly.
+- Packaging is proxy-only. `MOSH_BRAIN_PROXY_APIKEY` must be a scoped publishable proxy
+  credential, never a provider secret. `run-mosh.ps1 -Package` refuses any configured
+  direct-provider API key and rejects multiline proxy values before writing `brain.env`.
+- If the proxy pair is missing or incomplete, packaging succeeds without `brain.env`; Moshi
+  edits then fail visibly without mutating the project.
 
 ## 4. Real generative / FMS features (per-feature venvs)
 

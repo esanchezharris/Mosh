@@ -69,6 +69,30 @@ test("normalize moves the clip gain", async ({ page }) => {
   await expect.poll(async () => page.getByTestId("v2-clip-gain").inputValue()).not.toBe(before);
 });
 
+test("normalize stays fully reachable inside the production-width Inspector", async ({ page }) => {
+  await openClipTab(page);
+  const body = page.getByTestId("v2-insp-body");
+  const normalize = page.getByTestId("v2-clip-normalize");
+  await expect(normalize).toBeVisible();
+
+  // Regression for #534: the number input kept its browser intrinsic width, making the
+  // Normalize row wider than the 286px rail. Playwright/Accessibility could still
+  // activate the off-screen button by silently horizontal-scrolling the whole WebView,
+  // which hid the native production failure. Pin the pre-activation geometry instead.
+  const geometry = await body.evaluate((element, button) => {
+    const panel = element.getBoundingClientRect();
+    const action = (button as HTMLElement).getBoundingClientRect();
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      panelRight: panel.right,
+      actionRight: action.right,
+    };
+  }, await normalize.elementHandle());
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
+  expect(geometry.actionRight).toBeLessThanOrEqual(geometry.panelRight + 0.5);
+});
+
 test("loop region: toggle discloses start/length and round-trips", async ({ page }) => {
   await openClipTab(page);
   await expect(page.getByTestId("v2-clip-loop-start")).toHaveCount(0); // progressive disclosure

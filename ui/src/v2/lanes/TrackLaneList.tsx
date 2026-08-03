@@ -7,7 +7,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
-import { useEscapeToClose } from "../../hooks/useEscapeToClose";
+import { useAnchoredPanel } from "../../hooks/useAnchoredPanel";
 import { useShell, type SectionZoom } from "../shellState";
 import { beatSeconds, barSeconds } from "../../time";
 import type { CommandResult, Snapshot, Track } from "../../types";
@@ -265,40 +265,24 @@ export async function addTrackOfKind(
 // shifts. (`.v2-lhead` is `position: sticky` — wrapping it in a positioned div would break
 // the sticky-left column.)
 function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
-  const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useEscapeToClose(open, close);
+  // Flip-up-when-there's-no-room-below used to be hand-rolled here; it now lives in the
+  // shared hook, which additionally clamps horizontally. The 200px estimate is load-bearing
+  // and unchanged: the trailing add-track row sits at the END of the lane list, so on a full
+  // session it lands at the bottom of the window and a downward panel runs off-screen — with
+  // 8 tracks, "Instrument" was entirely unreachable. (v2-shell.spec pins that threshold.)
+  // 232px = `.v2-menu-rich`'s rendered width, for the horizontal clamp only.
+  const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(232, 200, "start");
   const exec = useStore((s) => s.exec);
 
-  const toggle = useCallback(() => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) {
-      // Flip up when there isn't room below. The trailing add-track row sits at the END of
-      // the lane list, so on a full session it lands at the bottom of the window and a
-      // downward panel runs off-screen — with 8 tracks, "Instrument" was entirely
-      // unreachable. Anchoring the panel's BOTTOM above the trigger (rather than its top
-      // below it) makes the flip independent of the panel's own height, so the estimate
-      // below only picks a direction and never has to be exact.
-      const kEstimatedPanelH = 200;
-      const roomBelow = window.innerHeight - r.bottom;
-      setAt(roomBelow >= kEstimatedPanelH
-        ? { left: r.left, top: r.bottom + 8 }
-        : { left: r.left, bottom: window.innerHeight - r.top + 8 });
-    }
-    setOpen((o) => !o);
-  }, []);
-
   const pick = useCallback((kind: TrackKind) => {
-    setOpen(false);
+    close();
     void addTrackOfKind(kind, exec);
-  }, [exec]);
+  }, [close, exec]);
 
   return (
     <div className="v2-addtrack">
       <button
-        ref={btnRef}
+        ref={anchorRef}
         className={variant === "empty" ? "v2-empty-add" : "v2-lhead v2-lhead-add"}
         data-testid="v2-track-add"
         aria-haspopup="menu"
@@ -310,35 +294,33 @@ function AddTrackMenu({ variant }: { variant: "empty" | "row" }) {
         <span className="v2-lname">Add track</span>
       </button>
       {open && at && (
-        <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={close} />
-          <div className="v2-menu-panel v2-menu-panel-fixed" style={{ top: at.top, bottom: at.bottom, left: at.left }}>
-            <div className="v2-menu v2-menu-rich" role="menu" aria-label="Add track">
-              {TRACK_KINDS.map(({ kind, label, hint }) => (
-                <button
-                  key={kind}
-                  role="menuitem"
-                  // Explicit: the icon is aria-hidden and the visible text is split across
-                  // two spans, so screen readers were announcing these rows unnamed.
-                  aria-label={`${label} track — ${hint}`}
-                  data-testid={`v2-track-add-${kind}`}
-                  onClick={() => pick(kind)}
-                >
-                  <span className="v2-licon" aria-hidden="true">
-                    {/* "tone" is not a track type — it makes an AUDIO track with a tone on
-                        it — so it borrows the waveform icon rather than falling through to
-                        TrackTypeIcon's unknown-type default. */}
-                    <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
-                  </span>
-                  <span className="v2-menu-text">
-                    <span className="v2-menu-label">{label}</span>
-                    <span className="v2-menu-hint">{hint}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
+        <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
+          style={{ top: at.top, bottom: at.bottom, left: at.left }}>
+          <div className="v2-menu v2-menu-rich" role="menu" aria-label="Add track">
+            {TRACK_KINDS.map(({ kind, label, hint }) => (
+              <button
+                key={kind}
+                role="menuitem"
+                // Explicit: the icon is aria-hidden and the visible text is split across
+                // two spans, so screen readers were announcing these rows unnamed.
+                aria-label={`${label} track — ${hint}`}
+                data-testid={`v2-track-add-${kind}`}
+                onClick={() => pick(kind)}
+              >
+                <span className="v2-licon" aria-hidden="true">
+                  {/* "tone" is not a track type — it makes an AUDIO track with a tone on
+                      it — so it borrows the waveform icon rather than falling through to
+                      TrackTypeIcon's unknown-type default. */}
+                  <TrackTypeIcon type={kind === "midi" ? "instrument" : kind === "tone" ? "audio" : kind} />
+                </span>
+                <span className="v2-menu-text">
+                  <span className="v2-menu-label">{label}</span>
+                  <span className="v2-menu-hint">{hint}</span>
+                </span>
+              </button>
+            ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -358,7 +340,9 @@ function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: Sec
 function TrackLaneHeader({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const clearSelection = useStore((s) => s.clearSelection);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
+  const setSelectedClip = useShell((s) => s.setSelectedClip);
   // Only show the preset line when it actually says something. It used to fall back to
   // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
   // it cost the name column a line of vertical space to say nothing.
@@ -373,29 +357,39 @@ function TrackLaneHeader({ track }: { track: Track }) {
   // though unlike a bus deletion it IS a plain undoable Edit mutation — the dialog says so.
   const [confirmRemove, setConfirmRemove] = useState(false);
   const clipCount = track.clips.length;
+  const selectTrack = () => {
+    setSelectedClip(null);
+    clearSelection();
+    setSelectedTrack(track.id);
+  };
 
   return (
     <div
       className={`v2-lhead${sel ? " sel" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-label={`Select track ${track.name}`}
-      aria-pressed={sel}
-      onClick={() => setSelectedTrack(track.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedTrack(track.id); }
-      }}
+      role="group"
+      aria-label={`${track.name} track`}
       data-testid="v2-track-header"
       data-track-id={track.id}
     >
-      <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
-      <span className="v2-lmeta">
-        <span className="v2-lrow">
-          <span className="v2-lname" title={track.name}>{track.name}</span>
+      <button
+        type="button"
+        className="v2-lhead-select"
+        aria-label={`Select track ${track.name}`}
+        aria-pressed={sel}
+        onClick={selectTrack}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(); }
+        }}
+      >
+        <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
+        <span className="v2-lmeta">
+          <span className="v2-lrow">
+            <span className="v2-lname" title={track.name}>{track.name}</span>
+          </span>
+          {preset && <span className="v2-lpreset">{preset}</span>}
         </span>
-        {preset && <span className="v2-lpreset">{preset}</span>}
-      </span>
-      <TrackMeterBar trackId={track.id} />
+        <TrackMeterBar trackId={track.id} />
+      </button>
       <span className="v2-ms">
         <button
           className={`m${track.mute ? " on" : ""}`}

@@ -23,6 +23,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from harness_session import reset_owned_harness_session
+
 SESSION = "verify-lora"
 ADAPTER = os.path.expanduser(os.environ.get(
     "MOSH_LORA_CHECK_ADAPTER", "~/mosh-loras/artifacts/bro-sa3-v2.safetensors"))
@@ -52,7 +54,7 @@ def check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands):
     (fam / f"{name}.json").write_text(json.dumps(
         {"displayName": "Verify Adapter", "trigger": TRIGGER, "notes": "lora_check"}))
 
-    shutil.rmtree(_mosh_base() / SESSION, ignore_errors=True)
+    reset_owned_harness_session(_mosh_base() / "_harness" / SESSION)
 
     out_base = ART / "07_lora_base.wav"
     out_rack = ART / "07_lora_rack.wav"
@@ -100,7 +102,7 @@ def check_lora_rack(ctx, ART, run_script, stats, diff_rms, failed_commands):
 
     # The manifest on disk is the FINAL (rack) render's: loras + trigger + merge timing.
     rack_man = None
-    for m in sorted(glob.glob(str(_mosh_base() / SESSION / "renders" / "*" / "output_manifest.json"))):
+    for m in sorted(glob.glob(str(_mosh_base() / "_harness" / SESSION / "renders" / "*" / "output_manifest.json"))):
         try:
             rack_man = json.loads(Path(m).read_text())
         except json.JSONDecodeError:

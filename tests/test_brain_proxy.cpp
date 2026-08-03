@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "brain/BrainProxy.h"
+#include "engine/SessionPaths.h"
 #include <cstdlib>
 
 // Hermetic coverage for the brain-proxy cutover (docs/brain-proxy/RUNBOOK.md): proxy-URL
@@ -89,11 +90,14 @@ TEST_CASE ("BrainProxy installId is minted once and reused, isolated from the re
     ScopedCleanBrainEnv clean;
     // MOSH_SELFTEST_SESSION mirrors MoshEngine's own hermeticity boundary
     // (src/engine/MoshEngine.cpp) so this never touches ~/Library/Mosh/session/identity.json.
-    ScopedEnv leaf ("MOSH_SELFTEST_SESSION", "session-brainproxy-catch2-test");
+    const auto name = "session-brainproxy-catch2-" + Uuid().toString().substring (0, 8);
+    ScopedEnv leaf ("MOSH_SELFTEST_SESSION", "_harness/" + name);
     auto dir = File::getSpecialLocation (File::userApplicationDataDirectory)
                    .getChildFile ("Mosh")
-                   .getChildFile ("session-brainproxy-catch2-test");
-    dir.deleteRecursively();   // start clean regardless of a prior interrupted run
+                   .getChildFile ("_harness")
+                   .getChildFile (name);
+    REQUIRE (mosh::sessionpaths::createOwnedHarnessSession (
+        File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"), dir));
 
     const auto first = BrainProxy::installId();
     CHECK (first.isNotEmpty());
@@ -102,7 +106,8 @@ TEST_CASE ("BrainProxy installId is minted once and reused, isolated from the re
     const auto second = BrainProxy::installId();
     CHECK (second == first);   // persisted + reused, not re-minted every call
 
-    dir.deleteRecursively();   // leave no trace
+    CHECK (mosh::sessionpaths::resetOwnedHarnessSession (
+        File::getSpecialLocation (File::userApplicationDataDirectory).getChildFile ("Mosh"), dir));
 }
 
 TEST_CASE ("BrainProxy falls through to the direct-provider path when the proxy is unreachable", "[brain][proxy]")

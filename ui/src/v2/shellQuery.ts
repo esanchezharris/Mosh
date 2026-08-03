@@ -1,6 +1,6 @@
 // Dev/e2e-only shell override. Reads a `?shell=v2` / `?shell=classic` query param so
 // `npm run dev` and Playwright can pick a shell per page-load WITHOUT mutating the
-// persisted setting. import.meta.env.DEV is false in the production single-file bundle,
+// persisted setting. The explicit development mode is absent from the production bundle,
 // so this can never affect the shipped app.
 //
 // This file intentionally imports NOTHING from settings/* — settings/effects.ts reads
@@ -11,9 +11,10 @@ export type ShellId = "classic" | "v2";
 
 export function devShellOverride(): ShellId | null {
   // import.meta.env may be undefined in some non-Vite contexts; guard defensively.
-  const dev = typeof import.meta !== "undefined" &&
-    Boolean((import.meta as { env?: { DEV?: boolean; VITE_MOSH_E2E_MOCK?: string } }).env?.DEV ||
-      (import.meta as { env?: { VITE_MOSH_E2E_MOCK?: string } }).env?.VITE_MOSH_E2E_MOCK === "1");
+  const mode = typeof import.meta !== "undefined"
+    ? (import.meta as { env?: { MODE?: string } }).env?.MODE
+    : undefined;
+  const dev = mode === "development" || mode === "e2e" || mode === "test";
   if (!dev) return null;
   try {
     const q = new URLSearchParams(window.location.search).get("shell");

@@ -49,27 +49,32 @@ if [ "$HAVE_CERT" = 1 ] && [ "$HAVE_PROFILE" = 1 ]; then
   echo
   [ -x "$REPO/run-mosh.sh" ] || { echo "✗ $REPO/run-mosh.sh not found/executable" >&2; exit 2; }
 
-  # ── brain key ──────────────────────────────────────────────────────────────
-  # The release SEALS brain.env into the bundle BEFORE signing, so a missing key
-  # cannot be added afterwards without invalidating the signature and redoing
-  # notarization. A stale `export MOSH_BRAIN_ENV=<deleted path>` is a known
-  # landmine here, and `${MOSH_BRAIN_ENV:-default}` does NOT protect against it
-  # (the var is set, just wrong). So validate the target file, don't trust the var.
-  has_keys() { [ -f "$1" ] && [ "$(grep -cE '^(DEEPSEEK|OPENAI|XAI)_API_KEY=.+' "$1" 2>/dev/null)" -gt 0 ]; }
-  if [ -n "${MOSH_BRAIN_ENV:-}" ] && has_keys "${MOSH_BRAIN_ENV}"; then
+  # ── brain proxy ────────────────────────────────────────────────────────────
+  has_proxy() {
+    [ -f "$1" ] \
+      && grep -qE '^MOSH_BRAIN_PROXY_URL=.+' "$1" 2>/dev/null \
+      && grep -qE '^MOSH_BRAIN_PROXY_APIKEY=.+' "$1" 2>/dev/null
+  }
+  has_provider_key() {
+    [ -f "$1" ] && grep -qE '^[[:space:]]*[A-Z0-9_]+_API_KEY[[:space:]]*=[[:space:]]*.+' "$1" 2>/dev/null
+  }
+  if [ -n "${MOSH_BRAIN_ENV:-}" ] && [ -f "${MOSH_BRAIN_ENV}" ]; then
     BRAIN_ENV="$MOSH_BRAIN_ENV"
   else
-    [ -n "${MOSH_BRAIN_ENV:-}" ] && no "ignoring stale MOSH_BRAIN_ENV='$MOSH_BRAIN_ENV' (missing or keyless)"
+    [ -n "${MOSH_BRAIN_ENV:-}" ] && no "ignoring stale MOSH_BRAIN_ENV='$MOSH_BRAIN_ENV' (missing)"
     BRAIN_ENV="$REPO/ui/.env.local"
   fi
-  if has_keys "$BRAIN_ENV"; then
-    ok "brain key source: $BRAIN_ENV ($(grep -cE '^(DEEPSEEK|OPENAI|XAI)_API_KEY=.+' "$BRAIN_ENV") provider key(s))"
+  if has_provider_key "$BRAIN_ENV"; then
+    no "Provider API key found in $BRAIN_ENV — refusing to create a distributable artifact."
+    echo "    Configure MOSH_BRAIN_PROXY_URL and MOSH_BRAIN_PROXY_APIKEY instead."
+    exit 3
+  elif has_proxy "$BRAIN_ENV"; then
+    ok "brain proxy source: $BRAIN_ENV"
   elif [ "${MOSH_ALLOW_NO_BRAIN:-0}" = "1" ]; then
-    no "no provider key found — continuing anyway (MOSH_ALLOW_NO_BRAIN=1)"
+    no "no complete brain proxy found — continuing anyway (MOSH_ALLOW_NO_BRAIN=1)"
   else
-    no "No provider key in $BRAIN_ENV — the notarized bundle would ship brain-less,"
-    echo "    and the key is sealed BEFORE signing, so it can't be added afterwards."
-    echo "    Fix ui/.env.local, or re-run with MOSH_ALLOW_NO_BRAIN=1 to accept it."
+    no "No complete brain proxy in $BRAIN_ENV — the notarized bundle would ship brain-less."
+    echo "    Configure the proxy, or re-run with MOSH_ALLOW_NO_BRAIN=1 to accept it."
     exit 3
   fi
 

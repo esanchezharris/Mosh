@@ -1,4 +1,5 @@
 #include "BrainProxy.h"
+#include "engine/SessionPaths.h"
 
 namespace mosh
 {
@@ -185,15 +186,18 @@ String BrainProxy::installId()
     if (const auto ov = SystemStats::getEnvironmentVariable ("MOSH_BRAIN_INSTALL_ID", {}); ov.isNotEmpty())
         return ov;
 
-    // Same app-data root MoshEngine::MoshEngine uses (src/engine/MoshEngine.cpp):
-    // ~/Library/<Mosh>/<leaf>. MOSH_SELFTEST_SESSION mirrors the engine's own leaf
-    // override so a harness run resolves to the isolated "session-selftest"-style dir
-    // instead of touching the real ~/Library/Mosh/session/identity.json.
+    // This uses SessionPaths before MoshEngine exists because --brain-smoke calls the
+    // proxy directly. An absent `_harness` request can be created and marked; an
+    // existing request is persisted only when it already has the exact marker.
+    // Unsafe or unowned values use per-process safety storage, or an ephemeral ID if
+    // that storage cannot be allocated.
     const auto leaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim();
-    const auto identityFile = File::getSpecialLocation (File::userApplicationDataDirectory)
-                                   .getChildFile ("Mosh")
-                                   .getChildFile (leaf.isNotEmpty() ? leaf : "session")
-                                   .getChildFile ("identity.json");
+    const auto moshDir = mosh::sessionpaths::moshDataDirectory (leaf.isNotEmpty());
+    const auto identityDirectory = mosh::sessionpaths::resolveIdentitySessionDirectory (
+        moshDir, leaf, mosh::sessionpaths::processTag());
+    if (! identityDirectory)
+        return Uuid().toString();
+    const auto identityFile = identityDirectory->getChildFile ("identity.json");
 
     if (identityFile.existsAsFile())
     {
@@ -225,10 +229,8 @@ var BrainProxy::chat (const var& messages, const String& requested)
         auto result = chatViaProxy (proxyUrl(), messages, requested);
         if ((bool) result.getProperty ("ok", false))
             return result;
-        // Fall through to the direct-provider path below (dev-only in practice: a
-        // production build that relies on the proxy carries no bundled keys, so
-        // resolve() below will itself return "no provider configured" — the existing,
-        // already-handled degrade path the UI falls back to a mock brain from).
+        // Fall through to the direct-provider path below. If no complete provider
+        // resolves, the caller receives a setup error and the UI emits no commands.
     }
 
     const auto p = resolve (requested);

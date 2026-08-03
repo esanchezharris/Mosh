@@ -4,6 +4,7 @@
 #include "app/MacStateRestoration.h"
 #include "app/MenuController.h"
 #include "app/SelfTest.h"
+#include "engine/AudioDeviceStartup.h"
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
@@ -11,6 +12,7 @@
 #include "brain/BrainProxy.h"
 #include "telemetry/CrashHandler.h"
 #include "util/Env.h"
+#include <exception>
 #include <iostream>
 #include <thread>
 
@@ -94,6 +96,26 @@ public:
         if (te::PluginManager::startChildProcessPluginScan (commandLine))
             return;
 
+        const auto commandLineParameters =
+            juce::JUCEApplicationBase::getCommandLineParameterArray();
+        if (! commandLineParameters.isEmpty()
+            && commandLineParameters[0] == "--audio-probe")
+        {
+            const auto request = audiostartup::parseProbeRequest (
+                commandLineParameters);
+            if (! request.valid)
+            {
+                setApplicationReturnValue (2);
+                quit();
+                return;
+            }
+            const auto error = audiostartup::runProbeChild (request);
+            std::cout << audiostartup::probeResultLine (request.nonce, error).toStdString();
+            setApplicationReturnValue (error.isEmpty() ? 0 : 1);
+            quit();
+            return;
+        }
+
         // Non-interactive live brain round-trip (no engine/audio needed). Proves the
         // native brain_chat path end-to-end against the real provider resolved from
         // the environment. Prompt overridable via MOSH_BRAIN_SMOKE_PROMPT.
@@ -107,6 +129,7 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool goldenSelfTest = commandLine.contains ("--golden-selftest");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
         const bool voiceSmoke = commandLine.contains ("--voice-smoke"); // headless speech-to-text smoke
@@ -115,8 +138,11 @@ public:
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
         const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
-        const bool headless = undoSelfTest || goldenSelfTest || commandLine.contains ("--selftest");
-        const bool noAudio = envNoAudio || headless || scanDeep || runScript || voiceSmoke;  // device-free harnesses + scan/script/voice utilities
+        const bool headless = undoSelfTest || goldenSelfTest
+                           || commandLine.contains ("--selftest") || audioRecoverySmoke;
+        const bool noAudio = envNoAudio
+                          || (headless && ! audioRecoverySmoke)
+                          || scanDeep || runScript || voiceSmoke;
 
         // SCAN GUARD (tier wall): a deep scan must NEVER warm the generative service.
         // Force MOSH_ENABLE_SA3=0 for THIS process BEFORE MoshOps (and thus jobManager)
@@ -149,13 +175,15 @@ public:
         modes.voiceSmoke     = voiceSmoke;
         modes.demoGui        = demoGui;
         modes.envNoAudio     = envNoAudio;
-        const juce::String sessionBaseName = mosh::sessionpaths::harnessSessionBase (modes);
+        const juce::String sessionBaseName = audioRecoverySmoke
+            ? "session-audio-recovery-smoke"
+            : mosh::sessionpaths::harnessSessionBase (modes);
 
         // Any non-interactive CLI launch (no one to dismiss a dialog) must suppress
         // AppKit's window-restoration "reopen after crash" modal BEFORE the engine ctor
         // pumps the run loop — otherwise a repeated-crash history makes NSPersistentUIRestorer
         // block the run forever (see MacStateRestoration.h). No-op off macOS.
-        if (noAudio || liveAudio || demoGui)
+        if (noAudio || liveAudio || demoGui || audioRecoverySmoke)
             disableAppKitStateRestoration();
 
         // Headless: no audio device, and an isolated cold session so the harness is
@@ -167,14 +195,141 @@ public:
         const bool keepSession = runScript
             && juce::SystemStats::getEnvironmentVariable ("MOSH_RUNSCRIPT_KEEP_SESSION", {}).trim() == "1"
             && juce::SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim().isNotEmpty();
-        engine  = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
-                                                /*freshSession=*/ (noAudio || liveAudio || demoGui) && ! keepSession,
-                                                sessionBaseName);
+        try
+        {
+            engine = std::make_unique<MoshEngine> ((! noAudio) || liveAudio,
+                                                   /*freshSession=*/ (noAudio || liveAudio || demoGui
+                                                                     || audioRecoverySmoke) && ! keepSession,
+                                                   sessionBaseName);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "Mosh startup failed: " << error.what() << std::endl;
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
         moshOps = std::make_unique<MoshOps> (*engine);
         remoteServer = std::make_unique<RemoteCompanionServer> (
             engine->sessionDir().getChildFile ("phone-takes"));
         remoteServer->setCommandHandler ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
         remoteServer->setSnapshotProvider ([this] { return moshOps->snapshot(); });
+
+        if (audioRecoverySmoke)
+        {
+            auto probeTransportSurvivesArgv = [] (const juce::XmlElement* setup)
+            {
+                const auto result = audiostartup::runProbeProcess (
+                    audiostartup::probeChildArguments (
+                        juce::File::getSpecialLocation (juce::File::currentExecutableFile),
+                        juce::Uuid().toString(),
+                        setup,
+                        2,
+                        2,
+                        60000),
+                    audiostartup::kMinTimeoutMs);
+                return result.status == audiostartup::ProbeProcessStatus::timedOut;
+            };
+
+            juce::XmlElement outputOnlySetup ("DEVICESETUP");
+            outputOnlySetup.setAttribute ("audioOutputDeviceName",
+                                          "MacBook Pro Speakers");
+            juce::XmlElement inputOnlySetup ("DEVICESETUP");
+            inputOnlySetup.setAttribute ("audioInputDeviceName", "BlackHole 2ch");
+            const bool defaultArgvRoundTrip = probeTransportSurvivesArgv (nullptr);
+            const bool outputOnlyArgvRoundTrip =
+                probeTransportSurvivesArgv (&outputOnlySetup);
+            const bool inputOnlyArgvRoundTrip =
+                probeTransportSurvivesArgv (&inputOnlySetup);
+
+            auto execute = [this] (const juce::String& name)
+            {
+                auto* command = new juce::DynamicObject();
+                command->setProperty ("command", name);
+                return moshOps->execute (juce::var (command));
+            };
+
+            const auto firstListStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto firstList = execute ("list_audio_devices");
+            const auto firstListElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - firstListStarted;
+            const auto firstData = firstList.getProperty ("data", juce::var());
+            const auto firstTypes = firstData.getProperty ("types", juce::var());
+
+            const auto retryStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto retry = execute ("retry_audio_device");
+            const auto retryElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - retryStarted;
+
+            const auto secondListStarted = juce::Time::getMillisecondCounterHiRes();
+            const auto secondList = execute ("list_audio_devices");
+            const auto secondListElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - secondListStarted;
+            const auto secondData = secondList.getProperty ("data", juce::var());
+            const auto secondTypes = secondData.getProperty ("types", juce::var());
+            const auto retryError = retry.getProperty ("error", juce::var()).toString();
+            const auto timeoutDeviceError = engine->audioDeviceError();
+
+            const auto invalidSetupFile =
+                engine->sessionDir().getChildFile ("audio-device.xml");
+            const bool invalidSetupWritten =
+                invalidSetupFile.replaceWithText ("<NOTDEVICE/>");
+            const auto invalidRetryStarted =
+                juce::Time::getMillisecondCounterHiRes();
+            const auto invalidRetry = execute ("retry_audio_device");
+            const auto invalidRetryElapsedMs =
+                juce::Time::getMillisecondCounterHiRes() - invalidRetryStarted;
+            const auto invalidRetryError =
+                invalidRetry.getProperty ("error", juce::var()).toString();
+
+            const bool pass = (bool) firstList.getProperty ("ok", false)
+                           && defaultArgvRoundTrip
+                           && outputOnlyArgvRoundTrip
+                           && inputOnlyArgvRoundTrip
+                           && ! (bool) firstData.getProperty ("audioEnabled", true)
+                           && firstTypes.isArray() && firstTypes.getArray()->isEmpty()
+                           && firstListElapsedMs < 1000.0
+                           && ! (bool) retry.getProperty ("ok", true)
+                           && retryError.contains ("did not open within")
+                           && retryElapsedMs < 2000.0
+                           && (bool) secondList.getProperty ("ok", false)
+                           && ! (bool) secondData.getProperty ("audioEnabled", true)
+                           && secondTypes.isArray() && secondTypes.getArray()->isEmpty()
+                           && secondListElapsedMs < 1000.0
+                           && timeoutDeviceError.contains ("did not open within")
+                           && invalidSetupWritten
+                           && ! (bool) invalidRetry.getProperty ("ok", true)
+                           && invalidRetryElapsedMs < audiostartup::kMinTimeoutMs
+                           && invalidRetryError.contains ("invalid or too large")
+                           && engine->audioDeviceError().contains ("invalid or too large")
+                           && ! engine->hasAudio();
+
+            auto* evidence = new juce::DynamicObject();
+            evidence->setProperty ("pass", pass);
+            evidence->setProperty ("defaultArgvRoundTrip", defaultArgvRoundTrip);
+            evidence->setProperty ("outputOnlyArgvRoundTrip", outputOnlyArgvRoundTrip);
+            evidence->setProperty ("inputOnlyArgvRoundTrip", inputOnlyArgvRoundTrip);
+            evidence->setProperty ("audioEnabled",
+                                   secondData.getProperty ("audioEnabled", true));
+            evidence->setProperty ("deviceTypeCount",
+                                   secondTypes.isArray() ? secondTypes.getArray()->size() : -1);
+            evidence->setProperty ("firstListElapsedMs", firstListElapsedMs);
+            evidence->setProperty ("retryOk", retry.getProperty ("ok", true));
+            evidence->setProperty ("retryElapsedMs", retryElapsedMs);
+            evidence->setProperty ("retryError", retryError);
+            evidence->setProperty ("secondListElapsedMs", secondListElapsedMs);
+            evidence->setProperty ("invalidSetupRetryOk",
+                                   invalidRetry.getProperty ("ok", true));
+            evidence->setProperty ("invalidSetupRetryElapsedMs",
+                                   invalidRetryElapsedMs);
+            evidence->setProperty ("invalidSetupRetryError", invalidRetryError);
+            evidence->setProperty ("audioDeviceError", engine->audioDeviceError());
+            std::cout << juce::JSON::toString (juce::var (evidence), false).toStdString()
+                      << std::endl;
+            setApplicationReturnValue (pass ? 0 : 1);
+            quit();
+            return;
+        }
 
         // Design-lab feed (opt-in): MOSH_LAB_FEED=1 autostarts the companion server
         // with a stable token (MOSH_LAB_TOKEN, default "mosh-lab") and a 24h TTL so
@@ -287,6 +442,11 @@ public:
         // Wire the swappable seam to the MoshOps spine (the ONLY backend coupling).
         auto& bridge = mainWindow->shell().bridge();
         bridge.setCommandHandler  ([this] (const juce::var& cmd) { return moshOps->execute (cmd); });
+        const auto browserSessionDir = engine->sessionDir();
+        bridge.setAsyncCommandHandler ([browserSessionDir] (const juce::var& cmd)
+        {
+            return MoshOps::executeFileBrowserReadOnly (browserSessionDir, cmd);
+        });
         bridge.setSnapshotProvider([this] { return moshOps->snapshot(); });
         bridge.setRemoteStartHandler ([this] (const juce::var& args) { return remoteServer->startPairing (args); });
         bridge.setRemoteStopHandler  ([this] (const juce::var&) { return remoteServer->stopServer(); });

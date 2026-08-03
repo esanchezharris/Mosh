@@ -110,20 +110,23 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   another session's dev server owns `:5173` — a foreign bundle false-fails *every* spec.
   Same class: `preview_start` resolves `.claude/launch.json` from the *session's* cwd, so a dev
   server can silently serve a different worktree. Probe the served tree before believing a screenshot.
-- **`--selftest` sessions:** headless runs auto-isolate, but an explicit `MOSH_SELFTEST_SESSION`
-  wins **verbatim** — two runs sharing one leaf delete each other's artifacts mid-test.
+- **`--selftest` sessions:** headless runs auto-isolate. An explicit `MOSH_SELFTEST_SESSION`
+  is honored only under `_harness/`. An absent leaf is created and marker-owned by Mosh;
+  an existing leaf is accepted only when it already carries the exact
+  `.mosh-harness-owned-v1` marker. Existing empty, populated, unsafe, escaping,
+  symlinked, or otherwise unowned paths fall back to a unique safety session. Two runs
+  must still use distinct harness leaves.
   `commandLine.contains("--selftest")` is also true for `--selftest-undo`; match undo FIRST.
   ([SLF-CONC-001](docs/worklog/2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md))
-- **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`. There is no
-  sandbox; isolate via `MOSH_SELFTEST_SESSION` or unit-test the pure helper instead.
+- **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`; changing
+  `$HOME` is not a sandbox. Use a unique marker-owned `_harness` leaf or unit-test the
+  pure helper instead.
 - **Branch protection vs the loops:** `enforce_admins` is on, so **`gh pr merge --admin` cannot
   bypass a required check**; `merge-one.sh` waits for the check and merges without `--admin`.
   Don't reintroduce `--admin` — it will just fail.
-  **Since 2026-07-24 the required `cheap gate` context is REMOVED** (GitHub Actions billing is
-  dead — every check fails in 1–3s, which is the tell), so merges go through on the local gate.
-  Verify with `gh api repos/zeke431/Mosh/branches/main/protection`; restore the context when
-  billing recovers. A 1-second "failure" is an outage, not a red test — but read the durations
-  before believing that.
+  GitHub Actions billing recovered on 2026-07-27, so a red hosted check is a real failure again.
+  Verify the current required contexts with
+  `gh api repos/zeke431/Mosh/branches/main/protection`; the local gate remains merge authority.
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.

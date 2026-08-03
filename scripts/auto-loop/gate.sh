@@ -21,6 +21,10 @@ CLASS="${1:?usage: gate.sh <cheap|native> <worktree> [base]}"
 WT="${2:?worktree required}"
 BASE="${3:-origin/main}"
 WT="$(cd "$WT" && pwd)"
+HEAD_SHA="$(git -C "$WT" rev-parse HEAD 2>/dev/null || printf unknown)"
+BASE_SHA="$(git -C "$WT" rev-parse "$BASE" 2>/dev/null || printf unknown)"
+TREE_CLEAN=true
+[ -z "$(git -C "$WT" status --porcelain 2>/dev/null)" ] || TREE_CLEAN=false
 
 al_load_cache_env
 SESS_BASE="$(unique_session "gate")"
@@ -138,7 +142,7 @@ ensure_node_modules() {
 run_py_tests() {
   # Run any test_*.py / *_test.py under dirs that this branch touched (relay/, service/).
   local changed; changed="$( ( cd "$WT" && git diff --name-only "$BASE...HEAD" 2>/dev/null ) || true )"
-  echo "$changed" | grep -qE '^(relay|service)/' || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
+  grep -qE '^(relay|service)/' <<< "$changed" || { emit_step "py_tests" true '{"detail":"no py changes"}'; return 0; }
   local found=0 ok=true failed_tests="" log; log="$(mktemp)"
   local t
   for t in $( cd "$WT" && git ls-files 'relay/*test*.py' 'relay/test_*.py' 'service/**/*_test.py' 'service/scripts/*test*.py' 2>/dev/null | sort -u ); do
@@ -193,12 +197,12 @@ gate_cheap() {
 runbook_advisory() {
   local changed rows=""
   changed="$(cd "$WT" && git diff --name-only "$BASE"...HEAD 2>/dev/null)" || return 0
-  echo "$changed" | grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" && rows="$rows REC-mic,REC-latency,REC-monitor"
-  echo "$changed" | grep -qE "fade|crossfade|Crossfade|Fade" && rows="$rows EAR-fades"
-  echo "$changed" | grep -qiE "warp|stretch|autoTempo" && rows="$rows EAR-warp"
-  echo "$changed" | grep -qE "export_stems|Stem|Renderer|export_audio" && rows="$rows EAR-stems"
-  echo "$changed" | grep -qE "midi_input|MidiInput" && rows="$rows MIDI-in"
-  echo "$changed" | grep -qE "^relay/|multiplayer|LockManager" && rows="$rows MP-two-mac"
+  grep -qE "Record|Take|InputDevice|input_monitor|arm_track|count_in" <<< "$changed" && rows="$rows REC-mic,REC-latency,REC-monitor"
+  grep -qE "fade|crossfade|Crossfade|Fade" <<< "$changed" && rows="$rows EAR-fades"
+  grep -qiE "warp|stretch|autoTempo" <<< "$changed" && rows="$rows EAR-warp"
+  grep -qE "export_stems|Stem|Renderer|export_audio" <<< "$changed" && rows="$rows EAR-stems"
+  grep -qE "midi_input|MidiInput" <<< "$changed" && rows="$rows MIDI-in"
+  grep -qE "^relay/|multiplayer|LockManager" <<< "$changed" && rows="$rows MP-two-mac"
   if [ -n "$rows" ]; then
     emit_step "runbook_advisory" true "{\"note\":\"owner hands-on rows affected:$rows — docs/VERIFICATION.md parity checklist\"}"
   fi
@@ -210,17 +214,23 @@ gate_native() {
   run_parity_checks
   runbook_advisory
 
-  # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step).
-  # Over a symlinked ui/node_modules (new-worktree.sh's cheap-lane speedup) npm reifies
-  # the link away into a partial local install and the build dies mid-ninja with a
-  # missing vite/esbuild — three real gate failures on 2026-07-29 (PRs #489, #490, #503),
-  # each healed by hand the same way. So the native lane de-symlinks unconditionally and
-  # does a real install BEFORE the build; the cheap lane keeps the symlink (its npm use
-  # is read-only). ensure_node_modules can't cover this: its lockfile-drift check passes
-  # a healthy symlink straight through, and healthy-symlink is exactly the broken case here.
+  # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step), and
+  # it only survives a REAL, COMPLETE local ui/node_modules. Two ways it isn't one:
+  #   - a symlink (new-worktree.sh's cheap-lane speedup): npm reifies the link away into a
+  #     partial install and ninja dies on a missing vite/esbuild — PRs #489, #490, #503;
+  #   - absent entirely: new-worktree.sh skips the symlink when the main seat's
+  #     ui/package-lock.json differs from the worktree's, which happens whenever the seat is
+  #     behind origin/main — and a stale seat is the NORMAL state, since merge-one.sh only
+  #     fetches it. Then CMake's npm install builds the partial tree itself — PR #512.
+  # So: de-symlink if needed, then install whenever the deps aren't demonstrably in sync.
+  # (The first version of this guard only handled the symlink case and #512 walked straight
+  # through the hole. The cheap lane keeps the symlink — its npm use is read-only.)
   if [ -L "$WT/ui/node_modules" ]; then
     al_log "native lane: ui/node_modules is a symlink — replacing with a real local install"
     rm -f "$WT/ui/node_modules"
+  fi
+  if [ ! -d "$WT/ui/node_modules" ] || deps_need_install "$WT/ui"; then
+    al_log "native lane: ui/node_modules absent or drifted — installing before the build"
     run_step "npm_ci_native" bash -c 'cd ui && (npm ci --no-audit --no-fund || npm install --no-audit --no-fund)' || return
     deps_write_stamp "$WT/ui"
   fi
@@ -315,7 +325,10 @@ finish() {
     --argjson steps "$steps" --argjson selftest "$SELFTEST_NS" \
     --argjson selftest_failed "$SELFTEST_FMAX" --argjson asserts "$SELFTEST_AMAX" \
     --arg session "$SESS_BASE" --arg port "$PORT" \
+    --arg head_sha "$HEAD_SHA" --arg base_ref "$BASE" --arg base_sha "$BASE_SHA" \
+    --argjson tree_clean "$TREE_CLEAN" \
     '{pass:$pass, class:$class, session:$session, port:$port,
+      head_sha:$head_sha, base_ref:$base_ref, base_sha:$base_sha, tree_clean:$tree_clean,
       selftest:$selftest, selftest_failed:$selftest_failed, asserts:$asserts,
       steps:$steps}'
 }

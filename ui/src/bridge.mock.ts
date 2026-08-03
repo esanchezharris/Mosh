@@ -4,9 +4,9 @@
 // UI runs fully interactive in a plain browser (Vite dev) with no JUCE WebView.
 //
 // This exists ONLY to make the UI iterable with real DOM/CSS introspection — it
-// is NOT the engine and ships nowhere: bridge.ts wires it in solely under
-// import.meta.env.DEV when the real native backend is absent. A production
-// `vite build` (the bundle staged into Mosh.app) strips it entirely.
+// is NOT the engine: bridge.ts enables it only in Vite development or explicit
+// e2e mode when the real native backend is absent. Optimized e2e builds write to
+// dist-e2e; production dist keeps MOCK_ENABLED false.
 //
 // Fidelity rule: the mock speaks the contract, not the engine. It returns the
 // same { ok, command, data } envelopes, emits snapshot_invalidated on structural
@@ -21,7 +21,11 @@ import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
   typeof import.meta !== "undefined" &&
-  Boolean(import.meta.env?.DEV || import.meta.env?.VITE_MOSH_E2E_MOCK === "1");
+  Boolean(
+    import.meta.env?.MODE === "development" ||
+    import.meta.env?.MODE === "e2e" ||
+    import.meta.env?.MODE === "test"
+  );
 
 // ── seed session ─────────────────────────────────────────────────────────────
 
@@ -415,7 +419,7 @@ const listeners = new Map<string, Set<Listener>>();
 const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -532,6 +536,32 @@ function mockAnalysis(line: LyricLine, sheet: LyricSheet) {
     stress: words.map((x) => x.stress).join(""), words, hasGap, analyzed,
     complete: analyzed === "text" && !hasGap, endInDict: !!endWord,
   };
+}
+function mockAnalysisFingerprint(sheet: LyricSheet): string {
+  return JSON.stringify({
+    grid: sheet.grid,
+    topic: sheet.topic,
+    mood: sheet.mood,
+    explicit: sheet.explicit,
+    rhymeStrictness: sheet.rhymeStrictness,
+    styleBias: !!sheet.styleBias,
+    lines: sheet.lines.map((line) => ({
+      index: line.index,
+      role: line.role,
+      seedText: line.seedText,
+      text: line.text,
+      syllableTarget: line.syllableTarget,
+      syllableTol: line.syllableTol,
+      stress: line.stress,
+      rhymeGroup: line.rhymeGroup,
+      rhymeStrictness: line.rhymeStrictness,
+      locked: line.locked,
+    })),
+  });
+}
+function clearAnalysisIfChanged(sheet: LyricSheet, before: string): void {
+  if (mockAnalysisFingerprint(sheet) !== before)
+    sheet.lines.forEach((line) => { delete line.analysis; });
 }
 function emit(type: string, payload?: unknown) {
   const ls = listeners.get("mosh_event");
@@ -843,39 +873,118 @@ function mkMoshFx(type: string): MoshFxReadout | undefined {
 
 // ── command dispatch ─────────────────────────────────────────────────────────
 
+type MockRecordingStop = {
+  applied: boolean;
+  discarded: boolean;
+  clips: { id: string }[];
+  reason?: string;
+};
+
+function finalizeMockRecording(discardRecordings: boolean): MockRecordingStop {
+  if (!snapshot.transport.recording) {
+    emit("transport", snapshot.transport);
+    invalidate();
+    return {
+      applied: false,
+      discarded: discardRecordings,
+      clips: [],
+      reason: "not recording",
+    };
+  }
+  stopPlayback();
+  snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
+  emit("transport", snapshot.transport);
+  if (discardRecordings) {
+    invalidate();
+    return { applied: true, discarded: true, clips: [] };
+  }
+
+  const targets = snapshot.tracks.filter((track) => track.armed);
+  if (targets.length === 0) {
+    invalidate();
+    return {
+      applied: false,
+      discarded: false,
+      clips: [],
+      reason: "no take captured (no armed live input)",
+    };
+  }
+
+  const landed: { id: string }[] = [];
+  for (const track of targets) {
+    const existing = track.clips.find((clip) => clip.takes && clip.takes.length > 0);
+    if (existing && existing.takes) {
+      const index = existing.takes.length;
+      existing.takes.forEach((take) => (take.isCurrent = false));
+      existing.takes.push({ index, description: `Take ${index + 1}`, isCurrent: true });
+      existing.numTakes = existing.takes.length;
+      existing.currentTakeIndex = index;
+      landed.push({ id: existing.id });
+    } else {
+      const clip = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
+      clip.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
+      clip.numTakes = 1;
+      clip.currentTakeIndex = 0;
+      track.clips.push(clip);
+      landed.push({ id: clip.id });
+    }
+  }
+  invalidate();
+  return { applied: true, discarded: false, clips: landed };
+}
+
 function dispatch(command: string, args: Record<string, unknown>): CommandResult {
   switch (command) {
     case "set_transport": {
-      const t = snapshot.transport;
       const action = str(args.action);
+      const shouldFinalize = snapshot.transport.recording
+        && (action === "stop" || action === "toggle" || action === "record" || action === "to_start");
+      if (shouldFinalize) {
+        const stopped = finalizeMockRecording(false);
+        if (!stopped.applied) return err(command, stopped.reason ?? "could not land recording take");
+
+        const next = { ...snapshot.transport };
+        if (action === "to_start") next.position = 0;
+        if ("position" in args) next.position = Math.max(0, num(args.position));
+        if ("loop" in args) {
+          next.looping = Boolean(args.loop);
+          next.loopStart = num(args.loopStart, next.loopStart);
+          next.loopEnd = num(args.loopEnd, next.loopEnd);
+        }
+        snapshot.transport = next;
+        emit("transport", snapshot.transport);
+        return ok(command, snapshot.transport);
+      }
+
+      const t = snapshot.transport;
       if (action === "toggle") {
         const playing = !t.playing;
         snapshot.transport = { ...t, playing };
         playing ? startPlayback() : stopPlayback();
         emit("transport", snapshot.transport);
-        return ok(command, { playing });
+        return ok(command, snapshot.transport);
       }
       if (action === "stop") {
         stopPlayback();
         snapshot.transport = { ...t, playing: false, recording: false, position: num(args.position, 0) };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "to_end") {
         snapshot.transport = { ...t, position: snapshot.session.length ?? 16 };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "to_start") {
         snapshot.transport = { ...t, position: 0 };
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       if (action === "record") {
         snapshot.transport = { ...t, recording: !t.recording, playing: true };
         startPlayback();
         emit("transport", snapshot.transport);
-        return ok(command);
+        return ok(command, snapshot.transport);
       }
       // direct field sets: position / loop
       const next: Transport = { ...t };
@@ -883,7 +992,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if ("loop" in args) { next.looping = Boolean(args.loop); next.loopStart = num(args.loopStart, t.loopStart); next.loopEnd = num(args.loopEnd, t.loopEnd); }
       snapshot.transport = next;
       emit("transport", snapshot.transport);
-      return ok(command);
+      return ok(command, snapshot.transport);
     }
 
     case "create_track": {
@@ -1148,12 +1257,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!t?.lyricSheet) return err(command, "track has no lyric sheet");
       pushUndo();
       const s = t.lyricSheet;
+      const analysisBefore = mockAnalysisFingerprint(s);
       if (args.grid != null) s.grid = str(args.grid, s.grid);
       if (args.topic != null) s.topic = str(args.topic, s.topic);
       if (args.mood != null) s.mood = str(args.mood, s.mood);
       if (args.explicit != null) s.explicit = str(args.explicit, s.explicit);
       if (args.rhymeStrictness != null) s.rhymeStrictness = str(args.rhymeStrictness, s.rhymeStrictness);
       if (args.styleBias != null) s.styleBias = !!args.styleBias;
+      clearAnalysisIfChanged(s, analysisBefore);
       invalidate(); return ok(command);
     }
     case "set_lyric_line": {
@@ -1164,6 +1275,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const lines = t.lyricSheet.lines;
       if (idx > lines.length) return err(command, "lineIndex out of range");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(t.lyricSheet);
       let line = lines.find((l) => l.index === idx);
       if (!line) {
         line = { index: idx, role: str(args.role, "verse"), seedText: "", text: "", syllableTarget: 0, syllableTol: 1, stress: "", rhymeGroup: "", rhymeStrictness: "", locked: false, sectionId: "", status: "empty" };
@@ -1191,6 +1303,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // while the producer edits the grid (the +/- syllable stepper) — confirm_skeleton flips it.
       if ((args.text != null || args.seedText != null) && line.status !== "skeleton" && (line.text || line.seedText)) line.status = "seed";
       refreshSingable(line);
+      clearAnalysisIfChanged(t.lyricSheet, analysisBefore);
       invalidate(); return ok(command, { lineIndex: idx });
     }
     case "remove_lyric_line": {
@@ -1200,8 +1313,10 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const at = t.lyricSheet.lines.findIndex((l) => l.index === idx);
       if (at < 0) return err(command, "no line at index " + idx);
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(t.lyricSheet);
       t.lyricSheet.lines.splice(at, 1);
       t.lyricSheet.lines.forEach((l, i) => (l.index = i)); // keep dense
+      clearAnalysisIfChanged(t.lyricSheet, analysisBefore);
       invalidate(); return ok(command);
     }
     case "get_rhymes": {
@@ -1243,12 +1358,14 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "accept_lyric_proposal": {
       const t = findTrack(str(args.trackId));
-      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      const sheet = t?.lyricSheet;
+      const l = sheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
       const pi = num(args.proposalIndex, 0);
-      if (!l) return err(command, "no line at index");
+      if (!sheet || !l) return err(command, "no line at index");
       const p = l.proposals?.[pi];
       if (!p) return err(command, "no proposal at that index");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(sheet);
       l.text = p.text;
       l.status = "asserted";
       // Native parity (approximation — the mock has no heard blob): a line whose take
@@ -1256,21 +1373,25 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       l.origin = l.origin === "partial" ? "mixed" : "generated";
       delete l.proposals;
       refreshSingable(l);
+      clearAnalysisIfChanged(sheet, analysisBefore);
       mockCorpusLines += 1; // §7 — auto-accumulate the accepted line into the voice corpus
       invalidate();
       return ok(command, { text: p.text });
     }
     case "assert_lyric_line": {
       const t = findTrack(str(args.trackId));
-      const l = t?.lyricSheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
-      if (!l) return err(command, "no line at index");
+      const sheet = t?.lyricSheet;
+      const l = sheet?.lines.find((x) => x.index === num(args.lineIndex, -1));
+      if (!sheet || !l) return err(command, "no line at index");
       const text = args.text != null ? str(args.text) : l.text;
       if (!completeLyricText(text)) return err(command, "line needs complete words before it can be asserted");
       pushUndo();
+      const analysisBefore = mockAnalysisFingerprint(sheet);
       l.text = text.trim();
       l.status = "asserted";
       delete l.proposals;
       refreshSingable(l);
+      clearAnalysisIfChanged(sheet, analysisBefore);
       invalidate();
       return ok(command, { text: l.text });
     }
@@ -1690,11 +1811,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // session state: arming flags the track; stop_recording lands a take on each
     // armed track. Repeat recordings stack onto the same clip's native take tree
     // (the UI shows lanes once a clip has ≥2 takes); set_current_take / keep_take
-    // act on that tree. arm/monitor mirror the backend's transport-config nature
-    // (non-undoable); landing/comping a take IS a document edit (undoable).
+    // act on that tree. arm, monitor, and take landing mirror the backend's
+    // non-undoable recording lifecycle; later comp selection remains undoable.
     case "arm_track": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
-      t.armed = Boolean(args.armed); invalidate(); return ok(command, { armed: t.armed });
+      t.armed = Boolean(args.armed); invalidate();
+      return ok(command, { trackId: t.id, armed: t.armed, applied: true });
     }
     case "set_input_monitor": {
       const t = findTrack(str(args.trackId)); if (!t) return err(command, "track not found");
@@ -1710,33 +1832,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command, { trackId: t.id, mode: t.monitor, applied: true });
     }
     case "stop_recording": {
-      stopPlayback();
-      snapshot.transport = { ...snapshot.transport, playing: false, recording: false };
-      emit("transport", snapshot.transport);
-      if (Boolean(args.discardRecordings)) { invalidate(); return ok(command, { clips: [] }); }
-      pushUndo(); // bracket only the actual take landing (the undoable document edit)
-      const armed = snapshot.tracks.filter((t) => t.armed);
-      const targets = armed.length ? armed : snapshot.tracks[0] ? [snapshot.tracks[0]] : [];
-      const landed: { id: string }[] = [];
-      for (const t of targets) {
-        // Stack onto an existing take-bearing clip if present, else start one.
-        const existing = t.clips.find((c) => c.takes && c.takes.length > 0);
-        if (existing && existing.takes) {
-          const idx = existing.takes.length;
-          existing.takes.forEach((tk) => (tk.isCurrent = false));
-          existing.takes.push({ index: idx, description: `Take ${idx + 1}`, isCurrent: true });
-          existing.numTakes = existing.takes.length;
-          existing.currentTakeIndex = idx;
-          landed.push({ id: existing.id });
-        } else {
-          const c = waveClip("take", Math.max(0, snapshot.transport.position - 2), 2);
-          c.takes = [{ index: 0, description: "Take 1", isCurrent: true }];
-          c.numTakes = 1; c.currentTakeIndex = 0;
-          t.clips.push(c);
-          landed.push({ id: c.id });
-        }
-      }
-      invalidate(); return ok(command, { clips: landed });
+      return ok(command, finalizeMockRecording(Boolean(args.discardRecordings)));
     }
     case "list_takes": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");

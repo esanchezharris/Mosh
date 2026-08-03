@@ -48,8 +48,8 @@ describe("v2 timeline clip drag — time-axis guard", () => {
   let root: Root;
   let exec: ReturnType<typeof vi.fn>;
 
-  const mount = () => {
-    useStore.setState({ snapshot: SNAPSHOT, snap: true, snapDivision: "1/4", pxPerSec: PX_PER_SEC, tool: "move", exec });
+  const mount = (snap = true, snapDivision: "bar" | "1/4" | "1/8" | "1/16" | "1/32" = "1/4") => {
+    useStore.setState({ snapshot: SNAPSHOT, snap, snapDivision, pxPerSec: PX_PER_SEC, tool: "move", exec });
     act(() => root.render(React.createElement(ClipView, { clip: CLIP, trackType: "audio", snapshot: SNAPSHOT })));
   };
 
@@ -58,7 +58,7 @@ describe("v2 timeline clip drag — time-axis guard", () => {
    * `classifyClipRegion` would read as "all edge" (⇒ trim, not move), so the clip
    * is given a real width first and the press starts well inside the body.
    */
-  const dragClip = (dxPx: number, dyPx: number) => {
+  const dragClip = (dxPx: number, dyPx: number, altKey = false) => {
     const el = host.querySelector('[data-testid="v2-clip"]') as HTMLElement | null;
     if (!el) throw new Error("v2 clip did not render");
     el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 60, width: 400, height: 60, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
@@ -71,13 +71,23 @@ describe("v2 timeline clip drag — time-axis guard", () => {
       el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 4, button: 0, clientX: x0, clientY: y0 }));
     });
     act(() => {
-      el.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 4, clientX: x0 + dxPx, clientY: y0 + dyPx, buttons: 1 }));
+      el.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 4, clientX: x0 + dxPx, clientY: y0 + dyPx, buttons: 1, altKey }));
     });
     act(() => {
       el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 4, clientX: x0 + dxPx, clientY: y0 + dyPx }));
     });
     const call = exec.mock.calls.find((c) => c[0] === "move_clip");
     return call ? (call[1] as { start: number }) : undefined;
+  };
+
+  const dragRightEdge = (dxPx: number, altKey = false) => {
+    const el = host.querySelector('[data-testid="v2-clip"]') as HTMLElement;
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 60, width: 400, height: 60, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const x0 = 399, y0 = 30;
+    act(() => { el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 12, button: 0, clientX: x0, clientY: y0 })); });
+    act(() => { el.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 12, clientX: x0 + dxPx, clientY: y0, buttons: 1, altKey })); });
+    act(() => { el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 12, clientX: x0 + dxPx, clientY: y0 })); });
+    return exec.mock.calls.find((c) => c[0] === "trim_clip")?.[1] as { length?: number } | undefined;
   };
 
   beforeEach(() => {
@@ -110,6 +120,30 @@ describe("v2 timeline clip drag — time-axis guard", () => {
     mount();
     // One grid cell to the right: 1.15 + 0.5 = 1.65, which the 0.5s grid rounds to 1.5.
     expect(dragClip(GRID_SEC * PX_PER_SEC, 0)?.start).toBeCloseTo(1.5, 6);
+  });
+
+  it("moves freely when snap is off", () => {
+    mount(false);
+    expect(dragClip(GRID_SEC * PX_PER_SEC, 0)?.start).toBeCloseTo(OFF_GRID_START + GRID_SEC, 6);
+  });
+
+  it("uses the selected musical division", () => {
+    mount(true, "1/8");
+    // At 120 BPM an eighth note is 0.25 seconds: raw 1.65 rounds to 1.75.
+    expect(dragClip(GRID_SEC * PX_PER_SEC, 0)?.start).toBeCloseTo(1.75, 6);
+  });
+
+  it("Option-drag temporarily bypasses snap without changing the toggle", () => {
+    mount(true, "1/4");
+    expect(dragClip(GRID_SEC * PX_PER_SEC, 0, true)?.start).toBeCloseTo(OFF_GRID_START + GRID_SEC, 6);
+    expect(useStore.getState().snap).toBe(true);
+  });
+
+  it("Option-drag bypasses snap for edge trims too", () => {
+    mount(true, "1/4");
+    // Original end 5.15 + 0.5s = 5.65. Free placement keeps the 4.5s length;
+    // the normal quarter-note grid would round the end to 5.5 (length 4.35).
+    expect(dragRightEdge(GRID_SEC * PX_PER_SEC, true)?.length).toBeCloseTo(4.5, 6);
   });
 
   // EDGECASE_SWEEP_V2_2026-07-18 L3 — interrupted drags. A pointercancel (system

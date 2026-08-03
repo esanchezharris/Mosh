@@ -24,10 +24,14 @@ export type TelemetrySlice = {
   // whole tree no longer re-renders 30×/s). Seeded from the snapshot on refresh
   // for the structural fields (recording / loop region).
   transport: Transport;
+  reconcileTransport: (transport: Partial<Transport>) => void;
 };
 
-export const createTelemetrySlice: StateCreator<State, [], [], TelemetrySlice> = () => ({
+export const createTelemetrySlice: StateCreator<State, [], [], TelemetrySlice> = (set) => ({
   levels: { tracks: {}, master: { l: -100, r: -100 } },
   spectrum: { bands: [], level: 0, flux: 0 },
   transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+  reconcileTransport: (transport) => set((state) => ({
+    transport: { ...state.transport, ...transport },
+  })),
 });

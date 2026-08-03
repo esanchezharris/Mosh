@@ -98,7 +98,7 @@ function runScript(lines: Cmd[], session: string): RunOut {
       MOSH_ENABLE_TRANSFORM: "0",
       MOSH_RUN_SCRIPT: spath,
       MOSH_RUN_SCRIPT_OUT: opath,
-      MOSH_SELFTEST_SESSION: session,
+      MOSH_SELFTEST_SESSION: session.startsWith("_harness/") ? session : `_harness/${session}`,
     },
     encoding: "utf8",
     timeout: 180_000,

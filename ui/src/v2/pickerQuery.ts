@@ -6,14 +6,16 @@
 // remembers to seed a flag". That also means the picker itself would be untestable, so
 // `?picker=1` opts a single spec back in.
 //
-// import.meta.env.DEV is false in the production single-file bundle, so this can never
+// The explicit development mode is absent from the production bundle, so this can never
 // affect the shipped app. Kept dependency-free for the same reason shellQuery.ts is.
 
 export function devPickerOverride(): boolean {
   const env = typeof import.meta !== "undefined"
-    ? (import.meta as { env?: { DEV?: boolean; VITE_MOSH_E2E_MOCK?: string } }).env
+    ? (import.meta as { env?: { MODE?: string } }).env
     : undefined;
-  const dev = Boolean(env?.DEV || env?.VITE_MOSH_E2E_MOCK === "1");
+  const dev = Boolean(
+    env?.MODE === "development" || env?.MODE === "e2e" || env?.MODE === "test"
+  );
   if (!dev) return false;
   try {
     return new URLSearchParams(window.location.search).get("picker") === "1";

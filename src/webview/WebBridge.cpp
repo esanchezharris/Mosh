@@ -175,6 +175,27 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                         args[0].getProperty ("command", juce::var()).toString());
                     mosh::telemetry::Breadcrumbs::record (safeName);
                     mosh::telemetry::Telemetry::onCommand (safeName);
+
+                    // A directory iterator can block on a large folder, a cloud
+                    // placeholder, or a disconnected volume. list_directory is the
+                    // one MoshOps command explicitly implemented as engine-free,
+                    // bounded read-only I/O, so dispatch it on a worker and resolve
+                    // its native Promise back on the message thread. All mutations
+                    // remain on the ordinary synchronous MoshOps seam below.
+                    if (safeName == "list_directory" && asyncCommandHandler != nullptr)
+                    {
+                        auto handler = asyncCommandHandler;
+                        const auto command = args[0];
+                        juce::Thread::launch ([handler, command, completion]() mutable
+                        {
+                            auto result = handler (command);
+                            juce::MessageManager::callAsync ([completion, result]() mutable
+                            {
+                                completion (result);
+                            });
+                        });
+                        return;
+                    }
                     completion (commandHandler (args[0]));
                 }
                 else
@@ -216,7 +237,7 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
         // proxy). Keys live in the environment, never in the WebView. The HTTP call
         // blocks, so it runs off the message thread and resolves the promise back on
         // it. Returns { ok, content, ... } or { ok:false, error } — bridge.ts throws
-        // on the error shape so the UI falls back to the mock brain (as in dev).
+        // on the error shape so packaged callers fail visibly without commands.
         .withNativeFunction (
             juce::Identifier ("brain_chat"),
             [] (const juce::Array<juce::var>& args,

@@ -11,7 +11,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 
 import pytest  # noqa: E402
-from server import make_server, FixedWindowLimiter  # noqa: E402
+from server import make_server, FixedWindowLimiter, RelayState  # noqa: E402
 
 
 @pytest.fixture()
@@ -85,6 +85,42 @@ def test_full_room_rejected(relay):
     status, body = _post(relay, "/mp/join", {"code": code, "peerId": "c"})
     assert status == 409
     assert "full" in body["error"]
+
+
+def test_events_expire_a_silent_peer_and_free_its_slot_and_lock():
+    clk = [1000.0]
+    state = RelayState(now_fn=lambda: clk[0], peer_lease_s=10)
+    httpd, port = make_server(0, state=state)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+    try:
+        _, created = _post(base, "/mp/create", {"peerId": "host", "name": "Host"})
+        code = created["code"]
+        _post(base, "/mp/join", {"code": code, "peerId": "guest", "name": "Guest"})
+        _post(base, "/mp/lock", {"code": code, "peerId": "guest", "key": "guest-track"})
+
+        clk[0] += 6
+        _get(base, f"/mp/events?code={code}&peerId=host&since=0")  # host stays live
+        clk[0] += 5
+        _, host_view = _get(base, f"/mp/events?code={code}&peerId=host&since=0")
+
+        assert set(host_view["peers"]) == {"host"}
+        assert "guest-track" not in host_view["locks"]
+        try:
+            _get(base, f"/mp/events?code={code}&peerId=guest&since=0")
+            assert False, "expired guest must not resume without joining"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+
+        status, joined = _post(base, "/mp/join", {
+            "code": code, "peerId": "replacement", "name": "New peer"
+        })
+        assert status == 200
+        assert set(joined["peers"]) == {"host", "replacement"}
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_join_unknown_room(relay):

@@ -5,6 +5,7 @@
 
 import { commandCatalogPrompt, AGENT_COMMAND_MAP } from "./commands";
 import { retrieveCards, knowledgePromptSection } from "./knowledge";
+import { MUSICAL_TIME_RULE } from "./musicalTime";
 import { renderSession } from "./sessionRender";
 import type { Snapshot } from "../types";
 import type { AgentCommandCall } from "./executor";
@@ -29,6 +30,7 @@ export const DEFAULT_RULES = [
   "Rules:",
   "- Use the REAL ids from the session below for trackId/clipId. Never invent ids or commands.",
   '- trackId/clipId are STRING ids: match one from the session exactly and pass it as a JSON string, e.g. "trackId": "17" — never the bare number 17, and never with extra quote characters inside the value.',
+  MUSICAL_TIME_RULE,
   "- One request can produce several commands (they apply together as one undoable change).",
   "- To re-imagine PART of the song (e.g. \"rework the hook\"), scope a render to that SECTION: create_render_layer on the wave clip under the section with regionStart/regionEnd in SECONDS (beats × 60 ÷ tempo), then render_layer.",
   "- If the request is unclear or needs info you don't have, set intent HUH and ask in `say` — don't guess.",

@@ -37,7 +37,8 @@ SERVICE_HOST = os.environ.get("MOSH_SERVICE_HOST", "127.0.0.1")
 SERVICE_PORT = int(os.environ.get("MOSH_SERVICE_PORT", "8770"))
 SERVICE_URL = f"http://{SERVICE_HOST}:{SERVICE_PORT}"
 RUN_STAMP = datetime.now().strftime('%Y%m%d-%H%M%S')
-SESSION_NAME = os.environ.get("MOSH_SELFTEST_SESSION", f"macos-ui-automation-{RUN_STAMP}")
+_SESSION_NAME = os.environ.get("MOSH_SELFTEST_SESSION", f"macos-ui-automation-{RUN_STAMP}")
+SESSION_NAME = _SESSION_NAME if _SESSION_NAME.startswith("_harness/") else f"_harness/{_SESSION_NAME}"
 COMMAND_LOG = Path(os.environ.get(
     "MOSH_COMMAND_LOG",
     Path.home() / "Library/Mosh" / SESSION_NAME / "mosh-log.jsonl",

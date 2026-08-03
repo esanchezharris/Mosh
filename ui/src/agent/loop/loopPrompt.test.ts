@@ -188,8 +188,12 @@ describe("legacy prompt byte-stability pin", () => {
     // richer sessions also gain the tempo map, buses and per-track pan/sends. The
     // "exactly two added lines" claim is not just prose: the test above pins the
     // fixture's FULL rendered block.
-    // Previous pin: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
-    expect(hash).toBe("a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83");
+    // Previous pins:
+    // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
+    // - pre-musical-time contract: a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
+    // The current pin intentionally includes the shared beat-offset rule and the
+    // explicit create_section/move_section catalog wording from issue #539.
+    expect(hash).toBe("e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

@@ -9,6 +9,7 @@
 #   PP_SKIP_VITEST=1   skip the UI unit tests (faster)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+source "$ROOT/scripts/lib/harness-session.sh"
 cd "$ROOT"
 
 BIN="${MOSH_BIN:-$(find "$ROOT/build-macos-arm64-release" -name Mosh -path '*Mosh.app/Contents/MacOS/*' -type f 2>/dev/null | head -1)}"
@@ -25,7 +26,9 @@ echo
 
 # 1) Command-surface selftest (isolated session, headless).
 echo "[1/4] command-surface selftest…"
-S="session-preflight-$$"; rm -rf "$HOME/Library/Mosh/$S" "$HOME/Library/Mosh/${S}-undo" 2>/dev/null
+S="_harness/session-preflight-$$"
+mosh_reset_owned_harness_session "$S"
+mosh_reset_owned_harness_session "${S}-undo"
 ST_LOG="$(mktemp -t pp-pf-selftest.XXXX.log)"
 if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$S" "$BIN" --selftest >"$ST_LOG" 2>&1; then
   note_pass "selftest — $(grep -oE '[0-9]+/[0-9]+ checks passed' "$ST_LOG" | tail -1)"

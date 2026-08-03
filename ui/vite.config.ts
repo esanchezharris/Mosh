@@ -1,54 +1,19 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { viteSingleFile } from "vite-plugin-singlefile";
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { installId } from "./src/sessionIdentity";
 
 // Per-install id sent to the brain PROXY (supabase/functions/brain, see
 // docs/brain-proxy/RUNBOOK.md) for its daily token-cap bookkeeping — never a secret,
-// just a bucket key. Reused from the SAME ~/Library/Mosh/<session>/identity.json
-// "uuid" field src/brain/BrainProxy.cpp's installId() and service/brain_client.py's
-// _install_id() read/write, so whichever of the three processes runs first mints it
-// and the others converge on it. MOSH_SELFTEST_SESSION mirrors the native harness's
-// own isolation leaf (unset in normal dev use -> the real "session" dir); unset in
-// dev, this whole module is unreachable anyway (proxy mode is opt-in below).
-let _cachedInstallId: string | null = null;
-function installId(env: Record<string, string>): string {
-  if (env.MOSH_BRAIN_INSTALL_ID) return env.MOSH_BRAIN_INSTALL_ID;
-  if (_cachedInstallId) return _cachedInstallId;
-  const leaf = (env.MOSH_SELFTEST_SESSION || "").trim() || "session";
-  const dir = join(homedir(), "Library", "Mosh", leaf);
-  const file = join(dir, "identity.json");
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf-8"));
-    if (typeof parsed.uuid === "string" && parsed.uuid) {
-      const uuidValue: string = parsed.uuid;   // JSON.parse is `any` — pin the type explicitly
-      _cachedInstallId = uuidValue;
-      return uuidValue;
-    }
-  } catch {
-    /* file absent/unreadable/malformed -> mint one below */
-  }
-  const fresh = randomUUID();
-  try {
-    if (!existsSync(file)) {
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(file, JSON.stringify({ uuid: fresh }));
-    }
-  } catch {
-    /* best-effort persistence only; an ephemeral id still lets the request through */
-  }
-  _cachedInstallId = fresh;
-  return fresh;
-}
-
+// just a bucket key. Normal dev uses the owner session; a harness persists only when
+// its exact ownership marker exists. Unsafe explicit values remain ephemeral and
+// cannot write owner or arbitrary identity files.
 // Brain proxy (dev) — keys live ONLY here (server side); the browser talks to
 // same-origin /api/brain/* and never sees a credential. All three providers speak
 // OpenAI-compatible /chat/completions. Mirrors design-lab/playground/vite.config.js.
 // In the packaged app there is no Vite; a native brain_chat proxy serves the same
-// route (see bridge.brainChat). With no keys set, the UI falls back to a mock brain.
+// route (see bridge.brainChat). Keyless Vite dev may use the demo brain; packaged
+// builds fail visibly and never substitute mock commands.
 //
 // PROXY CUTOVER (docs/brain-proxy/RUNBOOK.md): when MOSH_BRAIN_PROXY_URL is set (in
 // ui/.env.local, same as the provider keys), /api/brain/chat forwards to the deployed
@@ -153,12 +118,21 @@ function moshiBrain(env: Record<string, string>): Plugin {
 // external module scripts). base: "./" keeps refs origin-free. 03 / 06 §1.
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), ""); // "" → load ALL keys incl. unprefixed; SERVER-SIDE only, never bundled
+  if (command === "build" && mode !== "production" && mode !== "e2e") {
+    throw new Error(`${mode} mode is forbidden for packaged builds; use production or explicit e2e mode`);
+  }
+  if (command === "build" && mode !== "e2e" && process.env.NODE_ENV === "development") {
+    throw new Error("NODE_ENV=development is forbidden for packaged builds; unset it or use explicit e2e mode");
+  }
+  if (command === "build" && mode !== "e2e" && env.VITE_MOSH_E2E_MOCK) {
+    throw new Error("VITE_MOSH_E2E_MOCK is forbidden for packaged builds; use --mode e2e for browser-only test bundles");
+  }
   const plugins: Plugin[] = [react(), moshiBrain(env)];
   if (command === "build") plugins.splice(1, 0, viteSingleFile());
   return {
     plugins,
     base: "./",
-    build: { outDir: "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
+    build: { outDir: mode === "e2e" ? "dist-e2e" : "dist", emptyOutDir: true, target: "es2020", sourcemap: false },
     server: { port: 5173, strictPort: true },
   };
 });

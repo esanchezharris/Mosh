@@ -9,7 +9,7 @@
 // lives in the context menu instead of a split-tool click. Selection routes through the
 // store (so multiplayer broadcast/lock-claim still fire).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
 import { useSettings } from "../../settings/store";
@@ -57,6 +57,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
+  const transportPosition = useStore((s) => s.transport.position);
   const setSelectedClip = useShell((s) => s.setSelectedClip);
 
   const ensurePeaks = useStore((s) => s.ensurePeaks);
@@ -79,7 +80,8 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const [preview, setPreview] = useState<DragPos | null>(null);
   const drag = useRef<{ kind: DragKind; startX: number; startY: number; engaged: boolean; orig: DragPos } | null>(null);
   const lastUp = useRef<number | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; time: number } | null>(null);
+  const clipRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; time: number; splitLabel: string } | null>(null);
   useEffect(() => { setPreview(null); }, [clip.start, clip.length, clip.offset]);
 
   // L3 (EDGECASE_SWEEP_V2_2026-07-18) — abandon an interrupted drag. Without this, a
@@ -106,6 +108,23 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const kind = clip.type === "wave" ? "wave" : clip.type === "midi" ? (drumClip ? "drum" : "midi") : "block";
 
   const selectClip = (additive: boolean) => { select([clip.id], additive); setSelectedClip(clip.id); };
+  const closeMenu = (restoreFocus: boolean) => {
+    setMenu(null);
+    if (restoreFocus) window.setTimeout(() => clipRef.current?.focus(), 0);
+  };
+  const openKeyboardMenu = () => {
+    const rect = clipRef.current?.getBoundingClientRect();
+    const playheadInside = transportPosition > clip.start && transportPosition < clip.start + clip.length;
+    const rawTime = playheadInside ? transportPosition : clip.start + clip.length / 2;
+    const snappedTime = snapTime(rawTime);
+    const splitTime = snappedTime > clip.start && snappedTime < clip.start + clip.length ? snappedTime : rawTime;
+    setMenu({
+      x: (rect?.left ?? 0) + Math.min(24, (rect?.width ?? 0) / 2),
+      y: (rect?.top ?? 0) + Math.min(24, (rect?.height ?? 0) / 2),
+      time: splitTime,
+      splitLabel: playheadInside ? "Split at playhead" : "Split at clip midpoint",
+    });
+  };
   const edgeGrab = liveFeel().edgeGrabPx;
 
   const regionOf = (e: React.PointerEvent | React.MouseEvent) => {
@@ -153,14 +172,18 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     // silently straightened to the grid by a drag that never really travelled.
     if (Math.abs(dx) <= threshold) { setPreview(null); return; }
     const delta = pxToSec(dx), o = d.orig;
+    // Option is the temporary, gesture-local snap bypass. Read it on every move so
+    // the producer can press or release the modifier while already dragging; the
+    // shared snap toggle/division remains unchanged for the next edit.
+    const gestureTime = (raw: number) => e.altKey ? raw : snapTime(raw);
     if (d.kind === "move") {
-      setPreview({ ...o, start: Math.max(0, snapTime(o.start + delta)) });
+      setPreview({ ...o, start: Math.max(0, gestureTime(o.start + delta)) });
     } else if (d.kind === "trim-r" || d.kind === "stretch") {
       // Both drag the right edge to a new length; the commit differs (trim vs warp).
-      const end = snapTime(o.start + o.length + delta);
+      const end = gestureTime(o.start + o.length + delta);
       setPreview({ ...o, length: Math.max(MIN_LEN, end - o.start) });
     } else {
-      const start = Math.max(0, Math.min(o.start + o.length - MIN_LEN, snapTime(o.start + delta)));
+      const start = Math.max(0, Math.min(o.start + o.length - MIN_LEN, gestureTime(o.start + delta)));
       const used = start - o.start;
       setPreview({ start, length: o.length - used, offset: Math.max(0, o.offset + used) });
     }
@@ -208,14 +231,35 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     if (action !== EA.CONTEXT_MENU) return;
     e.preventDefault();
     selectClip(false);
-    setMenu({ x: e.clientX, y: e.clientY, time: snapTime(clip.start + pxToSec(localX)) });
+    const rawTime = clip.start + pxToSec(localX);
+    setMenu({ x: e.clientX, y: e.clientY, time: e.altKey ? rawTime : snapTime(rawTime), splitLabel: "Split here" });
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      selectClip(e.shiftKey);
+      return;
+    }
+    if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectClip(false);
+      openKeyboardMenu();
+    }
   };
 
   return (
     <div
+      ref={clipRef}
       className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
       style={{ left, width }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
+      onKeyDown={onKeyDown}
+      role="button" tabIndex={0} aria-label={`${clip.name} ${kind} clip`} aria-pressed={selected}
+      aria-haspopup="menu" aria-expanded={menu !== null}
       data-testid="v2-clip" data-clip-id={clip.id} title={clip.name}
     >
       {clip.type === "wave" && <ClipWave peaks={peaks} width={width} />}
@@ -239,15 +283,15 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       <div className="v2-trim l" style={{ width: edgeGrab }} />
       <div className="v2-trim r" style={{ width: edgeGrab }} />
       {menu && (
-        <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} onClose={() => setMenu(null)}
+        <ClipMenu clip={clip} x={menu.x} y={menu.y} time={menu.time} splitLabel={menu.splitLabel} onClose={closeMenu}
           drumClip={drumClip} beatsPerBar={meterOf(snapshot).num} />
       )}
     </div>
   );
 }
 
-function ClipMenu({ clip, x, y, time, onClose, drumClip, beatsPerBar }: {
-  clip: Clip; x: number; y: number; time: number; onClose: () => void;
+function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar }: {
+  clip: Clip; x: number; y: number; time: number; splitLabel: string; onClose: (restoreFocus: boolean) => void;
   drumClip: boolean; beatsPerBar: number;
 }) {
   const exec = useStore((s) => s.exec);
@@ -260,18 +304,42 @@ function ClipMenu({ clip, x, y, time, onClose, drumClip, beatsPerBar }: {
   const aiReady = useStore((s) => transcriptionMenuEnabled(s.capabilities));
   const aiHint = aiReady ? undefined : AI_SETUP_HINT;
   const loadCapabilities = useStore((s) => s.loadCapabilities);
+  const menuRef = useRef<HTMLDivElement>(null);
   // LAZY, on first menu open only — never at app init (that would synchronously spawn
   // the generative service and freeze the message thread on every launch; see
   // store.ts's init()). A guest opening this menu before ever visiting the generative
   // drawer briefly sees the AI actions enabled until this resolves, then corrects.
   useEffect(() => { loadCapabilities(); }, [loadCapabilities]);
+  useLayoutEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+  }, []);
   useEffect(() => {
-    const close = () => onClose();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const close = () => onClose(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(true); };
     const t = window.setTimeout(() => { window.addEventListener("pointerdown", close); window.addEventListener("keydown", onKey); }, 0);
     return () => { window.clearTimeout(t); window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
-  const run = (fn: () => void) => { fn(); onClose(); };
+  const run = (fn: () => void) => { fn(); onClose(true); };
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)') ?? [])];
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    let next = -1;
+    if (e.key === "ArrowDown") next = (current + 1) % items.length;
+    else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose(true);
+      return;
+    }
+    if (next >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      items[next]?.focus();
+    }
+  };
   const savePattern = async () => {
     const parsed = drumPatternFromNotes(clip.notes ?? [], beatsPerBar, 16);
     const card = buildDrumPatternCard(parsed, clip.name || "Drum pattern");
@@ -279,28 +347,29 @@ function ClipMenu({ clip, x, y, time, onClose, drumClip, beatsPerBar }: {
     if (res.ok) setMemoryToast({ text: `pattern "${card.name}"`, scope: "global", kind: "drum_pattern", ts: res.ts });
   };
   return createPortal(
-    <div className="v2-clipmenu" role="menu" data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()}>
-      <button role="menuitem" onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>Split here</button>
-      <button role="menuitem" onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+    <div ref={menuRef} className="v2-clipmenu" role="menu" aria-label={`${clip.name} clip actions`}
+      data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={onMenuKeyDown}>
+      <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>{splitLabel}</button>
+      <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
       {drumClip && memoryOn && (
-        <button role="menuitem" data-testid="clip-save-pattern" onClick={() => run(() => void savePattern())}>
+        <button role="menuitem" tabIndex={-1} data-testid="clip-save-pattern" onClick={() => run(() => void savePattern())}>
           Save pattern to memory
         </button>
       )}
       {clip.type === "wave" && (
-        <button role="menuitem" disabled={!aiReady} title={aiHint}
+        <button role="menuitem" tabIndex={-1} disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("transcribe_clip", { clipId: clip.id, mode: "mono" }))}>Convert to MIDI</button>
       )}
       {clip.type === "wave" && (
-        <button role="menuitem" data-testid="clip-build-lyrics" disabled={!aiReady} title={aiHint}
+        <button role="menuitem" tabIndex={-1} data-testid="clip-build-lyrics" disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("build_lyrics_from_clip", { clipId: clip.id }))}>Build lyrics from this take</button>
       )}
       {clip.type === "wave" && (
-        <button role="menuitem" data-testid="clip-build-flow" disabled={!aiReady} title={aiHint}
+        <button role="menuitem" tabIndex={-1} data-testid="clip-build-flow" disabled={!aiReady} title={aiHint}
           onClick={() => run(() => void exec("build_skeleton_from_clip", { clipId: clip.id }))}>Build flow from this take</button>
       )}
       <div className="v2-clipmenu-sep" />
-      <button role="menuitem" className="danger" onClick={() => run(() => void exec("remove_clip", { clipId: clip.id }))}>Remove</button>
+      <button role="menuitem" tabIndex={-1} className="danger" onClick={() => run(() => void exec("remove_clip", { clipId: clip.id }))}>Remove</button>
     </div>,
     document.body,
   );

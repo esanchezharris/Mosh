@@ -4,14 +4,16 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
-import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds } from "../time";
+import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
-import { useEscapeToClose } from "../hooks/useEscapeToClose";
+import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { useTransportControls } from "./useTransportControls";
+import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "../ui/RecentProjectList";
@@ -29,7 +31,20 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const t = useStore((s) => s.transport);
   const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
+  const snap = useStore((s) => s.snap);
+  const setSnap = useStore((s) => s.setSnap);
+  const snapDivision = useStore((s) => s.snapDivision);
+  const setSnapDivision = useStore((s) => s.setSnapDivision);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
+  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
+  const fallbackTrackId = selectedTrackId
+    ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id
+    ?? snapshot.tracks[0]?.id;
+  const transport = useTransportControls({
+    exec,
+    anyArmed,
+    fallbackTrackId,
+  });
 
   const map = tempoMapFrom(snapshot.session);
   const meter = meterFrom(snapshot.session);
@@ -45,15 +60,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   // track): arm it via arm_track ONLY when starting a fresh recording and no track
   // is armed yet — an already-armed track (or an in-progress recording, where the
   // click just stops it) is left untouched.
-  const anyArmed = snapshot.tracks.some((tr) => tr.armed);
-  async function handleRecord() {
-    if (!t.recording && !anyArmed) {
-      const trackId = selectedTrackId ?? snapshot.tracks.find((tr) => tr.type === "audio")?.id ?? snapshot.tracks[0]?.id;
-      if (trackId) await exec("arm_track", { trackId, armed: true });
-    }
-    await exec("set_transport", { action: "record" });
-  }
-
   return (
     <header className="v2-topbar" data-testid="v2-topbar">
       <div className="v2-brand">
@@ -96,6 +102,16 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
               <option value={1}>Count-in: 1 bar</option>
               <option value={2}>Count-in: 2 bars</option>
             </select>
+            <span className="v2-snap-controls" role="group" aria-label="Snap controls">
+              <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
+                data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
+                onClick={() => setSnap(!snap)}>Snap</button>
+              <select className="v2-chip v2-chip-sel" aria-label="Snap division" value={snapDivision}
+                title="Musical grid division — hold Option while dragging to bypass"
+                onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}>
+                {SNAP_DIVISIONS.map((division) => <option key={division} value={division}>{division}</option>)}
+              </select>
+            </span>
           </div>
         </div>
       </div>
@@ -103,14 +119,14 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-center">
         <div className="v2-transport" data-testid="v2-transport" data-playing={t.playing} data-recording={t.recording}>
           <button className="v2-tbtn" title="To start" aria-label="To start"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconSkipStart size={15} /></button>
+            onClick={() => void transport.stop()}><IconSkipStart size={15} /></button>
           <button className="v2-tbtn play" data-on={t.playing} data-testid="v2-play"
             aria-pressed={t.playing} aria-label={t.playing ? "Pause" : "Play"} title={t.playing ? "Pause" : "Play"}
-            onClick={() => void exec("set_transport", { action: "toggle" })}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
+            onClick={() => void transport.togglePlay()}>{t.playing ? <IconPause size={15} /> : <IconPlay size={15} />}</button>
           <button className="v2-tbtn" title="Stop" aria-label="Stop" data-testid="v2-stop"
-            onClick={() => void exec("set_transport", { action: "stop", position: 0 })}><IconStop size={15} /></button>
+            onClick={() => void transport.stop()}><IconStop size={15} /></button>
           <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
-            onClick={() => void handleRecord()}><span className="dot" /></button>
+            onClick={() => void transport.record()}><span className="dot" /></button>
         </div>
 
         <div className="v2-readout">
@@ -143,37 +159,13 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-// Compact collaborator preview near the invite button — initials circles tinted with each
-// peer's color, mirroring the full Collaborators rail. Reads the same store.peers; hidden
-// solo (renders nothing until someone else is in the session).
-function AvatarCluster() {
-  const peers = useStore((s) => s.peers);
-  const selfPeer = useStore((s) => s.mp.selfPeer);
-  const others = Object.entries(peers).filter(([id]) => id !== selfPeer);
-  if (others.length === 0) return null;
-  const shown = others.slice(0, 4);
-  const extra = others.length - shown.length;
-  return (
-    <div className="v2-avatars" data-testid="v2-avatars" title={`${others.length} in the session`}>
-      {shown.map(([id, p]) => (
-        <span key={id} className="v2-avatar" style={{ background: p.color }} title={p.name} aria-label={p.name}>
-          {(p.name || "?").charAt(0).toUpperCase()}
-        </span>
-      ))}
-      {extra > 0 && <span className="v2-avatar more" aria-label={`${extra} more`}>+{extra}</span>}
-    </div>
-  );
-}
-
 function OverflowMenu() {
-  const [open, setOpen] = useState(false);
-  // #41/#43 — join the shared Escape STACK so Esc dismisses the menu, and dismisses
-  // it FIRST when it sits above another overlay (instead of falling through and
-  // closing the modal underneath). The close callback must be render-stable: the
-  // stack re-pushes whenever it changes, which would hoist this menu back to the
-  // top of the stack on unrelated re-renders.
-  const close = useCallback(() => setOpen(false), []);
-  useEscapeToClose(open, close);
+  // Placement, Escape (#41/#43 — the shared stack, so Esc dismisses THIS menu first when
+  // it sits above another overlay) and outside-dismiss all live in the shared hook, which
+  // also clamps the panel into the viewport. That clamp matters here: `.v2-shell` is
+  // `overflow-x: auto` with a 1120px floor (#52), so below that width this trigger sits
+  // outside the viewport and an absolutely-positioned panel went with it.
+  const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(248, 420, "end");
   const exec = useStore((s) => s.exec);
   const training = useStore((s) => s.snapshot?.training ?? null);
   const theme = useStore((s) => s.theme);
@@ -184,76 +176,77 @@ function OverflowMenu() {
   const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
-    <button role="menuitem" onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
+    <button role="menuitem" onClick={() => { close(); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
   );
 
   return (
     <div className="v2-menu-wrap">
-      <button className="v2-btn icon" aria-label="More tools" aria-haspopup="dialog" aria-expanded={open}
-        data-testid="v2-overflow" onClick={() => setOpen((o) => !o)}><IconMore size={15} /></button>
-      {open && (
-        <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={() => setOpen(false)} />
-          <div className="v2-menu-panel">
-            <div className="v2-menu-tools" data-testid="v2-overflow-tools">
-              <MultiplayerTool
-                label={<IconUsers size={15} />}
-                title="2-player session"
-                className="v2-overflow-tool"
-                ariaLabel="Open multiplayer tools"
-                testId="v2-tool-multiplayer"
-              />
-              <TrainingTool
-                training={training}
-                label={<IconSpark size={15} />}
-                title="Type-beat training"
-                className="v2-overflow-tool"
-                ariaLabel="Open training tools"
-                testId="v2-tool-training"
-              />
-              <CommandLogTool
-                label={<IconList size={15} />}
-                title="Command log"
-                className="v2-overflow-tool"
-                ariaLabel="Open command log"
-                testId="v2-tool-command-log"
-              />
-              <MemoryTool
-                label={<IconStar size={15} />}
-                title="What Moshi remembers"
-                className="v2-overflow-tool"
-                ariaLabel="What Moshi remembers"
-                testId="v2-tool-memory"
-              />
-              <RemoteTool
-                label={<IconPhone size={15} />}
-                title="Pair iPhone companion"
-                className="v2-overflow-tool"
-                ariaLabel="Pair iPhone companion"
-                testId="v2-tool-remote"
-              />
-              <HelpTool
-                label={<IconHelp size={15} />}
-                title="Keyboard shortcuts"
-                className="v2-overflow-tool"
-                ariaLabel="Keyboard shortcuts"
-                testId="v2-tool-help"
-              />
-            </div>
-            <div className="v2-menu" role="menu">
-              <ProjectMenuGroup onPick={close} />
-              <div className="v2-menu-sep" />
-              {item("Undo", () => void exec("undo"), "⌘Z")}
-              {item("Redo", () => void exec("redo"), "⇧⌘Z")}
-              <div className="v2-menu-sep" />
-              {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
-              {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
-              <div className="v2-menu-sep" />
-              {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
-              {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
-            </div>
+      <button ref={anchorRef} className="v2-btn icon" aria-label="More tools" aria-haspopup="dialog" aria-expanded={open}
+        data-testid="v2-overflow" onClick={toggle}><IconMore size={15} /></button>
+      {/* `at` gates the render: `.v2-menu-panel-fixed` clears the base rule's `right`/`top`,
+          so the inline style MUST supply left + one of top/bottom or the panel falls to
+          static position. Same contract as AddTrackMenu. */}
+      {open && at && (
+        <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
+          style={{ left: at.left, top: at.top, bottom: at.bottom }}>
+          <div className="v2-menu-tools" data-testid="v2-overflow-tools">
+            <MultiplayerTool
+              label={<IconUsers size={15} />}
+              title="2-player session"
+              className="v2-overflow-tool"
+              ariaLabel="Open multiplayer tools"
+              testId="v2-tool-multiplayer"
+            />
+            <TrainingTool
+              training={training}
+              label={<IconSpark size={15} />}
+              title="Type-beat training"
+              className="v2-overflow-tool"
+              ariaLabel="Open training tools"
+              testId="v2-tool-training"
+            />
+            <CommandLogTool
+              label={<IconList size={15} />}
+              title="Command log"
+              className="v2-overflow-tool"
+              ariaLabel="Open command log"
+              testId="v2-tool-command-log"
+            />
+            <MemoryTool
+              label={<IconStar size={15} />}
+              title="What Moshi remembers"
+              className="v2-overflow-tool"
+              ariaLabel="What Moshi remembers"
+              testId="v2-tool-memory"
+            />
+            <RemoteTool
+              label={<IconPhone size={15} />}
+              title="Pair iPhone companion"
+              className="v2-overflow-tool"
+              ariaLabel="Pair iPhone companion"
+              testId="v2-tool-remote"
+            />
+            <HelpTool
+              label={<IconHelp size={15} />}
+              title="Keyboard shortcuts"
+              className="v2-overflow-tool"
+              ariaLabel="Keyboard shortcuts"
+              testId="v2-tool-help"
+            />
           </div>
-        </>
+          <div className="v2-menu" role="menu">
+            <ProjectMenuGroup onPick={close} />
+            <div className="v2-menu-sep" />
+            {item("Undo", () => void exec("undo"), "⌘Z")}
+            {item("Redo", () => void exec("redo"), "⇧⌘Z")}
+            <div className="v2-menu-sep" />
+            {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
+            {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
+            <div className="v2-menu-sep" />
+            {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
+            {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
+          </div>
+        </div>
       )}
     </div>
   );

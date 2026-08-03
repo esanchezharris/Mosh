@@ -45,6 +45,10 @@ describe("useKeyboardShortcuts", () => {
     useStore.setState({
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
+        if (command === "arm_track")
+          return { ok: true, command, data: { applied: true, armed: true } };
+        if (command === "set_transport" && args?.action === "record")
+          return { ok: true, command, data: { recording: true } };
         return { ok: true, command };
       }),
     });
@@ -59,11 +63,13 @@ describe("useKeyboardShortcuts", () => {
       editingClipId: null,
       automationTrackId: null,
       snapshot: null,
+      clipboard: null,
+      selectedTrackId: null,
     });
     vi.restoreAllMocks();
   });
 
-  it("dispatches Space to the transport from the app-level shortcut hook", () => {
+  it("dispatches Space to the transport from the app-level shortcut hook", async () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -72,10 +78,12 @@ describe("useKeyboardShortcuts", () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+    await vi.waitFor(() =>
+      expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } }),
+    );
   });
 
-  it("dispatches Space from the focused empty Moshi prompt", () => {
+  it("dispatches Space from the focused empty Moshi prompt", async () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -90,7 +98,9 @@ describe("useKeyboardShortcuts", () => {
       prompt.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
     });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
+    await vi.waitFor(() =>
+      expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } }),
+    );
     promptWrap.remove();
   });
 
@@ -141,7 +151,14 @@ describe("useKeyboardShortcuts", () => {
     expect(execCalls).toContainEqual({ command: "remove_clip", args: { clipId: "clip-1" } });
   });
 
-  it("dispatches Record through the app action dispatcher", () => {
+  it("dispatches Record through the app action dispatcher", async () => {
+    useStore.setState({
+      selectedTrackId: "record-track",
+      snapshot: {
+        session: {},
+        tracks: [{ id: "record-track", type: "audio", clips: [] }],
+      } as unknown as import("../types").Snapshot,
+    });
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -149,8 +166,14 @@ describe("useKeyboardShortcuts", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "R", bubbles: true }));
     });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
-    expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "record" } });
+    expect(execCalls).toEqual([
+      { command: "arm_track", args: { trackId: "record-track", armed: true } },
+      { command: "set_transport", args: { action: "record" } },
+    ]);
   });
 
   it("dispatches Duplicate through the app action dispatcher", () => {
@@ -164,6 +187,33 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "duplicate_clip", args: { clipId: "clip-1" } });
+  });
+
+  it("copies the selected arrangement clip and pastes it at the playhead", async () => {
+    const clip = { id: "clip-1", name: "Hook", type: "block", start: 2, length: 2 };
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      selectedTrackId: "t1",
+      clipboard: null,
+      transport: { playing: false, recording: false, position: 6, looping: false, loopStart: 0, loopEnd: 0 },
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [clip] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => root.render(React.createElement(Harness)));
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "c", metaKey: true, bubbles: true }));
+    });
+    expect(useStore.getState().clipboard?.clip.id).toBe("clip-1");
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "v", metaKey: true, bubbles: true }));
+    });
+    await vi.waitFor(() => expect(execCalls).toContainEqual({
+      command: "paste_clip",
+      args: { trackId: "t1", start: 6, clip },
+    }));
   });
 
   // FU-CLIP-NUDGE — fine clip nudge: fixed-increment move_clip, independent of
@@ -204,6 +254,38 @@ describe("useKeyboardShortcuts", () => {
     });
 
     expect(execCalls).toContainEqual({ command: "move_clip", args: { clipId: "clip-1", start: 0 } });
+  });
+
+  it("does not nudge a selected clip when a range slider owns focus but WebKit targets window", () => {
+    useStore.setState({
+      selection: new Set(["clip-1"]),
+      snapshot: {
+        session: {},
+        tracks: [{ id: "t1", clips: [{ id: "clip-1", start: 2, length: 2 }] }],
+      } as unknown as import("../types").Snapshot,
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.setAttribute("aria-label", "Send level");
+    document.body.appendChild(slider);
+    slider.focus();
+
+    // The packaged WKWebView can report this keydown at window even though the range
+    // input remains document.activeElement. The focused inspector control owns arrows;
+    // the app-level clip-nudge layer must yield to it.
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    const activeElement = document.activeElement;
+    const movedClip = execCalls.some((c) => c.command === "move_clip");
+    slider.remove();
+    expect(activeElement).toBe(slider);
+    expect(movedClip).toBe(false);
   });
 
   it("nudge is a no-op with nothing selected", () => {

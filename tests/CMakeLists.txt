@@ -13,7 +13,10 @@ target_sources(MoshTests PRIVATE
     test_drum_pattern.cpp
     test_automation_mode.cpp
     test_automation_curve_write.cpp
+    test_clip_loop_phase.cpp
+    test_render_source_window.cpp
     test_export_range.cpp
+    test_plugin_editor_param_gesture.cpp
     test_plugin_scan_progress.cpp
     test_moshfx_dsp.cpp
     test_renderlayer.cpp
@@ -25,12 +28,14 @@ target_sources(MoshTests PRIVATE
     test_agent_txn.cpp
     test_annotations.cpp
     test_remote_companion.cpp
+    test_recording_landing.cpp
     test_multiplayer_logical_id.cpp
     test_multiplayer_lock_manager.cpp
     test_multiplayer_outbox.cpp
     test_multiplayer_transfer_queue.cpp
     test_training.cpp
     test_webbridge_resource_guard.cpp
+    test_directory_listing.cpp
     test_rt_guard.cpp
     test_generative_jobmanager.cpp
     test_rave_engine.cpp
@@ -52,6 +57,7 @@ target_sources(MoshTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/remote/RemoteCompanionServer.cpp
     ${CMAKE_SOURCE_DIR}/src/training/TrainerRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/webview/UiResourcePathGuard.cpp
+    ${CMAKE_SOURCE_DIR}/src/files/DirectoryListing.cpp
     # RaveEngine.cpp is unconditionally compiled (MOSH_HAVE_ANIRA gates its body,
     # not its existence — see cmake/Dependencies.cmake); MoshTests never defines
     # MOSH_HAVE_ANIRA, so this always builds the graceful no-op stub branch. That
@@ -81,6 +87,22 @@ target_link_libraries(MoshTests PRIVATE
     juce::juce_recommended_config_flags)
 
 add_test(NAME MoshTests COMMAND $<TARGET_FILE:MoshTests>)
+add_test(NAME HarnessSessionShell
+         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/lib/harness-session-test.sh)
+add_test(NAME HarnessSessionPython
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/verify-hardware/harness_session_test.py)
+if (TARGET Mosh)
+    add_test(NAME AudioRecoverySmoke
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/audio-recovery-isolation-test.sh
+                          $<TARGET_FILE:Mosh>)
+    add_test(NAME SessionAllocationFailure
+             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/session-allocation-failure-test.sh
+                          $<TARGET_FILE:Mosh>)
+    set_tests_properties(AudioRecoverySmoke PROPERTIES
+        TIMEOUT 15)
+    set_tests_properties(SessionAllocationFailure PROPERTIES
+        TIMEOUT 15)
+endif()
 # test_training.cpp shells out to service/training relative to the CWD, so ctest
 # must run the suite from the repo root.
 set_tests_properties(MoshTests PROPERTIES

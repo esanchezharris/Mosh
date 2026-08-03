@@ -165,7 +165,7 @@ export function PianoRoll() {
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
   const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
-  const snapBeat = (b: number) => (stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
+  const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k);
   const gridBeats = gridBeatsFor({
     clipBeats: clip.length / beatSeconds(m),
@@ -223,7 +223,7 @@ export function PianoRoll() {
       // pitch nudge with its timing intact.
       const timeMoved = Math.abs(dxPx) > liveFeel().dragThreshold;
       if (d.kind === "move") {
-        const start = timeMoved ? Math.max(0, snapBeat(d.orig.start + db)) : d.orig.start;
+        const start = timeMoved ? Math.max(0, snapBeat(d.orig.start + db, e.altKey)) : d.orig.start;
         const dp = -Math.round((e.clientY - d.startY) / ROW_H);
         // Only a gesture that actually moves the PITCH axis may re-pitch the note.
         // Sliding a note sideways is a request to change its time, not its pitch —
@@ -231,7 +231,8 @@ export function PianoRoll() {
         const pitch = dp === 0 ? d.orig.pitch : lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
         setPreviewNote({ ...d.orig, start, pitch });
       } else if (timeMoved) {
-        const length = Math.max(stepBeats || 0.25, snapBeat(d.orig.start + d.orig.length + db) - d.orig.start);
+        const minLength = e.altKey ? 0.25 : stepBeats || 0.25;
+        const length = Math.max(minLength, snapBeat(d.orig.start + d.orig.length + db, e.altKey) - d.orig.start);
         setPreviewNote({ ...d.orig, length });
       } else {
         // Resize is a pure time-axis gesture, so inside the deadzone it commits
@@ -266,7 +267,7 @@ export function PianoRoll() {
     const wasMoved = gd.moved || Math.hypot(x - gd.x0, y - gd.y0) > 4;
     setLasso(null);
     if (!wasMoved) {
-      const start = Math.max(0, snapBeat(x / beatPx)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
+      const start = Math.max(0, snapBeat(x / beatPx, e.altKey)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
       return;
     }
@@ -493,7 +494,7 @@ export function PianoRoll() {
             </div>
           </div>
         </div>
-        <div className="pr-foot">click to add · drag to move · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
+        <div className="pr-foot">click to add · drag to move · Option-drag to bypass snap · drag the right edge to resize · drag a velocity bar below · ⌘-scroll to zoom · Esc to close</div></>
         )}
       </div>
     </div>

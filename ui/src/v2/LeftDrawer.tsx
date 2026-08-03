@@ -5,15 +5,15 @@
 // (built-ins + scanned VST3/AU → load onto the selected track). SOUNDS reuses SampleBrowser;
 // PLUGINS hosts PluginDock — the v2 plugin browser (there's no plugin modal in v2; the FX
 // rack's "+ Plugin" opens this dock on the Plugins tab via openBrowserTab). Open/tab state
-// is UI-local (shellState) and drives the column width via data-left-open on the shell.
+// is UI-local (shellState). AppV2 owns the open subscription and passes it here so the
+// shell column width and drawer contents cannot render from separate subscription turns.
 
 import { useShell } from "./shellState";
 import { SampleBrowser } from "../ui/SampleBrowser";
 import { PluginDock } from "./PluginBrowser";
 import { IconClose, IconFolder } from "../ui/icons";
 
-export function LeftDrawer() {
-  const open = useShell((s) => s.browserOpen);
+export function LeftDrawer({ open }: { open: boolean }) {
   const tab = useShell((s) => s.browserTab);
   const toggle = useShell((s) => s.toggleBrowser);
   const openTab = useShell((s) => s.openBrowserTab);
