@@ -17,6 +17,7 @@ import { PresenceMeter } from "./PresenceMeter";
 import { MasterMeter } from "../ui/Meter";
 import { Inspector } from "./inspector/Inspector";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
+import { ReconciledRange } from "./ReconciledRange";
 import { builtinEntry, installedEntry, matchEntry, type PluginEntry } from "../ui/pluginBrowserUtil";
 import type { Plugin } from "../types";
 
@@ -93,16 +94,24 @@ export function MasterCard() {
       <div className="v2-mix v2-master-body">
         <label className="v2-field">
           <span>Vol</span>
-          <input type="range" min={-48} max={6} step={0.5} value={master?.volumeDb ?? 0}
+          <ReconciledRange min={-48} max={6} step={0.5} value={master?.volumeDb ?? 0}
             aria-label="Master volume" data-testid="v2-master-volume"
-            onChange={(e) => void exec("set_master_volume", { db: Number(e.target.value) })} />
+            onCommit={(db) => exec("set_master_volume", { db })}
+            reconcile={async () => {
+              await useStore.getState().refresh();
+              return useStore.getState().snapshot?.master?.volumeDb ?? 0;
+            }} />
           <span className="v2-val">{(master?.volumeDb ?? 0).toFixed(1)}</span>
         </label>
         <label className="v2-field">
           <span>Pan</span>
-          <input type="range" min={-1} max={1} step={0.02} value={master?.pan ?? 0}
+          <ReconciledRange min={-1} max={1} step={0.02} value={master?.pan ?? 0}
             aria-label="Master pan" data-testid="v2-master-pan"
-            onChange={(e) => void exec("set_master_pan", { pan: Number(e.target.value) })} />
+            onCommit={(pan) => exec("set_master_pan", { pan })}
+            reconcile={async () => {
+              await useStore.getState().refresh();
+              return useStore.getState().snapshot?.master?.pan ?? 0;
+            }} />
           <span className="v2-val">{Math.round((master?.pan ?? 0) * 100)}</span>
         </label>
         <div className="v2-field" data-testid="v2-master-meter-field">
