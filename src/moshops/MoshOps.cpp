@@ -202,6 +202,9 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
+    // Live-note audition: we ARE the wasted-message listener, registered for our whole
+    // lifetime and read around each individual injection (see MoshOps.Live.cpp).
+    eng.edit().addWastedMidiMessagesListener (this);
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 
     // MP-001 — the live session. Its background poll loop calls back here (on the
@@ -252,6 +255,12 @@ MoshOps::~MoshOps()
     }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
+    // Silence anything the keyboard/piano roll left sounding, then detach the listener.
+    // Order matters: releaseAllVoices injects, which can call back into us, so we must
+    // still be registered while it runs — and must not stay registered on the Edit, which
+    // Main.cpp destroys after this object.
+    releaseAllVoices();
+    eng.edit().removeWastedMidiMessagesListener (this);
 }
 
 void MoshOps::timerCallback()
@@ -263,6 +272,12 @@ void MoshOps::timerCallback()
     if (playing || wasPlaying)
         emit ("transport", transportToVar());
     wasPlaying = playing;
+
+    // Live-note safety net. Force-release any voice past its own TTL — which covers both
+    // a blip's short lifetime and a held note whose note-off never arrived (WebView crash,
+    // frozen page, dropped event). Running it here means it lives in the native process
+    // and survives anything the UI does; it is a no-op when nothing is held.
+    sweepStuckVoices();
 
     // Lane A — drive the render-ahead scheduler off the transport clock while a Live clip plays.
     // Gated on hasAudio() so headless --selftest (which never arms it) is untouched.
@@ -609,6 +624,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_directory")    return cmdListDirectory (args);
     if (name == "audition_file")     return cmdAuditionFile (args);
     if (name == "stop_audition")     return cmdStopAudition (args);
+    // Live note audition (MoshOps.Live.cpp) — transient, like the two above: no
+    // transaction, no log line, no snapshot event. See that file's header for why.
+    if (name == "audition_note")     return cmdAuditionNote (args);
+    if (name == "all_notes_off")     return cmdAllNotesOff (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "open_recent")       return cmdOpenRecent (args);
@@ -1922,19 +1941,55 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
     auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (mc == nullptr) return errResult ("add_note", "no midi clip");
 
-    const int pitch = juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60));
-    const double start = juce::jmax (0.0, (double) args.getProperty ("start", 0.0));
-    const double length = juce::jmax (0.0625, (double) args.getProperty ("length", 1.0));
-    const int vel = juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100));
+    // A `notes` ARRAY may replace the scalar pitch/start/length/velocity, so a chord —
+    // several keys pressed together on the computer MIDI keyboard, or a pasted selection —
+    // lands inside the ONE transaction opened below and undoes as a single step. Same
+    // shape cmdAddMidiClip already accepts. (Deliberately not declared in the agent
+    // catalog: ArgSpec models only string/number/boolean, and the contract test checks
+    // that declared args are read, never the converse — add_midi_clip does the same.)
+    struct NoteSpec { int pitch; double start; double length; int vel; };
+    std::vector<NoteSpec> specs;
+    const auto notesVar = args.getProperty ("notes", var());   // bind: the temporary would die
+    if (auto* arr = notesVar.getArray())
+    {
+        for (auto& n : *arr)
+            specs.push_back ({ juce::jlimit (0, 127, (int) n.getProperty ("pitch", 60)),
+                               juce::jmax (0.0, (double) n.getProperty ("start", 0.0)),
+                               juce::jmax (0.0625, (double) n.getProperty ("length", 1.0)),
+                               juce::jlimit (1, 127, (int) n.getProperty ("velocity", 100)) });
+        if (specs.empty()) return errResult ("add_note", "'notes' is empty");
+    }
+    else
+    {
+        specs.push_back ({ juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60)),
+                           juce::jmax (0.0, (double) args.getProperty ("start", 0.0)),
+                           juce::jmax (0.0625, (double) args.getProperty ("length", 1.0)),
+                           juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100)) });
+    }
 
     beginTxn ("add_note");
-    mc->getSequence().addNote (pitch, tracktion::BeatPosition::fromBeats (start),
-                               tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
+    auto& seq = mc->getSequence();
+    Array<var> added;
+    for (auto& s : specs)
+    {
+        auto* note = seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.start),
+                                  tracktion::BeatDuration::fromBeats (s.length), s.vel, 0, &undoManager());
+        // The index of the note we just made. MidiList keeps its notes sorted, so a new
+        // note is NOT necessarily last — callers that need to address it (step record,
+        // duplicate, "select what I just drew") would otherwise have to re-fetch the whole
+        // snapshot and guess. Resolved by identity against the returned pointer.
+        int idx = -1;
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            if (seq.getNote (i) == note) { idx = i; break; }
+        added.add (idx);
+    }
     logLine ("add_note", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — auto-re-render the live hidden audio
     auto* data = new DynamicObject();
-    data->setProperty ("noteCount", mc->getSequence().getNumNotes());
+    data->setProperty ("noteCount", seq.getNumNotes());
+    data->setProperty ("noteIndex", added.size() == 1 ? added[0] : var (-1));
+    data->setProperty ("noteIndexes", added);
     return okResult ("add_note", var (data));
 }
 
@@ -1975,6 +2030,13 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
     }
     if (args.hasProperty ("velocity"))
         note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
+    // Note DEACTIVATE (Ableton's `0` key) — a muted note keeps its place in the clip and
+    // stays editable, it simply doesn't sound. This is the engine's own MidiNote::mute
+    // field, so it costs nothing and persists with the edit; it is also why per-note
+    // probability is NOT here (MidiNote has no such field, and faking one would mean
+    // intervening in the MIDI playback path).
+    if (args.hasProperty ("mute"))
+        note->setMute ((bool) args.getProperty ("mute", false), &undoManager());
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2726,6 +2788,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                 no->setProperty ("start", n->getStartBeat().inBeats());     // beats within the clip sequence
                 no->setProperty ("length", n->getLengthBeats().inBeats());
                 no->setProperty ("velocity", n->getVelocity());
+                // Deactivated (Ableton's `0`): still in the clip, still editable, silent.
+                // Emitted only when true so an ordinary clip's payload is byte-identical
+                // to before — notes[] is the largest part of the snapshot.
+                if (n->isMute()) no->setProperty ("mute", true);
                 notes.add (var (no));
             }
         o->setProperty ("notes", notes);

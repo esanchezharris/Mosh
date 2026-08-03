@@ -30,6 +30,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
+        // Live note audition: transient sound only — it mutates nothing, so two peers
+        // playing notes on the same track can never conflict (nor can a peer's keypress
+        // be blocked by someone else's lock on the track they are auditioning).
+        "audition_note", "all_notes_off",
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end",

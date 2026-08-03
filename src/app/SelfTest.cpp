@@ -4811,8 +4811,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto mClip = cmd (ops, "add_midi_clip", var (ca))["data"].getProperty ("clipId", var()).toString();
         check (clipNotes (mClip).size() == 3, "MIDI clip serialises its 3 notes into the snapshot");
 
-        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mClip }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}))), "add_note ok");
+        auto an = cmd (ops, "add_note", objN ({{ "clipId", mClip }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}));
+        check (ok (an), "add_note ok");
         check (clipNotes (mClip).size() == 4, "add_note adds a note");
+        // add_note reports WHICH note it made. MidiList keeps its notes sorted, so the new
+        // one is not necessarily last — a caller that needs to address what it just drew
+        // (step record, duplicate, select-what-I-drew) would otherwise have to re-fetch the
+        // snapshot and guess. Asserting the reported index actually holds the new pitch is
+        // what makes this non-vacuous: a hardcoded "last index" would fail here, since the
+        // note was inserted at start 1.4, ahead of the seeded note at start 2.
+        {
+            const int ni = (int) an["data"].getProperty ("noteIndex", -1);
+            auto ns = clipNotes (mClip);
+            auto* arr = ns.getArray();
+            check (ni >= 0 && arr != nullptr && ni < arr->size()
+                       && (int) (*arr)[ni].getProperty ("pitch", -1) == 72,
+                   "add_note returns the index the new note actually landed at");
+        }
+        // A chord in ONE command (and so one undo step): the computer MIDI keyboard sends
+        // this when several keys are held together.
+        {
+            const int before = clipNotes (mClip).size();
+            Array<var> chord;
+            for (int p : { 60, 64, 67 })
+            {
+                auto* n = new DynamicObject();
+                n->setProperty ("pitch", p); n->setProperty ("start", 6.0);
+                n->setProperty ("length", 1.0); n->setProperty ("velocity", 88);
+                chord.add (var (n));
+            }
+            auto* ch = new DynamicObject();
+            ch->setProperty ("clipId", mClip); ch->setProperty ("notes", chord);
+            auto cr = cmd (ops, "add_note", var (ch));
+            check (ok (cr) && clipNotes (mClip).size() == before + 3, "add_note lays a 3-note chord from a notes[] array");
+            const auto idxVar = cr["data"].getProperty ("noteIndexes", var());
+            check (idxVar.isArray() && idxVar.size() == 3, "add_note reports an index per note in the chord");
+            cmd (ops, "undo");
+            check (clipNotes (mClip).size() == before, "the whole chord undoes as ONE step");
+            cmd (ops, "redo");
+        }
+        // Note deactivate (Ableton's `0`) — rides the engine's own MidiNote mute field, and
+        // is emitted only when true, so an ordinary clip's notes[] payload is unchanged.
+        {
+            check (ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "mute", true }}))), "set_note mute ok");
+            auto ns = clipNotes (mClip);
+            check (ns.size() > 0 && (bool) ns[0].getProperty ("mute", false), "a deactivated note rides the snapshot");
+            cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "mute", false }}));
+            auto ns2 = clipNotes (mClip);
+            check (ns2.size() > 0 && ! ns2[0].hasProperty ("mute"), "reactivating drops the flag entirely (payload unchanged for normal notes)");
+        }
 
         check (ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "pitch", 48 }, { "velocity", 127 }}))), "set_note ok");
         { auto ns = clipNotes (mClip);
@@ -5994,6 +6041,115 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
         browseDir.deleteRecursively();
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track
+    }
+
+    // ─── Live note audition (audition_note / all_notes_off) ───
+    // WHAT THIS SECTION CANNOT DO: prove a note is audible. --selftest runs with no audio
+    // device, so ensurePlaybackContext() bails, no LiveMidiInjectingNode is ever reached,
+    // and `ok: true` here is the GRACEFUL-DEGRADATION answer, not evidence of sound. Any
+    // check reading "audition_note returned ok" would be vacuous. The audible proof lives
+    // in --live-audio-smoke, which opens a real device and measures master level.
+    //
+    // What IS real here, and is what this section asserts: the degradation contract, the
+    // held-voice state machine, and — most valuable — the three NEGATIVE properties that
+    // make a keypress cheap enough to send at 30 Hz. Each of those fails loudly the moment
+    // someone "helpfully" adds a transaction, a log line, or a snapshot event.
+    section ("Live note audition (audition_note)");
+    {
+        auto lt = cmd (ops, "create_track", args1 ("name", "LiveNotes"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "add_midi_clip", objN ({{ "trackId", lt }, { "length", 2.0 }}));   // auto-loads 4OSC
+
+        // Validation.
+        check (! ok (cmd (ops, "audition_note", objN ({{ "trackId", "nope" }, { "pitch", 60 }}))),
+               "audition_note errors on a bad trackId");
+        check (! ok (cmd (ops, "audition_note", args1 ("trackId", lt))),
+               "audition_note errors with no pitch");
+        check (! ok (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "wat" }}))),
+               "audition_note rejects an unknown action");
+
+        // The degradation contract. Headless this is the ONLY shape the command can
+        // return, and the UI branches on `audible`/`reason` — so pin it exactly.
+        auto a1 = cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}));
+        check (ok (a1), "audition_note ok (graceful headless)");
+        check (! (bool) a1["data"].getProperty ("audible", true), "audition_note reports audible:false with no device");
+        check (a1["data"].getProperty ("path", var()).toString() == "none", "audition_note reports path:none headless");
+        check (a1["data"].getProperty ("reason", var()).toString().isNotEmpty(), "audition_note explains why it was inaudible");
+
+        // Pitch is clamped, not rejected — a UI slider or an octave-shifted keyboard can
+        // legitimately run off the end of the range and must not error mid-performance.
+        auto hi = cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 200 }, { "action", "on" }}));
+        check (ok (hi) && (int) hi["data"].getProperty ("pitch", -1) == 127, "audition_note clamps pitch to 127");
+
+        // The held-voice state machine (real logic, and it runs with no device by design).
+        cmd (ops, "all_notes_off");
+        auto held = [&] (const juce::var& r) { return (int) r["data"].getProperty ("held", -1); };
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}))) == 1,
+               "a held note registers one voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 64 }, { "action", "on" }}))) == 2,
+               "a second held pitch registers a second voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}))) == 2,
+               "re-pressing a held pitch retriggers it without duplicating the voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "off" }}))) == 1,
+               "releasing one pitch drops exactly that voice");
+        auto ano = cmd (ops, "all_notes_off");
+        check (ok (ano) && (int) ano["data"].getProperty ("released", -1) == 1 && held (ano) == 0,
+               "all_notes_off releases the remainder and leaves nothing held");
+
+        // ── the three negative properties ──
+        // 1. It must not write the command log. A held key repeats at ~30 Hz; logging
+        //    would append 30 JSONL lines a second (and mirror each into the in-memory
+        //    cache under a lock). Fails the moment someone adds a logLine call.
+        {
+            for (int i = 0; i < 20; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 + i }, { "action", "blip" }}));
+            auto lg = cmd (ops, "get_command_log", args1 ("limit", 400))["data"].getProperty ("entries", var());
+            int auditionLines = 0;
+            if (auto* a = lg.getArray())
+                for (auto& e : *a)
+                    if (e.getProperty ("command", var()).toString() == "audition_note") ++auditionLines;
+            check (auditionLines == 0, "20 audition_note calls write ZERO command-log lines");
+        }
+        // 2. It must not invalidate the snapshot. Every invalidation makes the UI re-pull
+        //    the whole session; at key-repeat rate that is a re-render per keypress.
+        {
+            // Uses the harness's own capture (eventTypes), NOT a private sink — installing
+            // one here and detaching it afterwards silently unhooks the shared sink that
+            // later sections assert against.
+            eventTypes.clear();
+            cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 72 }, { "action", "blip" }}));
+            cmd (ops, "all_notes_off");
+            check (! hadEvent ("snapshot_invalidated"),
+                   "audition_note / all_notes_off emit NO snapshot_invalidated");
+            eventTypes.clear();
+        }
+        // 3. It must not open an undo transaction — an empty one per keypress would bury
+        //    the producer's last real edit under dozens of no-op undo steps.
+        //
+        //    TWO assertions, because the obvious one alone is not enough. A sabotage that
+        //    added beginTxn to the command did NOT fail the undo check below: an empty
+        //    beginNewTransaction is a no-op to juce::UndoManager, which creates nothing
+        //    until an action is actually performed. What beginTxn DOES do unconditionally
+        //    is bump the edit revision, so that is pinned first — it is the assertion that
+        //    genuinely catches a stray transaction.
+        {
+            auto revision = [&] {
+                return (int) cmd (ops, "batch_status", args1 ("transactionId", "probe"))["data"]
+                                 .getProperty ("revision", -1);
+            };
+            const int rev0 = revision();
+            for (int i = 0; i < 5; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "blip" }}));
+            check (rev0 >= 0 && revision() == rev0, "5 auditions do not bump the edit revision (no beginTxn)");
+
+            cmd (ops, "rename_track", objN ({{ "trackId", lt }, { "name", "UndoAnchor" }}));
+            for (int i = 0; i < 5; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "blip" }}));
+            cmd (ops, "undo");
+            check (trackById (lt).getProperty ("name", var()).toString() != "UndoAnchor",
+                   "ONE undo after 5 auditions reaches the previous real edit");
+        }
+
+        cmd (ops, "remove_track", args1 ("trackId", lt));
     }
 
     // ─── Wave: keyboard shortcuts + clip clipboard (CTL-002 / AED-001) ───

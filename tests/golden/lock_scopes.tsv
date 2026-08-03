@@ -13,6 +13,7 @@ agent_memory_clear	Unguarded
 agent_memory_delete	Unguarded
 agent_memory_read	Unguarded
 agent_memory_write	Unguarded
+all_notes_off	Unguarded
 analyze_lyrics	Track
 apply_remote_track	Unguarded
 approve_training_source	Unguarded
@@ -20,6 +21,7 @@ arm_track	Track
 assert_lyric_line	Track
 assign_sample	Track
 audition_file	Unguarded
+audition_note	Unguarded
 batch_begin	Unguarded
 batch_end	Unguarded
 batch_rollback	Unguarded

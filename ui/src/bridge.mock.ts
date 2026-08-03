@@ -380,6 +380,10 @@ const MOCK_TXN_READS = new Set([
   "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
+  // Live note audition — transient sound, no mutation. Mirrors TransactionSafe.h so a
+  // keypress still works while an agent transaction is open (asserted byte-equal by
+  // txnSafeRegistry.test.ts).
+  "audition_note", "all_notes_off",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -2057,6 +2061,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return str(args.path) ? ok(command, { path: str(args.path), playing: false }) : err(command, "missing 'path'");
     case "stop_audition":
       return ok(command);
+    // Live note audition. The dev mock has no engine, so it answers with the same
+    // graceful "nothing sounded, and here is why" shape the native command returns
+    // headless — callers must handle that path anyway, and pretending otherwise would
+    // let a UI bug that ignores `audible` pass every browser test.
+    case "audition_note": {
+      if (args.pitch == null) return err(command, "missing 'pitch'");
+      const action = str(args.action) || "blip";
+      if (!["on", "off", "blip"].includes(action)) return err(command, "action must be 'on', 'off' or 'blip'");
+      if (!findTrack(str(args.trackId))) return err(command, "no track");
+      return ok(command, {
+        trackId: str(args.trackId), pitch: num(args.pitch, 60), action,
+        audible: false, path: "none", held: 0, reason: "no audio device",
+      });
+    }
+    case "all_notes_off":
+      return ok(command, { released: 0, held: 0 });
 
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });

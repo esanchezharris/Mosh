@@ -33,7 +33,8 @@ namespace mosh
       result   = { "ok": bool, "command": string, "data"?: any, "error"?: string }
       snapshot = { schemaVersion, session, tracks[], transport }
       event    = { "type": string, ... }   (pushed on the "mosh_event" channel) */
-class MoshOps : private juce::Timer
+class MoshOps : private juce::Timer,
+                private te::Edit::WastedMidiMessagesListener
 {
 public:
     explicit MoshOps (MoshEngine& engineToUse);
@@ -732,6 +733,53 @@ private:
     std::unique_ptr<juce::AudioFormatReaderSource> previewReader;
     bool previewWired = false;
     void stopAudition();
+
+    // ── Live note audition (MoshOps.Live.cpp): play a pitch through a track's REAL
+    //    instrument on demand — the piano roll's "hear it as you drag", the drum pad
+    //    preview, and the computer-keyboard MIDI controller all ride this.
+    //
+    //    Transient, exactly like the file audition above: no undo transaction, no JSONL
+    //    line, no snapshot_invalidated. That is load-bearing rather than tidy — a held
+    //    key repeats at ~30 Hz, and logging or invalidating per event would push 30 empty
+    //    undo steps, 30 log lines and 30 full snapshot re-pulls PER SECOND.
+    struct HeldVoice
+    {
+        te::EditItemID track;
+        int    pitch = -1;
+        int    channel = 1;
+        double startedMs = 0.0;
+        // Each voice carries its OWN lifetime, which is what lets a fire-and-forget
+        // "blip" (drag a note to a new pitch, tap a drum pad) be nothing more than a
+        // held voice with a short TTL. The 30 Hz sweep then becomes the single release
+        // path for both kinds, instead of a per-note timer whose destruction mid-flight
+        // would be one more way to leak a stuck note.
+        double ttlMs = 0.0;
+    };
+    std::vector<HeldVoice> heldVoices_;          // message thread only
+    // Every injected message is stamped notMPE ({} == 0), which is what the engine's own
+    // guide-note path passes. A unique id per source only matters for MPE voice tracking.
+    static constexpr te::MPESourceID kLiveSourceID = {};
+
+    // Detects the case where an injected message reaches NOTHING. The engine only wraps a
+    // track in a LiveMidiInjectingNode when that track produced a clips node, so a track
+    // that has an instrument but NO CLIPS silently swallows every injected note. The
+    // engine fires this callback synchronously from inside injectLiveMidiMessage, so
+    // clearing the flag immediately before the call and reading it immediately after turns
+    // "did that actually reach an instrument?" into an exact answer instead of a guess.
+    void warnOfWastedMidiMessages (te::InputDevice*, te::Track*) override { wastedMidiFired_ = true; }
+    bool wastedMidiFired_ = false;
+
+    juce::var cmdAuditionNote (const juce::var& args);
+    juce::var cmdAllNotesOff  (const juce::var& args);
+    // Releases every held voice on every track (explicit note-offs, then an all-notes-off
+    // per channel, then any sampler's allNotesOff — the only thing that stops an
+    // open-ended one-shot). Called by the command, by the TTL sweep, on UI reload, and
+    // on project swap/teardown.
+    int  releaseAllVoices (te::AudioTrack* onlyThisTrack = nullptr);
+    // Force-releases voices held longer than MOSH_AUDITION_MAX_HOLD_MS. Runs on the
+    // existing 30 Hz timer, so it survives anything the WebView does (crash, freeze,
+    // a dropped note-off) without a watchdog thread of its own.
+    void sweepStuckVoices();
 
     MoshEngine& eng;
     PluginHost  pluginHost;

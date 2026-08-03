@@ -192,6 +192,12 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
         "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
         "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
+        // Live note audition — transient sound, no Edit mutation and no beginTxn (the
+        // invariant this set enforces). Listed because a producer must still be able to
+        // play the keyboard, drag a note, or tap a drum pad WHILE an agent skill holds a
+        // transaction open; without it every such keypress would fail
+        // TRANSACTION_IN_PROGRESS.
+        "audition_note", "all_notes_off",
     };
     return reads;
 }

@@ -153,6 +153,16 @@ juce::WebBrowserComponent::Options WebBridge::buildOptions()
                     juce::WebBrowserComponent::NativeFunctionCompletion completion)
             {
                 browserReadyForEvents = true;
+                // A page (re)load orphans any note the previous page was holding: its
+                // keyup handlers are gone, so nothing will ever send the note-off. Fire a
+                // panic through the ordinary command seam — this is the one moment we know
+                // for certain that no UI state survives.
+                if (commandHandler)
+                {
+                    auto* panic = new juce::DynamicObject();
+                    panic->setProperty ("command", "all_notes_off");
+                    commandHandler (juce::var (panic));
+                }
                 auto* ok = new juce::DynamicObject();
                 ok->setProperty ("ok", true);
                 completion (juce::var (ok));
