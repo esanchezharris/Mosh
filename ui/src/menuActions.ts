@@ -13,6 +13,12 @@ import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
 import { getSessionLog, clearSessionLog } from "./agent/memory/sessionLog";
 import { buildSessionDigest, polishSessionSummary, type ChatFn } from "./agent/memory/sessionSummary";
 import { enqueueTransportAction } from "./transportActionQueue";
+import {
+  FALLBACK_PROJECT_EXT,
+  openProjectFilters,
+  saveProjectDefaultName,
+  saveProjectFilters,
+} from "./projectFile";
 
 export type { ActionId };
 
@@ -68,6 +74,12 @@ export interface ActionCtx {
   // that don't care about this stay valid unchanged.
   chat?: ChatFn;
 }
+
+// PRJ-NAME — the picker filters. The pure string logic (and the reasoning about which
+// extension goes in which dialog) lives in projectFile.ts; these just read the
+// backend-owned extension off the snapshot and hand it over.
+const projectExt = (ctx: ActionCtx): string =>
+  ctx.store.snapshot?.session.projectExtension || FALLBACK_PROJECT_EXT;
 
 // AGT-MEM (M3, item 5) — session summaries: a terse recap of THIS session's meaningful
 // commands, written as a project-scope memory note for the project currently open (i.e.
@@ -172,7 +184,7 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
     case "open_project": {
       let file = opts.file;
       if (!file) {
-        const r = await ctx.pickFiles({ title: "Open project" });
+        const r = await ctx.pickFiles({ title: "Open project", filters: openProjectFilters(projectExt(ctx)) });
         if (!r.ok || !r.files[0]) return;
         file = r.files[0];
       }
@@ -205,7 +217,11 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       return;
 
     case "save_as": {
-      const r = await ctx.pickSaveFile({ title: "Save project as" });
+      const r = await ctx.pickSaveFile({
+        title: "Save project as",
+        filters: saveProjectFilters(projectExt(ctx)),
+        defaultName: saveProjectDefaultName(ctx.store.snapshot?.session.editFile ?? "", projectExt(ctx)),
+      });
       if (!r.ok || !r.file) return;
       await store.exec("save_as", { file: r.file });
       await store.refresh();

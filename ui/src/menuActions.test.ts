@@ -533,3 +533,65 @@ describe("runAction — clip nudge (FU-CLIP-NUDGE)", () => {
     expect(execCalls).toEqual([{ command: "move_clip", args: { clipId: "c1", start: 2.25 } }]);
   });
 });
+
+// PRJ-NAME — the native file-picker filters for project I/O.
+//
+// Open must accept BOTH the current extension and the legacy .tracktionedit: projects
+// saved before the rename are never migrated, so filtering them out would make a
+// producer's existing work look like it had vanished. Save As must offer only the
+// current one — it should never propose the legacy format as a NEW destination.
+describe("project picker filters (PRJ-NAME)", () => {
+  const snapWith = (over: Record<string, unknown>): Snapshot => ({
+    schemaVersion: 1,
+    session: {
+      sampleRate: 48000, tempo: 120, timeSigNumerator: 4, timeSigDenominator: 4,
+      metronome: false, key: { tonic: "C", mode: "major" }, length: 16,
+      editFile: "/Users/e/untitled - bearcat.mosh", ...over,
+    },
+    tracks: [],
+    transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
+    master: { volumeDb: 0, pan: 0 },
+  } as Snapshot);
+
+  it("open_project filters on the backend-reported extension AND the legacy one", async () => {
+    const { ctx } = makeCtx({}, { snapshot: snapWith({ projectExtension: "mosh" }) });
+    await runAction("open_project", ctx);
+    const filters = (ctx.pickFiles as ReturnType<typeof vi.fn>).mock.calls[0][0].filters as string;
+    expect(filters).toContain("*.mosh");
+    expect(filters).toContain("*.tracktionedit");
+  });
+
+  it("falls back to *.mosh when the snapshot omits projectExtension", async () => {
+    const { ctx } = makeCtx({}, { snapshot: snapWith({}) });
+    await runAction("open_project", ctx);
+    const filters = (ctx.pickFiles as ReturnType<typeof vi.fn>).mock.calls[0][0].filters as string;
+    expect(filters).toContain("*.mosh");
+    expect(filters).toContain("*.tracktionedit");
+  });
+
+  it("follows the backend when it reports a DIFFERENT extension (no second source of truth)", async () => {
+    const { ctx } = makeCtx({}, { snapshot: snapWith({ projectExtension: "msh" }) });
+    await runAction("open_project", ctx);
+    const filters = (ctx.pickFiles as ReturnType<typeof vi.fn>).mock.calls[0][0].filters as string;
+    expect(filters).toContain("*.msh");
+    expect(filters).not.toContain("*.mosh");
+  });
+
+  it("save_as filters on the current extension only, and pre-fills the project stem", async () => {
+    const { ctx } = makeCtx({}, { snapshot: snapWith({ projectExtension: "mosh" }) });
+    await runAction("save_as", ctx);
+    const opts = (ctx.pickSaveFile as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(opts.filters).toBe("*.mosh");
+    expect(opts.filters).not.toContain("tracktionedit");
+    expect(opts.defaultName).toBe("untitled - bearcat.mosh");
+  });
+
+  it("save_as of a LEGACY project pre-fills its stem with the current extension", async () => {
+    const { ctx } = makeCtx({}, {
+      snapshot: snapWith({ editFile: "/Users/e/old song.tracktionedit", projectExtension: "tracktionedit" }),
+    });
+    await runAction("save_as", ctx);
+    const opts = (ctx.pickSaveFile as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(opts.defaultName).toBe("old song.tracktionedit");
+  });
+});

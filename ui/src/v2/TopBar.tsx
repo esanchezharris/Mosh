@@ -16,15 +16,15 @@ import { useTransportControls } from "./useTransportControls";
 import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
+import { projectLabel } from "../projectFile";
 import { RecentProjectList } from "../ui/RecentProjectList";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Snapshot } from "../types";
 import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
-function projectName(editFile: string): string {
-  const base = editFile.split("/").pop() ?? "";
-  return base.replace(/\.[^.]+$/, "") || "Untitled";
-}
+// PRJ-NAME — one shared implementation (projectFile.ts); this bar only picks its own
+// empty-path wording. A generated project reads "untitled - bearcat" here.
+const projectName = (editFile: string): string => projectLabel(editFile) || "Untitled";
 
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);

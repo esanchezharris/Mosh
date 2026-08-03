@@ -5309,21 +5309,52 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (tracksBefore > 0, "session has tracks before new_project (sanity)");
 
         // new_project -> ok, empty tracks, editFile path changed, fresh file on disk.
-        auto npFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new.tracktionedit");
+        auto npFile = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new.mosh");
         npFile.deleteFile();
         auto np = cmd (ops, "new_project", args1 ("name", "selftest-new"));
         check (ok (np), "new_project ok");
         check (tracks (ops) == 0, "new_project starts with zero tracks");
         const auto newEdit = sess().getProperty ("editFile", var()).toString();
         check (newEdit != sessionEdit.getFullPathName(), "new_project changed session.editFile path");
-        check (File (newEdit).existsAsFile() && File (newEdit).getSize() > 0, "new_project wrote a fresh non-empty .tracktionedit");
+        check (File (newEdit).existsAsFile() && File (newEdit).getSize() > 0, "new_project wrote a fresh non-empty project file");
+        check (File (newEdit).hasFileExtension ("mosh"), "new_project saves as .mosh, not .tracktionedit");
+        check (sess().getProperty ("projectExtension", var()).toString() == "mosh",
+               "snapshot.session.projectExtension reports mosh");
+
+        // PRJ-NAME — the UNNAMED path. Every other new_project check passes an explicit
+        // name, so the generated default (the thing a producer actually gets when they
+        // hit ⌘N) was never exercised here at all.
+        {
+            auto unnamed = cmd (ops, "new_project");
+            check (ok (unnamed), "new_project with no name ok");
+            const File genFile (sess().getProperty ("editFile", var()).toString());
+            check (genFile.hasFileExtension ("mosh"), "generated project is a .mosh");
+            check (genFile.getFileNameWithoutExtension().startsWith ("untitled - "),
+                   "generated project name is 'untitled - <word>'");
+            // The word is a real word, not a timestamp: letters only, no digits.
+            const auto word = genFile.getFileNameWithoutExtension().fromFirstOccurrenceOf ("untitled - ", false, false);
+            check (word.isNotEmpty() && word.containsOnly ("abcdefghijklmnopqrstuvwxyz"),
+                   "generated project word is lowercase letters (not a timestamp)");
+            check (genFile.existsAsFile() && genFile.getSize() > 0, "generated project wrote a non-empty file");
+
+            // A second unnamed new_project must NOT clobber the first — the collision
+            // re-roll is the guard against silent data loss in a finite word space.
+            auto unnamed2 = cmd (ops, "new_project");
+            check (ok (unnamed2), "second unnamed new_project ok");
+            const File genFile2 (sess().getProperty ("editFile", var()).toString());
+            check (genFile2 != genFile, "a second unnamed new_project picks a different file");
+            check (genFile.existsAsFile(), "the first generated project still exists (not overwritten)");
+
+            // Return to the named project the rest of this block round-trips.
+            check (ok (cmd (ops, "open_project", args1 ("file", newEdit))), "reopen selftest-new after the unnamed pair");
+        }
 
         // create_track + save + open_project round-trips the track count.
         check (ok (cmd (ops, "create_track", args1 ("name", "RoundTrip"))), "create_track in new project ok");
         check (tracks (ops) == 1, "new project has 1 track after create_track");
         check (ok (cmd (ops, "save")), "save new project ok");
         // Swap to ANOTHER project, then open the saved one back.
-        auto npFile2 = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new2.tracktionedit");
+        auto npFile2 = eng.sessionDir().getChildFile ("projects").getChildFile ("selftest-new2.mosh");
         npFile2.deleteFile();
         check (ok (cmd (ops, "new_project", args1 ("name", "selftest-new2"))), "second new_project ok");
         check (tracks (ops) == 0, "second new project is empty");
@@ -5433,12 +5464,12 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     section ("Project safety: reopen last project on relaunch (gap 2)");
     {
         const auto sessionEdit = eng.editFile();
-        const auto defaultEdit = eng.sessionDir().getChildFile ("session.tracktionedit");
+        const auto defaultEdit = eng.sessionDir().getChildFile ("session.mosh");
         const auto lastJson    = eng.sessionDir().getChildFile ("last-project.json");
 
         // (a) rememberProject persists the path; startupEditFile resolves to it — i.e. a
         // relaunch would reopen it (this is the previously-untested app-restart decision).
-        auto probe = eng.sessionDir().getChildFile ("projects").getChildFile ("relaunch-probe.tracktionedit");
+        auto probe = eng.sessionDir().getChildFile ("projects").getChildFile ("relaunch-probe.mosh");
         probe.getParentDirectory().createDirectory();
         probe.replaceWithText ("<EDIT/>");   // a real file so existsAsFile() passes
         eng.rememberProject (probe);
@@ -5446,8 +5477,31 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (eng.startupEditFile() == probe, "startupEditFile resolves to the remembered project (relaunch reopens it)");
 
         // (b) a missing remembered project falls back to the default session file.
-        eng.rememberProject (eng.sessionDir().getChildFile ("projects").getChildFile ("does-not-exist.tracktionedit"));
-        check (eng.startupEditFile() == defaultEdit, "startupEditFile falls back to session.tracktionedit when the last project is missing");
+        eng.rememberProject (eng.sessionDir().getChildFile ("projects").getChildFile ("does-not-exist.mosh"));
+        check (eng.startupEditFile() == defaultEdit, "startupEditFile falls back to session.mosh when the last project is missing");
+        check (eng.defaultSessionEditFile() == defaultEdit, "the default session file is session.mosh");
+
+        // PRJ-NAME (b2) — back-compat. Projects saved before the .mosh rename must still
+        // open, and must stay .tracktionedit: nothing here migrates a file behind the
+        // producer's back. Built by saving a real project THROUGH save_as (a hand-written
+        // XML stub would prove only that the path parses).
+        {
+            const auto legacyProbe = eng.sessionDir().getChildFile ("projects")
+                                        .getChildFile ("legacy-probe.tracktionedit");
+            legacyProbe.deleteFile();
+            check (ok (cmd (ops, "save_as", args1 ("file", legacyProbe.getFullPathName()))),
+                   "save_as to an explicit .tracktionedit path is honoured verbatim");
+            check (legacyProbe.existsAsFile() && legacyProbe.getSize() > 0,
+                   "…and wrote a real project file at that exact path");
+            check (eng.editFile() == legacyProbe, "…adopting it as the backing file");
+
+            check (ok (cmd (ops, "new_project", args1 ("name", "away-from-legacy"))), "swap away from the legacy project");
+            check (ok (cmd (ops, "open_project", args1 ("file", legacyProbe.getFullPathName()))),
+                   "a pre-rename .tracktionedit project still opens");
+            check (eng.editFile().hasFileExtension ("tracktionedit"),
+                   "…and stays a .tracktionedit (never silently migrated)");
+            check (ok (cmd (ops, "save")), "…and still saves in place");
+        }
 
         // (c) new_project records itself as last + appears in the snapshot Recent list,
         // newest-first; open_project updates it too.

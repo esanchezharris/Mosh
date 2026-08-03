@@ -27,6 +27,7 @@ import { devPickerOverride } from "./pickerQuery";
 import { runAction } from "../menuActions";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import type { Snapshot } from "../types";
+import { projectLabel } from "../projectFile";   // PRJ-NAME — one shared implementation
 
 /** Pure visibility rule, testable without a DOM (mirrors shouldShowRecoveryNotice). */
 export function shouldShowSessionPicker(
@@ -51,7 +52,6 @@ export function visibleTrackCount(snapshot: Snapshot): number {
   return snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn).length;
 }
 
-const projectLabel = (path: string): string => (path.split("/").pop() ?? path).replace(/\.[^.]+$/, "");
 
 export function SessionPicker() {
   const snapshot = useStore((s) => s.snapshot);

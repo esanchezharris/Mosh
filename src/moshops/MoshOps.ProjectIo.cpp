@@ -19,6 +19,7 @@
 #include "RenderSourceWindow.h"
 #include "StemExport.h"
 #include "state/Ids.h"
+#include "state/ProjectName.h"
 #include "engine/SourceRef.h"
 #include "engine/RenderArtifacts.h"
 #include "multiplayer/LogicalId.h"
@@ -1357,13 +1358,36 @@ juce::var MoshOps::cmdSetAudioThreads (const juce::var& args)
 juce::var MoshOps::cmdNewProject (const juce::var& args)
 {
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
-    auto name = args.getProperty ("name", var()).toString().trim();
-    if (name.isEmpty())
-        name = "untitled-" + String (Time::getCurrentTime().toMilliseconds());
+    const auto projectsDir = eng.sessionDir().getChildFile ("projects");
+    const auto name = args.getProperty ("name", var()).toString().trim();
 
-    auto file = eng.sessionDir().getChildFile ("projects")
-                    .getChildFile (File::createLegalFileName (name))
-                    .withFileExtension ("tracktionedit");
+    auto fileFor = [&] (const String& n)
+    {
+        return projectsDir.getChildFile (File::createLegalFileName (n))
+                          .withFileExtension (projectname::kProjectExtension);
+    };
+
+    File file;
+    if (name.isNotEmpty())
+    {
+        file = fileFor (name);             // an explicit name is honoured verbatim (may overwrite)
+    }
+    else
+    {
+        // PRJ-NAME — "untitled - bearcat" instead of "untitled-1722693847234". The word
+        // space is finite, so a re-roll on collision is mandatory: silently reusing the
+        // path would blow away an existing unsaved project. Bounded tries, then a
+        // numeric suffix, so this can never spin.
+        for (int attempt = 0; attempt < 8 && file == File(); ++attempt)
+            if (auto candidate = fileFor (projectname::generateName ((uint32) Random::getSystemRandom().nextInt()));
+                ! candidate.exists())
+                file = candidate;
+
+        if (file == File())                // every roll collided — fall back to "<name> (2)"
+            file = projectsDir.getNonexistentChildFile (
+                       File::createLegalFileName (projectname::generateName ((uint32) Random::getSystemRandom().nextInt())),
+                       String (".") + projectname::kProjectExtension, false);
+    }
 
     eng.newProject (file);                 // stops transport + frees ctx before swap, re-points retriever
     lastSeenContext = nullptr;             // old ctx freed; force master-meter re-attach to the new ctx
@@ -1445,7 +1469,9 @@ juce::var MoshOps::cmdSaveAs (const juce::var& args)
 
     File file (path);
     if (file.getFileExtension().isEmpty())
-        file = file.withFileExtension ("tracktionedit");
+        file = file.withFileExtension (projectname::kProjectExtension);
+    // An explicit .tracktionedit path is still honoured verbatim — re-saving a legacy
+    // project keeps it where and what it is (no silent migration).
 
     // AGT-MEM — capture the OLD edit file BEFORE saveProjectAs adopts the new one, so
     // the project-scope agent-memory sidecar (a sibling of the edit file, keyed by its
