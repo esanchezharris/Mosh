@@ -6,7 +6,7 @@
 
 <p align="center">
   A native, cross-platform DAW with AI in the signal path — not bolted on.<br>
-  <a href="https://mosh-landing-two.vercel.app">Site &amp; waitlist</a> ·
+  
   <a href="ARCHITECTURE.md">Architecture</a> ·
   built by <a href="https://emiliosanchezharris.com">Emilio Sánchez-Harris</a>
 </p>
