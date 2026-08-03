@@ -13,8 +13,10 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../store";
 import { pickFiles } from "../../bridge";
 import { notePreview } from "../../audio/notePreview";
+import { wireNotePreview } from "../../audio/wireNotePreview";
 import { noteName } from "../../musicalKey";
 import type { DrumPad, Track } from "../../types";
+import { SAMPLE_DND_MIME, addRecentSample } from "../sampleBrowserUtil";
 
 /** Ableton shows 16 pads at a time; the bank selector walks the 128-note range. */
 const BANK = 16;
@@ -29,6 +31,9 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
   // Fetched lazily on mount, never at app init: execute_command is synchronous on the UI
   // thread, so eager catalog reads are how the window ends up frozen at startup.
   const [kits, setKits] = useState<{ id: string; name: string; available: boolean }[]>([]);
+  // The rack must be able to sound a pad on its own, without depending on the piano roll
+  // or the QWERTY hook having been mounted first (see wireNotePreview).
+  useEffect(() => { wireNotePreview(); }, []);
   useEffect(() => {
     void (async () => {
       const r = await exec("list_drum_kits") as { ok?: boolean; data?: { kits?: typeof kits } };
@@ -104,6 +109,11 @@ export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
                   onDragLeave={() => setDragOver((n) => (n === note ? null : n))}
                   onDrop={(e) => {
                     e.preventDefault(); setDragOver(null);
+                    // Two sources, one drop target: a row dragged out of the sample browser
+                    // (which already knows the real path, so no picker round-trip), or a
+                    // file dragged straight in from Finder.
+                    const fromBrowser = e.dataTransfer?.getData(SAMPLE_DND_MIME);
+                    if (fromBrowser) { addRecentSample(fromBrowser); void assign(note, fromBrowser); return; }
                     const f = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined;
                     if (f?.path) void assign(note, f.path);
                   }}
