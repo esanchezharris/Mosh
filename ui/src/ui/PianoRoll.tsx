@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import type { MidiNote } from "../types";
-import { meterAt, tempoMapFrom, beatSeconds, snapStepBeats } from "../time";
+import { meterAt, tempoMapFrom, beatSeconds } from "../time";
 import { noteName, pitchClass, resolveKey, scaleMask, snapToScale, keyLabel } from "../musicalKey";
 import { liveFeel } from "../interaction/config";
 import { DrumSequencer } from "./DrumSequencer";
@@ -17,16 +17,22 @@ import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx } from "./pianoRol
 import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
 import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
-import { moveEdits, resizeEdits, previewFrom, type GestureGeom } from "./pianoRollEdit";
-import { marqueeHit, toggleSelection, selectAtPitch, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
+import { moveEdits, resizeEdits, previewFrom, transposeEdits, nudgeEdits, velocityEdits, toggleActiveEdits, type GestureGeom } from "./pianoRollEdit";
+import { marqueeHit, toggleSelection, selectAtPitch, selectAll, invertSelection, stepSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
 import { notePreview } from "../audio/notePreview";
 import { wireNotePreview } from "../audio/wireNotePreview";
 import { qwertyState, onQwertyChange, setQwertyActive } from "../hooks/useQwertyMidi";
 import type { QwertyState } from "../interaction/qwertyMidi";
 import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
+import { visiblePitches, pitchAxis, PITCH_MIN, PITCH_MAX, type FoldMode } from "./pianoRollView";
+import { copyNotes, pasteAt, duplicateAfter, setClipboard, getClipboard } from "./pianoRollClipboard";
+import { effectiveStepBeats, gridLabel, GRID_DIVISIONS, GRID_DEFAULT, type EditorGrid } from "./pianoRollGrid";
 
 const ROW_H = 15;
-const LOW = 36, HIGH = 96;
+// The roll spans the FULL MIDI range: it used to stop at 36..96, so notes outside that
+// existed in the clip but could not be seen or edited. Folding (below) is what keeps 128
+// rows navigable.
+const LOW = PITCH_MIN, HIGH = PITCH_MAX;
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
 
 // "copy" is a move that leaves the originals behind — Ableton's Option-drag. It is latched
@@ -48,7 +54,6 @@ export function PianoRoll() {
   const snapshot = useStore((s) => s.snapshot);
   const exec = useStore((s) => s.exec);
   const snap = useStore((s) => s.snap);
-  const snapDivision = useStore((s) => s.snapDivision);
   const scaleLock = useSettings((s) => Boolean(s.get("scaleLock")));
   const notePreviewOn = useSettings((s) => Boolean(s.get("notePreview")));
   // The QWERTY instrument's state lives outside React (a keypress must not re-render the
@@ -62,6 +67,25 @@ export function PianoRoll() {
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
   const [mode, setMode] = useState<"piano" | "drums">("piano");
+  // View state, all editor-LOCAL: the arrangement's own grid and scroll are untouched by
+  // anything here, which is the point of having a separate grid at all.
+  const [fold, setFold] = useState<FoldMode>("off");
+  const [scaleHighlight, setScaleHighlight] = useState(false);
+  // The grid PERSISTS (a producer who works in 1/16 wants it there tomorrow) and lives in
+  // settings rather than component state — which also means it is independent of the
+  // arrangement's snapDivision by construction, not by discipline.
+  const grid: EditorGrid = {
+    division: (useSettings((s) => s.get("prGridDivision")) as EditorGrid["division"]) ?? GRID_DEFAULT.division,
+    adaptive: Boolean(useSettings((s) => s.get("prGridAdaptive"))),
+    triplet: Boolean(useSettings((s) => s.get("prGridTriplet"))),
+  };
+  const setGrid = (next: EditorGrid | ((g: EditorGrid) => EditorGrid)) => {
+    const g = typeof next === "function" ? next(grid) : next;
+    const st = useSettings.getState();
+    st.set("prGridDivision", g.division);
+    st.set("prGridAdaptive", g.adaptive);
+    st.set("prGridTriplet", g.triplet);
+  };
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
   const [previews, setPreviews] = useState<Map<number, MidiNote>>(() => new Map());
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -147,10 +171,12 @@ export function PianoRoll() {
   const stepRecordOnRef = useRef(false);
   const stepBeatsRef = useRef(1);
   const stepRef = useRef<StepState>(STEP_INITIAL);
+  const insertBeatRef = useRef(0);
+  const lockPitchRef = useRef<(p: number) => number>((p) => p);
   // Step record is armed exactly when the computer keyboard is on AND the roll is open.
   stepRecordOnRef.current = qwerty.active;
   const [insertBeat, setInsertBeat] = useState(0);
-  useEffect(() => { stepRef.current = STEP_INITIAL; setInsertBeat(0); }, [editingClipId]);
+  useEffect(() => { stepRef.current = STEP_INITIAL; setInsertBeat(0); insertBeatRef.current = 0; }, [editingClipId]);
   useEffect(() => {
     if (!editingClipId || !clip) return;
     const clipId = clip.id;
@@ -160,7 +186,7 @@ export function PianoRoll() {
       if (!d) return;
       const r = stepReduce(stepRef.current, { t: d.down ? "down" : "up", pitch: d.pitch }, stepBeatsRef.current);
       stepRef.current = r.next;
-      setInsertBeat(r.next.insertBeat);
+      setInsertBeat(r.next.insertBeat); insertBeatRef.current = r.next.insertBeat;
       if (r.add)
         void exec("add_note", {
           clipId, pitch: r.add.pitch, start: r.add.start,
@@ -179,26 +205,111 @@ export function PianoRoll() {
   // Delete/Backspace listener below (bubble phase) is unaffected.
   useEscapeStack(Boolean(editingClipId && clip), close);
 
-  // Keyboard while the piano roll is open: Delete/Backspace removes the SELECTED
-  // NOTES (the arrangement's global handler bails when editingClipId is set, so the
-  // clip is never deleted here). Removing in descending index order keeps each
-  // noteIndex valid as the backend reindexes after every removal.
+  // The editor's OWN keyboard layer. Mounted only while the roll is open, in BUBBLE phase,
+  // so precedence falls out of where each listener sits rather than from a priority table:
+  // the escape stack (capture) → the QWERTY instrument (capture, claims its letters when
+  // armed) → this → the app keymap. The app's clip-nudge already bails on editingClipId,
+  // so plain arrows are free for us here.
+  //
+  // Note the letter keys (F/G/K/T/0) deliberately stop working while the computer keyboard
+  // is armed — it claims them in capture phase to play notes, which IS Ableton's behaviour.
   useEffect(() => {
     if (!editingClipId || !clip) return;
     const clipId = clip.id;
+    const notesNow = clip.notes ?? [];
+
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      const sel = selectedNotes;
+      const take = () => { e.preventDefault(); e.stopPropagation(); };
+
+      // ── selection ──
+      if (mod && e.key.toLowerCase() === "a") {
+        take();
+        applySelection(e.shiftKey ? invertSelection(notesNow, sel) : selectAll(notesNow));
+        return;
+      }
+      // ── clipboard ──
+      if (mod && ["c", "x", "v", "d"].includes(e.key.toLowerCase())) {
+        const k = e.key.toLowerCase();
+        if (k === "c" || k === "x") {
+          if (sel.size === 0) return;
+          take();
+          setClipboard(copyNotes(notesNow, sel));
+          if (k === "x") { void removeNotes(exec, clipId, [...sel]); setSelectedNotes(new Set()); }
+          return;
+        }
+        if (k === "v") {
+          const cb = getClipboard();
+          if (!cb) return;
+          take();
+          void addNotes(exec, clipId, pasteAt(cb, insertBeatRef.current));
+          return;
+        }
+        if (sel.size === 0) return;   // Cmd+D
+        take();
+        void addNotes(exec, clipId, duplicateAfter(notesNow, sel));
+        return;
+      }
+      // ── quantize the clip to the grid shown here (Ableton's Cmd+U) ──
+      if (mod && e.key.toLowerCase() === "u") {
+        take();
+        void exec("quantize_notes", { clipId, division: stepBeatsRef.current });
+        return;
+      }
+      // ── grid (Cmd+1..4 pick a division, like Ableton) ──
+      if (mod && ["1", "2", "3", "4"].includes(e.key)) {
+        take();
+        const idx = Number(e.key);   // 1 => 1/4 … 4 => 1/32
+        setGrid((g) => ({ ...g, adaptive: false, division: GRID_DIVISIONS[idx] ?? g.division }));
+        return;
+      }
+      // ── nudge / transpose / velocity ──
+      if (e.key.startsWith("Arrow")) {
+        if (sel.size === 0) return;
+        const horizontal = e.key === "ArrowLeft" || e.key === "ArrowRight";
+        const dir = (e.key === "ArrowRight" || e.key === "ArrowDown") ? 1 : -1;
+        if (e.altKey) {          // step the selection to the next/previous note
+          take();
+          applySelection(stepSelection(notesNow, sel, horizontal ? (dir as 1 | -1) : (dir as 1 | -1)), { audition: true });
+          return;
+        }
+        take();
+        if (horizontal) {
+          void applyNoteEdits(exec, clipId, nudgeEdits(notesNow, sel, dir * (stepBeatsRef.current)));
+        } else if (mod) {
+          void applyNoteEdits(exec, clipId, velocityEdits(notesNow, sel, -dir * (e.shiftKey ? 1 : 10)));
+        } else {
+          const semis = -dir * (e.shiftKey ? 12 : 1);
+          void applyNoteEdits(exec, clipId, transposeEdits(notesNow, sel, semis, lockPitchRef.current));
+        }
+        return;
+      }
+      // ── view + note state (single letters — see the header note) ──
+      if (!mod && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "f") { take(); setFold((f) => (f === "content" ? "off" : "content")); return; }
+        if (k === "g") { take(); setFold((f) => (f === "scale" ? "off" : "scale")); return; }
+        if (k === "k") { take(); setScaleHighlight((v) => !v); return; }
+        if (k === "t") { take(); setGrid((g) => ({ ...g, triplet: !g.triplet })); return; }
+        if (e.key === "0" && sel.size > 0) {
+          take();
+          void applyNoteEdits(exec, clipId, toggleActiveEdits(notesNow, sel));
+          return;
+        }
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedNotes.size === 0) return;
-        e.preventDefault(); e.stopPropagation();
-        void removeNotes(exec, clipId, [...selectedNotes]);
+        if (sel.size === 0) return;
+        take();
+        void removeNotes(exec, clipId, [...sel]);
         setSelectedNotes(new Set());
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editingClipId, clip, selectedNotes, exec, close]);
+  }, [editingClipId, clip, selectedNotes, exec, close]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The grid's width came from the CLIP alone, so a short clip left the right third
   // of the panel unpainted: the grid element simply ended before its container did,
@@ -243,11 +354,12 @@ export function PianoRoll() {
   if (!editingClipId || !clip) return null;
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
-  const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
+  // The editor's OWN grid. `snap` (the global on/off) still applies, but the DIVISION is
+  // local — changing it here never re-grids the arrangement, and vice versa.
+  const stepBeats = snap ? effectiveStepBeats(m, grid, beatPx) : 0;
   // The step-record listener reads this at event time (see the refs above).
   stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
   const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
-  const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k);
   const gridBeats = gridBeatsFor({
     clipBeats: clip.length / beatSeconds(m),
     beatsPerBar: m.num,
@@ -257,8 +369,6 @@ export function PianoRoll() {
   const gridW = gridBeats * beatPx;
   // Feed the playhead loop this render's geometry (see the rAF effect above).
   geomRef.current = { start: clip.start, beatSec: beatSeconds(m), beatPx, len: clip.length };
-  const yOf = (pitch: number) => (HIGH - pitch) * ROW_H;
-  const pitchAt = (y: number) => HIGH - Math.floor(y / ROW_H);
   // Scale lock (invariant 88) — an INPUT AID, exactly like snap-to-grid above:
   // it constrains the pitch of notes you draw or drag BEFORE the command is sent,
   // so notes you never touched are never rewritten. Off ⇒ this whole block is
@@ -266,6 +376,18 @@ export function PianoRoll() {
   const songKey = resolveKey(snapshot?.session.key);
   const keyMask = scaleMask(songKey);
   const lockPitch = (pitch: number) => (scaleLock ? snapToScale(pitch, keyMask) : pitch);
+  lockPitchRef.current = lockPitch;
+  // Every consumer — rows, gutter, note boxes, marquee hit-testing, click-to-draw — goes
+  // through ONE axis object. Once rows can be folded away, (HIGH - pitch) * ROW_H is simply
+  // wrong, and any consumer still doing its own arithmetic would silently disagree.
+  const axis = pitchAxis(
+    visiblePitches({ low: LOW, high: HIGH, mode: fold, keyMask, notes: clip.notes ?? [] }),
+    ROW_H,
+  );
+  const pitches = axis.visible;
+  const yOf = axis.yOf;
+  const pitchAt = axis.pitchAt;
+
   const noteBox = (n: MidiNote) => ({ x: n.start * beatPx, y: yOf(n.pitch) + 1, w: Math.max(6, n.length * beatPx - 1), h: ROW_H - 2 });
   // The gesture arithmetic all lives in pianoRollEdit.ts; this is the geometry it needs.
   // minLengthBeats follows the Option key for the same reason snapping does — Option means
@@ -518,6 +640,32 @@ export function PianoRoll() {
             ⌨ {qwerty.active ? `C${qwerty.octave} · v${qwerty.velocity}` : "Keys"}
           </button>
           {mode === "piano" && (
+            <span className="seg" role="group" aria-label="Fold">
+              <button className="btn" data-testid="pr-fold" aria-pressed={fold === "content"}
+                onClick={() => setFold(fold === "content" ? "off" : "content")}
+                title="Fold (F) — show only the pitches this clip actually uses. Essential on a drum clip: eight rows instead of 128.">Fold</button>
+              <button className="btn" data-testid="pr-fold-scale" aria-pressed={fold === "scale"}
+                onClick={() => setFold(fold === "scale" ? "off" : "scale")}
+                title={`Fold to Scale (G) — show only rows in ${keyLabel(snapshot?.session.key ?? {})}, plus any pitch that already has a note (so nothing you wrote can be hidden).`}>Scale</button>
+            </span>
+          )}
+          {mode === "piano" && (
+            <button className="btn" data-testid="pr-scale-highlight" aria-pressed={scaleHighlight}
+              onClick={() => setScaleHighlight(!scaleHighlight)}
+              title="Highlight scale (K) — dim the out-of-key rows without constraining what you draw.">Key</button>
+          )}
+          {mode === "piano" && (
+            <span className="seg pr-grid-ctl" role="group" aria-label="Grid">
+              <button className="btn" data-testid="pr-grid-adaptive" aria-pressed={grid.adaptive}
+                onClick={() => setGrid({ ...grid, adaptive: !grid.adaptive })}
+                title="Adaptive grid — follow the zoom instead of a fixed division.">
+                {gridLabel(m, grid, beatPx)}
+              </button>
+              <button className="btn" data-testid="pr-grid-triplet" aria-pressed={grid.triplet}
+                onClick={() => setGrid({ ...grid, triplet: !grid.triplet })} title="Triplet grid (T)">T</button>
+            </span>
+          )}
+          {mode === "piano" && (
             <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
               onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}
               title={scaleLock
@@ -535,7 +683,10 @@ export function PianoRoll() {
             </span>
           )}
           {mode === "piano" && (
-            <button className="btn" onClick={() => exec("quantize_notes", { clipId: clip.id, division: snapStepBeats(m, snapDivision) })}>Quantize {snapDivision === "bar" ? "Bar" : snapDivision}</button>
+            <button className="btn" title="Snap every note in the clip to the grid shown here"
+              onClick={() => exec("quantize_notes", { clipId: clip.id, division: effectiveStepBeats(m, grid, beatPx) })}>
+              Quantize {gridLabel(m, grid, beatPx)}
+            </button>
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
@@ -603,13 +754,17 @@ export function PianoRoll() {
               setBeatPx(next.beatPx);
               el.scrollLeft = next.scrollLeft;
             }}>
-            <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: pitches.length * ROW_H }}
+            <div className="pr-grid" role="group" aria-label="Piano roll grid" style={{ width: gridW, height: axis.height }}
               onPointerDown={onGridDown} onPointerMove={onGridMove} onPointerUp={onGridUp} onPointerCancel={onGridCancel} onLostPointerCapture={onGridCancel}>
               {pitches.map((p) => {
                 // Only shade for the key while the lock is on, so the roll is
                 // pixel-identical to before when the feature is off.
-                const off = scaleLock && !keyMask[pitchClass(p)];
-                const root = scaleLock && pitchClass(p) === songKey.tonic;
+                // Shading is driven by EITHER the input aid (scale lock) or the pure view
+                // preference (scale highlight) — they were the same flag, so you could not
+                // see the key without also constraining what you drew.
+                const shade = scaleLock || scaleHighlight;
+                const off = shade && !keyMask[pitchClass(p)];
+                const root = shade && pitchClass(p) === songKey.tonic;
                 return <div key={`r${p}`} className={`pr-row ${isBlack(p) ? "black" : ""}${off ? " off-key" : ""}${root ? " root" : ""}`} style={{ top: yOf(p), height: ROW_H }} />;
               })}
               {Array.from({ length: gridBeats + 1 }, (_, b) => <div key={`c${b}`} className={`pr-gl ${b % m.num === 0 ? "bar" : ""}`} style={{ left: b * beatPx }} />)}

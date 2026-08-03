@@ -120,6 +120,15 @@ const MOSH: Keymap = {
 
 // Per-DAW variants — the core is shared; only a few flavor bindings differ so a
 // template switch is observable. (DAW interaction identity lives mostly in gestures.)
+//
+// Ableton. Note what is deliberately NOT here: the MIDI editor's own vocabulary (F fold,
+// G fold-to-scale, K highlight, T triplet, 0 deactivate, Cmd+U quantize, Cmd+1..4 grid,
+// arrow transpose/nudge/velocity) lives in the editor's OWN keyboard layer, mounted only
+// while the roll is open. Those keys are scoped to a surface rather than global, so
+// binding them in a preset would claim them app-wide — and would fight the computer MIDI
+// keyboard, which owns single letters whenever it is armed. Nothing is bound here that
+// does not have a live handler: a preset entry with no action behind it is a key that
+// silently does nothing.
 const ABLETON: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.RECORD]: "F9" };
 const FL: Keymap = { ...MOSH, [A.SPLIT]: "Mod+E", [A.DUPLICATE]: "Mod+B" };
 

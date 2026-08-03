@@ -284,6 +284,25 @@ function interactionSettings(): SettingDef[] {
       constraints: { options: DAW_OPTIONS },
     },
     {
+      id: "prGridDivision", type: "enum", default: "1/16", scope: "app",
+      category: "Interaction", label: "Piano-roll grid",
+      help: "The MIDI editor's own grid, independent of the arrangement's — choosing 1/16 to place hi-hats no longer re-grids the whole session. Cmd+1..4 in the editor.",
+      constraints: { options: [
+        { value: "bar", label: "Bar" }, { value: "1/4", label: "1/4" }, { value: "1/8", label: "1/8" },
+        { value: "1/16", label: "1/16" }, { value: "1/32", label: "1/32" },
+      ] },
+    },
+    {
+      id: "prGridAdaptive", type: "bool", default: true, scope: "app",
+      category: "Interaction", label: "Adaptive piano-roll grid",
+      help: "Let the editor's grid follow the zoom — the finest division whose lines are still far enough apart to aim at — instead of a fixed one.",
+    },
+    {
+      id: "prGridTriplet", type: "bool", default: false, scope: "app",
+      category: "Interaction", label: "Triplet grid",
+      help: "Three notes in the space of two, in the MIDI editor. T in the editor.",
+    },
+    {
       id: "notePreview", type: "bool", default: true, scope: "app",
       category: "Interaction", label: "Hear notes as you edit",
       help: "Ableton's Preview switch. Plays a note through the track's instrument when you draw it, drag it to a new pitch, click a key in the piano-roll gutter, or select it. Needs an instrument on the track.",

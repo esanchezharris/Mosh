@@ -19,7 +19,10 @@ vi.mock("../bridge", async () => {
   return { ...actual, onEvent: vi.fn(() => () => {}), pickFiles: vi.fn(), pickSaveFile: vi.fn() };
 });
 
-const ROW_H = 15, BEAT_PX = 42, HIGH = 96;
+// The roll spans the FULL MIDI range now (it used to stop at 96), so the same screen Y is
+// a different pitch. The helper below already derives Y from a target pitch, so this one
+// constant is the whole update.
+const ROW_H = 15, BEAT_PX = 42, HIGH = 127;
 /** clientY that lands the pointer on a given pitch row (pitchAt inverts this). */
 const yForPitch = (pitch: number) => (HIGH - pitch) * ROW_H + 1;
 
@@ -181,11 +184,15 @@ describe("piano-roll scale lock", () => {
     expect(host.querySelectorAll(".pr-row.root")).toHaveLength(0);
 
     act(() => { useSettings.getState().set("scaleLock", true); });
-    // The roll draws pitches 36..96. In A minor the five out-of-key classes
-    // (A# C# D# F# G#) contribute 5 rows each …
-    expect(host.querySelectorAll(".pr-row.off-key")).toHaveLength(25);
-    // … and the root rows are the A's in range: A2 A3 A4 A5 A6 (45 57 69 81 93).
-    expect(host.querySelectorAll(".pr-row.root")).toHaveLength(5);
+    // The roll now draws the FULL range, 0..127 (it used to stop at 36..96, which silently
+    // hid any note outside that). Counting rows for pitch class c: floor((127 - c)/12) + 1.
+    // A minor's five out-of-key classes are A#(10) C#(1) D#(3) F#(6) G#(8) →
+    // 10 + 11 + 11 + 11 + 10 = 53.
+    expect(host.querySelectorAll(".pr-row.off-key")).toHaveLength(53);
+    // The root is A (class 9): floor((127-9)/12) + 1 = 10.
+    expect(host.querySelectorAll(".pr-row.root")).toHaveLength(10);
+    // And the range itself is reachable — the old bug was that these rows did not exist.
+    expect(host.querySelectorAll(".pr-row")).toHaveLength(128);
   });
 
   it("exposes a toggle that reports its state and names the key", () => {

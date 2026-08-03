@@ -59,7 +59,12 @@ describe("piano-roll drag axis independence", () => {
 
   const mount = () => {
     // snap ON — this is the whole point: snapBeat must have teeth for the guard to matter.
-    useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, snapDivision: "1/4", exec });
+    // The editor keeps its OWN grid now — the arrangement's snapDivision no longer reaches
+    // it — so pin the division here. Adaptive off, or the step would follow the zoom.
+    useSettings.getState().set("prGridDivision", "1/4");
+    useSettings.getState().set("prGridAdaptive", false);
+    useSettings.getState().set("prGridTriplet", false);
+    useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, exec });
     act(() => root.render(React.createElement(PianoRoll)));
   };
 
