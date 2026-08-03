@@ -214,13 +214,35 @@ describe("legacy prompt byte-stability pin", () => {
     // richer sessions also gain the tempo map, buses and per-track pan/sends. The
     // "exactly two added lines" claim is not just prose: the test above pins the
     // fixture's FULL rendered block.
+    // Moved 2026-08-03 — loop-region + play-start-offset args declared.
+    //   set_transport — + N("loopStart") + N("loopEnd"), and the desc gains ", and the
+    //                    loop region". cmdSetTransport has ALWAYS read both
+    //                    (MoshOps.TempoProject.cpp:82-84) and only sets the range when
+    //                    BOTH are present, but neither was declared — so the agent could
+    //                    switch looping on and had no way to say WHERE. "loop the first
+    //                    4 bars" was unreachable. Found by the new arg-type scan, which
+    //                    also reports args a call site passes that the catalog never
+    //                    declares (the UI has always sent these:
+    //                    v2/timeline/TimeRangeBand.tsx:60, menuActions.ts:314).
+    //   trim_clip     — + N("offset"), likewise read by cmdTrimClip and sent by
+    //                    ui/clipDrag.ts:58 but undeclared. It is the play-start offset
+    //                    into the source — the one thing separating "trim the clip" from
+    //                    "slide the audio inside it".
+    //
+    // Same consumer posture as the builtins move above: NO command was added, removed or
+    // renamed — two commands gained optional args and one desc changed — so the SFT
+    // corpora and GEPA baselines are not invalidated, though a corpus rebuilt after this
+    // commit carries the new text. build_add_note_corrective.py parses AGENT_COMMANDS out
+    // of commands.ts, so it needs no edit.
+    //
     // Previous pins:
+    // - pre-loop-region-args: a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-builtins-vocabulary (unified renderer + issue #539 wording): e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
     // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
     // - pre-musical-time contract: a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c");
+    expect(hash).toBe("28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved
