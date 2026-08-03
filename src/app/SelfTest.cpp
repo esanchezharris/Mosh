@@ -4391,6 +4391,61 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "set_drum_pad still addresses a real pad, not a wide-range sound");
             check ((double) padOf (36).getProperty ("gainDb", 0.0) < -2.0, "the narrowest matching sound is the pad");
 
+            // apply_choke BAKES the group into note lengths, which is the only way clip
+            // playback and export can obey it — MoshOps is not in the engine's playback
+            // MIDI path and cannot inject a note-off between two clip notes at render time.
+            {
+                Array<var> hats;
+                auto addNote = [&] (int pitch, double start, double length) {
+                    auto* n = new DynamicObject();
+                    n->setProperty ("pitch", pitch); n->setProperty ("start", start);
+                    n->setProperty ("length", length); n->setProperty ("velocity", 100);
+                    hats.add (var (n));
+                };
+                addNote (46, 0.0, 4.0);   // open hat, ringing for a whole bar
+                addNote (42, 1.0, 0.25);  // closed hat one beat later — must cut it
+                addNote (38, 2.0, 0.25);  // a snare, NOT in the group — must cut nothing
+                auto* ca = new DynamicObject();
+                ca->setProperty ("trackId", pt); ca->setProperty ("length", 4.0); ca->setProperty ("notes", hats);
+                const auto hc = cmd (ops, "add_midi_clip", var (ca))["data"].getProperty ("clipId", var()).toString();
+
+                // Local reader — clipNotes() belongs to another section's scope.
+                auto notesOfClip = [&] (const juce::String& id) {
+                    auto trk = trackById (pt);
+                    auto clipsVar = trk.getProperty ("clips", var());
+                    if (auto* cs = clipsVar.getArray())
+                        for (auto& c : *cs)
+                            if (c.getProperty ("id", var()).toString() == id)
+                                return c.getProperty ("notes", var());
+                    return var();
+                };
+                auto lengthOfPitch = [&] (int pitch) {
+                    auto ns = notesOfClip (hc);
+                    if (auto* a = ns.getArray())
+                        for (auto& n : *a)
+                            if ((int) n.getProperty ("pitch", -1) == pitch)
+                                return (double) n.getProperty ("length", -1.0);
+                    return -1.0;
+                };
+
+                // Nothing is choked until the pads say so — proving the bake is driven by
+                // the group and not by "shorten everything".
+                check (ok (cmd (ops, "apply_choke", args1 ("clipId", hc))), "apply_choke ok with no groups set");
+                check (lengthOfPitch (46) > 3.9, "with no choke groups, no note is touched");
+
+                cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 1 }}));
+                cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 42 }, { "chokeGroup", 1 }}));
+                auto ac = cmd (ops, "apply_choke", args1 ("clipId", hc));
+                check (ok (ac) && (int) ac["data"].getProperty ("truncated", 0) == 1, "apply_choke truncates exactly the choked note");
+                check (std::abs (lengthOfPitch (46) - 1.0) < 1e-6, "the closed hat cuts the open hat at its onset");
+                check (std::abs (lengthOfPitch (38) - 0.25) < 1e-6, "a note OUTSIDE the group is left alone");
+                check (std::abs (lengthOfPitch (42) - 0.25) < 1e-6, "the choking note itself is untouched");
+
+                // Destructive, so it must be undoable in one step like any other edit.
+                cmd (ops, "undo");
+                check (lengthOfPitch (46) > 3.9, "ONE undo restores the choked note's length");
+            }
+
             cmd (ops, "remove_track", args1 ("trackId", pt));
         }
 

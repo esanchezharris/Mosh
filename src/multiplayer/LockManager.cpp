@@ -102,6 +102,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // CLP-LOOP — clip loop region; carries a clipId like gain/mute/fade.
         "set_clip_loop",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
+        "apply_choke",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
         "accept_render", "reject_render", "reset_render_layer", "bypass_layer",

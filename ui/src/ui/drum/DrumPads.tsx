@@ -22,7 +22,7 @@ const BANKS = 128 / BANK;
 /** The bank holding the General MIDI kit (36..51), which is where a Mosh kit lands. */
 const GM_BANK = Math.floor(36 / BANK);
 
-export function DrumPads({ track }: { track: Track }) {
+export function DrumPads({ track, clipId }: { track: Track; clipId?: string }) {
   const exec = useStore((s) => s.exec);
   const [bank, setBank] = useState(GM_BANK);
   const [dragOver, setDragOver] = useState<number | null>(null);
@@ -114,14 +114,14 @@ export function DrumPads({ track }: { track: Track }) {
         ))}
       </div>
 
-      <PadInspector track={track} pads={pads} />
+      <PadInspector track={track} pads={pads} clipId={clipId} />
       <div className="dp-foot">click a pad to hear it · drop a sample on a pad to load it · empty pad opens a file picker</div>
     </div>
   );
 }
 
 /** Per-pad mixer + choke, for whichever pad is selected. */
-function PadInspector({ track, pads }: { track: Track; pads: readonly DrumPad[] }) {
+function PadInspector({ track, pads, clipId }: { track: Track; pads: readonly DrumPad[]; clipId?: string }) {
   const exec = useStore((s) => s.exec);
   const [note, setNote] = useState<number | null>(null);
   const pad = pads.find((p) => p.pitch === note) ?? pads[0] ?? null;
@@ -154,6 +154,11 @@ function PadInspector({ track, pads }: { track: Track; pads: readonly DrumPad[] 
       </label>
       <button className="btn" data-testid="dp-clear" title="Empty this pad"
         onClick={() => void exec("clear_drum_pad", { trackId: track.id, note: pad.pitch })}>Clear</button>
+      {clipId && pads.some((p) => p.chokeGroup) && (
+        <button className="btn" data-testid="dp-apply-choke"
+          title="Bake the choke groups into this clip's note lengths, so playback and export obey them too — choke otherwise applies only to pads you play live. Shortens notes; undoable."
+          onClick={() => void exec("apply_choke", { clipId })}>Apply choke</button>
+      )}
     </div>
   );
 }

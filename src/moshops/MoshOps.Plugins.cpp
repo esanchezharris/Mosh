@@ -392,6 +392,93 @@ juce::var MoshOps::cmdClearDrumPad (const juce::var& args)
     return okResult ("clear_drum_pad", var (data));
 }
 
+// Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
+//
+// This exists because live choke cannot reach clip playback. During playback the MIDI
+// comes from the engine's own MidiNode; MoshOps is not in that path and cannot inject a
+// note-off between two clip notes at render time. Subclassing SamplerPlugin to do it
+// properly was rejected for v1: the plugin type name is persisted in every existing edit,
+// so it would change the on-disk format for every drum track already out there.
+//
+// Baking is the honest alternative rather than a hack: the notes really do get shorter,
+// which means you can SEE it in the piano roll, it survives export because the render path
+// reads the same MIDI, undo puts it back, and it is provable offline. The cost — it is a
+// destructive edit rather than a live setting — is why it is an explicit command with its
+// own undo step, never a silent side effect of adding a note.
+juce::var MoshOps::cmdApplyChoke (const juce::var& args)
+{
+    auto* clip = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (clip == nullptr) return errResult ("apply_choke", "no midi clip");
+    auto* track = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+    if (track == nullptr) return errResult ("apply_choke", "clip has no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("apply_choke", "track has no sampler");
+
+    // pitch → choke group, for every pad that has one.
+    std::map<int, int> groupOfPitch;
+    for (int i = 0; i < sampler->getNumSounds(); ++i)
+    {
+        auto sound = soundTreeAt (*sampler, i);
+        const int g = sound.isValid() ? (int) sound.getProperty (ids::moshChokeGroup, 0) : 0;
+        if (g > 0)
+            for (int n = sampler->getMinKey (i); n <= sampler->getMaxKey (i); ++n)
+                groupOfPitch[n] = g;
+    }
+    if (groupOfPitch.empty())
+        return okResult ("apply_choke", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clip->itemID.toString());
+            o->setProperty ("truncated", 0); o->setProperty ("groups", 0); return var (o); }());
+
+    auto& seq = clip->getSequence();
+    // Snapshot the pointers BEFORE mutating: setStartAndLength triggers tracktion's
+    // synchronous re-sort of the live MidiList, so walking it live would skip notes that
+    // moved past an already-visited index (the same hazard cmdQuantizeNotes documents).
+    std::vector<te::MidiNote*> notes;
+    for (int i = 0; i < seq.getNumNotes(); ++i)
+        if (auto* n = seq.getNote (i)) notes.push_back (n);
+
+    beginTxn ("apply_choke");
+    int truncated = 0;
+    std::set<int> groupsSeen;
+    for (auto* n : notes)
+    {
+        auto it = groupOfPitch.find (n->getNoteNumber());
+        if (it == groupOfPitch.end()) continue;
+        const int group = it->second;
+        groupsSeen.insert (group);
+
+        // The next note IN THE SAME GROUP that starts after this one — a closed hat cuts
+        // an open hat, but a kick never cuts a snare.
+        const double start = n->getStartBeat().inBeats();
+        double nextStart = std::numeric_limits<double>::max();
+        for (auto* other : notes)
+        {
+            if (other == n) continue;
+            auto o = groupOfPitch.find (other->getNoteNumber());
+            if (o == groupOfPitch.end() || o->second != group) continue;
+            const double os = other->getStartBeat().inBeats();
+            if (os > start && os < nextStart) nextStart = os;
+        }
+        if (nextStart == std::numeric_limits<double>::max()) continue;
+
+        const double length = n->getLengthBeats().inBeats();
+        const double capped = nextStart - start;
+        if (capped >= length || capped <= 0.0) continue;
+        n->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
+                              tracktion::BeatDuration::fromBeats (capped), &undoManager());
+        ++truncated;
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("truncated", truncated);
+    data->setProperty ("groups", (int) groupsSeen.size());
+    logLine ("apply_choke", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());
+    return okResult ("apply_choke", var (data));
+}
+
 // DRM-001 — assign a sample file to a single pad/note on a track's sampler. Maps
 // the sound to exactly that note (keyNote==minNote==maxNote, unity pitch) and
 // REPLACES any pad already covering the note, so it doubles as "swap this pad".

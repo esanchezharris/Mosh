@@ -15,6 +15,7 @@ agent_memory_read	Unguarded
 agent_memory_write	Unguarded
 all_notes_off	Unguarded
 analyze_lyrics	Track
+apply_choke	Clip
 apply_remote_track	Unguarded
 approve_training_source	Unguarded
 arm_track	Track

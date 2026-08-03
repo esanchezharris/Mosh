@@ -700,7 +700,7 @@ export function PianoRoll() {
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
-        {mode === "pads" && padTrack ? <DrumPads track={padTrack} /> : mode === "drums" ? <DrumSequencer clip={clip} /> : (
+        {mode === "pads" && padTrack ? <DrumPads track={padTrack} clipId={clip.id} /> : mode === "drums" ? <DrumSequencer clip={clip} /> : (
         <><div className="pr-body" ref={bodyRef}>
           {/* Ruler. Bar numbers are CLIP-LOCAL (bar 1 = the clip's start), because note
               positions are clip-local beats — session-absolute numbering would disagree

@@ -2826,6 +2826,28 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     // Drum-rack pads. The mock keeps its own pad list on the track so the grid, the
     // per-pad mixer and the choke picker all round-trip in the browser.
+    case "apply_choke": {
+      const f = findClip(str(args.clipId));
+      if (!f?.clip.notes) return err(command, "not a midi clip");
+      const t = findTrack(f.track.id);
+      const group = new Map<number, number>();
+      for (const p of t?.drumPads ?? []) if (p.chokeGroup) group.set(p.pitch, p.chokeGroup);
+      if (group.size === 0) return ok(command, { clipId: str(args.clipId), truncated: 0, groups: 0 });
+      pushUndo();
+      let truncated = 0;
+      for (const n of f.clip.notes) {
+        const g = group.get(n.pitch);
+        if (g == null) continue;
+        const next = f.clip.notes
+          .filter((o) => o !== n && group.get(o.pitch) === g && o.start > n.start)
+          .reduce((m, o) => Math.min(m, o.start), Infinity);
+        if (next === Infinity) continue;
+        const capped = next - n.start;
+        if (capped > 0 && capped < n.length) { n.length = capped; truncated++; }
+      }
+      invalidate();
+      return ok(command, { clipId: str(args.clipId), truncated, groups: new Set(group.values()).size });
+    }
     case "set_drum_pad": {
       const t = findTrack(str(args.trackId));
       const pad = t?.drumPads?.find((p) => p.pitch === num(args.note, -1));

@@ -565,6 +565,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
     if (name == "set_drum_pad")      return cmdSetDrumPad (args);
     if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
+    if (name == "apply_choke")       return cmdApplyChoke (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
