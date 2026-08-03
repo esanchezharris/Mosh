@@ -75,8 +75,8 @@ lives in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
 ## Status
 
-v0.1.0 is out: a signed, notarized macOS (Apple Silicon) build on the
-[releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0).
+v0.1.1 is out: a signed, notarized macOS (Apple Silicon) build on the
+[releases page](https://github.com/esanchezharris/Mosh/releases/latest).
 
 ## License
 

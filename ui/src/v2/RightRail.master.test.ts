@@ -21,6 +21,13 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+async function flushRangeReconcile(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 function makeSnapshot(master?: { volumeDb: number; pan: number }): Snapshot {
   return { schemaVersion: 1, session: {}, tracks: [], master } as unknown as Snapshot;
 }
@@ -73,21 +80,41 @@ describe("v2 RightRail MasterCard", () => {
     expect(pan!.value).toBe("0");
   });
 
-  it("dragging the volume slider execs set_master_volume with the new dB value", () => {
+  it("dragging the volume slider execs set_master_volume with the new dB value", async () => {
     render(makeSnapshot({ volumeDb: 0, pan: 0 }));
     const vol = host.querySelector<HTMLInputElement>('[data-testid="v2-master-volume"]');
     act(() => setInputValue(vol!, "-9.5"));
     const call = execCalls.find((c) => c.command === "set_master_volume");
     expect(call).toBeTruthy();
     expect(call!.args).toMatchObject({ db: -9.5 });
+    await flushRangeReconcile();
   });
 
-  it("dragging the pan slider execs set_master_pan with the new pan value", () => {
+  it("keeps rapid native volume steps cumulative while the snapshot is stale", async () => {
     render(makeSnapshot({ volumeDb: 0, pan: 0 }));
-    const pan = host.querySelector<HTMLInputElement>('[data-testid="v2-master-pan"]');
-    act(() => setInputValue(pan!, "-0.5"));
-    const call = execCalls.find((c) => c.command === "set_master_pan");
-    expect(call).toBeTruthy();
-    expect(call!.args).toMatchObject({ pan: -0.5 });
+    const vol = host.querySelector<HTMLInputElement>('[data-testid="v2-master-volume"]')!;
+
+    // macOS AXIncrement/AXDecrement derives the next step from the range element's
+    // current DOM value. A snapshot-controlled range used to snap back to 0 after
+    // every event, so three decrements dispatched -0.5 three times instead of
+    // continuing to -1 and -1.5 (#597).
+    for (let i = 0; i < 3; i++) {
+      act(() => setInputValue(vol, String(Number(vol.value) - 0.5)));
+    }
+
+    expect(execCalls.filter((c) => c.command === "set_master_volume").map((c) => c.args?.db))
+      .toEqual([-0.5, -1, -1.5]);
+    await flushRangeReconcile();
+  });
+
+  it("keeps rapid native pan steps cumulative while the snapshot is stale", async () => {
+    render(makeSnapshot({ volumeDb: 0, pan: 0 }));
+    const pan = host.querySelector<HTMLInputElement>('[data-testid="v2-master-pan"]')!;
+    for (let i = 0; i < 3; i++) {
+      act(() => setInputValue(pan, String(Number(pan.value) - 0.02)));
+    }
+    expect(execCalls.filter((c) => c.command === "set_master_pan").map((c) => c.args?.pan))
+      .toEqual([-0.02, -0.04, -0.06]);
+    await flushRangeReconcile();
   });
 });

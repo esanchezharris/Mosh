@@ -13,6 +13,31 @@ const S = (name: string, required = true, desc?: string): ArgSpec => ({ name, ty
 const N = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "number", required, desc });
 const B = (name: string, required = true, desc?: string): ArgSpec => ({ name, type: "boolean", required, desc });
 
+/** The engine's compiled-in builtin plugin TYPE names — the exact vocabulary
+ *  load_builtin / load_master_builtin accept. These go INLINE into the catalog
+ *  descriptions below, because only `desc` is rendered into the system prompt
+ *  (commandCatalogPrompt drops arg descriptions) and because the model has no
+ *  other way to learn them: list_builtins is a discovery call whose RETURN DATA
+ *  the agentic loop never shows the model (StepCommandResult is {command, ok,
+ *  error} — no payload), so pointing at it was a dead end. The bench signature
+ *  was a doubled `list_builtins, list_builtins` followed by a guessed type.
+ *
+ *  The trap this closes is specific and already documented in bridge.mock.ts:
+ *  the natural guess for an EQ is "eq", which the engine REJECTS — the real
+ *  type is "4bandEq".
+ *
+ *  Mirrors kBuiltins in src/moshops/MoshOpsInternal.h. Do NOT trust that sentence:
+ *  builtins.test.ts parses that C++ table and fails if this list drifts.
+ *
+ *  The load_builtin desc below inlines this list as a PLAIN string, not a
+ *  template literal, because service/skills/moshops_catalog.py parses this
+ *  file statically (skillCatalogBoundary.test.ts enforces that projection).
+ *  builtins.test.ts pins desc ⇄ BUILTIN_TYPES, so the two cannot drift. */
+export const BUILTIN_TYPES = [
+  "4osc", "sampler", "4bandEq", "compressor", "reverb", "delay", "chorus",
+  "phaser", "lowpass", "pitchShifter", "moshAutoTune", "moshOTT", "moshXFeedback",
+] as const;
+
 export const AGENT_COMMANDS: AgentCommand[] = [
   // ── tracks ──────────────────────────────────────────────────────────────
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
@@ -124,9 +149,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_track_output", desc: "Route a track's output — into another track (a submix), to a hardware device, or back to 'default'", args: [S("trackId"), S("destTrackId", false, "route into this track instead of the master"), S("deviceID", false, "route to a hardware output device (from list_track_outputs)"), S("output", false, "'default' resets to normal master routing")] },
 
   // ── plugins ─────────────────────────────────────────────────────────────
-  { command: "list_builtins", desc: "List the built-in effects/instruments available to load (read-only) — the 'type' names load_builtin/load_master_builtin take", args: [] },
+  { command: "list_builtins", desc: "List the built-in effects/instruments with their display names + categories (read-only) — you do NOT need this to load one, the 'type' names are already listed on load_builtin", args: [] },
   { command: "list_plugins", desc: "List the scanned VST3/AU plugins available to load (read-only) — the 'pluginId' names load_plugin/load_master_plugin take", args: [] },
-  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track (type from list_builtins)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
+  { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback (an EQ is \"4bandEq\" — \"eq\" is rejected)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
   { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash) — omit kit for the bundled default", args: [S("trackId"), S("kit", false, "kit id from list_drum_kits")] },
   { command: "assign_sample", desc: "Map an audio file to a track's sampler: mode 'drum' (default, one-shot pad at one note) or 'melodic' (a pitched 808/bass played across the keyboard, note-length gated)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127: the pad (drum) or the sample's root note (melodic)"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false), S("mode", false, "'drum' (default) or 'melodic'")] },
@@ -139,7 +164,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
 
   // ── master-bus plugins (limiter, bus EQ, …) — same commands as above, one level up ──
   { command: "load_master_plugin", desc: "Add a scanned VST3/AU plugin to the master bus (pluginId from list_plugins)", args: [S("pluginId"), N("index", false, "chain position")] },
-  { command: "load_master_builtin", desc: "Add a built-in effect to the master bus (type from list_builtins)", args: [S("type"), N("index", false, "chain position")] },
+  { command: "load_master_builtin", desc: "Add a built-in effect to the master bus — same 'type' vocabulary as load_builtin (glue compressor = \"compressor\", bus EQ = \"4bandEq\")", args: [S("type"), N("index", false, "chain position")] },
   { command: "set_master_plugin_param", desc: "Set a master-bus plugin parameter (0-1) by chain index + param index", args: [N("index"), N("paramIndex"), N("value", true, "0-1")] },
   { command: "bypass_master_plugin", desc: "Bypass/enable a plugin on the master bus", args: [N("index"), B("bypassed")] },
   { command: "reorder_master_plugin", desc: "Move a master-bus plugin to a new chain position", args: [N("index"), N("toIndex")] },

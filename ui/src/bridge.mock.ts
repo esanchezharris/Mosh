@@ -16,7 +16,7 @@
 
 import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
-import { parseDrumPattern } from "./ui/drumPatternUtil";
+import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
 import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
@@ -2610,7 +2610,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // replace; instrument-less target → drum type + kit; wave-audio target →
       // error; start defaults to 0.0 (the NATIVE add_midi_clip default — not the
       // mock's transport-position divergence above).
-      const parsed = parseDrumPattern(args.pattern, num(args.stepsPerBar, 16), num(args.bars, 0), num(args.velocity, 100));
+      const parsed = parseDrumPattern(args.pattern, num(args.stepsPerBar, 16), num(args.bars, 0), normalizeDrumVelocity(num(args.velocity, 100)));
       if (!parsed.ok) return err(command, parsed.error);
       const beatsPerBar = snapshot.session.timeSigNumerator ?? 4;
       const sb = stepBeats(beatsPerBar, parsed.stepsPerBar);

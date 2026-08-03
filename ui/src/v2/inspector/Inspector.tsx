@@ -17,6 +17,7 @@ import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
 import { meterAt, snapStep, tempoMapFrom } from "../../time";
+import { ReconciledRange } from "../ReconciledRange";
 import type { Clip, Track } from "../../types";
 
 export function Inspector() {
@@ -103,14 +104,24 @@ function MixTab({ track }: { track: Track }) {
       </label>
       <label className="v2-field">
         <span>Vol</span>
-        <input type="range" min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}
-          onChange={(e) => void exec("set_track_volume", { trackId: track.id, db: Number(e.target.value) })} />
+        <ReconciledRange key={`${track.id}:volume`} min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}
+          aria-label={`${track.name} volume`} data-testid="v2-track-volume"
+          onCommit={(db) => exec("set_track_volume", { trackId: track.id, db })}
+          reconcile={async () => {
+            await useStore.getState().refresh();
+            return useStore.getState().snapshot?.tracks.find((item) => item.id === track.id)?.volumeDb ?? 0;
+          }} />
         <span className="v2-val">{(track.volumeDb ?? 0).toFixed(1)}</span>
       </label>
       <label className="v2-field">
         <span>Pan</span>
-        <input type="range" min={-1} max={1} step={0.02} value={track.pan ?? 0}
-          onChange={(e) => void exec("set_track_pan", { trackId: track.id, pan: Number(e.target.value) })} />
+        <ReconciledRange key={`${track.id}:pan`} min={-1} max={1} step={0.02} value={track.pan ?? 0}
+          aria-label={`${track.name} pan`} data-testid="v2-track-pan"
+          onCommit={(pan) => exec("set_track_pan", { trackId: track.id, pan })}
+          reconcile={async () => {
+            await useStore.getState().refresh();
+            return useStore.getState().snapshot?.tracks.find((item) => item.id === track.id)?.pan ?? 0;
+          }} />
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
       <OutputField track={track} />

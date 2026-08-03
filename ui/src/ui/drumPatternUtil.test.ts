@@ -4,7 +4,7 @@
 // discipline). Change a vector here → change it there.
 import { describe, expect, it } from "vitest";
 import {
-  drumPatternLanePitch, drumPatternLaneName, parseDrumPattern, serializeDrumPattern, drumPatternFromNotes,
+  drumPatternLanePitch, drumPatternLaneName, parseDrumPattern, serializeDrumPattern, drumPatternFromNotes, normalizeDrumVelocity,
 } from "./drumPatternUtil";
 import type { DrumPatternParse } from "./drumPatternUtil";
 import { stepBeats } from "./drumGrid";
@@ -150,6 +150,22 @@ describe("parseDrumPattern", () => {
     expect(parseDrumPattern(p, 4, -1, 100).ok).toBe(false); // bars negative
     expect(parseDrumPattern(p, 4, 0, 0).ok).toBe(false); // velocity too small
     expect(parseDrumPattern(p, 4, 0, 128).ok).toBe(false); // velocity too big
+  });
+
+  // ── golden vector 10b: agent-scale velocity normalizes at the command boundary ──
+  // (MIRRORED in MoshOps.cpp cmdAddDrumPattern — the parser contract itself stays
+  // integer 1-127 in both languages.)
+  it("normalizeDrumVelocity maps agent shapes onto MIDI without hiding garbage", () => {
+    expect(normalizeDrumVelocity(0.78)).toBe(99); // 0-1 scale from a model
+    expect(normalizeDrumVelocity(0.004)).toBe(1); // floor of the audible range
+    expect(normalizeDrumVelocity(100.4)).toBe(100); // fractional MIDI rounds
+    expect(normalizeDrumVelocity(100)).toBe(100); // integers untouched
+    expect(normalizeDrumVelocity(0)).toBe(0); // still fails loud downstream
+    expect(normalizeDrumVelocity(200.2)).toBe(200); // out of range still fails downstream
+    const p = { kick: "x..." };
+    const r = parseDrumPattern(p, 4, 0, normalizeDrumVelocity(0.78));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.steps[0].velocity).toBe(99);
   });
 
   // ── golden vector 11: empty / malformed patterns ───────────────────────────────
