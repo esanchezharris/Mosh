@@ -4,13 +4,13 @@
 // itself is transparent; each cluster is its own floating surface. Transport reads the
 // live 30Hz store field; every mutation is an existing command through store.exec.
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
 import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
-import { useEscapeToClose } from "../hooks/useEscapeToClose";
+import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { useTransportControls } from "./useTransportControls";
 import { AvatarCluster } from "./AvatarCluster";
@@ -160,14 +160,12 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
 }
 
 function OverflowMenu() {
-  const [open, setOpen] = useState(false);
-  // #41/#43 — join the shared Escape STACK so Esc dismisses the menu, and dismisses
-  // it FIRST when it sits above another overlay (instead of falling through and
-  // closing the modal underneath). The close callback must be render-stable: the
-  // stack re-pushes whenever it changes, which would hoist this menu back to the
-  // top of the stack on unrelated re-renders.
-  const close = useCallback(() => setOpen(false), []);
-  useEscapeToClose(open, close);
+  // Placement, Escape (#41/#43 — the shared stack, so Esc dismisses THIS menu first when
+  // it sits above another overlay) and outside-dismiss all live in the shared hook, which
+  // also clamps the panel into the viewport. That clamp matters here: `.v2-shell` is
+  // `overflow-x: auto` with a 1120px floor (#52), so below that width this trigger sits
+  // outside the viewport and an absolutely-positioned panel went with it.
+  const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(248, 420, "end");
   const exec = useStore((s) => s.exec);
   const training = useStore((s) => s.snapshot?.training ?? null);
   const theme = useStore((s) => s.theme);
@@ -178,76 +176,77 @@ function OverflowMenu() {
   const setHandsFree = useStore((s) => s.setHandsFree);
   const setShell = useSettings((s) => s.set);
   const item = (label: string, fn: () => void, kbd?: string) => (
-    <button role="menuitem" onClick={() => { setOpen(false); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
+    <button role="menuitem" onClick={() => { close(); fn(); }}>{label}{kbd && <kbd>{kbd}</kbd>}</button>
   );
 
   return (
     <div className="v2-menu-wrap">
-      <button className="v2-btn icon" aria-label="More tools" aria-haspopup="dialog" aria-expanded={open}
-        data-testid="v2-overflow" onClick={() => setOpen((o) => !o)}><IconMore size={15} /></button>
-      {open && (
-        <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={() => setOpen(false)} />
-          <div className="v2-menu-panel">
-            <div className="v2-menu-tools" data-testid="v2-overflow-tools">
-              <MultiplayerTool
-                label={<IconUsers size={15} />}
-                title="2-player session"
-                className="v2-overflow-tool"
-                ariaLabel="Open multiplayer tools"
-                testId="v2-tool-multiplayer"
-              />
-              <TrainingTool
-                training={training}
-                label={<IconSpark size={15} />}
-                title="Type-beat training"
-                className="v2-overflow-tool"
-                ariaLabel="Open training tools"
-                testId="v2-tool-training"
-              />
-              <CommandLogTool
-                label={<IconList size={15} />}
-                title="Command log"
-                className="v2-overflow-tool"
-                ariaLabel="Open command log"
-                testId="v2-tool-command-log"
-              />
-              <MemoryTool
-                label={<IconStar size={15} />}
-                title="What Moshi remembers"
-                className="v2-overflow-tool"
-                ariaLabel="What Moshi remembers"
-                testId="v2-tool-memory"
-              />
-              <RemoteTool
-                label={<IconPhone size={15} />}
-                title="Pair iPhone companion"
-                className="v2-overflow-tool"
-                ariaLabel="Pair iPhone companion"
-                testId="v2-tool-remote"
-              />
-              <HelpTool
-                label={<IconHelp size={15} />}
-                title="Keyboard shortcuts"
-                className="v2-overflow-tool"
-                ariaLabel="Keyboard shortcuts"
-                testId="v2-tool-help"
-              />
-            </div>
-            <div className="v2-menu" role="menu">
-              <ProjectMenuGroup onPick={close} />
-              <div className="v2-menu-sep" />
-              {item("Undo", () => void exec("undo"), "⌘Z")}
-              {item("Redo", () => void exec("redo"), "⇧⌘Z")}
-              <div className="v2-menu-sep" />
-              {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
-              {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
-              <div className="v2-menu-sep" />
-              {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
-              {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
-            </div>
+      <button ref={anchorRef} className="v2-btn icon" aria-label="More tools" aria-haspopup="dialog" aria-expanded={open}
+        data-testid="v2-overflow" onClick={toggle}><IconMore size={15} /></button>
+      {/* `at` gates the render: `.v2-menu-panel-fixed` clears the base rule's `right`/`top`,
+          so the inline style MUST supply left + one of top/bottom or the panel falls to
+          static position. Same contract as AddTrackMenu. */}
+      {open && at && (
+        <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
+          style={{ left: at.left, top: at.top, bottom: at.bottom }}>
+          <div className="v2-menu-tools" data-testid="v2-overflow-tools">
+            <MultiplayerTool
+              label={<IconUsers size={15} />}
+              title="2-player session"
+              className="v2-overflow-tool"
+              ariaLabel="Open multiplayer tools"
+              testId="v2-tool-multiplayer"
+            />
+            <TrainingTool
+              training={training}
+              label={<IconSpark size={15} />}
+              title="Type-beat training"
+              className="v2-overflow-tool"
+              ariaLabel="Open training tools"
+              testId="v2-tool-training"
+            />
+            <CommandLogTool
+              label={<IconList size={15} />}
+              title="Command log"
+              className="v2-overflow-tool"
+              ariaLabel="Open command log"
+              testId="v2-tool-command-log"
+            />
+            <MemoryTool
+              label={<IconStar size={15} />}
+              title="What Moshi remembers"
+              className="v2-overflow-tool"
+              ariaLabel="What Moshi remembers"
+              testId="v2-tool-memory"
+            />
+            <RemoteTool
+              label={<IconPhone size={15} />}
+              title="Pair iPhone companion"
+              className="v2-overflow-tool"
+              ariaLabel="Pair iPhone companion"
+              testId="v2-tool-remote"
+            />
+            <HelpTool
+              label={<IconHelp size={15} />}
+              title="Keyboard shortcuts"
+              className="v2-overflow-tool"
+              ariaLabel="Keyboard shortcuts"
+              testId="v2-tool-help"
+            />
           </div>
-        </>
+          <div className="v2-menu" role="menu">
+            <ProjectMenuGroup onPick={close} />
+            <div className="v2-menu-sep" />
+            {item("Undo", () => void exec("undo"), "⌘Z")}
+            {item("Redo", () => void exec("redo"), "⇧⌘Z")}
+            <div className="v2-menu-sep" />
+            {item(voiceOn ? "Mute Moshi" : "Unmute Moshi", () => toggleVoice())}
+            {item(handsFreeOn ? "Hands-free: on" : "Hands-free: off", () => setHandsFree(!handsFreeOn))}
+            <div className="v2-menu-sep" />
+            {item(theme === "light" ? "Dark mode" : "Light mode", () => toggleTheme())}
+            {item("Switch to Classic UI", () => setShell("uiShell", "classic"))}
+          </div>
+        </div>
       )}
     </div>
   );
