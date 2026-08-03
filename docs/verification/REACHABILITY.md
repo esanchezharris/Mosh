@@ -50,7 +50,13 @@ Row format (the guard parses these columns exactly):
   mounted from `AppV2.tsx`), so the remaining debt is narrower than this bullet used to say —
   inline automation LANES on the arrangement, rather than a floating panel.
 - **G18** — group/submix: `create_group_track` is reachable (`Mod+G` groups the whole
-  selection, `menuActions.ts`), but `ungroup_track` has NO UI call site anywhere. Half-shipped.
+  selection, `menuActions.ts`), but `ungroup_track` has NO UI call site anywhere.
+  Half-shipped, and the missing half is BLOCKED ON A DESIGN DECISION, not on effort:
+  `ungroup_track` takes the GROUP's trackId, v2 filters group tracks out of the
+  arrangement (`!t.isGroup`), and a member track carries no `groupId` in the snapshot — so
+  there is currently no object on screen to hang the action on. Deciding where groups live
+  in v2 (a mixer view? a collapsed lane? a header badge on members?) comes first; bolting
+  an Ungroup onto something the producer cannot see would be worse than the gap.
 
 CLOSED 2026-08-03 (verified against the code, not the ledger):
 
