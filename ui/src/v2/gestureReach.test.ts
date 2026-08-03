@@ -15,8 +15,11 @@
 // WHAT IT ASSERTS. `ui/src/interaction/` already IS the gesture ledger — `actions.ts` is
 // the shared action vocabulary, `gestureTables.ts` maps region × gesture × modifier →
 // action, `keymap.ts` maps action → combo. Nothing ever checked that the shipped shell
-// implements what those tables promise. This asserts exactly that, against the MOSH
-// table (the default, and the one `getGestureTable` falls back to).
+// implements what those tables promise. This asserts exactly that, across EVERY table —
+// not just Mosh — because v2 now honours the user's "Mouse gestures" setting, so an
+// action only Ableton or Pro Tools asks for is just as reachable as a Mosh one.
+// (The union happens to equal Mosh's action set today; asserting the union anyway means
+// adding a rule to another preset cannot silently ship an unimplemented gesture.)
 //
 // THE PROBE'S OWN TRAP, WHICH IT FELL INTO FIRST. The searched surface must EXCLUDE
 // `ui/src/interaction/` — the tables mention every action and region by definition, and
@@ -26,12 +29,14 @@
 // `ui/src/agent`, which holds the command catalog, for exactly the same reason.
 //
 // WHY ACTIONS AND NOT REGIONS. An earlier draft also asserted that every table `region`
-// resolves in v2. That check fails for `clip.edge` and `ruler` — but not because the
-// capability is missing: v2 implements edge-trim and ruler seek/loop BY HAND
-// (`v2/timeline/BarRuler.tsx`) instead of routing them through `resolveGesture`. That is
-// a design observation, not a user-facing gap, and asserting on it would fail the gate
-// for something a producer can already do. Actions are the capability; regions are an
-// implementation detail.
+// resolves in v2. That still fails for `ruler` — not because the capability is missing:
+// v2 implements ruler seek/loop BY HAND (`v2/timeline/BarRuler.tsx`) instead of routing
+// them through `resolveGesture`. That is a design observation, not a user-facing gap, and
+// asserting on it would fail the gate for something a producer can already do. Actions
+// are the capability; regions are an implementation detail.
+// (`clip.header` / `clip.body` DO resolve now — `ClipView.tsx` passes a real `headerPx`
+// under a table that distinguishes them. `ui/e2e/gesture-clip-regions.spec.ts` is the
+// behavioural proof, since a region is decided from layout that jsdom does not have.)
 // ─────────────────────────────────────────────────────────────────────────────
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -42,7 +47,7 @@ import { GESTURE_TABLES } from "../interaction/gestureTables";
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Gesture-table actions the MOSH table promises but the shipped v2 shell does not
+ * Gesture-table actions a shipped preset promises but the v2 shell does not
  * implement. A RATCHET: entries may only be REMOVED. Adding one is a regression and
  * needs a reason a reviewer would accept, not a note that it was inconvenient.
  *
@@ -54,11 +59,10 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * the user's "Mouse gestures" DAW setting is honoured here, and the actions are named
  * where this probe can see them.
  *
- * EMPTY IS THE GOAL, NOT THE END. `clip.header` / `clip.body` (Ableton's and Pro Tools'
- * split) are still unimplemented in v2, which is why `ClipView.tsx` hardcodes
- * `getGestureTable("mosh")` instead of honouring the setting. That is tracked as a
- * separate finding, not hidden here: this map is about the MOSH table, and Mosh's own
- * clip rules are all implemented.
+ * `clip.header` / `clip.body` followed on the same day: `ClipView.tsx` no longer hardcodes
+ * `getGestureTable("mosh")`, so the user-visible "Mouse gestures" setting finally changes
+ * what the mouse does. The remaining honest gap is that `ruler` rules are implemented by
+ * hand in BarRuler rather than through the table — same behaviour, different route.
  */
 export const GESTURE_GAPS: Readonly<Record<string, string>> = {};
 
@@ -102,7 +106,11 @@ const isImplemented = (action: string) =>
   shell.includes(`"${action}"`)
   || new RegExp(`\\b(?:EA|EditorAction)\\.${action.toUpperCase()}\\b`).test(shell);
 
-const moshActions = [...new Set(GESTURE_TABLES.mosh.map((r) => r.action))];
+// Every action ANY shipped preset can ask for — v2 honours the user's table choice, so
+// scoping this to Mosh would let an Ableton-only gesture ship unimplemented.
+const tableActions = [...new Set(
+  Object.values(GESTURE_TABLES).flatMap((t) => t.map((r) => r.action)),
+)];
 
 describe("gesture reachability — the shipped shell honours its gesture table (GESTURE-REACH)", () => {
   it("the shell scan found real files (guards against a silently-empty probe)", () => {
@@ -113,14 +121,14 @@ describe("gesture reachability — the shipped shell honours its gesture table (
     expect(searched.length).toBeGreaterThan(100);
     expect(shell.length).toBeGreaterThan(200_000);
     expect(searched.length).toBeLessThan(graph.length);
-    expect(moshActions.length).toBeGreaterThan(10);
+    expect(tableActions.length).toBeGreaterThan(10);
     // Sanity: gestures we KNOW v2 implements must read as implemented, or the probe is broken.
     for (const a of ["move", "trim", "split", "select"])
       expect(isImplemented(a), `probe broken: ${a} is wired in v2 but read as missing`).toBe(true);
   });
 
-  it("every MOSH gesture-table action is implemented in v2, or declared with a reason", () => {
-    const undeclared = moshActions.filter((a) => !isImplemented(a) && !(a in GESTURE_GAPS));
+  it("every shipped preset's gesture-table action is implemented in v2, or declared with a reason", () => {
+    const undeclared = tableActions.filter((a) => !isImplemented(a) && !(a in GESTURE_GAPS));
     expect(
       undeclared,
       "These gestures are promised by ui/src/interaction/gestureTables.ts but the shipped v2 "
@@ -140,10 +148,10 @@ describe("gesture reachability — the shipped shell honours its gesture table (
     ).toEqual([]);
   });
 
-  it("every declared gap names a real action in the MOSH table", () => {
-    const known = new Set<string>(moshActions);
+  it("every declared gap names a real action in some shipped preset's table", () => {
+    const known = new Set<string>(tableActions);
     const bogus = Object.keys(GESTURE_GAPS).filter((a) => !known.has(a));
-    expect(bogus, "GESTURE_GAPS names an action the MOSH table does not contain.").toEqual([]);
+    expect(bogus, "GESTURE_GAPS names an action no shipped gesture table contains.").toEqual([]);
   });
 
   it("the gap list only shrinks (ratchet)", () => {
