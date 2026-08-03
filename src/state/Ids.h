@@ -84,6 +84,23 @@ namespace mosh::ids
     // value was always -48. Muting a lane was therefore permanent, and it persisted
     // through save/reload. Written WITH the undo manager so mute/unmute undoes as one.
     MOSH_DECLARE_ID (moshPadGainDb)
+    // The pad's CHOKE GROUP (1-16; absent/0 = none). Pads sharing a group cut each other
+    // off — a closed hat silencing an open one. Lives on the SOUND child alongside the
+    // parked gain above.
+    //
+    // This is a MOSH-SIDE property with NO engine backing: te::SamplerPlugin has no choke
+    // concept, its playingNotes list is private, and an open-ended voice ignores note-off
+    // entirely (the only stops it offers kill every voice on the track at once). It is
+    // therefore enforced by exactly two mechanisms, and nothing else:
+    //   - live triggering, where MoshOps owns the injected stream (audition_note); and
+    //   - apply_choke, which BAKES it into note lengths so clip playback and export obey
+    //     it too. During playback the MIDI comes from the engine's own MidiNode, which
+    //     MoshOps is not in the path of, so there is no third way to do this short of a
+    //     custom sampler subclass — rejected for v1 because the plugin type name is
+    //     persisted in every existing edit.
+    MOSH_DECLARE_ID (moshChokeGroup)
+    // The kit a drum track last loaded, so the picker can show what is on it.
+    MOSH_DECLARE_ID (drumKitId)
 
     // MP-001 (multiplayer) — STABLE LOGICAL IDs that survive across two peers'
     // independent engines. Tracktion's own te::EditItemID is allocator-dependent

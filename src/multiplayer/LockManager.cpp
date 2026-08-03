@@ -70,6 +70,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
+        "set_drum_pad", "clear_drum_pad",
         // DRM-002 — composite: can create a clip AND mutate track instrument/type.
         "add_drum_pattern",
         "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",

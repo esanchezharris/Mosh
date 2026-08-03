@@ -563,6 +563,8 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
+    if (name == "set_drum_pad")      return cmdSetDrumPad (args);
+    if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -2558,6 +2560,15 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             p->setProperty ("gainDb",    sampler->getSoundGainDb (i));
             p->setProperty ("pan",       sampler->getSoundPan (i));
             p->setProperty ("openEnded", sampler->isSoundOpenEnded (i));
+            // Choke group is a Mosh-side property on the SOUND tree (see Ids.h) — the
+            // engine has no such concept, so it can only be read back from where we put it.
+            {
+                int n = 0, group = 0;
+                for (auto v : sampler->state)
+                    if (v.hasType (te::IDs::SOUND))
+                        if (n++ == i) { group = (int) v.getProperty (ids::moshChokeGroup, 0); break; }
+                if (group > 0) p->setProperty ("chokeGroup", group);
+            }
             pads.add (var (p));
         }
         o->setProperty ("drumPads", pads);

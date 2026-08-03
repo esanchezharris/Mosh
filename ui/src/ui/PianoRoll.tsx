@@ -12,6 +12,7 @@ import { meterAt, tempoMapFrom, beatSeconds } from "../time";
 import { noteName, pitchClass, resolveKey, scaleMask, snapToScale, keyLabel } from "../musicalKey";
 import { liveFeel } from "../interaction/config";
 import { DrumSequencer } from "./DrumSequencer";
+import { DrumPads } from "./drum/DrumPads";
 import { centerScrollTopForNotes } from "./pianoRollScroll";
 import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx } from "./pianoRollGeom";
 import { velocityFromFraction } from "./drumGrid";
@@ -66,7 +67,7 @@ export function PianoRoll() {
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
-  const [mode, setMode] = useState<"piano" | "drums">("piano");
+  const [mode, setMode] = useState<"piano" | "drums" | "pads">("piano");
   // View state, all editor-LOCAL: the arrangement's own grid and scroll are untouched by
   // anything here, which is the point of having a separate grid at all.
   const [fold, setFold] = useState<FoldMode>("off");
@@ -106,7 +107,10 @@ export function PianoRoll() {
   // in the temporal dead zone by the time the effect ran.
   const setPreviewNotes = (m: Map<number, MidiNote>) => { previewRef.current = m; setPreviews(m); };
   // The track that owns the clip being edited — where auditioned notes are heard.
-  const auditionTrackId = snapshot?.tracks.find((t) => t.clips.some((c) => c.id === editingClipId))?.id ?? null;
+  const owningTrack = snapshot?.tracks.find((t) => t.clips.some((c) => c.id === editingClipId)) ?? null;
+  const auditionTrackId = owningTrack?.id ?? null;
+  // The pad grid only means anything on a track that hosts a sampler.
+  const padTrack = (owningTrack?.drumPads?.length ?? 0) > 0 ? owningTrack : null;
   // Every selection change goes through here so audition is opt-IN per call site. Doing it
   // in a useEffect on selectedNotes instead would also fire on the post-refresh pruning
   // below, re-auditioning the whole selection on every snapshot event.
@@ -610,6 +614,12 @@ export function PianoRoll() {
           <div className="seg" role="group" aria-label="Editor mode">
             <button className="btn" aria-pressed={mode === "piano"} onClick={() => setMode("piano")}>Piano</button>
             <button className="btn" aria-pressed={mode === "drums"} onClick={() => setMode("drums")}>Drums</button>
+            {/* The pad grid is for building and PLAYING a kit; the step grid beside it is
+                for writing patterns. Ableton has no step grid, so this is additive rather
+                than a replacement. Only offered on a track that actually has a sampler. */}
+            {padTrack && (
+              <button className="btn" data-testid="pr-tab-pads" aria-pressed={mode === "pads"} onClick={() => setMode("pads")}>Pads</button>
+            )}
           </div>
           <span className="spacer" />
           {mode === "piano" && selNote && (
@@ -690,7 +700,7 @@ export function PianoRoll() {
           )}
           <button className="btn x" onClick={close}>✕</button>
         </div>
-        {mode === "drums" ? <DrumSequencer clip={clip} /> : (
+        {mode === "pads" && padTrack ? <DrumPads track={padTrack} /> : mode === "drums" ? <DrumSequencer clip={clip} /> : (
         <><div className="pr-body" ref={bodyRef}>
           {/* Ruler. Bar numbers are CLIP-LOCAL (bar 1 = the clip's start), because note
               positions are clip-local beats — session-absolute numbering would disagree

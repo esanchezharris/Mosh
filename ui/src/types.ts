@@ -349,6 +349,8 @@ export type DrumPad = {
   gainDb: number;
   pan: number;
   openEnded: boolean;
+  /** 1-16, absent = none. Pads sharing a group cut each other off. */
+  chokeGroup?: number;
 };
 export type Track = {
   id: string;

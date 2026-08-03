@@ -38,6 +38,7 @@ cancel_lyric_job	Track
 cancel_render	Clip
 cancel_training_job	Unguarded
 clear_automation	Track
+clear_drum_pad	Track
 clear_plugin_blocklist	Unguarded
 compile_render	Clip
 complete_lyrics	Track
@@ -171,6 +172,7 @@ set_clip_warp	Clip
 set_count_in	SessionGlobal
 set_current_take	Track
 set_drum_lane	Track
+set_drum_pad	Track
 set_input_monitor	Track
 set_key	Unguarded
 set_lyric_constraint	Track

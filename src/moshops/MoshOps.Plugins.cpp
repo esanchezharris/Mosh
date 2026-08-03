@@ -18,6 +18,7 @@
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include <cmath>
+#include <limits>
 
 namespace mosh
 {
@@ -279,6 +280,116 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("load_drum_kit", var (data));
+}
+
+// Defined further down, beside applyDrumLaneGains which is its other consumer.
+static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index);
+
+// "The pad at this note" — the NARROWEST sound covering it, or -1.
+//
+// Narrowest, not first, because a sample assigned in melodic mode spans the whole
+// keyboard (min 0, max 127) and would otherwise shadow every pad on the track: a pad
+// command aimed at the snare would silently retune the 808 instead. A melodic sound is a
+// pitched instrument played across the keys, not a pad, so it only ever wins when nothing
+// more specific covers the note.
+static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+{
+    int best = -1, bestSpan = std::numeric_limits<int>::max();
+    for (int i = 0; i < sampler.getNumSounds(); ++i)
+    {
+        const int lo = sampler.getMinKey (i), hi = sampler.getMaxKey (i);
+        if (lo > note || hi < note) continue;
+        const int span = hi - lo;
+        if (span < bestSpan) { bestSpan = span; best = i; }
+    }
+    return best;
+}
+
+// ── Drum pads ────────────────────────────────────────────────────────────────────────
+// Per-pad mixer + identity, so the pad grid can behave like an instrument rather than a
+// row of file paths. Everything here addresses a pad by the NOTE that triggers it, which
+// is the only handle stable across a kit reload — the sampler's own sound index is not.
+juce::var MoshOps::cmdSetDrumPad (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_drum_pad", "no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("set_drum_pad", "track has no sampler");
+
+    const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", -1));
+    const int idx = padIndexForNote (*sampler, note);
+    if (idx < 0) return errResult ("set_drum_pad", "no pad at note " + juce::String (note));
+
+    beginTxn ("set_drum_pad");
+    auto sound = soundTreeAt (*sampler, idx);
+
+    if (args.hasProperty ("gainDb") || args.hasProperty ("pan"))
+    {
+        const float gain = (float) (double) args.getProperty ("gainDb", sampler->getSoundGainDb (idx));
+        const float pan  = (float) (double) args.getProperty ("pan",    sampler->getSoundPan (idx));
+        // While a pad is MUTED its live gain is the mute floor and the producer's real
+        // gain is parked (see applyDrumLaneGains). Writing the live gain here would be
+        // overwritten by the next unmute, so the parked copy is the one to update.
+        if (sound.isValid() && sound.hasProperty (ids::moshPadGainDb))
+        {
+            sound.setProperty (ids::moshPadGainDb, gain, &undoManager());
+            sampler->setSoundGains (idx, sampler->getSoundGainDb (idx), pan);
+        }
+        else
+        {
+            sampler->setSoundGains (idx, gain, pan);
+        }
+    }
+    if (args.hasProperty ("name"))
+        sampler->setSoundName (idx, args.getProperty ("name", var()).toString());
+    if (args.hasProperty ("chokeGroup") && sound.isValid())
+    {
+        const int group = juce::jlimit (0, 16, (int) args.getProperty ("chokeGroup", 0));
+        if (group > 0) sound.setProperty (ids::moshChokeGroup, group, &undoManager());
+        else           sound.removeProperty (ids::moshChokeGroup, &undoManager());
+        // A choked pad must be note-GATED, or nothing can ever cut it off: an open-ended
+        // voice ignores note-off by design.
+        sampler->setSoundOpenEnded (idx, group == 0);
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("note", note);
+    data->setProperty ("padIndex", idx);
+    logLine ("set_drum_pad", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());
+    return okResult ("set_drum_pad", var (data));
+}
+
+// The inverse of assign_sample, which can only ever REPLACE a pad. Without this there is
+// no way to empty a slot.
+juce::var MoshOps::cmdClearDrumPad (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("clear_drum_pad", "no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("clear_drum_pad", "track has no sampler");
+
+    const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", -1));
+    // Exactly ONE pad — the narrowest match. Removing every sound covering the note would
+    // also delete a melodic instrument that merely spans it, which is not what "empty this
+    // pad" means.
+    const int idx = padIndexForNote (*sampler, note);
+    if (idx < 0) return errResult ("clear_drum_pad", "no pad at note " + juce::String (note));
+
+    beginTxn ("clear_drum_pad");
+    sampler->removeSound (idx);
+    const int removed = 1;
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("note", note);
+    data->setProperty ("removed", removed);
+    logLine ("clear_drum_pad", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());
+    return okResult ("clear_drum_pad", var (data));
 }
 
 // DRM-001 — assign a sample file to a single pad/note on a track's sampler. Maps

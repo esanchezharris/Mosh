@@ -4335,6 +4335,65 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! laneHas (dt, "drumMutedPitches", 36), "unmuting clears the kick from the muted set");
         cmd (ops, "save"); cmd (ops, "reload");
         check (laneHas (dt, "drumSoloPitches", 38), "drum-lane solo persists across save/reload");
+        // ── Drum-rack pads ──
+        // set_drum_pad is the per-pad mixer; clear_drum_pad is the inverse assign_sample
+        // never had (it can only REPLACE a pad, so without this a slot cannot be emptied).
+        //
+        // On its OWN track: the shared drum track above carries a melodic-mode 808 mapped
+        // across the whole keyboard, which legitimately covers every note — fine for the
+        // engine, useless for asserting "there is no pad here".
+        {
+            auto pt = cmd (ops, "create_track", objN ({{ "name", "Pads" }, { "type", "drum" }}))["data"]
+                          .getProperty ("trackId", var()).toString();
+            auto padOf = [&] (int pitch) {
+                auto trk = trackById (pt);
+                auto padsVar = trk.getProperty ("drumPads", var());
+                if (auto* a = padsVar.getArray())
+                    for (auto& v : *a)
+                        if ((int) v.getProperty ("pitch", -1) == pitch) return v;
+                return var();
+            };
+            auto padCount = [&] {
+                auto trk = trackById (pt);
+                auto p = trk.getProperty ("drumPads", var());
+                return p.getArray() ? p.getArray()->size() : 0;
+            };
+            check (padCount() == 8, "a fresh drum track has the 8-pad kit");
+
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 38 }, { "gainDb", -6.0 }, { "pan", 0.5 }}))),
+                   "set_drum_pad ok");
+            check ((double) padOf (38).getProperty ("gainDb", 0.0) < -5.0, "set_drum_pad sets the pad's level");
+
+            // A choke group must also make the pad note-GATED: an open-ended voice ignores
+            // note-off, so nothing could ever cut it off.
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 1 }}))),
+                   "set_drum_pad sets a choke group");
+            check ((int) padOf (46).getProperty ("chokeGroup", 0) == 1, "choke group rides the snapshot");
+            check (! (bool) padOf (46).getProperty ("openEnded", true), "a choked pad becomes note-gated");
+            cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 0 }}));
+            check ((bool) padOf (46).getProperty ("openEnded", false), "clearing the choke group restores the one-shot");
+
+            check (! ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 99 }}))),
+                   "set_drum_pad errors where there is no pad");
+
+            const int before = padCount();
+            check (ok (cmd (ops, "clear_drum_pad", objN ({{ "trackId", pt }, { "note", 49 }}))), "clear_drum_pad ok");
+            check (padCount() == before - 1, "clear_drum_pad empties exactly one slot");
+            check (! ok (cmd (ops, "clear_drum_pad", objN ({{ "trackId", pt }, { "note", 49 }}))),
+                   "clearing an already-empty pad errors");
+
+            // A melodic-mode sound spans the whole keyboard, so it covers notes that have
+            // no pad of their own — but it must NEVER shadow a real pad. (It did: the pad
+            // lookup took the first covering sound, so every pad command on this track hit
+            // the 808 instead.)
+            auto kickWav = eng.sessionDir().getChildFile ("imports");
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 36 }, { "gainDb", -3.0 }}))),
+                   "set_drum_pad still addresses a real pad, not a wide-range sound");
+            check ((double) padOf (36).getProperty ("gainDb", 0.0) < -2.0, "the narrowest matching sound is the pad");
+
+            cmd (ops, "remove_track", args1 ("trackId", pt));
+        }
+
         // At this point the reload happened while lane 38 was SOLOED, so every other pad
         // is silenced and carrying a parked gain. That parked gain is a new property on
         // the sampler's SOUND tree, so this proves it actually SERIALISES: clearing the

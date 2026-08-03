@@ -2824,6 +2824,31 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       });
       invalidate(); return ok(command);
     }
+    // Drum-rack pads. The mock keeps its own pad list on the track so the grid, the
+    // per-pad mixer and the choke picker all round-trip in the browser.
+    case "set_drum_pad": {
+      const t = findTrack(str(args.trackId));
+      const pad = t?.drumPads?.find((p) => p.pitch === num(args.note, -1));
+      if (!pad) return err(command, "no pad at note");
+      pushUndo();
+      if ("gainDb" in args) pad.gainDb = num(args.gainDb, pad.gainDb);
+      if ("pan" in args) pad.pan = num(args.pan, pad.pan);
+      if ("name" in args) pad.name = str(args.name);
+      if ("chokeGroup" in args) {
+        const g = num(args.chokeGroup, 0);
+        if (g > 0) { pad.chokeGroup = g; pad.openEnded = false; }
+        else { delete pad.chokeGroup; pad.openEnded = true; }
+      }
+      invalidate(); return ok(command, { trackId: str(args.trackId), note: pad.pitch });
+    }
+    case "clear_drum_pad": {
+      const t = findTrack(str(args.trackId));
+      const i = t?.drumPads?.findIndex((p) => p.pitch === num(args.note, -1)) ?? -1;
+      if (!t?.drumPads || i < 0) return err(command, "no pad at note");
+      pushUndo();
+      t.drumPads.splice(i, 1);
+      invalidate(); return ok(command, { trackId: t.id, note: num(args.note, -1), removed: 1 });
+    }
     case "quantize_notes": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
       const div = num(args.division, 1); if (div > 0) { pushUndo(); for (const n of f.clip.notes) n.start = Math.round(n.start / div) * div; invalidate(); }

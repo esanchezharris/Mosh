@@ -289,6 +289,9 @@ private:
     juce::var cmdLoadDrumKit    (const juce::var& args);
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
+    // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
+    juce::var cmdSetDrumPad     (const juce::var& args);
+    juce::var cmdClearDrumPad   (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
