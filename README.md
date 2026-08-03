@@ -78,8 +78,7 @@ lives in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 ## Status
 
 v0.1.0 is out: a signed, notarized macOS (Apple Silicon) build on the
-[releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0). A demo film is landing shortly — join the [waitlist](https://mosh-landing-two.vercel.app)
-for the first public wave.
+[releases page](https://github.com/esanchezharris/Mosh/releases/tag/v0.1.0). A demo film is landing shortly.
 
 ## License
 
