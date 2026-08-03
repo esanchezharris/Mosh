@@ -4850,6 +4850,60 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (clipNotes (mClip).size() == before, "the whole chord undoes as ONE step");
             cmd (ops, "redo");
         }
+        // A MULTI-NOTE edit is one command and ONE undo step — the property the piano
+        // roll's group drag rests on. It belongs to the engine's UndoManager, so the
+        // browser tests can only ever show that the dev mock imitates it; the real
+        // assertion has to live here.
+        //
+        // It also pins the reason the `edits` array exists at all. setStartAndLength
+        // triggers tracktion's synchronous re-sort of the MidiList, so sending these as
+        // three separate set_note calls addresses stale indices as soon as the first one
+        // lands — which is exactly how this check failed when it was first written.
+        {
+            auto sortedStarts = [&] {
+                std::vector<double> out;
+                auto ns = clipNotes (mClip);
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr) out.push_back ((double) n.getProperty ("start", -1.0));
+                std::sort (out.begin(), out.end());
+                return out;
+            };
+            const auto before = sortedStarts();
+            check (before.size() >= 3, "at least 3 notes to group-move");
+
+            // Every note in the clip, shifted by the same +2 beats.
+            Array<var> groupEdits;
+            {
+                auto ns = clipNotes (mClip);
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr)
+                    {
+                        auto* e = new DynamicObject();
+                        e->setProperty ("noteIndex", (int) n.getProperty ("i", -1));
+                        e->setProperty ("start", (double) n.getProperty ("start", 0.0) + 2.0);
+                        groupEdits.add (var (e));
+                    }
+            }
+            auto* ge = new DynamicObject();
+            ge->setProperty ("clipId", mClip); ge->setProperty ("edits", groupEdits);
+            check (ok (cmd (ops, "set_note", var (ge))), "set_note accepts an edits[] array");
+
+            auto moved = sortedStarts();
+            bool allMoved = moved.size() == before.size();
+            for (size_t i = 0; i < moved.size() && allMoved; ++i)
+                allMoved = std::abs (moved[i] - (before[i] + 2.0)) < 1e-6;
+            // Assert the move REALLY happened before testing undo — otherwise a no-op
+            // "edit" would let the undo assertion below pass for entirely the wrong reason.
+            check (allMoved, "a group move shifts EVERY note, none left behind on a stale index");
+
+            cmd (ops, "undo");
+            auto back = sortedStarts();
+            bool allBack = back.size() == before.size();
+            for (size_t i = 0; i < back.size() && allBack; ++i)
+                allBack = std::abs (back[i] - before[i]) < 1e-6;
+            check (allBack, "ONE undo restores EVERY moved note (the group edit is a single undo step)");
+        }
+
         // Note deactivate (Ableton's `0`) — rides the engine's own MidiNote mute field, and
         // is emitted only when true, so an ordinary clip's notes[] payload is unchanged.
         {

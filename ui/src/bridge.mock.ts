@@ -2802,12 +2802,26 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);
     }
     case "set_note": {
-      const f = findClip(str(args.clipId)); const n = f?.clip.notes?.[num(args.noteIndex)]; if (!n) return err(command, "note not found");
+      const f = findClip(str(args.clipId));
+      if (!f?.clip.notes) return err(command, "not a midi clip");
+      // Mirrors the native command: an `edits` array resolves every target FIRST, then
+      // mutates. The backend does that because moving a note re-sorts the list and
+      // invalidates later indices; the mock keeps the same shape so a group edit is
+      // exercised identically in the browser.
+      const specs = Array.isArray(args.edits)
+        ? (args.edits as Record<string, unknown>[])
+        : [args as Record<string, unknown>];
+      const targets = specs.map((s) => f.clip.notes![num(s.noteIndex)]);
+      if (targets.some((t) => !t)) return err(command, "note not found");
       pushUndo();
-      if ("start" in args) n.start = Math.max(0, num(args.start, n.start));
-      if ("pitch" in args) n.pitch = Math.max(0, Math.min(127, num(args.pitch, n.pitch)));
-      if ("length" in args) n.length = Math.max(0.05, num(args.length, n.length));
-      if ("velocity" in args) n.velocity = Math.max(1, Math.min(127, num(args.velocity, n.velocity)));
+      specs.forEach((s, k) => {
+        const n = targets[k];
+        if ("start" in s) n.start = Math.max(0, num(s.start, n.start));
+        if ("pitch" in s) n.pitch = Math.max(0, Math.min(127, num(s.pitch, n.pitch)));
+        if ("length" in s) n.length = Math.max(0.05, num(s.length, n.length));
+        if ("velocity" in s) n.velocity = Math.max(1, Math.min(127, num(s.velocity, n.velocity)));
+        if ("mute" in s) n.mute = Boolean(s.mute);
+      });
       invalidate(); return ok(command);
     }
     case "quantize_notes": {

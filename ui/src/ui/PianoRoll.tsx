@@ -16,13 +16,25 @@ import { centerScrollTopForNotes } from "./pianoRollScroll";
 import { gridBeatsFor, rulerStride, zoomAnchored, clampBeatPx } from "./pianoRollGeom";
 import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
+import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
+import { moveEdits, resizeEdits, previewFrom, type GestureGeom } from "./pianoRollEdit";
+import { marqueeHit, toggleSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
 
 const ROW_H = 15;
 const LOW = 36, HIGH = 96;
 const isBlack = (p: number) => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
 
-type DragKind = "move" | "resize";
-type Drag = { kind: DragKind; i: number; startX: number; startY: number; orig: MidiNote };
+// "copy" is a move that leaves the originals behind — Ableton's Option-drag. It is latched
+// at POINTERDOWN, not read live during the drag, because Option during a move already means
+// "bypass snap" and the two must not fight over the same key mid-gesture.
+type DragKind = "move" | "resize" | "copy";
+type Drag = {
+  kind: DragKind;
+  anchorI: number;                    // the note actually grabbed
+  orig: Map<number, MidiNote>;        // the whole selection, frozen at pointerdown
+  startX: number;
+  startY: number;
+};
 type GridDrag = { pointerId: number; x0: number; y0: number; moved: boolean };
 
 export function PianoRoll() {
@@ -38,7 +50,7 @@ export function PianoRoll() {
 
   const [mode, setMode] = useState<"piano" | "drums">("piano");
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
-  const [preview, setPreview] = useState<MidiNote | null>(null);
+  const [previews, setPreviews] = useState<Map<number, MidiNote>>(() => new Map());
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [velocityDraft, setVelocityDraft] = useState<number | null>(null);
   // In-flight velocity-lane edits, keyed by note index. The REF is authoritative and the
@@ -49,7 +61,13 @@ export function PianoRoll() {
   const velDragRef = useRef<{ active: boolean; startX: number; drafts: Map<number, number> }>({ active: false, startX: 0, drafts: new Map() });
   const dragRef = useRef<Drag | null>(null);
   const gridDragRef = useRef<GridDrag | null>(null);
-  const previewRef = useRef<MidiNote | null>(null);
+  const previewRef = useRef<Map<number, MidiNote>>(new Map());
+  // Declared UP HERE, above the `if (!clip) return null` guard further down, because the
+  // effects below call it — and an effect closes over the render that scheduled it. On a
+  // render where the clip is momentarily absent (a refresh landing mid-gesture) the guard
+  // returns before any later const is initialised, so a helper defined below it would be
+  // in the temporal dead zone by the time the effect ran.
+  const setPreviewNotes = (m: Map<number, MidiNote>) => { previewRef.current = m; setPreviews(m); };
   const velocityDraftRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const keysRef = useRef<HTMLDivElement | null>(null);
@@ -82,7 +100,7 @@ export function PianoRoll() {
     if (keysRef.current) keysRef.current.scrollTop = top;
   }, [editingClipId, mode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setPreview(null); previewRef.current = null; setLasso(null); gridDragRef.current = null;
+    setPreviewNotes(new Map()); setLasso(null); gridDragRef.current = null;
     setSelectedNotes((prev) => {
       const available = new Set((clip?.notes ?? []).map((n) => n.i));
       const next = new Set([...prev].filter((i) => available.has(i)));
@@ -112,8 +130,7 @@ export function PianoRoll() {
       if (e.key === "Delete" || e.key === "Backspace") {
         if (selectedNotes.size === 0) return;
         e.preventDefault(); e.stopPropagation();
-        const idxs = [...selectedNotes].sort((a, b) => b - a);
-        void (async () => { for (const i of idxs) await exec("remove_note", { clipId, noteIndex: i }); })();
+        void removeNotes(exec, clipId, [...selectedNotes]);
         setSelectedNotes(new Set());
       }
     };
@@ -186,10 +203,17 @@ export function PianoRoll() {
   const keyMask = scaleMask(songKey);
   const lockPitch = (pitch: number) => (scaleLock ? snapToScale(pitch, keyMask) : pitch);
   const noteBox = (n: MidiNote) => ({ x: n.start * beatPx, y: yOf(n.pitch) + 1, w: Math.max(6, n.length * beatPx - 1), h: ROW_H - 2 });
-  const setPreviewNote = (n: MidiNote | null) => { previewRef.current = n; setPreview(n); };
+  // The gesture arithmetic all lives in pianoRollEdit.ts; this is the geometry it needs.
+  // minLengthBeats follows the Option key for the same reason snapping does — Option means
+  // "let me off the grid", which has to include the grid's minimum length.
+  const gestureGeom = (bypassSnap: boolean): GestureGeom => ({
+    beatPx, rowH: ROW_H, dragThreshold: liveFeel().dragThreshold,
+    snapBeat, lockPitch,
+    minLengthBeats: bypassSnap ? 0.25 : stepBeats || 0.25,
+  });
 
   const notes: MidiNote[] = (clip.notes ?? []).map((n) => {
-    const base = preview && preview.i === n.i ? preview : n;
+    const base = previews.get(n.i) ?? n;
     const v = velDrafts[n.i];
     return v == null ? base : { ...base, velocity: v };
   });
@@ -202,45 +226,48 @@ export function PianoRoll() {
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
     setSelectedNotes(new Set());
   };
-  const onNoteDown = (kind: DragKind, n: MidiNote) => (e: React.PointerEvent) => {
+  const onNoteDown = (kind: "move" | "resize", n: MidiNote) => (e: React.PointerEvent) => {
     e.stopPropagation();
-    setSelectedNotes(new Set([n.i]));
+    // Shift-click edits the SELECTION and starts no drag — otherwise the same gesture
+    // would both extend the selection and immediately begin moving it.
+    if (e.shiftKey) { setSelectedNotes(toggleSelection(selectedNotes, n.i, true)); return; }
+
+    // Grabbing a note that is already selected drags the WHOLE selection; grabbing an
+    // unselected one selects just it first. (Replacing the selection unconditionally, as
+    // this used to, is what made multi-note editing impossible.)
+    const sel = selectedNotes.has(n.i) ? selectedNotes : new Set([n.i]);
+    if (sel !== selectedNotes) setSelectedNotes(sel);
+
+    const byIndex = new Map((clip.notes ?? []).map((x) => [x.i, x]));
+    const orig = new Map<number, MidiNote>();
+    for (const i of sel) { const x = byIndex.get(i); if (x) orig.set(i, x); }
+
     try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
-    dragRef.current = { kind, i: n.i, startX: e.clientX, startY: e.clientY, orig: n };
+    dragRef.current = {
+      kind: kind === "move" && e.altKey ? "copy" : kind,
+      anchorI: n.i, orig, startX: e.clientX, startY: e.clientY,
+    };
   };
   const onGridMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d) {
-      const dxPx = e.clientX - d.startX;
-      const db = dxPx / beatPx;
       // The two axes are guarded symmetrically: an axis you did not move is never
-      // rewritten. Pitch gets its deadzone for free from rounding to whole rows
-      // (dp === 0 below covers half a row either way); TIME is continuous, so it
-      // needs the explicit drag threshold — the same "this is a drag, not tremor"
-      // constant the arrangement uses. Without it a 1px hand-wobble during a
-      // vertical drag would re-snap the start, which is the whole bug: a
-      // deliberately off-grid note (pushed hit, swung 16th) must survive a
-      // pitch nudge with its timing intact.
-      const timeMoved = Math.abs(dxPx) > liveFeel().dragThreshold;
-      if (d.kind === "move") {
-        const start = timeMoved ? Math.max(0, snapBeat(d.orig.start + db, e.altKey)) : d.orig.start;
-        const dp = -Math.round((e.clientY - d.startY) / ROW_H);
-        // Only a gesture that actually moves the PITCH axis may re-pitch the note.
-        // Sliding a note sideways is a request to change its time, not its pitch —
-        // so an existing off-key note survives a time-nudge untouched (invariant 88).
-        const pitch = dp === 0 ? d.orig.pitch : lockPitch(Math.min(127, Math.max(0, d.orig.pitch + dp)));
-        setPreviewNote({ ...d.orig, start, pitch });
-      } else if (timeMoved) {
-        const minLength = e.altKey ? 0.25 : stepBeats || 0.25;
-        const length = Math.max(minLength, snapBeat(d.orig.start + d.orig.length + db, e.altKey) - d.orig.start);
-        setPreviewNote({ ...d.orig, length });
-      } else {
-        // Resize is a pure time-axis gesture, so inside the deadzone it commits
-        // nothing — and the preview must be CLEARED, not merely left unwritten:
-        // dragging the grip far out and back to the origin would otherwise release
-        // with the abandoned length still standing and commit the trip anyway.
-        setPreviewNote(null);
-      }
+      // rewritten (see pianoRollEdit.ts, which owns that rule now). Pitch gets its
+      // deadzone for free from rounding to whole rows; TIME is continuous, so it needs an
+      // explicit drag threshold — without it a 1px hand-wobble during a vertical drag
+      // would re-snap the start, and a deliberately off-grid note (a pushed hit, a swung
+      // 16th) must survive a pitch nudge with its timing intact.
+      //
+      // Option during a COPY drag is the modifier that started the copy, not a snap
+      // bypass — reading it as both would make an Option-drag silently off-grid too.
+      const bypassSnap = d.kind !== "copy" && e.altKey;
+      const input = { orig: d.orig, dxPx: e.clientX - d.startX, dyPx: e.clientY - d.startY, bypassSnap };
+      const edits = d.kind === "resize" ? resizeEdits(input, gestureGeom(bypassSnap))
+                                        : moveEdits (input, gestureGeom(bypassSnap));
+      // Inside the deadzone the preview is CLEARED, not merely left unwritten: dragging
+      // out and back to the origin would otherwise release with the abandoned preview
+      // still standing and commit the trip anyway.
+      setPreviewNotes(previewFrom(d.orig, edits));
       return;
     }
     const gd = gridDragRef.current;
@@ -253,10 +280,30 @@ export function PianoRoll() {
   const onGridUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d) {
-      const finalPreview = previewRef.current; dragRef.current = null; setPreviewNote(null);
-      if (!finalPreview) return;
-      if (d.kind === "move") void exec("set_note", { clipId: clip.id, noteIndex: d.i, start: finalPreview.start, pitch: finalPreview.pitch });
-      else void exec("set_note", { clipId: clip.id, noteIndex: d.i, length: finalPreview.length });
+      const final = previewRef.current;
+      dragRef.current = null; setPreviewNotes(new Map());
+      if (final.size === 0) return;
+
+      if (d.kind === "copy") {
+        // Option-drag drops a COPY at the new position and leaves the originals alone.
+        // The new notes' indices are unknowable ahead of time (MidiList re-sorts on
+        // insert), so the selection is re-derived by value once the snapshot lands —
+        // otherwise the producer is left with the originals selected, or with indices
+        // pointing at whichever notes happen to occupy them now.
+        const made = [...final.values()].map((n) => ({ pitch: n.pitch, start: n.start, length: n.length, velocity: n.velocity }));
+        const ids = made.map(noteIdentity);
+        void (async () => {
+          await addNotes(exec, clip.id, made);
+          await useStore.getState().refresh();
+          const fresh = useStore.getState().snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === clip.id)?.notes ?? [];
+          setSelectedNotes(reselectByIdentity(fresh, ids));
+        })();
+        return;
+      }
+
+      const edits = [...final.values()].map((n) =>
+        d.kind === "resize" ? { i: n.i, length: n.length } : { i: n.i, start: n.start, pitch: n.pitch });
+      void applyNoteEdits(exec, clip.id, edits);
       return;
     }
     const gd = gridDragRef.current; if (!gd) return;
@@ -271,11 +318,12 @@ export function PianoRoll() {
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
       return;
     }
-    const xMin = Math.min(gd.x0, x), xMax = Math.max(gd.x0, x), yMin = Math.min(gd.y0, y), yMax = Math.max(gd.y0, y);
-    const hit = (clip.notes ?? []).filter((n) => { const b = noteBox(n); return b.x + b.w >= xMin && b.x <= xMax && b.y + b.h >= yMin && b.y <= yMax; }).map((n) => n.i);
-    setSelectedNotes(new Set(hit));
+    // Shift-marquee ADDS to the selection rather than replacing it, so several sweeps can
+    // build one selection up (Ableton behaves this way and it is muscle memory).
+    const hit = marqueeHit(clip.notes ?? [], { x0: gd.x0, y0: gd.y0, x1: x, y1: y }, noteBox);
+    setSelectedNotes(e.shiftKey ? new Set([...selectedNotes, ...hit]) : new Set(hit));
   };
-  const onGridCancel = () => { dragRef.current = null; gridDragRef.current = null; setPreviewNote(null); setLasso(null); };
+  const onGridCancel = () => { dragRef.current = null; gridDragRef.current = null; setPreviewNotes(new Map()); setLasso(null); };
 
   // ── velocity lane ──────────────────────────────────────────────────────────
   // Which notes a single drag has touched, and the velocity it last painted on each.
@@ -327,15 +375,13 @@ export function PianoRoll() {
     setVelDrafts({});
     if (!active) return;
     const byIndex = new Map((clip.notes ?? []).map((n) => [n.i, n.velocity]));
-    // set_note does NOT reindex (unlike remove_note, which is why THAT one goes in
-    // descending order), so ascending is safe here. One command per touched note, all
-    // on release: the whole gesture is a single undo step.
-    void (async () => {
-      for (const i of [...drafts.keys()].sort((a, b) => a - b)) {
-        const v = drafts.get(i);
-        if (v != null && v !== byIndex.get(i)) await exec("set_note", { clipId: clip.id, noteIndex: i, velocity: v });
-      }
-    })();
+    // Only the notes whose velocity actually CHANGED, committed on release, through the
+    // same seam every other multi-note edit uses — so an eight-note sweep is one undo
+    // step rather than eight, and never a flood of no-op commands.
+    const edits = [...drafts.entries()]
+      .filter(([i, v]) => v != null && v !== byIndex.get(i))
+      .map(([i, v]) => ({ i, velocity: v }));
+    void applyNoteEdits(exec, clip.id, edits);
   };
   const onVelCancel = () => { velDragRef.current = { active: false, startX: 0, drafts: new Map() }; setVelDrafts({}); };
 

@@ -2014,29 +2014,65 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
     auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (mc == nullptr) return errResult ("set_note", "no midi clip");
     auto& seq = mc->getSequence();
-    const int idx = (int) args.getProperty ("noteIndex", -1);
-    if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
-    auto* note = seq.getNote (idx);
+
+    // An `edits` ARRAY may replace the scalar noteIndex/pitch/…, so a whole selection —
+    // the piano roll's group drag — moves in ONE command and one undo step.
+    //
+    // It is not merely a convenience. setStartAndLength writes IDs::b, which triggers
+    // tracktion's SYNCHRONOUS re-sort of the live MidiList, so a note can hop to a new
+    // index the moment it is moved. N separate set_note calls therefore address stale
+    // indices as soon as the first one changes a start — a real bug, caught by the
+    // batched-move selftest below. Resolving every note POINTER up front, before any
+    // mutation, is immune to that; it is the same guard cmdQuantizeNotes documents.
+    struct Edit { te::MidiNote* note; juce::var spec; };
+    std::vector<Edit> edits;
+    const auto editsVar = args.getProperty ("edits", var());   // bind: the temporary would die
+    if (auto* arr = editsVar.getArray())
+    {
+        for (auto& e : *arr)
+        {
+            const int i = (int) e.getProperty ("noteIndex", -1);
+            if (i < 0 || i >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
+            edits.push_back ({ seq.getNote (i), e });
+        }
+        if (edits.empty()) return errResult ("set_note", "'edits' is empty");
+    }
+    else
+    {
+        const int idx = (int) args.getProperty ("noteIndex", -1);
+        if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
+        edits.push_back ({ seq.getNote (idx), args });
+    }
+
+    // One note's worth of the request. Its parameter is genuinely an args object — the
+    // whole command's for a scalar call, one element of `edits` for a group one — which
+    // is why the field reads below stay on `args` rather than an alias.
+    auto applyOne = [this] (te::MidiNote* note, const juce::var& args)
+    {
+        if (note == nullptr) return;
+        if (args.hasProperty ("pitch"))
+            note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
+        if (args.hasProperty ("start") || args.hasProperty ("length"))
+        {
+            const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
+            const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
+            note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
+                                     tracktion::BeatDuration::fromBeats (length), &undoManager());
+        }
+        if (args.hasProperty ("velocity"))
+            note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
+        // Note DEACTIVATE (Ableton's `0` key) — a muted note keeps its place in the clip
+        // and stays editable, it simply doesn't sound. This is the engine's own
+        // MidiNote::mute field, so it costs nothing and persists with the edit; it is also
+        // why per-note probability is NOT here (MidiNote has no such field, and faking one
+        // would mean intervening in the MIDI playback path).
+        if (args.hasProperty ("mute"))
+            note->setMute ((bool) args.getProperty ("mute", false), &undoManager());
+    };
 
     beginTxn ("set_note");
-    if (args.hasProperty ("pitch"))
-        note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
-    if (args.hasProperty ("start") || args.hasProperty ("length"))
-    {
-        const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
-        const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
-        note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
-                                 tracktion::BeatDuration::fromBeats (length), &undoManager());
-    }
-    if (args.hasProperty ("velocity"))
-        note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
-    // Note DEACTIVATE (Ableton's `0` key) — a muted note keeps its place in the clip and
-    // stays editable, it simply doesn't sound. This is the engine's own MidiNote::mute
-    // field, so it costs nothing and persists with the edit; it is also why per-note
-    // probability is NOT here (MidiNote has no such field, and faking one would mean
-    // intervening in the MIDI playback path).
-    if (args.hasProperty ("mute"))
-        note->setMute ((bool) args.getProperty ("mute", false), &undoManager());
+    for (auto& ed : edits)
+        applyOne (ed.note, ed.spec);
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();

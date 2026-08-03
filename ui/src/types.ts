@@ -184,6 +184,9 @@ export type MidiNote = {
   start: number;    // beats
   length: number;   // beats
   velocity: number; // 1..127
+  // Deactivated (Ableton's `0`): still in the clip and still editable, just silent.
+  // Serialized by the backend ONLY when true, so an ordinary note's payload is unchanged.
+  mute?: boolean;
 };
 
 export type Clip = {

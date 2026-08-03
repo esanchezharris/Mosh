@@ -62,6 +62,15 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
+  // NOTE: set_note also accepts "mute" (deactivate a note) and an "edits" array (a whole
+  // selection in one undoable command). Both are deliberately UNDECLARED here: arrays are
+  // unrepresentable in ArgSpec, and widening this entry would move the SFT/bench prompt
+  // hash for a capability the agent does not need. add_midi_clip does the same with its
+  // own notes array. The contract test checks that declared args are read, not the
+  // converse, so this is legal and intentional.
+  // (Careful editing comments in this file: service/skills/moshops_catalog.py parses it
+  // WITHOUT stripping comments, and treats a lone apostrophe as opening a string literal,
+  // so an unpaired quote here breaks catalog parity with a confusing "unbalanced" error.)
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
   { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", false, "beats: 1=1/4, 0.5=1/8, 0.25=1/16"), N("strength", false, "0-1")] },
   { command: "add_drum_pattern", desc: "Lay a whole drum grid in ONE undoable step from lane strings — 'x' hit, 'X' accent, '.'/'-' rest, '|' cosmetic; lanes kick/snare/clap/hat/openhat/lowtom/midtom/crash or a raw MIDI pitch; short lanes tile (\"x.\" = 8th hats)", args: [S("pattern", true, 'lane map: "kick: x...x...x...x...; snare: ....x.......x..."'), S("trackId", false, "target track — omit to create a new Drums track"), S("clipId", false, "existing MIDI clip: replaces ONLY the lanes named (trackId ignored)"), N("stepsPerBar", false, "1-64, default 16"), N("bars", false, "1-16, default fits the longest lane"), N("velocity", false, "1-127 for 'x' hits, default 100"), N("start", false, "seconds — new-clip position")] },
