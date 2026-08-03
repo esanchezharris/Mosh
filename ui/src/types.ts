@@ -332,6 +332,21 @@ export type BuiltinPlugin = {
 };
 
 export type Send = { bus: number; db: number; mute: boolean };
+// One loaded sound on a track's sampler. `index` is the sampler's own pad index and is
+// how every pad command addresses it; `pitch` is the note that triggers it. A pad whose
+// minNote..maxNote spans a wide range was assigned in melodic mode — it is a pitched
+// instrument across the keyboard, not a single pad.
+export type DrumPad = {
+  index: number;
+  pitch: number;
+  minNote: number;
+  maxNote: number;
+  name: string;
+  file: string;
+  gainDb: number;
+  pan: number;
+  openEnded: boolean;
+};
 export type Track = {
   id: string;
   // MP-001 — stable cross-peer logical id (the relay's lock key). Present once the
@@ -361,6 +376,13 @@ export type Track = {
   // drum track (set_drum_lane). Empty/absent = all lanes audible.
   drumMutedPitches?: number[];
   drumSoloPitches?: number[];
+  // The sampler's loaded PADS, on any track that hosts one. Unlike drumMutedPitches
+  // (which describes the eight fixed GM lanes the step grid assumes) this is what the
+  // track actually holds, so a pad grid can render the real kit. `gainDb` is the RAW
+  // engine gain — a muted pad reads at the engine's -48 dB floor, and the pad's own
+  // gain is restored on unmute. minNote/maxNote span the whole keyboard for a sample
+  // assigned in melodic mode, which is a pitched instrument rather than a pad.
+  drumPads?: DrumPad[];
   sends?: Send[];
   isReturn?: boolean;
   returnBus?: number;
@@ -371,7 +393,10 @@ export type Track = {
   parentId?: string;
   // RTG-001/002 — routing. input = the explicitly-chosen input device; output =
   // the track's destination (absent = default out; isTrack = routed into a track).
-  input?: { deviceID: string; name?: string };
+  // `kind` distinguishes the two device families, which matters because a track can
+  // carry a wave input and a MIDI input at once; absent on a choice stored before the
+  // device could be resolved.
+  input?: { deviceID: string; name?: string; kind?: "wave" | "midi" };
   output?: { isTrack: boolean; destId?: string; name: string; deviceID?: string };
   // LYR-001 — the per-track lyric sheet (absent ⇒ no sheet; the Lyrics tab shows its
   // empty state). Additive + optional.

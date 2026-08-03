@@ -4301,6 +4301,32 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 for (auto& v : *a) if ((int) v == note) return true;
             return false;
         };
+        // The pad's GAIN must survive a mute→unmute round trip. The checks below this
+        // one only ever assert that the muted-pitch SET rides the snapshot, which is
+        // why un-muting could be broken for as long as it was while they stayed green:
+        // nothing read a pad gain. te::SamplerPlugin clamps every gain write to
+        // [-48,+48] dB (in setSoundGains, and again in the SamplerSound constructor),
+        // so the old scheme — mute by writing -100, detect mute by reading back
+        // <= -99 — could never see its own sentinel. The stored value was always -48,
+        // the restore branch never fired once, and a muted lane stayed 48 dB down
+        // permanently, across save/reload too.
+        auto padGain = [&] (const String& tid, int pitch) -> double {
+            auto trk = trackById (tid);                  // hold the var (no dangling temporary)
+            auto padsVar = trk.getProperty ("drumPads", var());
+            if (auto* a = padsVar.getArray())
+                for (auto& v : *a)
+                    if ((int) v.getProperty ("pitch", -1) == pitch)
+                        return (double) v.getProperty ("gainDb", -999.0);
+            return -999.0;   // no such pad — distinguishable from any real gain
+        };
+        const double kickGain0 = padGain (dt, 36);
+        check (kickGain0 > -0.01 && kickGain0 < 0.01, "a freshly loaded kick pad sits at 0 dB");
+        cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }}));
+        check (padGain (dt, 36) < -40.0, "muting a drum lane actually silences its sampler pad");
+        cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", false }}));
+        const double kickGain1 = padGain (dt, 36);
+        check (kickGain1 > -0.01 && kickGain1 < 0.01, "un-muting a drum lane RESTORES its pad gain");
+
         check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }}))), "set_drum_lane mute ok");
         check (laneHas (dt, "drumMutedPitches", 36), "muted kick (36) rides the snapshot");
         check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", true }}))), "set_drum_lane solo ok");
@@ -4309,7 +4335,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! laneHas (dt, "drumMutedPitches", 36), "unmuting clears the kick from the muted set");
         cmd (ops, "save"); cmd (ops, "reload");
         check (laneHas (dt, "drumSoloPitches", 38), "drum-lane solo persists across save/reload");
+        // At this point the reload happened while lane 38 was SOLOED, so every other pad
+        // is silenced and carrying a parked gain. That parked gain is a new property on
+        // the sampler's SOUND tree, so this proves it actually SERIALISES: clearing the
+        // solo must restore pad 36 to its own gain. If the property did not round-trip,
+        // the restore would read a default and the pad would sit at the -48 dB floor.
+        check (padGain (dt, 36) < -40.0, "solo silences the non-soloed pads across save/reload");
         cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", false }})); // reset for later sections
+        check (padGain (dt, 36) > -0.01 && padGain (dt, 36) < 0.01,
+               "clearing solo restores a pad's gain from the PERSISTED parked value");
 
         // set_track_type round-trip on a plain track; undo restores type + removes the kit.
         auto plain = cmd (ops, "create_track", args1 ("name", "FlipMe"))["data"].getProperty ("trackId", var()).toString();
@@ -7075,6 +7109,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
+        // The chosen device's FAMILY. Only the wave side is provable here: headless the
+        // engine enumerates no MIDI devices at all (see the CTL-001 note above), so a
+        // MIDI deviceID cannot be resolved and the midi branch is HARDWARE-GATED — do
+        // not read this check as proof that MIDI routing works. What it does pin is that
+        // family resolution happens and defaults to wave for an unknown id, which is the
+        // contract the (previously MIDI-blind) retarget loop now depends on.
+        check (sti["data"].getProperty ("kind", var()).toString() == "wave",
+               "routing: a non-MIDI deviceID resolves to the wave family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
         check (! ok (cmd (ops, "set_track_input", args1 ("trackId", ra))), "routing: set_track_input missing deviceID errors");

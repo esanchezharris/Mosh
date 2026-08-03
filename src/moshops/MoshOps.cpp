@@ -2438,6 +2438,32 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         o->setProperty ("drumMutedPitches", toArr (t.state.getProperty (ids::drumMute, "").toString()));
         o->setProperty ("drumSoloPitches",  toArr (t.state.getProperty (ids::drumSolo, "").toString()));
     }
+    // The sampler's loaded PADS — what a drum track actually holds, rather than the
+    // eight GM lanes the step grid assumes. Emitted only when the track HAS a sampler,
+    // so every other track pays nothing. `gainDb` is the RAW engine gain (what you
+    // would hear), not the pad's parked user gain: mute is applied as a real gain
+    // write, so reading it back is the only honest way to tell a restored pad from a
+    // still-silenced one. minNote/maxNote are carried because assign_sample's melodic
+    // mode maps one sound across the whole keyboard, which is not a pad at all.
+    if (auto* sampler = findSampler (t))
+    {
+        Array<var> pads;
+        for (int i = 0; i < sampler->getNumSounds(); ++i)
+        {
+            auto* p = new DynamicObject();
+            p->setProperty ("index",     i);
+            p->setProperty ("pitch",     sampler->getKeyNote (i));
+            p->setProperty ("minNote",   sampler->getMinKey (i));
+            p->setProperty ("maxNote",   sampler->getMaxKey (i));
+            p->setProperty ("name",      sampler->getSoundName (i));
+            p->setProperty ("file",      sampler->getSoundMedia (i));
+            p->setProperty ("gainDb",    sampler->getSoundGainDb (i));
+            p->setProperty ("pan",       sampler->getSoundPan (i));
+            p->setProperty ("openEnded", sampler->isSoundOpenEnded (i));
+            pads.add (var (p));
+        }
+        o->setProperty ("drumPads", pads);
+    }
     // MIX-008 — a track nested under a group (submix folder) carries its parent's
     // id so the UI can indent it / show membership. Additive: flat consumers see
     // the same array, ungrouped tracks have no parentId.
@@ -2455,7 +2481,14 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             auto& dm = eng.engine().getDeviceManager();
             for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
                 if (auto* wi = dm.getWaveInDevice (i))
-                    if (wi->getDeviceID() == chosenID) { in->setProperty ("name", wi->getName()); break; }
+                    if (wi->getDeviceID() == chosenID)
+                    { in->setProperty ("name", wi->getName()); in->setProperty ("kind", "wave"); break; }
+            // …and the MIDI families too. Without this pass a chosen controller rendered
+            // as a bare deviceID with no name, because only wave devices were scanned —
+            // and there was no way to tell which family the stored choice belonged to.
+            if (! in->hasProperty ("name"))
+                if (auto mi = dm.findMidiInputDeviceForID (chosenID))
+                { in->setProperty ("name", mi->getName()); in->setProperty ("kind", "midi"); }
             o->setProperty ("input", var (in));
         }
     }

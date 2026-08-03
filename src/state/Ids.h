@@ -73,6 +73,17 @@ namespace mosh::ids
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)
     MOSH_DECLARE_ID (drumSolo)
+    // The pad's OWN gain, parked here while the pad is muted, and restored verbatim on
+    // unmute. Lives on te::SamplerPlugin's SOUND child (mosh-prefixed so it cannot
+    // collide with a te::IDs property), and so saves/reloads with the edit.
+    //
+    // It exists because a pad's mute state CANNOT be inferred from its gain. The engine
+    // clamps every gain write to [-48, +48] dB — in SamplerPlugin::setSoundGains and
+    // again in the SamplerSound constructor — so the old scheme (mute by writing -100,
+    // detect mute by reading back <= -99) could never see its own sentinel: the stored
+    // value was always -48. Muting a lane was therefore permanent, and it persisted
+    // through save/reload. Written WITH the undo manager so mute/unmute undoes as one.
+    MOSH_DECLARE_ID (moshPadGainDb)
 
     // MP-001 (multiplayer) — STABLE LOGICAL IDs that survive across two peers'
     // independent engines. Tracktion's own te::EditItemID is allocator-dependent

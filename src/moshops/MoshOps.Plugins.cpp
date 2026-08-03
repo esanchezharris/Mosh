@@ -1210,6 +1210,25 @@ static juce::SortedSet<int> parseLanePitches (const juce::String& s)
     return set;
 }
 
+// The i-th SOUND child of a sampler's state. te::SamplerPlugin::getSound does exactly
+// this walk to resolve a pad index, but it is private — and every pad index in this file
+// comes from that same numbering, so the two must agree.
+static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index)
+{
+    int n = 0;
+    for (auto v : sampler.state)
+        if (v.hasType (te::IDs::SOUND))
+            if (n++ == index)
+                return v;
+    return {};
+}
+
+// The quietest gain the engine will actually STORE. te::SamplerPlugin clamps every gain
+// write to [-48, +48] dB, in setSoundGains and again in the SamplerSound constructor, so
+// -48 dB is silence as far as this plugin is concerned. Writing -100 does not store -100;
+// it stores -48. (That mattered — see applyDrumLaneGains below.)
+static constexpr float kPadMuteDb = -48.0f;
+
 void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
 {
     auto* sampler = findSampler (track);
@@ -1221,13 +1240,37 @@ void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
 
     for (int i = 0; i < sampler->getNumSounds(); ++i)
     {
-        const int   key = sampler->getKeyNote (i);
-        const bool  eff = soloActive ? ! solo.contains (key) : muted.contains (key);
-        const float cur = sampler->getSoundGainDb (i);
-        // Only touch a pad crossing the mute threshold — a non-muted pad keeps its own
-        // gain; a formerly-muted pad restores to 0 dB.
-        if (eff)                   { if (cur > -99.0f) sampler->setSoundGains (i, -100.0f, sampler->getSoundPan (i)); }
-        else if (cur <= -99.0f)                        sampler->setSoundGains (i,    0.0f, sampler->getSoundPan (i));
+        const int  key        = sampler->getKeyNote (i);
+        const bool shouldMute = soloActive ? ! solo.contains (key) : muted.contains (key);
+
+        auto sound = soundTreeAt (*sampler, i);
+        if (! sound.isValid()) continue;
+
+        // Whether a pad is currently silenced is recorded EXPLICITLY — the presence of the
+        // parked gain is the flag — and never inferred from the gain itself. Inferring it
+        // is precisely what broke this: the old code muted by writing -100 and detected
+        // mute by reading back <= -99, but both values sit outside the engine's clamp, so
+        // the stored gain was always -48, the restore branch never once fired, and a muted
+        // lane stayed 48 dB down forever (persisting through save/reload). The selftest
+        // beside it stayed green the whole time because it only ever asserted that the
+        // muted-pitch SET rode the snapshot; nothing read a pad gain.
+        const bool isMuted = sound.hasProperty (ids::moshPadGainDb);
+        if (shouldMute == isMuted) continue;             // already in the state we want
+
+        if (shouldMute)
+        {
+            // Park the pad's own gain before silencing it. NOTE for any future per-pad
+            // gain control: while a pad is muted this parked copy — not the live gain —
+            // is the user's setting, so a gain edit must be written HERE instead.
+            sound.setProperty (ids::moshPadGainDb, sampler->getSoundGainDb (i), &undoManager());
+            sampler->setSoundGains (i, kPadMuteDb, sampler->getSoundPan (i));
+        }
+        else
+        {
+            const auto parked = (float) (double) sound.getProperty (ids::moshPadGainDb, 0.0);
+            sound.removeProperty (ids::moshPadGainDb, &undoManager());
+            sampler->setSoundGains (i, parked, sampler->getSoundPan (i));
+        }
     }
 }
 

@@ -611,10 +611,13 @@ private:
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
     // findSampler(): the track's te::SamplerPlugin if present (never creates one).
     te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
-    // applyDrumLaneGains(): silence (gain -100) the sampler pads whose GM pitch is
-    // muted (or, when any lane is soloed, every pad EXCEPT the soloed ones); restore
-    // formerly-muted pads to 0 dB. Only touches pads crossing the mute threshold, so
-    // a non-muted pad's custom gain is left alone. Reads the drumMute/drumSolo props.
+    // applyDrumLaneGains(): silence the sampler pads whose GM pitch is muted (or, when
+    // any lane is soloed, every pad EXCEPT the soloed ones), and restore a formerly-muted
+    // pad to the gain it had before. Only touches pads crossing the mute threshold, so a
+    // non-muted pad's custom gain is left alone. Reads the drumMute/drumSolo props.
+    // A muted pad's own gain is parked on its SOUND tree (ids::moshPadGainDb) and that
+    // property's PRESENCE is the mute flag — mute is never inferred from the gain value,
+    // because the engine clamps gains to [-48,+48] and would swallow any sentinel.
     void                 applyDrumLaneGains (te::AudioTrack&);
     // loadDrumKitInto(): clear + load the 8 bundled pads onto a sampler, each
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
