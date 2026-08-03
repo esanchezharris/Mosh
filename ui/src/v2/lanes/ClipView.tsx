@@ -24,9 +24,11 @@ import { liveFeel } from "../../interaction/config";
 import { passedDragThreshold, isDoubleClick } from "../../interaction/feel";
 import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
 import { pushEscapeHandler } from "../../hooks/escapeStack";
-// Reuse the proven legacy canvas renderers so drum clips show a true fixed-lane step
-// grid + MIDI shows note blocks (identical to the classic shell), not sparse dots.
-import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/Arrange";
+// Reuse the proven canvas renderers so drum clips show a true fixed-lane step grid +
+// MIDI shows note blocks (identical to the classic shell), not sparse dots. These live
+// in their own module (not classic's Arrange.tsx) so importing them does not pull the
+// classic arrangement view into the v2 module graph.
+import { ClipWave, ClipMidi, ClipDrumGrid, isDrumClip } from "../../ui/clipRenderers";
 import type { Clip, Snapshot } from "../../types";
 import { AI_SETUP_HINT, transcriptionMenuEnabled } from "../../capabilities";
 // AGT-MEM (M4, item 3) — "Save pattern to memory": reads the clip's own notes into
