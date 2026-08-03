@@ -19,7 +19,7 @@ that works on any track (MIDI/drum clips auto-bounce to audio first). A voice ag
 2-player multiplayer ride on the same command spine.
 
 <p align="center">
-  <img src="ui/e2e-artifacts/mosh-1-arrange.png" width="820" alt="Mosh V2 shell — arrange view with plugin chain, generative panel, and Moshi">
+  <img src="assets/app-arrange.png" width="820" alt="Mosh — arrange view with drum, audio, and MIDI tracks and the Ask Moshi bar">
 </p>
 
 > **macOS / Apple Silicon (arm64) is canonical.** A Windows + NVIDIA/CUDA build is an
