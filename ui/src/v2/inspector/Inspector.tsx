@@ -16,7 +16,7 @@ import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
-import { meterAt, snapStep, tempoMapFrom } from "../../time";
+import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
 import { ReconciledRange } from "../ReconciledRange";
 import type { Clip, Track } from "../../types";
 
@@ -531,13 +531,23 @@ function ClipTab({ clip }: { clip: Clip }) {
 
 function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
   const exec = useStore((s) => s.exec);
+  const session = useStore((s) => s.snapshot?.session);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
+  // `quantize_notes` takes `division` as a NUMBER OF BEATS (1 = 1/4, 0.25 = 1/16), not a
+  // label. This button used to pass the string "1/16" — which JUCE's `var` coerces via
+  // String::getDoubleValue(), parsing the leading numeral to 1.0 — so a button reading
+  // "Quantize 1/16" quantized to WHOLE BEATS, four times coarser than it claimed.
+  // Proven against the real engine with --run-script: notes at 0.30/1.18/2.07/3.42 beats
+  // landed on 0/1/2/3 with the string and on 0.25/1.25/2.0/3.5 with 0.25.
+  // Use the same tempo/meter-aware helper classic's PianoRoll passes, so a compound meter
+  // stays correct instead of assuming 4/4.
+  const sixteenth = snapStepBeats(meterAt(tempoMapFrom(session), clip.start), "1/16");
   return (
     <div className="v2-mix">
       {drum
         ? <button className="v2-btn primary" data-testid="v2-open-drumgrid" onClick={() => useDrumWindow.getState().open(clip.id)}>Open drum grid</button>
         : <button className="v2-btn primary" data-testid="v2-open-pianoroll" onClick={() => openPianoRoll(clip.id)}>Open piano-roll</button>}
-      <button className="v2-btn" onClick={() => void exec("quantize_notes", { clipId: clip.id, division: "1/16", strength: 1 })}>Quantize 1/16</button>
+      <button className="v2-btn" data-testid="v2-quantize-16" onClick={() => void exec("quantize_notes", { clipId: clip.id, division: sixteenth, strength: 1 })}>Quantize 1/16</button>
     </div>
   );
 }
