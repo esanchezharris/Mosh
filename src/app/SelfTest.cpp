@@ -4,6 +4,7 @@
 #include "moshops/MoshOps.h"
 #include "moshops/AgentMemoryStore.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
+#include "state/Lyrics.h"
 #include "state/Migrations.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
@@ -178,6 +179,23 @@ namespace
                                             + "-" + juce::Uuid().toString().substring (0, 8);
         return juce::File::getSpecialLocation (juce::File::tempDirectory)
                    .getChildFile ("mosh-selftest-" + tag + "-" + leafName);
+    }
+
+    bool commandLogHasRecord (const MoshEngine& eng, const juce::String& command,
+                              bool expectedOk, bool expectedUndoable)
+    {
+        const auto lines = juce::StringArray::fromLines (
+            eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString());
+        for (const auto& line : lines)
+        {
+            const auto record = juce::JSON::parse (line);
+            if (record.isObject()
+                && record.getProperty ("command", juce::var()).toString() == command
+                && (bool) record.getProperty ("ok", ! expectedOk) == expectedOk
+                && (bool) record.getProperty ("undoable", ! expectedUndoable) == expectedUndoable)
+                return true;
+        }
+        return false;
     }
 
     class LiveAudioProbe final : public juce::AudioIODeviceCallback
@@ -605,7 +623,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // against the raw env value would fail for any nested value. `fromLastOccurrenceOf`
     // returns the whole string when there is no '/', so a flat value behaves exactly as before.
     if (const auto s = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {}).trim(); s.isNotEmpty())
-        check (eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
+        check (mosh::sessionpaths::isSafetyIsolatedLeaf (eng.sessionDir().getFileName())
+                   || eng.sessionDir().getFileName() == s.fromLastOccurrenceOf ("/", false, false),
                "MOSH_SELFTEST_SESSION isolates the session dir (" + s + ")");
 
     // 1a'. ALWAYS: whichever route got us here, this run must own its session dir. A bare
@@ -618,7 +637,9 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         // Same leaf-vs-path point as 1a: an explicit MOSH_SELFTEST_SESSION may nest.
         const auto explicitLeaf = SystemStats::getEnvironmentVariable ("MOSH_SELFTEST_SESSION", {})
                                       .trim().fromLastOccurrenceOf ("/", false, false);
-        check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf) || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
+        check (mosh::sessionpaths::isAutoIsolatedLeaf (leaf)
+                   || mosh::sessionpaths::isSafetyIsolatedLeaf (leaf)
+                   || (explicitLeaf.isNotEmpty() && leaf == explicitLeaf),
                "session dir is private to this run, not a shared fixed path (" + leaf + ")");
     }
 
@@ -728,6 +749,107 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     check (tracks (ops) == batchBase + 2, "one redo restores the whole batch");
     cmd (ops, "undo");
     check (tracks (ops) == batchBase, "batch undone again — clean state for Stage 2");
+
+    // Issue #532 — a legacy Moshi batch around an AUDIO-clip move must leave exactly
+    // one user-visible history step. The native UI refreshes the snapshot and may
+    // autosave while the person reads Moshi's result. Neither operation may hide the
+    // move from history: one standalone Undo must restore the clip.
+    section ("AGT-UNDO: audio-clip batch survives autosave");
+    {
+        auto& undo = eng.edit().getUndoManager();
+        // Plugin persistence mirrors used to write through the Edit's UndoManager.
+        // That makes a normal save/autosave place one or more unnamed transactions
+        // above the producer's last edit.
+        const auto flushTrack = cmd (ops, "create_track", args1 ("name", "AGT Undo Flush Fixture"))
+                                    ["data"].getProperty ("trackId", var()).toString();
+        const auto loadFlushPlugin = cmd (ops, "load_builtin",
+                                          objN ({ { "trackId", flushTrack }, { "type", "4osc" } }));
+        check (ok (loadFlushPlugin), "AGT-UNDO flush fixture has a stateful built-in plugin");
+
+        // A save flush is only observable when a plugin has live state that is not
+        // already mirrored into its ValueTree. An automated parameter naturally has
+        // exactly that posture while playback follows its curve. Build the curve via
+        // MoshOps, then advance it below after the user's move transaction has closed.
+        const int flushPluginIndex = (int) loadFlushPlugin["data"].getProperty ("index", -1);
+        te::AutomatableParameter* flushParam = nullptr;
+        for (auto* t : te::getAudioTracks (eng.edit()))
+            if (t->itemID.toString() == flushTrack)
+                if (flushPluginIndex >= 0 && flushPluginIndex < t->pluginList.getPlugins().size())
+                    if (auto p = t->pluginList.getPlugins()[flushPluginIndex])
+                        if (p->getNumAutomatableParameters() > 0)
+                            flushParam = p->getAutomatableParameter (0).get();
+        check (flushParam != nullptr, "AGT-UNDO flush fixture exposes an automatable parameter");
+        const float explicitNorm = flushParam != nullptr
+                                     ? flushParam->valueRange.convertTo0to1 (flushParam->getCurrentExplicitValue())
+                                     : 0.0f;
+        const double curveNorm = explicitNorm < 0.5f ? 0.9 : 0.1;
+        check (ok (cmd (ops, "add_automation_point",
+                        objN ({ { "trackId", flushTrack }, { "pluginIndex", flushPluginIndex },
+                                { "paramIndex", 0 }, { "time", 1.0 }, { "value", curveNorm } }))),
+               "AGT-UNDO flush fixture has a non-default automation value");
+
+        // Edit installs its undo-transaction change listener asynchronously during
+        // construction. A GUI has long since completed that startup task; explicitly
+        // drain it here before the move so the real 350 ms close timer observes it.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (20);
+        undo.clearUndoHistory();
+
+        const auto audioClipId = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
+        const double before = (double) firstTrack (ops)["clips"][0].getProperty ("start", 0.0);
+        const double moved = before + 1.25;
+
+        check (ok (cmd (ops, "batch_begin", objN ({ { "name", "Move audio clip" } }))),
+               "AGT-UNDO legacy batch_begin ok");
+        check (ok (cmd (ops, "move_clip", objN ({ { "clipId", audioClipId }, { "start", moved } }))),
+               "AGT-UNDO audio clip move ok");
+        check (ok (cmd (ops, "batch_end")), "AGT-UNDO legacy batch_end ok");
+
+        // Match the three full refreshes observed in the production WebView path.
+        for (int i = 0; i < 3; ++i)
+            (void) ops.snapshot();
+
+        // Tracktion closes a user transaction 350 ms after its final change. Let
+        // that real timer fire before saving, as it does while a person reads the
+        // Moshi result and reaches for Undo. Without this boundary, persistence
+        // mirror writes are folded into the named move and cannot expose #532.
+        if (auto* mm = juce::MessageManager::getInstanceWithoutCreating())
+            mm->runDispatchLoopUntil (500);
+        else
+            juce::Thread::sleep (500);
+
+        // Match an automated plugin's live value at autosave time. Do this after
+        // the timer boundary and save synchronously, before its asynchronous state
+        // mirror catches up, which is the real state Edit::flushState must persist.
+        if (flushParam != nullptr)
+            flushParam->updateToFollowCurve (tracktion::TimePosition::fromSeconds (1.0));
+        check (flushParam != nullptr
+                 && std::abs (flushParam->getCurrentValue() - flushParam->getCurrentExplicitValue()) > 0.0001f,
+               "AGT-UNDO flush fixture has divergent live and explicit parameter state");
+
+        // Match the GUI autosave that can land between an agent edit and the user's
+        // immediate Undo. Saving must not add a housekeeping transaction.
+        check (ok (cmd (ops, "save")), "AGT-UNDO autosave fixture saved");
+
+        const auto descriptions = undo.getUndoDescriptions();
+        std::cerr << "  AGT-UNDO heads before Undo: " << descriptions.joinIntoString (" | ") << "\n";
+        check (descriptions.size() == 1,
+               "AGT-UNDO save/autosave adds no history above the audio move");
+
+        const auto undone = cmd (ops, "undo");
+        check ((bool) undone.getProperty ("data", false), "AGT-UNDO standalone Undo reports a real change");
+        const double afterOneUndo = (double) firstTrack (ops)["clips"][0].getProperty ("start", -1.0);
+        check (std::abs (afterOneUndo - before) < 0.001,
+               "AGT-UNDO ONE standalone Undo restores the audio clip after UI refreshes and autosave");
+
+        // Keep the remainder of the long selftest deterministic even on the RED side:
+        // drain only this isolated fixture, then restore an empty history.
+        for (int i = 0; i < 8 && std::abs ((double) firstTrack (ops)["clips"][0].getProperty ("start", -1.0) - before) >= 0.001; ++i)
+            (void) cmd (ops, "undo");
+        undo.clearUndoHistory();
+        (void) cmd (ops, "remove_track", args1 ("trackId", flushTrack));
+        undo.clearUndoHistory();
+    }
 
     // ─── AGT-PROV (FS-B2a): the ASK is recoverable from mosh-log.jsonl ───────────
     // Real-session skill mining needs the natural-language ask, not just the commands
@@ -2519,6 +2641,49 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "create_lyric_sheet", args1 ("trackId", vt))), "create_lyric_sheet ok");
         check (ok (cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 }, { "text", "hold the flame" }}))),
                "set_lyric_line ok");
+
+        // #535 — a flow analysis belongs to the exact sheet spec that produced it.
+        // Editing words, changing a sheet constraint, or asserting different words must
+        // remove the stale payload before the next snapshot/save can expose it.
+        const auto lyricLineState = [&]() -> juce::ValueTree
+        {
+            for (auto* t : te::getAudioTracks (eng.edit()))
+                if (t->itemID.toString() == vt)
+                    if (auto sheet = t->state.getChildWithName (mosh::ids::MOSH_LYRICSHEET); sheet.isValid())
+                        return mosh::LyricSheet::lines (sheet).getChildWithProperty (mosh::ids::lyricIndex, 0);
+            return {};
+        };
+        const auto plantLyricAnalysis = [&]
+        {
+            auto line = lyricLineState();
+            if (line.isValid())
+                line.setProperty (mosh::ids::lyricAnalysis,
+                                  R"({"syllables":3,"target":16,"hasGap":true,"complete":false})", nullptr);
+        };
+        plantLyricAnalysis();
+        check (lyricLineState().hasProperty (mosh::ids::lyricAnalysis), "stale-analysis fixture planted");
+        check (ok (cmd (ops, "set_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 },
+                                                        { "text", "hold the bright flame" },
+                                                        { "seedText", "hold the bright flame" }}))),
+               "editing an analyzed lyric line ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "editing lyric words invalidates stale analysis before snapshot/save");
+
+        plantLyricAnalysis();
+        check (ok (cmd (ops, "set_lyric_constraint", objN ({{ "trackId", vt }, { "grid", "1/8" }}))),
+               "changing an analyzed lyric constraint ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "changing sheet constraints invalidates stale analysis");
+        cmd (ops, "set_lyric_constraint", objN ({{ "trackId", vt }, { "grid", "1/16" }}));
+
+        plantLyricAnalysis();
+        check (ok (cmd (ops, "assert_lyric_line", objN ({{ "trackId", vt }, { "lineIndex", 0 },
+                                                           { "text", "hold the final flame" }}))),
+               "asserting different analyzed words ok");
+        check (! lyricLineState().hasProperty (mosh::ids::lyricAnalysis),
+               "asserting different words invalidates stale analysis");
+        check (ok (cmd (ops, "undo")), "undo pre-score analysis invalidation fixture");
+
         const juce::String scoreBlob =
             R"({"v":1,"algo":"v3","bar":0,"bpm":120.0,"timeSig":[4,4],"grid":"1/16","clamped":false,)"
             R"("slots":[{"start":0.0,"end":0.5,"velocity":90,"kind":"attack","segments":[{"start":0.0,"end":0.5,"pitch":57}]},)"
@@ -3815,6 +3980,185 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! ok (expEmpty), "export_stems on an edit with no non-empty tracks returns a clean error");
 
         stemDir.deleteRecursively();
+    }
+
+    // --- EXP-EOF-001 / #538: fail known-empty audio source windows before render ---
+    section ("Export rejects empty audio source windows atomically (#538)");
+    {
+        check (ok (cmd (ops, "new_project", args1 ("name", "export-source-window-selftest"))),
+               "source-window: fresh project ok");
+        const auto validTrack = cmd (ops, "create_track", args1 ("name", "Valid Source"))["data"]
+                                    .getProperty ("trackId", var()).toString();
+        const auto invalidTrack = cmd (ops, "create_track", args1 ("name", "Invalid Source"))["data"]
+                                      .getProperty ("trackId", var()).toString();
+        const auto validClip = cmd (ops, "add_test_tone_clip",
+                                    objN ({{ "trackId", validTrack }, { "seconds", 1.0 }, { "freq", 271.0 }}))["data"]
+                                   .getProperty ("clipId", var()).toString();
+        const auto invalidClip = cmd (ops, "add_test_tone_clip",
+                                      objN ({{ "trackId", invalidTrack }, { "seconds", 1.0 }, { "freq", 379.0 }}))["data"]
+                                     .getProperty ("clipId", var()).toString();
+        check (validClip.isNotEmpty() && invalidClip.isNotEmpty(),
+               "source-window: valid and invalid fixtures created");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", invalidClip }, { "offset", 1.0 }, { "length", 1.0 }}))),
+               "source-window: exact-EOF fixture set");
+
+        auto outDir = eng.sessionDir().getChildFile ("exports").getChildFile ("source-window-selftest");
+        outDir.deleteRecursively();
+        outDir.createDirectory();
+        auto invalidMixFile = outDir.getChildFile ("invalid-mix.wav");
+        const int mixLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                              .getProperty ("total", -1);
+        const double mixStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidMix = cmd (ops, "export_audio", args1 ("file", invalidMixFile.getFullPathName()));
+        const double mixElapsedMs = Time::getMillisecondCounterHiRes() - mixStartMs;
+        const auto mixError = invalidMix.getProperty ("error", var()).toString();
+        check (! ok (invalidMix), "source-window: exact-EOF mix export rejected");
+        check (mixElapsedMs < 1000.0, "source-window: mix rejection is pre-render and under one second");
+        check (mixError.contains ("Invalid Source") && mixError.contains (invalidClip)
+               && mixError.containsIgnoreCase ("effective offset")
+               && mixError.containsIgnoreCase ("source length")
+               && mixError.containsIgnoreCase ("trim"),
+               "source-window: mix error names the track, clip, measured window, and repair action");
+        check (! invalidMixFile.existsAsFile(), "source-window: rejected mix leaves no output file");
+        auto invalidMixLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidMixLog.getProperty ("total", -1) == mixLogTotalBefore + 1,
+               "source-window: rejected mix appends one command-log record");
+        if (auto* entries = invalidMixLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_audio"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected mix log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected mix log exposes an entries array");
+        }
+
+        auto previousMixFile = outDir.getChildFile ("previous-good-mix.wav");
+        const juce::String previousMixSentinel = "previous successful export must survive validation failure";
+        check (previousMixFile.replaceWithText (previousMixSentinel),
+               "source-window: previous export sentinel created");
+        auto rejectedOverwrite = cmd (ops, "export_audio", args1 ("file", previousMixFile.getFullPathName()));
+        check (! ok (rejectedOverwrite), "source-window: invalid mix cannot overwrite an existing export");
+        check (previousMixFile.loadFileAsString() == previousMixSentinel,
+               "source-window: validation failure preserves the previous export bytes");
+
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 2.0 }}))),
+               "source-window: invalid fixture moved outside custom export range");
+        auto unaffectedRangeFile = outDir.getChildFile ("unaffected-custom-range.wav");
+        auto unaffectedRange = cmd (ops, "export_audio",
+                                    objN ({{ "file", unaffectedRangeFile.getFullPathName() },
+                                           { "range", "custom" }, { "start", 0.0 }, { "end", 1.0 }}));
+        check (ok (unaffectedRange),
+               "source-window: invalid clip outside the custom range does not block export");
+        check (unaffectedRangeFile.existsAsFile() && unaffectedRangeFile.getSize() > 0,
+               "source-window: unaffected custom range writes audio");
+        check (ok (cmd (ops, "move_clip", objN ({{ "clipId", invalidClip }, { "start", 0.0 }}))),
+               "source-window: invalid fixture restored inside full export range");
+
+        auto invalidStemDir = outDir.getChildFile ("invalid-stems");
+        invalidStemDir.deleteRecursively();
+        const int stemLogTotalBefore = (int) cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                               .getProperty ("total", -1);
+        const double stemsStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidStems = cmd (ops, "export_stems", args1 ("dir", invalidStemDir.getFullPathName()));
+        const double stemsElapsedMs = Time::getMillisecondCounterHiRes() - stemsStartMs;
+        const auto stemsError = invalidStems.getProperty ("error", var()).toString();
+        check (! ok (invalidStems), "source-window: stem set rejects one invalid non-empty track");
+        check (stemsElapsedMs < 1000.0, "source-window: stem rejection is pre-render and under one second");
+        check (stemsError.contains ("Invalid Source") && stemsError.contains (invalidClip),
+               "source-window: stem error identifies the omitted track and clip");
+        check (invalidStemDir.findChildFiles (File::findFiles, false).isEmpty(),
+               "source-window: failed stem command leaves no partial stem files");
+        auto invalidStemLog = cmd (ops, "get_command_log", args1 ("limit", 1))["data"];
+        check ((int) invalidStemLog.getProperty ("total", -1) == stemLogTotalBefore + 1,
+               "source-window: rejected stem set appends one command-log record");
+        if (auto* entries = invalidStemLog.getProperty ("entries", var()).getArray())
+        {
+            const auto latest = entries->isEmpty() ? var() : entries->getLast();
+            check (latest.getProperty ("command", var()).toString() == "export_stems"
+                   && ! (bool) latest.getProperty ("ok", true)
+                   && ! (bool) latest.getProperty ("undoable", true)
+                   && latest.getProperty ("error", var()).toString().contains (invalidClip),
+                   "source-window: rejected stem log identifies the failed non-undoable export");
+        }
+        else
+        {
+            check (false, "source-window: rejected stem log exposes an entries array");
+        }
+
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", invalidClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 120.0 }}))),
+               "source-window: invalid fixture Warp on ok");
+        auto invalidWarpFile = outDir.getChildFile ("invalid-warp.wav");
+        const double warpStartMs = Time::getMillisecondCounterHiRes();
+        auto invalidWarp = cmd (ops, "export_audio", args1 ("file", invalidWarpFile.getFullPathName()));
+        const double warpElapsedMs = Time::getMillisecondCounterHiRes() - warpStartMs;
+        check (! ok (invalidWarp), "source-window: warped exact-EOF mix rejected");
+        check (warpElapsedMs < 1000.0, "source-window: warped rejection avoids the 20-second watchdog");
+        check (! invalidWarpFile.existsAsFile(), "source-window: rejected warped mix leaves no output file");
+
+        check (ok (cmd (ops, "remove_clip", args1 ("clipId", invalidClip))),
+               "source-window: invalid fixture removed");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 0.75 }, { "length", 0.5 }}))),
+               "source-window: in-range remainder fixture set");
+        auto tailFile = outDir.getChildFile ("valid-past-eof-tail.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", tailFile.getFullPathName()))),
+               "source-window: clip length may extend past EOF when an in-range remainder exists");
+        check (tailFile.existsAsFile() && tailFile.getSize() > 0,
+               "source-window: valid past-EOF tail writes audio");
+
+        auto emptyTailRangeFile = outDir.getChildFile ("invalid-tail-only-range.wav");
+        auto emptyTailRange = cmd (ops, "export_audio",
+                                   objN ({{ "file", emptyTailRangeFile.getFullPathName() },
+                                          { "range", "custom" }, { "start", 0.3 }, { "end", 0.5 }}));
+        check (! ok (emptyTailRange),
+               "source-window: custom range containing only a beyond-EOF tail is rejected");
+        check (! emptyTailRangeFile.existsAsFile(),
+               "source-window: rejected tail-only range leaves no output file");
+
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 0.0 }, { "length", 1.0 }}))),
+               "source-window: full in-range fixture restored for normal Warp control");
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", true },
+                                                        { "sourceBpm", 120.0 }}))),
+               "source-window: valid remainder Warp on ok");
+        // Warp proxy creation is asynchronous in the real UI.  Match the frozen
+        // reproduction's two-second wait while continuing to pump the JUCE message
+        // loop so this control proves a ready proxy rather than racing its creation.
+        {
+            auto* mm = MessageManager::getInstanceWithoutCreating();
+            const auto deadline = Time::getMillisecondCounter() + 3000;
+            while (Time::getMillisecondCounter() < deadline)
+            {
+                if (mm != nullptr)
+                    mm->runDispatchLoopUntil (50);
+                else
+                    Thread::sleep (50);
+            }
+        }
+        auto validWarpFile = outDir.getChildFile ("valid-warp.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", validWarpFile.getFullPathName()))),
+               "source-window: normal warped clip still exports");
+        check (validWarpFile.existsAsFile() && validWarpFile.getSize() > 0,
+               "source-window: normal warped export writes audio");
+
+        check (ok (cmd (ops, "set_clip_warp", objN ({{ "clipId", validClip }, { "autoTempo", false }}))),
+               "source-window: Warp off for virtual-phase fixture");
+        check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", validClip }, { "offset", 12.75 }, { "length", 1.0 }}))),
+               "source-window: large virtual offset fixture set");
+        check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", validClip }, { "enabled", true },
+                                                        { "start", 0.0 }, { "length", 1.0 }}))),
+               "source-window: virtual-phase loop on ok");
+        auto loopFile = outDir.getChildFile ("valid-loop-phase.wav");
+        check (ok (cmd (ops, "export_audio", args1 ("file", loopFile.getFullPathName()))),
+               "source-window: looping clip with a large virtual phase remains valid");
+        check (loopFile.existsAsFile() && loopFile.getSize() > 0,
+               "source-window: looping virtual phase writes audio");
+
+        outDir.deleteRecursively();
     }
 
     // --- DRM-001: drums make sound (working sampler + bundled kit + track type) ---
@@ -5526,6 +5870,23 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! sawTxt, "list_directory filters out the .txt (extension filter excludes non-audio)");
         check (sawDir, "list_directory lists the subfolder (isDir:true)");
 
+        // A browser must not materialise an unbounded directory on the WebView/message
+        // thread. Seed one entry beyond the production page limit: the response must be
+        // explicitly truncated instead of returning every row and freezing the surface.
+        auto boundedDir = eng.sessionDir().getChildFile ("browse-bounded-test");
+        boundedDir.deleteRecursively();
+        boundedDir.createDirectory();
+        for (int i = 0; i < 513; ++i)
+            boundedDir.getChildFile ("folder-" + String (i).paddedLeft ('0', 4)).createDirectory();
+        auto bounded = cmd (ops, "list_directory", args1 ("path", boundedDir.getFullPathName()));
+        auto boundedData = bounded["data"];
+        check (ok (bounded) && boundedData.getProperty ("entries", var()).size() == 512,
+               "list_directory caps a large folder at 512 visible entries");
+        check ((bool) boundedData.getProperty ("truncated", false),
+               "list_directory reports when a large folder was truncated");
+        check ((int) boundedData.getProperty ("limit", 0) == 512,
+               "list_directory publishes its visible-entry limit");
+
         // Folder navigation: descend into the child, parent points back at browseDir.
         auto into = cmd (ops, "list_directory", args1 ("path", childDir.getFullPathName()));
         check (ok (into) && (bool) into["data"].getProperty ("exists", false), "list_directory into subfolder exists:true");
@@ -6003,8 +6364,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     // ─── A2 — crash-recovery liveness sentinel ───
     // The GUI writes a session.running sentinel once the window is live and deletes it on a
     // clean quit; its presence at the next launch flags an unclean exit (a prior crash). The
-    // headless harness uses a wiped freshSession dir + never marks it, so it always reads
-    // clean. We exercise the mark/clear primitives + the clean-start read directly (the
+    // headless harness uses a cold isolated session, so it always reads clean. We exercise
+    // the mark/clear primitives + the clean-start read directly (the
     // ctor latch is GUI-only). Self-contained: leaves the sentinel cleared.
     section ("A2: crash-recovery liveness sentinel");
     {
@@ -6501,6 +6862,82 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (near ((double) clipById (lcid).getProperty ("start", -99.0), preStart)
                && near ((double) clipById (lcid).getProperty ("length", -99.0), preLength),
                "loop: disabling the loop does NOT move or resize the clip");
+
+        // Regression #545: Tracktion may store the currently audible loop phase as a
+        // virtual offset. Removing the loop must materialise that phase, otherwise a
+        // whole-file EOF offset becomes literal and the clip renders as silence.
+        {
+            auto phase = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 337.0 }}));
+            const auto phaseCid = phase["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", phaseCid }, { "reversed", true }}))),
+                   "loop phase: reverse on ok");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", phaseCid }, { "enabled", true },
+                                                           { "start", 0.0 }, { "length", 4.0 }}))),
+                   "loop phase: whole-source loop on ok");
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", phaseCid }, { "reversed", false }}))),
+                   "loop phase: reverse off ok");
+            const auto virtualOffset = (double) clipById (phaseCid).getProperty ("offset", -1.0);
+            const auto phaseStart = (double) clipById (phaseCid).getProperty ("start", -1.0);
+            const auto phaseLength = (double) clipById (phaseCid).getProperty ("length", -1.0);
+            check (virtualOffset > 3.9,
+                   "loop phase: fixture holds a virtual EOF offset while looping");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", phaseCid }, { "enabled", false }}))),
+                   "loop phase: disable ok");
+            check (near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: disabling materialises EOF modulo loop length at source zero");
+            check (near ((double) clipById (phaseCid).getProperty ("start", -1.0), phaseStart)
+                    && near ((double) clipById (phaseCid).getProperty ("length", -1.0), phaseLength),
+                   "loop phase: materialising the phase does not move or resize the clip");
+
+            check (ok (cmd (ops, "undo")), "loop phase: one undo restores loop and virtual offset");
+            check ((bool) clipById (phaseCid).getProperty ("loopEnabled", false)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), virtualOffset),
+                   "loop phase: undo restores both fields from the same transaction");
+            check (ok (cmd (ops, "redo")), "loop phase: redo disable ok");
+            check (! (bool) clipById (phaseCid).getProperty ("loopEnabled", true)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: redo clears loop and materialises phase again");
+            cmd (ops, "save"); cmd (ops, "reload");
+            check (! (bool) clipById (phaseCid).getProperty ("loopEnabled", true)
+                    && near ((double) clipById (phaseCid).getProperty ("offset", -1.0), 0.0),
+                   "loop phase: materialised offset persists across save/reload");
+        }
+
+        // The same rule applies when Reverse is still enabled: Loop-before-Reverse
+        // can also produce an exact EOF virtual phase.
+        {
+            auto reversed = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 389.0 }}));
+            const auto reversedCid = reversed["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", reversedCid }, { "enabled", true },
+                                                          { "start", 0.0 }, { "length", 4.0 }}))),
+                   "loop phase reverse-order: loop on ok");
+            check (ok (cmd (ops, "set_clip_reverse", objN ({{ "clipId", reversedCid }, { "reversed", true }}))),
+                   "loop phase reverse-order: reverse on ok");
+            check ((double) clipById (reversedCid).getProperty ("offset", -1.0) > 3.9,
+                   "loop phase reverse-order: reverse stores virtual EOF while looped");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", reversedCid }, { "enabled", false }}))),
+                   "loop phase reverse-order: disable ok");
+            check (near ((double) clipById (reversedCid).getProperty ("offset", -1.0), 0.0)
+                    && (bool) clipById (reversedCid).getProperty ("reversed", false),
+                   "loop phase reverse-order: disabling materialises phase and preserves Reverse");
+        }
+
+        // A large virtual offset uses floating modulo, and a partial loop adds its
+        // source start after wrapping the phase. Negative modulo is covered by the
+        // pure unit test because Tracktion clamps real clip offsets to zero.
+        {
+            auto partial = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", lt }, { "seconds", 4.0 }, { "freq", 431.0 }}));
+            const auto partialCid = partial["data"].getProperty ("clipId", var()).toString();
+            check (ok (cmd (ops, "trim_clip", objN ({{ "clipId", partialCid }, { "offset", 12.75 }, { "length", 2.0 }}))),
+                   "loop phase partial: virtual offset fixture set");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", partialCid }, { "enabled", true },
+                                                          { "start", 0.5 }, { "length", 1.0 }}))),
+                   "loop phase partial: loop on ok");
+            check (ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", partialCid }, { "enabled", false }}))),
+                   "loop phase partial: disable ok");
+            check (near ((double) clipById (partialCid).getProperty ("offset", -1.0), 1.25),
+                   "loop phase partial: large phase wraps inside the partial source loop");
+        }
 
         // enabled:true with a zero length is rejected (and mutates nothing).
         check (! ok (cmd (ops, "set_clip_loop", objN ({{ "clipId", lcid }, { "enabled", true }, { "length", 0.0 }}))),
@@ -7700,12 +8137,53 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (restoredName == "Net Src", "track restored from the relayed commit (end-to-end over HTTP)");
 
         // Exercise the NATIVE session command path (MultiplayerSession lifecycle:
-        // create -> background poll thread starts -> leave -> thread joins).
-        auto created = cmd (ops, "mp_create_session", objN ({ { "name", "Cy" }, { "color", "#00ff88" } }));
+        // failed join -> create -> background poll thread starts -> leave -> thread joins).
+        // These sentinel values are intentionally private and must never reach JSONL.
+        const juce::String privateBadCode = "private-room-code-issue-542";
+        const juce::String privateName = "private-display-name-issue-542";
+        const juce::String privateColor = "#542542";
+        check (! ok (cmd (ops, "mp_join_session",
+                          objN ({ { "code", privateBadCode }, { "name", privateName }, { "color", privateColor } }))),
+               "mp_join_session rejects an unknown room");
+        check (! ok (cmd (ops, "mp_claim_track", args1 ("trackId", "missing-track-issue-542"))),
+               "mp_claim_track missing-track failure is graceful");
+        check (! ok (cmd (ops, "mp_commit_track", args1 ("trackId", "missing-track-issue-542"))),
+               "mp_commit_track missing-track failure is graceful");
+
+        auto created = cmd (ops, "mp_create_session",
+                            objN ({ { "name", privateName }, { "color", privateColor } }));
         check (ok (created), "mp_create_session (native session) ok");
-        check (created.getProperty ("data", juce::var()).getProperty ("code", juce::var()).toString().isNotEmpty(),
+        const auto privateCreatedCode = created.getProperty ("data", juce::var())
+                                               .getProperty ("code", juce::var()).toString();
+        check (privateCreatedCode.isNotEmpty(),
                "native session returned a room code");
+        const auto logClaimTrack = cmd (ops, "create_track", args1 ("name", "MP Log Claim"));
+        const auto logClaimTrackId = logClaimTrack.getProperty ("data", juce::var())
+                                                  .getProperty ("trackId", juce::var()).toString();
+        auto successfulClaim = cmd (ops, "mp_claim_track", args1 ("trackId", logClaimTrackId));
+        check (ok (successfulClaim)
+                   && (bool) successfulClaim.getProperty ("data", juce::var()).getProperty ("granted", false),
+               "mp_claim_track grants a real track for the audit-log probe");
         check (ok (cmd (ops, "mp_leave_session")), "mp_leave_session ok (poll thread joined)");
+
+        check (commandLogHasRecord (eng, "mp_join_session", false, false),
+               "JSONL records failed mp_join_session with undoable:false");
+        check (commandLogHasRecord (eng, "mp_claim_track", false, false),
+               "JSONL records failed mp_claim_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_commit_track", false, false),
+               "JSONL records failed mp_commit_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_create_session", true, false),
+               "JSONL records successful mp_create_session with undoable:false");
+        check (commandLogHasRecord (eng, "mp_claim_track", true, false),
+               "JSONL records successful mp_claim_track with undoable:false");
+        check (commandLogHasRecord (eng, "mp_leave_session", true, false),
+               "JSONL records successful mp_leave_session with undoable:false");
+        const auto privateSessionLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        check (! privateSessionLog.contains (privateBadCode)
+                   && ! privateSessionLog.contains (privateName)
+                   && ! privateSessionLog.contains (privateColor)
+                   && ! privateSessionLog.contains (privateCreatedCode),
+               "multiplayer JSONL omits private room, name, color, and returned-code values");
 
         // P4 — audio stems. Content-addressing + the by-hash rewrite run on any
         // relay; the upload/peer-download round-trip now runs against WHATEVER
@@ -7775,6 +8253,8 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             peer.leave();
         }
         cmd (ops, "mp_leave_session");
+        check (commandLogHasRecord (eng, "mp_commit_track", true, false),
+               "JSONL records successful mp_commit_track with undoable:false");
 
         // PR-2 — stem transfer off the message thread. Proves global apply ORDER
         // survives two quick successive commits of the SAME track (a fast second
@@ -7867,6 +8347,15 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
             cmd (ordGuestOps, "mp_leave_session");
             cmd (ordHostOps, "mp_leave_session");
+            check (commandLogHasRecord (ordGuestEng, "mp_join_session", true, false),
+                   "guest JSONL records successful mp_join_session with undoable:false");
+            check (commandLogHasRecord (ordGuestEng, "mp_leave_session", true, false),
+                   "guest JSONL records successful mp_leave_session with undoable:false");
+            const auto guestLog = ordGuestEng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (! guestLog.contains (ordCode)
+                       && ! guestLog.contains ("OrdGuest")
+                       && ! guestLog.contains ("#202020"),
+                   "guest JSONL omits room code, display name, and color");
         }
 
         // PR-2 — no-freeze proxy. Gated additionally on MOSH_RELAY_BLOB_DELAY_MS (set
@@ -9716,6 +10205,7 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     section ("live-audio CoreAudio callback smoke");
 
     auto& deviceManager = eng.engine().getDeviceManager().deviceManager;
+    auto& tracktionDeviceManager = eng.engine().getDeviceManager();
     auto* device = deviceManager.getCurrentAudioDevice();
     check (eng.hasAudio(), "audio mode is enabled");
     check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
@@ -9734,15 +10224,48 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             check (device->getName().equalsIgnoreCase (requested), "current output matches MOSH_AUDIO_OUTPUT_DEVICE");
     }
 
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    tracktionDeviceManager.rescanMidiDeviceList();
+    if (mm != nullptr)
+        mm->runDispatchLoopUntil (100);
+
     auto track = cmd (ops, "create_track", args1 ("name", "Live Smoke"));
     check (ok (track), "create_track ok");
     const auto trackId = track["data"].getProperty ("trackId", var()).toString();
 
     check (ok (cmd (ops, "add_test_tone_clip",
-                   objN ({{ "trackId", trackId }, { "seconds", 2.0 }, { "freq", 440.0 }}))),
+                   objN ({{ "trackId", trackId }, { "seconds", 6.0 }, { "freq", 440.0 }}))),
            "add_test_tone_clip ok");
 
     check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "transport seek ok");
+
+    // ── GAP 2 precondition — arm before ANY playback has allocated the context ──
+    // This is intentionally before the GAP-3 play call. A fresh production project
+    // must be able to press Record first; requiring one hidden Play/Stop cycle left the
+    // visible input picker populated while arm_track returned applied:false.
+    String recTrackId;
+    if (requestedInput.isNotEmpty())
+    {
+        auto rt = cmd (ops, "create_track", args1 ("name", "Record Smoke"));
+        check (ok (rt), "GAP2: create_track (record) ok");
+        recTrackId = rt["data"].getProperty ("trackId", var()).toString();
+
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", recTrackId }, { "armed", true }}));
+        check (ok (arm), "GAP2: cold arm_track ok before playback");
+        check ((bool) arm["data"].getProperty ("applied", false),
+               "GAP2: cold arm_track applied before playback");
+        check ((bool) arm["data"].getProperty ("armed", false), "GAP2: track reports armed");
+        // The track snapshot should report it has an input now.
+        {
+            auto tv = ops.snapshot().getProperty ("tracks", var());
+            bool hasInput = false;
+            if (auto* arr = tv.getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("id", var()).toString() == recTrackId)
+                        hasInput = (bool) t.getProperty ("hasInput", false);
+            check (hasInput, "GAP2: cold-armed track reports hasInput");
+        }
+    }
 
     // ── GAP 3 — metering live-smoke (gated on MOSH_AUDIO_OUTPUT_DEVICE) ──
     // Enable the track meter + attach the level sink BEFORE playback, so the
@@ -9799,7 +10322,6 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     LiveAudioProbe probe;
     deviceManager.addAudioCallback (&probe);
 
-    auto* mm = MessageManager::getInstanceWithoutCreating();
     auto smokeMs = SystemStats::getEnvironmentVariable ("MOSH_LIVE_AUDIO_SMOKE_MS", "3500").getIntValue();
     smokeMs = jlimit (500, 15000, smokeMs);
     const auto end = Time::getMillisecondCounter() + (uint32) smokeMs;
@@ -9834,27 +10356,14 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
     // keeps it out of the default headless selftest.
     if (requestedInput.isNotEmpty())
     {
-        auto rt = cmd (ops, "create_track", args1 ("name", "Record Smoke"));
-        check (ok (rt), "GAP2: create_track (record) ok");
-        const auto recTrackId = rt["data"].getProperty ("trackId", var()).toString();
-
-        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", recTrackId }, { "armed", true }}));
-        check (ok (arm), "GAP2: arm_track ok");
-        check ((bool) arm["data"].getProperty ("applied", false), "GAP2: arm_track applied (input assigned)");
-        check ((bool) arm["data"].getProperty ("armed", false), "GAP2: track reports armed");
-        // The track snapshot should report it has an input now.
-        {
-            auto tv = ops.snapshot().getProperty ("tracks", var());
-            bool hasInput = false;
-            if (auto* arr = tv.getArray())
-                for (auto& t : *arr)
-                    if (t.getProperty ("id", var()).toString() == recTrackId)
-                        hasInput = (bool) t.getProperty ("hasInput", false);
-            check (hasInput, "GAP2: armed track reports hasInput");
-        }
-
-        check (ok (cmd (ops, "set_transport", args1 ("position", 0.0))), "GAP2: seek to 0 ok");
-        check (ok (cmd (ops, "set_transport", args1 ("action", "record"))), "GAP2: set_transport record ok");
+        auto recordSeek = cmd (ops, "set_transport", args1 ("position", 0.0));
+        check (ok (recordSeek), "GAP2: seek to 0 ok");
+        check (std::abs ((double) recordSeek["data"].getProperty ("position", -1.0)) < 0.01,
+               "GAP2: transport reached 0 before recording");
+        auto recordStart = cmd (ops, "set_transport", args1 ("action", "record"));
+        check (ok (recordStart), "GAP2: set_transport record ok");
+        check ((bool) recordStart["data"].getProperty ("recording", false),
+               "GAP2: record command entered recording state");
 
         // ── GAP 4 — barge-in: run the CONTINUOUS recognizer WHILE the take records ──
         // THE core hands-free unknown: can macOS Speech (AVAudioEngine input tap) and
@@ -9904,11 +10413,20 @@ int runLiveAudioSmoke (MoshEngine& eng, MoshOps& ops)
             speech->stopContinuous();
         }
 
-        auto stop = cmd (ops, "stop_recording");
-        check (ok (stop), "GAP2: stop_recording ok");
-        auto landed = stop["data"].getProperty ("clips", var());
+        check (eng.edit().getTransport().isRecording(), "GAP2: transport is recording before generic stop");
+        auto stop = cmd (ops, "set_transport", args1 ("action", "stop"));
+        check (ok (stop), "GAP2: generic transport stop finalized the recording");
+        check (! (bool) stop["data"].getProperty ("recording", true),
+               "GAP2: generic transport stop exited recording state");
+
+        var landed;
+        const auto tracksState = ops.snapshot().getProperty ("tracks", var());
+        if (auto* tracks = tracksState.getArray())
+            for (auto& trackState : *tracks)
+                if (trackState.getProperty ("id", var()).toString() == recTrackId)
+                    landed = trackState.getProperty ("clips", var());
         const int nLanded = landed.isArray() ? landed.size() : 0;
-        check (nLanded > 0, "GAP2: a take clip landed on the armed track");
+        check (nLanded > 0, "GAP2: generic transport stop landed a take on the armed track");
         if (nLanded > 0)
         {
             const auto srcPath = landed[0].getProperty ("sourceFile", var()).toString();

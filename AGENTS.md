@@ -4,7 +4,7 @@
 `docs/archive/consolidation/2026-06-09-mac-canonical-baseline-adr.md`). It carries
 the full v0 DAW slice plus the post-v0 work merged through 2026-07-16: the DAW-parity
 conformance scoreboard (`docs/FEATURE_AUDIT.md`), the pinned Tracktion/JUCE
-patches (`patches/` 0001–0005), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
+patches (`patches/` 0001–0006), tempo ramps + audio warp, AU hosting, the iOS companion + the phone
 **DAWN recording pad** (#239/#267), **2-player multiplayer** (PR #74), **always-on voice**
 (PR #71), the DAW project-file importers (`ui/src/import/`), audio→MIDI (`/transcribe`),
 the from-scratch **v2 UI shell** (default; classic preserved in `AppLegacy.tsx`),

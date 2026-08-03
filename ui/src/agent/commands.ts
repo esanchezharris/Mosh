@@ -19,9 +19,9 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
   // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
-  { command: "create_section", desc: "Add a named song section (beats)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
+  { command: "create_section", desc: "Add a named song section using quarter-note beat offsets from project start — never seconds (in 4/4, bar 1 to bar 5 is startBeat 0 to endBeat 16)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
   { command: "rename_section", desc: "Rename a song section", args: [S("sectionId"), S("name")] },
-  { command: "move_section", desc: "Move/resize a song section (in beats)", args: [S("sectionId"), N("startBeat"), N("endBeat")] },
+  { command: "move_section", desc: "Move/resize a song section using quarter-note beat offsets from project start — never seconds", args: [S("sectionId"), N("startBeat"), N("endBeat")] },
   { command: "remove_section", desc: "Remove a song section", args: [S("sectionId")] },
   // ── timeline annotations (authored comment pins; shared with collaborators) ──
   { command: "create_annotation", desc: "Drop a comment pin on the timeline at a beat (flag something for the producer/collaborators)", args: [S("text"), N("beat"), S("color", false), S("author", false)] },

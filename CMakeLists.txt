@@ -153,6 +153,7 @@ if (MOSH_BUILD_APP)
         # AL-012 — UI resource-provider path-traversal guard (see WebBridge.cpp's
         # serveUiResource); split out so it's testable without juce_gui_extra.
         src/webview/UiResourcePathGuard.cpp
+        src/files/DirectoryListing.cpp
         # Moshi's brain (server-side LLM proxy) + native voice (macOS Speech) — the
         # packaged-app equivalents of the Vite dev brain proxy + browser Web Speech.
         src/brain/BrainProxy.cpp
@@ -169,6 +170,16 @@ if (MOSH_BUILD_APP)
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
+        src/moshops/MoshOps.Lyrics.cpp
+        src/moshops/MoshOps.Notes.cpp
+        src/moshops/MoshOps.Clips.cpp
+        src/moshops/MoshOps.Tracks.cpp
+        src/moshops/MoshOps.TempoProject.cpp
+        src/moshops/MoshOps.Plugins.cpp
+        src/moshops/MoshOps.Mixer.cpp
+        src/moshops/MoshOps.Generative.cpp
+        src/moshops/MoshOps.Multiplayer.cpp
+        src/moshops/MoshOps.ProjectIo.cpp
         # MP-001 — 2-player multiplayer (track-lock + commit-on-move)
         src/multiplayer/TrackCommit.cpp
         src/multiplayer/MultiplayerClient.cpp

@@ -71,6 +71,16 @@ struct LyricSheet
         return sheet.getChildWithName (ids::LYRIC_LINES);
     }
 
+    /** Sheet-wide staleness key for analyze_lyrics. The analysis service grades lines
+        together (a changed line can become a rhyme-group anchor for its neighbours), so
+        a result may land only while the exact submitted spec is still current. */
+    static juce::String analysisFingerprint (const juce::var& spec)
+    {
+        const auto json = juce::JSON::toString (spec, true);
+        return juce::SHA256 (json.toRawUTF8(),
+                             (size_t) json.getNumBytesAsUTF8()).toHexString();
+    }
+
     /** Per-line generation/cache STALENESS key (mirrors RenderLayer::fingerprint) —
         every constraint input that should invalidate a cached proposal. A line's
         rhyme strictness inherits the sheet default when blank. `contextHash` folds in

@@ -25,7 +25,8 @@ set(MOSH_TRACKTION_PATCHES
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0002-juce-headless-vst3-adopt-description-scan-host.patch"
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0003-tracktion-parameter-set-without-nested-undo.patch"
     "${CMAKE_CURRENT_LIST_DIR}/../patches/0004-tracktion-audiofilemanager-empty-pop-guard.patch"
-    "${CMAKE_CURRENT_LIST_DIR}/../patches/0005-tracktion-rendermanager-job-delete-while-in-pool.patch")
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0005-tracktion-rendermanager-job-delete-while-in-pool.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/../patches/0006-tracktion-save-flush-no-undo.patch")
 set(MOSH_TRACKTION_PATCH_MANIFEST "${CMAKE_BINARY_DIR}/mosh-tracktion-patches.txt")
 file(WRITE "${MOSH_TRACKTION_PATCH_MANIFEST}" "")
 foreach(patch IN LISTS MOSH_TRACKTION_PATCHES)

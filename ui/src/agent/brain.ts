@@ -1,10 +1,3 @@
-// Moshi's brain — turns a chat turn into a behaviour + (optionally) a list of real
-// edits. It feeds the LLM a persona, the curated command catalog, and a compact
-// snapshot, and asks for ONE JSON object: { intent, say?, commands? }. If the proxy
-// is unreachable (no keys yet), it falls back to a tiny demo mock so the loop still
-// works in the preview. The pure prompt + parse logic lives in brainCore.ts (so the
-// offline benchmark can score the exact prompt without pulling the bridge/window).
-//
 // WP-11 best-of-n (flag `bestOfNServing`, default OFF): after the single-shot reply
 // parses, taste-classified command batches escalate through the native relay (the
 // service draws + ranks more candidates; any failure keeps the single-shot reply),
@@ -26,7 +19,7 @@
 // is now non-empty for every flag-on session, not just ones with existing content —
 // an intentional M3 change from M2's "only when pools are non-empty" gate.
 
-import { archivePair, brainChat, escalateCandidates } from "../bridge";
+import { archivePair, brainChat, demoBrainAvailable, escalateCandidates } from "../bridge";
 import { mockBrainReply } from "./brainMock";
 import { systemPrompt, parseReply, type BrainReply } from "./brainCore";
 import { maybeEscalate, maybeValidatorRetry } from "./bestOfN";
@@ -76,7 +69,7 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         // Best-of-n augmentation (flag-gated). It must NEVER discard the valid
         // single-shot reply: its own inner failures return null, and this guard
         // catches anything that escapes (e.g. manifest/catalog build) so a
-        // best-of-n error can't fall through to the demo mock below.
+        // best-of-n error can't escape into the provider-failure posture below.
         let chosen = reply;
         let replaced = false;
         try {
@@ -104,8 +97,8 @@ export function createBrain(getSnapshot: () => Snapshot | null): Brain {
         });
         return chosen;
       } catch {
-        // proxy unreachable / no key yet → demo mock so the loop still works
-        return mockBrainReply(text, snap);
+        if (demoBrainAvailable()) return mockBrainReply(text, snap);
+        return { intent: "UHOH", say: "can't reach my brain — check setup and try again" };
       }
     },
     clear() { history.length = 0; },

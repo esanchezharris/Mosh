@@ -1301,8 +1301,8 @@ def normalize_verdicts(fam_results):
 
 
 def load_backlog():
-    """id -> item for docs/auto-loop/backlog.jsonl (tolerant: absent file -> {})."""
-    path = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+    """id -> item for the parity registry (tolerant: absent file -> {})."""
+    path = REPO / "scripts" / "daw-conformance" / "parity_backlog.jsonl"
     items = {}
     if path.exists():
         for line in path.read_text().splitlines():

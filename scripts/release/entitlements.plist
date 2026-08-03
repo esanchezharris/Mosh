@@ -13,8 +13,7 @@
          Applied ONLY to the notarized distribution build, by
          scripts/release/sign-and-notarize.sh (invoked by `./run-mosh.sh release`
          locally and by .github/workflows/release.yml on a tag push). The everyday
-         ad-hoc `./run-mosh.sh deploy` / `deploy-anira` paths sign with `codesign
-         --sign -` (ad-hoc, no entitlements file, no Hardened Runtime) and never read
+         ad-hoc `./run-mosh.sh deploy` / `deploy-anira` paths sign with `codesign -s -` (ad-hoc, no entitlements file, no Hardened Runtime) and never read
          this file — they're for the owner's own Mac, not third-party distribution.
 
          Every key below is load-bearing (dropping it breaks a shipping feature); every

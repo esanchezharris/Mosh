@@ -1,7 +1,7 @@
-// The loop's demo/e2e brain — the multi-step sibling of brainMock.ts. Active
-// ONLY when the brain proxy is unreachable (no keys / dev / Playwright), so the
-// drawer, chips, Stop and task-undo are all drivable hermetically. Deterministic:
-// keyed on the TASK line of the loop's task-context message.
+// The loop's demo/e2e brain — the multi-step sibling of brainMock.ts. The explicit
+// Vite/e2e surface may use it after a provider failure so the drawer, Stop and
+// task-undo remain hermetic. Packaged builds never call it. Deterministic: keyed
+// on the TASK line of the loop's task-context message.
 
 import type { ChatMessage } from "./loop";
 

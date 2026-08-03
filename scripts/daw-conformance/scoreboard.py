@@ -8,8 +8,7 @@ without a binary:
                                                run (conformance.py --write-verdicts; a
                                                plain native-lane run FAILS if it disagrees)
   docs/reality-pack/mosh_daw_eval_suite.csv    the scenario→row fan-out
-  docs/auto-loop/backlog.jsonl                 the parity backlog (single source of truth —
-                                               the old hardcoded BACKLOG list is gone)
+  scripts/daw-conformance/parity_backlog.jsonl the minimal conventional-parity registry
   coverage_check.compute()                     static command-surface coverage ledger
 
 `--check` regenerates in-memory and diffs against the committed file: a stale scoreboard
@@ -29,7 +28,7 @@ SELF = Path(__file__).resolve().parent
 EVAL_CSV = REPO / "docs" / "reality-pack" / "mosh_daw_eval_suite.csv"
 MATRIX_CSV = REPO / "docs" / "reality-pack" / "daw_capability_matrix.csv"
 VERDICTS = SELF / "verdicts.json"
-BACKLOG = REPO / "docs" / "auto-loop" / "backlog.jsonl"
+BACKLOG = SELF / "parity_backlog.jsonl"
 OUT = REPO / "docs" / "FEATURE_AUDIT.md"
 
 STATUS_LABEL = {"pass": "✅ pass", "fail": "❌ FAIL", "gap": "🟡 gap",
@@ -174,8 +173,8 @@ def render():
 
     L.append("## Conventional-parity backlog (drives the auto-loop)")
     L.append("")
-    L.append("Read live from `docs/auto-loop/backlog.jsonl` (the single source of truth — items "
-             "are G-prefixed). `cheap` = UI/agent wiring (auto-mergeable); `native` = "
+    L.append("Read live from `scripts/daw-conformance/parity_backlog.jsonl` (the minimal "
+             "G-prefixed conventional-parity registry). `cheap` = UI/agent wiring; `native` = "
              "MoshOps/engine.")
     L.append("")
     if open_items:

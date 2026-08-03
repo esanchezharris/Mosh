@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run-mosh.sh — launch the built Mosh.app with brain keys + native voice, for a live
+# run-mosh.sh — launch the built Mosh.app with brain configuration + native voice, for a live
 # smoke test of the packaged-app pieces (LLM brain + macOS speech-to-text).
 #
 # THIS SCRIPT CONTAINS NO KEYS. It loads them from, in order:
@@ -155,13 +155,14 @@ fi
 # --- report which providers are configured (names only, never values) -------------
 if [ -f "$ENV_FILE" ]; then echo "env: ${ENV_FILE#$ROOT/}"; else echo "env: shell only (no $ENV_FILE)"; fi
 have_any=0
+if [ -n "${MOSH_BRAIN_PROXY_URL:-}" ]; then echo "  • brain proxy: configured"; have_any=1; fi
 for p in DEEPSEEK OPENAI XAI; do
   k="${p}_API_KEY"
   if [ -n "${!k:-}" ]; then echo "  • $p: key present"; have_any=1; fi
 done
 if [ "$have_any" = 0 ]; then
-  echo "  • no brain key found — paste one into ui/.env.local (voice still works;"
-  echo "    the brain falls back to the offline mock without a key)"
+  echo "  • no brain configuration found — configure the proxy for packaged builds"
+  echo "    (Moshi edits fail visibly without mutating the project)"
 fi
 
 # --- deploy helpers ---------------------------------------------------------------
@@ -214,31 +215,81 @@ bundle_service() {                              # $1 = installed app
   find "$SVC" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
-# Bundle the Moshi brain key(s) INTO the app so a Finder/Dock double-click (which inherits
-# NO shell env, so run-mosh.sh's exports are absent) still has a working brain — BrainProxy
-# reads Contents/Resources/brain.env as a fallback when the env var is missing. Keys come
-# from ui/.env.local (already loaded above); brain.env is gitignored and lives ONLY in the
-# bundle, never in git. (Security: anyone with the .app can read the key — don't share it.)
-bundle_brain_key() {                            # $1 = installed app
-  local DEST="$1" BF="$1/Contents/Resources/brain.env" v
-  : > "$BF"
-  # Proxy mode: when MOSH_BRAIN_PROXY_URL is set, the packaged BrainProxy hits the
-  # server-side proxy with MOSH_BRAIN_PROXY_APIKEY and the owner can OMIT the provider
-  # *_API_KEY lines below — so no extractable provider key ships in the bundle.
-  for v in MOSHI_BRAIN_PROVIDER \
-           MOSH_BRAIN_PROXY_URL MOSH_BRAIN_PROXY_APIKEY \
-           OPENAI_BASE_URL OPENAI_MODEL OPENAI_API_KEY \
-           DEEPSEEK_BASE_URL DEEPSEEK_MODEL DEEPSEEK_API_KEY \
-           XAI_BASE_URL XAI_MODEL XAI_API_KEY; do
-    [ -n "${!v:-}" ] && printf '%s=%s\n' "$v" "${!v}" >> "$BF"
+refuse_provider_brain_keys() {
+  local v
+  for v in OPENAI_API_KEY DEEPSEEK_API_KEY XAI_API_KEY GROK_API_KEY LOCAL_API_KEY; do
+    if [ -n "${!v:-}" ]; then
+      echo "refusing to bundle provider API keys; configure MOSH_BRAIN_PROXY_URL and MOSH_BRAIN_PROXY_APIKEY instead" >&2
+      return 1
+    fi
   done
-  chmod 600 "$BF" 2>/dev/null || true
-  if [ -s "$BF" ]; then
-    echo "bundled brain key → Contents/Resources/brain.env ($(grep -c '_API_KEY=' "$BF") provider key(s); Moshi has a brain on any launch)"
-  else
+}
+
+validate_brain_proxy_value() {
+  local name="$1" value="$2"
+  # POSIX environment strings cannot contain NUL. Reject the remaining line
+  # delimiters explicitly so one proxy value can never create another dotenv key.
+  case "$value" in
+    *$'\r'*|*$'\n'*)
+      echo "invalid brain proxy configuration: $name must be a single line" >&2
+      return 1
+      ;;
+  esac
+}
+
+brain_env_is_proxy_only() {
+  local file="$1" line count=0 seen_url=0 seen_apikey=0
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *$'\r'*) return 1 ;;
+      MOSH_BRAIN_PROXY_URL=?*)
+        [ "$seen_url" -eq 0 ] || return 1
+        seen_url=1
+        ;;
+      MOSH_BRAIN_PROXY_APIKEY=?*)
+        [ "$seen_apikey" -eq 0 ] || return 1
+        seen_apikey=1
+        ;;
+      *) return 1 ;;
+    esac
+    count=$((count + 1))
+  done < "$file"
+  [ "$count" -eq 2 ] && [ "$seen_url" -eq 1 ] && [ "$seen_apikey" -eq 1 ]
+}
+
+# Bundle only the proxy endpoint and its publishable credential so Finder/Dock launches
+# can reach Moshi without putting an extractable provider secret in a distributable app.
+bundle_brain_key() {                            # $1 = installed app
+  local BF="$1/Contents/Resources/brain.env"
+  local proxy_url="${MOSH_BRAIN_PROXY_URL:-}"
+  local proxy_apikey="${MOSH_BRAIN_PROXY_APIKEY:-}"
+  if ! refuse_provider_brain_keys; then
     rm -f "$BF"
-    echo "no brain key in env — skipped brain.env (paste one into ui/.env.local to bundle it)"
+    return 1
   fi
+  validate_brain_proxy_value MOSH_BRAIN_PROXY_URL "$proxy_url" || {
+    rm -f "$BF"
+    return 1
+  }
+  validate_brain_proxy_value MOSH_BRAIN_PROXY_APIKEY "$proxy_apikey" || {
+    rm -f "$BF"
+    return 1
+  }
+  if [ -z "$proxy_url" ] || [ -z "$proxy_apikey" ]; then
+    rm -f "$BF"
+    echo "no complete brain proxy configuration — skipped brain.env"
+    return
+  fi
+  (umask 077; printf 'MOSH_BRAIN_PROXY_URL=%s\nMOSH_BRAIN_PROXY_APIKEY=%s\n' \
+    "$proxy_url" "$proxy_apikey" > "$BF")
+  if ! brain_env_is_proxy_only "$BF"; then
+    rm -f "$BF"
+    echo "invalid brain proxy configuration: refusing non-proxy brain.env" >&2
+    return 1
+  fi
+  chmod 600 "$BF" 2>/dev/null || true
+  echo "bundled proxy configuration → Contents/Resources/brain.env"
 }
 
 install_app() {                                 # $1 = source app, $2 = dest
@@ -397,6 +448,7 @@ case "$MODE" in
     ;;
 
   deploy)
+    refuse_provider_brain_keys
     build_app macos-arm64-release macos-arm64-release-app
     APP="$(find "$ROOT/build-macos-arm64-release" -maxdepth 4 -name 'Mosh.app' -type d 2>/dev/null | sort | tail -n 1)"
     [ -n "$APP" ] || { echo "no built app to deploy" >&2; exit 1; }
@@ -411,6 +463,7 @@ case "$MODE" in
     ;;
 
   deploy-anira)
+    refuse_provider_brain_keys
     build_anira
     APP=""
     while IFS= read -r p; do APP="$p"; break; done \
@@ -427,12 +480,14 @@ case "$MODE" in
     ;;
 
   release)
+    refuse_provider_brain_keys
+
     # --- preflight: fail fast, before spending 10+ min on a Release build, if signing
     # identity / notary credentials aren't ready. Exact instructions on failure — see
     # scripts/release/sign-and-notarize.sh's own preflight/resolve_* functions.
     "$RELEASE_SIGN" --preflight-only
 
-    # --- build Release, stage, bundle service + brain key, sign, notarize, DMG ---
+    # --- build Release, stage, bundle service + brain proxy, sign, notarize, DMG ---
     build_app macos-arm64-release macos-arm64-release-app
     APP="$(resolve_app)"
     [ -n "$APP" ] || { echo "no built app to release" >&2; exit 1; }
@@ -441,7 +496,7 @@ case "$MODE" in
     STAGED="$OUTDIR/Mosh.app"
     install_app "$APP" "$STAGED"
     bundle_service "$STAGED"
-    bundle_brain_key "$STAGED"            # the key is sealed INTO the notarized bundle (see note below)
+    bundle_brain_key "$STAGED"
     echo "signing + notarizing + stapling the app…"
     "$RELEASE_SIGN" "$STAGED"
     DMG="$OUTDIR/Mosh.dmg"
@@ -455,9 +510,7 @@ case "$MODE" in
     echo "   DMG (drag-to-Applications): $DMG"
     echo "   ZIP (AirDrop-friendly):     $ZIP"
     spctl -a -t exec -vv "$STAGED" 2>&1 | sed 's/^/   gatekeeper: /'
-    echo "   NOTE: brain.env (your OpenAI key) is sealed inside the notarized bundle, so it"
-    echo "         was uploaded to Apple's notary service and is extractable by anyone you give"
-    echo "         the app to. Keep an OpenAI spend limit set and don't post it publicly."
+    echo "   brain.env contains only the proxy URL and publishable proxy credential."
     ;;
 
   *)     echo "usage: $0 [gui|smoke|build|deploy|deploy-anira|release]" >&2; exit 2 ;;

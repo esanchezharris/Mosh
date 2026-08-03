@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const LEDGER = join(repo, "docs", "verification", "REACHABILITY.md");
 const E2E_DIR = join(repo, "ui", "e2e");
-const BACKLOG = join(repo, "docs", "auto-loop", "backlog.jsonl");
+const BACKLOG = join(repo, "scripts", "daw-conformance", "parity_backlog.jsonl");
 const SRC_DIR = join(repo, "ui", "src");
 
 interface Row {

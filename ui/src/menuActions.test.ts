@@ -309,6 +309,27 @@ describe("runAction — transport", () => {
     expect(execCalls).toContainEqual({ command: "set_transport", args: { action: "toggle" } });
   });
 
+  it("reconciles command-confirmed transport state before telemetry", async () => {
+    const reconcileTransport = vi.fn();
+    const { ctx } = makeCtx({}, {
+      reconcileTransport,
+      exec: vi.fn(async () => ({
+        ok: true,
+        command: "set_transport",
+        data: { playing: false, recording: false, position: 4.5, ignored: "field" },
+      })),
+    });
+
+    await runAction("play_pause", ctx);
+
+    expect(reconcileTransport).toHaveBeenCalledOnce();
+    expect(reconcileTransport).toHaveBeenCalledWith({
+      playing: false,
+      recording: false,
+      position: 4.5,
+    });
+  });
+
   it("record/to_start/to_end keep their transport payloads", async () => {
     const { ctx, execCalls } = makeCtx();
     await runAction("record", ctx);
@@ -319,6 +340,88 @@ describe("runAction — transport", () => {
       { command: "set_transport", args: { action: "to_start" } },
       { command: "set_transport", args: { action: "to_end" } },
     ]);
+  });
+
+  it("record uses the store recording lifecycle when available", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, { enterRecord });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).toHaveBeenCalledOnce();
+    expect(execCalls).toEqual([]);
+  });
+
+  it("record finalizes through transport when recording is already active", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      transport: { playing: true, recording: true, position: 3 },
+    });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
+  it("uses live recording intent when transport telemetry is stale", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      currentMode: () => "recording",
+      transport: { playing: false, recording: false, position: 3 },
+    });
+
+    await runAction("record", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
+  it("serializes rapid menu Record actions before choosing start or finalize", async () => {
+    let releaseStart: (() => void) | undefined;
+    let mode: "idle" | "recording" = "idle";
+    const enterRecord = vi.fn(async () => {
+      await new Promise<void>((resolve) => { releaseStart = resolve; });
+      mode = "recording";
+    });
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      currentMode: () => mode,
+      transport: { playing: false, recording: false, position: 3 },
+    });
+
+    const first = runAction("record", ctx);
+    await vi.waitFor(() => expect(releaseStart).toBeTypeOf("function"));
+    const second = runAction("record", ctx);
+    expect(enterRecord).toHaveBeenCalledOnce();
+    releaseStart!();
+    await Promise.all([first, second]);
+
+    expect(enterRecord).toHaveBeenCalledOnce();
+    expect(execCalls).toEqual([
+      { command: "set_transport", args: { action: "record" } },
+    ]);
+  });
+
+  it("does not run transport or recording actions during a project transition", async () => {
+    const enterRecord = vi.fn(async () => {});
+    const { ctx, execCalls } = makeCtx({}, {
+      enterRecord,
+      projectTransitioning: true,
+    });
+
+    await runAction("record", ctx);
+    await runAction("play_pause", ctx);
+    await runAction("to_start", ctx);
+
+    expect(enterRecord).not.toHaveBeenCalled();
+    expect(execCalls).toEqual([]);
   });
 
   it("seek and loop_region preserve ruler set_transport payloads", async () => {

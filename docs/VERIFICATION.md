@@ -23,7 +23,7 @@ Only a few checks are inherently live (mic/voice, two-window multiplayer sync).
 | `service/.sa3.env` wired (`service/setup-sa3.sh`) | SA3 transform check | model present at `~/AI/stable-audio-3/optimized/mlx`; run setup to wire |
 | `numpy` | WAV analysis | numpy 2.4.4 ✓ |
 | Microphone + Privacy→Microphone grant | voice, recording | owner-provided, live |
-| `ui/.env.local` brain key | full STT→LLM→command loop | **not used this pass — voice tested against the mock brain** |
+| `ui/.env.local` brain key | full STT→LLM→command loop | **not used this pass — voice tested against the Vite demo brain** |
 
 ## The harness
 
@@ -69,7 +69,7 @@ continuously proven even though this table's snapshot is from 2026-06-20.
 | 5c | Bypass layer re-route (A/B) | offline | `bypass_layer{true}` RE-ROUTES real audio — it mutes the landed neural clip so the export collapses BACK to the original (pre-render) source, not just flips a status flag | ✅ AL-008: accepted render moves the mix clear of the original (**rendered-vs-orig RMS ≫ 0**) and bypass snaps it back (**bypass-vs-orig RMS ≈ 0 ≪ rendered-vs-orig**) |
 | 5d | Freeze stops the reactive re-render | offline | `freeze_layer` actually STOPS the auto-re-render loop (not just a status label), and `unfreeze_layer` restores it — counted in rendered files, with a live service | ✅ the inverse of the reactive check: initial render + a frozen edit + a thawed edit ⇒ exactly **2** layer files (3 = the freeze never held, 1 = the thaw never re-armed). RED-proven: with the `ids::reactive` write removed the frozen edit renders and it reads **3**. `--selftest` cannot see this — `reactiveTouch` returns on `!hasAudio()` before it reads the flag |
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
-| 7 | Voice (mock brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
+| 7 | Voice (Vite demo brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
 | 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |
 | 9 | Sketch (beatbox→drums) | gated | recognizable kick/snare/hat land in a real editable clip; tempo set; byte-identical across runs | ✅ `MOSH_SELFTEST_SKETCH=1` **16/16** on the committed fixtures (boom-bap 90 + trap 140), determinism asserted; CLI stdout byte-identical across runs |
 

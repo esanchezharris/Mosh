@@ -84,7 +84,7 @@ def main():
 
     out1 = V.ART / "ra_export_1.wav"
     out2 = V.ART / "ra_export_2.wav"
-    raw_tone = V._mosh_session_base() / SESSION / "audio" / f"tone-{int(FREQ)}.wav"
+    raw_tone = V._session_dir(SESSION) / "audio" / f"tone-{int(FREQ)}.wav"
     ENV = {"MOSH_SERVICE_PORT": "8797", "MOSH_ENABLE_TRANSFORM": "0"}
 
     cmds = [
@@ -125,7 +125,7 @@ def main():
     lay_after_tick = _layer(snap("after_tick"))
     lay_after_disarm = _layer(snap("after_disarm"))
 
-    live_dir = V._mosh_session_base() / SESSION / "renders"
+    live_dir = V._session_dir(SESSION) / "renders"
     ra_files = sorted(glob.glob(str(live_dir / "**" / "live" / "render_ahead_*.wav"), recursive=True),
                       key=lambda p: int(Path(p).stem.split("_")[-1]))
     ra_final = ra_files[-1] if ra_files else None

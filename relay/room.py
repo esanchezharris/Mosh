@@ -19,6 +19,10 @@ MAX_PEERS = 2
 # refreshing, so its lock frees itself — matching the Supabase relay's
 # `lease_expires_at` (mp.locks, 90s) so both backends behave identically.
 LOCK_LEASE_S = 90
+# Presence uses the same grace window as lock ownership. A peer may disappear for
+# a short network interruption and resume by polling/rejoining with the same id;
+# after the window it no longer occupies a room slot or owns locks.
+PEER_LEASE_S = 90
 
 
 class RoomError(Exception):
@@ -43,38 +47,62 @@ class Room:
     ring of the most-recent frames for reconnect/late-join catch-up."""
 
     def __init__(self, code, capacity=MAX_PEERS, ring_capacity=RING_CAPACITY,
-                 now_fn=None, lock_lease_s=LOCK_LEASE_S):
+                 now_fn=None, lock_lease_s=LOCK_LEASE_S,
+                 peer_lease_s=PEER_LEASE_S):
         self.code = code
         self.capacity = capacity
         self.ring_capacity = ring_capacity
         self._peers = {}                       # peer_id -> {"name", "color"}
+        self._peer_expires = {}                # peer_id -> monotonic deadline
         self._seq = 0                          # monotonic, per-room
         self._ring = deque(maxlen=ring_capacity)  # frames, oldest -> newest
         self._locks = {}                       # key -> {"owner", "epoch", "expires"}
         self._lock_epoch = 0                   # monotonic per-room fencing token
         self._now = now_fn if now_fn is not None else time.monotonic  # injectable clock (tests)
         self._lease_s = lock_lease_s
+        self._peer_lease_s = peer_lease_s
 
     # ── membership ──────────────────────────────────────────────────────────
     def peer_count(self):
+        self.sweep_peers()
         return len(self._peers)
 
     def has_peer(self, peer_id):
+        self.sweep_peers()
         return peer_id in self._peers
 
     def peers(self):
+        self.sweep_peers()
         return {pid: dict(p) for pid, p in self._peers.items()}
 
     def join(self, peer_id, name="", color=""):
         # Re-join (reconnect) is idempotent: refresh the profile, keep the slot.
+        self.sweep_peers()   # a crashed peer must not reserve the two-player slot
         if peer_id not in self._peers and len(self._peers) >= self.capacity:
             raise RoomFull(f"room {self.code} is full ({self.capacity})")
         self._peers[peer_id] = {"name": name, "color": color}
+        self._peer_expires[peer_id] = self._now() + self._peer_lease_s
         return self._peers[peer_id]
 
     def leave(self, peer_id):
         self._peers.pop(peer_id, None)
+        self._peer_expires.pop(peer_id, None)
         self.release_all_for(peer_id)   # a disconnecting peer must not hold locks
+
+    def sweep_peers(self):
+        """Expire silent members and their locks. Returns the number removed.
+
+        This is lazy by design: every membership read, join, and heartbeat calls
+        it while RelayState holds its mutex, so no background thread is needed.
+        """
+        now = self._now()
+        dead = [pid for pid, expires in self._peer_expires.items()
+                if expires <= now]
+        for pid in dead:
+            self._peers.pop(pid, None)
+            self._peer_expires.pop(pid, None)
+            self.release_all_for(pid)
+        return len(dead)
 
     # ── locks (the relay is the sole arbiter) ───────────────────────────────
     def _live_lock(self, key):
@@ -91,8 +119,7 @@ class Room:
         lapsed), already held by this peer (idempotent), or `steal=True`. A grant
         mints a fresh monotonic epoch (the fencing token); a re-acquire by the same
         owner keeps the epoch. Every grant/re-grant refreshes the lease."""
-        if peer_id not in self._peers:
-            raise UnknownPeer(f"{peer_id} is not a member of room {self.code}")
+        self.touch(peer_id)   # claiming is peer activity and must not admit an expired member
         cur = self._live_lock(key)
         if cur is not None and cur["owner"] == peer_id:
             cur["expires"] = self._now() + self._lease_s   # renew on re-claim
@@ -125,7 +152,11 @@ class Room:
         the relay's to re-grant), so a reconnecting peer resuming its poll can't
         resurrect a track the relay already advertised as free. Mirrors the Supabase
         backend, where a lapsed lease is revived only by an explicit mp_try_lock."""
+        self.sweep_peers()
+        if peer_id not in self._peers:
+            raise UnknownPeer(f"{peer_id} is not a member of room {self.code}")
         now = self._now()
+        self._peer_expires[peer_id] = now + self._peer_lease_s
         deadline = now + self._lease_s
         for v in self._locks.values():
             if v["owner"] == peer_id and v["expires"] > now:
@@ -162,8 +193,7 @@ class Room:
 
     # ── frames / sequence / catch-up ────────────────────────────────────────
     def publish(self, sender_id, msg):
-        if sender_id not in self._peers:
-            raise UnknownPeer(f"{sender_id} is not a member of room {self.code}")
+        self.touch(sender_id)   # publish is also the sender's presence heartbeat
         self._seq += 1
         frame = {"seq": self._seq, "from": sender_id, "msg": msg}
         self._ring.append(frame)
@@ -193,13 +223,18 @@ class RoomRegistry:
     """Maps room codes -> Room. One peer `create`s (and shares the code), the
     other `join`s."""
 
-    def __init__(self):
+    def __init__(self, now_fn=None, lock_lease_s=LOCK_LEASE_S,
+                 peer_lease_s=PEER_LEASE_S):
         self._rooms = {}
+        self._now = now_fn
+        self._lock_lease_s = lock_lease_s
+        self._peer_lease_s = peer_lease_s
 
     def create(self, code):
         if code in self._rooms:
             raise RoomError(f"room {code} already exists")
-        room = Room(code)
+        room = Room(code, now_fn=self._now, lock_lease_s=self._lock_lease_s,
+                    peer_lease_s=self._peer_lease_s)
         self._rooms[code] = room
         return room
 

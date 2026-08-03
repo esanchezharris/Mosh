@@ -43,7 +43,7 @@ def check_sa3_transform(ctx, ART, run_script, stats, diff_rms, failed_commands):
         mosh_base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Mosh"
     else:
         mosh_base = Path.home() / ".local" / "share" / "Mosh"
-    renders_dir = mosh_base / SESSION / "renders"
+    renders_dir = mosh_base / "_harness" / SESSION / "renders"
     outputs = sorted(glob.glob(str(renders_dir / "*" / "output.wav")))
     inputs = sorted(glob.glob(str(renders_dir / "*" / "output_manifest.json")))
 

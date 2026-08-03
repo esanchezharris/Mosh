@@ -87,6 +87,23 @@ export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 # runs in-process (precise if cmudict is importable, else a stdlib vowel-group heuristic).
 [[ -f phonology/.phonology.env ]] && source ./phonology/.phonology.env
 
+# Auto-wire SA3 on first boot: if setup has never run but a valid model port is
+# present and the host can carry it (Apple Silicon, 16 GB+ unified memory), run the
+# idempotent setup-sa3.sh so the service comes up on the real model instead of
+# silently booting the FakeAdapter. Fails loud in this log, never blocks the launch.
+if [[ ! -f .sa3.env && "${MOSH_ENABLE_SA3:-1}" == "1" && -d "${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}" ]]; then
+  if [[ "$(uname -m)" == "arm64" ]] && (( $(sysctl -n hw.memsize 2>/dev/null || echo 0) >= 17179869184 )); then
+    printf '[run.sh] .sa3.env missing but an SA3 model port is present — running setup-sa3.sh (one-time)\n'
+    if ./setup-sa3.sh; then
+      [[ -f .sa3.env ]] && source ./.sa3.env
+    else
+      printf '[run.sh] setup-sa3.sh failed — continuing on the FakeAdapter\n'
+    fi
+  else
+    printf '[run.sh] SA3 model port present but host below the bar (Apple Silicon, 16 GB+) — FakeAdapter\n'
+  fi
+fi
+
 export SA3_MLX_DIR="${SA3_MLX_DIR:-$HOME/AI/stable-audio-3/optimized/mlx}"
 export COLORRACK_DATA="${COLORRACK_DATA:-$(pwd)/colors/COLORRACK_DATA}"
 # LoRA rack: the watched adapter folder (drop .safetensors + optional sidecar json in).

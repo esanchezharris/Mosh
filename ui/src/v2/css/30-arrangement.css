@@ -219,13 +219,21 @@
      Zeroed here, on the class that owns the border model, rather than on the one row — otherwise it
      comes back the next time a header renders as a button. */
   border-top: 0; border-left: 0;
-  cursor: pointer; transition: background 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
+  transition: background 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
 }
 .v2-lhead:hover { background: rgba(255, 255, 255, 0.028); }
 .v2-lhead.sel {
   background: color-mix(in srgb, var(--v2-accent) 4.5%, transparent);
   border-right-color: var(--v2-line-strong);
   box-shadow: inset 3px 0 0 var(--v2-accent), inset 0 0 0 1px color-mix(in srgb, var(--v2-accent) 8%, transparent);
+}
+.v2-lhead-select {
+  align-self: stretch; flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: 8px; padding: 0;
+  border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer;
+}
+.v2-lhead-select:focus-visible {
+  outline: 2px solid var(--v2-accent); outline-offset: -2px; border-radius: var(--v2-radius-sm);
 }
 .v2-licon {
   flex: 0 0 auto; width: 34px; height: 34px; border-radius: var(--v2-radius-sm); display: grid; place-items: center;
@@ -326,6 +334,14 @@
 /* #48 — selection raises the clip so a fully-overlapped clip (selected via marquee or
    the inspector) becomes reachable by pointer instead of being buried forever. */
 .v2-clip.sel { outline: 2px solid var(--v2-accent); outline-offset: -1px; z-index: 1; }
+.v2-clip:focus-visible {
+  outline: 3px solid var(--v2-accent);
+  outline-offset: 2px;
+  z-index: 2;
+}
+@media (forced-colors: active) {
+  .v2-clip:focus-visible { outline-color: Highlight; }
+}
 .v2-trim { position: absolute; top: 0; bottom: 0; cursor: ew-resize; }
 .v2-trim.l { left: 0; }
 .v2-trim.r { right: 0; }
@@ -446,4 +462,3 @@
 .v2-lhead-add:hover .v2-licon { border-color: var(--v2-accent); }
 .v2-lane.v2-lane-add { background: transparent; border-bottom: none; }
 .v2-lane.v2-lane-add:hover { background: var(--v2-accent-soft); }   /* hint: droppable */
-

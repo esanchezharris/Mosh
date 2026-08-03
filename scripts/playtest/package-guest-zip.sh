@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # package-guest-zip.sh — build the shareable "guest zip" for a remote playtest:
-# a Release Mosh.app + the brain key + the two guest scripts (setup-guest.sh,
+# a Release Mosh.app + proxy configuration + the two guest scripts (setup-guest.sh,
 # collect-diagnostics.sh), ad-hoc re-signed, with every machine-local venv/model
 # pointer file stripped so it never pins the guest's machine to the HOST's paths.
 #
 # IMPORTANT: this NEVER touches /Applications/Mosh.app. Every packaging step (bundling
-# the service, the brain key, injecting Info.plist keys, signing) is done against a
+# the service, proxy configuration, injecting Info.plist keys, signing) is done against a
 # STAGING copy under dist/, by reusing the ACTUAL functions from run-mosh.sh (extracted
 # textually, not hand-duplicated) so this script can never drift from the real deploy
 # path. If a future step ever needs a real `deploy`, snapshot /Applications/Mosh.app
@@ -18,7 +18,7 @@
 #   CPM_SOURCE_CACHE, FETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE  — dep-cache locations
 #     (default: read from ~/.mosh-auto-loop/auto-loop.env, else the documented
 #      ~/Library/Mosh/work/{cpm-cache,deps/tracktion_engine-src})
-#   MOSH_BRAIN_ENV_ZIP  — dotenv to load for the bundled brain key (default:
+#   MOSH_BRAIN_ENV_ZIP  — dotenv to load for the bundled proxy configuration (default:
 #     $ROOT/ui/.env.local — NEVER the ambient MOSH_BRAIN_ENV; see the landmine note below)
 #   SKIP_BUILD=1        — reuse the newest existing Release build instead of rebuilding
 #
@@ -47,6 +47,19 @@ note_ok()   { say "$(green "✓") $*"; }
 note_bad()  { say "$(red "✗") $*"; FAILS+=("$*"); }
 note_warn() { say "$(yellow "⚠") $*"; }
 
+brain_env_configured() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 1
+  grep -Eq '^[[:space:]]*MOSH_BRAIN_PROXY_URL=[[:space:]]*[^[:space:]]+' "$env_file" \
+    && grep -Eq '^[[:space:]]*MOSH_BRAIN_PROXY_APIKEY=[[:space:]]*[^[:space:]]+' "$env_file"
+}
+
+brain_env_has_provider_key() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] \
+    && grep -Eq '^[[:space:]]*[A-Z0-9_]+_API_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' "$env_file"
+}
+
 # STAGE_ROOT is set once the staging dir is created (step 2); a failed run before or
 # after that point should not leave a half-built staged app lying around under dist/ —
 # clean it up whenever we exit non-zero (mirrors collect-diagnostics.sh's own trap,
@@ -72,7 +85,7 @@ extract_fn() {
     p && /^}/ {p=0; exit}
   ' "$file"
 }
-for fn in resolve_app build_app load_dotenv bundle_service bundle_brain_key install_app sign_app; do
+for fn in resolve_app build_app load_dotenv bundle_service refuse_provider_brain_keys validate_brain_proxy_value brain_env_is_proxy_only bundle_brain_key install_app sign_app; do
   fn_src="$(extract_fn "$fn" "$ROOT/run-mosh.sh")"
   if [[ -z "$fn_src" ]]; then
     echo "✗ could not extract function '$fn' from run-mosh.sh — has it been renamed/refactored?" >&2
@@ -135,8 +148,8 @@ if [[ -z "$BUILT_APP" || ! -x "$BUILT_APP/Contents/MacOS/Mosh" ]]; then
 fi
 note_ok "built app: $BUILT_APP"
 
-# ────────────────────── 2. bundle service + brain key (staged) ──────────────────
-header "2/10  bundle service + brain key (staging copy, never /Applications)"
+# ────────────────────── 2. bundle service + brain proxy (staged) ───────────────
+header "2/10  bundle service + brain proxy (staging copy, never /Applications)"
 
 DIST_DIR="$ROOT/dist"
 mkdir -p "$DIST_DIR"
@@ -156,9 +169,9 @@ unset MOSH_BRAIN_ENV
 ENV_FILE="${MOSH_BRAIN_ENV_ZIP:-$ROOT/ui/.env.local}"
 if [[ -f "$ENV_FILE" ]]; then
   load_dotenv "$ENV_FILE"
-  note_ok "loaded brain key dotenv from $ENV_FILE (explicit path, not inherited)"
+  note_ok "loaded brain proxy dotenv from $ENV_FILE (explicit path, not inherited)"
 else
-  note_warn "no dotenv at $ENV_FILE — the bundled app will ship WITHOUT a brain key"
+  note_warn "no dotenv at $ENV_FILE — the bundled app will ship WITHOUT a brain proxy"
 fi
 
 bundle_service "$STAGED" || { note_bad "bundle_service failed (partial/broken service bundle)"; exit 1; }
@@ -210,13 +223,16 @@ fi
 
 BRAIN_ENV="$STAGED/Contents/Resources/brain.env"
 if [[ -f "$BRAIN_ENV" ]]; then
-  if grep -q '_API_KEY=' "$BRAIN_ENV" 2>/dev/null; then
-    note_ok "brain.env present with an _API_KEY (guest's Moshi has a brain out of the box)"
+  if brain_env_has_provider_key "$BRAIN_ENV"; then
+    note_bad "brain.env contains a provider API key — refusing to produce a guest artifact"
+    exit 1
+  elif brain_env_configured "$BRAIN_ENV"; then
+    note_ok "brain.env present with proxy configuration (guest's Moshi has a brain out of the box)"
   else
-    note_warn "brain.env present but carries NO _API_KEY — guest falls back to the offline mock brain"
+    note_warn "brain.env present but carries no complete proxy configuration — Moshi edits fail visibly without mutation"
   fi
 else
-  note_warn "no brain.env in the bundle — guest falls back to the offline mock brain (paste a key into ui/.env.local and re-run to bundle one)"
+  note_warn "no brain.env in the bundle — configure the proxy and re-run to enable Moshi edits"
 fi
 
 [[ -f "$SVC_DIR/server.py" ]] && note_ok "service/server.py present" || note_bad "service/server.py MISSING"
@@ -269,8 +285,10 @@ fi
 
 # ────────────────────────── 7. selftest the staged app ──────────────────────────
 header "7/10  selftest staged app"
-SELFTEST_SESSION="session-package-zip-$$"
-rm -rf "$HOME/Library/Mosh/${SELFTEST_SESSION}" "$HOME/Library/Mosh/${SELFTEST_SESSION}-undo" 2>/dev/null || true
+SELFTEST_SESSION="_harness/session-package-zip-$$"
+source "$ROOT/scripts/lib/harness-session.sh"
+mosh_reset_owned_harness_session "$SELFTEST_SESSION"
+mosh_reset_owned_harness_session "${SELFTEST_SESSION}-undo"
 ST_LOG="$(mktemp -t pkg-guest-selftest.XXXX.log)"
 if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SELFTEST_SESSION" "$STAGED/Contents/MacOS/Mosh" --selftest >"$ST_LOG" 2>&1; then
   RESULT="$(grep -oE '[0-9]+/[0-9]+ checks passed' "$ST_LOG" | tail -1)"
@@ -335,8 +353,9 @@ if ditto -x -k "$ZIP_PATH" "$SIM_DIR"; then
       note_warn "could not attach a synthetic quarantine xattr to test unquarantine.sh (non-fatal)"
     fi
 
-    SIM_SESSION="session-package-zip-sim-$$"
-    rm -rf "$HOME/Library/Mosh/${SIM_SESSION}" "$HOME/Library/Mosh/${SIM_SESSION}-undo" 2>/dev/null || true
+    SIM_SESSION="_harness/session-package-zip-sim-$$"
+    mosh_reset_owned_harness_session "$SIM_SESSION"
+    mosh_reset_owned_harness_session "${SIM_SESSION}-undo"
     SIM_LOG="$(mktemp -t pkg-guest-sim-selftest.XXXX.log)"
     if MOSH_NO_AUDIO=1 MOSH_SELFTEST_SESSION="$SIM_SESSION" "$SIM_APP/Contents/MacOS/Mosh" --selftest >"$SIM_LOG" 2>&1; then
       SIM_RESULT="$(grep -oE '[0-9]+/[0-9]+ checks passed' "$SIM_LOG" | tail -1)"

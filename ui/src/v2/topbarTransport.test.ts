@@ -51,6 +51,8 @@ describe("v2 TopBar tempo / time-sig / metronome controls", () => {
     document.body.appendChild(host);
     root = createRoot(host);
     useStore.setState({
+      snap: true,
+      snapDivision: "1/4",
       exec: vi.fn(async (command: string, args?: Record<string, unknown>): Promise<CommandResult> => {
         execCalls.push({ command, args });
         return { ok: true, command };
@@ -156,5 +158,31 @@ describe("v2 TopBar tempo / time-sig / metronome controls", () => {
     const call = execCalls.find((c) => c.command === "set_count_in");
     expect(call).toBeTruthy();
     expect(call!.args).toMatchObject({ bars: 1 });
+  });
+
+  it("exposes an accessible snap toggle with the active state", () => {
+    render(makeSnapshot());
+    const toggle = host.querySelector<HTMLButtonElement>('button[aria-label="Snap to grid"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle!.textContent).toContain("Snap");
+
+    act(() => toggle!.click());
+    expect(useStore.getState().snap).toBe(false);
+    expect(host.querySelector('button[aria-label="Snap to grid"]')?.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("exposes every grid division and changes the shared snap division", () => {
+    render(makeSnapshot());
+    const division = host.querySelector<HTMLSelectElement>('select[aria-label="Snap division"]');
+    expect(division).not.toBeNull();
+    expect([...division!.options].map((option) => option.value)).toEqual(["bar", "1/4", "1/8", "1/16", "1/32"]);
+    expect(division!.value).toBe("1/4");
+
+    act(() => {
+      division!.value = "1/16";
+      division!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(useStore.getState().snapDivision).toBe("1/16");
   });
 });

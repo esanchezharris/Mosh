@@ -11,7 +11,12 @@
 // no invented commands, no invented args.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { runAgentBatch, DESTRUCTIVE_BLOCK_REASON, MAX_DESTRUCTIVE_PER_BATCH } from "./executor";
+import {
+  runAgentBatch,
+  DESTRUCTIVE_BLOCK_REASON,
+  HISTORY_CONTROL_BATCH_REASON,
+  MAX_DESTRUCTIVE_PER_BATCH,
+} from "./executor";
 import type { AgentCommandCall } from "./executor";
 import { useStore } from "../store";
 import { __resetMockForTests } from "../bridge.mock";
@@ -165,5 +170,104 @@ describe("agent executor — multi-command producer flows (integration)", () => 
     expect(after.tracks.some((t) => t.name === "Lead")).toBe(true);
     expect(after.session.tempo).toBe(140);
     expect(after.tracks.some((t) => t.id === "does-not-exist")).toBe(false);
+  });
+
+  it("runs agent undo directly, outside a fresh batch, so it restores the last visible edit", async () => {
+    const track = await useStore.getState().exec("create_track", { name: "Undo Target" });
+    const trackId = (track.data as { trackId: string }).trackId;
+    const tone = await useStore.getState().exec("add_test_tone_clip", { trackId, seconds: 2 });
+    const clipId = (tone.data as { clipId: string }).clipId;
+    await useStore.getState().refresh();
+    const originalStart = snap().tracks.find((t) => t.id === trackId)!.clips.find((c) => c.id === clipId)!.start;
+
+    const move = await runAgentBatch("move the clip", [
+      { command: "move_clip", args: { clipId, start: 24 } },
+    ]);
+    expect(move.applied).toBe(1);
+    expect(snap().tracks.find((t) => t.id === trackId)!.clips.find((c) => c.id === clipId)!.start).toBe(24);
+
+    const seen: { command: string; args: Record<string, unknown> }[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push({ command, args: args ?? {} });
+        return orig(command, args);
+      });
+
+    const undo = await runAgentBatch("voice", [{ command: "undo" }], {
+      utterance: "undo that last move",
+      source: "fastpath",
+    });
+
+    expect(seen.map((c) => c.command)).toEqual(["undo"]);
+    expect(seen[0].args).toMatchObject({
+      name: "voice",
+      utterance: "undo that last move",
+      source: "fastpath",
+    });
+    expect(typeof seen[0].args.turn_id).toBe("string");
+    expect(undo).toMatchObject({ applied: 1, entries: [{ command: "undo", ok: true }] });
+    expect(snap().tracks.find((t) => t.id === trackId)!.clips.find((c) => c.id === clipId)!.start).toBe(originalStart);
+
+    seen.length = 0;
+    const redo = await runAgentBatch("voice", [{ command: "redo" }], {
+      utterance: "redo that move",
+      source: "fastpath",
+    });
+    spy.mockRestore();
+
+    expect(seen.map((c) => c.command)).toEqual(["redo"]);
+    expect(redo).toMatchObject({ applied: 1, entries: [{ command: "redo", ok: true }] });
+    expect(snap().tracks.find((t) => t.id === trackId)!.clips.find((c) => c.id === clipId)!.start).toBe(24);
+  });
+
+  it("reports an honest no-op when agent undo has no history", async () => {
+    const before = snap();
+    const seen: string[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push(command);
+        return orig(command, args);
+      });
+
+    const undo = await runAgentBatch("voice", [{ command: "undo" }], {
+      utterance: "undo that",
+      source: "fastpath",
+    });
+    spy.mockRestore();
+
+    expect(seen).toEqual(["undo"]);
+    expect(undo).toMatchObject({
+      applied: 0,
+      entries: [{ command: "undo", ok: false, error: "nothing to undo" }],
+    });
+    expect(snap()).toEqual(before);
+  });
+
+  it("rejects a mixed history-control and edit plan without dispatching either command", async () => {
+    const before = snap();
+    const seen: string[] = [];
+    const orig = useStore.getState().exec;
+    const spy = vi
+      .spyOn(useStore.getState(), "exec")
+      .mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+        seen.push(command);
+        return orig(command, args);
+      });
+
+    const result = await runAgentBatch("undo and add", [
+      { command: "undo" },
+      { command: "create_track", args: { name: "Must Not Exist" } },
+    ]);
+    spy.mockRestore();
+
+    expect(seen).toEqual([]);
+    expect(result.applied).toBe(0);
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries.every((entry) => !entry.ok && entry.error === HISTORY_CONTROL_BATCH_REASON)).toBe(true);
+    expect(snap()).toEqual(before);
   });
 });

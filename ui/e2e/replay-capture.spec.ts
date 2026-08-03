@@ -62,7 +62,13 @@ test("canonical arrangement flow → command trace artifact", async ({ page }) =
   // its floor from the other steps — the replay lane then had no track creation to
   // replay and nobody noticed.
   const emitted = new Set((trace as { command: string }[]).map((t) => t.command));
-  for (const required of ["create_track", "set_clip_fade", "set_clip_gain", "create_bus"])
+  // set_clip_loop and set_master_volume were added here by #464, which independently found
+  // the same TRK-KIND menu bug main had already fixed. Its fix was redundant; these two
+  // names were not — the flow drives both gestures, so without them a silent stop in
+  // either one shrinks the replay artifact (and the native proof built from it) with
+  // nothing going red. That is the exact failure mode this loop exists to catch.
+  for (const required of ["create_track", "set_clip_fade", "set_clip_gain", "create_bus",
+    "set_clip_loop", "set_master_volume"])
     expect([...emitted], `gesture emitted no ${required}`).toContain(required);
 
   mkdirSync(ART_DIR, { recursive: true });

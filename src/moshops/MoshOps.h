@@ -51,6 +51,12 @@ public:
         executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
 
+    /** Browser-only read path. list_directory is pure filesystem I/O and may block on
+        a large, cloud-backed, or disconnected directory, so WebBridge invokes this
+        method on a worker instead of the audio/message thread. */
+    static juce::var executeFileBrowserReadOnly (const juce::File& sessionDir,
+                                                  const juce::var& command);
+
     /** Full session snapshot — bound to the WebView's get_snapshot. */
     juce::var snapshot();
 
@@ -624,6 +630,8 @@ private:
     // commands.contract.test.ts's handler-body scan only sees getProperty calls literally
     // inside each cmdXxx handler's own source span, not inside a shared helper it calls.
     te::AutomatableParameter* findParam (const juce::String& trackId, int pluginIndex, int paramIndex);
+    bool mirrorTrackEditorParameter (const juce::String& trackId,
+                                     te::AutomatableParameter&, float before, float after);
     te::AuxReturnPlugin* firstAuxReturnOn (te::AudioTrack&);
     te::AudioTrack*      findReturnTrackForBus (int bus);
     int                  allocateBusNumber();
@@ -655,6 +663,7 @@ private:
     // master signal.
     int              masterVisibleBoundary();
     te::Plugin*      findMasterPlugin (int index);
+    bool             mirrorMasterEditorParameter (te::AutomatableParameter&, float before, float after);
     void  emitSpectrum (bool playing);                    // drain tap → Goertzel bands → emit
     std::array<float, 1024> spectralRing {};              // rolling mono history
     int   spectralRingPos = 0;
@@ -703,9 +712,7 @@ private:
         if (! inBatch) undoManager().beginNewTransaction (name);
     }
 
-    /** The JUCE device manager under Tracktion's wrapper — the object the device
-        picker drives (the same one MoshEngine::applyRequestedAudioOutputDevice
-        uses). */
+    /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
     juce::AudioDeviceManager& adm() { return eng.engine().getDeviceManager().deviceManager; }
     juce::var currentAudioSelection();   // small {type,outputDevice,...} summary block
     // Applies a device-setup patch; returns the error string (empty == success). No

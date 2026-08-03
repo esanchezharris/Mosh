@@ -51,8 +51,8 @@ reports `gap` until the item ships; a `backlog_ref` at a **done** item is a hard
 | `scoreboard.py --check` | a stale `docs/FEATURE_AUDIT.md` (regenerable byte-for-byte from committed inputs alone) |
 
 `scoreboard.py` (no flag) regenerates `docs/FEATURE_AUDIT.md` from `verdicts.json` + the
-eval CSV + `docs/auto-loop/backlog.jsonl` (single source of truth — the old hardcoded
-backlog list is gone) + the coverage ledger.
+eval CSV + `scripts/daw-conformance/parity_backlog.jsonl` (the minimal G-prefixed
+conventional-parity registry) + the coverage ledger.
 
 ## Scope
 

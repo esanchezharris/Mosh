@@ -117,6 +117,23 @@ TEST_CASE ("L1 transient analysis (JSON object blob) round-trips on a line", "[l
     REQUIRE_FALSE (fresh.hasProperty (ids::lyricAnalysis));
 }
 
+TEST_CASE ("L1 sheet analysis fingerprint changes with submitted words or flow constraints", "[lyrics][l1]")
+{
+    const auto original = juce::JSON::parse (
+        R"({"grid":"1/16","rhymeStrictness":"slant","lines":[{"index":0,"text":"lighting up the flame","seedText":"","syllableTarget":5,"rhymeGroup":"A"}]})");
+    const auto identical = juce::JSON::parse (
+        R"({"grid":"1/16","rhymeStrictness":"slant","lines":[{"index":0,"text":"lighting up the flame","seedText":"","syllableTarget":5,"rhymeGroup":"A"}]})");
+    const auto newWords = juce::JSON::parse (
+        R"({"grid":"1/16","rhymeStrictness":"slant","lines":[{"index":0,"text":"lighting up the skyline","seedText":"","syllableTarget":5,"rhymeGroup":"A"}]})");
+    const auto newGrid = juce::JSON::parse (
+        R"({"grid":"1/8","rhymeStrictness":"slant","lines":[{"index":0,"text":"lighting up the flame","seedText":"","syllableTarget":5,"rhymeGroup":"A"}]})");
+
+    const auto fingerprint = LyricSheet::analysisFingerprint (original);
+    REQUIRE (fingerprint == LyricSheet::analysisFingerprint (identical));
+    REQUIRE (fingerprint != LyricSheet::analysisFingerprint (newWords));
+    REQUIRE (fingerprint != LyricSheet::analysisFingerprint (newGrid));
+}
+
 TEST_CASE ("Phase-2 skeleton lands lines `skeleton` + survives serialization (LYR-P2)", "[lyrics][skeleton]")
 {
     // build_skeleton_from_clip lands a wordless, EDITABLE skeleton: every line `skeleton`

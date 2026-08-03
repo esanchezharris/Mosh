@@ -284,3 +284,161 @@ test.describe("L7 · viewport floor", () => {
     expect(m.canScrollX).toBe(true);   // …because the shell keeps a floor and scrolls
   });
 });
+
+test.describe("L8 · overflow-menu containment", () => {
+  // The tools moved out of the topbar cluster into the overflow menu, but v2's reset for
+  // mosh.css's `.training-pop { width: min(94vw, 380px); overflow: auto }` — which sizes
+  // the WRAP, right for classic's flex topbar — kept the now-unrendered `.v2-tools`
+  // scope and went dead. Result: a 380px trigger in a 40px grid cell inside a 248px
+  // panel, overlapping its neighbours' hover targets and running off the right edge of
+  // the screen, plus a popover clipped out of existence by the wrap's own overflow.
+  //
+  // The pre-existing specs missed it because `toBeVisible()` only needs a non-empty box,
+  // which a clipped, overflowing element still has. So assert GEOMETRY, not visibility.
+  test("every overflow tool fits inside the panel, and the panel inside the viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    const panel = await page.locator(".v2-menu-panel").boundingBox();
+    if (!panel) throw new Error("missing panel bounds");
+    expect(panel.x).toBeGreaterThanOrEqual(0);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(1280 + 1);
+
+    const tools = page.locator(".v2-menu-tools > *");
+    const n = await tools.count();
+    expect(n).toBeGreaterThanOrEqual(6); // guard: an empty set would pass the loop vacuously
+    for (let i = 0; i < n; i++) {
+      const cls = await tools.nth(i).getAttribute("class");
+      const box = await tools.nth(i).boundingBox();
+      if (!box) throw new Error(`missing bounds for tool ${i}`);
+      expect(box.width, `tool ${i} (${cls}) is wider than the panel`).toBeLessThanOrEqual(panel.width);
+      expect(box.x + box.width, `tool ${i} (${cls}) overflows the panel's right edge`)
+        .toBeLessThanOrEqual(panel.x + panel.width + 1);
+    }
+  });
+
+  test("the Training popover opens at full size inside the viewport, not clipped by its wrap", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await page.getByTestId("v2-tool-training").click();
+
+    // The wrap must not be a scroll container — that is what clipped its own absolutely
+    // positioned .pop (whose containing block IS the wrap) down to nothing.
+    const wrapOverflow = await page.locator(".training-pop").evaluate((el) => getComputedStyle(el).overflow);
+    expect(wrapOverflow).toBe("visible");
+
+    const pop = await page.locator(".training-pop .pop").boundingBox();
+    if (!pop) throw new Error("missing training popover bounds");
+    expect(pop.width, "popover collapsed — the wrap's width/overflow leaked onto it").toBeGreaterThan(300);
+    expect(pop.height, "popover collapsed to a sliver").toBeGreaterThan(200);
+    expect(pop.x).toBeGreaterThanOrEqual(0);
+    expect(pop.x + pop.width).toBeLessThanOrEqual(1280 + 1);
+
+    // Not `toBeVisible()` — that is exactly what let the clipped popover ship. Assert the
+    // badge's BOX is on screen.
+    const badge = await page.getByTestId("training-preview-badge").boundingBox();
+    if (!badge) throw new Error("missing preview badge bounds");
+    expect(badge.x).toBeGreaterThanOrEqual(0);
+    expect(badge.x + badge.width).toBeLessThanOrEqual(1280 + 1);
+    expect(badge.y).toBeGreaterThanOrEqual(0);
+    expect(badge.y + badge.height).toBeLessThanOrEqual(800 + 1);
+  });
+});
+
+test.describe("L10 · modals opened from inside a popover", () => {
+  // `.v2-menu-panel` carries `backdrop-filter`, which makes it the containing block for
+  // `position: fixed` descendants. A ConfirmDialog rendered in place therefore had its
+  // `.modal-backdrop { inset: 0 }` resolve to the 248px panel, not the viewport, and the
+  // 374px dialog overflowed off the right of the screen — its "Cancel" measured at x=1304
+  // on a 1280px viewport. It was reachable only because the shell happened to be scrolled.
+  // Portaling it to <body> (TrackLaneList's delete-track precedent) is the fix; the
+  // popover dismissers then have to ignore modal layers, or the click that lands in the
+  // portaled dialog reads as "outside" and closes the popover that owns it.
+  test("the memory Clear confirmation is fully inside the viewport and clickable", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.addInitScript(() => {
+      window.localStorage.clear();
+      window.localStorage.setItem("mosh.settings", JSON.stringify({
+        version: 2, template: null, values: { theme: "dark", agentMemory: true }, keyOverrides: {},
+      }));
+    });
+    await page.goto("/?shell=v2");
+    await expect(page.getByTestId("v2-composer")).toBeVisible();
+    await page.getByTestId("agent-input").fill("remember I like wide low end");
+    await page.getByTestId("agent-send").click();
+    await expect(page.getByTestId("v2-memory-toast")).toBeVisible();
+
+    await page.getByLabel("More tools").click();
+    await page.getByLabel("What Moshi remembers").click();
+    const tier = page.getByTestId("memory-tier-preference");
+    await expect(tier).toContainText("wide low end");
+    await tier.getByRole("button", { name: "Clear" }).click();
+
+    const dialog = page.getByTestId("memory-clear-confirm");
+    const box = await dialog.boundingBox();
+    if (!box) throw new Error("missing confirm dialog bounds");
+    expect(box.x, "dialog runs off the LEFT edge").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "dialog runs off the RIGHT edge").toBeLessThanOrEqual(1280 + 1);
+    expect(box.y + box.height, "dialog runs off the BOTTOM").toBeLessThanOrEqual(800 + 1);
+
+    // And the buttons actually work — clicking Cancel must not tear down the popover
+    // that owns the dialog (it is portaled, so it is not a DOM descendant of it).
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(tier, "the popover closed along with its own dialog").toContainText("wide low end");
+  });
+});
+
+test.describe("L9 · anchored-panel placement", () => {
+  // `.v2-shell` is `overflow-x: auto` with a 1120px min-width floor (#52), so below that
+  // width the topbar's right cluster — and anything anchored to it — sits outside the
+  // viewport. The panel is now `position: fixed` and clamped by placeAnchoredPanel().
+  test("the overflow panel stays inside a 1024px viewport WITHOUT scrolling the shell", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await bootV2(page);
+    // Deliberately NOT scrolling the shell first. Scrolling to scrollWidth (the reflex,
+    // and what v2-shell.spec does for its reachability check) drags the anchor back into
+    // view and makes the OLD absolute panel land on screen too — the test would pass
+    // against the bug. At scrollLeft 0 the pre-fix panel's right edge is ~1102 on a 1024
+    // viewport, so this only passes because of the clamp.
+    await page.evaluate(() => (document.querySelector('[data-testid="v2-overflow"]') as HTMLElement).click());
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    const box = await page.locator(".v2-menu-panel").boundingBox();
+    if (!box) throw new Error("missing panel bounds");
+    expect(box.x, "panel runs off the LEFT edge").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "panel runs off the RIGHT edge").toBeLessThanOrEqual(1024 + 1);
+  });
+
+  test("topbar controls stay clickable while the overflow menu is open", async ({ page }) => {
+    // The menu used to render a `position: fixed; inset: 0; z-index: 55` dismiss sheet.
+    // Nothing in the topbar establishes a stacking context, so that sheet covered every
+    // control in it: this click hit the overlay and only closed the menu.
+    await bootV2(page);
+    await page.getByTestId("v2-overflow").click();
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    await page.getByTestId("v2-share").click();
+    await expect(page.getByTestId("mp-launcher-modal"), "the Invite click never reached the button").toBeVisible();
+    await expect(page.getByTestId("v2-overflow-tools"), "the menu should have dismissed").toHaveCount(0);
+  });
+
+  test("scrolling the shell dismisses the overflow menu instead of orphaning it", async ({ page }) => {
+    // The panel is viewport-fixed but its trigger lives in the shell's scrolled content,
+    // so the two drift apart. Closing is cheaper than tracking every scroll frame.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await bootV2(page);
+    await page.evaluate(() => (document.querySelector('[data-testid="v2-overflow"]') as HTMLElement).click());
+    await expect(page.getByTestId("v2-overflow-tools")).toBeVisible();
+
+    await page.evaluate(() => {
+      const shell = document.querySelector('[data-testid="v2-shell"]')!;
+      shell.scrollLeft += 60;
+      shell.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.getByTestId("v2-overflow-tools")).toHaveCount(0);
+  });
+});

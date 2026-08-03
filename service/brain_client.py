@@ -105,24 +105,58 @@ def _is_reasoning(model: str) -> bool:
             or (len(model) >= 2 and model[0] == "o" and model[1].isdigit()))
 
 
+def _identity_directory():
+    root = os.path.abspath(os.path.join(os.path.expanduser("~"), "Library", "Mosh"))
+    leaf = os.environ.get("MOSH_SELFTEST_SESSION", "").strip()
+    if not leaf:
+        return os.path.join(root, "session")
+
+    harness = os.path.join(root, "_harness")
+    candidate = os.path.abspath(os.path.join(root, leaf))
+    try:
+        if os.path.commonpath((harness, candidate)) != harness or candidate == harness:
+            return None
+    except ValueError:
+        return None
+
+    current = candidate
+    while current != root:
+        if os.path.lexists(current) and os.path.islink(current):
+            return None
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+    marker = os.path.join(candidate, ".mosh-harness-owned-v1")
+    if not os.path.isdir(candidate) or os.path.islink(marker):
+        return None
+    try:
+        with open(marker, encoding="utf-8") as f:
+            if f.read() != "Mosh isolated harness session v1":
+                return None
+    except OSError:
+        return None
+    return candidate
+
+
 def _install_id() -> str:
     """Per-install id sent to the brain proxy for its daily token-cap bookkeeping
     (migrations/0003_brain_usage.sql) — an opaque bookkeeping key, never a secret.
-    Reused from the SAME ~/Library/Mosh/<session>/identity.json "uuid" field
-    src/brain/BrainProxy.cpp's installId() and vite.config.ts's installId() read/
-    write, so whichever of the three processes runs first mints it and the others
-    converge on it. MOSH_BRAIN_INSTALL_ID overrides outright (skips the filesystem —
-    the test/CI seam); MOSH_SELFTEST_SESSION picks the session leaf, mirroring the
-    native harness's own isolation boundary, so a hermetic run never touches the
-    real ~/Library/Mosh/session/identity.json."""
+    Reused from ~/Library/Mosh/<session>/identity.json. MOSH_BRAIN_INSTALL_ID
+    overrides outright. An unset MOSH_SELFTEST_SESSION uses the owner session; an
+    exact marker-owned `_harness` session persists there; any other value uses an
+    ephemeral id and performs no filesystem write."""
     global _INSTALL_ID_CACHE
     override = os.environ.get("MOSH_BRAIN_INSTALL_ID")
     if override:
         return override
     if _INSTALL_ID_CACHE is not None:
         return _INSTALL_ID_CACHE
-    leaf = os.environ.get("MOSH_SELFTEST_SESSION", "").strip() or "session"
-    identity_dir = os.path.join(os.path.expanduser("~"), "Library", "Mosh", leaf)
+    identity_dir = _identity_directory()
+    if identity_dir is None:
+        _INSTALL_ID_CACHE = str(_uuid.uuid4())
+        return _INSTALL_ID_CACHE
     identity_file = os.path.join(identity_dir, "identity.json")
     try:
         with open(identity_file, encoding="utf-8") as f:

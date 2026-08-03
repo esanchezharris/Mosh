@@ -23,7 +23,11 @@ export function useKeyboardShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const action = resolveKey(liveKeymap(), e);
       if (!action) return;
-      if (isEditableTarget(e.target) && !emptyAgentPromptSpace(e.target, action)) return;
+      // Packaged WKWebView sometimes retargets a focused range input's Arrow keydown
+      // to window. The DOM focus owner is still authoritative: inspector controls keep
+      // their arrows until focus actually returns to the arrangement.
+      const keyboardOwner = isEditableTarget(e.target) ? e.target : document.activeElement;
+      if (isEditableTarget(keyboardOwner) && !emptyAgentPromptSpace(keyboardOwner, action)) return;
       if (nativeMenuPresent() && NATIVE_MENU_ACTIONS.has(action)) return;
 
       const s = useStore.getState();

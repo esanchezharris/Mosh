@@ -21,7 +21,9 @@ const css = readShellCss().replace(/\/\*[\s\S]*?\*\//g, "");
 /** Values that legitimately sit outside the scale, each with why. Shrink-only. */
 const DOCUMENTED_LITERALS: Record<string, Record<string, string>> = {
   "font-size": {
-    "0": "a reset (hides text while keeping the box), not a size on the scale",
+    // `font-size: 0` is gone: its only users were the `.v2-topbar .v2-tools .*-pop > .btn`
+    // glyph-hiding rules, which went dead when the tools moved into the overflow menu (they
+    // pass real icon components as labels now, so there is no text to hide).
     "12px": "the single biggest de-facto size in the shell; between --v2-fs-sm (11) and --v2-fs-base (13). Adding a scale step for it is a design decision, not a normalisation",
     "12.5px": "one deliberate optical nudge; rounding it is a visual change, not a no-op",
     "14px": "between --v2-fs-base (13) and --v2-fs-md (15); same call as 12px",
