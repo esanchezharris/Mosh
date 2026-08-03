@@ -351,7 +351,7 @@ const mockManifestDigest = (name: string, manifest: readonly unknown[]): string 
 // the mock cannot quietly admit something the engine refuses (or vice versa).
 const MOCK_TXN_SAFE = new Set([
   "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
-  "create_track", "rename_track", "set_track_color", "remove_track", "set_track_type",
+  "create_track", "rename_track", "set_track_color", "move_track", "remove_track", "set_track_type",
   "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
   "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
@@ -1093,6 +1093,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
         return err(command, `color must be "#rrggbb" or "" to clear, got: ${c}`);
       pushUndo();
       if (c === "") delete t.color; else t.color = c;
+      invalidate(); return ok(command);
+    }
+    // TRK-REORDER — mirrors cmdMoveTrack including the two behaviours an e2e would
+    // otherwise get wrong: an out-of-range index CLAMPS (a drag past the end means "last"),
+    // and a same-index move SUCCEEDS (a drag that lands where it started is ordinary).
+    case "move_track": {
+      const from = snapshot.tracks.findIndex((t) => t.id === str(args.trackId));
+      if (from < 0) return err(command, "track not found");
+      if (args.toIndex === undefined) return err(command, "missing 'toIndex'");
+      const orderable = snapshot.tracks.filter((t) => !t.isGroup && !t.isReturn);
+      const to = Math.max(0, Math.min(orderable.length - 1, num(args.toIndex, 0)));
+      if (to === from) return ok(command);
+      pushUndo();
+      const [moved] = snapshot.tracks.splice(from, 1);
+      snapshot.tracks.splice(to, 0, moved);
+      snapshot.tracks.forEach((t, i) => (t.index = i));
       invalidate(); return ok(command);
     }
     case "remove_track": {

@@ -64,7 +64,7 @@ inline const std::set<juce::String>& registry()
     static const std::set<juce::String> safe {
         // ── mixer / track ──
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
-        "create_track", "rename_track", "set_track_color", "remove_track", "set_track_type",
+        "create_track", "rename_track", "set_track_color", "move_track", "remove_track", "set_track_type",
         // ── clips ──
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",

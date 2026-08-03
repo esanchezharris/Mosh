@@ -432,6 +432,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "set_track_color")   return cmdSetTrackColor (args);
+    if (name == "move_track")        return cmdMoveTrack (args);
     if (name == "create_section")    return cmdCreateSection (args);
     if (name == "rename_section")    return cmdRenameSection (args);
     if (name == "move_section")      return cmdMoveSection (args);
@@ -2986,7 +2987,7 @@ void MoshOps::initRecoveryJournal()
 bool MoshOps::isReplayableCommand (const juce::String& name) const
 {
     static const juce::StringArray replayable {
-        "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color",
+        "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "move_track",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",

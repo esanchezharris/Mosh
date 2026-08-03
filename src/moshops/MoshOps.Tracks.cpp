@@ -126,6 +126,57 @@ juce::var MoshOps::cmdSetTrackColor (const juce::var& args)
     return okResult ("set_track_color");
 }
 
+// TRK-REORDER (#550) — move a track to a new position in the arrangement.
+//
+// `toIndex` is a position in the SAME list the snapshot numbers: te::getAudioTracks minus
+// hidden tracks (MoshOps.cpp's trackToVar loop). Using any other ordering would make the
+// index the UI can see mean something different from the index the command takes, which is
+// the sort of near-miss that reads as a bug the first time a producer drags row 3 to row 1.
+//
+// REFUSES to move a track that lives inside a folder/group. Tracktion's moveTrack takes a
+// TrackInsertPoint that also carries the PARENT, so a naive top-level move would silently
+// pull a track out of its submix — changing routing, which is audible, in a command whose
+// whole promise is that it only changes order. An honest refusal beats a surprise.
+juce::var MoshOps::cmdMoveTrack (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = findTrack (id);
+    if (track == nullptr) return errResult ("move_track", "no track: " + id);
+
+    if (! args.hasProperty ("toIndex")) return errResult ("move_track", "missing 'toIndex'");
+
+    // The visible ordering — identical filter to the snapshot's.
+    juce::Array<te::AudioTrack*> visible;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+        if (t != nullptr && ! (bool) t->state.getProperty (ids::moshHidden, false))
+            visible.add (t);
+
+    const int from = visible.indexOf (track);
+    if (from < 0) return errResult ("move_track", "track is not an orderable arrangement track: " + id);
+    if (track->getParentFolderTrack() != nullptr)
+        return errResult ("move_track", "track is inside a group; ungroup it before reordering: " + id);
+
+    const int n  = visible.size();
+    const int to = juce::jlimit (0, n - 1, (int) args.getProperty ("toIndex", 0));
+    if (to == from)
+    {
+        // A no-op is SUCCESS, not an error: a drag that lands where it started is a
+        // perfectly ordinary gesture, and failing it would make the UI show an error for
+        // doing nothing. No transaction is opened, so it also cannot pollute undo.
+        return okResult ("move_track");
+    }
+
+    beginTxn ("move_track");
+    // Moving DOWN lands after the track currently occupying the target slot; moving UP
+    // lands before it. Expressed with Tracktion's own insert-point idiom rather than
+    // arithmetic on indices, so the two directions cannot drift apart by one.
+    te::TrackInsertPoint point (*visible[to], /*insertBefore=*/ to < from);
+    eng.edit().moveTrack (track, point);
+    logLine ("move_track", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("move_track");
+}
+
 juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();

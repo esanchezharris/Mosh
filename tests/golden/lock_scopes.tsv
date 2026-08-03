@@ -97,6 +97,7 @@ mark_take	Unguarded
 move_annotation	SessionGlobal
 move_clip	Clip
 move_section	SessionGlobal
+move_track	Track
 mp_apply_bootstrap	Unguarded
 mp_apply_structural	Unguarded
 mp_broadcast_selection	Unguarded

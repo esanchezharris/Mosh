@@ -411,6 +411,18 @@
 }
 .v2-clip.hdr > .v2-clip-label:active { cursor: grabbing; }
 
+/* TRK-REORDER (#550) — hover/focus-revealed move buttons, same treatment as the remove
+   button they sit beside so the header stays calm until a producer means to reorganise. */
+.v2-lhead-move { position: absolute; right: 26px; top: 4px; display: none; flex-direction: column; gap: 1px; }
+.v2-lhead:hover .v2-lhead-move, .v2-lhead:focus-within .v2-lhead-move { display: flex; }
+.v2-lhead-move button {
+  width: 16px; height: 12px; line-height: 1; padding: 0;
+  font-size: var(--v2-fs-xs); border-radius: var(--v2-radius-xs);
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-dim); cursor: pointer;
+}
+.v2-lhead-move button:disabled { opacity: 0.3; cursor: default; }
+
 /* TRK-COLOUR (#550) — a track's chosen colour, applied where a producer scanning a dozen
    lanes actually looks: the header spine and the lane's left edge. Deliberately a SPINE
    and not a filled lane — a saturated lane background fights the clips and the waveform

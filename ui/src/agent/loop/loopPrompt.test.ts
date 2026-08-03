@@ -247,7 +247,13 @@ describe("legacy prompt byte-stability pin", () => {
     // command the older ones never saw. Not invalidating (nothing was removed or renamed),
     // but worth knowing before comparing runs across this line.
     //
+    //   move_track      — added with set_track_color as the second half of #550. Reordering
+    //                     is arrangement state only; it refuses a track inside a group
+    //                     rather than silently reparenting it (which would change routing,
+    //                     i.e. sound, from a command that promises only to change order).
+    //
     // Previous pins:
+    // - pre-move-track: 6ad2eb8b3f352b88fbf89375dfe1b52b23aaac981b2d6dc7ddf18111d868ab5d
     // - pre-set-track-color: 28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721
     // - pre-loop-region-args: a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-builtins-vocabulary (unified renderer + issue #539 wording): e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
@@ -255,7 +261,7 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-musical-time contract: a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("6ad2eb8b3f352b88fbf89375dfe1b52b23aaac981b2d6dc7ddf18111d868ab5d");
+    expect(hash).toBe("664faf563c5d5d5af66d42c863021fd3a18ae1d8305a20ae4f422189de0b3284");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

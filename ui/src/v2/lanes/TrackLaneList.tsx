@@ -208,7 +208,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>
-                <TrackLaneHeader track={t} />
+                <TrackLaneHeader track={t} index={tracks.indexOf(t)} total={tracks.length} />
                 <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}${t.color ? " coloured" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px`, ...(t.color ? { "--track-col": t.color } : {}) } as React.CSSProperties}>
                   {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
                       gets real positioned lines, because a repeating gradient cannot express
@@ -368,7 +368,7 @@ function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: Sec
   );
 }
 
-function TrackLaneHeader({ track }: { track: Track }) {
+function TrackLaneHeader({ track, index, total }: { track: Track; index: number; total: number }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const clearSelection = useStore((s) => s.clearSelection);
@@ -458,6 +458,32 @@ function TrackLaneHeader({ track }: { track: Track }) {
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
+      </span>
+      {/* TRK-REORDER (#550) — move this row up/down. Every one of the four reference DAWs
+          reorders tracks by DRAGGING the header, so drag is the 2-of-4 idiom and remains
+          the polish this owes; buttons are a real reorder affordance in the meantime
+          (Reaper and Pro Tools both also expose track-move as a command), and unlike a
+          half-wired drag they cannot lie about what they do. Hover/focus-revealed like the
+          remove button beside them, and disabled at the ends rather than silently no-oping
+          — a control that does nothing at the boundary is the small dishonesty this
+          programme keeps removing. */}
+      <span className="v2-lhead-move">
+        <button
+          type="button"
+          data-testid="v2-track-move-up"
+          aria-label={`Move ${track.name} up`}
+          title={`Move ${track.name} up`}
+          disabled={index <= 0}
+          onClick={(e) => { e.stopPropagation(); void exec("move_track", { trackId: track.id, toIndex: index - 1 }); }}
+        >▲</button>
+        <button
+          type="button"
+          data-testid="v2-track-move-down"
+          aria-label={`Move ${track.name} down`}
+          title={`Move ${track.name} down`}
+          disabled={index >= total - 1}
+          onClick={(e) => { e.stopPropagation(); void exec("move_track", { trackId: track.id, toIndex: index + 1 }); }}
+        >▼</button>
       </span>
       <button
         className="v2-lhead-rm"

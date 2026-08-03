@@ -967,6 +967,71 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 
+    // ── TRK-REORDER (#550) — move_track ───────────────────────────────────────────
+    // Ordering is pure arrangement state, so --selftest can prove ALL of it. The three
+    // things that actually go wrong with a reorder: the off-by-one between moving up and
+    // moving down, a move that quietly reparents a grouped track, and an undo that does
+    // not put the row back.
+    {
+        auto names = [&ops] {
+            juce::StringArray out;
+            const auto snap = ops.snapshot();
+            if (const auto* arr = snap.getProperty ("tracks", var()).getArray())
+                for (const auto& t : *arr)
+                    if (! (bool) t.getProperty ("isGroup", false))
+                        out.add (t.getProperty ("name", var()).toString());
+            return out;
+        };
+        // Three known rows to shuffle. create_track appends, so these land last.
+        cmd (ops, "create_track", objN ({{ "name", "RO-A" }}));
+        cmd (ops, "create_track", objN ({{ "name", "RO-B" }}));
+        cmd (ops, "create_track", objN ({{ "name", "RO-C" }}));
+        const auto before = names();
+        const int iA = before.indexOf ("RO-A"), iC = before.indexOf ("RO-C");
+        check (iA >= 0 && iC == iA + 2, "move_track fixture: RO-A/B/C are consecutive");
+        const auto idA = [&] {
+            const auto snap = ops.snapshot();
+            if (const auto* arr = snap.getProperty ("tracks", var()).getArray())
+                for (const auto& t : *arr)
+                    if (t.getProperty ("name", var()).toString() == "RO-A")
+                        return t.getProperty ("id", var()).toString();
+            return juce::String();
+        }();
+
+        // Move DOWN: A to C's slot => B, C, A.
+        check (ok (cmd (ops, "move_track", objN ({{ "trackId", idA }, { "toIndex", iC }}))),
+               "move_track down ok");
+        auto after = names();
+        check (after.indexOf ("RO-A") == iC && after.indexOf ("RO-B") == iA && after.indexOf ("RO-C") == iA + 1,
+               "moving DOWN lands the track AFTER the target slot's occupant");
+
+        // Move UP again: A back to its old slot => A, B, C.
+        check (ok (cmd (ops, "move_track", objN ({{ "trackId", idA }, { "toIndex", iA }}))),
+               "move_track up ok");
+        after = names();
+        check (after.indexOf ("RO-A") == iA && after.indexOf ("RO-B") == iA + 1 && after.indexOf ("RO-C") == iC,
+               "moving UP lands the track BEFORE the target slot's occupant (no off-by-one)");
+
+        // A move to where it already is is SUCCESS and must not pollute undo — the next
+        // undo has to reach the real previous edit, not an empty transaction (G14 class).
+        check (ok (cmd (ops, "move_track", objN ({{ "trackId", idA }, { "toIndex", iA }}))),
+               "move_track to the SAME index succeeds (a drag that lands where it started)");
+        check (names() == after, "a same-index move changes nothing");
+
+        // Out-of-range clamps rather than errors: a drag past the end is an ordinary
+        // gesture meaning \"put it last\".
+        check (ok (cmd (ops, "move_track", objN ({{ "trackId", idA }, { "toIndex", 9999 }}))),
+               "move_track clamps an out-of-range index instead of failing");
+        check (names().indexOf ("RO-A") == names().size() - 1, "clamped move puts the track last");
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after move ok");
+        check (names().indexOf ("RO-A") == iA, "undo puts the track back where it was");
+
+        check (! ok (cmd (ops, "move_track", objN ({{ "trackId", "nope" }, { "toIndex", 0 }}))),
+               "move_track REJECTS an unknown track");
+        check (! ok (cmd (ops, "move_track", objN ({{ "trackId", idA }}))),
+               "move_track REJECTS a missing toIndex");
+    }
+
     // ── TRK-COLOUR (#550) — set_track_color ────────────────────────────────────────
     // Colour changes nothing audible, so --selftest CAN fully prove it: the whole
     // capability is "does the value round-trip through the snapshot and survive undo".
