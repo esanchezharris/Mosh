@@ -102,6 +102,9 @@ midi_rag_database.pkl
 .playwright-mcp/
 test-results/
 mosh-*.png
+# ...but not the README hero logo. gitignore has no inline comments, so this
+# negation must sit on its own line or it silently matches nothing.
+!assets/mosh-icon*.png
 verify-artifacts/
 scripts/compiler-eval/artifacts/
 
