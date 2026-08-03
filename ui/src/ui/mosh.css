@@ -1081,6 +1081,15 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .pr-body:not(.pr-playing) .pr-playhead { display: none; }
 .pr-playhead-head { z-index: 2; }
 
+/* Step-record insert marker — where the next TYPED note lands. Deliberately dashed and
+   dimmer than the playhead: they can sit at different places at the same time, and
+   confusing "where playback is" with "where typing goes" would be maddening. */
+.pr-insert {
+  position: absolute; top: 0; bottom: 0; width: 0; margin-left: -1px;
+  border-left: 2px dashed var(--pr-note-sel); opacity: 0.75;
+  pointer-events: none; z-index: 3;
+}
+
 /* Velocity lane — one bar per note, bottom-anchored, mirroring the drum sequencer's
    velocity graph so the two editors read as one family. */
 .pr-vel-gutter {

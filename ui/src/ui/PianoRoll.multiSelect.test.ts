@@ -58,9 +58,16 @@ describe("piano-roll multi-note editing", () => {
   };
 
   const noteEls = () => [...host.querySelectorAll(".pr-note")];
-  const names = () => exec.mock.calls.map((c) => c[0] as string);
+  // EDIT commands only. Audition is a separate concern that interleaves freely with these
+  // (selecting a note sounds it), and it has its own spec — mixing the two here would make
+  // every sequence assertion depend on the Preview setting.
+  const names = () => exec.mock.calls.map((c) => c[0] as string).filter((n) => n !== "audition_note");
   const setNoteArgs = () =>
     exec.mock.calls.filter((c) => c[0] === "set_note").map((c) => c[1] as Record<string, number>);
+  /** Args of the first call to `command` — never index into mock.calls directly, since
+   *  audition_note interleaves with the edits. */
+  const argsOf = (command: string) =>
+    exec.mock.calls.find((c) => c[0] === command)?.[1] as Record<string, unknown> | undefined;
 
   const click = (el: Element, shiftKey = false) => {
     act(() => {
@@ -127,7 +134,7 @@ describe("piano-roll multi-note editing", () => {
     // ONE command carrying every note — which is also the only safe shape, since moving a
     // note re-sorts the engine's list and would invalidate any later index.
     expect(names()).toEqual(["set_note"]);
-    const edits = exec.mock.calls[0][1].edits as { noteIndex: number; start: number }[];
+    const edits = argsOf("set_note")!.edits as { noteIndex: number; start: number }[];
     // Each note moved by ONE beat from its own start — the selection keeps its shape
     // instead of collapsing onto the note that was grabbed.
     expect(edits.map((e) => e.start)).toEqual([1, 2, 3]);
@@ -155,7 +162,7 @@ describe("piano-roll multi-note editing", () => {
 
     await drag(noteEls()[0], 0, 2); // straight down two semitones
 
-    const edits = exec.mock.calls[0][1].edits as { pitch: number; start: number }[];
+    const edits = argsOf("set_note")!.edits as { pitch: number; start: number }[];
     expect(edits.map((e) => e.pitch)).toEqual([58, 60]);
     // A purely vertical drag must not rewrite any start (the axis invariant, at N).
     expect(edits.map((e) => e.start)).toEqual([0, 1]);
@@ -173,7 +180,7 @@ describe("piano-roll multi-note editing", () => {
     // One add_note carrying both copies, and — critically — no set_note: the originals
     // must be left exactly where they were.
     expect(names()).toEqual(["add_note"]);
-    const args = exec.mock.calls[0][1] as { notes?: { start: number }[] };
+    const args = argsOf("add_note") as { notes?: { start: number }[] };
     expect(args.notes?.map((n) => n.start)).toEqual([1, 2]);
   });
 

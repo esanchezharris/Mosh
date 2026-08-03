@@ -18,7 +18,12 @@ import { velocityFromFraction } from "./drumGrid";
 import { useEscapeStack } from "../hooks/useEscapeToClose";
 import { applyNoteEdits, removeNotes, addNotes } from "./noteCommands";
 import { moveEdits, resizeEdits, previewFrom, type GestureGeom } from "./pianoRollEdit";
-import { marqueeHit, toggleSelection, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
+import { marqueeHit, toggleSelection, selectAtPitch, noteIdentity, reselectByIdentity } from "./pianoRollSelection";
+import { notePreview } from "../audio/notePreview";
+import { wireNotePreview } from "../audio/wireNotePreview";
+import { qwertyState, onQwertyChange, setQwertyActive } from "../hooks/useQwertyMidi";
+import type { QwertyState } from "../interaction/qwertyMidi";
+import { stepReduce, STEP_INITIAL, type StepState } from "./stepRecord";
 
 const ROW_H = 15;
 const LOW = 36, HIGH = 96;
@@ -45,6 +50,14 @@ export function PianoRoll() {
   const snap = useStore((s) => s.snap);
   const snapDivision = useStore((s) => s.snapDivision);
   const scaleLock = useSettings((s) => Boolean(s.get("scaleLock")));
+  const notePreviewOn = useSettings((s) => Boolean(s.get("notePreview")));
+  // The QWERTY instrument's state lives outside React (a keypress must not re-render the
+  // app), so the header subscribes to it explicitly just to draw its readout.
+  const [qwerty, setQwerty] = useState<QwertyState>({ ...qwertyState });
+  useEffect(() => onQwertyChange(setQwerty), []);
+  // The roll must be able to sound notes on its own, without depending on any other
+  // feature having been mounted first (see wireNotePreview).
+  useEffect(() => { wireNotePreview(); }, []);
 
   const clip = snapshot?.tracks.flatMap((t) => t.clips).find((c) => c.id === editingClipId) ?? null;
 
@@ -68,6 +81,19 @@ export function PianoRoll() {
   // returns before any later const is initialised, so a helper defined below it would be
   // in the temporal dead zone by the time the effect ran.
   const setPreviewNotes = (m: Map<number, MidiNote>) => { previewRef.current = m; setPreviews(m); };
+  // The track that owns the clip being edited — where auditioned notes are heard.
+  const auditionTrackId = snapshot?.tracks.find((t) => t.clips.some((c) => c.id === editingClipId))?.id ?? null;
+  // Every selection change goes through here so audition is opt-IN per call site. Doing it
+  // in a useEffect on selectedNotes instead would also fire on the post-refresh pruning
+  // below, re-auditioning the whole selection on every snapshot event.
+  const applySelection = (next: Set<number>, opts?: { audition?: boolean }) => {
+    setSelectedNotes(next);
+    if (!opts?.audition || !auditionTrackId) return;
+    const byIndex = new Map((clip?.notes ?? []).map((n) => [n.i, n]));
+    const pitches = [...new Set([...next].map((i) => byIndex.get(i)?.pitch).filter((p): p is number => p != null))];
+    // Cap it: selecting a dense bar should not fire fifty simultaneous notes.
+    for (const p of pitches.slice(0, 6)) notePreview.tap(auditionTrackId, p);
+  };
   const velocityDraftRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const keysRef = useRef<HTMLDivElement | null>(null);
@@ -108,6 +134,42 @@ export function PianoRoll() {
     });
   }, [clip?.notes]);
   useEffect(() => { setVelocityDraft(null); velocityDraftRef.current = null; }, [editingClipId, selectedNotes]);
+
+  // STEP RECORD. The QWERTY layer owns "a key went down"; this owns "and here is where it
+  // lands". Keeping the insert marker here rather than in the engine is deliberate — it is
+  // view state, and a cursor in the engine would be a second model of "where we are" that
+  // has to be synced, persisted, undone and multiplayer-locked.
+  //
+  // The marker advances only when every held key is released (see stepRecord.ts), which is
+  // what makes a chord one beat wide and a sequence N beats long.
+  // Read at EVENT time through refs so the listener effect never has to re-subscribe on a
+  // grid or toggle change (re-subscribing mid-chord would lose the held set).
+  const stepRecordOnRef = useRef(false);
+  const stepBeatsRef = useRef(1);
+  const stepRef = useRef<StepState>(STEP_INITIAL);
+  // Step record is armed exactly when the computer keyboard is on AND the roll is open.
+  stepRecordOnRef.current = qwerty.active;
+  const [insertBeat, setInsertBeat] = useState(0);
+  useEffect(() => { stepRef.current = STEP_INITIAL; setInsertBeat(0); }, [editingClipId]);
+  useEffect(() => {
+    if (!editingClipId || !clip) return;
+    const clipId = clip.id;
+    const onNote = (ev: Event) => {
+      if (!stepRecordOnRef.current) return;
+      const d = (ev as CustomEvent<{ pitch: number; velocity?: number; down: boolean }>).detail;
+      if (!d) return;
+      const r = stepReduce(stepRef.current, { t: d.down ? "down" : "up", pitch: d.pitch }, stepBeatsRef.current);
+      stepRef.current = r.next;
+      setInsertBeat(r.next.insertBeat);
+      if (r.add)
+        void exec("add_note", {
+          clipId, pitch: r.add.pitch, start: r.add.start,
+          length: stepBeatsRef.current, velocity: d.velocity ?? 100,
+        });
+    };
+    window.addEventListener("mosh-qwerty-note", onNote);
+    return () => window.removeEventListener("mosh-qwerty-note", onNote);
+  }, [editingClipId, clip, exec]);
 
   // Escape goes through the shared stack (AL-001), not a private window listener.
   // This component was the one holdout — every other overlay adopted the stack and
@@ -182,6 +244,8 @@ export function PianoRoll() {
 
   const m = meterAt(tempoMapFrom(snapshot?.session), clip.start);
   const stepBeats = snap ? snapStepBeats(m, snapDivision) : 0;
+  // The step-record listener reads this at event time (see the refs above).
+  stepBeatsRef.current = stepBeats > 0 ? stepBeats : 1;
   const snapBeat = (b: number, bypass = false) => (!bypass && stepBeats > 0 ? Math.round(b / stepBeats) * stepBeats : b);
   const pitches = Array.from({ length: HIGH - LOW + 1 }, (_, k) => HIGH - k);
   const gridBeats = gridBeatsFor({
@@ -230,13 +294,13 @@ export function PianoRoll() {
     e.stopPropagation();
     // Shift-click edits the SELECTION and starts no drag — otherwise the same gesture
     // would both extend the selection and immediately begin moving it.
-    if (e.shiftKey) { setSelectedNotes(toggleSelection(selectedNotes, n.i, true)); return; }
+    if (e.shiftKey) { applySelection(toggleSelection(selectedNotes, n.i, true), { audition: true }); return; }
 
     // Grabbing a note that is already selected drags the WHOLE selection; grabbing an
     // unselected one selects just it first. (Replacing the selection unconditionally, as
     // this used to, is what made multi-note editing impossible.)
     const sel = selectedNotes.has(n.i) ? selectedNotes : new Set([n.i]);
-    if (sel !== selectedNotes) setSelectedNotes(sel);
+    if (sel !== selectedNotes) applySelection(sel, { audition: true });
 
     const byIndex = new Map((clip.notes ?? []).map((x) => [x.i, x]));
     const orig = new Map<number, MidiNote>();
@@ -264,6 +328,13 @@ export function PianoRoll() {
       const input = { orig: d.orig, dxPx: e.clientX - d.startX, dyPx: e.clientY - d.startY, bypassSnap };
       const edits = d.kind === "resize" ? resizeEdits(input, gestureGeom(bypassSnap))
                                         : moveEdits (input, gestureGeom(bypassSnap));
+      // AUDITION 1/4 — hear the pitch as you drag up the scale. Driven off the ANCHOR's
+      // previewed pitch, and notePreview itself collapses this to at most one command per
+      // crossed semitone, so a fast octave drag is a handful of notes rather than a flood.
+      if (d.kind !== "resize" && auditionTrackId) {
+        const anchor = previewFrom(d.orig, edits).get(d.anchorI);
+        if (anchor) notePreview.hold("pr-drag", auditionTrackId, anchor.pitch, anchor.velocity);
+      }
       // Inside the deadzone the preview is CLEARED, not merely left unwritten: dragging
       // out and back to the origin would otherwise release with the abandoned preview
       // still standing and commit the trip anyway.
@@ -282,6 +353,7 @@ export function PianoRoll() {
     if (d) {
       const final = previewRef.current;
       dragRef.current = null; setPreviewNotes(new Map());
+      notePreview.release("pr-drag");
       if (final.size === 0) return;
 
       if (d.kind === "copy") {
@@ -315,15 +387,23 @@ export function PianoRoll() {
     setLasso(null);
     if (!wasMoved) {
       const start = Math.max(0, snapBeat(x / beatPx, e.altKey)), pitch = lockPitch(pitchAt(y)), length = stepBeats > 0 ? stepBeats : 1;
+      // AUDITION 2/4 — hear what you just drew.
+      if (auditionTrackId) notePreview.tap(auditionTrackId, pitch);
       void exec("add_note", { clipId: clip.id, pitch, start, length, velocity: 100 });
       return;
     }
     // Shift-marquee ADDS to the selection rather than replacing it, so several sweeps can
     // build one selection up (Ableton behaves this way and it is muscle memory).
     const hit = marqueeHit(clip.notes ?? [], { x0: gd.x0, y0: gd.y0, x1: x, y1: y }, noteBox);
-    setSelectedNotes(e.shiftKey ? new Set([...selectedNotes, ...hit]) : new Set(hit));
+    applySelection(e.shiftKey ? new Set([...selectedNotes, ...hit]) : new Set(hit));
   };
-  const onGridCancel = () => { dragRef.current = null; gridDragRef.current = null; setPreviewNotes(new Map()); setLasso(null); };
+  // The single cancel funnel for pointercancel + lostpointercapture, which is why the
+  // stuck-note release is one line rather than one per exit.
+  const onGridCancel = () => {
+    dragRef.current = null; gridDragRef.current = null;
+    setPreviewNotes(new Map()); setLasso(null);
+    notePreview.release("pr-drag");
+  };
 
   // ── velocity lane ──────────────────────────────────────────────────────────
   // Which notes a single drag has touched, and the velocity it last painted on each.
@@ -417,6 +497,26 @@ export function PianoRoll() {
               <span className="tc">{velocityValue}</span>
             </label>
           )}
+          {/* Ableton's Preview switch (the headphone) and the computer-keyboard toggle.
+              Both are producer preferences, so they live in settings and persist. */}
+          <button className="btn" data-testid="pr-preview" aria-pressed={notePreviewOn}
+            onClick={() => {
+              const next = !notePreviewOn;
+              useSettings.getState().set("notePreview", next);
+              if (!next) notePreview.releaseAll();
+            }}
+            title={notePreviewOn
+              ? "Preview ON — notes sound through the track's instrument as you draw, drag, or select them."
+              : "Preview OFF — editing is silent. Click to hear notes as you edit."}>
+            {notePreviewOn ? "🎧" : "🎧̸"} Preview
+          </button>
+          <button className="btn" data-testid="pr-qwerty" aria-pressed={qwerty.active}
+            onClick={() => setQwertyActive(!qwerty.active)}
+            title={qwerty.active
+              ? `Computer MIDI keyboard ON — A-K play white keys, W/E/T/Y/U black. Z/X octave, C/V velocity. While it is on, single-letter shortcuts need Shift.`
+              : "Play notes with the computer keyboard (Ableton's M)."}>
+            ⌨ {qwerty.active ? `C${qwerty.octave} · v${qwerty.velocity}` : "Keys"}
+          </button>
           {mode === "piano" && (
             <button className="btn" data-testid="pr-scale-lock" aria-pressed={scaleLock}
               onClick={() => useSettings.getState().set("scaleLock", !scaleLock)}
@@ -464,7 +564,16 @@ export function PianoRoll() {
           <div className="pr-keys-vp" ref={keysRef}>
             <div className="pr-keys">
               {pitches.map((p) => (
-                <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
+                // AUDITION 3/4 — the gutter is playable: click a key to hear that pitch.
+                // Shift-click selects every note at that pitch instead (Ableton's gesture).
+                <div key={p} className={`pr-key ${isBlack(p) ? "black" : "white"}`} style={{ height: ROW_H }}
+                  data-testid="pr-key" data-pitch={p}
+                  title={`${noteName(p)} — click to hear it, shift-click to select its notes`}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    if (e.shiftKey) applySelection(selectAtPitch(clip.notes ?? [], p, true, selectedNotes));
+                    else if (auditionTrackId) notePreview.tap(auditionTrackId, p);
+                  }}>{p % 12 === 0 && <span>{noteName(p)}</span>}</div>
               ))}
             </div>
           </div>
@@ -519,6 +628,12 @@ export function PianoRoll() {
               })}
               {lasso && <div className="pr-lasso" style={{ left: Math.min(lasso.x0, lasso.x1), top: Math.min(lasso.y0, lasso.y1), width: Math.abs(lasso.x1 - lasso.x0), height: Math.abs(lasso.y1 - lasso.y0) }} />}
               <div className="pr-playhead" data-testid="pr-playhead" aria-hidden />
+              {/* Step-record insert marker — where the next typed note lands. Shown only
+                  while the computer keyboard is armed, so it never clutters mouse editing. */}
+              {qwerty.active && (
+                <div className="pr-insert" data-testid="pr-insert" aria-hidden
+                  style={{ left: insertBeat * beatPx }} />
+              )}
             </div>
           </div>
 

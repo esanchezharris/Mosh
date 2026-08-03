@@ -284,6 +284,11 @@ function interactionSettings(): SettingDef[] {
       constraints: { options: DAW_OPTIONS },
     },
     {
+      id: "notePreview", type: "bool", default: true, scope: "app",
+      category: "Interaction", label: "Hear notes as you edit",
+      help: "Ableton's Preview switch. Plays a note through the track's instrument when you draw it, drag it to a new pitch, click a key in the piano-roll gutter, or select it. Needs an instrument on the track.",
+    },
+    {
       id: "scaleLock", type: "bool", default: false, scope: "app",
       category: "Interaction", label: "Scale lock",
       help: "In the piano roll, snap notes you draw or drag to the song key, and dim the out-of-key rows. Existing notes are never rewritten. Off by default — set the key in the topbar.",
