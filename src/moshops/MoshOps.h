@@ -78,6 +78,7 @@ private:
     void applyMultiplayerCommitMessage (const juce::var& msg);
     juce::var cmdCreateTrack    (const juce::var& args);
     juce::var cmdRenameTrack    (const juce::var& args);
+    juce::var cmdSetTrackColor  (const juce::var& args);
     juce::var cmdRemoveTrack    (const juce::var& args);
     // SEC-001 — named song sections (MOSH_SECTIONS tree on the Edit; undoable).
     juce::var cmdCreateSection  (const juce::var& args);

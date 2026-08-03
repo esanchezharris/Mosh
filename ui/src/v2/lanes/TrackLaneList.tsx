@@ -209,7 +209,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {tracks.map((t) => (
               <Fragment key={t.id}>
                 <TrackLaneHeader track={t} />
-                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}${t.color ? " coloured" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px`, ...(t.color ? { "--track-col": t.color } : {}) } as React.CSSProperties}>
                   {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
                       gets real positioned lines, because a repeating gradient cannot express
                       an uneven grid and would drift from the ruler above. */}
@@ -396,7 +396,8 @@ function TrackLaneHeader({ track }: { track: Track }) {
 
   return (
     <div
-      className={`v2-lhead${sel ? " sel" : ""}`}
+      className={`v2-lhead${sel ? " sel" : ""}${track.color ? " coloured" : ""}`}
+      style={track.color ? ({ "--track-col": track.color } as React.CSSProperties) : undefined}
       role="group"
       aria-label={`${track.name} track`}
       data-testid="v2-track-header"

@@ -20,6 +20,14 @@ import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
 import { ReconciledRange } from "../ReconciledRange";
 import type { Clip, Track } from "../../types";
 
+// Eight track colours. Chosen to stay distinguishable in BOTH themes and against the
+// arrangement's dark lanes, and to survive the common red-green colour blindness (no
+// red/green pair carries meaning on its own — the icon and name still identify a track).
+export const TRACK_COLORS = [
+  "#ff5f5f", "#ff9f43", "#ffd166", "#4ade80",
+  "#38bdf8", "#818cf8", "#c084fc", "#f472b6",
+] as const;
+
 export function Inspector() {
   const snapshot = useStore((s) => s.snapshot);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
@@ -102,6 +110,38 @@ function MixTab({ track }: { track: Track }) {
           }}
         />
       </label>
+      {/* TRK-COLOUR (#550) — organisation, not sound. A palette rather than a colour
+          wheel: eight choices a producer picks from in a second beat a picker they have to
+          aim at, and the persisted format is still free hex (Ids.h), so changing this
+          palette later is a UI edit and never a migration. The last swatch clears back to
+          the type default — the command takes "" for exactly that, so "no colour" is a
+          real choice rather than a state you can only reach by undo. */}
+      <div className="v2-field v2-swatches" role="group" aria-label={`Colour for ${track.name}`}>
+        <span>Colour</span>
+        <div className="v2-swatch-row">
+          {TRACK_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`v2-swatch${(track.color ?? "") === c ? " on" : ""}`}
+              style={{ background: c }}
+              data-testid={`v2-track-color-${c.slice(1)}`}
+              aria-label={`Colour ${c}`}
+              aria-pressed={(track.color ?? "") === c}
+              onClick={() => void exec("set_track_color", { trackId: track.id, color: c })}
+            />
+          ))}
+          <button
+            type="button"
+            className={`v2-swatch v2-swatch-none${track.color ? "" : " on"}`}
+            data-testid="v2-track-color-none"
+            aria-label="Default colour"
+            aria-pressed={!track.color}
+            title="Back to the track type's default"
+            onClick={() => void exec("set_track_color", { trackId: track.id, color: "" })}
+          />
+        </div>
+      </div>
       <label className="v2-field">
         <span>Vol</span>
         <ReconciledRange key={`${track.id}:volume`} min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}

@@ -967,6 +967,46 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 
+    // ── TRK-COLOUR (#550) — set_track_color ────────────────────────────────────────
+    // Colour changes nothing audible, so --selftest CAN fully prove it: the whole
+    // capability is "does the value round-trip through the snapshot and survive undo".
+    // (Contrast arm_track, which this harness is structurally blind to — no audio device.)
+    check (ok (cmd (ops, "set_track_color", objN ({{ "trackId", tid }, { "color", "#ff5f5f" }}))),
+           "set_track_color accepts a well-formed hex colour");
+    check (firstTrack (ops).getProperty ("color", var()).toString() == "#ff5f5f",
+           "set_track_color: the colour reaches the snapshot");
+    // Case-insensitive in, normalized lowercase out — so a UI never has to guess which
+    // case the snapshot will echo back when it compares against its own palette.
+    check (ok (cmd (ops, "set_track_color", objN ({{ "trackId", tid }, { "color", "#00FF88" }}))),
+           "set_track_color accepts uppercase hex");
+    check (firstTrack (ops).getProperty ("color", var()).toString() == "#00ff88",
+           "set_track_color normalizes to lowercase");
+    // VALIDATION, not silent coercion: a bad colour must be visibly refused, and must not
+    // have half-applied. A command that quietly ignored this is the exact failure class
+    // the usability programme exists to remove.
+    check (! ok (cmd (ops, "set_track_color", objN ({{ "trackId", tid }, { "color", "red" }}))),
+           "set_track_color REJECTS a non-hex colour");
+    check (! ok (cmd (ops, "set_track_color", objN ({{ "trackId", tid }, { "color", "#ff5f5" }}))),
+           "set_track_color REJECTS a short hex colour");
+    check (firstTrack (ops).getProperty ("color", var()).toString() == "#00ff88",
+           "a rejected colour leaves the previous one intact");
+    check (! ok (cmd (ops, "set_track_color", objN ({{ "trackId", "no-such-track" }, { "color", "#112233" }}))),
+           "set_track_color REJECTS an unknown track");
+    // Undo restores the PREVIOUS colour, not the default — the G14 empty-transaction class
+    // (a setter that opens no real transaction makes undo destroy the edit before it).
+    check (ok (cmd (ops, "undo", objN ({}))), "undo after recolour ok");
+    check (firstTrack (ops).getProperty ("color", var()).toString() == "#ff5f5f",
+           "undo restores the PREVIOUS colour, not the default");
+    check (ok (cmd (ops, "redo", objN ({}))), "redo after recolour ok");
+    check (firstTrack (ops).getProperty ("color", var()).toString() == "#00ff88",
+           "redo re-applies the colour");
+    // "" clears back to the type default: a real operation, so the property goes AWAY
+    // rather than becoming an empty string the UI would have to special-case.
+    check (ok (cmd (ops, "set_track_color", objN ({{ "trackId", tid }, { "color", "" }}))),
+           "set_track_color accepts \"\" to clear");
+    check (! firstTrack (ops).hasProperty ("color"),
+           "clearing removes the colour property entirely");
+
     // move_clip -> start 2.0s
     { auto* a = new DynamicObject(); a->setProperty ("clipId", cid); a->setProperty ("start", 2.0);
       check (ok (cmd (ops, "move_clip", var (a))), "move_clip ok"); }

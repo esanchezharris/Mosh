@@ -351,6 +351,8 @@ export type Track = {
   // this track captures a point. Only "write" is behavioral in v0 — "touch"/"latch"
   // round-trip losslessly but are inert (Phase 2).
   automationMode?: "read" | "touch" | "latch" | "write";
+  /** "#rrggbb" (lowercase), or absent for the track type's default colour. */
+  color?: string;
   armed?: boolean;
   monitor?: "off" | "automatic" | "on";
   hasInput?: boolean;

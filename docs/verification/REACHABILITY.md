@@ -42,6 +42,7 @@ Row format (the guard parses these columns exactly):
 | Automation point editing (classic shell) | add_automation_point, set_automation_point | reachable | testid:open-automation | polish.spec.ts |
 | Ripple delete | delete_time_range | reachable | testid:v2-timerange-delete-ripple | v2-timerange.spec.ts |
 | Group / ungroup tracks | create_group_track, ungroup_track | gap:G18 | testid:v2-group-tracks | ripple-delete.spec.ts |
+| Track colour | set_track_color | reachable | testid:v2-track-color-none | track-color.spec.ts |
 | Live capture to a take (mic) | arm_track, stop_recording | hardware | — | — |
 
 ## Current debt (tracked)

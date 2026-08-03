@@ -411,6 +411,30 @@
 }
 .v2-clip.hdr > .v2-clip-label:active { cursor: grabbing; }
 
+/* TRK-COLOUR (#550) — a track's chosen colour, applied where a producer scanning a dozen
+   lanes actually looks: the header spine and the lane's left edge. Deliberately a SPINE
+   and not a filled lane — a saturated lane background fights the clips and the waveform
+   for attention, and the point of the colour is to find the row, not to decorate it.
+   Both read `--track-col`, set inline from the snapshot, so an untinted track costs no
+   extra DOM and no extra rule. */
+.v2-lhead.coloured { box-shadow: inset 3px 0 0 var(--track-col); }
+.v2-lhead.coloured .v2-licon { color: var(--track-col); }
+.v2-lane.coloured { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--track-col) 70%, transparent); }
+
+/* the Inspector's swatch row */
+.v2-swatches { align-items: flex-start; }
+.v2-swatch-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.v2-swatch {
+  width: 18px; height: 18px; border-radius: var(--v2-radius-xs);
+  border: 1px solid var(--v2-line); cursor: pointer; padding: 0;
+}
+.v2-swatch.on { outline: 2px solid var(--v2-accent); outline-offset: 1px; }
+/* "no colour" reads as a slash, not an empty box — an empty box looks like a missing
+   swatch rather than a choice. */
+.v2-swatch-none {
+  background: linear-gradient(135deg, transparent 45%, var(--v2-dim) 45%, var(--v2-dim) 55%, transparent 55%);
+}
+
 /* marquee (lasso) overlay — GESTURE-REACH. The `empty` region of every DAW preset in
    ui/src/interaction/gestureTables.ts promises drag-to-marquee; until this landed it was
    implemented only in the classic shell, so a v2 producer could not select more than one

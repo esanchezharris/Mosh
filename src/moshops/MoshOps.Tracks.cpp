@@ -93,6 +93,39 @@ juce::var MoshOps::cmdRenameTrack (const juce::var& args)
     return okResult ("rename_track");
 }
 
+// TRK-COLOUR (#550) — recolour a track. Colour is pure organisation: it changes nothing
+// audible, which is exactly why it earns its place in a beat-first session where a
+// producer is looking at a dozen lanes and needs to find the drums instantly.
+//
+// VALIDATES rather than coerces. An unparseable colour that silently did nothing would be
+// the failure mode this whole programme exists to remove, so a bad value is an error the
+// caller sees. "" clears back to the type default — a real operation, not a rejection.
+juce::var MoshOps::cmdSetTrackColor (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    te::Track* track = findTrack (id);
+    if (track == nullptr) track = findGroupTrack (id);   // groups recolour too, like rename
+    if (track == nullptr) return errResult ("set_track_color", "no track: " + id);
+
+    auto colour = args.getProperty ("color", var()).toString().trim().toLowerCase();
+    if (colour.isNotEmpty())
+    {
+        const bool wellFormed = colour.length() == 7
+                             && colour[0] == '#'
+                             && colour.substring (1).containsOnly ("0123456789abcdef");
+        if (! wellFormed)
+            return errResult ("set_track_color",
+                              "color must be \"#rrggbb\" or \"\" to clear, got: " + colour);
+    }
+
+    beginTxn ("set_track_color");
+    if (colour.isEmpty()) track->state.removeProperty (ids::trackColour, &undoManager());
+    else                  track->state.setProperty (ids::trackColour, colour, &undoManager());
+    logLine ("set_track_color", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_color");
+}
+
 juce::var MoshOps::cmdRemoveTrack (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();

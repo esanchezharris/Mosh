@@ -235,14 +235,27 @@ describe("legacy prompt byte-stability pin", () => {
     // commit carries the new text. build_add_note_corrective.py parses AGENT_COMMANDS out
     // of commands.ts, so it needs no edit.
     //
+    // Moved 2026-08-03 (second time today) — `set_track_color` added to the catalog.
+    //   set_track_color — the usability programme's first genuinely NEW command rather than
+    //                     a UI for something the engine already had. Track colour is pure
+    //                     organisation (it changes nothing audible), which is exactly why a
+    //                     beat-first producer staring at a dozen lanes wants it. Args
+    //                     {trackId, color:"#rrggbb"|""}; "" clears to the type default.
+    //
+    // This one DOES add a command, so unlike the loop-region move above it is a real
+    // catalog growth: an SFT corpus or GEPA baseline rebuilt after this commit carries a
+    // command the older ones never saw. Not invalidating (nothing was removed or renamed),
+    // but worth knowing before comparing runs across this line.
+    //
     // Previous pins:
+    // - pre-set-track-color: 28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721
     // - pre-loop-region-args: a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-builtins-vocabulary (unified renderer + issue #539 wording): e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
     // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
     // - pre-musical-time contract: a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721");
+    expect(hash).toBe("6ad2eb8b3f352b88fbf89375dfe1b52b23aaac981b2d6dc7ddf18111d868ab5d");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

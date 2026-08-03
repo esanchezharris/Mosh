@@ -42,6 +42,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── tracks ──────────────────────────────────────────────────────────────
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
+  { command: "set_track_color", desc: "Recolour a track for organisation (changes nothing audible)", args: [S("trackId"), S("color", true, '"#rrggbb" lowercase hex, or "" to clear back to the type default')] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
   // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
   { command: "create_section", desc: "Add a named song section using quarter-note beat offsets from project start — never seconds (in 4/4, bar 1 to bar 5 is startBeat 0 to endBeat 16)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
@@ -251,6 +252,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "remember_preference": return `Remembered: "${a.text ?? ""}"`;
     case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
+    case "set_track_color": return a.color ? `Recoloured a track ${a.color}` : `Cleared a track's colour`;
     case "remove_track": return `Removed a track`;
     case "add_test_tone_clip": return `Added a test tone`;
     case "import_clip": return `Imported audio ${a.file ? String(a.file).split("/").pop() : "clip"}${a.startSeconds ? ` at ${a.startSeconds}s` : ""}`;
