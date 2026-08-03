@@ -44,6 +44,17 @@ export function drumPatternLanePitch(key: string): number {
 
 const err = (error: string): DrumPatternParse => ({ ok: false, error });
 
+/** Agents often send velocity on a 0-1 scale, or as fractional MIDI. Normalize the
+ *  two reasonable shapes to integer MIDI ((0,1) scales to 1-127, other fractions
+ *  round); everything else passes through untouched so parseDrumPattern still
+ *  fails loud on real garbage. MIRRORED in MoshOps.cpp cmdAddDrumPattern.
+ */
+export function normalizeDrumVelocity(velocity: number): number {
+  if (!Number.isFinite(velocity) || Number.isInteger(velocity)) return velocity;
+  if (velocity > 0 && velocity < 1) return Math.max(1, Math.round(velocity * 127));
+  return Math.round(velocity);
+}
+
 /** Parse a pattern (object {lane: steps} or flat string "lane: steps; lane: steps").
  *  bars == 0 derives bars from the longest lane. */
 export function parseDrumPattern(

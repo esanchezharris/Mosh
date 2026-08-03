@@ -1,3 +1,4 @@
+#include <cmath>
 #include "MoshOps.h"
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
@@ -1400,9 +1401,21 @@ juce::var MoshOps::cmdAddDrumPattern (const juce::var& args)
     const auto clipId      = args.getProperty ("clipId", var()).toString();
     const int  stepsPerBar = (int) args.getProperty ("stepsPerBar", 16);
     const int  bars        = (int) args.getProperty ("bars", 0);
-    const int  velocity    = (int) args.getProperty ("velocity", 100);
+    int        velocity    = (int) args.getProperty ("velocity", 100);
     const double start     = (double) args.getProperty ("start", 0.0);
     const auto clipName    = args.getProperty ("name", "Drums").toString();
+
+    // Agents often send velocity on a 0-1 scale, or as fractional MIDI — the
+    // literal (int) read above truncates those to 0 and the parse fails. Normalize
+    // the two reasonable shapes from the raw var instead (MIRRORED in
+    // drumPatternUtil.ts normalizeDrumVelocity — keep in lockstep).
+    {
+        const double rawVelocity = (double) args.getProperty ("velocity", 100);
+        if (rawVelocity > 0.0 && rawVelocity < 1.0)
+            velocity = juce::jmax (1, (int) std::lround (rawVelocity * 127.0));
+        else if (std::abs (rawVelocity - (double) std::lround (rawVelocity)) > 1e-9)
+            velocity = (int) std::lround (rawVelocity);
+    }
 
     // Validate + parse + resolve the target BEFORE the transaction: every error
     // path below leaves no empty undo step (the cmdLoadDrumKit discipline).
