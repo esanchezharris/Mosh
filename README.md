@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mosh-logo.png" width="110" alt="Mosh logo">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/mosh-icon-white.png"><img src="assets/mosh-icon.png" width="110" alt="Mosh logo"></picture>
 </p>
 
 <h1 align="center">Mosh</h1>
