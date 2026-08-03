@@ -18,6 +18,7 @@ import { beatSeconds } from "../../time";
 import { meterOf } from "../timeline/geom";
 import { EditorAction as EA, type Mods } from "../../interaction/actions";
 import { resolveGesture } from "../../interaction/gestures";
+import { selectSimilarIds } from "./selectSimilar";
 import { classifyClipRegion } from "../../interaction/region";
 import { liveFeel, liveGestureTable } from "../../interaction/config";
 import { passedDragThreshold, isDoubleClick } from "../../interaction/feel";
@@ -403,6 +404,15 @@ function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar
       data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={onMenuKeyDown}>
       <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>{splitLabel}</button>
       <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+      {/* #554 — select every copy of this loop, project-wide. UI-LOCAL: selection never
+          crosses the seam, so there is no command here and never will be. Keyed on the
+          SOURCE file (name only for MIDI, which has none), matching Reaper and Pro Tools.
+          Lives beside Duplicate because both answer "act on more than just this one". */}
+      <button role="menuitem" tabIndex={-1} data-testid="clip-select-similar"
+        onClick={() => run(() => {
+          const ids = selectSimilarIds(useStore.getState().snapshot, clip.id);
+          useStore.getState().select(ids, false);
+        })}>Select similar</button>
       {drumClip && memoryOn && (
         <button role="menuitem" tabIndex={-1} data-testid="clip-save-pattern" onClick={() => run(() => void savePattern())}>
           Save pattern to memory

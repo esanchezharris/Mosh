@@ -495,6 +495,31 @@ function ClipTab({ clip }: { clip: Clip }) {
           <span className="v2-val">s</span>
         </label>
       )}
+      {/* CAP-CLP-016 — the play-start OFFSET: which point in the source the clip starts
+          playing from. `trim_clip{offset}` has always been read by cmdTrimClip and sent
+          by the edge-drag layer, but it was undeclared in the catalog and had no control,
+          so a producer could only reach it by dragging a clip's left edge — which also
+          moves the clip. This slides the audio INSIDE the clip and leaves the clip where
+          it is: the difference between "start this later" and "start it from later in the
+          sample". Length is held constant for the same reason. */}
+      <label className="v2-field">
+        <span>Offset</span>
+        <input
+          type="number"
+          min={0}
+          step={0.01}
+          aria-label="Play-start offset into the source (seconds)"
+          data-testid="v2-clip-offset"
+          value={Number((clip.offset ?? 0).toFixed(3))}
+          onChange={(e) => void exec("trim_clip", {
+            clipId: clip.id,
+            start: clip.start,
+            length: clip.length,
+            offset: Math.max(0, Number(e.target.value)),
+          })}
+        />
+        <span className="v2-val">s</span>
+      </label>
       {isWave && (
         <label className="v2-field">
           <span>Normalize to</span>
@@ -533,6 +558,9 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
   const exec = useStore((s) => s.exec);
   const session = useStore((s) => s.snapshot?.session);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
+  // Local, not persisted: quantize strength is a per-gesture decision, like the amount
+  // on a nudge — a producer picks it for THIS pass, not for the project.
+  const [strengthPct, setStrengthPct] = useState(100);
   // `quantize_notes` takes `division` as a NUMBER OF BEATS (1 = 1/4, 0.25 = 1/16), not a
   // label. This button used to pass the string "1/16" — which JUCE's `var` coerces via
   // String::getDoubleValue(), parsing the leading numeral to 1.0 — so a button reading
@@ -547,7 +575,27 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
       {drum
         ? <button className="v2-btn primary" data-testid="v2-open-drumgrid" onClick={() => useDrumWindow.getState().open(clip.id)}>Open drum grid</button>
         : <button className="v2-btn primary" data-testid="v2-open-pianoroll" onClick={() => openPianoRoll(clip.id)}>Open piano-roll</button>}
-      <button className="v2-btn" data-testid="v2-quantize-16" onClick={() => void exec("quantize_notes", { clipId: clip.id, division: sixteenth, strength: 1 })}>Quantize 1/16</button>
+      {/* #552 — `strength` has been a real cmdQuantizeNotes argument all along and the
+          call site hardcoded 1, so a producer could only have FULL quantize: the one
+          setting that strips a groove entirely. 100% snaps to the grid, lower values
+          move each note a fraction of the way and keep the human timing. No swing
+          control here on purpose — the engine has no swing term, so a swing slider
+          would be a fresh inert surface of exactly the kind this programme removes. */}
+      <label className="v2-field">
+        <span>Strength</span>
+        <input
+          type="range" min={0} max={100} step={5}
+          aria-label="Quantize strength (percent)"
+          data-testid="v2-quantize-strength"
+          value={strengthPct}
+          onChange={(e) => setStrengthPct(Number(e.target.value))}
+        />
+        <span className="v2-val">{strengthPct}%</span>
+      </label>
+      <button className="v2-btn" data-testid="v2-quantize-16"
+        onClick={() => void exec("quantize_notes", { clipId: clip.id, division: sixteenth, strength: strengthPct / 100 })}>
+        Quantize 1/16
+      </button>
     </div>
   );
 }
