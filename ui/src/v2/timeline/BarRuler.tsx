@@ -12,6 +12,18 @@
 // classic's onRulerDown, which resolves seek-vs-loop-region the same way at the same
 // event for the same reason.
 //
+// GESTURE-REACH — seek and the range drag resolve through the gesture TABLE
+// (`interaction/gestureTables.ts` RULER_RULES) rather than an `if (e.shiftKey)`. Every
+// preset ships the SAME ruler rules, so this changes no behaviour today; what it buys is
+// that the ruler stops being the one region the user's "Mouse gestures" setting cannot
+// reach, and that `gestureReach.test.ts` can assert the region resolves at all instead of
+// carrying it as a written exception. If a preset ever wants a different ruler idiom, it
+// becomes a table edit rather than a code edit.
+//
+// The one honest mapping: the table's LOOP_REGION opens v2's range BAND, which is a
+// superset — its toolbar turns the span into a loop, a delete, a close-gap delete or a
+// re-imagine. Classic's LOOP_REGION sets the loop directly. Same gesture, richer result.
+//
 // WHY snapTimeMap, NEVER geom.ts's flat helpers: geom.ts derives every position from
 // session.tempo alone — one number, the tempo at time zero — which is only correct
 // while the tempo never changes. A project can now hold real tempo changes (the tempo
@@ -27,6 +39,9 @@ import type { Snapshot } from "../../types";
 import { tempoMapFrom, snapTimeMap, gridLines, type SnapDiv, type TempoMap } from "../../time";
 import { contentSeconds } from "./geom";
 import { usePointerScrub } from "./usePointerScrub";
+import { EditorAction as EA } from "../../interaction/actions";
+import { resolveGesture } from "../../interaction/gestures";
+import { liveGestureTable } from "../../interaction/config";
 
 const capturePointer = (element: HTMLElement, pointerId: number) => {
   if (typeof element.setPointerCapture !== "function") return;
@@ -102,7 +117,10 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (rangePointer.current != null || scrub.isActive()) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    if (e.shiftKey) {
+    const mods = { shift: e.shiftKey, alt: e.altKey, meta: e.metaKey || e.ctrlKey };
+    const tool = useStore.getState().tool;
+    const dragAction = resolveGesture(liveGestureTable(), { region: "ruler", gesture: "drag", mods, tool });
+    if (dragAction === EA.LOOP_REGION) {
       const sec = snappedSecAt(map, pxPerSec, e.clientX, rect.left, snapDivision, snap, e.altKey);
       anchor.current = sec;
       rangePointer.current = e.pointerId;
@@ -112,6 +130,10 @@ export function BarRuler({ snapshot, width }: { snapshot: Snapshot; width: numbe
       capturePointer(e.currentTarget, e.pointerId);
       return;
     }
+    // Plain press: SEEK. v2 additionally SCRUBS while held (#517 — a held drag used to
+    // emit a single seek), which the table has no rule for because a scrub is a
+    // continuous refinement of the same seek, not a second action.
+    if (resolveGesture(liveGestureTable(), { region: "ruler", gesture: "click", mods, tool }) !== EA.SEEK) return;
     scrub.begin(e.currentTarget, e.pointerId, positionAt(e.currentTarget, e.clientX));
   };
 

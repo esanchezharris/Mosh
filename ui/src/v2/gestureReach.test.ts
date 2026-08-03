@@ -28,15 +28,19 @@
 // surfaced the three real gaps.) This mirrors uiReachability.test.ts excluding
 // `ui/src/agent`, which holds the command catalog, for exactly the same reason.
 //
-// WHY ACTIONS AND NOT REGIONS. An earlier draft also asserted that every table `region`
-// resolves in v2. That still fails for `ruler` — not because the capability is missing:
-// v2 implements ruler seek/loop BY HAND (`v2/timeline/BarRuler.tsx`) instead of routing
-// them through `resolveGesture`. That is a design observation, not a user-facing gap, and
-// asserting on it would fail the gate for something a producer can already do. Actions
-// are the capability; regions are an implementation detail.
-// (`clip.header` / `clip.body` DO resolve now — `ClipView.tsx` passes a real `headerPx`
-// under a table that distinguishes them. `ui/e2e/gesture-clip-regions.spec.ts` is the
-// behavioural proof, since a region is decided from layout that jsdom does not have.)
+// ACTIONS AND REGIONS. It asserts BOTH now. Actions are the capability ("can a producer
+// marquee at all?"); regions are how a gesture finds its rule, and a region v2 never
+// classifies is a region whose whole rule-set is unreachable no matter how the table
+// changes. Regions were excluded at first because `ruler` and `clip.edge` resolved
+// nowhere — v2 implemented ruler seek/loop and edge-trim BY HAND, so asserting on them
+// would have failed the gate for things a producer could already do. Both are routed
+// through `resolveGesture` now, so the exception is retired rather than carried:
+//   • `clip.header` / `clip.body` — ClipView passes a real `headerPx` under a table that
+//     distinguishes them (proof: `ui/e2e/gesture-clip-regions.spec.ts`).
+//   • `ruler` — BarRuler resolves seek vs range through the table (proof:
+//     `ui/e2e/v2-timerange.spec.ts`, which predates this and still passes unchanged).
+// A carried exception that has quietly become false is the exact drift this repo keeps
+// paying for, so the rule is: retire it the moment it stops being true.
 // ─────────────────────────────────────────────────────────────────────────────
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -102,6 +106,16 @@ const searched = graph.filter((f) =>
   && !f.endsWith("bridge.mock.ts"));         // the dev backend implements everything
 const shell = searched.map((f) => readFileSync(f, "utf8")).join("\n");
 
+/** `shell` with comments removed. Needed by any check whose pattern could legitimately
+ *  appear in PROSE — a guard that fails on a comment describing the bug it prevents is a
+ *  false positive, and I hit exactly that: ClipView's header comment quotes the old
+ *  `headerPx: 0` while the code no longer does it. `://` is spared so a URL in a string
+ *  literal cannot swallow the rest of its line (that would hide a real hit — the
+ *  dangerous direction). */
+const code = shell
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 const isImplemented = (action: string) =>
   shell.includes(`"${action}"`)
   || new RegExp(`\\b(?:EA|EditorAction)\\.${action.toUpperCase()}\\b`).test(shell);
@@ -136,6 +150,40 @@ describe("gesture reachability — the shipped shell honours its gesture table (
       + "this repo can see this. Either implement the gesture, or add it to GESTURE_GAPS with "
       + "a reason.",
     ).toEqual([]);
+  });
+
+  it("every region a shipped table addresses can actually be produced by v2", () => {
+    // A region v2 never produces makes every rule targeting it dead, however correct the
+    // rule is. Two ways a region reaches the resolver, and the check has to know both:
+    //   • lane/ruler surfaces NAME theirs in the resolveGesture call ("empty", "ruler").
+    //   • clip.* forms are RETURNED by classifyClipRegion (interaction/region.ts), which
+    //     is outside the searched surface by design — so a literal search would report
+    //     them missing forever. Calling the classifier is what makes them producible.
+    const regions = [...new Set(Object.values(GESTURE_TABLES).flatMap((t) => t.map((r) => r.region)))];
+    const callsClassifier = shell.includes("classifyClipRegion(");
+    const producible = (region: string) =>
+      shell.includes(`"${region}"`) || (region.startsWith("clip") && callsClassifier);
+    expect(
+      regions.filter((r) => !producible(r)),
+      "These regions are addressed by a shipped gesture table but v2 can never produce "
+      + "them, so every rule targeting them is dead.",
+    ).toEqual([]);
+  });
+
+  it("the clip classifier is not called with a header height of zero", () => {
+    // The sharp edge of the check above, and the exact bug it exists to prevent from
+    // returning. classifyClipRegion only returns "clip.header" when headerPx > 0
+    // (interaction/region.ts:23). v2 called it with a hardcoded `headerPx: 0`, so
+    // Ableton's and Pro Tools' clip.header/clip.body rules were unreachable — while
+    // every static signal said the region was wired, because the CALL was there.
+    // A region is only producible if the argument permits it.
+    const zeroed = /headerPx:\s*0\b/.test(code);
+    expect(
+      zeroed,
+      "v2 passes a literal `headerPx: 0` to classifyClipRegion, which makes clip.header "
+      + "impossible to produce and silently kills every header/body rule. Pass a real "
+      + "height when the active table distinguishes them (see ClipView's headerPx()).",
+    ).toBe(false);
   });
 
   it("every declared gap is still a gap (wiring one up must delete its entry)", () => {
