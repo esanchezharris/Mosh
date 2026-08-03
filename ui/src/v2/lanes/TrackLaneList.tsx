@@ -422,6 +422,29 @@ function TrackLaneHeader({ track }: { track: Track }) {
         <TrackMeterBar trackId={track.id} />
       </button>
       <span className="v2-ms">
+        {/* G15 / CAP-REC-004 — the per-track RECORD ARM. `arm_track` and `stop_recording`
+            have always landed takes on EVERY armed track, but the only way to arm from v2
+            was the transport Record button, which auto-arms the SELECTED track alone. So
+            multi-track simultaneous recording — a whole band, or a vocal and a room mic —
+            was engine-complete and unreachable by mouse.
+
+            Disabled with a reason when the track has no routed input: arming a track that
+            cannot receive audio would record silence and look like a working take. The
+            snapshot already carries `hasInput`, so this is an honest gate, not a guess.
+
+            NOT undoable by design, matching cmdArmTrack: arming is a transport decision
+            like monitor mode, not an edit to the project. */}
+        <button
+          className={`r${track.armed ? " on" : ""}`}
+          data-testid="v2-track-arm"
+          aria-label={`Record-arm ${track.name}`}
+          aria-pressed={!!track.armed}
+          disabled={track.hasInput === false}
+          title={track.hasInput === false
+            ? `${track.name} has no input routed — pick one in the Inspector's Mix tab before arming`
+            : `Record-arm ${track.name}`}
+          onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
+        >R</button>
         <button
           className={`m${track.mute ? " on" : ""}`}
           aria-label="Mute"

@@ -15,7 +15,7 @@ import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
-import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
+import { midiInputOptions, waveInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
 import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
 import { ReconciledRange } from "../ReconciledRange";
 import type { Clip, Track } from "../../types";
@@ -125,7 +125,7 @@ function MixTab({ track }: { track: Track }) {
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
       <OutputField track={track} />
-      {track.isInstrument && <MidiInputField track={track} />}
+      {track.isInstrument ? <MidiInputField track={track} /> : <AudioInputField track={track} />}
       <InputMonitorField track={track} />
       <div className="v2-mix-btns">
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
@@ -200,6 +200,36 @@ function MidiInputField({ track }: { track: Track }) {
       <span>MIDI in</span>
       <select className="btn ghost" data-testid="v2-midi-input"
         aria-label={`MIDI input for ${track.name}`} value={currentTrackInput(track)}
+        onChange={(e) => void exec("set_track_input", { trackId: track.id, deviceID: e.target.value })}>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// G15 — the per-track AUDIO-input picker, the wave-side twin of MidiInputField above.
+// Its absence was load-bearing, not cosmetic: an audio track's only input choice lived in
+// the GLOBAL Settings panel, so a producer could not route two different sources to two
+// tracks — which is exactly what multi-track recording means, and what the new per-track
+// arm toggle exists to enable. It also made the arm button's own disabled tooltip
+// ("pick one in the Inspector's Mix tab") untrue for audio tracks, which is the kind of
+// almost-right surface this programme exists to remove.
+//
+// Same shape and same command as the MIDI twin: read-only `list_wave_inputs` enumeration
+// (lazy — loadRouting is on-demand, never at init, because execute_command is synchronous
+// on the UI thread and a service-spawning call at startup freezes the shell), routed
+// through the existing `set_track_input`. No new mutation command.
+function AudioInputField({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const waveInputs = useStore((s) => s.waveInputs);
+  const loadRouting = useStore((s) => s.loadRouting);
+  useEffect(() => { void loadRouting(); }, [loadRouting]);
+  const opts = waveInputOptions(waveInputs);
+  return (
+    <label className="v2-field">
+      <span>Audio in</span>
+      <select className="btn ghost" data-testid="v2-track-input"
+        aria-label={`Audio input for ${track.name}`} value={currentTrackInput(track)}
         onChange={(e) => void exec("set_track_input", { trackId: track.id, deviceID: e.target.value })}>
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

@@ -273,6 +273,12 @@
    names ("stays dark in BOTH themes"). #1a1206 was a bespoke near-black doing the same job. */
 .v2-ms button.on.m { background: var(--mute, #ffb454); color: var(--on-accent); border-color: transparent; }
 .v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* G15 — record arm. Uses the transport's own --v2-rec so an armed track and the Record
+   button read as the same state, and dims to the standard disabled treatment when the
+   track has no routed input (arming something that cannot receive audio would record
+   silence and look like a working take). */
+.v2-ms button.on.r { background: var(--v2-rec); color: var(--on-accent); border-color: transparent; }
+.v2-ms button.r:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* UI-REACH remove_track — hover/focus-revealed like the tempo lane's own point-remove
    button (.v2-tempo-rm). Deliberately position:absolute, NOT a flex sibling: a first

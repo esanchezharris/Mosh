@@ -19,7 +19,7 @@ _From `docs/reality-pack/daw_capability_matrix.csv` — the sourced enumeration 
 
 | Tier | capabilities | engine shipped | UI reachable | SHIPPED | PARTIAL | MISSING |
 |---|---|---|---|---|---|---|
-| T0 — daily-driver core | 28 | 19 (68%) | 13 (46%) | 13 | 15 | 0 |
+| T0 — daily-driver core | 28 | 19 (68%) | 14 (50%) | 14 | 14 | 0 |
 | T1 — pro | 112 | 35 (31%) | 19 (17%) | 19 | 35 | 58 |
 | T2 — niche | 55 | 6 (11%) | 7 (13%) | 6 | 11 | 38 |
 | X — rejected (owner-signed) | 2 | 0 (0%) | 0 (0%) | 0 | 0 | 0 |
@@ -100,14 +100,11 @@ Read live from `scripts/daw-conformance/parity_backlog.jsonl` (the minimal G-pre
 | id | status | class | size | Gap |
 |---|---|---|---|---|
 | G10b | ready | native | M | Automation touch/latch modes + multi-target conflict policy |
-| G15 | ready | cheap | M | v2 per-track record affordances (arm toggle, input monitor, input picker) |
 | G16 | ready | cheap | M | v2 automation surface (write-arm control + lane editing) |
-| G17 | ready | cheap | S | Ripple-delete UI affordance |
 | G18 | ready | cheap | S | Group/ungroup track UI affordance |
-| G19 | ready | cheap | S | Stem-export UI affordance in ExportControls |
 | G20 | ready | native | S | stretch_clip fails on a just-reversed clip — it reads the proxy's length, not the source's |
 
-_16 parity items landed and reconciled (G5, G6, G8, G9, G3, G14, G1, G7, G4a, G4b, G2a, G2b, G11, G13, G10, G12) — evidence lives in their backlog notes._
+_19 parity items landed and reconciled (G5, G6, G8, G9, G3, G14, G1, G7, G4a, G4b, G2a, G2b, G11, G13, G10, G12, G15, G17, G19) — evidence lives in their backlog notes._
 
 ## How this stays honest
 
