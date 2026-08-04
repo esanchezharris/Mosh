@@ -186,6 +186,40 @@ def stats(path):
     }
 
 
+def onsets_seconds(path, rel_thresh=0.18, min_gap_s=0.02):
+    """Attack times (seconds) in a percussive render, by peak-picking the rectified first
+    difference of a short-time peak envelope.
+
+    Deliberately simple and dependency-free: the renders this runs on are single-voice
+    drum hits with hard transients, so an amplitude-flux detector resolves every onset to
+    within a hop (~1.5 ms at 44.1 kHz) and has no library behaviour to drift on. It exists
+    because timing is the one thing a note-position assertion CANNOT prove — a quantize can
+    write the right beat numbers and still render the wrong groove."""
+    data, sr, _ = load_wav(path)
+    m = np.abs(mono(data))
+    hop = 64
+    n = (m.size // hop) * hop
+    if n == 0 or not sr:
+        return []
+    env = m[:n].reshape(-1, hop).max(axis=1)
+    flux = np.diff(env, prepend=0.0)
+    flux[flux < 0.0] = 0.0
+    top = float(flux.max())
+    if top <= 0.0:
+        return []
+    flux = flux / top
+    gap = max(1, int(round(min_gap_s * sr / hop)))
+    out, last = [], -(10 ** 9)
+    for i in range(flux.size):
+        if flux[i] < rel_thresh or i - last < gap:
+            continue
+        if flux[i] < float(flux[i:i + gap].max()):
+            continue        # still on the rising edge — the peak frame is the onset
+        out.append(i * hop / sr)
+        last = i
+    return out
+
+
 def diff_rms(a, b):
     """RMS of the sample-aligned difference of two WAVs (how different they are)."""
     ma, mb = mono(load_wav(a)[0]), mono(load_wav(b)[0])
@@ -1894,6 +1928,76 @@ def check_insert_time(ctx):
                 "undo_diff_rms": diff_rms(before_out, undo_out)})
 
 
+def check_quantize_swing(ctx):
+    """CAP-MID-004: `quantize_notes` swing DELAYS every second subdivision of the grid and
+    leaves the on-beat subdivisions exactly where they are.
+
+    Proven in RENDERED AUDIO, because that is the only lane that can see a groove. A
+    note-position assertion in `--selftest` is precisely the shape of test that passes while
+    the result is inaudible — so this renders the SAME clip twice in one process: once
+    quantized straight (the control, and the RED reference) and once re-quantized with
+    swing. The control must give UNIFORM inter-onset intervals; the swung render must
+    ALTERNATE long-short-long-short, with the even (on-beat) onsets unmoved.
+
+    On an engine with no swing term the second quantize is a no-op, both renders are the
+    same uniform 16ths, the ratio is ~1.0 and this check FAILS. That is the RED."""
+    SESSION = "verify-quantize-swing"
+    straight = ART / "13_quantize_straight.wav"
+    swung = ART / "13_quantize_swung.wav"
+    DIV, SWING, BPM = 0.25, 60.0, 120.0            # 1/16 grid, MPC-65 feel, 8 hits over 2 beats
+    # Deterministic jitter so the straight pass is a REAL quantize and not a no-op; every
+    # nudge is well under half a division, so each note's target grid slot is unambiguous.
+    JITTER = [0.03, -0.04, 0.05, -0.03, 0.04, -0.05, 0.02, -0.02]
+    notes = [{"pitch": 42, "start": round(i * DIV + JITTER[i], 4), "length": 0.05, "velocity": 120}
+             for i in range(8)]
+    cmds = [
+        {"command": "set_tempo", "args": {"bpm": BPM}},
+        {"command": "create_track", "args": {"name": "Swing", "type": "drum"}, "capture": {"T": "trackId"}},
+        {"command": "add_midi_clip", "args": {"trackId": "${T}", "start": 0, "length": 2, "notes": notes},
+         "capture": {"C": "clipId"}},
+        # Control — `swing` OMITTED, i.e. the untouched default path.
+        {"command": "quantize_notes", "args": {"clipId": "${C}", "division": DIV, "strength": 1.0}},
+        {"command": "export_audio", "args": {"file": str(straight)}},
+        # The same, now dead-on-grid clip, re-quantized WITH swing.
+        {"command": "quantize_notes", "args": {"clipId": "${C}", "division": DIV, "strength": 1.0, "swing": SWING}},
+        {"command": "export_audio", "args": {"file": str(swung)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION)
+    fails = failed_commands(results)
+    if fails or not (straight.exists() and swung.exists()):
+        return row("Quantize swing (rendered groove)", False,
+                   {"failed_commands": fails, "straight": straight.exists(), "swung": swung.exists(),
+                    "stderr": proc.stderr[-500:]})
+
+    moved = [r.get("data", {}).get("moved") for r in results if r.get("command") == "quantize_notes"]
+    so, sw = onsets_seconds(straight), onsets_seconds(swung)
+    detail = {"onsets_straight": [round(t, 4) for t in so], "onsets_swung": [round(t, 4) for t in sw],
+              "moved": moved, "division_beats": DIV, "swing": SWING, "bpm": BPM}
+    if len(so) != 8 or len(sw) != 8:
+        detail["error"] = "onset detection did not resolve 8 hits in both renders"
+        return row("Quantize swing (rendered groove)", False, detail)
+
+    si, wi = np.diff(so), np.diff(sw)
+    uniform = float(si.max() / si.min()) if si.min() > 0 else 0.0
+    # 8 onsets → 7 gaps, so the long run is one longer than the short run; pair them off.
+    longs, shorts = wi[0::2], wi[1::2]                       # odd subdivisions were delayed
+    n = min(longs.size, shorts.size)
+    longs, shorts = longs[:n], shorts[:n]
+    ratio = float(longs.mean() / shorts.mean()) if n and shorts.mean() > 0 else 0.0
+    # The on-beat subdivisions (even k) must not have moved at all — this is what separates
+    # "swing" from "shift the whole pattern late".
+    onbeat_drift = max(abs(sw[i] - so[i]) for i in range(0, 8, 2))
+    detail.update({"straight_uniformity": round(uniform, 4), "swing_long_short_ratio": round(ratio, 4),
+                   "onbeat_drift_s": round(onbeat_drift, 5),
+                   "moved_by_swing": moved[1] if len(moved) > 1 else None})
+    ok = (uniform < 1.15                                     # control really is straight
+          and ratio > 1.4                                    # theory at swing=60 is 0.325/0.175 = 1.857
+          and bool((longs > shorts).all())                   # long-short-long-short, every pair
+          and onbeat_drift < 0.008                           # the on-beats stayed put (~2 hops)
+          and moved[1:] == [4])                              # exactly the 4 odd subdivisions moved
+    return row("Quantize swing (rendered groove)", ok, detail)
+
+
 OFFLINE_CHECKS = [check_spectral_helpers, check_export_dither,
                   check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
@@ -1904,7 +2008,7 @@ OFFLINE_CHECKS = [check_spectral_helpers, check_export_dither,
                   check_skill_transaction_real_engine, check_stem_export,
                   check_clip_fades, check_clip_reverse, check_warp_stretch,
                   check_automation_ramp, check_send_return, check_master_chain,
-                  check_insert_time]
+                  check_insert_time, check_quantize_swing]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,9 @@
 //   • Quantize strength (#552)       — cmdQuantizeNotes has taken `strength` all along;
 //                                      the call site hardcoded 1, so only FULL quantize
 //                                      was reachable — the one setting that kills a groove
+//   • Quantize swing (CAP-MID-004)   — the exception to the rule above: the engine had NO
+//                                      swing term, so this one shipped ENGINE FIRST and the
+//                                      slider landed with it (#552's remaining half)
 //   • Clip play-start offset         — trim_clip{offset} read by cmdTrimClip and sent by
 //     (CAP-CLP-016)                    the edge-drag layer, but undeclared and uncontrolled
 //
@@ -70,6 +73,32 @@ test.describe("engine-backed controls that had no UI", () => {
     await strength.fill("50");
     await expect(page.locator("text=50%")).toBeVisible();
     // The button still works at a partial strength (the command accepts 0..1).
+    await page.getByTestId("v2-quantize-16").click();
+    await expect(page.getByTestId("v2-quantize-16")).toBeEnabled();
+  });
+
+  // CAP-MID-004 — the swing half of #552, and the one control here that did NOT exist in
+  // the engine first: cmdQuantizeNotes grew the `swing` term in the same change, so this
+  // is a reachability check over a real capability rather than over a fresh inert slider.
+  // Same scope caveat as strength above: whether the result GROOVES is verify.py's job
+  // (check_quantize_swing renders it and asserts the onsets alternate). What a browser can
+  // prove is that a mouse-only producer can find the control and that straight is default.
+  test("the quantize swing control is reachable and defaults to straight", async ({ page }) => {
+    await bootV2(page);
+    await page.getByTestId("v2-track-add").click();
+    await page.getByTestId("v2-track-add-midi").click();
+    await page.getByTestId("v2-clip").last().click();
+    await page.getByTestId("v2-insp-tab-midi").click();
+
+    const swing = page.getByTestId("v2-quantize-swing");
+    await expect(swing).toBeVisible();
+    await expect(swing).toHaveValue("0");             // 0 = straight, so the old behaviour is the default
+    await expect(page.locator("text=straight")).toBeVisible();
+    await swing.fill("60");
+    await expect(swing).toHaveValue("60");
+    await expect(page.locator("text=60%")).toBeVisible();
+    // The same button quantizes with swing applied — swing is a term OF quantize, not a
+    // separate action, which is why no new command was registered.
     await page.getByTestId("v2-quantize-16").click();
     await expect(page.getByTestId("v2-quantize-16")).toBeEnabled();
   });

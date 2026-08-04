@@ -5589,6 +5589,103 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
             check (bothOnGrid, "quantize_notes: a note reordered mid-loop is not silently skipped (both land on-grid)");
         }
 
+        // ── CAP-MID-004 (#552): quantize SWING ──────────────────────────────────────
+        // `swing` is 0..100 (0 = straight, and the default). It DELAYS every second
+        // subdivision of the grid and leaves the on-beat subdivisions where they are —
+        // FL's Swing knob and Reaper's quantize-dialog swing slider agree on that, and
+        // Live reaches it through the Groove Pool. 100 == the MPC 75% ceiling: the
+        // off-beat lands exactly halfway to the next on-beat (MPC% = 50 + swing/4).
+        //
+        // WHAT THIS LANE CANNOT SEE: whether the result GROOVES. These are note-position
+        // assertions, which is exactly the shape of test that passes while the audible
+        // result is wrong. The real proof is the rendered inter-onset intervals in
+        // scripts/verify-hardware/verify.py::check_quantize_swing — straight renders
+        // uniform, swung renders long-short-long-short.
+        {
+            const auto swTrack = cmd (ops, "create_track", args1 ("name", "QuantizeSwing"))["data"].getProperty ("trackId", var()).toString();
+            // A fresh clip per case, so each assertion starts from a known fixture rather
+            // than the residue of the previous one.
+            auto swClip = [&] (std::initializer_list<double> starts) {
+                auto* o = new DynamicObject();
+                o->setProperty ("trackId", swTrack); o->setProperty ("length", 4.0);
+                const auto cid = cmd (ops, "add_midi_clip", var (o))["data"].getProperty ("clipId", var()).toString();
+                int pitch = 60;
+                for (double s : starts)
+                    cmd (ops, "add_note", objN ({ { "clipId", cid }, { "pitch", pitch++ },
+                                                  { "start", s }, { "length", 0.125 }, { "velocity", 90 } }));
+                return cid;
+            };
+            // Order-independent and exact: every expected beat must hold exactly one note,
+            // and the clip must hold no others.
+            auto lands = [&] (const String& cid, std::initializer_list<double> expected) {
+                auto ns = clipNotes (cid);
+                if (ns.size() != (int) expected.size()) return false;
+                for (double beat : expected)
+                {
+                    int n = 0;
+                    if (auto* arr = ns.getArray())
+                        for (auto& v : *arr)
+                            if (std::abs ((double) v.getProperty ("start", -1.0) - beat) < 1.0e-6) ++n;
+                    if (n != 1) return false;
+                }
+                return true;
+            };
+            const std::initializer_list<double> STRAIGHT { 0.0, 0.25, 0.5, 0.75 };   // 16ths, on the grid
+            const std::initializer_list<double> SWUNG    { 0.0, 0.375, 0.5, 0.875 }; // swing 100 @ 1/16
+
+            // THE INVARIANT: absent `swing` is the untouched pre-swing path. An already
+            // on-grid clip must come back with nothing moved at all.
+            const auto cA = swClip (STRAIGHT);
+            auto rA = cmd (ops, "quantize_notes", objN ({ { "clipId", cA }, { "division", 0.25 }, { "strength", 1.0 } }));
+            check (ok (rA) && (int) rA["data"].getProperty ("moved", -1) == 0
+                           && (int) rA["data"].getProperty ("swung", -1) == 0,
+                   "quantize_notes with NO swing arg moves nothing on an on-grid clip (the pre-swing default path)");
+            check (lands (cA, STRAIGHT), "no swing arg: every subdivision stays on the straight grid");
+
+            // ...and an explicit 0 is the same thing, not a small swing.
+            auto rB = cmd (ops, "quantize_notes", objN ({ { "clipId", cA }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 0.0 } }));
+            check (ok (rB) && (int) rB["data"].getProperty ("moved", -1) == 0 && lands (cA, STRAIGHT),
+                   "swing:0 is exactly straight — 0 is the neutral value, not a small swing");
+
+            // The behaviour itself: delay the odd subdivisions, leave the on-beats alone.
+            const auto cC = swClip (STRAIGHT);
+            auto rC = cmd (ops, "quantize_notes", objN ({ { "clipId", cC }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 100.0 } }));
+            check (ok (rC) && (int) rC["data"].getProperty ("moved", -1) == 2
+                           && (int) rC["data"].getProperty ("swung", -1) == 2,
+                   "swing moves EXACTLY the two off-beat subdivisions (moved==swung==2)");
+            check (lands (cC, SWUNG),
+                   "swing delays every SECOND subdivision (0.25->0.375, 0.75->0.875) and leaves the on-beats at 0 and 0.5");
+
+            // The ceiling is why 100 is safe: half a subdivision of delay, so the "and"
+            // can never reach the next on-beat however hard the control is driven.
+            const auto cD = swClip (STRAIGHT);
+            cmd (ops, "quantize_notes", objN ({ { "clipId", cD }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 10000.0 } }));
+            check (lands (cD, SWUNG),
+                   "swing clamps at 100 (MPC 75%) — an over-driven value never pushes an off-beat onto the next on-beat");
+
+            const auto cE = swClip (STRAIGHT);
+            auto rE = cmd (ops, "quantize_notes", objN ({ { "clipId", cE }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", -75.0 } }));
+            check (ok (rE) && (int) rE["data"].getProperty ("moved", -1) == 0 && lands (cE, STRAIGHT),
+                   "a negative swing clamps to straight rather than rushing the off-beats");
+
+            // strength aims at the SWUNG target, so a half-strength swung quantize keeps
+            // half the groove — it does not pull to a straight grid first.
+            const auto cF = swClip (STRAIGHT);
+            cmd (ops, "quantize_notes", objN ({ { "clipId", cF }, { "division", 0.25 }, { "strength", 0.5 }, { "swing", 100.0 } }));
+            check (lands (cF, { 0.0, 0.3125, 0.5, 0.8125 }),
+                   "strength interpolates toward the SWUNG target (half of the 0.125-beat push), not to a straight grid");
+
+            // A loose take tightens AND swings in the same pass — the real use.
+            const auto cG = swClip ({ 0.03, 0.22, 0.54, 0.71 });
+            auto rG = cmd (ops, "quantize_notes", objN ({ { "clipId", cG }, { "division", 0.25 }, { "strength", 1.0 }, { "swing", 100.0 } }));
+            check (ok (rG) && (int) rG["data"].getProperty ("moved", -1) == 4
+                           && (int) rG["data"].getProperty ("swung", -1) == 2,
+                   "a loose take quantizes AND swings in one pass (4 moved, 2 of them off-beats)");
+            check (lands (cG, SWUNG), "off-grid notes land on the SWUNG grid, not a straight one");
+            cmd (ops, "undo");
+            check (lands (cG, { 0.03, 0.22, 0.54, 0.71 }), "ONE undo restores the whole swung quantize");
+        }
+
         const int before = clipNotes (mClip).size();
         check (ok (cmd (ops, "remove_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }}))), "remove_note ok");
         check (clipNotes (mClip).size() == before - 1, "remove_note removes a note");

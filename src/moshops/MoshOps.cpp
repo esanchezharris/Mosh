@@ -2226,9 +2226,25 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
 
     const double division = juce::jmax (0.03125, (double) args.getProperty ("division", 1.0));   // beats
     const double strength = juce::jlimit (0.0, 1.0, (double) args.getProperty ("strength", 1.0));
+    // SWING (CAP-MID-004, #552) — 0..100, 0 = straight, and 0 is the DEFAULT. Swing DELAYS
+    // every second subdivision of the quantize grid and leaves the on-beat subdivisions
+    // exactly where they are; FL's Swing knob and Reaper's quantize-dialog swing slider
+    // agree on that shape (Live reaches the same result through the Groove Pool), so it is
+    // what the capability matrix's 2-of-4 rule licenses and all that is implemented here.
+    //
+    // 100 is the classic MPC 75% ceiling: the off-beat lands exactly HALFWAY to the next
+    // on-beat, so no amount of swing can ever push a note onto (or past) its neighbour.
+    // MPC% = 50 + swing/4, so the triplet feel (MPC 66.7%) is swing ≈ 67.
+    //
+    // The invariant: absent or 0 must leave this handler BYTE-IDENTICAL to the pre-swing
+    // one. Hence `swingOffset > 0.0` gates the only new arithmetic and selects `q` ITSELF
+    // rather than `q + 0.0` — the default path executes the same operations in the same
+    // order as before, so every pre-existing quantize check passes unedited.
+    const double swing = juce::jlimit (0.0, 100.0, (double) args.getProperty ("swing", 0.0));
+    const double swingOffset = (swing / 100.0) * (division * 0.5);   // beats, ≤ half a subdivision
 
     beginTxn ("quantize_notes");
-    int moved = 0;
+    int moved = 0, swung = 0;
     // Snapshot the note pointers ONCE before mutating: setStartAndLength() writes
     // IDs::b, which triggers tracktion's synchronous re-sort of the live MidiList
     // (the same hazard MidiList::moveAllBeatPositions/rescale guard against by
@@ -2241,19 +2257,29 @@ juce::var MoshOps::cmdQuantizeNotes (const juce::var& args)
     for (auto* note : notes)
     {
         const double start = note->getStartBeat().inBeats();
-        const double q = std::round (start / division) * division;
-        const double next = start + (q - start) * strength;
+        const double slot  = std::round (start / division);       // which subdivision it belongs to
+        const double q     = slot * division;
+        // Odd slots are the "and"s — the second subdivision of every pair — and are the
+        // ones swing pushes late. Even slots are the on-beats and never move.
+        const bool offbeat = (std::llround (slot) % 2) != 0;
+        const double target = (swingOffset > 0.0 && offbeat) ? q + swingOffset : q;
+        // strength interpolates toward the SWUNG target, so a partial quantize keeps the
+        // groove it is moving toward instead of pulling notes to a straight grid first.
+        const double next = start + (target - start) * strength;
         if (std::abs (next - start) > 1.0e-6)
         {
             note->setStartAndLength (tracktion::BeatPosition::fromBeats (juce::jmax (0.0, next)),
                                      note->getLengthBeats(), &undoManager());
             ++moved;
+            if (swingOffset > 0.0 && offbeat) ++swung;
         }
     }
     logLine ("quantize_notes", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3
-    auto* data = new DynamicObject(); data->setProperty ("moved", moved);
+    auto* data = new DynamicObject();
+    data->setProperty ("moved", moved);
+    data->setProperty ("swung", swung);   // of `moved`, how many were off-beats pushed late
     return okResult ("quantize_notes", var (data));
 }
 

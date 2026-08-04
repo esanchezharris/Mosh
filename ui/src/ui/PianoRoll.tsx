@@ -87,6 +87,14 @@ export function PianoRoll() {
     st.set("prGridAdaptive", g.adaptive);
     st.set("prGridTriplet", g.triplet);
   };
+  // Quantize SWING (CAP-MID-004, #552) — 0..100, 0 = straight. The engine delays every
+  // second subdivision of the grid and leaves the on-beats put; 100 is the MPC 75% ceiling
+  // (MPC% = 50 + swing/4, so a triplet feel is ~67). Editor-LOCAL and not persisted, for
+  // the same reason quantize strength isn't: how much groove a pass should add is a
+  // decision about THIS take, not a standing preference like the grid.
+  const [swingPct, setSwingPct] = useState(0);
+  const swingRef = useRef(0);
+  swingRef.current = swingPct;
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(() => new Set());
   const [previews, setPreviews] = useState<Map<number, MidiNote>>(() => new Map());
   const [lasso, setLasso] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -260,7 +268,7 @@ export function PianoRoll() {
       // ── quantize the clip to the grid shown here (Ableton's Cmd+U) ──
       if (mod && e.key.toLowerCase() === "u") {
         take();
-        void exec("quantize_notes", { clipId, division: stepBeatsRef.current });
+        void exec("quantize_notes", { clipId, division: stepBeatsRef.current, swing: swingRef.current });
         return;
       }
       // ── grid (Cmd+1..4 pick a division, like Ableton) ──
@@ -693,8 +701,29 @@ export function PianoRoll() {
             </span>
           )}
           {mode === "piano" && (
-            <button className="btn" title="Snap every note in the clip to the grid shown here"
-              onClick={() => exec("quantize_notes", { clipId: clip.id, division: effectiveStepBeats(m, grid, beatPx) })}>
+            <span className="seg pr-swing-ctl" role="group" aria-label="Quantize swing">
+              {/* #552 — the engine's `swing` term, which cmdQuantizeNotes gained with this
+                  control (never the other way round: a swing slider over an engine with no
+                  swing is an inert surface). 0 is straight, so leaving it alone is exactly
+                  the quantize this button has always done. */}
+              <input
+                type="range" min={0} max={100} step={1} value={swingPct}
+                data-testid="pr-quantize-swing"
+                aria-label="Quantize swing (percent)"
+                title="Swing — delay every second subdivision of the grid and leave the on-beats where they are. 0 is straight; 100 is the MPC 75% maximum, where the off-beat sits exactly halfway to the next on-beat. Around 67 is the classic triplet feel."
+                onChange={(e) => setSwingPct(Number(e.target.value))}
+              />
+              <span className="pr-swing-val" data-testid="pr-quantize-swing-val">
+                {swingPct === 0 ? "straight" : `swing ${swingPct}`}
+              </span>
+            </span>
+          )}
+          {mode === "piano" && (
+            <button className="btn" data-testid="pr-quantize"
+              title="Snap every note in the clip to the grid shown here, using the swing amount beside this button"
+              onClick={() => exec("quantize_notes", {
+                clipId: clip.id, division: effectiveStepBeats(m, grid, beatPx), swing: swingPct,
+              })}>
               Quantize {gridLabel(m, grid, beatPx)}
             </button>
           )}

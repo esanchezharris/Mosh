@@ -674,8 +674,10 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
   const session = useStore((s) => s.snapshot?.session);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
   // Local, not persisted: quantize strength is a per-gesture decision, like the amount
-  // on a nudge — a producer picks it for THIS pass, not for the project.
+  // on a nudge — a producer picks it for THIS pass, not for the project. Swing rides
+  // alongside it for the same reason.
   const [strengthPct, setStrengthPct] = useState(100);
+  const [swingPct, setSwingPct] = useState(0);
   // `quantize_notes` takes `division` as a NUMBER OF BEATS (1 = 1/4, 0.25 = 1/16), not a
   // label. This button used to pass the string "1/16" — which JUCE's `var` coerces via
   // String::getDoubleValue(), parsing the leading numeral to 1.0 — so a button reading
@@ -693,9 +695,7 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
       {/* #552 — `strength` has been a real cmdQuantizeNotes argument all along and the
           call site hardcoded 1, so a producer could only have FULL quantize: the one
           setting that strips a groove entirely. 100% snaps to the grid, lower values
-          move each note a fraction of the way and keep the human timing. No swing
-          control here on purpose — the engine has no swing term, so a swing slider
-          would be a fresh inert surface of exactly the kind this programme removes. */}
+          move each note a fraction of the way and keep the human timing. */}
       <label className="v2-field">
         <span>Strength</span>
         <input
@@ -707,8 +707,30 @@ function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
         />
         <span className="v2-val">{strengthPct}%</span>
       </label>
+      {/* CAP-MID-004 — the swing half of #552. This slider shipped WITH the engine term,
+          not before it: cmdQuantizeNotes now delays every second subdivision of the grid
+          and leaves the on-beats where they are (FL's Swing knob and Reaper's
+          quantize-dialog slider agree; Live gets there via the Groove Pool). 0 is
+          straight, so leaving it alone is exactly the quantize this button did before;
+          100 is the MPC 75% ceiling, where the off-beat sits halfway to the next on-beat
+          and can never collide with it. Proven in rendered audio, not note positions —
+          verify.py::check_quantize_swing. */}
+      <label className="v2-field">
+        <span>Swing</span>
+        <input
+          type="range" min={0} max={100} step={5}
+          aria-label="Quantize swing (percent)"
+          data-testid="v2-quantize-swing"
+          title="Delay every second subdivision and leave the on-beats put. 0 is straight; ~67 is the classic triplet feel; 100 is the MPC 75% maximum."
+          value={swingPct}
+          onChange={(e) => setSwingPct(Number(e.target.value))}
+        />
+        <span className="v2-val">{swingPct === 0 ? "straight" : `${swingPct}%`}</span>
+      </label>
       <button className="v2-btn" data-testid="v2-quantize-16"
-        onClick={() => void exec("quantize_notes", { clipId: clip.id, division: sixteenth, strength: strengthPct / 100 })}>
+        onClick={() => void exec("quantize_notes", {
+          clipId: clip.id, division: sixteenth, strength: strengthPct / 100, swing: swingPct,
+        })}>
         Quantize 1/16
       </button>
     </div>
