@@ -80,9 +80,29 @@ export function useAnchoredPanel(
       setOpen(false);
     };
     document.addEventListener("pointerdown", onDown, true);
-    document.addEventListener("scroll", onDismiss, true);
-    window.addEventListener("resize", onDismiss);
+    // …but ARM the scroll/resize dismissal one frame late.
+    //
+    // The click that opens this panel may itself have scrolled: a trackpad flick keeps
+    // firing scroll events for hundreds of ms after the fingers lift, and the trailing
+    // "Add track" row genuinely needs scrolling into view once the list has grown. Scroll
+    // events are delivered asynchronously, in the rendering step — whereas the click
+    // handler runs setOpen(true), React commits, and this effect fires, all synchronously
+    // inside the click task. Arm synchronously and the panel receives the scroll that
+    // caused its own opening click, and closes the instant it opens.
+    //
+    // One frame is exactly the right delay, not a magic number: the HTML spec's
+    // update-the-rendering step fires scroll events BEFORE it runs animation-frame
+    // callbacks, so any scroll already queued when the panel opened has been dispatched
+    // by the time this callback registers the listener. A scroll the user makes
+    // afterwards still dismisses, which is the deliberate behaviour (a fixed-position
+    // panel whose trigger has scrolled away is worse than one that closes) — both halves
+    // are pinned by e2e/anchored-panel-scroll-race.spec.ts.
+    const armed = requestAnimationFrame(() => {
+      document.addEventListener("scroll", onDismiss, true);
+      window.addEventListener("resize", onDismiss);
+    });
     return () => {
+      cancelAnimationFrame(armed);
       document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("scroll", onDismiss, true);
       window.removeEventListener("resize", onDismiss);
