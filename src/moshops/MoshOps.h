@@ -796,6 +796,28 @@ private:
     void warnOfWastedMidiMessages (te::InputDevice*, te::Track*) override { wastedMidiFired_ = true; }
     bool wastedMidiFired_ = false;
 
+    // REC-002 — the computer keyboard as a REAL MIDI input.
+    //
+    // injectLiveMidiMessage is monitor-only: it reaches a LiveMidiInjectingNode and
+    // nothing else, so nothing played on the QWERTY keyboard could be recorded or reach
+    // the retrospective buffer that Capture reads. A note played through a
+    // te::MidiInputDevice gets all of that for free — timing, record latency, overdub
+    // merge, record-quantise and the Capture buffer are the engine's, not ours.
+    //
+    // So Mosh publishes a virtual MIDI input named below. It shows up in the track input
+    // picker like any other controller, because that is what it is.
+    static constexpr const char* kKeyboardDeviceName = "Mosh Keyboard";
+    /** Creates the virtual input once audio is up; returns it, or nullptr headless.
+        Idempotent and cheap after the first success (the flag short-circuits it). */
+    te::MidiInputDevice* ensureKeyboardInputDevice();
+    bool keyboardDeviceEnsured_ = false;
+    /** The MIDI input device this track is ARMED to, or nullptr. Non-null is what makes
+        an auditioned note recordable — and is the whole fork in cmdAuditionNote. */
+    te::MidiInputDevice* armedMidiInputFor (te::AudioTrack&);
+    /** One held voice's note-off, down whichever road its note-on took. Shared by the
+        explicit release and the TTL sweep so the two cannot diverge. */
+    void releaseOneVoice (te::AudioTrack&, int channel, int pitch);
+
     juce::var cmdAuditionNote (const juce::var& args);
     juce::var cmdAllNotesOff  (const juce::var& args);
     // Releases every held voice on every track (explicit note-offs, then an all-notes-off

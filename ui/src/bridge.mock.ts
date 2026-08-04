@@ -274,6 +274,10 @@ const MOCK_WAVE_INPUTS = [
 // CTL-001 — mock MIDI inputs so the v2 inspector's per-instrument MIDI-input picker
 // has real choices and set_track_input can route one (list_midi_inputs enumeration).
 const MOCK_MIDI_INPUTS = [
+  // REC-002 — the backend publishes a virtual MIDI input under exactly this name, so the
+  // computer keyboard is routable and recordable like any other controller. Listed FIRST
+  // because it is the one every user has (a laptop with no hardware still gets it).
+  { deviceID: "midi-mosh-kbd", name: "Mosh Keyboard", alias: "Mosh Keyboard", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-akai", name: "Akai MPK Mini", alias: "Akai MPK Mini", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-iac", name: "IAC Driver Bus 1", alias: "IAC Driver Bus 1", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-launchkey", name: "Launchkey 49", alias: "Launchkey 49", enabled: false, monitor: "off" as const },
@@ -2120,7 +2124,9 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!findTrack(str(args.trackId))) return err(command, "no track");
       return ok(command, {
         trackId: str(args.trackId), pitch: num(args.pitch, 60), action,
-        audible: false, path: "none", held: 0, reason: "no audio device",
+        // REC-002 — `recordable` is true only on the "input" path. The mock has no engine
+        // to arm to, so it answers false, exactly as a headless backend does.
+        audible: false, path: "none", held: 0, recordable: false, reason: "no audio device",
       });
     }
     case "all_notes_off":

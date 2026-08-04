@@ -6283,6 +6283,19 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (a1["data"].getProperty ("path", var()).toString() == "none", "audition_note reports path:none headless");
         check (a1["data"].getProperty ("reason", var()).toString().isNotEmpty(), "audition_note explains why it was inaudible");
 
+        // REC-002 — `recordable` says whether this note went down the INPUT road (the
+        // only one a recorder or Capture can see) rather than the monitor-only inject.
+        // Headless there is no device to arm to, so false is the only honest answer, and
+        // pinning it here is what stops the field from quietly becoming decorative.
+        //
+        // THE ROUTING FORK ITSELF IS HARDWARE-GATED and this run cannot reach it:
+        // armedMidiInputFor() walks getAllInputDevices(), which is empty without an open
+        // device, so the input branch is never taken. That a note played on an armed
+        // track lands in the take is verified live, with a controller.
+        check (a1["data"].hasProperty ("recordable"), "audition_note always reports whether the note was recordable");
+        check (! (bool) a1["data"].getProperty ("recordable", true),
+               "audition_note reports recordable:false with no armed input (the only honest headless answer)");
+
         // Pitch is clamped, not rejected — a UI slider or an octave-shifted keyboard can
         // legitimately run off the end of the range and must not error mid-performance.
         auto hi = cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 200 }, { "action", "on" }}));

@@ -280,6 +280,14 @@ void MoshOps::timerCallback()
     // and survives anything the UI does; it is a no-op when nothing is held.
     sweepStuckVoices();
 
+    // REC-002 — publish the "Mosh Keyboard" virtual MIDI input as soon as audio comes up,
+    // so it is in the track input picker BEFORE the producer goes looking for it. Doing
+    // this lazily (on the first audition) would mean the picker was empty exactly when
+    // someone was trying to work out how to record their keyboard. Guarded internally, so
+    // this is a bool test on every tick after the first.
+    if (eng.hasAudio())
+        ensureKeyboardInputDevice();
+
     // Lane A — drive the render-ahead scheduler off the transport clock while a Live clip plays.
     // Gated on hasAudio() so headless --selftest (which never arms it) is untouched.
     if (renderAhead_.active && playing && eng.hasAudio())

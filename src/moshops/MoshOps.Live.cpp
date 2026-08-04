@@ -55,6 +55,54 @@ constexpr int kBlipMinMs     = 20;
 constexpr int kBlipMaxMs     = 5000;
 }
 
+// ── REC-002: the keyboard as a real MIDI input ───────────────────────────────────────
+te::MidiInputDevice* MoshOps::ensureKeyboardInputDevice()
+{
+    if (! eng.hasAudio()) return nullptr;
+
+    auto& dm = eng.engine().getDeviceManager();
+    auto find = [&] () -> te::MidiInputDevice*
+    {
+        for (auto& mi : dm.getMidiInDevices())
+            if (mi != nullptr && mi->getName() == kKeyboardDeviceName)
+                return mi.get();
+        return nullptr;
+    };
+
+    if (auto* existing = find())
+    {
+        keyboardDeviceEnsured_ = true;
+        return existing;
+    }
+
+    // Not the same thing as the flag: the flag stops us RE-SCANNING every 30 Hz tick once
+    // we have looked. A device that was created and then deleted by the producer stays
+    // deleted — republishing it under them would be the wrong kind of helpful.
+    if (keyboardDeviceEnsured_) return nullptr;
+    keyboardDeviceEnsured_ = true;
+
+    // createVirtualMidiDevice persists the name in engine property storage and rescans,
+    // so this happens once per install rather than once per launch. A failure (the name
+    // is somehow taken) is not worth an error: the keyboard still auditions, it just
+    // cannot be recorded, and cmdAuditionNote says so through `recordable`.
+    dm.createVirtualMidiDevice (kKeyboardDeviceName);
+    return find();
+}
+
+te::MidiInputDevice* MoshOps::armedMidiInputFor (te::AudioTrack& track)
+{
+    for (auto* inst : eng.edit().getAllInputDevices())
+        if (inst != nullptr
+            && te::isOnTargetTrack (*inst, track, 0)
+            && inst->isRecordingEnabled (track.itemID))
+        {
+            auto& dev = inst->getInputDevice();
+            if (dev.isMidi())
+                return dynamic_cast<te::MidiInputDevice*> (&dev);
+        }
+    return nullptr;
+}
+
 // ── the command ──────────────────────────────────────────────────────────────────────
 juce::var MoshOps::cmdAuditionNote (const juce::var& args)
 {
@@ -83,6 +131,10 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
         data->setProperty ("audible", audible);
         data->setProperty ("path", path);
         data->setProperty ("held", (int) heldVoices_.size());
+        // REC-002 — only the "input" path can be captured or recorded. The caller is told
+        // WHICH path fired rather than left to assume the three are equivalent: the
+        // sampler path ignores velocity, and the inject path is invisible to recording.
+        data->setProperty ("recordable", juce::String (path) == "input");
         if (reason.isNotEmpty()) data->setProperty ("reason", reason);
         return okResult ("audition_note", var (data));
     };
@@ -115,6 +167,26 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
 
     const auto msg = noteOn ? juce::MidiMessage::noteOn  (channel, pitch, (juce::uint8) velocity)
                             : juce::MidiMessage::noteOff (channel, pitch);
+
+    // REC-002 — an ARMED track takes the input path instead, so what you play on the
+    // computer keyboard is recordable and reaches the buffer Capture reads. The engine
+    // owns everything from here: timing, record latency, overdub merge, record-quantise.
+    //
+    // Deliberately gated on ARMED rather than taken always. Two reasons, and the second
+    // is the load-bearing one:
+    //   • Doubling. With the track armed, monitoring makes the input path audible; adding
+    //     an inject on top would sound every note twice.
+    //   • Blast radius. The unarmed path is the spine of three shipped surfaces — the
+    //     piano roll's drag-audition, the drum pads, and the QWERTY keyboard on an idle
+    //     track. None of them can regress from a change that cannot reach them, and none
+    //     of their audibility is provable in a headless run.
+    // It also matches Ableton, where the computer MIDI keyboard plays the armed track.
+    ensureKeyboardInputDevice();
+    if (auto* armedInput = armedMidiInputFor (*track))
+    {
+        armedInput->handleIncomingMidiMessage (msg, armedInput->getMPESourceID());
+        return reply (true, "input");
+    }
 
     // Cleared immediately before and read immediately after: the engine calls
     // warnOfWastedMidiMessages synchronously from inside this very call.
@@ -163,6 +235,23 @@ juce::var MoshOps::cmdAllNotesOff (const juce::var& args)
 }
 
 // ── shared release path ──────────────────────────────────────────────────────────────
+void MoshOps::releaseOneVoice (te::AudioTrack& track, int channel, int pitch)
+{
+    // REC-002 — the note-off MUST take the same road the note-on took. A note sounded
+    // through the armed input and released through the inject path would leave the
+    // engine's recorder holding an unmatched note-on: the take lands with a note that
+    // never ends, and the producer's monitoring hangs. Re-resolving the armed input per
+    // release (rather than remembering it on the HeldVoice) is deliberate — arming can
+    // change while a key is held, and the CURRENT road is the one that will be listened to.
+    const auto off = juce::MidiMessage::noteOff (channel, pitch);
+    if (auto* armedInput = armedMidiInputFor (track))
+    {
+        armedInput->handleIncomingMidiMessage (off, armedInput->getMPESourceID());
+        return;
+    }
+    track.injectLiveMidiMessage (off, kLiveSourceID);
+}
+
 int MoshOps::releaseAllVoices (te::AudioTrack* onlyThisTrack)
 {
     const bool audio = eng.hasAudio();
@@ -182,7 +271,7 @@ int MoshOps::releaseAllVoices (te::AudioTrack* onlyThisTrack)
         if (auto* t = wanted (v))
         {
             if (audio)
-                t->injectLiveMidiMessage (juce::MidiMessage::noteOff (v.channel, v.pitch), kLiveSourceID);
+                releaseOneVoice (*t, v.channel, v.pitch);
             ++released;
         }
 
@@ -229,7 +318,7 @@ void MoshOps::sweepStuckVoices()
     for (auto& v : done)
         if (auto* t = findTrack (v.track.toString()))
             if (audio)
-                t->injectLiveMidiMessage (juce::MidiMessage::noteOff (v.channel, v.pitch), kLiveSourceID);
+                releaseOneVoice (*t, v.channel, v.pitch);
 
     heldVoices_.erase (std::remove_if (heldVoices_.begin(), heldVoices_.end(), expired),
                        heldVoices_.end());
