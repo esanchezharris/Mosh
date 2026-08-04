@@ -1382,6 +1382,72 @@ def check_automation_ramp(ctx):
                 "ends_below_half": falls, "monotone_trend": trend})
 
 
+def check_mute_automation(ctx):
+    """CAP-AUT-006's AUDIBLE half: a curve on the per-track mute gate makes the render
+    actually silent across the muted span and leaves the rest alone.
+
+    `--selftest` proves the parameter exists, takes a curve and survives save/reload, and
+    that is ALL it can prove — a headless run has no audio device. This is precisely the
+    freeze_layer class: that command shipped inert for weeks WITH a passing selftest
+    check asserting its label was written. So the assertion here is on the PCM: windowed
+    RMS inside [1.0, 2.0) must be floor-level silence while the windows either side stay
+    at the dry level, and the dry render must be loud in all three (i.e. the silence came
+    from the curve, not from an empty clip)."""
+    dry = ART / "17_mute_dry.wav"
+    wet = ART / "17_mute_wet.wav"
+    cmds = [
+        # muteGateIndex is the gate's real pluginList index — it is hidden from the
+        # snapshot's `plugins` rack (it rides `mixerPlugins`), and --run-script cannot
+        # read a snapshot, so create_track hands it back directly. Capturing it beats
+        # assuming an index: a wrong assumption would write the curve onto some other
+        # plugin and fail here as "not silent", which reads like a broken gate.
+        {"command": "create_track", "args": {"name": "Mu"},
+         "capture": {"T": "trackId", "G": "muteGateIndex"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 3.0, "freq": 220.0}},
+        {"command": "export_audio", "args": {"file": str(dry)}},
+        # The mute parameter is DISCRETE (2 states): the engine snaps every applied value
+        # at 0.5, so a 0->1 segment flips at its temporal midpoint. Pairs 20 ms apart put
+        # each edge within 10 ms of where it is drawn instead of halfway across a second.
+        {"command": "write_automation_curve",
+         "args": {"trackId": "${T}", "pluginIndex": "${G}", "paramIndex": 0, "apply": "replace",
+                  "points": [{"t": 0.0, "v": 0.0}, {"t": 0.99, "v": 0.0},
+                             {"t": 1.01, "v": 1.0}, {"t": 1.99, "v": 1.0},
+                             {"t": 2.01, "v": 0.0}, {"t": 3.0, "v": 0.0}]}},
+        {"command": "export_audio", "args": {"file": str(wet)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-mute-automation")
+    fails = failed_commands(results)
+    if fails or not (dry.exists() and wet.exists()):
+        return row("Mute automation silences", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+
+    def window_rms(path, t0, t1):
+        d, sr, _ = load_wav(path)
+        m = mono(d)
+        a, b = int(t0 * sr), min(int(t1 * sr), m.size)
+        if b <= a:
+            return 0.0
+        return float(np.sqrt(np.mean(m[a:b] ** 2)))
+
+    # 0.2 s of margin either side of each edge, so a ramped gate edge (5 ms) and the
+    # snap midpoint never land inside a measurement window.
+    spans = [(0.2, 0.8), (1.2, 1.8), (2.2, 2.8)]
+    wet_rms = [window_rms(wet, a, b) for a, b in spans]
+    dry_rms = [window_rms(dry, a, b) for a, b in spans]
+
+    dry_loud = all(r > 0.01 for r in dry_rms)                       # the tone is there to mute
+    muted_silent = wet_rms[1] < 1e-4                                # < -80 dBFS: silence, not "quieter"
+    edges_intact = wet_rms[0] > 0.01 and wet_rms[2] > 0.01
+    # Outside the muted span the gate is a multiply by exactly 1.0, so the un-muted
+    # windows must match the dry render, not merely be loud.
+    unchanged = all(abs(wet_rms[i] - dry_rms[i]) < 1e-6 for i in (0, 2))
+    ok = dry_loud and muted_silent and edges_intact and unchanged
+    return row("Mute automation silences", ok,
+               {"dry_rms": [round(v, 5) for v in dry_rms], "wet_rms": [round(v, 6) for v in wet_rms],
+                "dry_loud": dry_loud, "muted_span_silent": muted_silent,
+                "unmuted_spans_intact": edges_intact, "unmuted_bit_identical_to_dry": unchanged})
+
+
 def check_send_return(ctx):
     """The send/return wet path is REAL audio (invariant 59's audible half): a hot
     reverb on the bus return makes the render differ from dry; pulling the send to
@@ -1451,7 +1517,8 @@ OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile
                   check_render_artifact_portability, check_crash_recovery,
                   check_skill_transaction_real_engine, check_stem_export,
                   check_clip_fades, check_clip_reverse, check_warp_stretch,
-                  check_automation_ramp, check_send_return, check_master_chain]
+                  check_automation_ramp, check_mute_automation, check_send_return,
+                  check_master_chain]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

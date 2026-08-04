@@ -4,6 +4,7 @@
 #include "SessionPaths.h"
 #include "SourceRef.h"
 #include "state/Migrations.h"
+#include "plugins/mixer/TrackMutePlugin.h"
 
 #include <atomic>
 #include <iostream>
@@ -255,6 +256,17 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
             moshDir, propertyStorageSession, propertyStorageDir, uniqueTag, useOwnerSession),
         std::make_unique<te::UIBehaviour>(),
         std::move (behaviour));
+
+    // CAP-AUT-006 — register the mute gate's type HERE, not with the rest of the Mosh
+    // built-ins in PluginHost::initialise(). PluginHost runs from the MoshOps ctor,
+    // which is AFTER this ctor loads the persisted Edit below — and
+    // PluginManager::createPlugin drops an unknown type with a log line
+    // (tracktion_PluginManager.cpp:461), leaving the <PLUGIN> child orphaned in the
+    // tree. The next ensureTrackMuteGate would then add a SECOND gate and the saved
+    // mute curve would be silently dead. The Engine ctor has already run
+    // pluginManager->initialise(), and registerBuiltInType ignores a duplicate type, so
+    // PluginHost's own pass stays a harmless no-op.
+    enginePtr->getPluginManager().createBuiltInType<mosh::TrackMutePlugin>();
 
     // Session directory: a stable per-app-data folder so save/reload round-trips.
     // Each harness run gets its own dir so it can't be polluted by (or clobber) a real

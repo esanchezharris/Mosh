@@ -1831,6 +1831,142 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! (bool) paramVar (at, pidx, 0).getProperty ("automated", true), "clear_automation removes all points");
     }
 
+    // ─── CAP-AUT-006: mute has an automatable parameter ───
+    // The engine has none (see docs/ENGINE_API_NOTES.md "Track mute" — track mute is a
+    // property read by TrackMuteState, not a parameter), so Mosh carries a hidden
+    // per-track mute GATE plugin whose one discrete parameter takes a curve.
+    //
+    // WHAT THIS SECTION CANNOT SEE, stated up front so nobody mistakes it for proof of
+    // the feature: a headless run has no audio device, so none of this shows that the
+    // gate ACTUALLY SILENCES anything. It shows the parameter exists, is addressable by
+    // the generic automation commands, is stepped, and survives save/reload. The audible
+    // half is scripts/verify-hardware/verify.py::check_mute_automation, which renders a
+    // mute curve to WAV and asserts the muted span is silent PCM and the rest is not.
+    // This split is deliberate: freeze_layer shipped inert for weeks WITH a passing
+    // selftest check asserting its label was written.
+    section ("CAP-AUT-006: mute automation");
+    {
+        auto mixerPluginVar = [&] (const String& trkId, const String& type) -> var {
+            auto trk = trackById (trkId);
+            auto mixers = trk.getProperty ("mixerPlugins", var());
+            if (auto* arr = mixers.getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == type) return p;
+            return {};
+        };
+        auto paramOf = [&] (const var& plugin, int paramIdx) -> var {
+            auto params = plugin.getProperty ("params", var());
+            if (auto* arr = params.getArray())
+                for (auto& pr : *arr)
+                    if ((int) pr.getProperty ("index", -1) == paramIdx) return pr;
+            return {};
+        };
+
+        const auto mt = cmd (ops, "create_track", args1 ("name", "Muter"))["data"].getProperty ("trackId", var()).toString();
+
+        auto gate = mixerPluginVar (mt, "moshTrackMute");
+        const int gateIdx = (int) gate.getProperty ("index", -1);
+        check (gateIdx >= 0, "CAP-AUT-006: a fresh track carries a mute gate in mixerPlugins");
+        check (gate.getProperty ("name", var()).toString() == "Mute", "CAP-AUT-006: the gate is named Mute");
+
+        // It must NOT be in the rack — a "Mute" row in every chain would be noise, and
+        // the P6 undo matrix already caught the fader leaking there.
+        {
+            bool inRack = false;
+            auto plugins = trackById (mt).getProperty ("plugins", var());
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == "moshTrackMute") inRack = true;
+            check (! inRack, "CAP-AUT-006: the mute gate is hidden from the plugins rack");
+        }
+
+        auto muteParam = paramOf (gate, 0);
+        check (muteParam.getProperty ("name", var()).toString() == "Mute", "CAP-AUT-006: parameter 0 is Mute");
+        check ((bool) muteParam.getProperty ("discrete", false), "CAP-AUT-006: the mute parameter is discrete");
+        check ((int) muteParam.getProperty ("states", 0) == 2, "CAP-AUT-006: the mute parameter has 2 states");
+        check (! (bool) muteParam.getProperty ("automated", true), "CAP-AUT-006: un-automated by default");
+
+        // The generic param commands address it — no new command, no second kind of
+        // automation target. This is the whole point of putting it on a plugin.
+        var mutePoints; { Array<var> a; a.add (objN ({{ "t", 0.0 }, { "v", 0.0 }}));
+                          a.add (objN ({{ "t", 0.5 }, { "v", 1.0 }}));
+                          a.add (objN ({{ "t", 1.5 }, { "v", 0.0 }})); mutePoints = a; }
+        check (ok (cmd (ops, "write_automation_curve", objN ({{ "trackId", mt }, { "pluginIndex", gateIdx }, { "paramIndex", 0 },
+                                                             { "apply", "replace" }, { "points", mutePoints }}))),
+               "CAP-AUT-006: write_automation_curve accepts a mute curve");
+        check ((bool) paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("automated", false),
+               "CAP-AUT-006: the mute parameter reports automated");
+        check (paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("points", var()).size() == 3,
+               "CAP-AUT-006: 3 mute points ride the snapshot");
+
+        // Save/reload: the curve lives on the plugin's own ValueTree, so persistence is
+        // free — but "free" is exactly the kind of claim that turns out to be false.
+        cmd (ops, "save"); cmd (ops, "reload");
+        {
+            auto reloaded = mixerPluginVar (mt, "moshTrackMute");
+            check ((int) reloaded.getProperty ("index", -1) >= 0, "CAP-AUT-006: the mute gate survives save/reload");
+            auto pr = paramOf (reloaded, 0);
+            check ((bool) pr.getProperty ("automated", false) && pr.getProperty ("points", var()).size() == 3,
+                   "CAP-AUT-006: the mute curve survives save/reload");
+            check ((bool) pr.getProperty ("discrete", false) && (int) pr.getProperty ("states", 0) == 2,
+                   "CAP-AUT-006: discreteness survives save/reload (the type is rebuilt, not stored)");
+        }
+
+        // Undo is the ordinary automation undo — one transaction, fully reversible.
+        {
+            const auto gi = (int) mixerPluginVar (mt, "moshTrackMute").getProperty ("index", -1);
+            check (ok (cmd (ops, "clear_automation", objN ({{ "trackId", mt }, { "pluginIndex", gi }, { "paramIndex", 0 }}))),
+                   "CAP-AUT-006: clear_automation on the mute curve ok");
+            check (! (bool) paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("automated", true),
+                   "CAP-AUT-006: the mute curve clears");
+            check (ok (cmd (ops, "undo")), "CAP-AUT-006: undo ok");
+            check (paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("points", var()).size() == 3,
+                   "CAP-AUT-006: undo restores the mute curve");
+        }
+
+        // remove_plugin must refuse it — an agent addressing raw pluginList indices would
+        // otherwise delete the curve and leave the next ensureTrackMuteGate to add a
+        // fresh empty gate in its place.
+        {
+            const auto gi = (int) mixerPluginVar (mt, "moshTrackMute").getProperty ("index", -1);
+            check (! ok (cmd (ops, "remove_plugin", objN ({{ "trackId", mt }, { "index", gi }}))),
+                   "CAP-AUT-006: remove_plugin refuses the mute gate");
+            check ((int) mixerPluginVar (mt, "moshTrackMute").getProperty ("index", -1) == gi,
+                   "CAP-AUT-006: the refused removal left the gate in place");
+            check (paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("points", var()).size() == 3,
+                   "CAP-AUT-006: the refused removal left the curve intact");
+        }
+
+        // The routing mute is a SEPARATE thing and stays that way: automating the gate
+        // must not have touched track.mute, and set_track_mute must not touch the curve.
+        check (! (bool) trackById (mt).getProperty ("mute", true), "CAP-AUT-006: a mute curve does not set the routing mute");
+        cmd (ops, "set_track_mute", objN ({{ "trackId", mt }, { "mute", true }}));
+        check ((bool) trackById (mt).getProperty ("mute", false), "CAP-AUT-006: set_track_mute still works alongside the gate");
+        check (paramOf (mixerPluginVar (mt, "moshTrackMute"), 0).getProperty ("points", var()).size() == 3,
+               "CAP-AUT-006: set_track_mute leaves the mute curve alone");
+        cmd (ops, "set_track_mute", objN ({{ "trackId", mt }, { "mute", false }}));
+
+        // The fader rides the same array once it exists, so its own volume/pan curves
+        // become pickable too — they were addressable by command all along but
+        // unreachable in AutomationPanel, which only lists `plugins`, and the fader is
+        // filtered out of that. It stays LAZY (ensureVolumePlugin, on the first fader
+        // touch): materialising it eagerly would insert a pan-law gain stage into every
+        // track's chain, which is not a byte-neutral thing to do to the render goldens.
+        check (! mixerPluginVar (mt, "volume").isObject(), "CAP-AUT-006: the fader is still lazy — no fader until touched");
+        cmd (ops, "set_track_volume", objN ({{ "trackId", mt }, { "db", -3.0 }}));
+        {
+            auto fader = mixerPluginVar (mt, "volume");
+            check ((int) fader.getProperty ("index", -1) >= 0, "CAP-AUT-006: the fader rides mixerPlugins once materialised");
+            check (paramOf (fader, 0).getProperty ("name", var()).toString().isNotEmpty(), "CAP-AUT-006: the fader exposes its volume parameter");
+            bool faderInRack = false;
+            auto plugins = trackById (mt).getProperty ("plugins", var());
+            if (auto* arr = plugins.getArray())
+                for (auto& p : *arr)
+                    if (p.getProperty ("type", var()).toString() == "volume") faderInRack = true;
+            check (! faderInRack, "CAP-AUT-006: the fader stays hidden from the plugins rack");
+        }
+    }
+
     // ─── G10: parameter automation RECORDING (v0) ───
     // docs/superpowers/specs/2026-07-17-g10-automation-record.md — synchronous capture
     // (gated on automationMode==write, NOT transport.isPlaying()) inside cmdSetPluginParam;
@@ -7123,7 +7259,21 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "reload")), "id-probe: reload ok");
         const auto pid2 = findIdByName ("IdProbe");   // track itemID persists across reload
         check (pid2.isNotEmpty(), "id-probe: probe track survived reload");
-        check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", pid2 }, { "index", 0 }}))),
+        // Remove the EQ this probe actually loaded, resolved from the snapshot's rack.
+        // It used to hardcode index 0, which was never the EQ — index 0 was whichever
+        // hidden mixer element happened to sit at the front of the chain (the metering
+        // tap then, the CAP-AUT-006 mute gate now, which remove_plugin refuses). The
+        // probe is about the itemID allocator, so WHICH plugin goes away is incidental;
+        // naming it makes the sequence say what it does instead of depending on a chain
+        // layout it never asserted.
+        int eqIndex = -1;
+        { auto plugins = trackById (pid2).getProperty ("plugins", var());
+          if (auto* arr = plugins.getArray())
+            for (auto& p : *arr)
+                if (p.getProperty ("type", var()).toString() == "4bandEq")
+                    eqIndex = (int) p.getProperty ("index", -1); }
+        check (eqIndex >= 0, "id-probe: the loaded EQ is addressable after reload");
+        check (ok (cmd (ops, "remove_plugin", objN ({{ "trackId", pid2 }, { "index", eqIndex }}))),
                "id-probe: remove_plugin ok");
         check (ok (cmd (ops, "load_builtin", objN ({{ "trackId", pid2 }, { "type", "compressor" }}))),
                "id-probe: load a second plugin after remove (no duplicate-itemID assert)");

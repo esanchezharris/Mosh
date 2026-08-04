@@ -11,6 +11,7 @@
 #include "moshops/AgentTxn.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
+#include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
 #include "training/TrainerRegistry.h"
@@ -671,6 +672,14 @@ private:
     struct MeterTap { te::LevelMeterPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
     te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
     te::LevelMeterPlugin* findTrackMeter (te::AudioTrack&);
+    // ── CAP-AUT-006: the per-track mute gate ── a hidden mixer element carrying the one
+    // automatable "mute" parameter (a curve needs something to point at; the engine has
+    // no automatable mute — see TrackMutePlugin.h). Materialised alongside the metering
+    // tap and kept immediately UPSTREAM of it, so a curve-muted track reads silent on its
+    // own meter. NOT the routing mute: set_track_mute is untouched by it.
+    TrackMutePlugin* ensureTrackMuteGate (te::AudioTrack&);
+    TrackMutePlugin* findTrackMuteGate (te::AudioTrack&);
+
     void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
     void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;

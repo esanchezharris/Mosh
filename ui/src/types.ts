@@ -270,6 +270,11 @@ export type PluginParam = {
   value: number;
   automated?: boolean;
   points?: AutoPoint[];
+  /** Stepped, not continuous: the engine snaps every applied value (including each
+   *  sample off the curve) to the nearest of `states` evenly-spaced states, so the
+   *  editor snaps its points to the same grid. Absent means continuous. */
+  discrete?: boolean;
+  states?: number;
 };
 
 // Route C.2 — the real-time RAVE insert's snapshot view (present iff this plugin is one).
@@ -362,8 +367,17 @@ export type Track = {
   type: string;
   clips: Clip[];
   plugins?: Plugin[];
+  // CAP-AUT-006 — the mixer strip's own automatable plugins: the fader (volume/pan) and
+  // the mute gate. They are deliberately absent from `plugins` (a rack row for either
+  // would be noise), but their parameters automate through exactly the same
+  // (trackId, pluginIndex, paramIndex) addressing as anything in `plugins` — the indices
+  // here are real pluginList indices. Split out solely so the automation picker can
+  // offer them; nothing else should render this.
+  mixerPlugins?: Plugin[];
   volumeDb?: number;
   pan?: number;
+  /** The routing mute (`set_track_mute`). NOT the mute-gate parameter — see
+   *  src/plugins/mixer/TrackMutePlugin.h for how the two differ and why both exist. */
   mute?: boolean;
   solo?: boolean;
   // G10 — automation record-arm mode. Absent (legacy/never-set track) means "read".

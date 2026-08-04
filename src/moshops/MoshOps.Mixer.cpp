@@ -63,12 +63,59 @@ te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)
 
 te::LevelMeterPlugin* MoshOps::ensureTrackMeter (te::AudioTrack& t)
 {
+    // CAP-AUT-006 — materialise the mute gate here, BEFORE the early return, so it lands
+    // on legacy tracks that already have a meter as well as on fresh ones. Every path
+    // that gives a track a meter gives it a mute gate; keeping the two together is what
+    // guarantees the gate ends up upstream of the meter (see ensureTrackMuteGate).
+    // Best-effort, exactly like the meter itself: a failure here must not fail the
+    // caller's command.
+    ensureTrackMuteGate (t);
+
     if (auto* lm = findTrackMeter (t)) return lm;
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::LevelMeterPlugin::xmlTypeName, {});
     if (plugin == nullptr) return nullptr;
     auto* lm = dynamic_cast<te::LevelMeterPlugin*> (plugin.get());
     t.pluginList.insertPlugin (plugin, t.pluginList.getPlugins().size(), nullptr);   // append → post-fader
     return lm;                                                // client is wired by reconcileMeterClients()
+}
+
+// ── CAP-AUT-006: the mute gate (a hidden mixer element, one automatable parameter) ────
+TrackMutePlugin* MoshOps::findTrackMuteGate (te::AudioTrack& t)
+{
+    for (auto* p : t.pluginList.getPlugins())
+        if (auto* g = dynamic_cast<TrackMutePlugin*> (p))
+            return g;
+    return nullptr;
+}
+
+TrackMutePlugin* MoshOps::ensureTrackMuteGate (te::AudioTrack& t)
+{
+    if (auto* g = findTrackMuteGate (t)) return g;
+
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (TrackMutePlugin::xmlTypeName, {});
+    if (plugin == nullptr) return nullptr;
+    auto* gate = dynamic_cast<TrackMutePlugin*> (plugin.get());
+    if (gate == nullptr) return nullptr;
+
+    // Insert immediately BEFORE the level-meter tap when one exists, else append. Two
+    // things follow from that placement, and both are the point:
+    //   - the meter is downstream of the gate, so a track the curve has muted reads
+    //     silent on its own meter — a bouncing meter over a muted track would be exactly
+    //     the kind of convincing lie this repo keeps getting bitten by;
+    //   - the gate is a pure multiply, so it COMMUTES with the fader. It does not matter
+    //     whether ensureVolumePlugin has run yet or where the fader lands relative to it;
+    //     silence × any gain is silence. Only the meter's side of the gate matters.
+    // A plugin the user loads LATER still appends to the end of the chain, i.e.
+    // downstream of the gate — it is fed silence while muted, but can ring its own tail
+    // out. TrackMutePlugin.h states that difference from the routing mute in full.
+    int index = t.pluginList.getPlugins().size();
+    if (auto* lm = findTrackMeter (t))
+    {
+        const int meterIndex = t.pluginList.indexOf (lm);
+        if (meterIndex >= 0) index = meterIndex;
+    }
+    t.pluginList.insertPlugin (plugin, index, nullptr);
+    return gate;
 }
 
 // Sync the client map to the LIVE meter taps in the edit. Robust against undo/

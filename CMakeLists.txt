@@ -223,6 +223,8 @@ if (MOSH_BUILD_APP)
         src/plugins/hosting/PluginHost.cpp
         # Moshi reactivity — master-output spectral tap (pure measure)
         src/plugins/spectral/MasterSpectralTapPlugin.cpp
+        # CAP-AUT-006 — the per-track mute gate (hidden mixer element, one automatable param)
+        src/plugins/mixer/TrackMutePlugin.cpp
         # Mosh-native FX suite — in-app Tracktion built-ins.
         src/plugins/moshfx/MoshAutoTuneDsp.cpp
         src/plugins/moshfx/MoshAutoTunePlugin.cpp
