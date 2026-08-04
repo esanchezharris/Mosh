@@ -381,19 +381,48 @@ TEST_CASE ("audio probe timeout child fixture", "[audiostartup-child]")
 
 TEST_CASE ("a timed-out process is killed before the caller resumes", "[audiostartup]")
 {
-    const auto heartbeat = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                               .getNonexistentChildFile ("mosh-audio-probe-heartbeat", ".txt");
-    mosh::setEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT", heartbeat.getFullPathName().toRawUTF8());
-    const auto result = runProbeProcess (
-        { juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-              .getFullPathName(),
-          "[audiostartup-child]" },
-        250);
-    mosh::unsetEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT");
+    // The subject here is the kill, and the heartbeat is the independent evidence for
+    // it: a child that was demonstrably writing before the timeout must write nothing
+    // after runProbeProcess returns. That evidence only means something if the child
+    // was actually caught mid-write, so "it wrote at least once" is a PRECONDITION,
+    // not the claim — and a fixed budget races the child's own process startup (exec +
+    // JUCE static init + Catch2 registration) for it. Measured on this Mac: ~35-80ms
+    // idle, but past 250ms once several processes start at once, at which point the
+    // child is killed before its first appendText and the file never exists. That was
+    // a ~1-in-28 flake failing on the precondition while the kill itself was fine.
+    //
+    // So establish the precondition instead of gambling on it: escalate the budget
+    // until the child has demonstrably started writing, then assert the kill. A quiet
+    // machine still pays only the first 250ms; a loaded one buys the margin it needs.
+    // The cap stays well under the child fixture's own ~10s lifetime (1000 x 10ms) so
+    // that every attempt is still a kill and never a child exiting on its own.
+    juce::File heartbeat;
+    ProbeProcessResult result;
+    juce::int64 sizeAfterReturn = 0;
+
+    for (int timeoutMs = 250; timeoutMs <= 4000; timeoutMs *= 2)
+    {
+        heartbeat = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                        .getNonexistentChildFile ("mosh-audio-probe-heartbeat", ".txt");
+        mosh::setEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT",
+                         heartbeat.getFullPathName().toRawUTF8());
+        result = runProbeProcess (
+            { juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                  .getFullPathName(),
+              "[audiostartup-child]" },
+            timeoutMs);
+        mosh::unsetEnvVar ("MOSH_AUDIO_TEST_HEARTBEAT");
+
+        sizeAfterReturn = heartbeat.getSize();
+        if (heartbeat.existsAsFile() && sizeAfterReturn > 0)
+            break;
+
+        // Killed before it could write, so this attempt proves nothing either way.
+        heartbeat.deleteFile();
+    }
 
     CHECK (result.status == ProbeProcessStatus::timedOut);
     REQUIRE (heartbeat.existsAsFile());
-    const auto sizeAfterReturn = heartbeat.getSize();
     REQUIRE (sizeAfterReturn > 0);
     juce::Thread::sleep (100);
     CHECK (heartbeat.getSize() == sizeAfterReturn);
