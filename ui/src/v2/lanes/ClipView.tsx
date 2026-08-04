@@ -73,6 +73,9 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   const exec = useStore((s) => s.exec);
   const tool = useStore((s) => s.tool);
   const snapTime = useStore((s) => s.snapTime);
+  // CAP-CLP-017 — the modal ripple toggle (top bar). Read here rather than inside
+  // commitClipDrag so that helper stays store-free and unit-testable.
+  const ripple = useStore((s) => s.ripple);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
   const transportPosition = useStore((s) => s.transport.position);
   const setSelectedClip = useShell((s) => s.setSelectedClip);
@@ -244,7 +247,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
         if (r && r.end - r.start < 1e-6) useShell.getState().setTimeRange(null);
         return;
       }
-      commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview);
+      commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview, ripple);
       return;
     }
     // A non-left button's release (right-click → context menu, middle-click) must NOT

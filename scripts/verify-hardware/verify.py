@@ -1794,6 +1794,106 @@ def check_export_dither(ctx):
     })
 
 
+def _span_rms(path, spans):
+    """RMS of the rendered mono signal over each [a, b) second span (clamped to the
+    file). Spans are given with a margin inside each region so a clip boundary landing a
+    frame either side cannot decide the verdict."""
+    m, sr, _ = load_wav(path)
+    m = mono(m)
+    out = []
+    for a, b in spans:
+        i0, i1 = int(round(a * sr)), min(m.size, int(round(b * sr)))
+        seg = m[i0:i1] if i1 > i0 else m[:0]
+        out.append(round(float(np.sqrt(np.mean(seg ** 2))) if seg.size else 0.0, 5))
+    return out
+
+
+def check_insert_time(ctx):
+    """CAP-CLP-017: insert_time must move the AUDIO, not just the ValueTree.
+
+    `--selftest` proves the STRUCTURE — every downstream clip start moved by exactly the
+    inserted duration and undo restored it. It cannot prove the samples followed: the
+    whole freeze_layer class of bug is a command whose bookkeeping is perfect and whose
+    rendered output is unchanged. So: render the same edit three times through the real
+    offline renderer and read where the energy actually is.
+
+    Fixture — one track, a 4s tone at 0 (it STRADDLES the insertion point) and a 1s tone
+    at 6, i.e. a 7s edit that sounds  [0,4) tone · [4,6) silence · [6,7) tone.
+    Insert 2s at t=2. The edit must then sound
+        [0,2) tone · [2,4) NEW SILENCE · [4,6) tone (the split half, delayed 2s) ·
+        [6,8) silence · [8,9) tone (delayed 2s)
+    — a hole in the audio exactly where the space was opened, and every later sound
+    exactly 2s later. Then undo and render again: byte-for-byte the original.
+
+    Loud/quiet is judged RELATIVELY (a quiet window must be < 5% of the loud windows'
+    level) rather than against a hardcoded amplitude, so a change to the test tone's gain
+    cannot silently turn this into a tautology."""
+    SESSION = "verify-insert-time"
+    before_out = ART / "13_insert_before.wav"
+    after_out = ART / "13_insert_after.wav"
+    undo_out = ART / "13_insert_undone.wav"
+
+    cmds = [
+        # A FRESH project first. Harness sessions persist between verify.py runs, and this
+        # check reads absolute window positions in the rendered file — a leftover track
+        # from a previous run would move the energy and turn a real regression into noise
+        # (or hide one). The `before` duration assertion below is the belt to this braces.
+        {"command": "new_project", "args": {"name": "insert-time-verify"}},
+        {"command": "create_track", "args": {"name": "InsertTime"}, "capture": {"T": "trackId"}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 4.0, "freq": 220.0}},
+        {"command": "add_test_tone_clip", "args": {"trackId": "${T}", "seconds": 1.0, "freq": 660.0},
+         "capture": {"C2": "clipId"}},
+        {"command": "move_clip", "args": {"clipId": "${C2}", "start": 6.0}},
+        {"command": "export_audio", "args": {"file": str(before_out)}},
+        {"command": "insert_time", "args": {"start": 2.0, "duration": 2.0}},
+        {"command": "export_audio", "args": {"file": str(after_out)}},
+        {"command": "undo"},
+        {"command": "export_audio", "args": {"file": str(undo_out)}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, SESSION)
+    fails = failed_commands(results)
+    outs = (before_out, after_out, undo_out)
+    if fails or not all(p.exists() for p in outs):
+        return row("insert_time moves the audio (CAP-CLP-017)", False,
+                   {"failed_commands": fails,
+                    "exists": {p.name: p.exists() for p in outs},
+                    "stderr": proc.stderr[-500:]})
+
+    st_before, st_after, st_undo = (stats(p) for p in outs)
+
+    # BEFORE: tone · silence · tone across a 7s edit.
+    b_tone1, b_gap, b_tone2 = _span_rms(before_out, [(0.2, 3.8), (4.2, 5.8), (6.1, 6.9)])
+    # AFTER: the SAME material with a 2s hole punched at t=2 and everything after it late.
+    a_head, a_hole, a_tail, a_gap, a_late = _span_rms(
+        after_out, [(0.2, 1.8), (2.2, 3.8), (4.2, 5.8), (6.2, 7.8), (8.1, 8.9)])
+
+    loud = min(b_tone1, b_tone2, a_head, a_tail, a_late)
+    quiet = max(b_gap, a_hole, a_gap)
+    pattern_ok = loud > 0.01 and quiet < loud * 0.05
+
+    # The fixture really is the 7s edit this check reasons about (a dirty session or a
+    # changed add_test_tone_clip default must fail loudly, not skew the windows quietly).
+    fixture_ok = abs(st_before["duration_s"] - 7.0) < 0.05
+
+    # The edit got exactly 2s longer, and the renderer produced exactly that.
+    grew_ok = abs(st_after["duration_s"] - (st_before["duration_s"] + 2.0)) < 0.02
+
+    # …and one undo puts the samples back, not just the bookkeeping.
+    undo_ok = (st_undo["frames"] == st_before["frames"]
+               and diff_rms(before_out, undo_out) < 1e-6)
+
+    ok = fixture_ok and pattern_ok and grew_ok and undo_ok
+    return row("insert_time moves the audio (CAP-CLP-017)", ok,
+               {"before": st_before, "after": st_after, "undone": st_undo,
+                "before_rms": {"tone1": b_tone1, "gap": b_gap, "tone2": b_tone2},
+                "after_rms": {"head": a_head, "new_hole": a_hole, "delayed_tail": a_tail,
+                              "gap": a_gap, "delayed_tone2": a_late},
+                "loud_floor": loud, "quiet_ceiling": quiet,
+                "fixture_is_7s": fixture_ok, "pattern_ok": pattern_ok, "grew_by_2s": grew_ok,
+                "undo_restores_samples": undo_ok,
+                "undo_diff_rms": diff_rms(before_out, undo_out)})
+
+
 OFFLINE_CHECKS = [check_spectral_helpers, check_export_dither,
                   check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
@@ -1803,7 +1903,8 @@ OFFLINE_CHECKS = [check_spectral_helpers, check_export_dither,
                   check_render_artifact_portability, check_crash_recovery,
                   check_skill_transaction_real_engine, check_stem_export,
                   check_clip_fades, check_clip_reverse, check_warp_stretch,
-                  check_automation_ramp, check_send_return, check_master_chain]
+                  check_automation_ramp, check_send_return, check_master_chain,
+                  check_insert_time]
 
 
 # ── main ────────────────────────────────────────────────────────────────────────

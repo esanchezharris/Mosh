@@ -19,6 +19,13 @@ type Exec = (command: string, args?: Record<string, unknown>) => Promise<unknown
 
 const rejected = (r: unknown): boolean => !(r as { ok?: boolean } | null)?.ok;
 
+// CAP-CLP-017 — RIPPLE mode is a shell-level toggle (store.ripple), so it reaches the
+// backend as one extra argument on the command a gesture already issues: move_clip and
+// trim_clip both take {ripple:true} and carry every later clip on the same track. It is
+// threaded as an explicit parameter rather than read from the store here so this helper
+// stays a pure function (its unit tests call it with no store at all), and it is OMITTED
+// entirely when off — the native default is false, and not sending the key keeps a
+// ripple-off drag byte-identical to the command this shipped with.
 export function commitClipDrag(
   kind: "move" | "trim-l" | "trim-r" | "stretch",
   preview: DragPos | null,
@@ -26,7 +33,9 @@ export function commitClipDrag(
   clipId: string,
   exec: Exec,
   setPreview: (p: DragPos | null) => void,
+  ripple = false,
 ): void {
+  const rippleArg = ripple ? { ripple: true } : {};
   if (kind === "stretch") {
     // Time-stretch (warp) to the dragged length instead of trimming the source.
     if (preview && preview.length > 0) {
@@ -40,7 +49,7 @@ export function commitClipDrag(
   }
   if (kind === "move") {
     if (preview && Math.abs(preview.start - origStart) > 1e-4) {
-      void exec("move_clip", { clipId, start: preview.start }).then((r) => {
+      void exec("move_clip", { clipId, start: preview.start, ...rippleArg }).then((r) => {
         if (rejected(r)) setPreview(null); // command rejected → snap back immediately
       });
     } else {
@@ -56,6 +65,7 @@ export function commitClipDrag(
       start: preview.start,
       length: preview.length,
       offset: preview.offset,
+      ...rippleArg,
     }).then((r) => {
       if (rejected(r)) setPreview(null); // command rejected → revert the trim preview
     });

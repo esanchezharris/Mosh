@@ -240,6 +240,14 @@ private:
     // transaction: per targeted track, split overlapping clips at the range
     // bounds and remove the fully-inside segment(s).
     juce::var cmdDeleteTimeRange (const juce::var& args);
+    // CAP-CLP-017 — insert_time: the inverse of a ripple delete. One undoable
+    // transaction that opens `duration` seconds of empty timeline at `start` and
+    // pushes EVERYTHING after it right — clips (split at the insertion point),
+    // plugin-parameter automation on every targeted track AND the master bus,
+    // tempo/time-signature/pitch changes, beat-anchored song sections and
+    // annotations, and the transport loop region. See the body's "WHAT MOVES"
+    // ledger in MoshOps.Clips.cpp for exactly what is and is not covered.
+    juce::var cmdInsertTime      (const juce::var& args);
     juce::var cmdSetTrackVolume (const juce::var& args);
     juce::var cmdSetTrackPan    (const juce::var& args);
     juce::var cmdSetTrackMute   (const juce::var& args);

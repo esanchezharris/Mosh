@@ -1630,10 +1630,30 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "move_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");
-      pushUndo(); f.clip.start = Math.max(0, num(args.start, f.clip.start));
+      // CAP-CLP-017 — the cross-track refusal is validated BEFORE any mutation, exactly
+      // like the native handler: ripple describes a distance on the track the clip is
+      // leaving, so it has no meaning across a move to another one.
+      if (args.ripple && "trackId" in args) {
+        const dest = findTrack(str(args.trackId));
+        if (dest && dest !== f.track)
+          return err(command, "ripple:true cannot be combined with a move to another track");
+      }
+      pushUndo();
+      const oldStart = f.clip.start, oldEnd = f.clip.start + f.clip.length;
+      f.clip.start = Math.max(0, num(args.start, f.clip.start));
       if ("trackId" in args) { // move across tracks
         const dest = findTrack(str(args.trackId));
         if (dest && dest !== f.track) { f.track.clips = f.track.clips.filter((c) => c.id !== f.clip.id); dest.clips.push(f.clip); }
+      }
+      // CAP-CLP-017 — opt-in ripple (default absent ⇒ path above unchanged): same-track
+      // clips at/after this clip's OLD end follow by the move distance. Mirrors
+      // rippleShiftClipsAfter exactly — negative-start clamp, moved clip excluded.
+      if (args.ripple) {
+        const delta = f.clip.start - oldStart;
+        if (Math.abs(delta) > 1e-6)
+          for (const c of f.track.clips)
+            if (c.id !== f.clip.id && c.start >= oldEnd - 1e-6)
+              c.start = Math.max(0, c.start + delta);
       }
       invalidate(); return ok(command);
     }
@@ -1740,6 +1760,116 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       }
       invalidate();
       return ok(command, { removed, splits, tracks: targets.length, ripple });
+    }
+    // CAP-CLP-017 — insert_time: open `duration` seconds at `start` and push everything
+    // after it right. The inverse of the ripple delete above, and modelled here to the
+    // same depth the mock models anything: clips (split at the point, then shifted),
+    // plugin-parameter automation on the targeted tracks AND the master bus (points
+    // shifted, with hold points at both edges of the new span so the value is held FLAT
+    // across it), the tempo map, beat-anchored sections/annotations, and the loop region.
+    //
+    // The one native behaviour the mock does NOT reproduce is the clip-ORDER hazard the
+    // native handler exists to dodge (Tracktion sorts its clip list asynchronously; a JS
+    // array has no such thing). So a green mock run is NOT evidence about that — the
+    // "clips in un-sorted order" case is proven in --selftest against the real engine.
+    case "insert_time": {
+      const start = num(args.start, 0), duration = num(args.duration, 0);
+      if (start < 0) return err(command, "start must be >= 0");
+      if (!(duration > 0)) return err(command, "duration must be greater than 0");
+      const idsArg = Array.isArray(args.trackIds) ? (args.trackIds as unknown[]).map(String) : null;
+      const scoped = idsArg !== null;
+      const targets = idsArg ? snapshot.tracks.filter((t) => idsArg.includes(t.id)) : snapshot.tracks;
+      pushUndo();
+      const EPS = 1e-6;
+      const beatsPerSec = (snapshot.session.tempo || 120) / 60;
+
+      // Points at/after the insertion point move right; a hold point at each edge keeps
+      // the value in force at `start` flat across the new space instead of stretching a
+      // ramp through it. Mirrors te::Track::insertSpaceIntoTrack, which is what the
+      // native side calls.
+      const shiftAutomation = (plugins: typeof snapshot.tracks[number]["plugins"]) => {
+        for (const pl of plugins ?? [])
+          for (const p of pl.params ?? []) {
+            if (!p.points?.length) continue;
+            // Linear between neighbours, flat outside the curve's own span — the shape
+            // te::AutomationCurve::getValueAt produces for the curve:0 points
+            // add_automation_point writes. A step-function read here would report the
+            // wrong held value and quietly make the hold pair a lie.
+            const valueAt = (t: number) => {
+              const pts = p.points!;
+              if (t <= pts[0].t + EPS) return pts[0].v;
+              for (let i = 1; i < pts.length; i++) {
+                if (t > pts[i].t + EPS) continue;
+                const span = pts[i].t - pts[i - 1].t;
+                return span <= EPS ? pts[i].v
+                  : pts[i - 1].v + (pts[i].v - pts[i - 1].v) * ((t - pts[i - 1].t) / span);
+              }
+              return pts[pts.length - 1].v;
+            };
+            const held = valueAt(start);
+            for (const pt of p.points) if (pt.t >= start - EPS) pt.t += duration;
+            p.points.push({ t: start, v: held }, { t: start + duration, v: held });
+            p.points.sort((a, b) => a.t - b.t);
+          }
+      };
+
+      let splits = 0, clipsMoved = 0;
+      for (const t of targets) {
+        const next: typeof t.clips = [];
+        for (const c of t.clips) {
+          const c0 = c.start, c1 = c.start + c.length;
+          if (c0 < start - EPS && c1 > start + EPS) {   // straddles → split at the point
+            const right = JSON.parse(JSON.stringify(c)) as typeof c;
+            right.id = nextClipId();
+            right.start = start;
+            right.length = c1 - start;
+            right.offset = (c.offset ?? 0) + (start - c0);
+            if (right.notes) {
+              const cutBeats = (start - c0) * beatsPerSec;
+              right.notes = right.notes.filter((n) => n.start >= cutBeats - 1e-9)
+                                       .map((n) => ({ ...n, start: n.start - cutBeats }));
+              reindexNotes(right);
+            }
+            c.length = start - c0;
+            if (c.notes) {
+              const keepBeats = (start - c0) * beatsPerSec;
+              c.notes = c.notes.filter((n) => n.start < keepBeats - 1e-9);
+              reindexNotes(c);
+            }
+            next.push(c, right);
+            splits++;
+          } else next.push(c);
+        }
+        for (const c of next)
+          if (c.start >= start - EPS) { c.start += duration; clipsMoved++; }
+        t.clips = next.sort((a, b) => a.start - b.start);
+        shiftAutomation(t.plugins);
+      }
+
+      let sectionsMoved = 0, annotationsMoved = 0, loopShifted = false;
+      if (!scoped) {
+        shiftAutomation(snapshot.master?.plugins);
+        for (const m of snapshot.session.tempoMap ?? []) if (m.time >= start - EPS) m.time += duration;
+        // Sections/annotations are BEAT-anchored: shift by the beat width of the new span.
+        const beatAt = start * beatsPerSec, beatDelta = duration * beatsPerSec;
+        for (const s of snapshot.sections ?? []) {
+          if (s.endBeat <= beatAt + EPS) continue;
+          if (s.startBeat >= beatAt - EPS) s.startBeat += beatDelta;   // whole → moves
+          s.endBeat += beatDelta;                                      // straddling → grows
+          sectionsMoved++;
+        }
+        for (const a of snapshot.annotations ?? [])
+          if (a.beat >= beatAt - EPS) { a.beat += beatDelta; annotationsMoved++; }
+        const tr = snapshot.transport;
+        if (tr.loopEnd - tr.loopStart > EPS && tr.loopEnd > start + EPS) {
+          if (tr.loopStart >= start - EPS) tr.loopStart += duration;   // whole → moves
+          tr.loopEnd += duration;                                      // straddling → grows
+          loopShifted = true;
+        }
+      }
+      invalidate();
+      return ok(command, { start, duration, tracks: targets.length, splits, clipsMoved,
+                           sectionsMoved, annotationsMoved, loopShifted, scoped });
     }
     case "duplicate_clip": {
       const f = findClip(str(args.clipId)); if (!f) return err(command, "clip not found");

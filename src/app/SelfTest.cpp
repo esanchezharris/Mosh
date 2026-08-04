@@ -7555,6 +7555,443 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         }
     }
 
+    // ─── CAP-CLP-017: insert_time (whole-timeline) + move_clip RIPPLE ───
+    //
+    // insert_time's blast radius is the whole project, which is why it was held back and
+    // why this section is the size it is. The rule under test is EXACTNESS, not
+    // plausibility: every downstream thing moves by precisely the inserted amount, every
+    // upstream thing does not move at all, and ONE undo puts every one of them back.
+    //
+    // It runs in its own project. An unscoped insert_time rewrites every track, the tempo
+    // map, the sections/annotations and the loop, so running it on the shared harness edit
+    // would corrupt every later section's fixtures — and a test that has to tiptoe around
+    // the shared edit ends up asserting less than it should.
+    section ("CAP-CLP-017: insert_time + move_clip ripple");
+    {
+        const auto sessionEdit = eng.editFile();
+        check (ok (cmd (ops, "new_project", args1 ("name", "insert-time"))),
+               "insert-time: isolated project (unscoped insert_time rewrites EVERY track)");
+
+        // EXACT, not "close enough": these are double translations (s + delta), so a
+        // 1e-6 window is the honest tolerance. 0.05 would hide an off-by-a-hair shift,
+        // which is the whole class of bug this command can produce.
+        auto exact = [] (double a, double b) { return std::abs (a - b) < 1.0e-6; };
+
+        auto startsOf = [&] (const String& tid) -> juce::Array<double> {
+            juce::Array<double> starts;
+            auto trk = trackById (tid);                       // returns a var BY VALUE — bind it
+            auto clipsVar = trk.getProperty ("clips", var());
+            if (auto* clips = clipsVar.getArray())
+                for (auto& c : *clips)
+                    starts.add ((double) c.getProperty ("start", -1.0));
+            starts.sort();
+            return starts;
+        };
+        auto spansOf = [&] (const String& tid) -> juce::Array<double> {   // [s0,e0, s1,e1, …] sorted by start
+            juce::Array<double> out;
+            auto trk = trackById (tid);
+            auto clipsVar = trk.getProperty ("clips", var());
+            juce::Array<double> starts;
+            if (auto* clips = clipsVar.getArray())
+                for (auto& c : *clips) starts.add ((double) c.getProperty ("start", -1.0));
+            starts.sort();
+            for (auto s : starts)
+                if (auto* clips = clipsVar.getArray())
+                    for (auto& c : *clips)
+                        if (exact ((double) c.getProperty ("start", -1.0), s))
+                        { out.add (s); out.add (s + (double) c.getProperty ("length", 0.0)); break; }
+            return out;
+        };
+        // Automation point times for (track, plugin, param 0), sorted.
+        auto pointTimes = [&] (const String& tid, int plugIdx) -> juce::Array<double> {
+            juce::Array<double> ts;
+            auto trk = trackById (tid);
+            auto pluginsVar = trk.getProperty ("plugins", var());
+            if (auto* plugins = pluginsVar.getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                    {
+                        auto paramsVar = p.getProperty ("params", var());
+                        if (auto* params = paramsVar.getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == 0)
+                                {
+                                    auto ptsVar = pr.getProperty ("points", var());
+                                    if (auto* pts = ptsVar.getArray())
+                                        for (auto& pt : *pts) ts.add ((double) pt.getProperty ("t", -1.0));
+                                }
+                    }
+            ts.sort();
+            return ts;
+        };
+        auto pointValueAt = [&] (const String& tid, int plugIdx, double t) -> double {
+            auto trk = trackById (tid);
+            auto pluginsVar = trk.getProperty ("plugins", var());
+            if (auto* plugins = pluginsVar.getArray())
+                for (auto& p : *plugins)
+                    if ((int) p.getProperty ("index", -1) == plugIdx)
+                    {
+                        auto paramsVar = p.getProperty ("params", var());
+                        if (auto* params = paramsVar.getArray())
+                            for (auto& pr : *params)
+                                if ((int) pr.getProperty ("index", -1) == 0)
+                                {
+                                    auto ptsVar = pr.getProperty ("points", var());
+                                    if (auto* pts = ptsVar.getArray())
+                                        for (auto& pt : *pts)
+                                            if (exact ((double) pt.getProperty ("t", -1.0), t))
+                                                return (double) pt.getProperty ("v", -1.0);
+                                }
+                    }
+            return -1.0;
+        };
+        auto sectionBeats = [&] (const String& name) -> juce::Array<double> {   // [startBeat, endBeat]
+            juce::Array<double> out;
+            auto snap = ops.snapshot();
+            auto secsVar = snap.getProperty ("sections", var());
+            if (auto* secs = secsVar.getArray())
+                for (auto& s : *secs)
+                    if (s.getProperty ("name", var()).toString() == name)
+                    { out.add ((double) s.getProperty ("startBeat", -1.0)); out.add ((double) s.getProperty ("endBeat", -1.0)); }
+            return out;
+        };
+        auto annotationBeat = [&] (const String& text) -> double {
+            auto snap = ops.snapshot();
+            auto annsVar = snap.getProperty ("annotations", var());
+            if (auto* anns = annsVar.getArray())
+                for (auto& a : *anns)
+                    if (a.getProperty ("text", var()).toString() == text)
+                        return (double) a.getProperty ("beat", -1.0);
+            return -1.0;
+        };
+        auto tempoTimeFor = [&] (double bpm) -> double {
+            auto snap = ops.snapshot();
+            auto sess = snap.getProperty ("session", var());
+            auto tmVar = sess.getProperty ("tempoMap", var());
+            if (auto* tm = tmVar.getArray())
+                for (auto& t : *tm)
+                    if (std::abs ((double) t.getProperty ("bpm", 0.0) - bpm) < 0.001)
+                        return (double) t.getProperty ("time", -1.0);
+            return -1.0;
+        };
+        auto loopRange = [&] () -> juce::Array<double> {
+            auto snap = ops.snapshot();
+            auto tr = snap.getProperty ("transport", var());
+            return { (double) tr.getProperty ("loopStart", -1.0), (double) tr.getProperty ("loopEnd", -1.0) };
+        };
+
+        // ── the fixture: a known arrangement, at 120 BPM 4/4 (so 1 beat = 0.5s) ──
+        //   track A : clip 0..2 (upstream) · clip 3..7 (STRADDLES the insertion point) · clip 8..9
+        //   track B : clip 6..7                       (proves "every track", not just one)
+        //   automation on A's compressor: 1s @ 0.2, 6s @ 0.8   (a ramp ACROSS the point)
+        //   master  : one automation point at 6s      (the track type te::insertSpaceIntoEdit misses)
+        //   tempo   : 140 BPM change at 6s
+        //   sections: "Intro" 0..8 beats (before) · "Bridge" 8..16 (straddles) · "Hook" 20..28 (after)
+        //   notes   : "early" @ beat 4 (before) · "late" @ beat 24 (after)
+        //   loop    : 6..10s
+        // Insert 2s at 5s ⇒ 4 beats of space at beat 10.
+        check (ok (cmd (ops, "set_tempo", objN ({{ "bpm", 120.0 }}))), "insert-time: fixture tempo 120");
+
+        // The tempo change goes in BEFORE any clip exists, and that ordering is a bug fix,
+        // not a style choice. te::TempoSetting::setBpm passes remapEditPositions=true, so
+        // adding a tempo change RE-TIMES every clip after it to preserve its BEAT position
+        // — laying the clips first and the tempo change second silently moved the 8..9 clip
+        // to 7.714 and made this section fail against a command that was behaving perfectly.
+        // (insert_time's own tempo shift does NOT remap: TempoSequence::moveTempoStart
+        // passes remapEditPositions=false, which is why the clips below stay put.)
+        check (ok (cmd (ops, "insert_tempo_change", objN ({{ "time", 6.0 }, { "bpm", 140.0 }}))), "insert-time: 140 BPM change at 6s");
+
+        const auto tA = cmd (ops, "create_track", args1 ("name", "InsA"))["data"].getProperty ("trackId", var()).toString();
+        const auto tB = cmd (ops, "create_track", args1 ("name", "InsB"))["data"].getProperty ("trackId", var()).toString();
+        // Every tone gets an explicit unique NAME. MoshEngine::generateTestTone derives the
+        // file path from the name, which defaults to "tone-<freq>" — so two sections that
+        // happen to pick the same frequency share one WAV on disk, and this fixture drew a
+        // 1.2s clip where it asked for 2.0s because SelfTest.cpp:3074 had already minted
+        // tone-251.wav at 1.2s. Naming per clip removes the whole class.
+        auto place = [&] (const String& tid, const String& toneName, double seconds, double at) -> String {
+            auto made = cmd (ops, "add_test_tone_clip", objN ({{ "trackId", tid }, { "name", toneName },
+                                                               { "seconds", seconds }, { "freq", 251.0 }}));
+            const auto cid = made["data"].getProperty ("clipId", var()).toString();
+            if (at > 0.0) cmd (ops, "move_clip", objN ({{ "clipId", cid }, { "start", at }}));
+            return cid;
+        };
+        place (tA, "ins-a1", 2.0, 0.0);
+        place (tA, "ins-a2", 4.0, 3.0);
+        place (tA, "ins-a3", 1.0, 8.0);
+        place (tB, "ins-b1", 1.0, 6.0);
+        {
+            // Assert the fixture IS what the rest of this section reasons about. Both of the
+            // traps above produced a plausible-looking arrangement that was quietly wrong;
+            // pinning the spans here makes the next such trap fail at the fixture rather
+            // than deep in an assertion about insert_time.
+            auto a = spansOf (tA), b = spansOf (tB);
+            check (a.size() == 6 && exact (a[0], 0.0) && exact (a[1], 2.0)
+                   && exact (a[2], 3.0) && exact (a[3], 7.0)
+                   && exact (a[4], 8.0) && exact (a[5], 9.0),
+                   "insert-time: fixture track A is exactly 0..2 / 3..7 / 8..9");
+            check (b.size() == 2 && exact (b[0], 6.0) && exact (b[1], 7.0),
+                   "insert-time: fixture track B is exactly 6..7");
+        }
+
+        cmd (ops, "load_builtin", objN ({{ "trackId", tA }, { "type", "compressor" }}));
+        int pidxA = -1;
+        { auto trk = trackById (tA);
+          auto pluginsVar = trk.getProperty ("plugins", var());
+          if (auto* plugins = pluginsVar.getArray())
+              for (auto& p : *plugins)
+                  if (p.getProperty ("type", var()).toString() == "compressor")
+                      pidxA = (int) p.getProperty ("index", -1); }
+        check (pidxA >= 0, "insert-time: compressor on track A (automation fixture)");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", tA }, { "pluginIndex", pidxA }, { "paramIndex", 0 }, { "time", 1.0 }, { "value", 0.2 }}))),
+               "insert-time: automation point at 1s");
+        check (ok (cmd (ops, "add_automation_point", objN ({{ "trackId", tA }, { "pluginIndex", pidxA }, { "paramIndex", 0 }, { "time", 6.0 }, { "value", 0.8 }}))),
+               "insert-time: automation point at 6s (a ramp straddling the insertion point)");
+
+        // Master-bus automation. Reached through the ENGINE rather than a command because
+        // add_automation_point addresses (trackId, pluginIndex, paramIndex) and the master
+        // bus has no trackId — which is precisely why nobody would have noticed the master
+        // curve staying put. Written with a null UndoManager so the FIXTURE itself is not
+        // on the undo stack: the only master-curve write undo can revert is insert_time's.
+        te::Plugin* masterPlug = nullptr;
+        {
+            juce::Array<te::Plugin*> before;
+            for (auto* p : eng.edit().getMasterPluginList().getPlugins()) before.add (p);
+            check (ok (cmd (ops, "load_master_builtin", args1 ("type", "compressor"))), "insert-time: master compressor loaded");
+            for (auto* p : eng.edit().getMasterPluginList().getPlugins())
+                if (! before.contains (p)) { masterPlug = p; break; }
+        }
+        te::AutomatableParameter* masterParam = (masterPlug != nullptr && masterPlug->getNumAutomatableParameters() > 0)
+                                                  ? masterPlug->getAutomatableParameter (0).get() : nullptr;
+        check (masterParam != nullptr, "insert-time: master compressor exposes an automatable parameter");
+        if (masterParam != nullptr)
+            masterParam->getCurve().addPoint (tracktion::TimePosition::fromSeconds (6.0),
+                                              masterParam->valueRange.convertFrom0to1 (0.75f), 0.0f, nullptr);
+        auto masterPointTime = [&] () -> double {
+            if (masterParam == nullptr || masterParam->getCurve().getNumPoints() == 0) return -1.0;
+            return masterParam->getCurve().getPointTime (0).inSeconds();
+        };
+        check (exact (masterPointTime(), 6.0), "insert-time: master automation point sits at 6s before the insert");
+
+        check (ok (cmd (ops, "create_section", objN ({{ "name", "Intro" },  { "startBeat", 0.0 },  { "endBeat", 8.0 }}))),  "insert-time: section Intro 0..8 beats");
+        check (ok (cmd (ops, "create_section", objN ({{ "name", "Bridge" }, { "startBeat", 8.0 },  { "endBeat", 16.0 }}))), "insert-time: section Bridge 8..16 beats (straddles beat 10)");
+        check (ok (cmd (ops, "create_section", objN ({{ "name", "Hook" },   { "startBeat", 20.0 }, { "endBeat", 28.0 }}))), "insert-time: section Hook 20..28 beats");
+        check (ok (cmd (ops, "create_annotation", objN ({{ "text", "early" }, { "beat", 4.0 }}))),  "insert-time: annotation at beat 4");
+        check (ok (cmd (ops, "create_annotation", objN ({{ "text", "late" },  { "beat", 24.0 }}))), "insert-time: annotation at beat 24");
+        check (ok (cmd (ops, "set_transport", objN ({{ "loop", true }, { "loopStart", 6.0 }, { "loopEnd", 10.0 }}))), "insert-time: loop 6..10s");
+
+        // (0) VALIDATION — refused before any side effect. Snapshot the world, try the bad
+        // calls, assert nothing at all moved.
+        {
+            const auto before = spansOf (tA);
+            check (! ok (cmd (ops, "insert_time", objN ({{ "start", 5.0 }, { "duration", 0.0 }}))),  "insert-time: duration 0 errors");
+            check (! ok (cmd (ops, "insert_time", objN ({{ "start", 5.0 }, { "duration", -1.0 }}))), "insert-time: negative duration errors");
+            check (! ok (cmd (ops, "insert_time", objN ({{ "start", -1.0 }, { "duration", 2.0 }}))), "insert-time: negative start errors");
+            check (! ok (cmd (ops, "insert_time", objN ({{ "start", 5.0 }}))),                       "insert-time: missing duration errors");
+            check (spansOf (tA) == before, "insert-time: every rejected call left the arrangement untouched");
+        }
+
+        // (1) THE INSERT.
+        auto ins = cmd (ops, "insert_time", objN ({{ "start", 5.0 }, { "duration", 2.0 }}));
+        check (ok (ins), "insert-time: insert_time {start:5, duration:2} ok");
+        check ((int) ins["data"].getProperty ("splits", -1) == 1, "insert-time: exactly one clip straddled the point and was split");
+        check (! (bool) ins["data"].getProperty ("scoped", true), "insert-time: reports scoped:false for a whole-project insert");
+
+        // clips — EXACTLY +2s downstream, EXACTLY 0 upstream.
+        {
+            auto a = spansOf (tA);
+            check (a.size() == 8, "insert-time: track A now holds four clips (the straddler was split)");
+            if (a.size() == 8)
+            {
+                check (exact (a[0], 0.0) && exact (a[1], 2.0), "insert-time: the upstream clip did NOT move (0..2)");
+                check (exact (a[2], 3.0) && exact (a[3], 5.0), "insert-time: the straddler's LEFT half held its ground (3..5)");
+                check (exact (a[4], 7.0) && exact (a[5], 9.0), "insert-time: the straddler's RIGHT half moved by exactly 2s (5..7 -> 7..9)");
+                check (exact (a[6], 10.0) && exact (a[7], 11.0), "insert-time: the downstream clip moved by exactly 2s (8..9 -> 10..11)");
+            }
+            auto b = spansOf (tB);
+            check (b.size() == 2 && exact (b[0], 8.0) && exact (b[1], 9.0),
+                   "insert-time: the OTHER track's clip moved by exactly 2s too (6..7 -> 8..9)");
+        }
+
+        // automation — the failure that is silent. Points at/after the point move by
+        // exactly 2s; the point before does not; and a HOLD pair pins the value flat
+        // across the new space instead of stretching the ramp through it.
+        {
+            auto ts = pointTimes (tA, pidxA);
+            check (ts.size() == 4, "insert-time: automation gained the two hold points (2 -> 4)");
+            if (ts.size() == 4)
+            {
+                check (exact (ts[0], 1.0), "insert-time: the automation point BEFORE the insert did not move (1s)");
+                check (exact (ts[1], 5.0) && exact (ts[2], 7.0), "insert-time: hold points written at both edges of the new space (5s, 7s)");
+                check (exact (ts[3], 8.0), "insert-time: the automation point after the insert moved by exactly 2s (6s -> 8s)");
+                const double v5 = pointValueAt (tA, pidxA, 5.0), v7 = pointValueAt (tA, pidxA, 7.0);
+                check (std::abs (v5 - v7) < 0.01, "insert-time: the value is HELD FLAT across the inserted space (no ramp stretched through it)");
+                check (std::abs (v5 - 0.68) < 0.02, "insert-time: the held value is the one that was in force at the insertion point");
+            }
+            check (exact (masterPointTime(), 8.0),
+                   "insert-time: MASTER-BUS automation moved by exactly 2s too (the track te::insertSpaceIntoEdit misses)");
+        }
+
+        // tempo / time-signature, beat-anchored sections + annotations, loop region.
+        check (exact (tempoTimeFor (140.0), 8.0), "insert-time: the 140 BPM change moved by exactly 2s (6s -> 8s)");
+        {
+            auto intro = sectionBeats ("Intro"), bridge = sectionBeats ("Bridge"), hook = sectionBeats ("Hook");
+            check (intro.size() == 2 && exact (intro[0], 0.0) && exact (intro[1], 8.0),  "insert-time: a section entirely before the point did not move");
+            check (bridge.size() == 2 && exact (bridge[0], 8.0) && exact (bridge[1], 20.0), "insert-time: a section STRADDLING the point grew by 4 beats (kept its start)");
+            check (hook.size() == 2 && exact (hook[0], 24.0) && exact (hook[1], 32.0), "insert-time: a section after the point moved by exactly 4 beats");
+            check ((int) ins["data"].getProperty ("sectionsMoved", -1) == 2, "insert-time: result counts the two sections it touched");
+        }
+        check (exact (annotationBeat ("early"), 4.0),  "insert-time: an annotation before the point did not move");
+        check (exact (annotationBeat ("late"), 28.0),  "insert-time: an annotation after the point moved by exactly 4 beats");
+        {
+            auto lr = loopRange();
+            check (lr.size() == 2 && exact (lr[0], 8.0) && exact (lr[1], 12.0), "insert-time: the loop region moved by exactly 2s (6..10 -> 8..12)");
+            check ((bool) ins["data"].getProperty ("loopShifted", false), "insert-time: result reports the loop shift");
+        }
+
+        // (2) ONE UNDO restores ALL of it. An insert that needs several undos because it
+        // opened several transactions is unrecoverable in practice — this is the check
+        // that says it didn't.
+        check (ok (cmd (ops, "undo")), "insert-time: one undo ok");
+        {
+            auto a = spansOf (tA);
+            check (a.size() == 6, "insert-time undo: track A is back to three clips (the split is gone)");
+            if (a.size() == 6)
+            {
+                check (exact (a[0], 0.0) && exact (a[1], 2.0), "insert-time undo: clip 0..2 restored");
+                check (exact (a[2], 3.0) && exact (a[3], 7.0), "insert-time undo: the straddler is WHOLE again (3..7)");
+                check (exact (a[4], 8.0) && exact (a[5], 9.0), "insert-time undo: clip 8..9 restored");
+            }
+            auto b = spansOf (tB);
+            check (b.size() == 2 && exact (b[0], 6.0) && exact (b[1], 7.0), "insert-time undo: the other track's clip restored (6..7)");
+
+            auto ts = pointTimes (tA, pidxA);
+            check (ts.size() == 2 && exact (ts[0], 1.0) && exact (ts[1], 6.0),
+                   "insert-time undo: automation is back to its two original points (hold points gone)");
+            check (exact (masterPointTime(), 6.0), "insert-time undo: master automation restored to 6s");
+            check (exact (tempoTimeFor (140.0), 6.0), "insert-time undo: the tempo change is back at 6s");
+
+            auto bridge = sectionBeats ("Bridge"), hook = sectionBeats ("Hook");
+            check (bridge.size() == 2 && exact (bridge[0], 8.0) && exact (bridge[1], 16.0), "insert-time undo: the straddling section restored");
+            check (hook.size() == 2 && exact (hook[0], 20.0) && exact (hook[1], 28.0), "insert-time undo: the downstream section restored");
+            check (exact (annotationBeat ("late"), 24.0), "insert-time undo: the downstream annotation restored");
+            auto lr = loopRange();
+            check (lr.size() == 2 && exact (lr[0], 6.0) && exact (lr[1], 10.0),
+                   "insert-time undo: the LOOP REGION is restored too (it is not in the Edit's undo history — SetLoopRangeAction puts it back)");
+        }
+
+        // (3) SCOPED — trackIds moves only those tracks. The project-global structures
+        // (tempo, sections, annotations, loop, master) deliberately hold still: shifting
+        // them for a partial insert would desync the tracks the caller excluded.
+        {
+            auto scoped = cmd (ops, "insert_time", objN ({{ "start", 5.0 }, { "duration", 2.0 },
+                                                          { "trackIds", var (juce::Array<var> { var (tB) }) }}));
+            check (ok (scoped), "insert-time scoped: ok");
+            check ((bool) scoped["data"].getProperty ("scoped", false), "insert-time scoped: result reports scoped:true");
+            auto b = spansOf (tB);
+            check (b.size() == 2 && exact (b[0], 8.0) && exact (b[1], 9.0), "insert-time scoped: the named track moved");
+            auto a = spansOf (tA);
+            check (a.size() == 6 && exact (a[2], 3.0) && exact (a[4], 8.0), "insert-time scoped: the UNNAMED track did not move");
+            check (exact (tempoTimeFor (140.0), 6.0), "insert-time scoped: the tempo map did not move");
+            check (exact (masterPointTime(), 6.0), "insert-time scoped: master automation did not move");
+            check (exact (annotationBeat ("late"), 24.0), "insert-time scoped: annotations did not move");
+            check ((int) scoped["data"].getProperty ("sectionsMoved", -1) == 0, "insert-time scoped: no sections touched");
+            auto lr = loopRange();
+            check (lr.size() == 2 && exact (lr[0], 6.0), "insert-time scoped: the loop region did not move");
+            check (ok (cmd (ops, "undo")), "insert-time scoped: undo ok");
+            check (spansOf (tB).size() == 2 && exact (spansOf (tB)[0], 6.0), "insert-time scoped: undo restored the named track");
+        }
+
+        // (4) A track whose clip list is NOT sorted by start. Tracktion sorts its clip list
+        // in an ASYNC handleAsyncUpdate, and MoshOps never pumps the message loop
+        // mid-command (AUD-001) — so "move a clip right, then add another" leaves the list
+        // in un-sorted ValueTree order. te::ClipTrack::insertSpaceIntoTrack walks that list
+        // BACKWARDS and breaks at the first clip whose centre precedes the insertion point,
+        // which would silently leave the moved-right clip behind. This is the case that
+        // decides between calling the engine's ClipTrack override and doing the move with
+        // the order-independent ripple helper.
+        {
+            const auto tC = cmd (ops, "create_track", args1 ("name", "InsUnsorted"))["data"].getProperty ("trackId", var()).toString();
+            place (tC, "ins-c1", 1.0, 5.0);   // added FIRST, ends up LAST on the timeline
+            place (tC, "ins-c2", 1.0, 0.0);   // added second, sits at 0
+            auto s = startsOf (tC);
+            check (s.size() == 2 && exact (s[0], 0.0) && exact (s[1], 5.0), "insert-time unsorted: fixture is 0..1 and 5..6");
+            check (ok (cmd (ops, "insert_time", objN ({{ "start", 2.0 }, { "duration", 1.0 },
+                                                       { "trackIds", var (juce::Array<var> { var (tC) }) }}))),
+                   "insert-time unsorted: insert ok");
+            s = startsOf (tC);
+            check (s.size() == 2 && exact (s[0], 0.0) && exact (s[1], 6.0),
+                   "insert-time unsorted: the later clip moved even though the clip list was added out of order (5 -> 6)");
+            check (ok (cmd (ops, "undo")), "insert-time unsorted: undo ok");
+        }
+
+        // ── move_clip RIPPLE (the second half of CAP-CLP-017) ──
+        {
+            const auto tR = cmd (ops, "create_track", args1 ("name", "MoveRipple"))["data"].getProperty ("trackId", var()).toString();
+            const auto mid = place (tR, "ins-r1", 1.0, 0.0);   // A: 0..1  (the one we drag)
+            place (tR, "ins-r2", 1.0, 2.0);                 // B: 2..3
+            place (tR, "ins-r3", 1.0, 4.0);                 // C: 4..5
+            check (startsOf (tR).size() == 3, "move-ripple: three clips laid out (0/2/4)");
+
+            // (a) DEFAULT — no ripple arg: the neighbours stay exactly where they are.
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", mid }, { "start", 6.0 }}))), "move-ripple: plain move ok");
+            {
+                auto s = startsOf (tR);
+                check (s.size() == 3 && exact (s[0], 2.0) && exact (s[1], 4.0) && exact (s[2], 6.0),
+                       "move-ripple: a plain move leaves the neighbours untouched");
+            }
+            check (ok (cmd (ops, "undo")), "move-ripple: undo the plain move");
+
+            // (b) ripple:true — dragging A right by 3s carries B and C by exactly 3s.
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", mid }, { "start", 3.0 }, { "ripple", true }}))),
+                   "move-ripple: ripple move ok");
+            {
+                auto s = startsOf (tR);
+                check (s.size() == 3 && exact (s[0], 3.0) && exact (s[1], 5.0) && exact (s[2], 7.0),
+                       "move-ripple: the later clips followed by exactly the move distance (2->5, 4->7)");
+            }
+
+            // (c) ONE undo reverts the move AND the shift (single transaction).
+            check (ok (cmd (ops, "undo")), "move-ripple: one undo ok");
+            {
+                auto s = startsOf (tR);
+                check (s.size() == 3 && exact (s[0], 0.0) && exact (s[1], 2.0) && exact (s[2], 4.0),
+                       "move-ripple: one undo restored BOTH the moved clip and its neighbours");
+            }
+
+            // (d) moving LEFT pulls them left by the same amount, and never past 0.
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", mid }, { "start", 0.0 }, { "ripple", true }}))),
+                   "move-ripple: a zero-distance ripple move is a no-op, not an error");
+            {
+                auto s = startsOf (tR);
+                check (s.size() == 3 && exact (s[1], 2.0) && exact (s[2], 4.0), "move-ripple: a zero-distance move shifts nothing");
+            }
+
+            // (e) ripple + a cross-track move is REFUSED, with no side effect. The
+            // neighbours it would carry live on the track the clip is leaving, so the
+            // shift distance describes nothing there.
+            {
+                const auto before = startsOf (tR);
+                auto bad = cmd (ops, "move_clip", objN ({{ "clipId", mid }, { "start", 8.0 },
+                                                         { "trackId", tB }, { "ripple", true }}));
+                check (! ok (bad), "move-ripple: ripple + a move to another track is refused");
+                check (startsOf (tR) == before, "move-ripple: the refused call mutated nothing");
+                check (bad.getProperty ("error", var()).toString().contains ("another track"),
+                       "move-ripple: the refusal names the reason");
+            }
+            // …and ripple + an EXPLICIT trackId naming the clip's OWN track is fine (it is
+            // not a track change), so the guard cannot break a same-track drag that happens
+            // to pass its trackId.
+            check (ok (cmd (ops, "move_clip", objN ({{ "clipId", mid }, { "start", 1.0 },
+                                                     { "trackId", tR }, { "ripple", true }}))),
+                   "move-ripple: ripple + the clip's OWN trackId is allowed");
+            check (ok (cmd (ops, "undo")), "move-ripple: teardown undo");
+        }
+
+        // teardown: restore the harness session edit for later sections.
+        check (ok (cmd (ops, "open_project", args1 ("file", sessionEdit.getFullPathName()))),
+               "insert-time: restored the session edit (CAP-CLP-017 teardown)");
+    }
+
     // ─── CLP-LOOP: clip loop region (reality-pack invariant 28) ───
     section ("CLP-LOOP: set_clip_loop");
     {

@@ -73,6 +73,27 @@ export function TimeRangeBand() {
     await useStore.getState().refresh();
   };
 
+  // CAP-CLP-017 — UIREACH-INSERT-TIME. insert_time's ONLY shipped-UI home, and the exact
+  // inverse of "Delete, close gap" one button along: that one removes the span and pulls
+  // everything after it left; this one pushes everything from the span's START right by
+  // the span's length, opening it as empty timeline. Drawing the space you want and
+  // pressing a button is the whole gesture — no bar-count dialog to get wrong, and the
+  // ruler already snaps the span to the grid.
+  //
+  // An EXPLICIT action, not something the Ripple mode does silently, and that is the same
+  // call the two delete buttons already make: this rewrites clips on every track, the
+  // automation under them, the tempo map, the song sections and the loop in one
+  // transaction. Pro Tools reaches it the same way — Shuffle mode is the drag behaviour,
+  // Insert Silence is a named command you invoke.
+  //
+  // Like delete, it invalidates the span it was drawn from (everything the band described
+  // has just moved right), so the selection clears itself.
+  const runInsert = async () => {
+    const { start, end } = r;
+    setRange(null);
+    await exec("insert_time", { start, duration: end - start });
+  };
+
   const loopingThis = transport.looping
     && Math.abs(transport.loopStart - r.start) < EPS
     && Math.abs(transport.loopEnd - r.end) < EPS;
@@ -140,6 +161,13 @@ export function TimeRangeBand() {
             onClick={() => void runCrop()}
           >
             Crop
+          </button>
+          <button
+            type="button" data-testid="v2-timerange-insert"
+            title="Open this much empty timeline here — clips, automation, tempo changes, sections and the loop all slide right to make room"
+            onClick={() => void runInsert()}
+          >
+            Insert time
           </button>
           <button
             type="button" className="v2-timerange-clear" data-testid="v2-timerange-clear"

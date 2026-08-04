@@ -313,16 +313,32 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-apply-choke:              78e70a05732a178871f2a66292f7d5ab7f16be9d71fb3420d45147086e9fbde4
     // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
     // - pre-musical-time contract:    a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
+    // Latest move, CAP-CLP-017 (insert_time + move_clip ripple). Unlike the builtins
+    // move above, this one ADDS A COMMAND, so say so plainly rather than filing it as a
+    // wording tweak: the catalog gains `insert_time` (one line) and `move_clip` gains a
+    // `ripple` arg plus the clause describing it. Two catalog lines differ, the prompt's
+    // SHAPE is unchanged (no new section, no reordering, session render untouched).
+    //
+    // Consumer impact is therefore larger than the last pin's: an SFT corpus or GEPA
+    // baseline built before this commit describes a catalog that is missing a command the
+    // engine now answers to. Nothing is invalidated — no command was removed or renamed,
+    // and every previously-gold completion is still valid — but a model trained on the
+    // old text will never reach for insert_time, which is a coverage gap rather than a
+    // correctness one. build_add_note_corrective.py needs no edit (it parses
+    // AGENT_COMMANDS out of commands.ts rather than hand-copying it).
+    //
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    // - main @ the usability-audit merge (#607), pre-set-track-icon:
+    // - pre-insert-time (CAP-CLP-017): 38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334
+    // - main @ the usability-audit merge (#607):
     //                                 2ee994e58085baafc5ae47f16391e57b635a641cd23a7cdeb306e5a6983f10d2
-    // - this branch, pre-rebase onto that main:
-    //                                 5a34c2636f82a2228850ae39cf3d842f5162f16af06da51ea0ce0f23ff4df876
-    // Neither side survived the rebase (main added set_track_color + move_track while this
-    // branch added set_track_icon), so the pin below was RECOMPUTED from the merged
-    // catalog rather than picked from a side.
-    expect(hash).toBe("b06ddb381b43a5bd89441607733dcec69a73f49b3b5f3581e9dfe97d706ac912");
+    // - this branch, pre-rebase:      2674395a8f21029a694b2df9cccf5235a9d10eba6b0d86f50f6822e6fed91dc1
+    // - main @ set_track_icon (#620): b06ddb381b43a5bd89441607733dcec69a73f49b3b5f3581e9dfe97d706ac912
+    // This pin moved TWICE during one merge campaign — the catalog grew under this branch
+    // first with set_track_color + move_track (#607), then with set_track_icon (#620). Each
+    // time the pin was RECOMPUTED from the merged catalog rather than picked from a side,
+    // which is the only correct move when both sides added commands.
+    expect(hash).toBe("f7e286eed2c29f157ae93bebbc3927e112a97f0d990d1238335742b40767ea46");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

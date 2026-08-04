@@ -118,6 +118,13 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     // Everything else (create_track/bus/group, tempo, master, buses, tempo-map,
     // generative render ops, and any future/unlisted command) fails CLOSED to the
     // session lock — guarded until deliberately classified.
+    //
+    // CAP-CLP-017 — insert_time and delete_time_range both land here, and for once the
+    // fail-closed default is also the RIGHT answer rather than merely the safe one: each
+    // rewrites every track, the tempo map and the beat-anchored song structure in one
+    // transaction, so there is no single track key that could describe what they contend
+    // for. Both carry a SessionGlobal row in tests/golden/lock_scopes.tsv, which is what
+    // stops that from being an accident of omission.
     return Scope::SessionGlobal;
 }
 

@@ -106,6 +106,12 @@ TEST_CASE ("classify: structural ops + unknown commands fail closed to session-g
     REQUIRE (LockManager::classify ("reorder_master_plugin")   == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("bypass_master_plugin")    == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("set_master_plugin_param") == Scope::SessionGlobal);
+    // CAP-CLP-017: the whole-timeline pair. Each rewrites every track, the tempo map and
+    // the beat-anchored song structure in one transaction, so no single track key could
+    // describe what they contend for -- session-global is the right answer, not just the
+    // fail-closed one.
+    REQUIRE (LockManager::classify ("insert_time")        == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("delete_time_range")  == Scope::SessionGlobal);
     // fail-closed: a command nobody classified is guarded, not waved through.
     REQUIRE (LockManager::classify ("some_future_command")== Scope::SessionGlobal);
 }

@@ -1,14 +1,18 @@
 /* ─────────────────────────────── TOP BAR ─────────────────────────────────── */
 .v2-topbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* minmax(0, 1fr), not 1fr: a bare `1fr` track has an AUTO minimum, so the side clusters
+     grow the track past its share instead of shrinking — which is how the meta row came to
+     overflow under the centred transport (see .v2-proj-meta below). minmax(0, …) makes the
+     track floor 0 so the clusters actually get their column and scroll inside it. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   height: var(--v2-topbar-h);
   padding: 0 4px;
   margin: 12px 14px 0;
 }
-.v2-brand { justify-self: start; display: flex; align-items: center; gap: 11px; min-width: 0; }
+.v2-brand { justify-self: stretch; display: flex; align-items: center; gap: 11px; min-width: 0; }
 .v2-mark { flex: 0 0 auto; display: block; }
 .v2-center { justify-self: center; display: flex; align-items: center; gap: 12px; }
 .v2-top-right { justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -18,7 +22,21 @@
   font-size: var(--v2-fs-lg); letter-spacing: 0.01em; color: var(--v2-ground-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
 }
-.v2-proj-meta { display: flex; align-items: center; gap: 8px; font-size: var(--v2-fs-sm); color: var(--v2-ground-dim); }
+/* CONSTRAINED to its grid column, and scrollable rather than overflowing. Found by
+   driving the new Ripple chip through a real Playwright click: the meta row had ALREADY
+   outgrown its column before this change — at a 1440px viewport it measured 597px inside a
+   450px column, so the centred transport pill was painted over its tail and intercepted
+   every pointer event there. The Snap toggle and its division select were, in fact, not
+   clickable at all. Overflow in a grid item is silent by default, which is why it survived.
+   `min-width: 0` lets the row shrink to its column and `overflow-x: auto` gives it an
+   honest scrollbar — the same answer `.v2-shell` already gives one level up (#52: "an
+   honest scrollbar instead of self-destruction"). The row is genuinely crowded at ten
+   controls; thinning it is a design call, not this change. */
+.v2-proj-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--v2-fs-sm); color: var(--v2-ground-dim);
+  min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+}
 .v2-chip {
   appearance: none; background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line);
   color: var(--v2-ground-dim); font: inherit; font-size: var(--v2-fs-sm); padding: 2px 8px; border-radius: var(--v2-radius-pill);
@@ -33,6 +51,16 @@
 .v2-timesig .v2-chip-num { width: 34px; }
 .v2-timesig-slash { color: var(--v2-ground-dim); opacity: 0.7; }
 .v2-chip-toggle[data-on="true"] { color: var(--v2-accent, #b6ff3c); border-color: var(--v2-accent, #b6ff3c); }
+/* CAP-CLP-017 — ripple edit is louder than an ordinary toggle when armed, on purpose:
+   with it on, one clip drag rearranges every later clip on the track, most of which is
+   off-screen. A warn-tinted FILL (not just an outline like Snap) is the standing notice
+   that the next drag will do more than it looks like. Not the agentic lime — see
+   accentReservation.test.ts; this is a producer-armed edit mode, not the machine working. */
+.v2-ripple-chip[data-on="true"] {
+  color: var(--v2-ground-text);
+  border-color: var(--status-warn);
+  background: color-mix(in srgb, var(--status-warn) 24%, transparent);
+}
 
 /* the transport is a dark floating PILL; the readout is a light time CARD — both on cream */
 .v2-transport {
