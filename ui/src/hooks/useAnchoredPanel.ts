@@ -97,6 +97,13 @@ export function useAnchoredPanel(
     // while a trackpad glide is still settling, sees the menu blink open and vanish;
     // Playwright merely hits the timing reliably. pointerdown and resize stay immediate —
     // neither is self-inflicted by the opening click.
+    //
+    // ONE FRAME IS EXACT, not a magic delay. Scroll events are delivered in the HTML
+    // spec's "update the rendering" step, which fires them BEFORE running
+    // animation-frame callbacks — while the click handler's setOpen(true), React's
+    // commit, and this effect all run synchronously inside the click task. So a scroll
+    // queued before the panel existed is delivered before this callback registers the
+    // listener, and a scroll the user makes afterwards still dismisses normally.
     let scrollArmed = false;
     const raf = requestAnimationFrame(() => {
       scrollArmed = true;
