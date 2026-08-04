@@ -537,6 +537,15 @@ case "$MODE" in
     packaging_check "$STAGED"
     echo "signing + notarizing + stapling the app…"
     "$RELEASE_SIGN" "$STAGED"
+
+    # FS-K3 — upload debug symbols so a future crash comes back SYMBOLICATED rather
+    # than as raw addresses. Runs AFTER signing (the signed binary's UUID is what
+    # Sentry matches against) and SKIPS CLEANLY when Sentry isn't configured, which
+    # is the current state — the project is BLOCKED-ON-OWNER. It never fails the
+    # release for a missing optional credential; see the script's header for why
+    # that's the opposite stance to sign-and-notarize.sh's fail-closed one.
+    "$ROOT/scripts/release/upload-dsyms.sh" "$STAGED"
+
     DMG="$OUTDIR/Mosh.dmg"
     echo "building DMG…"
     make_dmg "$STAGED" "$DMG"

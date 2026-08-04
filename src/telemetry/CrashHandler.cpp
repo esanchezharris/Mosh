@@ -3,6 +3,7 @@
 #include "Breadcrumbs.h"
 #include "CrashReportFormatter.h"
 #include "Telemetry.h"
+#include "SentryReporter.h"
 
 #include <atomic>
 #include <cstdio>
@@ -222,6 +223,23 @@ namespace
         // TelemetryConfig::isOptedIn() itself and is a pure no-op when it's false —
         // no file, no thread, no network. See docs/telemetry/PRIVACY.md.
         Telemetry::onAppLaunch();
+
+        // FS-K3 — Sentry (crashpad) reporter. A no-op in the default build
+        // (MOSH_HAVE_SENTRY undefined) and, even in a -DMOSH_ENABLE_SENTRY=ON
+        // build, a no-op unless the SAME TelemetryConfig::isOptedIn() bit above is
+        // set AND a DSN is configured. No second consent flag, no new command.
+        //
+        // ORDER MATTERS, and not in the direction you'd guess. This runs LAST, after
+        // the POSIX handlers are installed, but on macOS that does NOT make our
+        // handlers win: crashpad installs a MACH exception port, and Mach exceptions
+        // are serviced before BSD signal delivery. So for a hardware fault
+        // (SIGSEGV/SIGBUS/SIGILL/SIGFPE) crashpad takes the crash and the local
+        // report above may not be written; software-raised signals (abort(), an
+        // uncaught C++ exception) still travel the BSD path and produce both. This
+        // is measured, not assumed — see docs/first-stranger-program/lanes/fs-k3.md
+        // gate G5, which asserts on both artifacts. It only ever applies to a
+        // Sentry-ON build; the shipped default build is unaffected.
+        initSentryReporter();
     }
 }
 

@@ -125,6 +125,10 @@ endif()
 
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
+# FS-K3 — Sentry crash reporting. Defines the MOSH_ENABLE_SENTRY option (OFF) and,
+# only when it is ON, fetches the pinned sentry-native + crashpad. A separate file
+# from Dependencies.cmake on purpose — see the header comment there.
+include(cmake/Sentry.cmake)
 
 # Platform capability flags. AU plug-in hosting is a macOS-only format; on Windows
 # the JUCE WebView is backed by WebView2 (Edge Chromium) rather than the legacy
@@ -200,6 +204,11 @@ if (MOSH_BUILD_APP)
         src/telemetry/TelemetryConfig.cpp
         src/telemetry/Telemetry.cpp
         src/telemetry/CrashHandler.cpp
+        # FS-K3 — Sentry (crashpad) reporter. Compiled unconditionally; MOSH_HAVE_SENTRY
+        # gates its BODY, not its existence (the RaveEngine.cpp arrangement), so the
+        # default build compiles the no-op branch and the pure PII scrubber inside it
+        # stays unit-testable in MoshTests with no SDK linked.
+        src/telemetry/SentryReporter.cpp
         # Stage 1 — Engine + MoshOps spine + state feed (01, 02)
         src/engine/MoshEngine.cpp
         src/moshops/MoshOps.cpp
@@ -288,6 +297,15 @@ if (MOSH_BUILD_APP)
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+    # FS-K3 — Sentry crash reporting (gated; default build OFF). Both calls are
+    # no-ops without MOSH_ENABLE_SENTRY, so the default target definition is
+    # unchanged.
+    if (MOSH_ENABLE_SENTRY AND TARGET mosh_sentry)
+        target_link_libraries(Mosh PRIVATE mosh_sentry)
+    endif()
+    mosh_sentry_stage_handler(Mosh)
+    mosh_sentry_emit_dsym(Mosh)
 
     # Route C.2 — real-time RAVE insert via anira + LibTorch (gated; default build OFF).
     if (MOSH_ENABLE_ANIRA AND TARGET mosh_neural_backends)
