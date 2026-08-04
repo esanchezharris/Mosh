@@ -6962,6 +6962,227 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
     }
 
+    // ─── CAP-TRN-005 — the metronome's sound, level and routing ───
+    //
+    // set_metronome grew from a one-arg toggle into a PARTIAL PATCH over tracktion's own
+    // click surface. Two storage homes, both exercised here: te::Edit's CLICKTRACK child
+    // (enabled/level/emphasizeBars/recordingOnly/outputDevice — saves with the
+    // .tracktionedit, so save+reload is a real check) and te::PropertyStorage via the
+    // te::Click free functions (the two WAV samples + the two MIDI notes — app-global, so
+    // they survive a reload but are not IN the project file).
+    //
+    // WHAT THIS SECTION CANNOT SEE, and it is the load-bearing half of the ticket: the
+    // click is AUDIO. A headless run has no device, so nothing below hears a level change,
+    // an accented downbeat, or a route to a different output — it proves only that the
+    // command validates, stores, round-trips and reaches the engine's own state. This is
+    // the freeze_layer class of blind spot, called out here so nobody reads a green
+    // --selftest as proof the click got quieter.
+    //
+    // And verify.py CANNOT close it either, which is the non-obvious part:
+    // makeNode<ClickNode> exists at exactly one place in the engine
+    // (tracktion_EditNodeBuilder.cpp:1954), inside the LIVE-PLAYBACK createNodeForEdit
+    // overload, summed into an output device's node. The OFFLINE overload that
+    // Renderer::renderToFile uses — and therefore export_audio and every verify.py WAV —
+    // never adds one. The click is not in a bounce at all (correct DAW behaviour, and the
+    // reason nobody noticed). Audible proof is an owner listen at a real device or
+    // nothing; see docs/ENGINE_API_NOTES.md § Metronome / click track.
+    section ("CAP-TRN-005: metronome sound / level / routing (set_metronome partial patch)");
+    {
+        auto sess = [&] { return ops.snapshot().getProperty ("session", var()); };
+        auto clk  = [&] { return sess().getProperty ("click", var()); };
+        auto dbl  = [&] (const char* k) { return (double) clk().getProperty (k, -999.0); };
+        auto str  = [&] (const char* k) { return clk().getProperty (k, var()).toString(); };
+        auto flag = [&] (const char* k) { return (bool) clk().getProperty (k, false); };
+
+        // The block exists, is complete, and starts on tracktion's own defaults.
+        check (clk().isObject(), "snapshot session.click present");
+        for (auto* f : { "enabled", "level", "levelMin", "levelMax", "emphasizeBars",
+                         "recordingOnly", "outputDevice", "outputDeviceResolved",
+                         "defaultOutputDevice", "soundBig", "soundSmall",
+                         "midiNoteBig", "midiNoteSmall" })
+            check (clk().hasProperty (f), juce::String ("session.click carries ") + f);
+        check (std::abs (dbl ("levelMin") - 0.2) < 1e-9 && std::abs (dbl ("levelMax") - 1.0) < 1e-9,
+               "session.click exposes the engine's [0.2, 1.0] level clamp");
+        check ((int) clk().getProperty ("midiNoteBig", -1) == 37
+                   && (int) clk().getProperty ("midiNoteSmall", -1) == 76,
+               "session.click MIDI notes default to the engine's 37/76");
+        check (str ("soundBig").isEmpty() && str ("soundSmall").isEmpty(),
+               "session.click sounds default to \"\" (the engine's built-in click)");
+
+        // A call naming nothing we understand is a typo, not a no-op — and specifically
+        // NOT "turn the click off", which is what it used to mean when `enabled` was the
+        // only arg and defaulted to false.
+        cmd (ops, "set_metronome", args1 ("enabled", true));
+        check (! ok (cmd (ops, "set_metronome")), "set_metronome with no recognized arg errors");
+        check (! ok (cmd (ops, "set_metronome", args1 ("nonsense", 1))), "set_metronome with only an unknown arg errors");
+        check (flag ("enabled") && (bool) sess().getProperty ("metronome", false),
+               "a rejected call did NOT silently turn the click off");
+
+        // PARTIAL PATCH: a level-only call must leave `enabled` exactly where it was.
+        // This is the whole reason the arg became optional, and the regression is
+        // invisible — the click just stops.
+        check (ok (cmd (ops, "set_metronome", args1 ("level", 0.8))), "set_metronome (level only) ok");
+        check (flag ("enabled"), "a level-only patch left enabled untouched");
+        check (std::abs (dbl ("level") - 0.8) < 1e-6, "session.click.level == 0.8 after set");
+        check ((bool) sess().getProperty ("metronome", false), "session.metronome mirror still true");
+
+        // The engine's floor is real, so 0 is a quiet click and NOT silence, and the result
+        // reports the EFFECTIVE value rather than the requested one — otherwise the UI
+        // would draw a slider position the engine will never honour.
+        auto zero = cmd (ops, "set_metronome", args1 ("level", 0.0));
+        check (ok (zero), "set_metronome (level 0) accepted");
+        check (std::abs ((double) zero["data"].getProperty ("level", -1.0) - 0.2) < 1e-6,
+               "level 0 comes back as the engine floor 0.2 (0 is not silence)");
+        check (std::abs (dbl ("level") - 0.2) < 1e-6, "snapshot agrees with the clamped level");
+
+        // The two checks above are deliberately about the OBSERVABLE contract, and the
+        // engine gives it two independent enforcers — setClickTrackVolume clamps on write
+        // AND getClickTrackVolume re-clamps on read — so they hold while either is intact.
+        // A RED-proof confirmed exactly that: reporting the raw clickTrackGain instead of
+        // getClickTrackVolume() left all of them green, because the write clamp had already
+        // stored 0.2. This isolates the READ clamp, which is the one that matters for a
+        // file Mosh did not write: a project from an older build (or from Waveform) can
+        // legitimately carry a sub-floor level. The fixture goes straight onto the
+        // CLICKTRACK child on purpose — the command is precisely the thing that cannot
+        // produce this state, so routing it through the command would test nothing.
+        {
+            auto clickTree = eng.edit().state.getOrCreateChildWithName (te::IDs::CLICKTRACK, nullptr);
+            clickTree.setProperty (te::IDs::level, 0.05, nullptr);
+            check (std::abs ((double) clickTree.getProperty (te::IDs::level, -1.0) - 0.05) < 1e-9,
+                   "legacy-file fixture really carries a sub-floor level (0.05) on the tree");
+            check (std::abs (dbl ("level") - 0.2) < 1e-6,
+                   "a sub-floor level from a foreign/legacy file still reports the engine floor (READ clamp)");
+        }
+
+        // Out-of-domain level rejected, storage untouched (validate-before-write).
+        check (! ok (cmd (ops, "set_metronome", args1 ("level", 1.5))), "set_metronome rejects level > 1");
+        check (! ok (cmd (ops, "set_metronome", args1 ("level", -0.1))), "set_metronome rejects level < 0");
+        check (std::abs (dbl ("level") - 0.2) < 1e-6, "a rejected level left storage untouched (still 0.2)");
+        check (ok (cmd (ops, "set_metronome", args1 ("level", 0.75))), "set_metronome (level 0.75) ok");
+
+        // Emphasis + recording-only.
+        check (ok (cmd (ops, "set_metronome", args1 ("emphasizeBars", true))), "set_metronome (emphasizeBars) ok");
+        check (flag ("emphasizeBars"), "session.click.emphasizeBars true after set");
+        check (eng.edit().clickTrackEmphasiseBars.get(),
+               "emphasizeBars reached the LIVE engine (te::Edit::clickTrackEmphasiseBars)");
+        check (ok (cmd (ops, "set_metronome", args1 ("recordingOnly", true))), "set_metronome (recordingOnly) ok");
+        check (flag ("recordingOnly"), "session.click.recordingOnly true after set");
+        check (eng.edit().clickTrackRecordingOnly.get(),
+               "recordingOnly reached the LIVE engine (te::Edit::clickTrackRecordingOnly)");
+        check (flag ("emphasizeBars"), "the recordingOnly patch left emphasizeBars alone");
+
+        // ── sound: the engine's click loader is WAV-only, so a non-WAV would load as an
+        // empty buffer and SILENTLY fall back to the built-in click. Refuse instead.
+        auto clickWav = [&]
+        {
+            juce::AudioBuffer<float> buf (1, 4410);
+            buf.clear();
+            for (int i = 0; i < 200; ++i) buf.setSample (0, i, (float) (1.0 - i / 200.0));
+            auto dir = eng.sessionDir().getChildFile ("click-sound-test");
+            dir.createDirectory();
+            auto f = dir.getChildFile ("custom-click.wav");
+            f.deleteFile();
+            juce::WavAudioFormat fmt;
+            if (auto os = std::unique_ptr<juce::FileOutputStream> (f.createOutputStream()))
+            {
+                std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (os.get(), 44100.0, 1u, 16, {}, 0));
+                if (w != nullptr) { os.release(); w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples()); }
+            }
+            return f;
+        }();
+        check (clickWav.existsAsFile(), "custom click WAV synthesized");
+        // A sibling that EXISTS but is not a WAV — the fixture has to really carry the
+        // thing the guard suppresses, or "rejects a non-WAV" passes on the missing-file
+        // branch instead and proves nothing about the extension check.
+        auto notWav = clickWav.getSiblingFile ("custom-click.aiff");
+        notWav.replaceWithText ("not really audio");
+        check (notWav.existsAsFile(), "non-WAV click fixture written (exists, wrong extension)");
+
+        check (ok (cmd (ops, "set_metronome", args1 ("soundBig", clickWav.getFullPathName()))),
+               "set_metronome accepts an existing .wav for soundBig");
+        check (str ("soundBig") == clickWav.getFullPathName(), "session.click.soundBig round-trips the path");
+        check (! ok (cmd (ops, "set_metronome", args1 ("soundBig", notWav.getFullPathName()))),
+               "set_metronome rejects an existing non-WAV (it would silently fall back to the built-in)");
+        check (! ok (cmd (ops, "set_metronome", args1 ("soundSmall", clickWav.getSiblingFile ("nope.wav").getFullPathName()))),
+               "set_metronome rejects a .wav path that does not exist");
+        check (str ("soundBig") == clickWav.getFullPathName(), "a rejected sound left storage untouched");
+        check (ok (cmd (ops, "set_metronome", args1 ("soundBig", ""))), "set_metronome accepts \"\" to restore the built-in click");
+        check (str ("soundBig").isEmpty(), "session.click.soundBig back to \"\" (built-in)");
+
+        // ── MIDI click notes (only audible on a MIDI-routed click; stored regardless).
+        check (ok (cmd (ops, "set_metronome", args1 ("midiNoteBig", 60))), "set_metronome (midiNoteBig 60) ok");
+        check ((int) clk().getProperty ("midiNoteBig", -1) == 60, "session.click.midiNoteBig == 60");
+        check (! ok (cmd (ops, "set_metronome", args1 ("midiNoteBig", 128))), "set_metronome rejects midiNoteBig 128");
+        check (! ok (cmd (ops, "set_metronome", args1 ("midiNoteSmall", -1))), "set_metronome rejects midiNoteSmall -1");
+        check ((int) clk().getProperty ("midiNoteBig", -1) == 60, "a rejected note left storage untouched (still 60)");
+        check (ok (cmd (ops, "set_metronome", args1 ("midiNoteBig", 37))), "set_metronome (midiNoteBig back to 37) ok");
+
+        // ── routing. Headless there are no output devices at all, so an arbitrary name is
+        // accepted as PERSISTED INTENT (cmdSetTrackOutput's posture) — and this is exactly
+        // why the snapshot carries the raw stored name AND the resolved one: getClickTrackDevice()
+        // normalises anything it cannot resolve to the default sentinel, so reading back
+        // only the resolved value would make every stored route look like it never saved.
+        const auto defaultOut = str ("defaultOutputDevice");
+        check (defaultOut == "(default audio output)", "session.click.defaultOutputDevice is the engine's sentinel");
+        check (ok (cmd (ops, "set_metronome", args1 ("outputDevice", "Studio Headphones"))),
+               "set_metronome accepts an output name headless (persisted intent)");
+        check (str ("outputDevice") == "Studio Headphones", "session.click.outputDevice keeps the RAW stored intent");
+        check (str ("outputDeviceResolved") == defaultOut,
+               "session.click.outputDeviceResolved falls back to the default when the device is absent");
+        check (ok (cmd (ops, "set_metronome", args1 ("outputDevice", "default"))), "set_metronome accepts outputDevice 'default'");
+        check (str ("outputDevice") == defaultOut, "outputDevice 'default' stores the engine sentinel");
+        check (ok (cmd (ops, "set_metronome", args1 ("outputDevice", ""))), "set_metronome accepts outputDevice \"\"");
+        check (str ("outputDevice") == defaultOut, "outputDevice \"\" stores the engine sentinel too");
+
+        // list_audio_devices carries the click destinations (a DIFFERENT vocabulary from
+        // `types`: te::OutputDevice NAMES spanning wave + MIDI outs). Headless that is
+        // exactly the audio sentinel.
+        auto lad = cmd (ops, "list_audio_devices");
+        check (ok (lad), "list_audio_devices ok (clickOutputs)");
+        auto clickOuts = lad["data"].getProperty ("clickOutputs", var());
+        check (clickOuts.isArray(), "list_audio_devices carries a clickOutputs array");
+        if (auto* a = clickOuts.getArray())
+        {
+            check (a->size() >= 1, "clickOutputs always offers at least the default sentinel");
+            check (! a->isEmpty() && a->getFirst().getProperty ("name", var()).toString() == defaultOut,
+                   "clickOutputs leads with the default-audio-output sentinel");
+            check (! a->isEmpty() && a->getFirst().hasProperty ("isMidi"), "each clickOutput declares isMidi");
+        }
+
+        // ── persistence. The per-Edit half lives in the CLICKTRACK child of the Edit
+        // tree, so it must survive save+reload; the app-global half lives in
+        // PropertyStorage, which a reload does not touch either.
+        check (ok (cmd (ops, "set_metronome", args1 ("outputDevice", "Studio Headphones"))), "re-set routing before save");
+        check (ok (cmd (ops, "save")),   "save (metronome) ok");
+        check (ok (cmd (ops, "reload")), "reload (metronome) ok");
+        check (std::abs (dbl ("level") - 0.75) < 1e-6, "session.click.level survived save+reload");
+        check (flag ("emphasizeBars"), "session.click.emphasizeBars survived save+reload");
+        check (flag ("recordingOnly"), "session.click.recordingOnly survived save+reload");
+        check (str ("outputDevice") == "Studio Headphones", "session.click.outputDevice survived save+reload");
+        check ((int) clk().getProperty ("midiNoteBig", -1) == 37, "app-global MIDI note still readable after reload");
+
+        // ── NON-UNDOABLE PREFERENCE. Every CLICKTRACK CachedValue is bound with a nullptr
+        // UndoManager by the engine itself, so a transaction here could only ever be an
+        // EMPTY one — and an empty transaction's undo destroys the PREVIOUS real edit.
+        auto mLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+        bool mPref = false;
+        for (auto& ln : juce::StringArray::fromLines (mLog))
+            if (ln.contains ("\"command\": \"set_metronome\"") && ln.contains ("\"undoable\": false")) mPref = true;
+        check (mPref, "set_metronome logged undoable:false (preference)");
+        cmd (ops, "set_metronome", args1 ("level", 0.9));
+        cmd (ops, "undo");
+        check (std::abs (dbl ("level") - 0.9) < 1e-6, "undo after set_metronome does NOT revert it (non-undoable)");
+
+        // Restore the engine defaults so later blocks/gates see a clean project.
+        check (ok (cmd (ops, "set_metronome", objN ({{ "enabled", false }, { "level", 0.6 },
+                                                     { "emphasizeBars", false }, { "recordingOnly", false },
+                                                     { "outputDevice", "" }, { "soundBig", "" }, { "soundSmall", "" },
+                                                     { "midiNoteBig", 37 }, { "midiNoteSmall", 76 }}))),
+               "set_metronome restore defaults ok (one patch, all nine fields)");
+        check (! flag ("enabled") && ! flag ("emphasizeBars") && ! flag ("recordingOnly"),
+               "metronome restored to the engine defaults");
+    }
+
     // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
     // WHAT THIS CANNOT PROVE, stated up front so nothing below reads as more than it is:
     // a headless run has no audio device, so no te::MidiInputDevice exists, so

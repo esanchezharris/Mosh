@@ -110,7 +110,17 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "insert_tempo_change", desc: "Add a tempo-map point beyond the base tempo (speed the song up/down partway through) — the point's curve shapes the span from IT to the NEXT point", args: [N("time", true, "seconds"), N("bpm", true, "20-999"), N("curve", false, "1 = step (default); values in (-1,1) ramp: <0 log, 0 linear, >0 exponential")] },
   { command: "remove_tempo_change", desc: "Remove a tempo-map point by index from session.tempoMap — index 0 is the base tempo (edit that via set_tempo, never remove it)", args: [N("index", true, "1..N-1 from session.tempoMap")] },
   { command: "set_time_signature", desc: "Set the time signature", args: [N("numerator"), N("denominator")] },
-  { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
+  // CAP-TRN-005: a partial patch — every arg is optional and an absent one is left alone.
+  // `enabled` is no longer required (it used to be the only arg, so an omitted one meant
+  // "off"; now a call naming nothing at all is an error instead of a silent mute).
+  // NOTE: set_metronome also accepts outputDevice, soundBig, soundSmall, midiNoteBig and
+  // midiNoteSmall. Those are deliberately UNDECLARED here for the same reason set_note's
+  // `edits` array is: they take device names and WAV paths that only the machine in front
+  // of the producer knows, and the agentic loop never shows the model a list_audio_devices
+  // payload to learn them from, so declaring them would only invite invented paths. They
+  // are fully reachable by mouse in the v2 metronome panel. The contract test checks that
+  // declared args are read, not the converse, so this is legal and intentional.
+  { command: "set_metronome", desc: "Metronome click: turn it on/off, set its level, accent the downbeat, or make it audible only while recording", args: [B("enabled", false), N("level", false, "linear gain 0-1; the engine clamps to 0.2-1.0, so 0 is not silence — turn it off instead"), B("emphasizeBars", false, "accent the first beat of each bar"), B("recordingOnly", false, "only audible while recording")] },
   { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
   { command: "set_count_in", desc: "Set the count-in / pre-roll before recording (0=off, 1=one bar, 2=two bars) — an audible click plays through the pre-roll before capture starts", args: [N("bars", true, "0, 1, or 2")] },
   { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
@@ -288,7 +298,15 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "insert_tempo_change": return `Added a tempo change to ${a.bpm} BPM at ${a.time}s`;
     case "remove_tempo_change": return `Removed a tempo change`;
     case "set_time_signature": return `Set time signature to ${a.numerator}/${a.denominator}`;
-    case "set_metronome": return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
+    // CAP-TRN-005 — `enabled` is now optional, so "not true" no longer means "turned it
+    // off": a level-only or emphasis-only call has to summarize as what it actually did.
+    case "set_metronome": {
+      if (a.enabled != null) return a.enabled ? `Turned the metronome on` : `Turned the metronome off`;
+      if (a.level != null) return `Set the metronome level to ${Math.round(Number(a.level) * 100)}%`;
+      if (a.emphasizeBars != null) return a.emphasizeBars ? `Accented the metronome's downbeat` : `Stopped accenting the metronome's downbeat`;
+      if (a.recordingOnly != null) return a.recordingOnly ? `Metronome now clicks only while recording` : `Metronome now clicks all the time`;
+      return `Changed the metronome settings`;
+    }
     case "set_key": return `Set key to ${a.tonic ?? ""} ${a.mode ?? ""}`.trim();
     case "set_count_in": return Number(a.bars) > 0 ? `Set a ${a.bars}-bar count-in` : `Turned the count-in off`;
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;

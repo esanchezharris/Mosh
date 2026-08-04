@@ -1098,6 +1098,36 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
         defaultBufferSize = dev->getDefaultBufferSize();
     }
 
+    // CAP-TRN-005 — the destinations the CLICK can be routed to. Deliberately a
+    // different list from `types` above: tracktion routes the click by te::OutputDevice
+    // NAME (Edit::setClickTrackOutput → findOutputDeviceWithName), not by the JUCE
+    // device-type/deviceID vocabulary the rest of this result speaks, and the list spans
+    // wave AND midi outs. The sentinels come first — findOutputDeviceWithName resolves
+    // them to "whatever the default is right now", so a producer who later swaps
+    // interfaces keeps a working route. Headless this is exactly the audio sentinel and
+    // nothing else: no real device exists, and the MIDI sentinel is only offered when
+    // there is at least one MIDI out for it to mean something.
+    Array<var> clickOutputs;
+    {
+        auto addClickOutput = [&clickOutputs] (const juce::String& deviceName, bool isMidi)
+        {
+            auto* co = new DynamicObject();
+            co->setProperty ("name", deviceName);
+            co->setProperty ("isMidi", isMidi);
+            clickOutputs.add (var (co));
+        };
+        addClickOutput (te::DeviceManager::getDefaultAudioOutDeviceName (false), false);
+        auto& tdm = eng.engine().getDeviceManager();
+        for (int i = 0; i < tdm.getNumWaveOutDevices(); ++i)
+            if (auto* wo = tdm.getWaveOutDevice (i))
+                addClickOutput (wo->getName(), false);
+        if (tdm.getNumMidiOutDevices() > 0)
+            addClickOutput (te::DeviceManager::getDefaultMidiOutDeviceName (false), true);
+        for (int i = 0; i < tdm.getNumMidiOutDevices(); ++i)
+            if (auto* mo = tdm.getMidiOutDevice (i))
+                addClickOutput (mo->getName(), true);
+    }
+
     auto* data = new DynamicObject();
     data->setProperty ("types", types);
     data->setProperty ("current", currentAudioSelection());
@@ -1105,6 +1135,7 @@ juce::var MoshOps::cmdListAudioDevices (const juce::var&)
     data->setProperty ("bufferSizes", bufferSizes);
     data->setProperty ("defaultBufferSize", defaultBufferSize);
     data->setProperty ("audioEnabled", eng.hasAudio());
+    data->setProperty ("clickOutputs", clickOutputs);
     return okResult ("list_audio_devices", var (data));
 }
 

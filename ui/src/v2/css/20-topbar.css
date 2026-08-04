@@ -226,6 +226,22 @@
 .v2-rec-retro { flex-direction: row !important; align-items: center; gap: 8px; }
 .v2-rec-retro input[type="range"] { flex: 1; min-width: 0; }
 
+/* CAP-TRN-005 — the ♩ toggle and its settings caret read as one control, the same way
+   .v2-snap-controls pairs its toggle with its division. The wrapper must NOT generate a
+   box of its own: it is also the .v2-menu-wrap anchor for the fixed panel. */
+.v2-click-controls { display: inline-flex; align-items: center; gap: 3px; }
+/* Quieter than the toggle beside it — a disclosure, not a second state to read. */
+.v2-click-more { padding-inline: 5px; color: var(--v2-dim); line-height: 1; }
+.v2-click-more:hover { color: var(--v2-text); }
+/* Width is PINNED and MUST match the panelWidth passed to useAnchoredPanel in
+   MetronomePanel.tsx — same contract (and same past bug) as .v2-rec-panel above.
+   metronomePanel.test.ts pins the two together. */
+.v2-click-panel { width: 300px; display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+.v2-click-panel select { flex: none; max-width: 150px; }
+.v2-click-panel .v2-chip-num { width: 52px; flex: none; }
+.v2-click-sound { cursor: default; }
+.v2-click-sound-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+
 /* Capture sits in the transport pill beside Record; quieter than the transport buttons
    because it is an after-the-fact rescue, not part of the play/stop rhythm. */
 .v2-tbtn.v2-capture { font-size: var(--v2-fs-md); line-height: 1; color: var(--v2-dim); }

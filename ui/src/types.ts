@@ -451,6 +451,11 @@ export type AudioDevices = {
   bufferSizes: number[];
   defaultBufferSize: number;
   audioEnabled: boolean;
+  /** CAP-TRN-005 — where the CLICK can be routed. A separate list from `types` above on
+   *  purpose: tracktion routes the click by te::OutputDevice name across wave AND MIDI
+   *  outs, which is a different vocabulary from the JUCE device-type enumeration. Absent
+   *  on an older backend. */
+  clickOutputs?: ClickOutput[];
 };
 
 // BRW-001 — content/file browser (read-only list_directory). Pure view data; the
@@ -477,6 +482,51 @@ export type DirListing = {
 // backend-defaulted, so the UI never sees a missing field. tonic ∈ voice.js NOTE_PC,
 // mode ∈ voice.js SCALES — the two domains must match the voice module exactly.
 export type SessionKey = { tonic: string; mode: string };
+
+// CAP-TRN-005 — the metronome's sound, level and routing, read straight off
+// tracktion_engine's own click-track surface (te::Edit's CLICKTRACK child plus two
+// app-global PropertyStorage settings). Not a Mosh model: every field maps 1:1 to
+// something the engine already had.
+export type ClickSettings = {
+  /** Same value as session.metronome — the click is on. */
+  enabled: boolean;
+  /** LINEAR gain, and the engine clamps it to [levelMin, levelMax] on both read and
+   *  write. So 0 is NOT silence: to silence the click you turn it off. */
+  level: number;
+  /** The engine's hard floor (0.2) and ceiling (1.0) for `level`. Sent so the UI can
+   *  draw the range that is actually honoured instead of a dead-bottomed 0..1 slider. */
+  levelMin: number;
+  levelMax: number;
+  /** Accent the first beat of each bar with the louder "big" click. Engine default off. */
+  emphasizeBars: boolean;
+  /** Only audible while recording (or while an input is armed and recording). */
+  recordingOnly: boolean;
+  /** The STORED routing intent — an OutputDevice name, or "" when nothing was ever
+   *  chosen. Note this is a device NAME, not the deviceID the track-output commands
+   *  use: routing the click is name-based in tracktion (findOutputDeviceWithName). */
+  outputDevice: string;
+  /** What the engine will ACTUALLY use — `outputDevice` when it resolves, otherwise
+   *  the default-audio-out sentinel. Differs from `outputDevice` whenever the stored
+   *  device is not currently present (unplugged interface, or any headless run). */
+  outputDeviceResolved: string;
+  /** The "(default audio output)" sentinel string, backend-owned so the UI never
+   *  hard-codes it. Selecting it follows whatever the default device becomes. */
+  defaultOutputDevice: string;
+  /** WAV paths for the downbeat ("big") and other-beat ("small") clicks. "" ⇒ the
+   *  engine's built-in click. The engine's loader is WAV-only, so the backend rejects
+   *  anything else rather than silently falling back. */
+  soundBig: string;
+  soundSmall: string;
+  /** MIDI notes (0-127) for the two clicks. Only audible when the click is routed to a
+   *  MIDI output — inert on an audio out, which is why the UI reveals them only then. */
+  midiNoteBig: number;
+  midiNoteSmall: number;
+};
+
+/** One destination the click can be routed to (from list_audio_devices' `clickOutputs`).
+ *  Deliberately separate from the JUCE device-type list in the same result: tracktion
+ *  routes the click by te::OutputDevice NAME, spanning wave and MIDI outs. */
+export type ClickOutput = { name: string; isMidi: boolean };
 
 // REC-001 — how a live MIDI take behaves. Producer INTENT stored with the project; the
 // backend pushes it into te::MidiInputDevice (mergeRecordings / replaceExistingClips /
@@ -602,6 +652,11 @@ export type Snapshot = {
     timeSigNumerator?: number;
     timeSigDenominator?: number;
     metronome?: boolean;
+    // CAP-TRN-005 — the click's sound, level and routing. Sits next to `metronome`
+    // (which stays the on/off flag) rather than under session.project, because unlike
+    // countInBars/recordOptions this is the ENGINE's own click-track state, not
+    // Mosh-owned MOSH_PROJECT intent. Every field is always present.
+    click?: ClickSettings;
     // G2b — count-in / pre-roll bars before recording (0=off, 1=one bar, 2=two
     // bars). Mirrors session.project.countInBars (set_count_in writes it); ALWAYS
     // present, defaulting to 0. tracktion_engine plays an audible click through

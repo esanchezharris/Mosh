@@ -2354,6 +2354,13 @@ juce::var MoshOps::snapshot()
         session->setProperty ("timeSigMap", sigMap);
     }
     session->setProperty ("metronome", edit.clickTrackEnabled.get());
+    // CAP-TRN-005 — the click's sound/level/routing, next to the on-off flag rather than
+    // inside session.project: unlike countInBars/recordOptions these are not Mosh-owned
+    // MOSH_PROJECT intent, they are tracktion's own CLICKTRACK state plus two app-global
+    // PropertyStorage settings. `metronome` above stays as the flag every existing
+    // consumer reads. The output-device CANDIDATE list is deliberately NOT here — device
+    // enumeration stays behind on-demand list_audio_devices (see the note below).
+    session->setProperty ("click", clickSettingsToVar());
     session->setProperty ("length", edit.getLength().inSeconds());
     session->setProperty ("editFile", eng.editFile().getFullPathName());
     session->setProperty ("dirty", eng.isDirty());   // unsaved-changes flag (gap 1)

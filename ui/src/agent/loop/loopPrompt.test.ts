@@ -178,7 +178,23 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-08-03 (c), consciously: ONE catalog line, set_record_options — how a
+    // Moved 2026-08-03 (d), consciously: ONE catalog line REWORDED, set_metronome
+    // (CAP-TRN-005). No command was added, removed or renamed; the prompt's SHAPE is
+    // unchanged. The line gained three optional args — level, emphasizeBars,
+    // recordingOnly — and `enabled` became optional, because the command turned into a
+    // partial patch. That last part is the behavioural half of the move and the reason
+    // it is worth the tokens: `enabled` used to default to FALSE, so a call that named
+    // any other field would have silently muted the click.
+    //
+    // Deliberately NOT in that move: outputDevice, soundBig, soundSmall, midiNoteBig and
+    // midiNoteSmall, which the same command also accepts. They take device names and WAV
+    // paths that only the producer's own machine knows, and — the structural reason,
+    // same as the builtin-vocabulary case below — StepCommandResult carries no payload,
+    // so the loop can never show the model what list_audio_devices returned. Declaring
+    // them would buy invented paths at real prompt cost. They are reachable by mouse in
+    // the v2 metronome panel, and the exclusion is written down in commands.ts.
+    //
+    // Prior move, 2026-08-03 (c): ONE catalog line, set_record_options — how a
     // live take behaves (overdub vs a fresh clip, record-quantise, punch). It is in the
     // catalog rather than UI-only for consistency with set_count_in, which is already
     // there: both answer "what happens when I hit record", and a producer who can ask
@@ -254,9 +270,10 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-drum-rack / pre-builtins: e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
     // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
     // - pre-musical-time contract:    a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
+    // - pre-metronome-settings:       38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334");
+    expect(hash).toBe("bac517c6717a31d122a8d04ae49cf29da3d8387635b35c963aed70b23092a481");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

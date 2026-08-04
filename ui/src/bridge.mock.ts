@@ -46,6 +46,12 @@ const nextAnnotationId = () => "ann-" + ++annotationSeq;
 // G4b — fade curve name -> te::AudioFadeCurve::Type int (1..4), mirroring the native enum.
 const FADE_CURVE_TYPE: Record<string, number> = { linear: 1, convex: 2, concave: 3, sCurve: 4 };
 
+// CAP-TRN-005 — te::DeviceManager::getDefaultAudioOutDeviceName(false), verbatim. The
+// engine's findOutputDeviceWithName resolves this exact string to the current default
+// wave out, so it is a routing VALUE, not a UI label — the mock has to spell it the same
+// way the backend does or a round-trip through set_metronome would not match.
+const DEFAULT_CLICK_OUTPUT = "(default audio output)";
+
 function waveClip(name: string, start: number, length: number): Clip {
   return {
     id: nextClipId(),
@@ -139,6 +145,16 @@ function seedSnapshot(): Snapshot {
       raveAvailable: true,   // Route C.2 — exercise the "+ RAVE" affordance in dev/e2e
       singVoiceEnrolled: false,  // FMS Phase-3 — dev/e2e exercise the not-enrolled copy
       metronome: false, countInBars: 0, length: 16, editFile: "/mock/session.mosh",
+      // CAP-TRN-005 — the SAME defaults MoshOps::clickSettingsToVar returns for a project
+      // that has never set them: engine level default 0.6, no bar emphasis, always
+      // audible, no stored routing, built-in click samples, engine MIDI notes 37/76.
+      click: {
+        enabled: false, level: 0.6, levelMin: 0.2, levelMax: 1,
+        emphasizeBars: false, recordingOnly: false,
+        outputDevice: "", outputDeviceResolved: DEFAULT_CLICK_OUTPUT,
+        defaultOutputDevice: DEFAULT_CLICK_OUTPUT,
+        soundBig: "", soundSmall: "", midiNoteBig: 37, midiNoteSmall: 76,
+      },
       // gap 2 — the Recent list the native snapshot carries (newest-first). Seeded so the
       // session picker and every Open-Recent surface have something real to render in dev
       // and e2e; kept in lockstep with `recentPaths` by syncRecents().
@@ -2198,6 +2214,18 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       types: [{ name: "CoreAudio", outputs: ["MacBook Pro Speakers", "External Headphones"], inputs: ["MacBook Pro Microphone", "Scarlett 2i2"] }],
       current: { ...mockAudioSel, sampleRate: SR, bufferSize: snapshot.session.bufferSize ?? 512 },
       sampleRates: [44100, 48000, 96000], bufferSizes: [128, 256, 512, 1024], defaultBufferSize: 512, audioEnabled: true,
+      // CAP-TRN-005 — click destinations, by te::OutputDevice NAME (not the deviceID the
+      // track-output pickers use). Sentinel first, then wave outs, then the MIDI sentinel
+      // + MIDI outs, exactly as cmdListAudioDevices builds it — so the metronome panel's
+      // "reveal the MIDI notes once a MIDI destination is chosen" branch is reachable in
+      // dev and e2e.
+      clickOutputs: [
+        { name: DEFAULT_CLICK_OUTPUT, isMidi: false },
+        { name: "MacBook Pro Speakers", isMidi: false },
+        { name: "External Headphones", isMidi: false },
+        { name: "(default MIDI output)", isMidi: true },
+        { name: "IAC Driver Bus 1", isMidi: true },
+      ],
     });
     case "set_buffer_size": { if (snapshot.session) snapshot.session.bufferSize = num(args.bufferSize, 512); invalidate(); return ok(command); }
     case "set_audio_threads": { if (snapshot.session) { snapshot.session.audioThreads = num(args.threads, 8); snapshot.session.audioThreadsAuto = false; } invalidate(); return ok(command); }
@@ -2281,7 +2309,56 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return ok(command);
     }
     case "relink_clip": return ok(command);   // gap 3 — re-point a missing wave source (mock no-op)
-    case "set_metronome": { pushUndo(); snapshot.session.metronome = Boolean(args.enabled); invalidate(); return ok(command); }
+    // CAP-TRN-005 — a PARTIAL PATCH over the click settings, and NOT undoable: the real
+    // cmdSetMetronome takes no Tracktion transaction (every CLICKTRACK CachedValue is
+    // bound with a nullptr UndoManager), so the old pushUndo() here made the mock revert
+    // on undo where the app does not. Validation mirrors the backend field for field,
+    // because a Playwright spec against this mock is the ONLY thing some of these paths
+    // get before the real app sees them.
+    case "set_metronome": {
+      const c = snapshot.session.click;
+      if (!c) return err(command, "no click settings");
+      const has = (k: string) => Object.prototype.hasOwnProperty.call(args, k);
+      const KEYS = ["enabled", "level", "emphasizeBars", "recordingOnly", "outputDevice",
+                    "soundBig", "soundSmall", "midiNoteBig", "midiNoteSmall"];
+      if (!KEYS.some(has))
+        return err(command, `expected at least one of: ${KEYS.join(", ")}`);
+      if (has("level")) {
+        const lv = num(args.level, -1);
+        if (lv < 0 || lv > 1) return err(command, "level must be a linear gain in 0..1 (the engine clamps it to 0.2..1.0)");
+      }
+      for (const k of ["midiNoteBig", "midiNoteSmall"] as const)
+        if (has(k)) {
+          const n = num(args[k], -1);
+          if (n < 0 || n > 127) return err(command, `${k} must be 0..127`);
+        }
+      for (const k of ["soundBig", "soundSmall"] as const)
+        if (has(k)) {
+          const p = String(args[k] ?? "").trim();
+          // The mock has no filesystem, so it can only enforce the half of the rule that
+          // is about the STRING (the engine's click loader is WAV-only). Existence is the
+          // backend's to check — noted so nobody reads a green spec as proof of both.
+          if (p !== "" && !/\.wav$/i.test(p))
+            return err(command, `${k} must be an existing .wav file (or "" to restore the built-in click): ${p}`);
+        }
+      if (has("enabled")) { c.enabled = Boolean(args.enabled); snapshot.session.metronome = c.enabled; }
+      if (has("emphasizeBars")) c.emphasizeBars = Boolean(args.emphasizeBars);
+      if (has("recordingOnly")) c.recordingOnly = Boolean(args.recordingOnly);
+      // The engine clamps on write AND on read, so the mock stores the clamped value —
+      // otherwise a slider dragged to 0 would read back 0 here and 0.2 in the real app.
+      if (has("level")) c.level = Math.min(c.levelMax, Math.max(c.levelMin, num(args.level, c.level)));
+      if (has("outputDevice")) {
+        const raw = String(args.outputDevice ?? "").trim();
+        c.outputDevice = raw === "" || raw === "default" ? c.defaultOutputDevice : raw;
+        c.outputDeviceResolved = c.outputDevice;
+      }
+      if (has("soundBig")) c.soundBig = String(args.soundBig ?? "").trim();
+      if (has("soundSmall")) c.soundSmall = String(args.soundSmall ?? "").trim();
+      if (has("midiNoteBig")) c.midiNoteBig = num(args.midiNoteBig, c.midiNoteBig);
+      if (has("midiNoteSmall")) c.midiNoteSmall = num(args.midiNoteSmall, c.midiNoteSmall);
+      invalidate();
+      return ok(command, { ...c, metronome: c.enabled });
+    }
     case "set_time_signature": {
       pushUndo();
       snapshot.session.timeSigNumerator = Math.max(1, num(args.numerator, snapshot.session.timeSigNumerator));
