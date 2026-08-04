@@ -137,6 +137,50 @@ namespace
         auto pos = ac.getPosition();
         return { pos.getOffset().inSeconds() * speed, pos.getLength().inSeconds() * speed };
     }
+
+    // CAP-CLP-017 — the transport LOOP REGION is the one thing insert_time moves that is
+    // NOT in the Edit's undo history: TransportControl::loopPoint1/loopPoint2 are
+    // CachedValues wired with no UndoManager, which is exactly why set_transport is
+    // classified NonUndoable in TransactionSafe.h. Leaving the loop where it was would be
+    // a silent lie (insert 8 bars before the chorus, and the loop still brackets the OLD
+    // chorus); shifting it non-undoably would break the one-transaction promise in the
+    // other direction. So the shift is pushed as an explicit UndoableAction — the same
+    // device SetFaderValueAction (MoshOps.Mixer.cpp) and SetPluginParamValueAction
+    // (MoshOps.Plugins.cpp) already use for engine state that lives outside the ValueTree.
+    // It joins the caller's open transaction, so one ⌘Z still reverts the loop with
+    // everything else.
+    //
+    // Holding `te::Edit&` matches SetPluginParamValueAction: an Edit swap (reload /
+    // open_project) replaces the UndoManager along with the Edit, so a stale action can
+    // never be replayed against a dead one.
+    struct SetLoopRangeAction final : public juce::UndoableAction
+    {
+        SetLoopRangeAction (te::Edit& e, tracktion::TimeRange after)
+            : edit (e), rangeAfter (after), rangeBefore (e.getTransport().getLoopRange()) {}
+
+        bool perform() override        { edit.getTransport().setLoopRange (rangeAfter);  return true; }
+        bool undo() override           { edit.getTransport().setLoopRange (rangeBefore); return true; }
+        int  getSizeInUnits() override { return (int) sizeof (*this); }
+
+        te::Edit& edit;
+        const tracktion::TimeRange rangeAfter, rangeBefore;
+    };
+
+    // CAP-CLP-017 — the ONE shift rule, applied to every span-shaped thing insert_time
+    // touches (the loop region in seconds, a song section in beats). A span that ends at
+    // or before the insertion point is untouched; a span that starts at or after it moves
+    // whole; a span that STRADDLES it grows — its start holds and only its end moves, so
+    // the inserted space lands inside the span rather than teleporting it. That is what
+    // both reference DAWs do with a selection/loop that brackets an Insert Time, and it is
+    // the only rule under which "insert then delete the same span" is an exact inverse.
+    struct SpanShift { double lo = 0.0, hi = 0.0; bool moved = false; };
+
+    SpanShift shiftSpanForInsert (double lo, double hi, double at, double delta, double eps)
+    {
+        if (hi <= at + eps)              return { lo, hi, false };            // entirely before
+        if (lo >= at - eps)              return { lo + delta, hi + delta, true };   // entirely after
+        return { lo, hi + delta, true };                                      // straddles → grows
+    }
 }
 
 // Shared wave-file insertion path used by both import_clip (path-based) and
@@ -285,8 +329,27 @@ juce::var MoshOps::cmdMoveClip (const juce::var& args)
     auto* clip = findClip (id);
     if (clip == nullptr) return errResult ("move_clip", "no clip: " + id);
 
+    // CAP-CLP-017 — opt-in RIPPLE (default FALSE ⇒ the move below is byte-identical when
+    // the arg is absent). Captured BEFORE the move: the neighbours downstream follow this
+    // clip's OLD end and shift by however far the clip itself travelled. Exactly
+    // trim_clip's rule (ARR-011), differing only in what produced the delta.
+    const bool   ripple   = (bool) args.getProperty ("ripple", false);
+    const auto   origPos  = clip->getPosition();
+    const double oldStart = origPos.getStart().inSeconds();
+    const double oldEnd   = origPos.getEnd().inSeconds();
+
+    // Validated BEFORE any side effect (no transaction opened, nothing mutated): ripple
+    // has no defined meaning across a track change. The neighbours it would carry live on
+    // the track the clip is LEAVING, and "shift them by how far the clip moved" describes
+    // a distance the clip no longer has on that track. A legible refusal costs a caller
+    // nothing; guessing would silently rearrange a track the caller never named.
+    if (ripple && args.hasProperty ("trackId"))
+        if (auto* dest = findTrack (args.getProperty ("trackId", var()).toString());
+            dest != nullptr && dest != clip->getTrack())
+            return errResult ("move_clip", "ripple:true cannot be combined with a move to another track");
+
     beginTxn ("move_clip");
-    const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", clip->getPosition().getStart().inSeconds()));
+    const double newStart = juce::jmax (0.0, (double) args.getProperty ("start", oldStart));
     clip->setStart (tracktion::TimePosition::fromSeconds (newStart), false, true);   // keep length
 
     // Optional move to another track.
@@ -294,6 +357,15 @@ juce::var MoshOps::cmdMoveClip (const juce::var& args)
         if (auto* dest = findTrack (args.getProperty ("trackId", var()).toString()))
             if (dest != clip->getTrack())
                 clip->moveTo (*dest);
+
+    // Ripple scope = THIS clip's own track, the only track a same-track move touches
+    // (mirrors trim_clip; delete_time_range's cross-track trackIds set has no analogue for
+    // a single-clip command). Moving right pushes the later clips right by the same
+    // amount; moving left pulls them left. `clip` itself is excluded — it has already
+    // landed, and it can satisfy the >= oldEnd test after a large move.
+    if (ripple)
+        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (clip->getTrack()))
+            rippleShiftClipsAfter (*clipTrack, oldEnd, newStart - oldStart, clip);
 
     logLine ("move_clip", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -1055,6 +1127,244 @@ juce::var MoshOps::cmdDeleteTimeRange (const juce::var& args)
     logLine ("delete_time_range", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("delete_time_range", var (data));
+}
+
+// ── CAP-CLP-017 — insert_time ─────────────────────────────────────────────────
+// Open `duration` seconds of empty timeline at `start` and push everything after it
+// right. The inverse of a ripple delete, and the single most common arrangement edit
+// there is ("I need another 8 before the chorus").
+//
+// WHAT MOVES — the whole point of this command, so it is written down rather than
+// implied. An UNSCOPED call (no `trackIds`) moves all six:
+//
+//   1. CLIPS on every audio track. A clip straddling the insertion point is SPLIT there
+//      first (ClipTrack::splitClip, the same primitive as split_clip / delete_time_range's
+//      phase 1) so the space opens inside it rather than teleporting it; every clip then
+//      starting at or after the point slides right by exactly `duration`.
+//   2. AUTOMATION CURVES on every one of those tracks' plugin racks, AND on the MASTER
+//      bus. Points at or after the insertion point move right; a hold point is written at
+//      each edge of the new span so the value in force at the insertion point is held
+//      FLAT across the inserted silence instead of a ramp being stretched through it.
+//      This is the failure that is silent and unrecoverable if you get it wrong, so it
+//      does not use hand-rolled arithmetic: it calls the engine's OWN insert-space
+//      implementation (te::Track::insertSpaceIntoTrack), which is the code Tracktion's
+//      insertSpaceIntoEdit uses. Master is reached explicitly because te::MasterTrack is
+//      not a ClipTrack and insertSpaceIntoEdit therefore MISSES it — a real gap in the
+//      engine helper, closed here.
+//   3. TEMPO changes, TIME SIGNATURES and pitch changes on the tempo track
+//      (te::TempoTrack::insertSpaceIntoTrack → tempoSequence/pitchSequence
+//      insertSpaceIntoSequence).
+//   4. Named SONG SECTIONS (MOSH_SECTIONS) — beat-anchored, so they shift by the number
+//      of BEATS the inserted span occupies, measured across the tempo edit above.
+//   5. Timeline ANNOTATIONS (MOSH_ANNOTATIONS) — same beat shift.
+//   6. The transport LOOP REGION, via SetLoopRangeAction so it undoes with everything else.
+//
+// WHAT DOES NOT MOVE, named rather than left to be discovered:
+//   • A SCOPED call (`trackIds` present) moves ONLY those tracks' clips and their own rack
+//     automation. Tempo, sections, annotations, the loop and the master bus are
+//     PROJECT-GLOBAL: shifting them for a partial insert would desync every track the
+//     caller deliberately excluded. Same rationale as delete_time_range's ripple scope.
+//   • Non-audio clip tracks (marker / chord / arranger). The target set is
+//     te::getAudioTracks(), identical to delete_time_range's, so the two commands are
+//     exact inverses. Mosh creates none of those track types; song structure lives in
+//     MOSH_SECTIONS (4) instead.
+//   • Automation inside a RackType, on a MacroParameter, or on a Modifier. Mosh has no
+//     command or UI that authors any of those and never creates a rack; an edit that
+//     acquired one elsewhere would keep its curves where they are.
+//   • A lyric line's baked lyricScore blob, which carries an absolute `bar`. Inserting
+//     time before it leaves that stale (LYR Phase-3 state; regenerate the skeleton).
+//   • Multiplayer peers. insert_time does not broadcast, exactly like delete_time_range —
+//     the same pre-existing hole in both, not a new one.
+//
+// ONE TRANSACTION. Every write above joins the single beginTxn("insert_time"), including
+// the loop region. An insert that left half the timeline moved because it opened several
+// transactions is not recoverable by ⌘Z, which is the worst possible failure for an edit
+// this large.
+juce::var MoshOps::cmdInsertTime (const juce::var& args)
+{
+    const double start    = (double) args.getProperty ("start", 0.0);
+    const double duration = (double) args.getProperty ("duration", 0.0);
+    if (start < 0.0)         return errResult ("insert_time", "start must be >= 0");
+    if (! (duration > 0.0))  return errResult ("insert_time", "duration must be greater than 0");
+
+    auto& edit = eng.edit();
+
+    // Resolve the target tracks. Bind the var array to a local before getArray() so the
+    // temporary stays alive while we read it (a pointer into a destroyed var temporary is
+    // a use-after-free this codebase has already paid for once).
+    juce::Array<te::AudioTrack*> targets;
+    const auto trackIdsVar = args.getProperty ("trackIds", var());
+    const bool scoped = trackIdsVar.isArray();
+    if (auto* ids = trackIdsVar.getArray())
+    {
+        for (auto& idv : *ids)
+            if (auto* t = findTrack (idv.toString()))
+                if (! targets.contains (t))
+                    targets.add (t);
+    }
+    else
+    {
+        for (auto* t : te::getAudioTracks (edit))
+            if (t != nullptr)
+                targets.add (t);
+    }
+
+    const auto at    = tracktion::TimePosition::fromSeconds (start);
+    const auto space = tracktion::TimeDuration::fromSeconds (duration);
+    auto& ts = edit.tempoSequence;
+
+    // Captured BEFORE the tempo map is touched: the beat coordinate of the insertion
+    // point. Beats before the point are unaffected by the insert (the tempo in force at
+    // `start` does not change and the beat origin is 0), so this stays valid afterwards
+    // and (beatsAt(start+duration) − this) is the exact beat width of the new space.
+    const double beatAtStart = ts.toBeats (at).inBeats();
+
+    beginTxn ("insert_time");
+
+    // Tempo-track ORDERING, mirrored verbatim from te::insertSpaceIntoEdit: the tempo map
+    // goes first UNLESS the edit's timecode format is bars/beats, in which case the
+    // time-domain moves happen first and the map follows. Beat-anchored material (a
+    // warp-locked clip) is repositioned implicitly by a tempo shift, so doing both in the
+    // wrong order double-counts it. Following the engine's own choice keeps insert_time
+    // behaviour-identical to the Insert Space it is built on.
+    const bool tempoFirst = ! edit.getTimecodeFormat().isBarsBeats();
+    const auto shiftTempoTrack = [&]
+    {
+        if (auto* tempoTrack = edit.getTempoTrack())
+            tempoTrack->insertSpaceIntoTrack (at, space);   // base (automation) + tempo/pitch sequences
+    };
+
+    if (! scoped && tempoFirst)
+        shiftTempoTrack();
+
+    int splits = 0, clipsMoved = 0;
+
+    for (auto* track : targets)
+    {
+        if (track == nullptr) continue;
+        auto* clipTrack = dynamic_cast<te::ClipTrack*> (track);
+        if (clipTrack == nullptr) continue;
+
+        // Phase 1 — split every clip that straddles the insertion point, so nothing is cut
+        // in half by the shift. Iterate a stable copy (splitClip inserts into the live
+        // list) and re-read each clip's live position; the bound must be STRICTLY inside,
+        // mirroring delete_time_range's phase 1 and split_clip's own guard.
+        {
+            juce::Array<te::Clip*> snap;
+            for (auto* c : clipTrack->getClips())
+                if (c != nullptr)
+                    snap.add (c);
+
+            for (auto* c : snap)
+            {
+                if (c == nullptr) continue;
+                const auto p = c->getPosition();
+                if (p.getStart() < at && at < p.getEnd())
+                {
+                    clipTrack->splitClip (*c, at);
+                    ++splits;
+                }
+            }
+            // Deliberately NO message-loop pump: splitClip's position writes are
+            // synchronous ValueTree ops, visible immediately (AUD-001; patches/0005).
+        }
+
+        // Phase 2 — the AUTOMATION half of the engine's insert-space, and ONLY that half.
+        // The qualified call reaches te::Track::insertSpaceIntoTrack directly instead of
+        // te::ClipTrack's override, on purpose: the override's clip loop walks getClips()
+        // BACKWARDS and `break`s at the first clip whose centre precedes the insertion
+        // point, which is only correct if the clip list is sorted by start. In Tracktion
+        // that sort is an ASYNC handleAsyncUpdate, and MoshOps never pumps the message loop
+        // mid-command (AUD-001), so a track whose clips are in un-sorted ValueTree order —
+        // trivially produced by moving one clip right and then adding another — would have
+        // had its later clips silently left behind. Phase 3 below does the clip move with
+        // the order-independent helper the ripple family already uses.
+        clipTrack->te::Track::insertSpaceIntoTrack (at, space);
+
+        // Phase 3 — the clip move. rippleShiftClipsAfter iterates a full stable copy with
+        // no ordering assumption and no early break, and is the SAME primitive
+        // delete_time_range's ripple and trim_clip's ripple use, so "insert 2s" and "ripple
+        // delete 2s" are exact inverses of each other by construction.
+        clipsMoved += rippleShiftClipsAfter (*clipTrack, start, duration);
+    }
+
+    if (! scoped && ! tempoFirst)
+        shiftTempoTrack();
+
+    int sectionsMoved = 0, annotationsMoved = 0;
+    bool loopShifted = false;
+
+    if (! scoped)
+    {
+        // MASTER-BUS automation. te::MasterTrack wraps getMasterPluginList() and is a
+        // Track but NOT a ClipTrack, so Tracktion's own insertSpaceIntoEdit — which only
+        // walks getTracksOfType<ClipTrack> plus the tempo track — never reaches it. A
+        // master-bus filter sweep would have stayed put while the music under it moved.
+        if (auto* master = edit.getMasterTrack())
+            master->insertSpaceIntoTrack (at, space);   // MasterTrack adds no override → automation only
+
+        // BEAT-ANCHORED Mosh state. Sections and annotations are stored in beats so they
+        // survive tempo edits; the tempo map has just moved under them, so the shift is
+        // measured in beats across that edit rather than derived from `duration`.
+        constexpr double kBeatEps = 1.0e-6;
+        const double beatDelta = ts.toBeats (at + space).inBeats() - beatAtStart;
+
+        if (beatDelta > kBeatEps)
+        {
+            if (auto sections = edit.state.getChildWithName (ids::MOSH_SECTIONS); sections.isValid())
+                for (int i = 0; i < sections.getNumChildren(); ++i)
+                {
+                    auto s = sections.getChild (i);
+                    const auto sh = shiftSpanForInsert ((double) s[ids::sectionStartBeat],
+                                                        (double) s[ids::sectionEndBeat],
+                                                        beatAtStart, beatDelta, kBeatEps);
+                    if (! sh.moved) continue;
+                    s.setProperty (ids::sectionStartBeat, sh.lo, &undoManager());
+                    s.setProperty (ids::sectionEndBeat,   sh.hi, &undoManager());
+                    ++sectionsMoved;
+                }
+
+            if (auto anns = edit.state.getChildWithName (ids::MOSH_ANNOTATIONS); anns.isValid())
+                for (int i = 0; i < anns.getNumChildren(); ++i)
+                {
+                    auto a = anns.getChild (i);
+                    const double b = (double) a[ids::annotationBeat];
+                    if (b < beatAtStart - kBeatEps) continue;
+                    a.setProperty (ids::annotationBeat, b + beatDelta, &undoManager());
+                    ++annotationsMoved;
+                }
+        }
+
+        // The transport LOOP REGION. An empty range is the "no loop" state — leave it
+        // alone rather than manufacturing a loop at `duration`.
+        const auto loop = edit.getTransport().getLoopRange();
+        if (loop.getLength().inSeconds() > 1.0e-6)
+        {
+            const auto sh = shiftSpanForInsert (loop.getStart().inSeconds(), loop.getEnd().inSeconds(),
+                                                start, duration, 1.0e-6);
+            if (sh.moved)
+            {
+                undoManager().perform (new SetLoopRangeAction (edit,
+                    tracktion::TimeRange (tracktion::TimePosition::fromSeconds (sh.lo),
+                                          tracktion::TimePosition::fromSeconds (sh.hi))));
+                loopShifted = true;
+            }
+        }
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("start", start);
+    data->setProperty ("duration", duration);
+    data->setProperty ("tracks", targets.size());
+    data->setProperty ("splits", splits);
+    data->setProperty ("clipsMoved", clipsMoved);
+    data->setProperty ("sectionsMoved", sectionsMoved);
+    data->setProperty ("annotationsMoved", annotationsMoved);
+    data->setProperty ("loopShifted", loopShifted);
+    data->setProperty ("scoped", scoped);
+    logLine ("insert_time", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("insert_time", var (data));
 }
 
 // Recreate a clip from a clipToVar-shaped descriptor on a target track at a

@@ -61,7 +61,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "add_test_tone_clip", desc: "Drop a test-tone clip on a track (lands at 0)", args: [S("trackId", false), N("seconds", false, "duration in seconds"), N("freq", false, "Hz")] },
   { command: "import_clip", desc: "Import an audio file onto a track at a given time", args: [S("file"), S("trackId", false), S("name", false), N("startSeconds", false, "seconds on the timeline")] },
   { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "seconds")] },
-  { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
+  { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track) — ripple:true makes same-track neighbors follow by the same distance", args: [S("clipId"), S("trackId", false), N("start", true, "seconds"), B("ripple", false, "shift later clips on the SAME track by the move distance; cannot be combined with trackId")] },
   // `offset` was read by cmdTrimClip (MoshOps.Clips.cpp) and sent by the drag layer
   // (ui/clipDrag.ts:58), but never declared — so the agent could not express a play-start
   // offset (which point in the SOURCE the clip starts playing from), the one thing that
@@ -71,6 +71,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
   { command: "delete_time_range", desc: "Remove everything in a time span across ALL tracks (splits straddling clips at the bounds) — destructive, one per step; ripple:true closes the gap by sliding later clips left", args: [N("start", true, "seconds"), N("end", true, "seconds"), B("ripple", false, "close the gap — later clips slide left by the range length")] },
+  { command: "insert_time", desc: "Open empty timeline at a point and push EVERYTHING after it later — clips on every track (split at the point), their automation, the master bus, tempo/time-signature changes, song sections, annotations and the loop. The inverse of a ripple delete; use it to make room for another 8 bars before the chorus", args: [N("start", true, "seconds"), N("duration", true, "seconds of space to open")] },
   { command: "rename_clip", desc: "Rename a clip", args: [S("clipId"), S("name")] },
   { command: "set_clip_gain", desc: "Set a clip's gain in dB", args: [S("clipId"), N("gainDb")] },
   { command: "set_clip_mute", desc: "Mute/unmute a clip", args: [S("clipId"), B("mute")] },
@@ -275,12 +276,13 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "add_test_tone_clip": return `Added a test tone`;
     case "import_clip": return `Imported audio ${a.file ? String(a.file).split("/").pop() : "clip"}${a.startSeconds ? ` at ${a.startSeconds}s` : ""}`;
     case "add_midi_clip": return `Added a MIDI clip`;
-    case "move_clip": return `Moved a clip to ${a.start}s`;
+    case "move_clip": return `Moved a clip to ${a.start}s${a.ripple ? " and carried its later neighbours" : ""}`;
     case "trim_clip": return `Trimmed a clip`;
     case "split_clip": return `Split a clip at ${a.time}s`;
     case "duplicate_clip": return `Duplicated a clip`;
     case "remove_clip": return `Removed a clip`;
     case "delete_time_range": return `Cleared ${a.start}–${a.end}s across all tracks${a.ripple ? " and closed the gap" : ""}`;
+    case "insert_time": return `Opened ${a.duration}s of space at ${a.start}s — everything after it moved later`;
     case "rename_clip": return `Renamed a clip to "${a.name}"`;
     case "set_clip_gain": return `Set clip gain to ${a.gainDb} dB`;
     case "set_clip_mute": return a.mute ? `Muted a clip` : `Unmuted a clip`;

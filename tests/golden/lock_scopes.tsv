@@ -76,6 +76,7 @@ import_clip_data	Track
 import_lora_adapter	Unguarded
 import_training_source	Unguarded
 insert_tempo_change	SessionGlobal
+insert_time	SessionGlobal
 insert_time_sig_change	SessionGlobal
 keep_take	Track
 list_audio_devices	Unguarded

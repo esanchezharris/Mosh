@@ -106,6 +106,12 @@ TEST_CASE ("classify: structural ops + unknown commands fail closed to session-g
     REQUIRE (LockManager::classify ("reorder_master_plugin")   == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("bypass_master_plugin")    == Scope::SessionGlobal);
     REQUIRE (LockManager::classify ("set_master_plugin_param") == Scope::SessionGlobal);
+    // CAP-CLP-017: the whole-timeline pair. Each rewrites every track, the tempo map and
+    // the beat-anchored song structure in one transaction, so no single track key could
+    // describe what they contend for -- session-global is the right answer, not just the
+    // fail-closed one.
+    REQUIRE (LockManager::classify ("insert_time")        == Scope::SessionGlobal);
+    REQUIRE (LockManager::classify ("delete_time_range")  == Scope::SessionGlobal);
     // fail-closed: a command nobody classified is guarded, not waved through.
     REQUIRE (LockManager::classify ("some_future_command")== Scope::SessionGlobal);
 }
@@ -254,6 +260,15 @@ namespace
             "set_key",
             "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
             "set_metronome", "delete_time_range",
+            // CAP-CLP-017 -- insert_time is delete_time_range's inverse and has the same
+            // (wider) reach: one transaction rewrites every track's clips, their rack
+            // automation, the master bus, the tempo map, the beat-anchored sections and
+            // annotations, and the transport loop. No single track key describes what that
+            // contends for, so session-global is the RIGHT answer here, not merely the
+            // fail-closed default. (This guard is the seventh registration a new command
+            // needs and the one the CAP-CLP-017 ticket's list of six missed -- it caught
+            // insert_time falling through unclassified, exactly as designed.)
+            "insert_time",
             // G2b — count-in / pre-roll bars is a project-wide recording preference,
             // same fail-closed SessionGlobal default as set_metronome/set_tempo above
             // (unlike set_key, which is classified Unguarded in LockManager.cpp), not

@@ -74,6 +74,18 @@ export type State = {
   tool: Tool;
   snap: boolean;
   snapDivision: SnapDiv; // musical grid resolution (bar, 1/4, 1/8, …)
+  // CAP-CLP-017 — RIPPLE EDIT mode. When on, dragging or trimming a clip carries every
+  // later clip on the SAME track with it (move_clip/trim_clip {ripple:true}) instead of
+  // leaving a hole or an overlap.
+  //
+  // MODAL AND VISIBLE, not a held modifier, and that is the whole point. Two of the four
+  // reference DAWs (Pro Tools' Shuffle mode, Reaper's ripple-all/ripple-per-track) make
+  // this a mode the user is TOLD is on, because a ripple drag silently rearranges material
+  // far off-screen — a hidden one is a way to destroy an arrangement by accident. It is
+  // therefore off by default and announced by a lit chip in the top bar for as long as it
+  // is on. It is UI-local view state like `snap`: the backend learns about it only as the
+  // `ripple` argument on the command a gesture actually issues.
+  ripple: boolean;
   selection: Set<string>;
   peaks: Record<string, Peaks>;
   // The audio source each cached peaks array was fetched for (clipId → sourceFile).
@@ -133,6 +145,7 @@ export type State = {
   setSnapAuto: (b: boolean) => void;
   /** snapDivision, or the zoom-derived one when snapAuto. */
   effectiveSnapDivision: () => SnapDiv;
+  setRipple: (b: boolean) => void;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   snapTime: (t: number) => number;
@@ -379,6 +392,7 @@ export const useStore = create<State>((set, get, api) => ({
   snap: true,
   snapDivision: "1/4",
   snapAuto: false,
+  ripple: false,   // CAP-CLP-017 — OFF by default; a hidden ripple mode destroys arrangements
   selection: new Set<string>(),
   peaks: {},
   peaksSourceKey: {},
@@ -570,6 +584,7 @@ export const useStore = create<State>((set, get, api) => ({
   setSnap: (b) => set({ snap: b }),
   setSnapDivision: (d) => set({ snapDivision: d, snapAuto: false }),
   setSnapAuto: (b) => set({ snapAuto: b }),
+  setRipple: (b) => set({ ripple: b }),
   select: (ids, additive = false) => {
     set((s) => {
       const next = new Set(additive ? s.selection : []);

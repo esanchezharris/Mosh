@@ -530,6 +530,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "detect_clip_bpm")   return cmdDetectClipBpm (args);
     if (name == "duplicate_clip")    return cmdDuplicateClip (args);
     if (name == "delete_time_range") return cmdDeleteTimeRange (args);
+    if (name == "insert_time")       return cmdInsertTime (args);      // CAP-CLP-017
     if (name == "paste_clip")        return cmdPasteClip (args);
     if (name == "set_track_volume")  return cmdSetTrackVolume (args);
     if (name == "set_track_pan")     return cmdSetTrackPan (args);
@@ -3159,7 +3160,7 @@ bool MoshOps::isReplayableCommand (const juce::String& name) const
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
-        "duplicate_clip", "delete_time_range", "paste_clip",
+        "duplicate_clip", "delete_time_range", "insert_time", "paste_clip",
         "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
         "create_section", "rename_section", "move_section", "remove_section",
         "create_annotation", "edit_annotation", "move_annotation", "remove_annotation",

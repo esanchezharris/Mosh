@@ -38,6 +38,8 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const snapAuto = useStore((s) => s.snapAuto);
   const setSnapAuto = useStore((s) => s.setSnapAuto);
   const setSnapDivision = useStore((s) => s.setSnapDivision);
+  const ripple = useStore((s) => s.ripple);
+  const setRipple = useStore((s) => s.setRipple);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const anyArmed = snapshot.tracks.some((tr) => tr.armed);
   const fallbackTrackId = selectedTrackId
@@ -68,7 +70,54 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-brand">
         <div className="v2-proj">
           <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
+          {/* The EDIT MODES lead this row, and that ordering is load-bearing rather than
+              cosmetic. The meta row's content has outgrown its grid column (measured: 534px
+              of chips in a 446px track BEFORE this change, so `Snap` and its division select
+              were already sitting behind the centred transport pill and could not be
+              clicked at all). It now scrolls inside its column instead of overflowing under
+              the pill — see 20-topbar.css — which means whatever sits at the END of the row
+              is off-screen until you scroll. Snap and Ripple change what the NEXT DRAG DOES;
+              a mode you cannot see is the exact failure this feature exists to avoid. The
+              settings that follow (key, tempo, meter, metronome, count-in, record options)
+              are set-and-forget values, so they are the right things to push into the
+              scroll. The row is genuinely over budget at ten controls; thinning it is a
+              design call, not this change. */}
           <div className="v2-proj-meta">
+            <span className="v2-snap-controls" role="group" aria-label="Snap controls">
+              <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
+                data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
+                onClick={() => setSnap(!snap)}>Snap</button>
+              {/* CAP-CLP-002 — "Auto" is the ADAPTIVE grid: the division follows the zoom,
+                  so the grid stays aimable instead of turning into noise when you zoom in
+                  or vanishing when you zoom out. Every reference DAW does this. It sits in
+                  the same control rather than beside it because it is an ALTERNATIVE way
+                  to answer "which grid?", not an extra thing to also decide. */}
+              <select className="v2-chip v2-chip-sel" aria-label="Snap division"
+                data-testid="v2-snap-division"
+                value={snapAuto ? "auto" : snapDivision}
+                title="Musical grid division — Auto follows the zoom. Hold Option while dragging to bypass"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "auto") setSnapAuto(true);
+                  else setSnapDivision(v as typeof snapDivision);   // also clears snapAuto
+                }}>
+                <option value="auto">auto</option>
+                {SNAP_DIVISIONS.map((division) => <option key={division} value={division}>{division}</option>)}
+              </select>
+            </span>
+            {/* CAP-CLP-017 — RIPPLE EDIT. Next to Snap because both answer "what else
+                moves when I drag", and a producer hunting for one will find the other.
+                Deliberately a MODE with a lit chip and a live label rather than a held
+                modifier: a ripple drag rearranges material that is usually off-screen, so
+                the two reference DAWs that agree (Pro Tools Shuffle, Reaper ripple) both
+                make it something the user is TOLD is on. The label changes text, not just
+                colour, so the state survives a producer who cannot read the accent. */}
+            <button className="v2-chip v2-chip-toggle v2-ripple-chip" data-testid="v2-ripple"
+              aria-label="Ripple edit mode" aria-pressed={ripple} data-on={ripple}
+              title={ripple
+                ? "Ripple edit is ON — dragging or trimming a clip carries every later clip on its track. Click to turn off."
+                : "Ripple edit is off — dragging a clip leaves its neighbours where they are. Click to turn on."}
+              onClick={() => setRipple(!ripple)}>{ripple ? "Ripple ON" : "Ripple"}</button>
             <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
               onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
               {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
@@ -108,28 +157,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             {/* REC-001 — next to Count-in on purpose: both answer "what happens when I
                 hit record", and a producer hunting for one will find the other. */}
             <RecordOptionsChip />
-            <span className="v2-snap-controls" role="group" aria-label="Snap controls">
-              <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
-                data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
-                onClick={() => setSnap(!snap)}>Snap</button>
-              {/* CAP-CLP-002 — "Auto" is the ADAPTIVE grid: the division follows the zoom,
-                  so the grid stays aimable instead of turning into noise when you zoom in
-                  or vanishing when you zoom out. Every reference DAW does this. It sits in
-                  the same control rather than beside it because it is an ALTERNATIVE way
-                  to answer "which grid?", not an extra thing to also decide. */}
-              <select className="v2-chip v2-chip-sel" aria-label="Snap division"
-                data-testid="v2-snap-division"
-                value={snapAuto ? "auto" : snapDivision}
-                title="Musical grid division — Auto follows the zoom. Hold Option while dragging to bypass"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "auto") setSnapAuto(true);
-                  else setSnapDivision(v as typeof snapDivision);   // also clears snapAuto
-                }}>
-                <option value="auto">auto</option>
-                {SNAP_DIVISIONS.map((division) => <option key={division} value={division}>{division}</option>)}
-              </select>
-            </span>
           </div>
         </div>
       </div>

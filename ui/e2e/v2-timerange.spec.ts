@@ -98,6 +98,44 @@ test("Delete, close gap slides every downstream clip left instead of leaving a h
   expect(await clipSpans(page, "Keys")).toEqual([[2, 4], [4, 6]]);
 });
 
+// CAP-CLP-017 — the inverse action on the same band. Driven through the real gesture for
+// the same reason as the deletes: what can break here is reach and layout (a fourth
+// button pushing the toolbar somewhere a real mousedown->mouseup cannot land), and no
+// spy on store.exec would notice that.
+test("Insert time opens the drawn span and pushes every downstream clip right", async ({ page }) => {
+  await bootV2(page);
+  await dragRange(page, 4, 6);
+  await expect(page.getByTestId("v2-timerange-band")).toBeVisible();
+
+  const insertBtn = page.getByTestId("v2-timerange-insert");
+  await expect(insertBtn).toBeVisible();
+  await insertBtn.click();
+  await expect(page.getByTestId("v2-timerange-band")).toHaveCount(0);
+
+  // The straddling clip splits at 4s; its right half — and everything after it — moves
+  // right by exactly the 2s span. The reverse of "Delete, close gap" one button along.
+  for (const track of ["Drums", "Bass"]) {
+    expect(await clipSpans(page, track), `${track} did not open the span`).toEqual([[0, 4], [6, 10]]);
+  }
+  expect(await clipSpans(page, "Keys")).toEqual([[2, 4], [6, 10]]);
+});
+
+// The modal half. A ripple drag rearranges clips that are usually off-screen, so the
+// property under test is that the shell TELLS the producer the mode is armed — in text,
+// through a control they can reach with a mouse — and that the mode actually changes what
+// the next drag does.
+test("Ripple mode is announced in the top bar and makes a clip drag carry its neighbours", async ({ page }) => {
+  await bootV2(page);
+  const chip = page.getByTestId("v2-ripple");
+  await expect(chip).toBeVisible();
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+  await expect(chip).toHaveText("Ripple");
+
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await expect(chip, "an armed destructive mode must say so in text, not colour alone").toHaveText("Ripple ON");
+});
+
 test("the same range can be looped instead of deleted, and toggles off on a second press", async ({ page }) => {
   await bootV2(page);
   await dragRange(page, 4, 6);

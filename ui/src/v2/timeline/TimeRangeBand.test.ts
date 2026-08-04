@@ -28,6 +28,7 @@ describe("TimeRangeBand", () => {
   const del = () => host.querySelector('[data-testid="v2-timerange-delete"]') as HTMLButtonElement | null;
   const delRipple = () => host.querySelector('[data-testid="v2-timerange-delete-ripple"]') as HTMLButtonElement | null;
   const clearBtn = () => host.querySelector('[data-testid="v2-timerange-clear"]') as HTMLButtonElement | null;
+  const insertBtn = () => host.querySelector('[data-testid="v2-timerange-insert"]') as HTMLButtonElement | null;
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -92,6 +93,29 @@ describe("TimeRangeBand", () => {
     render();
     await act(async () => { delRipple()!.click(); });
     expect(exec).toHaveBeenCalledWith("delete_time_range", { start: 2, end: 3, ripple: true });
+  });
+
+  // CAP-CLP-017 — insert_time's only shipped-UI home, and the exact inverse of
+  // "Delete, close gap": it sends the span's LENGTH as `duration` at the span's START.
+  // Like the two deletes it is a NAMED, explicitly-clicked action rather than something
+  // the Ripple mode does behind a drag — it rewrites every track, the tempo map, the
+  // sections and the loop in one transaction.
+  it("Insert time opens the drawn span's length at its start", async () => {
+    useShell.setState({ timeRange: { start: 4, end: 6 }, timeRangeDragging: false });
+    render();
+    expect(insertBtn(), "insert_time must have a labelled control of its own").toBeTruthy();
+    expect(insertBtn()).not.toBe(delRipple());
+
+    await act(async () => { insertBtn()!.click(); });
+    expect(exec).toHaveBeenCalledWith("insert_time", { start: 4, duration: 2 });
+    expect(exec).toHaveBeenCalledTimes(1);   // one command, not a delete + an insert
+  });
+
+  it("Insert time clears the now-stale selection (everything it described just moved right)", async () => {
+    useShell.setState({ timeRange: { start: 4, end: 6 }, timeRangeDragging: false });
+    render();
+    await act(async () => { insertBtn()!.click(); });
+    expect(useShell.getState().timeRange).toBeNull();
   });
 
   it("either action clears the now-stale selection", async () => {

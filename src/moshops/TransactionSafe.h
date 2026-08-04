@@ -45,10 +45,16 @@ enum class Class
     skill plainly needs. All 47 satisfy criteria 1–4.
 
     Reviewed EXCLUSIONS (each mechanically "safe" but held out of v1 on purpose):
-      • remove_bus / create_group_track / ungroup_track / delete_time_range — each
-        reaches ACROSS tracks (remove_bus sweeps the send off every track), so a
-        rollback's blast radius is wider than the manifest describes. Admit only with a
-        cross-track rollback fixture.
+      • remove_bus / create_group_track / ungroup_track / delete_time_range /
+        insert_time — each reaches ACROSS tracks (remove_bus sweeps the send off every
+        track), so a rollback's blast radius is wider than the manifest describes. Admit
+        only with a cross-track rollback fixture. insert_time (CAP-CLP-017) is the widest
+        of them and is held out DELIBERATELY, not by omission: it rewrites every clip,
+        every rack's automation, the master bus, the tempo map, the beat-anchored song
+        sections/annotations and the transport loop in one go. It satisfies criteria 1-4
+        mechanically — one beginTxn, logLine undoable:true, no thread/job, no re-entry into
+        execute() — so nothing here would reject it; that is exactly why the exclusion has
+        to be written down. Same posture as its inverse, delete_time_range.
       • paste_clip / relink_clip / import_clip_data — object-typed or filesystem-path
         payloads; not agent-callable, so no skill can manifest them anyway.
       • the render-layer family (bypass_layer, freeze_layer, unfreeze_layer,
