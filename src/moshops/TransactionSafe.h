@@ -118,6 +118,10 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "enable_track_meter", "disable_track_meter", "enable_all_meters",
         "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
         "activate_lora_adapter", "import_lora_adapter",
+        // REC-001 — record options are a stored preference pushed into per-device engine
+        // state; nothing about them is in the Edit's undo history, so an undo inside a
+        // skill's transaction would not put them back.
+        "set_record_options",
     };
     if (nonUndoable.count (command) > 0)
     {
@@ -151,6 +155,13 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "new_project", "open_project", "open_recent", "save", "save_as", "reload",
         "recover_session", "discard_recovery", "export_audio", "export_stems",
         "set_transport", "stop_recording", "undo", "redo",
+        // REC-001 — capture_midi IS synchronous and undoable, so it would pass criteria
+        // 1-4 mechanically. It is held out anyway, on the same "deliberately NARROW"
+        // ground as remove_bus above: with armedOnly:false it creates clips on EVERY
+        // track that has buffered input, so a rollback's blast radius is wider than a
+        // manifest naming one command can describe. It is also a PERFORMANCE gesture —
+        // there is no skill that plays a keyboard and then captures it.
+        "capture_midi",
     };
     if (lifecycle.count (command) > 0)
     {

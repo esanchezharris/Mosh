@@ -478,6 +478,28 @@ export type DirListing = {
 // mode ∈ voice.js SCALES — the two domains must match the voice module exactly.
 export type SessionKey = { tonic: string; mode: string };
 
+// REC-001 — how a live MIDI take behaves. Producer INTENT stored with the project; the
+// backend pushes it into te::MidiInputDevice (mergeRecordings / replaceExistingClips /
+// quantisation) and te::Edit::recordingPunchInOut whenever it could matter, so these are
+// engine-wired settings rather than remembered ones.
+export type RecordOptions = {
+  /** A new take MERGES into the clip it lands on instead of starting a fresh one. */
+  overdub: boolean;
+  /** A take REPLACES clips it overlaps. Distinct from overdub: this is about the clips
+   *  already on the timeline, not about the take's own contents. */
+  replaceExisting: boolean;
+  /** Record-quantise grid in BEATS, 0 = off. Same domain as quantize_notes' `division`,
+   *  but the engine implements an irregular set (1/9 and 1/12 exist, 1/48 does not), so
+   *  the backend refuses a value outside it rather than snapping. */
+  quantize: number;
+  /** The engine's own name for `quantize` ("1/16 beat", "(none)") — display only. */
+  quantizeLabel: string;
+  /** Capture only inside the punch/loop range. */
+  punchInOut: boolean;
+  /** How far back capture_midi can reach for MIDI you played without recording. */
+  retrospectiveSeconds: number;
+};
+
 export type TrainingSource = {
   index: number;
   source_id: string;
@@ -648,6 +670,11 @@ export type Snapshot = {
       // top-level session.countInBars above (like session.project.key vs
       // session.key). Additive/optional so this stays a non-breaking type change.
       countInBars?: number;
+      // REC-001 — what a live MIDI take DOES, alongside the count-in that precedes it.
+      // Every field is always present on the wire (the backend defaults them), so the
+      // recording panel never has to tell "false" from "missing" — but the object itself
+      // is optional here, because a snapshot from an older backend simply won't have it.
+      recordOptions?: RecordOptions;
     };
   };
   tracks: Track[];

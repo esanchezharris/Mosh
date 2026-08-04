@@ -6949,6 +6949,140 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
     }
 
+    // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
+    // WHAT THIS CANNOT PROVE, stated up front so nothing below reads as more than it is:
+    // a headless run has no audio device, so no te::MidiInputDevice exists, so
+    // applyRecordOptionsToDevices() writes to nothing and capture_midi has no
+    // retrospective buffer to capture from. That an overdub take really MERGES, or that
+    // Capture really recovers what you just played, is HARDWARE-GATED — it needs a
+    // controller and a live interface.
+    //
+    // What IS provable here is everything between the producer and the engine: the
+    // stored intent, the partial-patch integrity (a rejected field leaves the others
+    // untouched), persistence across save/reload, the non-undoable-preference posture,
+    // and capture_midi's graceful empty-handed shape. Deliberately NOT written: any
+    // check phrased as "capture_midi returned ok" on its own — ok:true IS the
+    // degradation answer, so such a check could not fail.
+    section ("REC-001: record options + Capture MIDI (set_record_options, capture_midi)");
+    {
+        auto proj = [&] { return ops.snapshot().getProperty ("session", var()).getProperty ("project", var()); };
+        auto recOpts = [&] { return proj().getProperty ("recordOptions", var()); };
+        auto optBool = [&] (const char* k) { return (bool) recOpts().getProperty (k, false); };
+        auto optNum  = [&] (const char* k) { return (double) recOpts().getProperty (k, -1.0); };
+
+        // Defaults on a project that has never set them. overdub ON is deliberate: it is
+        // Ableton's behaviour and the engine's own default (mergeRecordings = true).
+        check (recOpts().isObject(), "snapshot session.project.recordOptions present");
+        check (optBool ("overdub"), "recordOptions.overdub defaults to true (merge, like the engine)");
+        check (! optBool ("replaceExisting"), "recordOptions.replaceExisting defaults to false");
+        check (! optBool ("punchInOut"), "recordOptions.punchInOut defaults to false");
+        check (optNum ("quantize") == 0.0, "recordOptions.quantize defaults to 0 (off)");
+        check (recOpts().getProperty ("quantizeLabel", var()).toString() == "(none)",
+               "recordOptions.quantizeLabel defaults to the engine's own \"(none)\"");
+        check (optNum ("retrospectiveSeconds") > 0.0, "recordOptions.retrospectiveSeconds has a usable default");
+
+        // Each field sets independently — the property the UI depends on, since five
+        // separate controls each send only their own field.
+        check (ok (cmd (ops, "set_record_options", args1 ("overdub", false))), "set_record_options overdub:false ok");
+        check (! optBool ("overdub"), "overdub:false stored");
+        check (! optBool ("punchInOut"), "setting overdub alone left punchInOut untouched");
+        check (ok (cmd (ops, "set_record_options", args1 ("punchInOut", true))), "set_record_options punchInOut:true ok");
+        check (optBool ("punchInOut"), "punchInOut:true stored");
+        check (! optBool ("overdub"), "setting punchInOut alone left overdub untouched");
+
+        // punchInOut is the one option with an Edit-side home, so it is the one that can
+        // be checked against the live engine headless. te::Edit::recordingPunchInOut is
+        // bound with a nullptr UndoManager, which is exactly why it is written through
+        // this preference path rather than inside a transaction.
+        check (eng.edit().recordingPunchInOut.get(),
+               "punchInOut reached the live engine (te::Edit::recordingPunchInOut)");
+
+        // Record-quantise: a grid the engine implements is accepted and gets the engine's
+        // own label back; one it does not is REFUSED rather than snapped to the nearest.
+        check (ok (cmd (ops, "set_record_options", args1 ("quantize", 0.25))), "set_record_options quantize 1/4 beat ok");
+        check (optNum ("quantize") == 0.25, "quantize 0.25 stored");
+        check (recOpts().getProperty ("quantizeLabel", var()).toString() == "1/4 beat",
+               "quantize 0.25 labelled with the engine's own name");
+        check (! ok (cmd (ops, "set_record_options", args1 ("quantize", 0.3))),
+               "set_record_options refuses a grid the engine does not implement (0.3)");
+        // The integrity property that makes a partial patch safe: a refused field must
+        // not have written the OTHER fields on its way to failing.
+        check (optNum ("quantize") == 0.25, "a refused quantize left the stored grid untouched");
+        check (optBool ("punchInOut"), "a refused quantize left punchInOut untouched");
+
+        check (! ok (cmd (ops, "set_record_options", args1 ("retrospectiveSeconds", -1.0))),
+               "set_record_options refuses a negative retrospective window");
+        check (! ok (cmd (ops, "set_record_options", args1 ("retrospectiveSeconds", 600.0))),
+               "set_record_options refuses a retrospective window past the cap");
+
+        // Persistence, like every other MOSH_PROJECT preference.
+        check (ok (cmd (ops, "save")),   "save (record options) ok");
+        check (ok (cmd (ops, "reload")), "reload (record options) ok");
+        check (optNum ("quantize") == 0.25, "recordOptions.quantize survived save+reload");
+        check (optBool ("punchInOut"), "recordOptions.punchInOut survived save+reload");
+
+        // NON-undoable preference, same posture (and same check) as set_count_in above.
+        {
+            auto roLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool roPref = false;
+            for (auto& ln : juce::StringArray::fromLines (roLog))
+                if (ln.contains ("\"command\": \"set_record_options\"") && ln.contains ("\"undoable\": false")) roPref = true;
+            check (roPref, "set_record_options logged undoable:false (preference)");
+        }
+        cmd (ops, "undo");
+        check (optNum ("quantize") == 0.25, "undo after set_record_options does NOT revert it (non-undoable)");
+
+        // capture_midi, headless. The shape is the whole contract here: ok (a producer
+        // pressing Capture with nothing buffered has done nothing wrong), applied:false,
+        // no clips, and a REASON — never a silent ok that reads as a successful capture.
+        auto capR = cmd (ops, "capture_midi");
+        check (ok (capR), "capture_midi ok (graceful, no audio device)");
+        check (! (bool) capR["data"].getProperty ("applied", true), "capture_midi applied:false headless");
+        {
+            auto cl = capR["data"].getProperty ("clips", var());   // bind before getArray
+            check (cl.isArray() && cl.size() == 0, "capture_midi lands no clips headless (clips:[])");
+        }
+        check (capR["data"].hasProperty ("reason"), "capture_midi reports WHY it captured nothing");
+
+        // A capture that captured nothing must leave NO footprint. Two witnesses, chosen
+        // because each can actually fail:
+        //
+        //   1. no snapshot_invalidated. Nothing changed, so a re-pull would be pure cost
+        //      — and Capture is a key a producer mashes.
+        //   2. logged undoable:false. This is the one that protects the producer: a
+        //      Capture that claims to be undoable when it created nothing puts a phantom
+        //      step in front of their real work.
+        //
+        // (A `session.dirty` witness was written here first and DELETED — it passed a
+        // sabotage that called markDirty() before the guards, because by this point in
+        // the run the project is already dirty and the flag could not move. It looked
+        // exactly like a check that worked.)
+        {
+            eventTypes.clear();
+            cmd (ops, "capture_midi", args1 ("armedOnly", true));
+            check (! hadEvent ("snapshot_invalidated"),
+                   "a no-op capture_midi emits no snapshot_invalidated (nothing changed)");
+
+            auto capLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool sawUndoableCapture = false, sawPrefCapture = false;
+            for (auto& ln : juce::StringArray::fromLines (capLog))
+                if (ln.contains ("\"command\": \"capture_midi\""))
+                {
+                    if (ln.contains ("\"undoable\": true"))  sawUndoableCapture = true;
+                    if (ln.contains ("\"undoable\": false")) sawPrefCapture = true;
+                }
+            check (sawPrefCapture, "JSONL records capture_midi");
+            check (! sawUndoableCapture,
+                   "a capture that landed no clips is NOT logged undoable (no phantom undo step)");
+        }
+
+        // Restore the defaults so later blocks/gates see a clean project.
+        check (ok (cmd (ops, "set_record_options",
+                        objN ({{ "overdub", true }, { "replaceExisting", false },
+                               { "quantize", 0.0 }, { "punchInOut", false }}))),
+               "set_record_options restore defaults ok");
+    }
+
     // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───
     // Before the patch, this load -> save -> reload -> remove -> load sequence could hand
     // the second plugin an itemID still held by the first in automatableEditItemCache ->

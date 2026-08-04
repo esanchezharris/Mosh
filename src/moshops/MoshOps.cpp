@@ -640,6 +640,12 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
     if (name == "set_count_in")      return broadcastStructuralIfActive (name, args, cmdSetCountIn (args));
+    // REC-001 — broadcast like set_count_in: record options are project-wide state a
+    // multiplayer peer must see, not a viewer-local preference. capture_midi is NOT
+    // broadcast the same way — it creates clips, so it invalidates the snapshot and
+    // resyncs through the ordinary structural path.
+    if (name == "set_record_options") return broadcastStructuralIfActive (name, args, cmdSetRecordOptions (args));
+    if (name == "capture_midi")      return cmdCaptureMidi (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);

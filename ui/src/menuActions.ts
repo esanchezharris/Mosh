@@ -5,6 +5,7 @@
 // Tracktion directly. File pickers reuse the existing native dialogs (pick_files /
 // pick_save_file) — they only resolve a path; the mutation is still a command.
 
+import { runCaptureMidi } from "./captureMidi";
 import type { ActionId } from "./keymap";
 import type { Snapshot } from "./types";
 import { meterAt, snapStep, tempoMapFrom, type SnapDiv } from "./time";
@@ -56,6 +57,10 @@ export interface ActionStore {
   automationTrackId?: string | null;
   // Taste loop (⌘⇧F) — opens the felt-wrong capture dialog. Optional for test fakes.
   setFeltWrongOpen?: (open: boolean) => void;
+  // REC-001 (⇧⌘C) — Capture MIDI reports through the shared error banner, because
+  // capturing NOTHING is the common outcome and is otherwise completely invisible.
+  // Optional for test fakes.
+  setLastError?: (message: string | null) => void;
 }
 
 export interface ActionCtx {
@@ -313,6 +318,13 @@ export async function runAction(id: ActionId, ctx: ActionCtx, opts: RunActionOpt
       if (typeof opts.loopStart === "number" && typeof opts.loopEnd === "number")
         await store.exec("set_transport", { loop: true, loopStart: opts.loopStart, loopEnd: opts.loopEnd });
       return;
+    case "capture_midi": {
+      // REC-001 — the ⇧⌘C door onto the same helper the transport button uses, so the
+      // two can't drift into reporting the outcome differently.
+      const { message } = await runCaptureMidi(store.exec);
+      store.setLastError?.(message);
+      return;
+    }
     case "felt_wrong":
       // Taste loop (workshop 2026-07-19): opens the capture dialog; the dialog itself
       // archives the row (no MoshOps command — the archive rides archive_pair).

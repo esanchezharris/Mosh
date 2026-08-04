@@ -46,6 +46,9 @@ export const EditorAction = {
   // keyboard — transport
   PLAY_PAUSE: "play_pause",
   RECORD: "record",
+  // REC-001 — Ableton's Capture MIDI. Transport-adjacent but the opposite direction in
+  // time: RECORD decides what happens next, CAPTURE_MIDI rescues what already happened.
+  CAPTURE_MIDI: "capture_midi",
   TO_START: "to_start",
   TO_END: "to_end",
 

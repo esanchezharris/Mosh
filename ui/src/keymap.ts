@@ -8,7 +8,7 @@
 export type ActionId =
   | "new_project" | "open_project" | "open_recent" | "save" | "save_as" | "export_audio"
   | "undo" | "redo" | "cut" | "copy" | "paste" | "delete"
-  | "play_pause" | "record" | "to_start" | "to_end"
+  | "play_pause" | "record" | "capture_midi" | "to_start" | "to_end"
   | "duplicate" | "group" | "split"
   | "nudge_left" | "nudge_right"
   | "tool_move" | "tool_split" | "tool_range"

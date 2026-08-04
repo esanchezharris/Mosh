@@ -178,7 +178,19 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-08-03 (b), consciously: the Drum Rack added set_drum_pad,
+    // Moved 2026-08-03 (c), consciously: ONE catalog line, set_record_options — how a
+    // live take behaves (overdub vs a fresh clip, record-quantise, punch). It is in the
+    // catalog rather than UI-only for consistency with set_count_in, which is already
+    // there: both answer "what happens when I hit record", and a producer who can ask
+    // for a two-bar count-in should be able to ask to record in overdub.
+    //
+    // capture_midi, which landed in the same commit, is deliberately NOT here. It keeps
+    // what the producer just PLAYED, and the model has no performance sitting in the
+    // retrospective buffer — an entry for it would cost prompt budget to advertise a
+    // command that can only ever come back empty-handed. It lives in
+    // commandClassification.ts instead, with that reason written down.
+    //
+    // Prior move, 2026-08-03 (b): the Drum Rack added set_drum_pad,
     // clear_drum_pad, apply_choke and list_drum_kits to the catalog (and a kit arg to
     // load_drum_kit), so the prompt gained two command lines. These are real new agent
     // capability (per-pad level/pan/name/choke, and the missing inverse of
@@ -234,6 +246,7 @@ describe("legacy prompt byte-stability pin", () => {
     //
     // Previous pins (two lineages, merged at 2026-08-03 — neither branch tip's own hash
     // is reachable from here, which is why both are listed):
+    // - pre-record-options:           d3de1c58e515bd660c0b1214ee0db163a011de9c1326e66e450409587ba6e121
     // - drum-rack branch, pre-merge:  e699bb5c200d27200711dc36b008567cde58e380ad70efb3cff9d8e62743bb2e
     // - main, pre-merge (builtins):   a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-kit-library:              0396e079069da25afde5d96dcf0a9019bd6774b2e12d4c44840583d065ab1c39
@@ -243,7 +256,7 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-musical-time contract:    a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("d3de1c58e515bd660c0b1214ee0db163a011de9c1326e66e450409587ba6e121");
+    expect(hash).toBe("38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

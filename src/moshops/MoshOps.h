@@ -405,6 +405,16 @@ private:
     // live Edit's real tracktion_engine pre-roll (te::Edit::setCountInMode) so the
     // setting is ENGINE-WIRED, not just stored.
     juce::var cmdSetCountIn (const juce::var& args);
+    // REC-001 — how a live MIDI take behaves (overdub/replace/record-quantise/punch) and
+    // how far Capture can reach back. Same MOSH_PROJECT node + NON-undoable-preference
+    // template as cmdSetCountIn, and for the same reason: three of the five live on
+    // te::MidiInputDevice, which does not exist until an audio device is open.
+    // applyRecordOptionsToDevices() is what makes them real. See MoshOps.Record.cpp.
+    juce::var cmdSetRecordOptions (const juce::var& args);
+    // REC-001 — Ableton's Capture MIDI: turn what you just played, while NOT recording,
+    // into clips (te::EditPlaybackContext::applyRetrospectiveRecord). The one command in
+    // this group that IS an Edit mutation, so unlike its neighbours it is undoable.
+    juce::var cmdCaptureMidi (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -450,6 +460,15 @@ private:
     // save/reload that swapped in a different Edit instance). Cheap + headless-safe
     // (writes engine property storage, no audio device required).
     void applyCountInToEdit();
+    // REC-001 — the resolved { overdub, replaceExisting, quantize, quantizeLabel,
+    // punchInOut, retrospectiveSeconds } block. Every field always present (a UI that
+    // has to tell "false" from "missing" renders a toggle in a third, wrong state).
+    juce::var recordOptionsToVar();
+    // REC-001 — pushes the stored record-option intent into whatever MIDI input devices
+    // exist RIGHT NOW, plus te::Edit::recordingPunchInOut. Called on set, on
+    // record-start and on project load, so a controller plugged in AFTER the setting was
+    // made still honours it. A complete no-op headless (no devices to write to).
+    void applyRecordOptionsToDevices();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.

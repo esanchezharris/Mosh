@@ -56,6 +56,30 @@ namespace mosh::ids
     // timeBase/musicalTonic).
     MOSH_DECLARE_ID (countInBars)
 
+    // REC-001 — how a live MIDI take BEHAVES. Stored on the same MOSH_PROJECT node as
+    // countInBars, and for the same reason: the engine's own homes for these settings
+    // are unreachable when they are set.
+    //
+    //   recOverdub / recReplaceExisting / recQuantize live on MidiInputDevice
+    //     (mergeRecordings / replaceExistingClips / quantisation), which are PER-DEVICE
+    //     and exist only while an audio device is open. A producer setting "overdub"
+    //     with no interface plugged in would otherwise be writing to nothing, and the
+    //     value could not be proven headless.
+    //   recPunchInOut mirrors te::Edit::recordingPunchInOut, which DOES live in the Edit
+    //     — but is bound with a nullptr UndoManager, so writing it inside a transaction
+    //     makes an empty one (the G14 undo class: the next undo then destroys the
+    //     PREVIOUS edit). Storing intent here keeps one write path for all five.
+    //
+    // MoshOps::applyRecordOptionsToDevices() pushes the stored intent into the live
+    // engine every time it could matter (on set, on record-start, on project load), so
+    // the setting is real rather than merely remembered — the same discipline
+    // applyCountInToEdit uses. NON-undoable preferences, all five.
+    MOSH_DECLARE_ID (recOverdub)          // bool — a new take MERGES into the clip it lands on
+    MOSH_DECLARE_ID (recReplaceExisting)  // bool — a take REPLACES clips under it
+    MOSH_DECLARE_ID (recQuantize)         // double — beats; 0 = off. Same domain as quantize_notes' `division`
+    MOSH_DECLARE_ID (recPunchInOut)       // bool — capture only inside the loop/punch range
+    MOSH_DECLARE_ID (recRetroSeconds)     // double — how much played-but-not-recorded MIDI capture_midi can reach back for
+
     // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
     // A plain property on the track's own state tree so the choice saves/reloads
     // with the edit; arm_track prefers it over first-match. NON-undoable

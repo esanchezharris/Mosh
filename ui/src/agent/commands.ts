@@ -118,6 +118,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── recording / takes ─────────────────────────────────────────────────────
   { command: "arm_track", desc: "Arm/disarm a track's input for recording", args: [S("trackId"), B("armed")] },
   { command: "stop_recording", desc: "Stop recording and land the take", args: [B("discardRecordings", false)] },
+  { command: "set_record_options", desc: "How a live MIDI take behaves: overdub (merge into the clip it lands on) vs replace, record-quantise to a grid, and punch (capture only inside the loop range)", args: [B("overdub", false), B("replaceExisting", false), N("quantize", false, "beats, 0=off — same grid as quantize_notes"), B("punchInOut", false), N("retrospectiveSeconds", false, "0-60, how far back Capture can reach")] },
   { command: "set_input_monitor", desc: "Set a track's input monitoring", args: [S("trackId"), S("mode", false, '"off"|"automatic"|"on"')] },
   { command: "list_takes", desc: "List the take lanes on a clip", args: [S("clipId")] },
   { command: "set_current_take", desc: "Select which take lane is active", args: [S("clipId"), N("takeIndex")] },
@@ -293,6 +294,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
     case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
     case "stop_recording": return `Stopped recording`;
+    case "set_record_options": return a.overdub !== undefined ? (a.overdub ? `Recording in overdub` : `Recording replaces`) : `Set the recording options`;
     case "set_input_monitor": return `Set input monitoring`;
     case "list_takes": return `Listed the takes`;
     case "set_current_take": return `Switched to take ${a.takeIndex}`;

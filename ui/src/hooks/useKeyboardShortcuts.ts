@@ -83,6 +83,9 @@ export function useKeyboardShortcuts() {
         case EA.TOOL_RANGE: void dispatch("tool_range"); break;
         case EA.SPLIT: prevent(); void dispatch("split"); break;
         case EA.FELT_WRONG: prevent(); void dispatch("felt_wrong"); break;
+        // REC-001 — ⇧⌘C. prevent() matters: the browser's own Copy would otherwise
+        // also fire on the Mod+C half of the chord in some WebKit builds.
+        case EA.CAPTURE_MIDI: prevent(); void dispatch("capture_midi"); break;
         default: break;
       }
     };

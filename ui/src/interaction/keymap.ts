@@ -116,6 +116,10 @@ const MOSH: Keymap = {
   // Taste loop: "felt wrong" capture. Mod+Shift+F is free in every preset below
   // (no keymap or gesture collision), and inherited by all of them.
   [A.FELT_WRONG]: "Mod+Shift+F",
+  // REC-001 — Capture MIDI. Mod+Shift+C is Ableton's own binding AND is free in every
+  // preset below (the only other Mod+Shift combos in use are Z and F), so it lives in the
+  // shared core rather than in ABLETON: it is the right key everywhere, not a flavour.
+  [A.CAPTURE_MIDI]: "Mod+Shift+C",
 };
 
 // Per-DAW variants — the core is shared; only a few flavor bindings differ so a

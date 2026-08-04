@@ -38,6 +38,7 @@ bypass_plugin	Track
 cancel_lyric_job	Track
 cancel_render	Clip
 cancel_training_job	Unguarded
+capture_midi	SessionGlobal
 clear_automation	Track
 clear_drum_pad	Track
 clear_plugin_blocklist	Unguarded
@@ -187,6 +188,7 @@ set_note	Clip
 set_plugin_param	Track
 set_project_settings	Unguarded
 set_rave_param	Track
+set_record_options	SessionGlobal
 set_render_param	Clip
 set_send_level	Track
 set_tempo	SessionGlobal

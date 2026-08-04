@@ -146,6 +146,17 @@ function seedSnapshot(): Snapshot {
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
+      // REC-001 — seeded with the SAME defaults MoshOps::recordOptionsToVar returns for a
+      // project that has never set them (overdub on, everything else off/none). A mock
+      // that seeded something else would make the recording panel render one way in dev
+      // and another way on a fresh real project.
+      project: {
+        sampleRate: 44100, bitDepth: 24, timeBase: "seconds", countInBars: 0,
+        recordOptions: {
+          overdub: true, replaceExisting: false, quantize: 0,
+          quantizeLabel: "(none)", punchInOut: false, retrospectiveSeconds: 10,
+        },
+      },
     },
     tracks,
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
@@ -1908,6 +1919,43 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
       snapshot.session.countInBars = bars; invalidate(); return ok(command);
     }
+    // REC-001 — the same partial-patch shape as native: each field independent, an
+    // out-of-domain value refused WITHOUT writing any of the others. Preference, so no
+    // pushUndo (mirrors cmdSetRecordOptions' logLine(..., false)).
+    case "set_record_options": {
+      const cur = snapshot.session.project?.recordOptions;
+      if (!cur) return err(command, "no record options on this snapshot");
+      // Mirrors kQuantGrids in MoshOps.Record.cpp — deliberately irregular, and refused
+      // rather than snapped, exactly as native does it.
+      const GRIDS: [number, string][] = [
+        [0, "(none)"], [1 / 64, "1/64 beat"], [1 / 32, "1/32 beat"], [1 / 24, "1/24 beat"],
+        [1 / 16, "1/16 beat"], [1 / 12, "1/12 beat"], [1 / 9, "1/9 beat"], [1 / 8, "1/8 beat"],
+        [1 / 6, "1/6 beat"], [1 / 4, "1/4 beat"], [1 / 3, "1/3 beat"], [1 / 2, "1/2 beat"], [1, "1 beat"],
+      ];
+      if (args.quantize !== undefined) {
+        const q = num(args.quantize, 0);
+        const hit = GRIDS.find(([b]) => Math.abs(b - q) <= 1e-6 * Math.max(1, Math.abs(b)));
+        if (!hit) return err(command, `quantize must be one of these beat divisions: ${GRIDS.map(([b]) => b).join(", ")}`);
+        cur.quantize = hit[0];
+        cur.quantizeLabel = hit[1];
+      }
+      if (args.retrospectiveSeconds !== undefined) {
+        const s = num(args.retrospectiveSeconds, 10);
+        if (s < 0 || s > 60) return err(command, "retrospectiveSeconds must be 0..60");
+        cur.retrospectiveSeconds = s;
+      }
+      if (args.overdub !== undefined) cur.overdub = !!args.overdub;
+      if (args.replaceExisting !== undefined) cur.replaceExisting = !!args.replaceExisting;
+      if (args.punchInOut !== undefined) cur.punchInOut = !!args.punchInOut;
+      invalidate();
+      return ok(command, { ...cur });
+    }
+    // REC-001 — Capture MIDI. The mock has no retrospective buffer (nothing is ever
+    // PLAYED into it in a browser), so it answers with the same graceful applied:false
+    // shape native gives when the buffer is empty, rather than inventing a clip. That
+    // keeps the UI's empty-handed path — the common one — honest in dev and e2e.
+    case "capture_midi":
+      return ok(command, { applied: false, clips: [], reason: "nothing had been played into the retrospective buffer" });
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {

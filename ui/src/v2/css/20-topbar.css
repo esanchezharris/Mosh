@@ -201,6 +201,28 @@
    supplies `bottom` instead of `top`. Both come from the inline style. */
 .v2-menu-panel-fixed { position: fixed; right: auto; top: auto; }
 
+/* REC-001 — the take-behaviour panel. A settings sheet rather than a menu: rows are
+   label-over-hint with their control on the right, so each toggle explains what it does
+   without a tooltip. Every colour is a token (the theme guard rejects raw hex). */
+.v2-rec-panel { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+.v2-rec-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 7px 8px; border-radius: var(--v2-radius-sm); cursor: pointer;
+}
+.v2-rec-row:hover { background: var(--v2-accent-soft); }
+.v2-rec-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.v2-rec-row b { font-weight: 500; font-size: var(--v2-fs-base); color: var(--v2-text); }
+.v2-rec-row em { font-style: normal; font-size: var(--v2-fs-sm); color: var(--v2-faint); line-height: 1.35; }
+.v2-rec-row input[type="checkbox"] { margin-top: 3px; flex: none; }
+.v2-rec-row select { flex: none; max-width: 120px; }
+.v2-rec-retro { flex-direction: row !important; align-items: center; gap: 8px; }
+.v2-rec-retro input[type="range"] { flex: 1; min-width: 0; }
+
+/* Capture sits in the transport pill beside Record; quieter than the transport buttons
+   because it is an after-the-fact rescue, not part of the play/stop rhythm. */
+.v2-tbtn.v2-capture { font-size: var(--v2-fs-md); line-height: 1; color: var(--v2-dim); }
+.v2-tbtn.v2-capture:hover { color: var(--v2-text); }
+
 /* Rich menu rows: an icon plus a label over a hint, rather than a single label line. */
 .v2-menu-rich button { justify-content: flex-start; gap: 10px; padding: 8px; }
 .v2-menu-rich .v2-licon { width: 30px; height: 30px; border-radius: 9px; }
