@@ -146,6 +146,17 @@ function seedSnapshot(): Snapshot {
       audioEnabled: true, bitDepth: 24, bufferSize: 512,
       availableCores: 8, audioThreads: 8, audioThreadsAuto: true,
       key: { tonic: "A", mode: "minor" },
+      // REC-001 — seeded with the SAME defaults MoshOps::recordOptionsToVar returns for a
+      // project that has never set them (overdub on, everything else off/none). A mock
+      // that seeded something else would make the recording panel render one way in dev
+      // and another way on a fresh real project.
+      project: {
+        sampleRate: 44100, bitDepth: 24, timeBase: "seconds", countInBars: 0,
+        recordOptions: {
+          overdub: true, replaceExisting: false, quantize: 0,
+          quantizeLabel: "(none)", punchInOut: false, retrospectiveSeconds: 10,
+        },
+      },
     },
     tracks,
     transport: { playing: false, recording: false, position: 0, looping: false, loopStart: 0, loopEnd: 0 },
@@ -263,6 +274,10 @@ const MOCK_WAVE_INPUTS = [
 // CTL-001 — mock MIDI inputs so the v2 inspector's per-instrument MIDI-input picker
 // has real choices and set_track_input can route one (list_midi_inputs enumeration).
 const MOCK_MIDI_INPUTS = [
+  // REC-002 — the backend publishes a virtual MIDI input under exactly this name, so the
+  // computer keyboard is routable and recordable like any other controller. Listed FIRST
+  // because it is the one every user has (a laptop with no hardware still gets it).
+  { deviceID: "midi-mosh-kbd", name: "Mosh Keyboard", alias: "Mosh Keyboard", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-akai", name: "Akai MPK Mini", alias: "Akai MPK Mini", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-iac", name: "IAC Driver Bus 1", alias: "IAC Driver Bus 1", enabled: true, monitor: "automatic" as const },
   { deviceID: "midi-launchkey", name: "Launchkey 49", alias: "Launchkey 49", enabled: false, monitor: "off" as const },
@@ -376,10 +391,14 @@ const MOCK_TXN_READS = new Set([
   "get_clip_peaks", "file_peaks", "get_command_log", "get_plugin_blocklist",
   "list_plugins", "list_builtins", "list_takes", "list_directory",
   "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
-  "list_track_outputs", "list_rave_models", "list_training_sources",
+  "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
   "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
   "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
   "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
+  // Live note audition — transient sound, no mutation. Mirrors TransactionSafe.h so a
+  // keypress still works while an agent transaction is open (asserted byte-equal by
+  // txnSafeRegistry.test.ts).
+  "audition_note", "all_notes_off",
 ]);
 
 function mockTxnStatusData(t: MockTxn): Record<string, unknown> {
@@ -1904,6 +1923,43 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       // in MoshOps.cpp). No pushUndo() here, unlike the mutation commands above.
       snapshot.session.countInBars = bars; invalidate(); return ok(command);
     }
+    // REC-001 — the same partial-patch shape as native: each field independent, an
+    // out-of-domain value refused WITHOUT writing any of the others. Preference, so no
+    // pushUndo (mirrors cmdSetRecordOptions' logLine(..., false)).
+    case "set_record_options": {
+      const cur = snapshot.session.project?.recordOptions;
+      if (!cur) return err(command, "no record options on this snapshot");
+      // Mirrors kQuantGrids in MoshOps.Record.cpp — deliberately irregular, and refused
+      // rather than snapped, exactly as native does it.
+      const GRIDS: [number, string][] = [
+        [0, "(none)"], [1 / 64, "1/64 beat"], [1 / 32, "1/32 beat"], [1 / 24, "1/24 beat"],
+        [1 / 16, "1/16 beat"], [1 / 12, "1/12 beat"], [1 / 9, "1/9 beat"], [1 / 8, "1/8 beat"],
+        [1 / 6, "1/6 beat"], [1 / 4, "1/4 beat"], [1 / 3, "1/3 beat"], [1 / 2, "1/2 beat"], [1, "1 beat"],
+      ];
+      if (args.quantize !== undefined) {
+        const q = num(args.quantize, 0);
+        const hit = GRIDS.find(([b]) => Math.abs(b - q) <= 1e-6 * Math.max(1, Math.abs(b)));
+        if (!hit) return err(command, `quantize must be one of these beat divisions: ${GRIDS.map(([b]) => b).join(", ")}`);
+        cur.quantize = hit[0];
+        cur.quantizeLabel = hit[1];
+      }
+      if (args.retrospectiveSeconds !== undefined) {
+        const s = num(args.retrospectiveSeconds, 10);
+        if (s < 0 || s > 60) return err(command, "retrospectiveSeconds must be 0..60");
+        cur.retrospectiveSeconds = s;
+      }
+      if (args.overdub !== undefined) cur.overdub = !!args.overdub;
+      if (args.replaceExisting !== undefined) cur.replaceExisting = !!args.replaceExisting;
+      if (args.punchInOut !== undefined) cur.punchInOut = !!args.punchInOut;
+      invalidate();
+      return ok(command, { ...cur });
+    }
+    // REC-001 — Capture MIDI. The mock has no retrospective buffer (nothing is ever
+    // PLAYED into it in a browser), so it answers with the same graceful applied:false
+    // shape native gives when the buffer is empty, rather than inventing a clip. That
+    // keeps the UI's empty-handed path — the common one — honest in dev and e2e.
+    case "capture_midi":
+      return ok(command, { applied: false, clips: [], reason: "nothing had been played into the retrospective buffer" });
     case "set_master_volume": { pushUndo(); if (snapshot.master) snapshot.master.volumeDb = num(args.db); invalidate(); return ok(command); }
 
     case "undo": {
@@ -2057,6 +2113,24 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       return str(args.path) ? ok(command, { path: str(args.path), playing: false }) : err(command, "missing 'path'");
     case "stop_audition":
       return ok(command);
+    // Live note audition. The dev mock has no engine, so it answers with the same
+    // graceful "nothing sounded, and here is why" shape the native command returns
+    // headless — callers must handle that path anyway, and pretending otherwise would
+    // let a UI bug that ignores `audible` pass every browser test.
+    case "audition_note": {
+      if (args.pitch == null) return err(command, "missing 'pitch'");
+      const action = str(args.action) || "blip";
+      if (!["on", "off", "blip"].includes(action)) return err(command, "action must be 'on', 'off' or 'blip'");
+      if (!findTrack(str(args.trackId))) return err(command, "no track");
+      return ok(command, {
+        trackId: str(args.trackId), pitch: num(args.pitch, 60), action,
+        // REC-002 — `recordable` is true only on the "input" path. The mock has no engine
+        // to arm to, so it answers false, exactly as a headless backend does.
+        audible: false, path: "none", held: 0, recordable: false, reason: "no audio device",
+      });
+    }
+    case "all_notes_off":
+      return ok(command, { released: 0, held: 0 });
 
     // ── plugins ────────────────────────────────────────────────
     case "list_plugins": return ok(command, { plugins: VST3S, counts: { vst3: VST3S.length, au: 0, total: VST3S.length } });
@@ -2782,13 +2856,82 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       pushUndo(); f.clip.notes.splice(num(args.noteIndex), 1); reindexNotes(f.clip); invalidate(); return ok(command);
     }
     case "set_note": {
-      const f = findClip(str(args.clipId)); const n = f?.clip.notes?.[num(args.noteIndex)]; if (!n) return err(command, "note not found");
+      const f = findClip(str(args.clipId));
+      if (!f?.clip.notes) return err(command, "not a midi clip");
+      // Mirrors the native command: an `edits` array resolves every target FIRST, then
+      // mutates. The backend does that because moving a note re-sorts the list and
+      // invalidates later indices; the mock keeps the same shape so a group edit is
+      // exercised identically in the browser.
+      const specs = Array.isArray(args.edits)
+        ? (args.edits as Record<string, unknown>[])
+        : [args as Record<string, unknown>];
+      const targets = specs.map((s) => f.clip.notes![num(s.noteIndex)]);
+      if (targets.some((t) => !t)) return err(command, "note not found");
       pushUndo();
-      if ("start" in args) n.start = Math.max(0, num(args.start, n.start));
-      if ("pitch" in args) n.pitch = Math.max(0, Math.min(127, num(args.pitch, n.pitch)));
-      if ("length" in args) n.length = Math.max(0.05, num(args.length, n.length));
-      if ("velocity" in args) n.velocity = Math.max(1, Math.min(127, num(args.velocity, n.velocity)));
+      specs.forEach((s, k) => {
+        const n = targets[k];
+        if ("start" in s) n.start = Math.max(0, num(s.start, n.start));
+        if ("pitch" in s) n.pitch = Math.max(0, Math.min(127, num(s.pitch, n.pitch)));
+        if ("length" in s) n.length = Math.max(0.05, num(s.length, n.length));
+        if ("velocity" in s) n.velocity = Math.max(1, Math.min(127, num(s.velocity, n.velocity)));
+        if ("mute" in s) n.mute = Boolean(s.mute);
+      });
       invalidate(); return ok(command);
+    }
+    // Drum-rack pads. The mock keeps its own pad list on the track so the grid, the
+    // per-pad mixer and the choke picker all round-trip in the browser.
+    case "list_drum_kits":
+      return ok(command, {
+        kits: [
+          { id: "mosh-kit", name: "mosh kit", pads: 8, path: "/kits/mosh-kit", available: true },
+          { id: "mosh-808", name: "mosh 808", pads: 8, path: "/kits/mosh-808", available: true },
+        ],
+        defaultKit: "mosh-kit",
+      });
+    case "apply_choke": {
+      const f = findClip(str(args.clipId));
+      if (!f?.clip.notes) return err(command, "not a midi clip");
+      const t = findTrack(f.track.id);
+      const group = new Map<number, number>();
+      for (const p of t?.drumPads ?? []) if (p.chokeGroup) group.set(p.pitch, p.chokeGroup);
+      if (group.size === 0) return ok(command, { clipId: str(args.clipId), truncated: 0, groups: 0 });
+      pushUndo();
+      let truncated = 0;
+      for (const n of f.clip.notes) {
+        const g = group.get(n.pitch);
+        if (g == null) continue;
+        const next = f.clip.notes
+          .filter((o) => o !== n && group.get(o.pitch) === g && o.start > n.start)
+          .reduce((m, o) => Math.min(m, o.start), Infinity);
+        if (next === Infinity) continue;
+        const capped = next - n.start;
+        if (capped > 0 && capped < n.length) { n.length = capped; truncated++; }
+      }
+      invalidate();
+      return ok(command, { clipId: str(args.clipId), truncated, groups: new Set(group.values()).size });
+    }
+    case "set_drum_pad": {
+      const t = findTrack(str(args.trackId));
+      const pad = t?.drumPads?.find((p) => p.pitch === num(args.note, -1));
+      if (!pad) return err(command, "no pad at note");
+      pushUndo();
+      if ("gainDb" in args) pad.gainDb = num(args.gainDb, pad.gainDb);
+      if ("pan" in args) pad.pan = num(args.pan, pad.pan);
+      if ("name" in args) pad.name = str(args.name);
+      if ("chokeGroup" in args) {
+        const g = num(args.chokeGroup, 0);
+        if (g > 0) { pad.chokeGroup = g; pad.openEnded = false; }
+        else { delete pad.chokeGroup; pad.openEnded = true; }
+      }
+      invalidate(); return ok(command, { trackId: str(args.trackId), note: pad.pitch });
+    }
+    case "clear_drum_pad": {
+      const t = findTrack(str(args.trackId));
+      const i = t?.drumPads?.findIndex((p) => p.pitch === num(args.note, -1)) ?? -1;
+      if (!t?.drumPads || i < 0) return err(command, "no pad at note");
+      pushUndo();
+      t.drumPads.splice(i, 1);
+      invalidate(); return ok(command, { trackId: t.id, note: num(args.note, -1), removed: 1 });
     }
     case "quantize_notes": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");

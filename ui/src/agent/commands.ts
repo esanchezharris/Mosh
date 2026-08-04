@@ -87,10 +87,23 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── MIDI notes ──────────────────────────────────────────────────────────
   { command: "add_note", desc: "Add a MIDI note (pitch 0-127) to a MIDI clip", args: [S("clipId"), N("pitch"), N("start", true, "beats"), N("length", true, "beats"), N("velocity", false, "0-127")] },
   { command: "remove_note", desc: "Remove a MIDI note by index", args: [S("clipId"), N("noteIndex")] },
+  // NOTE: set_note also accepts "mute" (deactivate a note) and an "edits" array (a whole
+  // selection in one undoable command). Both are deliberately UNDECLARED here: arrays are
+  // unrepresentable in ArgSpec, and widening this entry would move the SFT/bench prompt
+  // hash for a capability the agent does not need. add_midi_clip does the same with its
+  // own notes array. The contract test checks that declared args are read, not the
+  // converse, so this is legal and intentional.
+  // (Careful editing comments in this file: service/skills/moshops_catalog.py parses it
+  // WITHOUT stripping comments, and treats a lone apostrophe as opening a string literal,
+  // so an unpaired quote here breaks catalog parity with a confusing "unbalanced" error.)
   { command: "set_note", desc: "Edit a MIDI note's pitch/start/length/velocity", args: [S("clipId"), N("noteIndex"), N("pitch", false), N("start", false), N("length", false), N("velocity", false)] },
   { command: "quantize_notes", desc: "Quantize a MIDI clip's notes to a grid", args: [S("clipId"), N("division", false, "beats: 1=1/4, 0.5=1/8, 0.25=1/16"), N("strength", false, "0-1")] },
   { command: "add_drum_pattern", desc: "Lay a whole drum grid in ONE undoable step from lane strings — 'x' hit, 'X' accent, '.'/'-' rest, '|' cosmetic; lanes kick/snare/clap/hat/openhat/lowtom/midtom/crash or a raw MIDI pitch; short lanes tile (\"x.\" = 8th hats)", args: [S("pattern", true, 'lane map: "kick: x...x...x...x...; snare: ....x.......x..."'), S("trackId", false, "target track — omit to create a new Drums track"), S("clipId", false, "existing MIDI clip: replaces ONLY the lanes named (trackId ignored)"), N("stepsPerBar", false, "1-64, default 16"), N("bars", false, "1-16, default fits the longest lane"), N("velocity", false, "1-127 for 'x' hits, default 100"), N("start", false, "seconds — new-clip position")] },
   { command: "set_drum_lane", desc: "Mute/solo one drum pad lane on a drum track, by MIDI note", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 — the pad"), B("mute", false), B("solo", false)] },
+  { command: "set_drum_pad", desc: "Set one drum pad's level, pan, name or choke group (pads in a group cut each other off, e.g. a closed hat silencing an open one)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 — the pad"), N("gainDb", false, "-48..+48"), N("pan", false, "-1..1"), S("name", false), N("chokeGroup", false, "1-16, or 0 for none")] },
+  { command: "list_drum_kits", desc: "List the drum kits available to load (read-only)", args: [] },
+  { command: "apply_choke", desc: "Bake the choke groups on a drum track into note lengths for this clip, so playback and export obey them too (a closed hat cuts an open one). Shortens notes; undoable", args: [S("clipId")] },
+  { command: "clear_drum_pad", desc: "Empty one drum pad, removing its sample (assign_sample can only replace)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127 — the pad")] },
 
   // ── transport & timing ──────────────────────────────────────────────────
   { command: "set_tempo", desc: "Set the project tempo in BPM", args: [N("bpm")] },
@@ -105,6 +118,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── recording / takes ─────────────────────────────────────────────────────
   { command: "arm_track", desc: "Arm/disarm a track's input for recording", args: [S("trackId"), B("armed")] },
   { command: "stop_recording", desc: "Stop recording and land the take", args: [B("discardRecordings", false)] },
+  { command: "set_record_options", desc: "How a live MIDI take behaves: overdub (merge into the clip it lands on) vs replace, record-quantise to a grid, and punch (capture only inside the loop range)", args: [B("overdub", false), B("replaceExisting", false), N("quantize", false, "beats, 0=off — same grid as quantize_notes"), B("punchInOut", false), N("retrospectiveSeconds", false, "0-60, how far back Capture can reach")] },
   { command: "set_input_monitor", desc: "Set a track's input monitoring", args: [S("trackId"), S("mode", false, '"off"|"automatic"|"on"')] },
   { command: "list_takes", desc: "List the take lanes on a clip", args: [S("clipId")] },
   { command: "set_current_take", desc: "Select which take lane is active", args: [S("clipId"), N("takeIndex")] },
@@ -140,7 +154,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "list_plugins", desc: "List the scanned VST3/AU plugins available to load (read-only) — the 'pluginId' names load_plugin/load_master_plugin take", args: [] },
   { command: "load_builtin", desc: "Add a built-in effect/instrument to a track. type is EXACTLY one of: 4osc, sampler, 4bandEq, compressor, reverb, delay, chorus, phaser, lowpass, pitchShifter, moshAutoTune, moshOTT, moshXFeedback (an EQ is \"4bandEq\" — \"eq\" is rejected)", args: [S("trackId"), N("index", false, "chain position"), S("type")] },
   { command: "set_track_type", desc: "Set a track's type — 'drum' loads the working sampler + drum kit so its MIDI notes are audible", args: [S("trackId"), S("type", true, '"audio" | "drum"')] },
-  { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash)", args: [S("trackId")] },
+  { command: "load_drum_kit", desc: "Load the built-in drum kit onto a track's sampler (kick/snare/clap/hats/toms/crash) — omit kit for the bundled default", args: [S("trackId"), S("kit", false, "kit id from list_drum_kits")] },
   { command: "assign_sample", desc: "Map an audio file to a track's sampler: mode 'drum' (default, one-shot pad at one note) or 'melodic' (a pitched 808/bass played across the keyboard, note-length gated)", args: [S("trackId"), N("note", true, "MIDI pitch 0-127: the pad (drum) or the sample's root note (melodic)"), S("file", true, "audio file path"), S("name", false, "pad label"), N("gainDb", false), S("mode", false, "'drum' (default) or 'melodic'")] },
   { command: "load_plugin", desc: "Add a scanned VST3/AU plugin to a track (pluginId from list_plugins)", args: [S("trackId"), S("pluginId"), N("index", false, "chain position")] },
   { command: "set_plugin_param", desc: "Set a plugin parameter (0-1) by chain index + param index", args: [S("trackId"), N("index"), N("paramIndex"), N("value", true, "0-1")] },
@@ -280,6 +294,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "set_transport": return a.action === "record" ? `Recording` : a.action === "stop" ? `Stopped` : a.action === "to_start" ? `Back to the start` : `Transport`;
     case "arm_track": return a.armed ? `Armed a track` : `Disarmed a track`;
     case "stop_recording": return `Stopped recording`;
+    case "set_record_options": return a.overdub !== undefined ? (a.overdub ? `Recording in overdub` : `Recording replaces`) : `Set the recording options`;
     case "set_input_monitor": return `Set input monitoring`;
     case "list_takes": return `Listed the takes`;
     case "set_current_take": return `Switched to take ${a.takeIndex}`;

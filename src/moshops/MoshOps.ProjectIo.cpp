@@ -216,6 +216,7 @@ juce::var MoshOps::cmdSave (const juce::var& args)
 
 juce::var MoshOps::cmdReload (const juce::var& args)
 {
+    releaseAllVoices();                 // silence held notes while their Edit still exists
     unregisterAllMeterClients();        // old measurers are still valid here
     // PRJ-FMT — a newer-format file on disk is refused; the current Edit is kept untouched.
     if (auto refusal = eng.reloadFromFile(); refusal.isNotEmpty())   // reconcileMeterClients() re-registers next frame
@@ -1356,6 +1357,7 @@ juce::var MoshOps::cmdSetAudioThreads (const juce::var& args)
 
 juce::var MoshOps::cmdNewProject (const juce::var& args)
 {
+    releaseAllVoices();                    // silence held notes while their Edit still exists
     unregisterAllMeterClients();           // old measurers valid here; dead after the swap
     auto name = args.getProperty ("name", var()).toString().trim();
     if (name.isEmpty())
@@ -1408,6 +1410,7 @@ juce::var MoshOps::cmdOpenProject (const juce::var& args)
 {
     const auto path = args.getProperty ("file", var()).toString();
     if (path.isEmpty()) return errResult ("open_project", "missing 'file'");
+    releaseAllVoices();                 // silence held notes while their Edit still exists
 
     File file (path);
     if (! file.existsAsFile()) return errResult ("open_project", "file not found: " + path);

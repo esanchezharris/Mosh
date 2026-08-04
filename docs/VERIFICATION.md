@@ -69,9 +69,25 @@ continuously proven even though this table's snapshot is from 2026-06-20.
 | 5c | Bypass layer re-route (A/B) | offline | `bypass_layer{true}` RE-ROUTES real audio — it mutes the landed neural clip so the export collapses BACK to the original (pre-render) source, not just flips a status flag | ✅ AL-008: accepted render moves the mix clear of the original (**rendered-vs-orig RMS ≫ 0**) and bypass snaps it back (**bypass-vs-orig RMS ≈ 0 ≪ rendered-vs-orig**) |
 | 5d | Freeze stops the reactive re-render | offline | `freeze_layer` actually STOPS the auto-re-render loop (not just a status label), and `unfreeze_layer` restores it — counted in rendered files, with a live service | ✅ the inverse of the reactive check: initial render + a frozen edit + a thawed edit ⇒ exactly **2** layer files (3 = the freeze never held, 1 = the thaw never re-armed). RED-proven: with the `ids::reactive` write removed the frozen edit renders and it reads **3**. `--selftest` cannot see this — `reactiveTouch` returns on `!hasAudio()` before it reads the flag |
 | 6 | Realtime output path | live | device opens; audio frames flow | ✅ `--live-audio-smoke` **14/14** (MacBook Pro Speakers, CoreAudio 48k) — by-ear out-loud confirm still owner-side |
+| 6b | Live MIDI capture (REC-001/002) | live | playing the computer keyboard reaches the RECORDER, not just the monitor: an armed track takes the engine's input path, the notes land in a take, Capture MIDI recovers notes played while NOT recording, and overdub merges into the existing clip | ✅ `--midi-record-smoke` **34/34**, deterministic over 3 consecutive runs, 0 JUCE assertions. RED-proven twice: removing the input route fails **7** checks (the take lands nothing, Capture recovers nothing, overdub lands nothing); forcing `mergeRecordings=false` fails the merge check with clips 3 → 4. `--selftest` structurally cannot see any of it — with no audio device `getAllInputDevices()` is empty, so the routing fork is never taken and the retrospective buffer never fills |
 | 7 | Voice (Vite demo brain) | live | STT transcribes; earcons fire | ⏳ owner: grant mic, hold-to-talk + 👂 hands-free + barge-in (`MOSH_VOICE_BARGE_IN=1`) |
 | 8 | Multiplayer (2-process) | live | protocol green; track-lock + clip-move sync | ✅ `relay/run-mp-selftest.sh` **911/911** — two-window *visual* sync still owner-side |
 | 9 | Sketch (beatbox→drums) | gated | recognizable kick/snare/hat land in a real editable clip; tempo set; byte-identical across runs | ✅ `MOSH_SELFTEST_SKETCH=1` **16/16** on the committed fixtures (boom-bap 90 + trap 140), determinism asserted; CLI stdout byte-identical across runs |
+
+**Live MIDI capture** (needs a real audio device; nothing else — no MIDI controller):
+
+```bash
+build-macos-arm64/Mosh_artefacts/Debug/Mosh.app/Contents/MacOS/Mosh --midi-record-smoke
+```
+
+What makes this automatable rather than owner-driven, unlike its neighbours in this table:
+the virtual **"Mosh Keyboard"** MIDI input Mosh publishes. A physical controller cannot be
+synthesised, but a virtual device's `handleIncomingMidiMessage` is the exact entry point a
+physical one uses — so driving it through `audition_note` *is* a producer playing the
+computer keyboard. It is NOT in CI because a GitHub runner has no audio device.
+
+It deliberately asserts nothing about **audibility** — that is check 6's job. Conflating the
+two is how a harness ends up proving sound it never measured.
 
 **Sketch gated selftest** (needs `service/sketch/setup-sketch.sh` first):
 

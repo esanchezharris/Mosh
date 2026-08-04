@@ -403,6 +403,21 @@ function TrackLaneHeader({ track }: { track: Track }) {
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
+        {/* REC-002 — record-arm, where every DAW puts it. It is not decoration next to
+            M/S: arming is what routes live MIDI to this track AND what makes a note
+            played on the computer keyboard recordable at all (audition_note only takes
+            the input path on an armed track). Without this the ONLY way to arm was to
+            press Record, which made Capture MIDI — whose whole point is that you were
+            NOT recording — impossible to reach for the QWERTY keyboard. */}
+        <button
+          className={`r${track.armed ? " on" : ""}`}
+          aria-label="Record-arm"
+          aria-pressed={!!track.armed}
+          title={track.armed
+            ? "Armed — live MIDI reaches this track, and what you play can be recorded or captured"
+            : "Record-arm: route live MIDI here so it can be recorded or captured"}
+          onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
+        >●</button>
       </span>
       <button
         className="v2-lhead-rm"

@@ -4301,6 +4301,32 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 for (auto& v : *a) if ((int) v == note) return true;
             return false;
         };
+        // The pad's GAIN must survive a mute→unmute round trip. The checks below this
+        // one only ever assert that the muted-pitch SET rides the snapshot, which is
+        // why un-muting could be broken for as long as it was while they stayed green:
+        // nothing read a pad gain. te::SamplerPlugin clamps every gain write to
+        // [-48,+48] dB (in setSoundGains, and again in the SamplerSound constructor),
+        // so the old scheme — mute by writing -100, detect mute by reading back
+        // <= -99 — could never see its own sentinel. The stored value was always -48,
+        // the restore branch never fired once, and a muted lane stayed 48 dB down
+        // permanently, across save/reload too.
+        auto padGain = [&] (const String& tid, int pitch) -> double {
+            auto trk = trackById (tid);                  // hold the var (no dangling temporary)
+            auto padsVar = trk.getProperty ("drumPads", var());
+            if (auto* a = padsVar.getArray())
+                for (auto& v : *a)
+                    if ((int) v.getProperty ("pitch", -1) == pitch)
+                        return (double) v.getProperty ("gainDb", -999.0);
+            return -999.0;   // no such pad — distinguishable from any real gain
+        };
+        const double kickGain0 = padGain (dt, 36);
+        check (kickGain0 > -0.01 && kickGain0 < 0.01, "a freshly loaded kick pad sits at 0 dB");
+        cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }}));
+        check (padGain (dt, 36) < -40.0, "muting a drum lane actually silences its sampler pad");
+        cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", false }}));
+        const double kickGain1 = padGain (dt, 36);
+        check (kickGain1 > -0.01 && kickGain1 < 0.01, "un-muting a drum lane RESTORES its pad gain");
+
         check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 36 }, { "mute", true }}))), "set_drum_lane mute ok");
         check (laneHas (dt, "drumMutedPitches", 36), "muted kick (36) rides the snapshot");
         check (ok (cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", true }}))), "set_drum_lane solo ok");
@@ -4309,7 +4335,169 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (! laneHas (dt, "drumMutedPitches", 36), "unmuting clears the kick from the muted set");
         cmd (ops, "save"); cmd (ops, "reload");
         check (laneHas (dt, "drumSoloPitches", 38), "drum-lane solo persists across save/reload");
+        // ── Drum-rack pads ──
+        // set_drum_pad is the per-pad mixer; clear_drum_pad is the inverse assign_sample
+        // never had (it can only REPLACE a pad, so without this a slot cannot be emptied).
+        //
+        // On its OWN track: the shared drum track above carries a melodic-mode 808 mapped
+        // across the whole keyboard, which legitimately covers every note — fine for the
+        // engine, useless for asserting "there is no pad here".
+        {
+            auto pt = cmd (ops, "create_track", objN ({{ "name", "Pads" }, { "type", "drum" }}))["data"]
+                          .getProperty ("trackId", var()).toString();
+            auto padOf = [&] (int pitch) {
+                auto trk = trackById (pt);
+                auto padsVar = trk.getProperty ("drumPads", var());
+                if (auto* a = padsVar.getArray())
+                    for (auto& v : *a)
+                        if ((int) v.getProperty ("pitch", -1) == pitch) return v;
+                return var();
+            };
+            auto padCount = [&] {
+                auto trk = trackById (pt);
+                auto p = trk.getProperty ("drumPads", var());
+                return p.getArray() ? p.getArray()->size() : 0;
+            };
+            check (padCount() == 8, "a fresh drum track has the 8-pad kit");
+
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 38 }, { "gainDb", -6.0 }, { "pan", 0.5 }}))),
+                   "set_drum_pad ok");
+            check ((double) padOf (38).getProperty ("gainDb", 0.0) < -5.0, "set_drum_pad sets the pad's level");
+
+            // A choke group must also make the pad note-GATED: an open-ended voice ignores
+            // note-off, so nothing could ever cut it off.
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 1 }}))),
+                   "set_drum_pad sets a choke group");
+            check ((int) padOf (46).getProperty ("chokeGroup", 0) == 1, "choke group rides the snapshot");
+            check (! (bool) padOf (46).getProperty ("openEnded", true), "a choked pad becomes note-gated");
+            cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 0 }}));
+            check ((bool) padOf (46).getProperty ("openEnded", false), "clearing the choke group restores the one-shot");
+
+            check (! ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 99 }}))),
+                   "set_drum_pad errors where there is no pad");
+
+            const int before = padCount();
+            check (ok (cmd (ops, "clear_drum_pad", objN ({{ "trackId", pt }, { "note", 49 }}))), "clear_drum_pad ok");
+            check (padCount() == before - 1, "clear_drum_pad empties exactly one slot");
+            check (! ok (cmd (ops, "clear_drum_pad", objN ({{ "trackId", pt }, { "note", 49 }}))),
+                   "clearing an already-empty pad errors");
+
+            // A melodic-mode sound spans the whole keyboard, so it covers notes that have
+            // no pad of their own — but it must NEVER shadow a real pad. (It did: the pad
+            // lookup took the first covering sound, so every pad command on this track hit
+            // the 808 instead.)
+            auto kickWav = eng.sessionDir().getChildFile ("imports");
+            check (ok (cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 36 }, { "gainDb", -3.0 }}))),
+                   "set_drum_pad still addresses a real pad, not a wide-range sound");
+            check ((double) padOf (36).getProperty ("gainDb", 0.0) < -2.0, "the narrowest matching sound is the pad");
+
+            // apply_choke BAKES the group into note lengths, which is the only way clip
+            // playback and export can obey it — MoshOps is not in the engine's playback
+            // MIDI path and cannot inject a note-off between two clip notes at render time.
+            {
+                Array<var> hats;
+                auto addNote = [&] (int pitch, double start, double length) {
+                    auto* n = new DynamicObject();
+                    n->setProperty ("pitch", pitch); n->setProperty ("start", start);
+                    n->setProperty ("length", length); n->setProperty ("velocity", 100);
+                    hats.add (var (n));
+                };
+                addNote (46, 0.0, 4.0);   // open hat, ringing for a whole bar
+                addNote (42, 1.0, 0.25);  // closed hat one beat later — must cut it
+                addNote (38, 2.0, 0.25);  // a snare, NOT in the group — must cut nothing
+                auto* ca = new DynamicObject();
+                ca->setProperty ("trackId", pt); ca->setProperty ("length", 4.0); ca->setProperty ("notes", hats);
+                const auto hc = cmd (ops, "add_midi_clip", var (ca))["data"].getProperty ("clipId", var()).toString();
+
+                // Local reader — clipNotes() belongs to another section's scope.
+                auto notesOfClip = [&] (const juce::String& id) {
+                    auto trk = trackById (pt);
+                    auto clipsVar = trk.getProperty ("clips", var());
+                    if (auto* cs = clipsVar.getArray())
+                        for (auto& c : *cs)
+                            if (c.getProperty ("id", var()).toString() == id)
+                                return c.getProperty ("notes", var());
+                    return var();
+                };
+                auto lengthOfPitch = [&] (int pitch) {
+                    auto ns = notesOfClip (hc);
+                    if (auto* a = ns.getArray())
+                        for (auto& n : *a)
+                            if ((int) n.getProperty ("pitch", -1) == pitch)
+                                return (double) n.getProperty ("length", -1.0);
+                    return -1.0;
+                };
+
+                // Nothing is choked until the pads say so — proving the bake is driven by
+                // the group and not by "shorten everything".
+                check (ok (cmd (ops, "apply_choke", args1 ("clipId", hc))), "apply_choke ok with no groups set");
+                check (lengthOfPitch (46) > 3.9, "with no choke groups, no note is touched");
+
+                cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 46 }, { "chokeGroup", 1 }}));
+                cmd (ops, "set_drum_pad", objN ({{ "trackId", pt }, { "note", 42 }, { "chokeGroup", 1 }}));
+                auto ac = cmd (ops, "apply_choke", args1 ("clipId", hc));
+                check (ok (ac) && (int) ac["data"].getProperty ("truncated", 0) == 1, "apply_choke truncates exactly the choked note");
+                check (std::abs (lengthOfPitch (46) - 1.0) < 1e-6, "the closed hat cuts the open hat at its onset");
+                check (std::abs (lengthOfPitch (38) - 0.25) < 1e-6, "a note OUTSIDE the group is left alone");
+                check (std::abs (lengthOfPitch (42) - 0.25) < 1e-6, "the choking note itself is untouched");
+
+                // Destructive, so it must be undoable in one step like any other edit.
+                cmd (ops, "undo");
+                check (lengthOfPitch (46) > 3.9, "ONE undo restores the choked note's length");
+            }
+
+            // ── kit library ──
+            // Two kits ship, deliberately: a one-entry list is a picker that cannot be
+            // wrong, and this check could not tell a real enumeration from a constant.
+            {
+                auto lk = cmd (ops, "list_drum_kits");
+                check (ok (lk), "list_drum_kits ok");
+                auto kitsVar = lk["data"].getProperty ("kits", var());
+                juce::StringArray ids;
+                if (auto* a = kitsVar.getArray())
+                    for (auto& k : *a)
+                        if ((bool) k.getProperty ("available", false))
+                            ids.add (k.getProperty ("id", var()).toString());
+                check (ids.contains ("mosh-kit"), "the bundled kit is listed as available");
+                check (ids.size() >= 2, "more than one kit is available (the picker has something to pick)");
+
+                auto other = ids.contains ("mosh-808") ? juce::String ("mosh-808") : juce::String();
+                if (other.isNotEmpty())
+                {
+                    auto ld2 = cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", other }}));
+                    check (ok (ld2) && (int) ld2["data"].getProperty ("pads", 0) == 8, "load_drum_kit loads a NAMED kit");
+                    check (trackById (pt).getProperty ("drumKit", var()).toString() == other,
+                           "the loaded kit rides the snapshot");
+                    // Prove the pads really changed source, not just the label: the two
+                    // kits are synthesised separately, so their files differ.
+                    auto padsVar = trackById (pt).getProperty ("drumPads", var());
+                    bool fromOther = false;
+                    if (auto* a = padsVar.getArray())
+                        for (auto& v : *a)
+                            if (v.getProperty ("file", var()).toString().contains (other)) { fromOther = true; break; }
+                    check (fromOther, "the pads actually point at the named kit's samples");
+                }
+
+                check (! ok (cmd (ops, "load_drum_kit", objN ({{ "trackId", pt }, { "kit", "no-such-kit" }}))),
+                       "load_drum_kit errors on an unknown kit");
+                // …and the error must leave the sampler ALONE, not half-wiped.
+                check ((int) [&] { auto p = trackById (pt).getProperty ("drumPads", var());
+                                   return p.getArray() ? p.getArray()->size() : 0; }() == 8,
+                       "a failed kit load leaves the existing pads untouched");
+            }
+
+            cmd (ops, "remove_track", args1 ("trackId", pt));
+        }
+
+        // At this point the reload happened while lane 38 was SOLOED, so every other pad
+        // is silenced and carrying a parked gain. That parked gain is a new property on
+        // the sampler's SOUND tree, so this proves it actually SERIALISES: clearing the
+        // solo must restore pad 36 to its own gain. If the property did not round-trip,
+        // the restore would read a default and the pad would sit at the -48 dB floor.
+        check (padGain (dt, 36) < -40.0, "solo silences the non-soloed pads across save/reload");
         cmd (ops, "set_drum_lane", objN ({{ "trackId", dt }, { "note", 38 }, { "solo", false }})); // reset for later sections
+        check (padGain (dt, 36) > -0.01 && padGain (dt, 36) < 0.01,
+               "clearing solo restores a pad's gain from the PERSISTED parked value");
 
         // set_track_type round-trip on a plain track; undo restores type + removes the kit.
         auto plain = cmd (ops, "create_track", args1 ("name", "FlipMe"))["data"].getProperty ("trackId", var()).toString();
@@ -4777,8 +4965,109 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         const auto mClip = cmd (ops, "add_midi_clip", var (ca))["data"].getProperty ("clipId", var()).toString();
         check (clipNotes (mClip).size() == 3, "MIDI clip serialises its 3 notes into the snapshot");
 
-        check (ok (cmd (ops, "add_note", objN ({{ "clipId", mClip }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}))), "add_note ok");
+        auto an = cmd (ops, "add_note", objN ({{ "clipId", mClip }, { "pitch", 72 }, { "start", 1.4 }, { "length", 1.0 }, { "velocity", 100 }}));
+        check (ok (an), "add_note ok");
         check (clipNotes (mClip).size() == 4, "add_note adds a note");
+        // add_note reports WHICH note it made. MidiList keeps its notes sorted, so the new
+        // one is not necessarily last — a caller that needs to address what it just drew
+        // (step record, duplicate, select-what-I-drew) would otherwise have to re-fetch the
+        // snapshot and guess. Asserting the reported index actually holds the new pitch is
+        // what makes this non-vacuous: a hardcoded "last index" would fail here, since the
+        // note was inserted at start 1.4, ahead of the seeded note at start 2.
+        {
+            const int ni = (int) an["data"].getProperty ("noteIndex", -1);
+            auto ns = clipNotes (mClip);
+            auto* arr = ns.getArray();
+            check (ni >= 0 && arr != nullptr && ni < arr->size()
+                       && (int) (*arr)[ni].getProperty ("pitch", -1) == 72,
+                   "add_note returns the index the new note actually landed at");
+        }
+        // A chord in ONE command (and so one undo step): the computer MIDI keyboard sends
+        // this when several keys are held together.
+        {
+            const int before = clipNotes (mClip).size();
+            Array<var> chord;
+            for (int p : { 60, 64, 67 })
+            {
+                auto* n = new DynamicObject();
+                n->setProperty ("pitch", p); n->setProperty ("start", 6.0);
+                n->setProperty ("length", 1.0); n->setProperty ("velocity", 88);
+                chord.add (var (n));
+            }
+            auto* ch = new DynamicObject();
+            ch->setProperty ("clipId", mClip); ch->setProperty ("notes", chord);
+            auto cr = cmd (ops, "add_note", var (ch));
+            check (ok (cr) && clipNotes (mClip).size() == before + 3, "add_note lays a 3-note chord from a notes[] array");
+            const auto idxVar = cr["data"].getProperty ("noteIndexes", var());
+            check (idxVar.isArray() && idxVar.size() == 3, "add_note reports an index per note in the chord");
+            cmd (ops, "undo");
+            check (clipNotes (mClip).size() == before, "the whole chord undoes as ONE step");
+            cmd (ops, "redo");
+        }
+        // A MULTI-NOTE edit is one command and ONE undo step — the property the piano
+        // roll's group drag rests on. It belongs to the engine's UndoManager, so the
+        // browser tests can only ever show that the dev mock imitates it; the real
+        // assertion has to live here.
+        //
+        // It also pins the reason the `edits` array exists at all. setStartAndLength
+        // triggers tracktion's synchronous re-sort of the MidiList, so sending these as
+        // three separate set_note calls addresses stale indices as soon as the first one
+        // lands — which is exactly how this check failed when it was first written.
+        {
+            auto sortedStarts = [&] {
+                std::vector<double> out;
+                auto ns = clipNotes (mClip);
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr) out.push_back ((double) n.getProperty ("start", -1.0));
+                std::sort (out.begin(), out.end());
+                return out;
+            };
+            const auto before = sortedStarts();
+            check (before.size() >= 3, "at least 3 notes to group-move");
+
+            // Every note in the clip, shifted by the same +2 beats.
+            Array<var> groupEdits;
+            {
+                auto ns = clipNotes (mClip);
+                if (auto* arr = ns.getArray())
+                    for (auto& n : *arr)
+                    {
+                        auto* e = new DynamicObject();
+                        e->setProperty ("noteIndex", (int) n.getProperty ("i", -1));
+                        e->setProperty ("start", (double) n.getProperty ("start", 0.0) + 2.0);
+                        groupEdits.add (var (e));
+                    }
+            }
+            auto* ge = new DynamicObject();
+            ge->setProperty ("clipId", mClip); ge->setProperty ("edits", groupEdits);
+            check (ok (cmd (ops, "set_note", var (ge))), "set_note accepts an edits[] array");
+
+            auto moved = sortedStarts();
+            bool allMoved = moved.size() == before.size();
+            for (size_t i = 0; i < moved.size() && allMoved; ++i)
+                allMoved = std::abs (moved[i] - (before[i] + 2.0)) < 1e-6;
+            // Assert the move REALLY happened before testing undo — otherwise a no-op
+            // "edit" would let the undo assertion below pass for entirely the wrong reason.
+            check (allMoved, "a group move shifts EVERY note, none left behind on a stale index");
+
+            cmd (ops, "undo");
+            auto back = sortedStarts();
+            bool allBack = back.size() == before.size();
+            for (size_t i = 0; i < back.size() && allBack; ++i)
+                allBack = std::abs (back[i] - before[i]) < 1e-6;
+            check (allBack, "ONE undo restores EVERY moved note (the group edit is a single undo step)");
+        }
+
+        // Note deactivate (Ableton's `0`) — rides the engine's own MidiNote mute field, and
+        // is emitted only when true, so an ordinary clip's notes[] payload is unchanged.
+        {
+            check (ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "mute", true }}))), "set_note mute ok");
+            auto ns = clipNotes (mClip);
+            check (ns.size() > 0 && (bool) ns[0].getProperty ("mute", false), "a deactivated note rides the snapshot");
+            cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "mute", false }}));
+            auto ns2 = clipNotes (mClip);
+            check (ns2.size() > 0 && ! ns2[0].hasProperty ("mute"), "reactivating drops the flag entirely (payload unchanged for normal notes)");
+        }
 
         check (ok (cmd (ops, "set_note", objN ({{ "clipId", mClip }, { "noteIndex", 0 }, { "pitch", 48 }, { "velocity", 127 }}))), "set_note ok");
         { auto ns = clipNotes (mClip);
@@ -5962,6 +6251,128 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         cmd (ops, "remove_track", args1 ("trackId", trkId));   // tidy up the probe track
     }
 
+    // ─── Live note audition (audition_note / all_notes_off) ───
+    // WHAT THIS SECTION CANNOT DO: prove a note is audible. --selftest runs with no audio
+    // device, so ensurePlaybackContext() bails, no LiveMidiInjectingNode is ever reached,
+    // and `ok: true` here is the GRACEFUL-DEGRADATION answer, not evidence of sound. Any
+    // check reading "audition_note returned ok" would be vacuous. The audible proof lives
+    // in --live-audio-smoke, which opens a real device and measures master level.
+    //
+    // What IS real here, and is what this section asserts: the degradation contract, the
+    // held-voice state machine, and — most valuable — the three NEGATIVE properties that
+    // make a keypress cheap enough to send at 30 Hz. Each of those fails loudly the moment
+    // someone "helpfully" adds a transaction, a log line, or a snapshot event.
+    section ("Live note audition (audition_note)");
+    {
+        auto lt = cmd (ops, "create_track", args1 ("name", "LiveNotes"))["data"].getProperty ("trackId", var()).toString();
+        cmd (ops, "add_midi_clip", objN ({{ "trackId", lt }, { "length", 2.0 }}));   // auto-loads 4OSC
+
+        // Validation.
+        check (! ok (cmd (ops, "audition_note", objN ({{ "trackId", "nope" }, { "pitch", 60 }}))),
+               "audition_note errors on a bad trackId");
+        check (! ok (cmd (ops, "audition_note", args1 ("trackId", lt))),
+               "audition_note errors with no pitch");
+        check (! ok (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "wat" }}))),
+               "audition_note rejects an unknown action");
+
+        // The degradation contract. Headless this is the ONLY shape the command can
+        // return, and the UI branches on `audible`/`reason` — so pin it exactly.
+        auto a1 = cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}));
+        check (ok (a1), "audition_note ok (graceful headless)");
+        check (! (bool) a1["data"].getProperty ("audible", true), "audition_note reports audible:false with no device");
+        check (a1["data"].getProperty ("path", var()).toString() == "none", "audition_note reports path:none headless");
+        check (a1["data"].getProperty ("reason", var()).toString().isNotEmpty(), "audition_note explains why it was inaudible");
+
+        // REC-002 — `recordable` says whether this note went down the INPUT road (the
+        // only one a recorder or Capture can see) rather than the monitor-only inject.
+        // Headless there is no device to arm to, so false is the only honest answer, and
+        // pinning it here is what stops the field from quietly becoming decorative.
+        //
+        // THE ROUTING FORK ITSELF IS HARDWARE-GATED and this run cannot reach it:
+        // armedMidiInputFor() walks getAllInputDevices(), which is empty without an open
+        // device, so the input branch is never taken. That a note played on an armed
+        // track lands in the take is verified live, with a controller.
+        check (a1["data"].hasProperty ("recordable"), "audition_note always reports whether the note was recordable");
+        check (! (bool) a1["data"].getProperty ("recordable", true),
+               "audition_note reports recordable:false with no armed input (the only honest headless answer)");
+
+        // Pitch is clamped, not rejected — a UI slider or an octave-shifted keyboard can
+        // legitimately run off the end of the range and must not error mid-performance.
+        auto hi = cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 200 }, { "action", "on" }}));
+        check (ok (hi) && (int) hi["data"].getProperty ("pitch", -1) == 127, "audition_note clamps pitch to 127");
+
+        // The held-voice state machine (real logic, and it runs with no device by design).
+        cmd (ops, "all_notes_off");
+        auto held = [&] (const juce::var& r) { return (int) r["data"].getProperty ("held", -1); };
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}))) == 1,
+               "a held note registers one voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 64 }, { "action", "on" }}))) == 2,
+               "a second held pitch registers a second voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "on" }}))) == 2,
+               "re-pressing a held pitch retriggers it without duplicating the voice");
+        check (held (cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "off" }}))) == 1,
+               "releasing one pitch drops exactly that voice");
+        auto ano = cmd (ops, "all_notes_off");
+        check (ok (ano) && (int) ano["data"].getProperty ("released", -1) == 1 && held (ano) == 0,
+               "all_notes_off releases the remainder and leaves nothing held");
+
+        // ── the three negative properties ──
+        // 1. It must not write the command log. A held key repeats at ~30 Hz; logging
+        //    would append 30 JSONL lines a second (and mirror each into the in-memory
+        //    cache under a lock). Fails the moment someone adds a logLine call.
+        {
+            for (int i = 0; i < 20; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 + i }, { "action", "blip" }}));
+            auto lg = cmd (ops, "get_command_log", args1 ("limit", 400))["data"].getProperty ("entries", var());
+            int auditionLines = 0;
+            if (auto* a = lg.getArray())
+                for (auto& e : *a)
+                    if (e.getProperty ("command", var()).toString() == "audition_note") ++auditionLines;
+            check (auditionLines == 0, "20 audition_note calls write ZERO command-log lines");
+        }
+        // 2. It must not invalidate the snapshot. Every invalidation makes the UI re-pull
+        //    the whole session; at key-repeat rate that is a re-render per keypress.
+        {
+            // Uses the harness's own capture (eventTypes), NOT a private sink — installing
+            // one here and detaching it afterwards silently unhooks the shared sink that
+            // later sections assert against.
+            eventTypes.clear();
+            cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 72 }, { "action", "blip" }}));
+            cmd (ops, "all_notes_off");
+            check (! hadEvent ("snapshot_invalidated"),
+                   "audition_note / all_notes_off emit NO snapshot_invalidated");
+            eventTypes.clear();
+        }
+        // 3. It must not open an undo transaction — an empty one per keypress would bury
+        //    the producer's last real edit under dozens of no-op undo steps.
+        //
+        //    TWO assertions, because the obvious one alone is not enough. A sabotage that
+        //    added beginTxn to the command did NOT fail the undo check below: an empty
+        //    beginNewTransaction is a no-op to juce::UndoManager, which creates nothing
+        //    until an action is actually performed. What beginTxn DOES do unconditionally
+        //    is bump the edit revision, so that is pinned first — it is the assertion that
+        //    genuinely catches a stray transaction.
+        {
+            auto revision = [&] {
+                return (int) cmd (ops, "batch_status", args1 ("transactionId", "probe"))["data"]
+                                 .getProperty ("revision", -1);
+            };
+            const int rev0 = revision();
+            for (int i = 0; i < 5; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "blip" }}));
+            check (rev0 >= 0 && revision() == rev0, "5 auditions do not bump the edit revision (no beginTxn)");
+
+            cmd (ops, "rename_track", objN ({{ "trackId", lt }, { "name", "UndoAnchor" }}));
+            for (int i = 0; i < 5; ++i)
+                cmd (ops, "audition_note", objN ({{ "trackId", lt }, { "pitch", 60 }, { "action", "blip" }}));
+            cmd (ops, "undo");
+            check (trackById (lt).getProperty ("name", var()).toString() != "UndoAnchor",
+                   "ONE undo after 5 auditions reaches the previous real edit");
+        }
+
+        cmd (ops, "remove_track", args1 ("trackId", lt));
+    }
+
     // ─── Wave: keyboard shortcuts + clip clipboard (CTL-002 / AED-001) ───
     // The keyboard layer is window 'keydown' handlers in the React UI (App mounts
     // useKeyboardShortcuts) — pure view code, NOT headless-testable, so it is NOT
@@ -6551,6 +6962,140 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         check (ok (cmd (ops, "set_count_in", args1 ("bars", 0))), "set_count_in restore default (0/off) ok");
     }
 
+    // ─── REC-001 — how a live MIDI take behaves, and Capture MIDI ───
+    // WHAT THIS CANNOT PROVE, stated up front so nothing below reads as more than it is:
+    // a headless run has no audio device, so no te::MidiInputDevice exists, so
+    // applyRecordOptionsToDevices() writes to nothing and capture_midi has no
+    // retrospective buffer to capture from. That an overdub take really MERGES, or that
+    // Capture really recovers what you just played, is HARDWARE-GATED — it needs a
+    // controller and a live interface.
+    //
+    // What IS provable here is everything between the producer and the engine: the
+    // stored intent, the partial-patch integrity (a rejected field leaves the others
+    // untouched), persistence across save/reload, the non-undoable-preference posture,
+    // and capture_midi's graceful empty-handed shape. Deliberately NOT written: any
+    // check phrased as "capture_midi returned ok" on its own — ok:true IS the
+    // degradation answer, so such a check could not fail.
+    section ("REC-001: record options + Capture MIDI (set_record_options, capture_midi)");
+    {
+        auto proj = [&] { return ops.snapshot().getProperty ("session", var()).getProperty ("project", var()); };
+        auto recOpts = [&] { return proj().getProperty ("recordOptions", var()); };
+        auto optBool = [&] (const char* k) { return (bool) recOpts().getProperty (k, false); };
+        auto optNum  = [&] (const char* k) { return (double) recOpts().getProperty (k, -1.0); };
+
+        // Defaults on a project that has never set them. overdub ON is deliberate: it is
+        // Ableton's behaviour and the engine's own default (mergeRecordings = true).
+        check (recOpts().isObject(), "snapshot session.project.recordOptions present");
+        check (optBool ("overdub"), "recordOptions.overdub defaults to true (merge, like the engine)");
+        check (! optBool ("replaceExisting"), "recordOptions.replaceExisting defaults to false");
+        check (! optBool ("punchInOut"), "recordOptions.punchInOut defaults to false");
+        check (optNum ("quantize") == 0.0, "recordOptions.quantize defaults to 0 (off)");
+        check (recOpts().getProperty ("quantizeLabel", var()).toString() == "(none)",
+               "recordOptions.quantizeLabel defaults to the engine's own \"(none)\"");
+        check (optNum ("retrospectiveSeconds") > 0.0, "recordOptions.retrospectiveSeconds has a usable default");
+
+        // Each field sets independently — the property the UI depends on, since five
+        // separate controls each send only their own field.
+        check (ok (cmd (ops, "set_record_options", args1 ("overdub", false))), "set_record_options overdub:false ok");
+        check (! optBool ("overdub"), "overdub:false stored");
+        check (! optBool ("punchInOut"), "setting overdub alone left punchInOut untouched");
+        check (ok (cmd (ops, "set_record_options", args1 ("punchInOut", true))), "set_record_options punchInOut:true ok");
+        check (optBool ("punchInOut"), "punchInOut:true stored");
+        check (! optBool ("overdub"), "setting punchInOut alone left overdub untouched");
+
+        // punchInOut is the one option with an Edit-side home, so it is the one that can
+        // be checked against the live engine headless. te::Edit::recordingPunchInOut is
+        // bound with a nullptr UndoManager, which is exactly why it is written through
+        // this preference path rather than inside a transaction.
+        check (eng.edit().recordingPunchInOut.get(),
+               "punchInOut reached the live engine (te::Edit::recordingPunchInOut)");
+
+        // Record-quantise: a grid the engine implements is accepted and gets the engine's
+        // own label back; one it does not is REFUSED rather than snapped to the nearest.
+        check (ok (cmd (ops, "set_record_options", args1 ("quantize", 0.25))), "set_record_options quantize 1/4 beat ok");
+        check (optNum ("quantize") == 0.25, "quantize 0.25 stored");
+        check (recOpts().getProperty ("quantizeLabel", var()).toString() == "1/4 beat",
+               "quantize 0.25 labelled with the engine's own name");
+        check (! ok (cmd (ops, "set_record_options", args1 ("quantize", 0.3))),
+               "set_record_options refuses a grid the engine does not implement (0.3)");
+        // The integrity property that makes a partial patch safe: a refused field must
+        // not have written the OTHER fields on its way to failing.
+        check (optNum ("quantize") == 0.25, "a refused quantize left the stored grid untouched");
+        check (optBool ("punchInOut"), "a refused quantize left punchInOut untouched");
+
+        check (! ok (cmd (ops, "set_record_options", args1 ("retrospectiveSeconds", -1.0))),
+               "set_record_options refuses a negative retrospective window");
+        check (! ok (cmd (ops, "set_record_options", args1 ("retrospectiveSeconds", 600.0))),
+               "set_record_options refuses a retrospective window past the cap");
+
+        // Persistence, like every other MOSH_PROJECT preference.
+        check (ok (cmd (ops, "save")),   "save (record options) ok");
+        check (ok (cmd (ops, "reload")), "reload (record options) ok");
+        check (optNum ("quantize") == 0.25, "recordOptions.quantize survived save+reload");
+        check (optBool ("punchInOut"), "recordOptions.punchInOut survived save+reload");
+
+        // NON-undoable preference, same posture (and same check) as set_count_in above.
+        {
+            auto roLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool roPref = false;
+            for (auto& ln : juce::StringArray::fromLines (roLog))
+                if (ln.contains ("\"command\": \"set_record_options\"") && ln.contains ("\"undoable\": false")) roPref = true;
+            check (roPref, "set_record_options logged undoable:false (preference)");
+        }
+        cmd (ops, "undo");
+        check (optNum ("quantize") == 0.25, "undo after set_record_options does NOT revert it (non-undoable)");
+
+        // capture_midi, headless. The shape is the whole contract here: ok (a producer
+        // pressing Capture with nothing buffered has done nothing wrong), applied:false,
+        // no clips, and a REASON — never a silent ok that reads as a successful capture.
+        auto capR = cmd (ops, "capture_midi");
+        check (ok (capR), "capture_midi ok (graceful, no audio device)");
+        check (! (bool) capR["data"].getProperty ("applied", true), "capture_midi applied:false headless");
+        {
+            auto cl = capR["data"].getProperty ("clips", var());   // bind before getArray
+            check (cl.isArray() && cl.size() == 0, "capture_midi lands no clips headless (clips:[])");
+        }
+        check (capR["data"].hasProperty ("reason"), "capture_midi reports WHY it captured nothing");
+
+        // A capture that captured nothing must leave NO footprint. Two witnesses, chosen
+        // because each can actually fail:
+        //
+        //   1. no snapshot_invalidated. Nothing changed, so a re-pull would be pure cost
+        //      — and Capture is a key a producer mashes.
+        //   2. logged undoable:false. This is the one that protects the producer: a
+        //      Capture that claims to be undoable when it created nothing puts a phantom
+        //      step in front of their real work.
+        //
+        // (A `session.dirty` witness was written here first and DELETED — it passed a
+        // sabotage that called markDirty() before the guards, because by this point in
+        // the run the project is already dirty and the flag could not move. It looked
+        // exactly like a check that worked.)
+        {
+            eventTypes.clear();
+            cmd (ops, "capture_midi", args1 ("armedOnly", true));
+            check (! hadEvent ("snapshot_invalidated"),
+                   "a no-op capture_midi emits no snapshot_invalidated (nothing changed)");
+
+            auto capLog = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            bool sawUndoableCapture = false, sawPrefCapture = false;
+            for (auto& ln : juce::StringArray::fromLines (capLog))
+                if (ln.contains ("\"command\": \"capture_midi\""))
+                {
+                    if (ln.contains ("\"undoable\": true"))  sawUndoableCapture = true;
+                    if (ln.contains ("\"undoable\": false")) sawPrefCapture = true;
+                }
+            check (sawPrefCapture, "JSONL records capture_midi");
+            check (! sawUndoableCapture,
+                   "a capture that landed no clips is NOT logged undoable (no phantom undo step)");
+        }
+
+        // Restore the defaults so later blocks/gates see a clean project.
+        check (ok (cmd (ops, "set_record_options",
+                        objN ({{ "overdub", true }, { "replaceExisting", false },
+                               { "quantize", 0.0 }, { "punchInOut", false }}))),
+               "set_record_options restore defaults ok");
+    }
+
     // ─── itemID-allocator regression (engine patch: createNewItemID scans ALL caches) ───
     // Before the patch, this load -> save -> reload -> remove -> load sequence could hand
     // the second plugin an itemID still held by the first in automatableEditItemCache ->
@@ -7075,6 +7620,14 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         auto sti = cmd (ops, "set_track_input", objN ({{ "trackId", ra }, { "deviceID", "in-3-4" }}));
         check (ok (sti), "routing: set_track_input ok (graceful headless)");
         check (! (bool) sti["data"].getProperty ("applied", true), "routing: applied:false headless (choice stored)");
+        // The chosen device's FAMILY. Only the wave side is provable here: headless the
+        // engine enumerates no MIDI devices at all (see the CTL-001 note above), so a
+        // MIDI deviceID cannot be resolved and the midi branch is HARDWARE-GATED — do
+        // not read this check as proof that MIDI routing works. What it does pin is that
+        // family resolution happens and defaults to wave for an unknown id, which is the
+        // contract the (previously MIDI-blind) retarget loop now depends on.
+        check (sti["data"].getProperty ("kind", var()).toString() == "wave",
+               "routing: a non-MIDI deviceID resolves to the wave family");
         check (trackById (ra)["input"].getProperty ("deviceID", var()).toString() == "in-3-4",
                "routing: chosen input deviceID in the snapshot");
         check (! ok (cmd (ops, "set_track_input", args1 ("trackId", ra))), "routing: set_track_input missing deviceID errors");
@@ -10914,6 +11467,275 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
     const bool pass = words.size() > 0 && hits >= jmax (1, (words.size() * 2) / 3);   // ≥ 2/3 of the words
     std::cerr << "  matched " << hits << "/" << words.size() << " phrase words → " << (pass ? "PASS" : "FAIL") << "\n";
     return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,
+// with NOBODY PLAYING A KEYBOARD.
+//
+// This exists because every other harness in this file is blind to it. --selftest has no
+// audio device, so getAllInputDevices() is empty, so the routing fork in cmdAuditionNote
+// is never taken and the retrospective buffer never fills. Everything REC-001/REC-002
+// added — overdub, record-quantise, Capture, and the input path itself — was therefore
+// verifiable only by hand, with a controller plugged in.
+//
+// What makes it automatable is the virtual "Mosh Keyboard" MIDI input. A physical
+// controller cannot be synthesised; a virtual device's handleIncomingMidiMessage is
+// exactly the entry point a physical one uses, so driving it through audition_note IS a
+// producer playing the computer keyboard. The audio device still has to be real (no
+// device ⇒ no playback context ⇒ no input instances), which is why this is its own CLI
+// mode and not a --selftest section.
+//
+// Deliberately NOT asserted anywhere below: that anything was AUDIBLE. This proves the
+// notes reach the recorder and land in a clip. Whether they reach a speaker is
+// --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
+// sound it never measured.
+int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    std::cerr << "\n===== Mosh live MIDI capture smoke =====\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [&] (int ms) {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (1, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (10);
+            else Thread::sleep (10);
+        }
+    };
+
+    // Every note this harness "plays". Distinct pitches so a landed clip can be matched
+    // against them by content, not merely by count — a take that captured the right
+    // NUMBER of wrong notes is a failure this would otherwise wave through.
+    const std::vector<int> kTakeNotes    { 60, 64, 67 };
+    const std::vector<int> kCaptureNotes { 72, 74 };
+    const std::vector<int> kOverdubNotes { 55, 57 };
+
+    // Reads the notes of every clip on one track, newest clip last.
+    auto trackClips = [&] (const String& trackId) -> Array<var> {
+        Array<var> out;
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& tr : *tracks)
+                if (tr.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips) out.add (c);
+        return out;
+    };
+    auto pitchesOf = [] (const var& clip) -> std::set<int> {
+        std::set<int> out;
+        auto ns = clip.getProperty ("notes", var());
+        if (auto* arr = ns.getArray())
+            for (auto& n : *arr) out.insert ((int) n.getProperty ("pitch", -1));
+        return out;
+    };
+    auto allPitchesOn = [&] (const String& trackId) -> std::set<int> {
+        std::set<int> out;
+        for (auto& c : trackClips (trackId))
+            for (int p : pitchesOf (c)) out.insert (p);
+        return out;
+    };
+    auto contains = [] (const std::set<int>& hay, const std::vector<int>& needles) {
+        for (int n : needles) if (hay.count (n) == 0) return false;
+        return true;
+    };
+    // Plays a sequence the way a producer would: note-on, hold, note-off, gap. The pumps
+    // are load-bearing — the engine timestamps each message as it arrives, so a burst
+    // sent with no message-thread time between events records as a chord at t=0.
+    auto playNotes = [&] (const String& trackId, const std::vector<int>& pitches, int holdMs, int gapMs) {
+        for (int p : pitches)
+        {
+            cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", p },
+                                             { "action", "on" }, { "velocity", 100 }}));
+            pump (holdMs);
+            cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", p }, { "action", "off" }}));
+            pump (gapMs);
+        }
+    };
+
+    // ── the device ───────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: the Mosh Keyboard input exists and is routable");
+
+    check (eng.hasAudio(), "audio mode is enabled (no device means no input instances, so nothing to prove)");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    if (! eng.hasAudio())
+    {
+        std::cerr << "  !!   no audio device — this harness cannot run. "
+                     "Check MOSH_AUDIO_OUTPUT_DEVICE / system audio.\n";
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+    }
+
+    eng.ensurePlaybackContext();
+    eng.engine().getDeviceManager().rescanMidiDeviceList();
+    pump (300);   // the 30 Hz MoshOps timer is what publishes the virtual device
+
+    String keyboardID;
+    {
+        auto r = cmd (ops, "list_midi_inputs");
+        check (ok (r), "list_midi_inputs ok");
+        auto ins = r["data"].getProperty ("inputs", var());
+        if (auto* arr = ins.getArray())
+            for (auto& i : *arr)
+                if (i.getProperty ("name", var()).toString() == "Mosh Keyboard")
+                    keyboardID = i.getProperty ("deviceID", var()).toString();
+        check (keyboardID.isNotEmpty(), "the Mosh Keyboard virtual MIDI input is published and enumerable");
+    }
+    if (keyboardID.isEmpty())
+    {
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+    }
+
+    // ── arm ──────────────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: arming routes the keyboard to the track");
+
+    auto trackId = cmd (ops, "create_track", objN ({{ "name", "MIDI Capture" }}))
+                       ["data"].getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track ok");
+    // A MIDI clip gives the track an instrument (4OSC) — and, incidentally, the clips
+    // node the INJECT path needs, so the unarmed comparison below is a fair one.
+    check (ok (cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "length", 4.0 }}))),
+           "add_midi_clip ok (loads an instrument)");
+
+    // BEFORE arming: the note must take the monitor-only inject path. This is the control
+    // arm of the experiment — without it, a `recordable:true` after arming proves nothing
+    // about the fork, only that the field exists.
+    {
+        auto before = cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", 60 }, { "action", "blip" }}));
+        check (ok (before), "audition_note ok before arming");
+        check (before["data"].getProperty ("path", var()).toString() != "input",
+               "an UNARMED track does not take the input path (the fork is really gated)");
+        check (! (bool) before["data"].getProperty ("recordable", true),
+               "an UNARMED note reports recordable:false");
+    }
+
+    check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", trackId }, { "deviceID", keyboardID }}))),
+           "set_track_input routes the Mosh Keyboard to the track");
+    {
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+        check (ok (arm), "arm_track ok");
+        check ((bool) arm["data"].getProperty ("applied", false), "arm_track applied (a real input instance was armed)");
+    }
+    pump (150);
+
+    // AFTER arming: the fork. THIS is the check the whole feature rests on, and the one
+    // --selftest structurally cannot make.
+    {
+        auto after = cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", 60 }, { "action", "blip" }}));
+        check (ok (after), "audition_note ok after arming");
+        check (after["data"].getProperty ("path", var()).toString() == "input",
+               "an ARMED track takes the INPUT path (what makes a played note recordable)");
+        check ((bool) after["data"].getProperty ("recordable", false),
+               "an ARMED note reports recordable:true");
+    }
+
+    // ── record a take ────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: playing the keyboard while recording lands a take");
+
+    const int clipsBefore = trackClips (trackId).size();
+    check (ok (cmd (ops, "set_transport", objN ({{ "position", 0.0 }}))), "seek to 0 ok");
+    {
+        auto rec = cmd (ops, "set_transport", objN ({{ "action", "record" }}));
+        check (ok (rec), "set_transport record ok");
+        check (eng.edit().getTransport().isRecording(), "the transport really is recording");
+    }
+
+    playNotes (trackId, kTakeNotes, 180, 120);
+
+    {
+        auto stop = cmd (ops, "stop_recording");
+        check (ok (stop), "stop_recording ok");
+        pump (250);
+        const auto landedPitches = allPitchesOn (trackId);
+        const bool got = contains (landedPitches, kTakeNotes);
+        std::cerr << "  ..   played 60/64/67; track now holds " << trackClips (trackId).size()
+                  << " clip(s), pitches:";
+        for (int p : landedPitches) std::cerr << " " << p;
+        std::cerr << "\n";
+        // By CONTENT, not by count: a take that captured three wrong notes would pass a
+        // "3 notes landed" check, and this is the only run that can tell the difference.
+        check (got, "the notes played on the computer keyboard landed in the take (60, 64, 67)");
+        check (trackClips (trackId).size() >= clipsBefore, "recording did not destroy the clip that was there");
+    }
+
+    // ── Capture MIDI ─────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: Capture MIDI recovers what was played with NO recording");
+
+    check (! eng.edit().getTransport().isRecording(), "not recording (Capture's whole premise)");
+    {
+        // Make sure the buffer can reach back over what we are about to play.
+        check (ok (cmd (ops, "set_record_options", objN ({{ "retrospectiveSeconds", 30.0 }}))),
+               "set_record_options widened the retrospective window");
+    }
+    const auto beforeCapture = allPitchesOn (trackId);
+    check (beforeCapture.count (72) == 0 && beforeCapture.count (74) == 0,
+           "the capture pitches (72, 74) are NOT already on the track (so a hit means Capture put them there)");
+
+    playNotes (trackId, kCaptureNotes, 180, 120);
+    pump (200);
+
+    {
+        auto capR = cmd (ops, "capture_midi");
+        check (ok (capR), "capture_midi ok");
+        const bool applied = (bool) capR["data"].getProperty ("applied", false);
+        if (! applied)
+            std::cerr << "  ..   capture_midi reason: "
+                      << capR["data"].getProperty ("reason", var()).toString() << "\n";
+        check (applied, "capture_midi captured something");
+        pump (200);
+        const auto afterCapture = allPitchesOn (trackId);
+        check (contains (afterCapture, kCaptureNotes),
+               "Capture recovered the notes played while NOT recording (72, 74)");
+    }
+
+    // ── overdub ──────────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: overdub merges instead of replacing");
+
+    check (ok (cmd (ops, "set_record_options", objN ({{ "overdub", true }, { "replaceExisting", false }}))),
+           "set_record_options overdub on");
+    const auto beforeOverdub = allPitchesOn (trackId);
+    const int clipsBeforeOverdub = trackClips (trackId).size();
+    check (ok (cmd (ops, "set_transport", objN ({{ "position", 0.0 }}))), "seek to 0 ok (overdub pass)");
+    check (ok (cmd (ops, "set_transport", objN ({{ "action", "record" }}))), "set_transport record ok (overdub pass)");
+    playNotes (trackId, kOverdubNotes, 180, 120);
+    check (ok (cmd (ops, "stop_recording")), "stop_recording ok (overdub pass)");
+    pump (250);
+    {
+        const auto afterOverdub = allPitchesOn (trackId);
+        check (contains (afterOverdub, kOverdubNotes), "the overdub pass landed its own notes (55, 57)");
+
+        std::vector<int> survivors (beforeOverdub.begin(), beforeOverdub.end());
+        check (contains (afterOverdub, survivors),
+               "the overdub pass destroyed nothing that was already there");
+
+        // THE overdub property, and the reason the check above is not enough on its own:
+        // with replaceExisting off (the default, and what Capture forces) nothing is ever
+        // deleted, so "everything survived" passes whether merging happened or not. What
+        // actually distinguishes an overdub is WHERE the notes went — into the clip that
+        // was already there, rather than a new one beside it. Clip COUNT is the witness.
+        const int clipsAfterOverdub = trackClips (trackId).size();
+        std::cerr << "  ..   clips before the overdub pass=" << clipsBeforeOverdub
+                  << "  after=" << clipsAfterOverdub << "\n";
+        check (clipsAfterOverdub == clipsBeforeOverdub,
+               "overdub MERGED into the existing clip instead of starting a new one");
+    }
+
+    // Leave nothing armed or held behind.
+    cmd (ops, "all_notes_off");
+    cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
 }
 
 } // namespace mosh
