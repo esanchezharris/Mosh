@@ -204,7 +204,15 @@
 /* REC-001 — the take-behaviour panel. A settings sheet rather than a menu: rows are
    label-over-hint with their control on the right, so each toggle explains what it does
    without a tooltip. Every colour is a token (the theme guard rejects raw hex). */
-.v2-rec-panel { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+/* One line, always. A wrapped chip is taller than its neighbours and visibly breaks the
+   bar's baseline — which is exactly what happened before the label was shortened. */
+.v2-rec-chip { white-space: nowrap; }
+/* Width is PINNED, and the number must match the panelWidth passed to useAnchoredPanel in
+   RecordPanel.tsx. The hook clamps the panel into the viewport using that number, so a
+   panel that renders wider than it declared gets placed wrong on a narrow window — which
+   it did: left to the base .v2-menu-panel rules the hint text pushed it to 424px against
+   a declared 260. */
+.v2-rec-panel { width: 320px; display: flex; flex-direction: column; gap: 2px; padding: 8px; }
 .v2-rec-row {
   display: flex; align-items: flex-start; gap: 9px;
   padding: 7px 8px; border-radius: var(--v2-radius-sm); cursor: pointer;

@@ -36,24 +36,37 @@ const DEFAULTS: RecordOptions = {
 export function RecordOptionsChip() {
   const exec = useStore((s) => s.exec);
   const opts = useStore((s) => s.snapshot?.session.project?.recordOptions) ?? DEFAULTS;
-  const { open, at, anchorRef, panelRef, toggle } = useAnchoredPanel(260, 300, "start");
+  // 320 MUST match `.v2-rec-panel { width }` in css/20-topbar.css — the hook clamps the
+  // panel into the viewport using this number, so a disagreement mis-places it on a
+  // narrow window. RecordPanel.test.ts pins the two together.
+  const { open, at, anchorRef, panelRef, toggle } = useAnchoredPanel(320, 320, "start");
 
   const set = (patch: Partial<RecordOptions>) => void exec("set_record_options", patch);
 
-  // The chip says what is ON, not what the panel is called — a producer scanning the bar
-  // needs to know that the next take will merge, without opening anything.
-  const summary = [
-    opts.overdub ? "overdub" : "new take",
-    opts.quantize > 0 ? "quantised" : null,
+  // The chip surfaces only what would SURPRISE you. Overdub on, no quantise, no punch is
+  // the default and the expectation, so the chip is just "Rec" — spelling out the default
+  // state would be three words of noise on a bar that already carries six controls.
+  // Anything that would make the next take behave unexpectedly gets named. (It also has
+  // to stay one line: the first version rendered "Rec: overdub" wrapped, and a 41px chip
+  // in a row of 24px ones knocked the whole bar out of alignment.)
+  const flags = [
+    opts.overdub ? null : "new take",
+    opts.quantize > 0 ? "grid" : null,
     opts.punchInOut ? "punch" : null,
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean);
+  const label = flags.length ? `Rec: ${flags.join(" · ")}` : "Rec";
+
+  // The full state lives in the tooltip, so nothing is hidden — just not shouted.
+  const title = `Recording: ${opts.overdub ? "overdub" : "new take each time"}`
+    + `, quantise ${opts.quantize > 0 ? opts.quantizeLabel : "off"}`
+    + `, punch ${opts.punchInOut ? "on" : "off"}`;
 
   return (
     <span className="v2-menu-wrap">
-      <button ref={anchorRef} className="v2-chip" data-testid="v2-rec-opts"
+      <button ref={anchorRef} className="v2-chip v2-rec-chip" data-testid="v2-rec-opts"
         aria-label="Recording options" aria-haspopup="dialog" aria-expanded={open}
-        title="What a live MIDI take does when it lands"
-        onClick={toggle}>Rec: {summary}</button>
+        title={title}
+        onClick={toggle}>{label}</button>
       {open && at && (
         <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed v2-rec-panel"
           style={{ left: at.left, top: at.top, bottom: at.bottom }}

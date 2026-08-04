@@ -273,6 +273,10 @@
    names ("stays dark in BOTH themes"). #1a1206 was a bespoke near-black doing the same job. */
 .v2-ms button.on.m { background: var(--mute, #ffb454); color: var(--on-accent); border-color: transparent; }
 .v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* REC-002 — armed uses the SAME red as the transport's record button (--v2-rec, via
+   --status-rec), because they mean the same thing: this track is the one that captures.
+   A different red here would read as a different state. */
+.v2-ms button.on.r { background: var(--status-rec); color: var(--on-accent); border-color: transparent; }
 
 /* UI-REACH remove_track — hover/focus-revealed like the tempo lane's own point-remove
    button (.v2-tempo-rm). Deliberately position:absolute, NOT a flex sibling: a first

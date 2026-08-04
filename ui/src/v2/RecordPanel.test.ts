@@ -55,20 +55,28 @@ describe("record options panel", () => {
     vi.restoreAllMocks();
   });
 
-  it("the chip says what is ON without being opened", () => {
-    mount();
-    const chip = host.querySelector('[data-testid="v2-rec-opts"]')!;
-    expect(chip.textContent).toContain("overdub");
-    expect(chip.textContent).toContain("quantised");
-    expect(chip.textContent).not.toContain("punch");   // punchInOut is false in OPTS
+  it("names only what would surprise you — the default state is just 'Rec'", () => {
+    // Defaults: overdub on, no quantise, no punch. Spelling those out would be three
+    // words of noise on a bar that already carries six controls.
+    mount({ ...OPTS, overdub: true, quantize: 0, punchInOut: false });
+    expect(host.querySelector('[data-testid="v2-rec-opts"]')!.textContent).toBe("Rec");
   });
 
-  it("a chip on a fresh project reads 'new take' rather than lying about overdub", () => {
-    mount({ ...OPTS, overdub: false, quantize: 0, punchInOut: true });
+  it("names every non-default, so a take can't behave unexpectedly unannounced", () => {
+    mount({ ...OPTS, overdub: false, quantize: 0.25, punchInOut: true });
     const chip = host.querySelector('[data-testid="v2-rec-opts"]')!;
-    expect(chip.textContent).toContain("new take");
+    expect(chip.textContent).toContain("new take");   // a take will NOT merge
+    expect(chip.textContent).toContain("grid");
     expect(chip.textContent).toContain("punch");
-    expect(chip.textContent).not.toContain("quantised");
+  });
+
+  it("keeps the full state in the tooltip, so nothing is hidden — just not shouted", () => {
+    mount({ ...OPTS, overdub: true, quantize: 0.25, quantizeLabel: "1/4 beat", punchInOut: false });
+    const chip = host.querySelector('[data-testid="v2-rec-opts"]')!;
+    const title = chip.getAttribute("title")!;
+    expect(title).toContain("overdub");
+    expect(title).toContain("1/4 beat");            // the engine's own grid name
+    expect(title).toContain("punch off");
   });
 
   it("EACH control sends only its own field", async () => {
@@ -110,6 +118,29 @@ describe("record options panel", () => {
       expect(ENGINE_GRIDS.some((g) => Math.abs(g - v) <= 1e-6 * Math.max(1, g)),
         `the panel offers ${v} beats, which set_record_options would refuse`).toBe(true);
     expect(values.length).toBeGreaterThan(1);   // anti-vacuity: an empty list passes the loop
+  });
+
+  it("declares the same panel width to the placement hook that the CSS renders", async () => {
+    // These two numbers live in different files and only one of them is enforced by
+    // anything: useAnchoredPanel clamps the panel into the viewport using the DECLARED
+    // width, so if the CSS renders wider the panel is mis-placed on a narrow window.
+    // That was live for a moment — the base .v2-menu-panel rules let the hint text push
+    // it to 424px against a declared 260. jsdom does not apply the stylesheet, so this
+    // reads both sources rather than measuring.
+    const { readFileSync } = await import("node:fs");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    // readShellCss() rather than reading 20-topbar.css directly: it is the module that
+    // already throws when a partition goes missing, so this guard cannot end up grepping
+    // an empty haystack and passing.
+    const { readShellCss } = await import("./cssSource");
+    const css = readShellCss();
+    const tsx = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "RecordPanel.tsx"), "utf8");
+    const cssWidth = css.match(/\.v2-rec-panel\s*\{[^}]*width:\s*(\d+)px/)?.[1];
+    const declared = tsx.match(/useAnchoredPanel\((\d+),/)?.[1];
+    expect(cssWidth, ".v2-rec-panel must pin an explicit width").toBeDefined();
+    expect(declared, "RecordPanel must declare a panel width").toBeDefined();
+    expect(declared).toBe(cssWidth);
   });
 
   it("warns that Replace is not undoable, because the engine's delete really is not", () => {
