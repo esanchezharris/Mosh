@@ -78,6 +78,7 @@ import_training_source	Unguarded
 insert_tempo_change	SessionGlobal
 insert_time	SessionGlobal
 insert_time_sig_change	SessionGlobal
+jump_to_history	Unguarded
 keep_take	Track
 list_audio_devices	Unguarded
 list_builtins	Unguarded

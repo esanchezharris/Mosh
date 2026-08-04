@@ -208,6 +208,12 @@ namespace mosh
         o->setProperty ("command",  parsed.getProperty ("command", juce::var()));
         o->setProperty ("ok",       (bool) parsed.getProperty ("ok", false));
         o->setProperty ("undoable", (bool) parsed.getProperty ("undoable", false));
+        // CAP-PRJ-005 — the history stamp: which undo point this line's command left the
+        // session at. Absent on lines written before this shipped and on lines from an
+        // earlier process, which is exactly right — neither is restorable, and the UI
+        // reads a missing stamp as "not a restore point" rather than guessing.
+        if (parsed.hasProperty ("txn"))
+            o->setProperty ("txn", parsed.getProperty ("txn", juce::var()));
         if (parsed.hasProperty ("error"))
             o->setProperty ("error", parsed.getProperty ("error", juce::var()));
         return juce::var (o);

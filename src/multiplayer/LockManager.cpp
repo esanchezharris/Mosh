@@ -36,6 +36,12 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "audition_note", "all_notes_off",
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
+        // CAP-PRJ-005 — jump_to_history is repeated undo/redo over the local Edit's own
+        // UndoManager. Same posture as undo/redo directly above: it targets no single
+        // track (the args name a history point, not a clip), so it contends for nothing
+        // a peer could hold, and blocking it would leave a producer unable to walk back
+        // out of their own history while someone else is working.
+        "jump_to_history",
         "mark_take", "batch_begin", "batch_end",
         // FS-B2a — batch_status is a pure read; batch_rollback undoes exactly the agent
         // transaction the CALLER owns (proven by undo-head + fingerprint), so like

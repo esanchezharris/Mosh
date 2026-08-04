@@ -732,8 +732,20 @@ export type CommandLogEntry = {
   ok: boolean;
   undoable: boolean;
   error?: string;
+  // CAP-PRJ-005 — the undo point this command left the session at, as
+  // "<sessionToken>:<transactionId>". ABSENT on lines written before the stamp shipped.
+  // Two lines sharing a stamp is the normal case, not a bug: a command that opened no
+  // undo transaction (set_metronome, a preference write) leaves the point where it was,
+  // and every command inside one agent batch shares that batch's single transaction.
+  txn?: string;
 };
 export type CommandLog = {
   entries: CommandLogEntry[];
   total: number;
+  // CAP-PRJ-005 — where the session is NOW, and every point a jump can still reach.
+  // Reachability is a property of the LIVE undo timeline, not of the log file: a point
+  // undone past and then overwritten by a new edit, evicted as the history filled, or
+  // stamped by an earlier process is simply not in this list.
+  currentTxn?: string;
+  restorableTxns?: string[];
 };

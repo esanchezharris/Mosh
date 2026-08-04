@@ -198,6 +198,11 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
       trainerRegistry (engineToUse.sessionDir())
 {
     logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    // CAP-PRJ-005 — a per-process token scoping every history stamp. mosh-log.jsonl
+    // outlives the process; the UndoManager does not. Without this, a line stamped
+    // "txn 3" by yesterday's session would look like a reachable point today and
+    // restore the producer somewhere they never were.
+    historyToken_ = juce::Uuid().toDashedString().upToFirstOccurrenceOf ("-", false, false);
     invalidateCommandLogCache();
     initRecoveryJournal();                    // A3 — read a crashed tail into memory, then start fresh
     initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
@@ -503,6 +508,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_metronome")     return broadcastStructuralIfActive (name, args, cmdSetMetronome (args));
     if (name == "undo")              return cmdUndo (args);
     if (name == "redo")              return cmdRedo (args);
+    if (name == "jump_to_history")   return cmdJumpToHistory (args);   // CAP-PRJ-005
     if (name == "batch_begin")       return cmdBatchBegin (args);
     if (name == "batch_end")         return cmdBatchEnd (args);
     if (name == "batch_status")      return cmdBatchStatus (args);      // FS-B2a
@@ -734,6 +740,10 @@ juce::String MoshOps::lockKeyFor (LockManager::Scope scope, const juce::var& arg
 juce::var MoshOps::cmdUndo (const juce::var& args)
 {
     const bool did = undoManager().undo();
+    // CAP-PRJ-005 — walk the mirror's cursor with the UndoManager's. Doing it HERE
+    // (before logLine's syncUndoMirror) is what tells the mirror this was a move along
+    // the existing timeline rather than a new transaction; see syncUndoMirror().
+    if (did && txnCursor_ > 0) --txnCursor_;
     if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("undo", args, did, did ? String() : String ("nothing to undo"), false);
     emitSnapshotInvalidated();
@@ -743,10 +753,103 @@ juce::var MoshOps::cmdUndo (const juce::var& args)
 juce::var MoshOps::cmdRedo (const juce::var& args)
 {
     const bool did = undoManager().redo();
+    if (did && txnCursor_ < (int) txnIds_.size()) ++txnCursor_;   // CAP-PRJ-005 (see cmdUndo)
     if (did) { eng.markDirty(); ++editRevision_; }   // edit content changed → needs re-save (gap 1)
     logLine ("redo", args, did, did ? String() : String ("nothing to redo"), false);
     emitSnapshotInvalidated();
     return okResult ("redo", var (did));
+}
+
+// CAP-PRJ-005 — jump to a point in undo history.
+//
+// Pro Tools, Reaper and Live all show a history list you CLICK AN ENTRY IN, and all
+// three restore to that point rather than asking for a step count. This is that, over
+// the list the producer already has (the command log). The argument is the log line's
+// own `txn` stamp — an identity, resolved against the live undo timeline here, at click
+// time. Everything that could make a step COUNT wrong (a non-undoable command in the
+// middle, a batch collapsing many commands into one transaction, a discarded redo tail,
+// an evicted oldest transaction, a stale line from a previous session) shows up here as
+// "not found" — a refusal the producer can read, never a silent landing somewhere else.
+juce::var MoshOps::cmdJumpToHistory (const juce::var& args)
+{
+    const auto target = args.getProperty ("txn", var()).toString().trim();
+    if (target.isEmpty())
+        return errResult ("jump_to_history", "txn is required (the history stamp of the point to restore)");
+
+    // An open agent transaction owns the undo head and proves ownership by comparing it
+    // (AgentTxn::planRollback). Walking the stack out from under it would make that proof
+    // a lie, so refuse while one is open — including the LEGACY untagged batch, which
+    // txnPreDispatch does not gate.
+    if (inBatch)
+        return errResult ("jump_to_history", "a batch is open; end or roll it back before jumping");
+
+    syncUndoMirror();
+
+    if (! target.startsWith (historyToken_ + ":"))
+        return errResult ("jump_to_history",
+                          "that point belongs to an earlier session and can no longer be restored");
+
+    const auto suffix = target.fromLastOccurrenceOf (":", false, false);
+    if (suffix.isEmpty() || ! suffix.containsOnly ("0123456789"))
+        return errResult ("jump_to_history", "malformed txn stamp: " + target);
+    const juce::int64 wanted = suffix.getLargeIntValue();
+
+    int destination = -1;
+    if (wanted == 0)
+    {
+        destination = 0;                       // the session's own starting point
+    }
+    else
+    {
+        for (int i = 0; i < (int) txnIds_.size(); ++i)
+            if (txnIds_[(size_t) i] == wanted)
+            { destination = i + 1; break; }    // "after transaction i" == cursor i+1
+    }
+
+    if (destination < 0)
+    {
+        logLine ("jump_to_history", args, false, "point no longer in the undo history", false);
+        return errResult ("jump_to_history",
+                          "that point is no longer in the undo history (it was undone past and "
+                          "overwritten by a later edit, or dropped as the history filled)");
+    }
+
+    const int from = txnCursor_;
+    int undone = 0, redone = 0;
+
+    while (txnCursor_ > destination)
+    {
+        if (! undoManager().undo())
+            break;                             // the UndoManager disagrees: stop, report what happened
+        --txnCursor_;
+        ++undone;
+    }
+    while (txnCursor_ < destination)
+    {
+        if (! undoManager().redo())
+            break;
+        ++txnCursor_;
+        ++redone;
+    }
+
+    const bool arrived = (txnCursor_ == destination);
+    if (undone > 0 || redone > 0) { eng.markDirty(); ++editRevision_; }
+
+    logLine ("jump_to_history", args, arrived,
+             arrived ? String() : String ("the undo history moved while jumping"), false);
+    emitSnapshotInvalidated();
+
+    if (! arrived)
+        return errResult ("jump_to_history", "the undo history moved while jumping; stopped at "
+                                             + currentHistoryTxn());
+
+    auto* data = new DynamicObject();
+    data->setProperty ("txn", currentHistoryTxn());
+    data->setProperty ("undone", undone);
+    data->setProperty ("redone", redone);
+    data->setProperty ("from", from);
+    data->setProperty ("depth", txnCursor_);
+    return okResult ("jump_to_history", var (data));
 }
 
 // Agent batch grouping: batch_begin opens ONE undo transaction; every command run
@@ -770,7 +873,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
         if (inBatch)
             return errResult ("batch_begin", "a batch is already open");
         const auto label = args.getProperty ("name", var ("agent edit")).toString();
-        undoManager().beginNewTransaction (label);
+        beginUndoTransaction (label);
         inBatch = true;
         logLine ("batch_begin", args, true, {}, false);
         return okResult ("batch_begin");
@@ -847,7 +950,7 @@ juce::var MoshOps::cmdBatchBegin (const juce::var& args)
     // ActionSet appears on the first perform), so an empty transaction leaves the undo
     // stack completely untouched — which is what lets rollback distinguish "we own a
     // non-empty head" from "there is nothing of ours to undo".
-    undoManager().beginNewTransaction (record->label);
+    beginUndoTransaction (record->label);
     inBatch = true;
     txn_ = std::move (record);
 
@@ -1753,7 +1856,7 @@ juce::var MoshOps::cmdSketchBeatbox (const juce::var& args)
         // strands an empty drum track + altered tempo). Reuse the batch flag the agent uses
         // (beginTxn skips its own beginNewTransaction while inBatch); respect an outer batch.
         const bool ownBatch = ! inBatch;
-        if (ownBatch) { undoManager().beginNewTransaction ("sketch_beatbox"); inBatch = true; }
+        if (ownBatch) { beginUndoTransaction ("sketch_beatbox"); inBatch = true; }
 
         juce::Array<var> emitted;
 
@@ -1886,7 +1989,7 @@ juce::var MoshOps::cmdGenerateBeatRecipe (const juce::var& args)
     const bool ownBatch = ! inBatch;
     if (ownBatch)
     {
-        undoManager().beginNewTransaction ("generate_beat_recipe");
+        beginUndoTransaction ("generate_beat_recipe");
         inBatch = true;
     }
 
@@ -3094,9 +3197,100 @@ void MoshOps::emitTrackPatch (te::AudioTrack& track)
     emit ("snapshot_invalidated", var (p));
 }
 
+// ── CAP-PRJ-005 — the undo-transaction mirror ────────────────────────────────
+// Full rationale on the members in MoshOps.h. In one line: JUCE owns the SHAPE of the
+// undo timeline, this owns the IDENTITY of each entry in it, and the two are reconciled
+// after every command so identity can never drift out from under the shape.
+void MoshOps::syncUndoMirror()
+{
+    auto& um = undoManager();
+    const int u = um.getUndoDescriptions().size();   // == JUCE's nextIndex (the cursor)
+    const int r = um.getRedoDescriptions().size();
+    const int total = u + r;
+
+    // How many transactions landed at the tip since the last sync?
+    //
+    // Normally the depth says it: anything above the cursor is new. Deliberately NOT
+    // reached on redo — cmdRedo advances txnCursor_ before it logs, so u == txnCursor_
+    // by then and the mirror treats a redone transaction as the SAME one, not a new one.
+    int added = juce::jmax (0, u - txnCursor_);
+
+    // …except at SATURATION, where the depth lies. `Edit` keeps 30 undo levels, and once
+    // the budget is spent JUCE's dropOldTransactionsIfTooLarge() evicts the oldest
+    // transaction inside the very perform() that added the new one — depth unchanged,
+    // total unchanged, a brand-new transaction at the tip. Counting alone cannot see it,
+    // and a mirror that missed it would hand the NEW transaction the OLD one's id: a
+    // stamp that restores somewhere the producer never clicked, which is the entire
+    // failure mode this design exists to remove. So ask the UndoManager directly: a
+    // transaction was opened (txnOpenedSinceSync_) and it now holds actions ⇒ it
+    // materialised. (Residual, stated plainly: an undoable mutation that reaches the Edit
+    // WITHOUT going through a MoshOps command would not set the flag. That is already a
+    // violation of the one-mutation-path directive, and it only misleads at exactly the
+    // saturation point.)
+    const int actionsInHead = um.getNumActionsInCurrentTransaction();
+    if (txnOpenedSinceSync_ && actionsInHead > 0)
+    {
+        if (added == 0) added = 1;
+        txnOpenedSinceSync_ = false;
+    }
+
+    // A new transaction discards the redo tail (JUCE does this inside perform()), so the
+    // mirror discards it too — those points are gone for good, and their ids are never
+    // reused. That is what turns a click on a stale row into a legible refusal instead of
+    // a wrong restore.
+    if (added > 0)
+    {
+        txnIds_.resize ((size_t) juce::jmax (0, txnCursor_));
+        for (int k = 0; k < added; ++k)
+            txnIds_.push_back (nextTxnId_++);
+        txnCursor_ = (int) txnIds_.size();
+    }
+
+    // Reconcile against ground truth. Two things can shrink the timeline without going
+    // through a command: UndoManager::dropOldTransactionsIfTooLarge() drops the OLDEST
+    // transactions off the bottom once the Edit's undo-level budget is spent, and
+    // MoshEngine calls clearUndoHistory() on load/new-project. Both are front-drops, so
+    // erasing from the front is not a guess — it is the only shape a shrink can have.
+    if ((int) txnIds_.size() > total)
+    {
+        const int drop = (int) txnIds_.size() - total;
+        txnIds_.erase (txnIds_.begin(), txnIds_.begin() + drop);
+    }
+    // Growth we did not mint (nothing observed produces it; heal rather than diverge —
+    // a fresh id is unreachable-by-any-stamp, which fails closed).
+    while ((int) txnIds_.size() < total)
+        txnIds_.push_back (nextTxnId_++);
+
+    txnCursor_ = juce::jlimit (0, (int) txnIds_.size(), u);   // JUCE is the authority
+}
+
+juce::String MoshOps::currentHistoryTxn() const
+{
+    const juce::int64 id = (txnCursor_ > 0 && txnCursor_ <= (int) txnIds_.size())
+                             ? txnIds_[(size_t) txnCursor_ - 1]
+                             : 0;   // 0 == "before any transaction in this session"
+    return historyToken_ + ":" + juce::String (id);
+}
+
+juce::var MoshOps::restorableHistoryTxns() const
+{
+    Array<var> out;
+    out.add (var (historyToken_ + ":0"));            // the session's own starting point
+    for (auto id : txnIds_)
+        out.add (var (historyToken_ + ":" + juce::String (id)));
+    return var (out);
+}
+
 void MoshOps::logLine (const juce::String& command, const juce::var& args,
                        bool ok, const juce::String& error, bool undoable)
 {
+    // Stamp BEFORE writing: the log line records the history point the session is at
+    // once this command has run. Note this is derived from the UndoManager, not from
+    // the `undoable` argument — a command that CLAIMS undoable:true but opened an empty
+    // transaction (the G14 class) moves no cursor and so shares the previous point,
+    // which is the truth. That is the whole reason the stamp is trustworthy.
+    syncUndoMirror();
+
     auto* o = new DynamicObject();
     o->setProperty ("ts", Time::getCurrentTime().toMilliseconds());
     o->setProperty ("seq", ++seq);
@@ -3105,6 +3299,7 @@ void MoshOps::logLine (const juce::String& command, const juce::var& args,
     o->setProperty ("ok", ok);
     if (error.isNotEmpty()) o->setProperty ("error", error);
     o->setProperty ("undoable", undoable);
+    o->setProperty ("txn", currentHistoryTxn());
     const auto record = var (o);
     const auto line = JSON::toString (record, true);
     const auto filePath = logFile.getFullPathName();
@@ -3153,6 +3348,13 @@ void MoshOps::initRecoveryJournal()
 // Only deterministic, replayable arrangement mutations are journaled — NOT plugin ops (the
 // in-process-crash culprits; replaying one would re-crash) nor renders/admin/transport/IO.
 // An ALLOWLIST (conservative): an unknown command is simply not recovered, never misapplied.
+//
+// CAP-PRJ-005 — jump_to_history is deliberately ABSENT, for exactly the reason undo and
+// redo are absent: recovery replays the surviving forward edits onto a freshly loaded
+// Edit whose UndoManager is empty, so a recorded history move has nothing to move along.
+// Replaying one would either no-op or (worse, if it ever stopped being a no-op) undo a
+// replayed edit the producer never asked to lose. Not-in-the-allowlist means not
+// recovered, which is the correct outcome and needs no code.
 bool MoshOps::isReplayableCommand (const juce::String& name) const
 {
     static const juce::StringArray replayable {
