@@ -14,6 +14,7 @@ import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { useTransportControls } from "./useTransportControls";
 import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
+import { MetronomeControls } from "./MetronomePanel";
 import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
@@ -144,9 +145,11 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
                 onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
             </span>
-            <button className="v2-chip v2-chip-toggle" aria-label="Metronome" aria-pressed={Boolean(snapshot.session.metronome)}
-              data-on={Boolean(snapshot.session.metronome)} title="Metronome click"
-              onClick={() => void exec("set_metronome", { enabled: !snapshot.session.metronome })}>♩</button>
+            {/* CAP-TRN-005 — still a one-click ♩ toggle; the caret beside it opens the
+                click's level/sound/routing. Next to Count-in on purpose: the count-in
+                plays THROUGH this click, so someone who turned it on and heard nothing
+                is looking for the level. */}
+            <MetronomeControls session={snapshot.session} />
             <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
               title="Count-in before recording — an audible click plays through the pre-roll"
               onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
