@@ -28,13 +28,17 @@ TREE_CLEAN=true
 
 al_load_cache_env
 SESS_BASE="$(unique_session "gate")"
-PORT="$(unique_port)"
+# Reported in the verdict JSON; set to the first port block this run actually reserves.
+# NOT allocated up front any more: nothing ever bound it, so the old reservation only
+# burned a block out of a band that several concurrent worktrees share.
+PORT=""
 
-# Always clean up stray services on exit (the port-8770 orphan trap).
-cleanup() { kill_stray_services "$PORT"; rm -f "$STEPS_FILE" 2>/dev/null || true; }
+# On exit, release every port this run reserved — killing any of OUR services still on
+# them. Scoped by reservation + process identity, so a sibling worktree's gate is never
+# touched (it used to be: see the ownership notes in lib.sh).
+cleanup() { al_release_all_ports; rm -f "$STEPS_FILE" 2>/dev/null || true; }
 STEPS_FILE="$(mktemp)"
 trap cleanup EXIT
-kill_stray_services "$PORT"
 
 OVERALL=true
 # Tail a log file as a SINGLE LINE of printable text: newlines/tabs → spaces, all
@@ -74,16 +78,31 @@ run_selftest_x3() {
     local sess="${SESS_BASE}-r$i" log; log="$(mktemp)"
     # A FRESH service port per run: reusing one port across the 3 runs raced on service
     # teardown and intermittently produced a non-zero exit even with 0 failed checks
-    # (a false gate-red). unique_port skips any still-alive prior service.
+    # (a false gate-red). unique_port now RESERVES the block for the length of the run, so
+    # a concurrent worktree cannot pick the same port during the long gap before the
+    # service binds — and therefore cannot kill this run's service out from under it.
     local sport; sport="$(unique_port)"
-    kill_stray_services "$sport"
+    if [ -z "$sport" ]; then
+      # al_die exits the `$( )` subshell, not us. Fail loudly: an empty MOSH_SERVICE_PORT
+      # crashes server.py's int() and would surface as a pile of generative-only failures
+      # that look exactly like a real regression.
+      emit_step "selftest_x3" false "$(jq -nc --arg dir "$AL_PORT_DIR" \
+        '{error:"could not reserve a service port block", ports_dir:$dir}')"
+      rm -f "$log"; return 1
+    fi
+    [ -n "$PORT" ] || PORT="$sport"
     # -ApplePersistenceIgnoreState YES: a headless selftest must NEVER inherit AppKit's
     # window-restoration / "reopen after crash" modal. After repeated crashes macOS shows
     # NSPersistentUIRestorer's runModal during launch, which blocks a headless run forever
     # (cost a 2h hang once). NSUserDefaults reads the flag from argv, suppressing it.
     MOSH_SELFTEST_SESSION="$sess" MOSH_SERVICE_PORT="$sport" "$bin" --selftest -ApplePersistenceIgnoreState YES >"$log" 2>&1
     rc=$?
-    kill_stray_services "$sport"; sleep 1   # let this run's service die before the next
+    # Reap this run's own service, let it actually die, and only THEN hand the block back —
+    # releasing first would let a sibling gate claim a block still occupied by our corpse.
+    # Both calls touch only ports we reserved, and only listeners that identify as a Mosh
+    # service (see the ownership notes in lib.sh).
+    kill_stray_services "$sport"; sleep 1
+    al_release_port "$sport"
     read n f < <(parse_selftest_tally "$log")
     a="$(count_juce_asserts "$log")"
     ns="$ns $n"
@@ -176,10 +195,22 @@ run_parity_checks() {
   run_step "parity_scoreboard" bash -c 'python3 scripts/daw-conformance/scoreboard.py --check'
 }
 
+# ── the harness testing itself ───────────────────────────────────────────────────
+# lib.sh's own unit tests. Run UNCONDITIONALLY in both lanes, not path-scoped to
+# scripts/auto-loop/: a path-scoped suite stays invisible until some PR happens to touch
+# that directory, which is how a broken service/ test once hid for weeks. Both are pure
+# filesystem + loopback and hermetic (private lock registry, private port window), so they
+# are safe to run alongside a sibling worktree's gate. ~25s total.
+run_harness_selftests() {
+  run_step "harness_deps_freshness" bash scripts/auto-loop/deps-freshness-selftest.sh
+  run_step "harness_port_ownership" bash scripts/auto-loop/port-ownership-selftest.sh
+}
+
 # ── cheap lane ───────────────────────────────────────────────────────────────────
 gate_cheap() {
   ensure_node_modules
   run_parity_checks
+  run_harness_selftests
   run_step "typecheck" bash -c 'cd ui && npm run typecheck'
   run_step "vitest"    bash -c 'cd ui && npm test'
   run_step "e2e"       bash -c 'cd ui && npm run test:e2e'
@@ -212,6 +243,7 @@ runbook_advisory() {
 # ── native lane ──────────────────────────────────────────────────────────────────
 gate_native() {
   run_parity_checks
+  run_harness_selftests
   runbook_advisory
 
   # The native build runs `npm install` INSIDE CMake (the phone-companion bundle step), and
