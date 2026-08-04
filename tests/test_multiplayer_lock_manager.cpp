@@ -260,6 +260,15 @@ namespace
             "set_key",
             "set_time_signature", "insert_time_sig_change", "remove_time_sig_change",
             "set_metronome", "delete_time_range",
+            // CAP-CLP-017 -- insert_time is delete_time_range's inverse and has the same
+            // (wider) reach: one transaction rewrites every track's clips, their rack
+            // automation, the master bus, the tempo map, the beat-anchored sections and
+            // annotations, and the transport loop. No single track key describes what that
+            // contends for, so session-global is the RIGHT answer here, not merely the
+            // fail-closed default. (This guard is the seventh registration a new command
+            // needs and the one the CAP-CLP-017 ticket's list of six missed -- it caught
+            // insert_time falling through unclassified, exactly as designed.)
+            "insert_time",
             // G2b — count-in / pre-roll bars is a project-wide recording preference,
             // same fail-closed SessionGlobal default as set_metronome/set_tempo above
             // (unlike set_key, which is classified Unguarded in LockManager.cpp), not
