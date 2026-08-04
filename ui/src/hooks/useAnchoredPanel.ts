@@ -80,11 +80,40 @@ export function useAnchoredPanel(
       setOpen(false);
     };
     document.addEventListener("pointerdown", onDown, true);
-    document.addEventListener("scroll", onDismiss, true);
     window.addEventListener("resize", onDismiss);
+
+    // Scroll arms ONE FRAME LATE, and that delay is load-bearing. The click that opens a
+    // panel is itself a scroll source — the browser scrolls a partly-offscreen trigger
+    // into view before dispatching the click — so the resulting scroll lands just AFTER
+    // the panel opens, when an immediately-armed listener would dismiss it. Measured at
+    // 1ms in a captured failure: `|toggle:false->true@1088 |dismiss:scroll@1089`.
+    //
+    // The trailing add-track row is the worst case (it sits at the END of the lane list,
+    // so it is the trigger most likely to need scrolling to), and it is where this showed
+    // up: main's e2e suite failed intermittently on "the add-track menu reaches drum and
+    // instrument tracks" waiting for a menu item that had already been torn down.
+    //
+    // NOT a test workaround. A producer clicking a partly-offscreen trigger, or clicking
+    // while a trackpad glide is still settling, sees the menu blink open and vanish;
+    // Playwright merely hits the timing reliably. pointerdown and resize stay immediate —
+    // neither is self-inflicted by the opening click.
+    //
+    // ONE FRAME IS EXACT, not a magic delay. Scroll events are delivered in the HTML
+    // spec's "update the rendering" step, which fires them BEFORE running
+    // animation-frame callbacks — while the click handler's setOpen(true), React's
+    // commit, and this effect all run synchronously inside the click task. So a scroll
+    // queued before the panel existed is delivered before this callback registers the
+    // listener, and a scroll the user makes afterwards still dismisses normally.
+    let scrollArmed = false;
+    const raf = requestAnimationFrame(() => {
+      scrollArmed = true;
+      document.addEventListener("scroll", onDismiss, true);
+    });
+
     return () => {
+      cancelAnimationFrame(raf);
       document.removeEventListener("pointerdown", onDown, true);
-      document.removeEventListener("scroll", onDismiss, true);
+      if (scrollArmed) document.removeEventListener("scroll", onDismiss, true);
       window.removeEventListener("resize", onDismiss);
     };
   }, [open]);
