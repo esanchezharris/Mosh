@@ -31,6 +31,17 @@ int runCommandScript (MoshEngine&, MoshOps&);
     exits. Used by the BlackHole virtual loopback gate. */
 int runLiveAudioSmoke (MoshEngine&, MoshOps&);
 
+/** REC-002 — `Mosh --midi-record-smoke`: the live-MIDI-capture path end to end, with
+    nobody playing a keyboard. Arms a track to the virtual "Mosh Keyboard" input, plays
+    notes through it, and asserts they land in a recorded take, that Capture MIDI recovers
+    notes played while NOT recording, and that overdub merges rather than replaces.
+
+    Its own mode rather than a --selftest section because it needs a real audio device:
+    with none open there are no input instances, so the routing fork in cmdAuditionNote is
+    never taken and the retrospective buffer never fills. Proves nothing about AUDIBILITY
+    — that is --live-audio-smoke's job. */
+int runMidiRecordSmoke (MoshEngine&, MoshOps&);
+
 /** Voice STT smoke (`Mosh --voice-smoke`): synthesizes a known phrase with macOS
     `say`, transcribes it through SFSpeechRecognizer, and asserts the transcript
     matches — proving the speech-to-text path end-to-end with nobody speaking. FILE

@@ -268,6 +268,7 @@ namespace mosh::sessionpaths
         bool undoSelfTest    = false;   // --selftest-undo
         bool goldenSelfTest  = false;   // --golden-selftest
         bool liveAudioSmoke  = false;   // --live-audio-smoke
+        bool midiRecordSmoke = false;   // --midi-record-smoke
         bool scanDeep        = false;   // --scan-plugins-deep
         bool runScript       = false;   // --run-script
         bool voiceSmoke      = false;   // --voice-smoke
@@ -287,6 +288,7 @@ namespace mosh::sessionpaths
         if (m.undoSelfTest)   return "session-selftest-undo";
         if (m.goldenSelfTest) return "session-golden-selftest";
         if (m.liveAudioSmoke) return "session-live-audio-smoke";
+        if (m.midiRecordSmoke) return "session-midi-record-smoke";
         if (m.scanDeep)       return "session-scan";
         if (m.runScript)      return "session-run-script";
         if (m.demoGui)        return "session-demo";

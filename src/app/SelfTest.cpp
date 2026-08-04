@@ -11469,4 +11469,273 @@ int runVoiceSmoke (MoshEngine& eng, MoshOps& ops)
     return finish (pass ? 0 : 1, "transcript=\"" + transcript + "\"; matched " + String (hits) + "/" + String (words.size()) + " words");
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// REC-002 — `Mosh --midi-record-smoke`: the whole live-MIDI-capture path, end to end,
+// with NOBODY PLAYING A KEYBOARD.
+//
+// This exists because every other harness in this file is blind to it. --selftest has no
+// audio device, so getAllInputDevices() is empty, so the routing fork in cmdAuditionNote
+// is never taken and the retrospective buffer never fills. Everything REC-001/REC-002
+// added — overdub, record-quantise, Capture, and the input path itself — was therefore
+// verifiable only by hand, with a controller plugged in.
+//
+// What makes it automatable is the virtual "Mosh Keyboard" MIDI input. A physical
+// controller cannot be synthesised; a virtual device's handleIncomingMidiMessage is
+// exactly the entry point a physical one uses, so driving it through audition_note IS a
+// producer playing the computer keyboard. The audio device still has to be real (no
+// device ⇒ no playback context ⇒ no input instances), which is why this is its own CLI
+// mode and not a --selftest section.
+//
+// Deliberately NOT asserted anywhere below: that anything was AUDIBLE. This proves the
+// notes reach the recorder and land in a clip. Whether they reach a speaker is
+// --live-audio-smoke's job, and conflating the two is how a harness ends up "proving"
+// sound it never measured.
+int runMidiRecordSmoke (MoshEngine& eng, MoshOps& ops)
+{
+    using namespace juce;
+    failures = 0;
+    checks = 0;
+    resetSections();
+
+    std::cerr << "\n===== Mosh live MIDI capture smoke =====\n";
+
+    auto* mm = MessageManager::getInstanceWithoutCreating();
+    auto pump = [&] (int ms) {
+        const auto end = Time::getMillisecondCounter() + (uint32) jmax (1, ms);
+        while (Time::getMillisecondCounter() < end)
+        {
+            if (mm != nullptr) mm->runDispatchLoopUntil (10);
+            else Thread::sleep (10);
+        }
+    };
+
+    // Every note this harness "plays". Distinct pitches so a landed clip can be matched
+    // against them by content, not merely by count — a take that captured the right
+    // NUMBER of wrong notes is a failure this would otherwise wave through.
+    const std::vector<int> kTakeNotes    { 60, 64, 67 };
+    const std::vector<int> kCaptureNotes { 72, 74 };
+    const std::vector<int> kOverdubNotes { 55, 57 };
+
+    // Reads the notes of every clip on one track, newest clip last.
+    auto trackClips = [&] (const String& trackId) -> Array<var> {
+        Array<var> out;
+        auto snap = ops.snapshot();
+        if (auto* tracks = snap["tracks"].getArray())
+            for (auto& tr : *tracks)
+                if (tr.getProperty ("id", var()).toString() == trackId)
+                    if (auto* clips = tr.getProperty ("clips", var()).getArray())
+                        for (auto& c : *clips) out.add (c);
+        return out;
+    };
+    auto pitchesOf = [] (const var& clip) -> std::set<int> {
+        std::set<int> out;
+        auto ns = clip.getProperty ("notes", var());
+        if (auto* arr = ns.getArray())
+            for (auto& n : *arr) out.insert ((int) n.getProperty ("pitch", -1));
+        return out;
+    };
+    auto allPitchesOn = [&] (const String& trackId) -> std::set<int> {
+        std::set<int> out;
+        for (auto& c : trackClips (trackId))
+            for (int p : pitchesOf (c)) out.insert (p);
+        return out;
+    };
+    auto contains = [] (const std::set<int>& hay, const std::vector<int>& needles) {
+        for (int n : needles) if (hay.count (n) == 0) return false;
+        return true;
+    };
+    // Plays a sequence the way a producer would: note-on, hold, note-off, gap. The pumps
+    // are load-bearing — the engine timestamps each message as it arrives, so a burst
+    // sent with no message-thread time between events records as a chord at t=0.
+    auto playNotes = [&] (const String& trackId, const std::vector<int>& pitches, int holdMs, int gapMs) {
+        for (int p : pitches)
+        {
+            cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", p },
+                                             { "action", "on" }, { "velocity", 100 }}));
+            pump (holdMs);
+            cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", p }, { "action", "off" }}));
+            pump (gapMs);
+        }
+    };
+
+    // ── the device ───────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: the Mosh Keyboard input exists and is routable");
+
+    check (eng.hasAudio(), "audio mode is enabled (no device means no input instances, so nothing to prove)");
+    check (eng.audioDeviceError().isEmpty(), "requested audio device opened");
+    if (! eng.hasAudio())
+    {
+        std::cerr << "  !!   no audio device — this harness cannot run. "
+                     "Check MOSH_AUDIO_OUTPUT_DEVICE / system audio.\n";
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+    }
+
+    eng.ensurePlaybackContext();
+    eng.engine().getDeviceManager().rescanMidiDeviceList();
+    pump (300);   // the 30 Hz MoshOps timer is what publishes the virtual device
+
+    String keyboardID;
+    {
+        auto r = cmd (ops, "list_midi_inputs");
+        check (ok (r), "list_midi_inputs ok");
+        auto ins = r["data"].getProperty ("inputs", var());
+        if (auto* arr = ins.getArray())
+            for (auto& i : *arr)
+                if (i.getProperty ("name", var()).toString() == "Mosh Keyboard")
+                    keyboardID = i.getProperty ("deviceID", var()).toString();
+        check (keyboardID.isNotEmpty(), "the Mosh Keyboard virtual MIDI input is published and enumerable");
+    }
+    if (keyboardID.isEmpty())
+    {
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+    }
+
+    // ── arm ──────────────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: arming routes the keyboard to the track");
+
+    auto trackId = cmd (ops, "create_track", objN ({{ "name", "MIDI Capture" }}))
+                       ["data"].getProperty ("trackId", var()).toString();
+    check (trackId.isNotEmpty(), "create_track ok");
+    // A MIDI clip gives the track an instrument (4OSC) — and, incidentally, the clips
+    // node the INJECT path needs, so the unarmed comparison below is a fair one.
+    check (ok (cmd (ops, "add_midi_clip", objN ({{ "trackId", trackId }, { "length", 4.0 }}))),
+           "add_midi_clip ok (loads an instrument)");
+
+    // BEFORE arming: the note must take the monitor-only inject path. This is the control
+    // arm of the experiment — without it, a `recordable:true` after arming proves nothing
+    // about the fork, only that the field exists.
+    {
+        auto before = cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", 60 }, { "action", "blip" }}));
+        check (ok (before), "audition_note ok before arming");
+        check (before["data"].getProperty ("path", var()).toString() != "input",
+               "an UNARMED track does not take the input path (the fork is really gated)");
+        check (! (bool) before["data"].getProperty ("recordable", true),
+               "an UNARMED note reports recordable:false");
+    }
+
+    check (ok (cmd (ops, "set_track_input", objN ({{ "trackId", trackId }, { "deviceID", keyboardID }}))),
+           "set_track_input routes the Mosh Keyboard to the track");
+    {
+        auto arm = cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", true }}));
+        check (ok (arm), "arm_track ok");
+        check ((bool) arm["data"].getProperty ("applied", false), "arm_track applied (a real input instance was armed)");
+    }
+    pump (150);
+
+    // AFTER arming: the fork. THIS is the check the whole feature rests on, and the one
+    // --selftest structurally cannot make.
+    {
+        auto after = cmd (ops, "audition_note", objN ({{ "trackId", trackId }, { "pitch", 60 }, { "action", "blip" }}));
+        check (ok (after), "audition_note ok after arming");
+        check (after["data"].getProperty ("path", var()).toString() == "input",
+               "an ARMED track takes the INPUT path (what makes a played note recordable)");
+        check ((bool) after["data"].getProperty ("recordable", false),
+               "an ARMED note reports recordable:true");
+    }
+
+    // ── record a take ────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: playing the keyboard while recording lands a take");
+
+    const int clipsBefore = trackClips (trackId).size();
+    check (ok (cmd (ops, "set_transport", objN ({{ "position", 0.0 }}))), "seek to 0 ok");
+    {
+        auto rec = cmd (ops, "set_transport", objN ({{ "action", "record" }}));
+        check (ok (rec), "set_transport record ok");
+        check (eng.edit().getTransport().isRecording(), "the transport really is recording");
+    }
+
+    playNotes (trackId, kTakeNotes, 180, 120);
+
+    {
+        auto stop = cmd (ops, "stop_recording");
+        check (ok (stop), "stop_recording ok");
+        pump (250);
+        const auto landedPitches = allPitchesOn (trackId);
+        const bool got = contains (landedPitches, kTakeNotes);
+        std::cerr << "  ..   played 60/64/67; track now holds " << trackClips (trackId).size()
+                  << " clip(s), pitches:";
+        for (int p : landedPitches) std::cerr << " " << p;
+        std::cerr << "\n";
+        // By CONTENT, not by count: a take that captured three wrong notes would pass a
+        // "3 notes landed" check, and this is the only run that can tell the difference.
+        check (got, "the notes played on the computer keyboard landed in the take (60, 64, 67)");
+        check (trackClips (trackId).size() >= clipsBefore, "recording did not destroy the clip that was there");
+    }
+
+    // ── Capture MIDI ─────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: Capture MIDI recovers what was played with NO recording");
+
+    check (! eng.edit().getTransport().isRecording(), "not recording (Capture's whole premise)");
+    {
+        // Make sure the buffer can reach back over what we are about to play.
+        check (ok (cmd (ops, "set_record_options", objN ({{ "retrospectiveSeconds", 30.0 }}))),
+               "set_record_options widened the retrospective window");
+    }
+    const auto beforeCapture = allPitchesOn (trackId);
+    check (beforeCapture.count (72) == 0 && beforeCapture.count (74) == 0,
+           "the capture pitches (72, 74) are NOT already on the track (so a hit means Capture put them there)");
+
+    playNotes (trackId, kCaptureNotes, 180, 120);
+    pump (200);
+
+    {
+        auto capR = cmd (ops, "capture_midi");
+        check (ok (capR), "capture_midi ok");
+        const bool applied = (bool) capR["data"].getProperty ("applied", false);
+        if (! applied)
+            std::cerr << "  ..   capture_midi reason: "
+                      << capR["data"].getProperty ("reason", var()).toString() << "\n";
+        check (applied, "capture_midi captured something");
+        pump (200);
+        const auto afterCapture = allPitchesOn (trackId);
+        check (contains (afterCapture, kCaptureNotes),
+               "Capture recovered the notes played while NOT recording (72, 74)");
+    }
+
+    // ── overdub ──────────────────────────────────────────────────────────────────────
+    section ("live MIDI capture: overdub merges instead of replacing");
+
+    check (ok (cmd (ops, "set_record_options", objN ({{ "overdub", true }, { "replaceExisting", false }}))),
+           "set_record_options overdub on");
+    const auto beforeOverdub = allPitchesOn (trackId);
+    const int clipsBeforeOverdub = trackClips (trackId).size();
+    check (ok (cmd (ops, "set_transport", objN ({{ "position", 0.0 }}))), "seek to 0 ok (overdub pass)");
+    check (ok (cmd (ops, "set_transport", objN ({{ "action", "record" }}))), "set_transport record ok (overdub pass)");
+    playNotes (trackId, kOverdubNotes, 180, 120);
+    check (ok (cmd (ops, "stop_recording")), "stop_recording ok (overdub pass)");
+    pump (250);
+    {
+        const auto afterOverdub = allPitchesOn (trackId);
+        check (contains (afterOverdub, kOverdubNotes), "the overdub pass landed its own notes (55, 57)");
+
+        std::vector<int> survivors (beforeOverdub.begin(), beforeOverdub.end());
+        check (contains (afterOverdub, survivors),
+               "the overdub pass destroyed nothing that was already there");
+
+        // THE overdub property, and the reason the check above is not enough on its own:
+        // with replaceExisting off (the default, and what Capture forces) nothing is ever
+        // deleted, so "everything survived" passes whether merging happened or not. What
+        // actually distinguishes an overdub is WHERE the notes went — into the clip that
+        // was already there, rather than a new one beside it. Clip COUNT is the witness.
+        const int clipsAfterOverdub = trackClips (trackId).size();
+        std::cerr << "  ..   clips before the overdub pass=" << clipsBeforeOverdub
+                  << "  after=" << clipsAfterOverdub << "\n";
+        check (clipsAfterOverdub == clipsBeforeOverdub,
+               "overdub MERGED into the existing clip instead of starting a new one");
+    }
+
+    // Leave nothing armed or held behind.
+    cmd (ops, "all_notes_off");
+    cmd (ops, "arm_track", objN ({{ "trackId", trackId }, { "armed", false }}));
+
+    std::cerr << "===== " << checks - failures << "/" << checks
+              << " live-MIDI-capture checks passed, " << failures << " failed =====\n";
+    return failures;
+}
+
 } // namespace mosh

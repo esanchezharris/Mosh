@@ -129,6 +129,9 @@ public:
         const bool undoSelfTest = commandLine.contains ("--selftest-undo");
         const bool goldenSelfTest = commandLine.contains ("--golden-selftest");
         const bool liveAudioSmoke = commandLine.contains ("--live-audio-smoke");
+        // REC-002 — live MIDI capture end-to-end. Needs a REAL device (no device ⇒ no
+        // input instances ⇒ the routing fork is never taken), so it joins liveAudio below.
+        const bool midiRecordSmoke = commandLine.contains ("--midi-record-smoke");
         const bool audioRecoverySmoke = commandLine.contains ("--audio-recovery-smoke");
         const bool scanDeep = commandLine.contains ("--scan-plugins-deep");
         const bool runScript = commandLine.contains ("--run-script");   // headless batch command runner
@@ -137,7 +140,7 @@ public:
                           || commandLine.contains ("--demo5")
                           || commandLine.contains ("--demo6");
         const bool envNoAudio = juce::SystemStats::getEnvironmentVariable ("MOSH_NO_AUDIO", "0") == "1";
-        const bool liveAudio = liveAudioSmoke;   // opens the real device, fresh cold session
+        const bool liveAudio = liveAudioSmoke || midiRecordSmoke;   // opens the real device, fresh cold session
         const bool headless = undoSelfTest || goldenSelfTest
                            || commandLine.contains ("--selftest") || audioRecoverySmoke;
         const bool noAudio = envNoAudio
@@ -170,6 +173,7 @@ public:
         modes.undoSelfTest   = undoSelfTest;                          // ...so undo is matched FIRST
         modes.goldenSelfTest = goldenSelfTest;
         modes.liveAudioSmoke = liveAudioSmoke;
+        modes.midiRecordSmoke = midiRecordSmoke;
         modes.scanDeep       = scanDeep;
         modes.runScript      = runScript;
         modes.voiceSmoke     = voiceSmoke;
@@ -415,6 +419,14 @@ public:
         if (liveAudioSmoke)
         {
             const int fails = runLiveAudioSmoke (*engine, *moshOps);
+            setApplicationReturnValue (fails);
+            quit();
+            return;
+        }
+
+        if (midiRecordSmoke)
+        {
+            const int fails = runMidiRecordSmoke (*engine, *moshOps);
             setApplicationReturnValue (fails);
             quit();
             return;

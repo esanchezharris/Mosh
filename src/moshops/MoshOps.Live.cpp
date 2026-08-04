@@ -213,7 +213,7 @@ juce::var MoshOps::cmdAuditionNote (const juce::var& args)
 
     return reply (false, "none",
                   "the track has no clips, so the engine builds no live-MIDI node for it "
-                  "— add a clip to play this instrument");
+                  "- add a clip to play this instrument");
 }
 
 juce::var MoshOps::cmdAllNotesOff (const juce::var& args)
