@@ -6,6 +6,7 @@
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "state/Lyrics.h"
 #include "state/Migrations.h"
+#include "state/TrackIcons.h"
 #include "multiplayer/MultiplayerClient.h"
 #include "multiplayer/MultiplayerSession.h"
 #include "brain/BrainProxy.h"
@@ -964,6 +965,87 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
 
     // ─── Stage 2: arrangement editing + mixer stub ───
     section ("Stage 2: arrangement + mixer");
+
+    // ── CAP-TRK-002 (#613) — set_track_icon ────────────────────────────────────────
+    // An icon changes nothing audible, so --selftest can prove the WHOLE capability:
+    // the name round-trips through the snapshot, survives undo, and — the acceptance
+    // criterion of #613 — survives save/reload, which is the difference between an icon
+    // that lives in the project file and one that lives in UI state.
+    //
+    // This block runs BEFORE `cid`/`tid` are captured below on purpose: it save/reloads
+    // the edit, and Tracktion hands out fresh item IDs on load, so ids captured ahead of
+    // a reload would address clips that no longer exist.
+    {
+        const auto icoTid = firstTrack (ops).getProperty ("id", var()).toString();
+
+        check (ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", "bass" } }))),
+               "set_track_icon accepts a known icon name");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "bass",
+               "set_track_icon: the icon reaches the snapshot");
+
+        // Case/whitespace-insensitive in, normalized lowercase out — so a UI never has to
+        // guess which case the snapshot echoes back when comparing against its palette.
+        check (ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", "  Keys " } }))),
+               "set_track_icon accepts padded mixed-case input");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "keys",
+               "set_track_icon trims and normalizes to lowercase");
+
+        // VALIDATION, not silent coercion. This is the one place icons DIVERGE from
+        // set_track_color and it is deliberate: every well-formed "#rrggbb" renders, so
+        // colour can validate FORM alone, but an icon name outside the registry has
+        // nothing to draw. Accepting it would store a value that renders as the type
+        // default forever — a command that reports ok and visibly does nothing, which is
+        // the exact failure class this programme exists to remove.
+        check (! ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", "banana" } }))),
+               "set_track_icon REJECTS an unknown icon name");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "keys",
+               "a rejected icon leaves the previous one intact");
+        check (! ok (cmd (ops, "set_track_icon", objN ({ { "trackId", "no-such-track" }, { "icon", "drum" } }))),
+               "set_track_icon REJECTS an unknown track");
+
+        // The registry is a CLAIM about what the engine will accept. Walk it, so a name
+        // added to the header but rejected by the command cannot pass unnoticed.
+        {
+            bool everyRegisteredIconAccepted = true;
+            for (const auto& name : trackIcons::registry())
+                if (! ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", name } }))))
+                    everyRegisteredIconAccepted = false;
+            check (everyRegisteredIconAccepted, "every icon in trackIcons::registry() is accepted");
+            check (trackIcons::registry().size() >= 8,
+                   "the icon registry offers a real choice, not a token one");
+        }
+
+        // Undo restores the PREVIOUS icon, not the default — the G14 empty-transaction
+        // class, where a setter that opens no real transaction makes undo destroy the
+        // edit before it instead of its own.
+        check (ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", "guitar" } }))),
+               "set_track_icon re-set before the undo probe");
+        check (ok (cmd (ops, "set_track_icon", objN ({ { "trackId", icoTid }, { "icon", "vocal" } }))),
+               "set_track_icon set a second icon");
+        check (ok (cmd (ops, "undo", objN ({}))), "undo after set_track_icon ok");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "guitar",
+               "undo restores the PREVIOUS icon, not the default");
+        check (ok (cmd (ops, "redo", objN ({}))), "redo after set_track_icon ok");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "vocal",
+               "redo re-applies the icon");
+
+        // THE ACCEPTANCE CRITERION (#613): icon set, project saved, project reopened,
+        // icon still there. If trackIcon rode anything but the track's own state tree
+        // this is the check that fails.
+        check (ok (cmd (ops, "save", objN ({}))), "save after set_track_icon ok");
+        check (ok (cmd (ops, "reload", objN ({}))), "reload after set_track_icon ok");
+        check (firstTrack (ops).getProperty ("icon", var()).toString() == "vocal",
+               "the icon PERSISTS across save/reload (it is in the project file, not UI state)");
+
+        // "" clears back to the track type's default: a real operation, so the property
+        // goes AWAY rather than becoming an empty string every consumer must special-case.
+        const auto reloadedTid = firstTrack (ops).getProperty ("id", var()).toString();
+        check (ok (cmd (ops, "set_track_icon", objN ({ { "trackId", reloadedTid }, { "icon", "" } }))),
+               "set_track_icon accepts \"\" to clear");
+        check (! firstTrack (ops).hasProperty ("icon"),
+               "clearing removes the icon property entirely");
+    }
+
     const auto cid = firstTrack (ops)["clips"][0].getProperty ("id", var()).toString();
     const auto tid = firstTrack (ops).getProperty ("id", var()).toString();
 

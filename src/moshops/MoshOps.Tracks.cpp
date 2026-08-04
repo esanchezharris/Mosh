@@ -12,6 +12,7 @@
 #include "MoshOpsInternal.h"
 #include "RecordingLanding.h"
 #include "state/Ids.h"
+#include "state/TrackIcons.h"
 #include "multiplayer/LogicalId.h"
 
 namespace mosh
@@ -175,6 +176,49 @@ juce::var MoshOps::cmdMoveTrack (const juce::var& args)
     logLine ("move_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("move_track");
+}
+
+// CAP-TRK-002 (#613) — give a track an icon. Pure organisation: it changes nothing
+// audible, which is exactly why it earns its place. A producer six tracks into a beat
+// finds the drums by SHAPE, well before they read a name, and that is the whole job.
+//
+// Stores the icon NAME (see ids::trackIcon), so the palette the UI draws can be reordered
+// or grown later without touching a single project file.
+//
+// VALIDATES MEMBERSHIP, not just form — the one place this deliberately diverges from
+// set_track_color. Colour can check form alone because every well-formed "#rrggbb" is a
+// colour something can draw; icon names are not total that way. A name outside the
+// registry has no glyph, so accepting it would persist a value that renders as the type
+// default forever: a command reporting ok while visibly doing nothing, which is the exact
+// failure class this programme exists to remove. "" clears back to the type default — a
+// real operation, not a rejection.
+juce::var MoshOps::cmdSetTrackIcon (const juce::var& args)
+{
+    const auto id = args.getProperty ("trackId", var()).toString();
+    auto* track = findTrack (id);
+    // NOT findGroupTrack, unlike rename_track. A group (submix) track is serialized by
+    // its own branch of snapshot(), which emits no "icon", and the v2 lane list filters
+    // groups out entirely — so an icon set on one would be stored, undoable, persisted,
+    // and invisible. Refusing is the honest answer until a group has somewhere to show it.
+    if (track == nullptr)
+        return errResult ("set_track_icon", "no track: " + id);
+
+    const auto icon = args.getProperty ("icon", var()).toString().trim().toLowerCase();
+    if (icon.isNotEmpty() && ! trackIcons::isKnown (icon))
+    {
+        juce::StringArray known;
+        for (const auto& n : trackIcons::registry()) known.add (n);
+        return errResult ("set_track_icon",
+                          "unknown icon \"" + icon + "\" — expected one of: "
+                              + known.joinIntoString (", ") + ", or \"\" to clear");
+    }
+
+    beginTxn ("set_track_icon");
+    if (icon.isEmpty()) track->state.removeProperty (ids::trackIcon, &undoManager());
+    else                track->state.setProperty (ids::trackIcon, icon, &undoManager());
+    logLine ("set_track_icon", args, true, {}, true);
+    emitSnapshotInvalidated();
+    return okResult ("set_track_icon");
 }
 
 juce::var MoshOps::cmdRemoveTrack (const juce::var& args)

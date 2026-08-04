@@ -24,6 +24,7 @@ import { meterOf, contentSeconds, headW } from "../timeline/geom";
 import { useLaneMarquee } from "./useLaneMarquee";
 import { boundsOf } from "./marqueeHit";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
+import { trackIconGlyph } from "../trackIcons";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
 import { Meter as AudioLevelMeter } from "../../ui/Meter";
@@ -431,7 +432,9 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(); }
         }}
       >
-        <span className="v2-licon" aria-hidden="true"><TrackTypeIcon type={track.type} /></span>
+        <span className="v2-licon" data-testid="v2-track-icon" data-icon={track.icon ?? ""} aria-hidden="true">
+          <TrackIcon track={track} />
+        </span>
         <span className="v2-lmeta">
           <span className="v2-lrow">
             <span className="v2-lname" title={track.name}>{track.name}</span>
@@ -564,4 +567,18 @@ function TrackTypeIcon({ type }: { type: string }) {
   if (type === "drum") return <IconDrum size={16} />;
   if (type === "audio") return <IconWaveform size={16} />;
   return <IconLayers size={16} />;
+}
+
+// CAP-TRK-002 (#613) — the producer's chosen icon wins over the type default; with no
+// choice made, nothing changes and the type icon stands, exactly as it always did.
+//
+// `trackIconGlyph` returns null for a name this build cannot draw, and that path is real
+// rather than defensive: the persisted value is a NAME, so a project saved by a newer
+// Mosh — one release with two more icons in it — opens here carrying a name this binary
+// has never heard of. Falling back to the type icon means that project renders correctly
+// in every other respect and keeps its icon when it goes home; the alternative, trusting
+// the name, would draw an empty box.
+function TrackIcon({ track }: { track: Track }) {
+  const Chosen = trackIconGlyph(track.icon);
+  return Chosen ? <Chosen size={16} /> : <TrackTypeIcon type={track.type} />;
 }

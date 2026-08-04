@@ -290,6 +290,23 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-set-track-color: 28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721
     // - pre-loop-region-args: a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-builtins-vocabulary (unified renderer + issue #539 wording): e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
+    //
+    // Moved 2026-08-03 — `set_track_icon` added to the catalog (CAP-TRK-002 / #613).
+    //   set_track_icon — the last unbuilt piece of #550. A track icon changes nothing
+    //                    audible; it exists so a producer six tracks into a beat finds
+    //                    the drums by shape before they read a name. Args
+    //                    {trackId, icon}; icon is one of ten NAMES (drum, perc, bass,
+    //                    guitar, keys, synth, vocal, strings, fx, sample) or "" to clear
+    //                    back to the track type's default.
+    //
+    // Unlike the renderer moves above, this one ADDS a command, so it is real catalog
+    // growth: an SFT corpus or GEPA baseline rebuilt after this commit carries a command
+    // older ones never saw. Nothing was removed or renamed, so prior corpora are not
+    // invalidated — but a run compared across this line is not comparing like with like.
+    //
+    // Previous pins (two lineages, merged at 2026-08-03 — neither branch tip's own hash
+    // is reachable from here, which is why both are listed):
+    // - pre-set-track-icon:           38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334
     // - pre-record-options:           d3de1c58e515bd660c0b1214ee0db163a011de9c1326e66e450409587ba6e121
     // - drum-rack branch, pre-merge:  e699bb5c200d27200711dc36b008567cde58e380ad70efb3cff9d8e62743bb2e
     // - pre-kit-library:              0396e079069da25afde5d96dcf0a9019bd6774b2e12d4c44840583d065ab1c39
@@ -298,7 +315,14 @@ describe("legacy prompt byte-stability pin", () => {
     // - pre-musical-time contract:    a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("2ee994e58085baafc5ae47f16391e57b635a641cd23a7cdeb306e5a6983f10d2");
+    // - main @ the usability-audit merge (#607), pre-set-track-icon:
+    //                                 2ee994e58085baafc5ae47f16391e57b635a641cd23a7cdeb306e5a6983f10d2
+    // - this branch, pre-rebase onto that main:
+    //                                 5a34c2636f82a2228850ae39cf3d842f5162f16af06da51ea0ce0f23ff4df876
+    // Neither side survived the rebase (main added set_track_color + move_track while this
+    // branch added set_track_icon), so the pin below was RECOMPUTED from the merged
+    // catalog rather than picked from a side.
+    expect(hash).toBe("b06ddb381b43a5bd89441607733dcec69a73f49b3b5f3581e9dfe97d706ac912");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

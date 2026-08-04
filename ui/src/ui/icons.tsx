@@ -355,3 +355,90 @@ export function IconCameraOff(p: IconProps) {
     </Svg>
   );
 }
+
+// ── track icons (CAP-TRK-002 / #613) ────────────────────────────────────────────────
+// These ship at 16px in the track header, which is the size that governs every choice
+// below: at 16px an outline loses its interior and only the SILHOUETTE survives. So the
+// three "it's a waveform" instruments are separated by structure rather than by detail —
+// bass is one smooth low period, sample is discrete vertical slices, synth is angular saw
+// teeth — because three tastefully different squiggles would be one indistinguishable
+// squiggle in the header. `drum` reuses IconDrum (the MPC pad grid), `vocal` reuses
+// IconMic and `fx` reuses IconSpark; only the seven with no existing glyph are new.
+
+// tambourine — a ring with jingles. Deliberately round where IconDrum is square, so
+// "beat" and "tops" don't collapse into each other at a glance.
+export function IconPerc(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="4.6" r="1.3" />
+      <circle cx="18.4" cy="15.7" r="1.3" />
+      <circle cx="5.6" cy="15.7" r="1.3" />
+    </Svg>
+  );
+}
+
+// the low end — one full, slow, tall period. The only smooth curve in the set.
+export function IconBass(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M2.5 12c0-4.5 2.4-6.5 4.75-6.5S12 7.5 12 12s2.4 6.5 4.75 6.5S21.5 16.5 21.5 12" />
+    </Svg>
+  );
+}
+
+// figure-8 body + neck. The one instrument outline that survives 16px, because the
+// waist is the whole read.
+export function IconGuitar(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9.7 10.6a3.4 3.4 0 1 0-2.6 5.8 3.9 3.9 0 1 0 4.1 3.1 3.5 3.5 0 0 0-1.5-8.9z" />
+      <path d="M12.2 11.4L19 4.6" />
+      <path d="M17.6 3.2l3.2 3.2" />
+    </Svg>
+  );
+}
+
+// a keybed seen head-on: the two black-key clusters are what make it unmistakable.
+export function IconKeys(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="6.5" width="18" height="11" rx="1.6" />
+      <path d="M8.25 6.5v11" />
+      <path d="M12 6.5v11" />
+      <path d="M15.75 6.5v11" />
+      <path d="M6.6 6.5v4.4M9.9 6.5v4.4M14.1 6.5v4.4M17.4 6.5v4.4" />
+    </Svg>
+  );
+}
+
+// sawtooth — angular where bass is smooth. Reads "oscillator", not "recording".
+export function IconSynth(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 17L8 7v10l5-10v10l5-10v10h3" />
+    </Svg>
+  );
+}
+
+// a harp/lyre: an arc with strings under it. No other icon here has parallel verticals
+// under a curve, which is the whole point.
+export function IconStrings(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 19.5C5 9.5 19 9.5 19 19.5" />
+      <path d="M4 19.5h16" />
+      <path d="M8.5 19.5v-6.2M12 19.5v-7.4M15.5 19.5v-6.2" />
+    </Svg>
+  );
+}
+
+// chopped audio — discrete slices, not a continuous line. The bracket says "a region of
+// a file" rather than "a signal".
+export function IconSample(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 8.5v7M7.7 6v12M11.4 9.5v5M15.1 7v10M18.8 10v4" />
+    </Svg>
+  );
+}

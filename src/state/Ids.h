@@ -100,6 +100,20 @@ namespace mosh::ids
     // decision (v2 offers eight swatches) and baking one into the persisted format would
     // make every future palette change a migration.
     MOSH_DECLARE_ID (trackColour)
+
+    // CAP-TRK-002 (#613) — the track's chosen ICON, as a NAME ("bass"), or absent for the
+    // track type's default glyph. Lives on the track's own state tree like trackType, so
+    // it saves/reloads with the edit, and is written WITH the undo manager — picking an
+    // icon is an edit a producer expects ⌘Z to take back.
+    //
+    // A NAME, never an index into the palette the UI happens to render. An index would
+    // make every future reorder — or every insertion anywhere but the end — silently
+    // repaint the icons of projects already on disk, and there is no migration that can
+    // fix that afterwards, because the file does not record which palette it meant. A
+    // name means the palette can grow, shrink and be reordered freely and old projects
+    // stay correct. Same reasoning as a colour storing "#rrggbb" rather than "swatch 3".
+    // The vocabulary of legal names lives in state/TrackIcons.h.
+    MOSH_DECLARE_ID (trackIcon)
     // FL drum-lane mute/solo: comma-separated GM pitches whose sampler pad is muted /
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)

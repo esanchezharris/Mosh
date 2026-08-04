@@ -62,6 +62,24 @@
   flex: 1 1 auto; min-width: 0; font: inherit; color: var(--v2-text);
   background: var(--v2-surface-sunken); border: 1px solid var(--v2-line); border-radius: 6px; padding: 5px 8px;
 }
+/* CAP-TRK-002 (#613) — the icon picker. `align-items: flex-start` because this field
+   wraps to two rows and would otherwise centre its "Icon" label against the block. */
+.v2-icons { align-items: flex-start; }
+.v2-icon-row { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.v2-icon-pick {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border-radius: var(--v2-radius-xs);
+  background: var(--v2-surface-sunken); border: 1px solid var(--v2-line);
+  color: var(--v2-dim); cursor: pointer; line-height: 1;
+}
+.v2-icon-pick:hover { color: var(--v2-text); border-color: var(--v2-accent); }
+/* The selected icon is marked by FILL, not by an outline: at 24px an outline ring reads
+   as a focus state, and the picker is a row of ten of them. */
+.v2-icon-pick.on { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* "no icon" is an em dash rather than an empty square — an empty square looks like a
+   glyph that failed to load rather than a choice you can make. */
+.v2-icon-none { font-size: var(--v2-fs-sm); }
+
 .v2-val { flex: 0 0 40px; text-align: right; color: var(--v2-text); font-family: var(--font-mono); font-size: var(--v2-fs-sm); }
 /* set_input_monitor's applied:false readout — an `ok:true` result that did nothing
    (no input device matches this track), which the global lastError banner does not

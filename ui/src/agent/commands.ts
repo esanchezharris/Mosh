@@ -43,6 +43,7 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
   { command: "set_track_color", desc: "Recolour a track for organisation (changes nothing audible)", args: [S("trackId"), S("color", true, '"#rrggbb" lowercase hex, or "" to clear back to the type default')] },
+  { command: "set_track_icon", desc: "Set a track's icon so it is findable at a glance (changes nothing audible)", args: [S("trackId"), S("icon", true, 'one of: drum, perc, bass, guitar, keys, synth, vocal, strings, fx, sample — or "" to clear back to the track type default')] },
   { command: "move_track", desc: "Reorder a track — toIndex is its new position in the arrangement (0 = top). Refuses a track inside a group", args: [S("trackId"), N("toIndex", true, "0-based position among the arrangement's tracks")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
   // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
@@ -268,6 +269,7 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
     case "set_track_color": return a.color ? `Recoloured a track ${a.color}` : `Cleared a track's colour`;
+    case "set_track_icon": return a.icon ? `Set a track's icon to ${a.icon}` : `Cleared a track's icon`;
     case "move_track": return `Moved a track to position ${a.toIndex}`;
     case "remove_track": return `Removed a track`;
     case "add_test_tone_clip": return `Added a test tone`;
