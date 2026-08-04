@@ -332,6 +332,47 @@ Verified against the pinned clone (`model/export/tracktion_Renderer.h`):
   (`mosh::resolveExportRange`, `src/moshops/ExportRange.h`), unit-tested directly by
   `tests/test_export_range.cpp` without a live `MoshEngine`.
 
+## Track mute (CAP-AUT-006) — RESOLVED: the engine has NO automatable mute parameter
+
+Searched before designing anything, because the whole shape of the ticket turns on the
+answer. **There is none, on any axis, in the pinned clone.** What exists:
+
+- **Track mute is a property, not a parameter.** `Track::setMute(bool)` /
+  `AudioTrack::setMute` (`model/tracks/tracktion_AudioTrack.cpp:426`) writes
+  `muted`, a `CachedValue<bool>` on `IDs::mute` (`:110`). Nothing automatable is attached
+  to it.
+- **It is applied in the graph, not in a plugin.** `TrackMuteState` reads
+  `track->shouldBePlayed()` once per block from `TrackMutingNode::prefetchBlock`
+  (`playback/graph/tracktion_TrackMutingNode.cpp:36,63`), and
+  `createNodeForAudioTrack` (`playback/graph/tracktion_EditNodeBuilder.cpp:1418`) wraps
+  an audio track in **two** of those nodes — one over the clips, one over the whole
+  track output — while `PluginNode` skips a muted track's plugins entirely
+  (`tracktion_PluginNode.cpp:185-191`, gated on
+  `TrackMuteState::shouldTrackContentsBeProcessed()`). That is why the routing mute is
+  cheaper than any gate: nothing on the track runs.
+- **`VolumeAndPanPlugin::muteOrUnmute()` is not it.** It stores `lastVolumeBeforeMute`
+  and drives the fader to −100 dB and back (`plugins/internal/tracktion_VolumeAndPan.cpp:322`) —
+  a UI convenience on the existing `volume` parameter, not a parameter of its own, and
+  gain rather than routing.
+- **The internal plugins' full automatable-parameter set** is `volume`/`pan` on
+  `VolumeAndPanPlugin`, `vca` on `VCAPlugin`, and the four Rack in/out params
+  (`grep addAutomatableParameter plugins/internal/*.cpp`). No mute anywhere.
+- `AutomatableParameter` *does* support stepped parameters —
+  `isDiscrete()`/`getNumberOfStates()`/`getValueForState()`/`snapToState()`
+  (`model/automation/tracktion_AutomatableParameter.h:176-184`), and
+  `setParameterValue` runs **every** applied value through `snapToState`
+  (`:1387`), including each sample taken off a curve. So a two-state parameter is
+  applied as a step, which is what a mute lane must be.
+
+**What Mosh built instead** (`src/plugins/mixer/TrackMutePlugin.{h,cpp}`): a hidden
+per-track plugin carrying one discrete `mute` parameter, applied as a 5 ms-ramped
+multiply by zero, inserted immediately upstream of the post-fader metering tap. It is a
+**gate, not routing** — the clips and plugins still run and are silenced, where
+`set_track_mute` stops them running at all. `TrackMutePlugin.h` states the difference in
+full; the audible proof is `scripts/verify-hardware/verify.py::check_mute_automation`.
+
+No engine patch was needed or taken for this.
+
 ## Still to verify at their stages
 
 - **Takes / CompManager / WaveCompManager** external-take injection — Stage 5. If opaque → new-clip-on-neural-lane fallback (already a user-selectable mode, 05 §3.1).

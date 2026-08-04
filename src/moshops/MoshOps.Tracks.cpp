@@ -75,6 +75,14 @@ juce::var MoshOps::cmdCreateTrack (const juce::var& args)
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("type", type);
     data->setProperty ("isInstrument", trackHasInstrument (*track));
+    // CAP-AUT-006 — the pluginIndex of this track's mute gate, so a caller can write a
+    // mute curve without a snapshot round-trip (the gate is hidden from `plugins`; it
+    // rides `mixerPlugins`). −1 if the gate could not be created, which is the same
+    // best-effort contract as the metering tap above.
+    {
+        auto* gate = findTrackMuteGate (*track);
+        data->setProperty ("muteGateIndex", gate != nullptr ? track->pluginList.indexOf (gate) : -1);
+    }
     logLine ("create_track", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("create_track", var (data));
@@ -563,14 +571,22 @@ juce::var MoshOps::cmdSetTrackVolume (const juce::var& args)
 {
     const auto id = args.getProperty ("trackId", var()).toString();
     te::VolumeAndPanPlugin* vp = nullptr;
-    te::AudioTrack* audioTrack = nullptr;
-    if (auto* track = findTrack (id))
-        { audioTrack = track; vp = ensureVolumePlugin (*track); }
-    else if (auto* group = findGroupTrack (id))   // MIX-008: group fader (submix VolumeAndPan)
-        vp = group->getVolumePlugin();
-    if (vp == nullptr) return errResult ("set_track_volume", "no track");
+    te::AudioTrack* audioTrack = findTrack (id);
+    auto* group = audioTrack != nullptr ? nullptr : findGroupTrack (id);   // MIX-008: group fader (submix VolumeAndPan)
+    if (audioTrack == nullptr && group == nullptr) return errResult ("set_track_volume", "no track");
+    if (group != nullptr && group->getVolumePlugin() == nullptr) return errResult ("set_track_volume", "no track");
 
+    // ensureVolumePlugin MATERIALISES the fader on first touch, so it must run INSIDE
+    // this command's transaction: outside it, the insert lands in whatever transaction
+    // was open before and one undo restores the fader's VALUE while leaving the plugin
+    // itself behind. That was invisible while the fader was filtered out of the snapshot
+    // entirely; surfacing it in `mixerPlugins` (CAP-AUT-006) made the undo matrix red on
+    // "set_track_volume ONE undo restores the canonical snapshot", which is the matrix
+    // doing its job. Validation above still runs before any mutation, so a bad trackId
+    // opens no transaction.
     beginTxn ("set_track_volume");
+    vp = audioTrack != nullptr ? ensureVolumePlugin (*audioTrack) : group->getVolumePlugin();
+    if (vp == nullptr) return errResult ("set_track_volume", "no volume plugin");
     // G14 — route the fader change through the UndoManager (setVolumeDb alone bypasses it).
     undoManager().perform (new SetFaderValueAction (*vp, false, (float) (double) args.getProperty ("db", 0.0)));
     logLine ("set_track_volume", args, true, {}, true);
@@ -583,10 +599,14 @@ juce::var MoshOps::cmdSetTrackPan (const juce::var& args)
 {
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("set_track_pan", "no track");
+
+    // Same transaction-boundary fix as cmdSetTrackVolume above: the fader's first-touch
+    // materialisation belongs INSIDE this command's transaction, or one undo leaves the
+    // plugin behind.
+    beginTxn ("set_track_pan");
     auto* vp = ensureVolumePlugin (*track);
     if (vp == nullptr) return errResult ("set_track_pan", "no volume plugin");
 
-    beginTxn ("set_track_pan");
     // G14 — route the pan change through the UndoManager (setPan alone bypasses it).
     undoManager().perform (new SetFaderValueAction (*vp, true,
         juce::jlimit (-1.0f, 1.0f, (float) (double) args.getProperty ("pan", 0.0))));

@@ -1,5 +1,6 @@
 #include "PluginHost.h"
 #include "PluginEditorParamGesture.h"
+#include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/moshfx/MoshFxPlugins.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #if MOSH_HAVE_ANIRA
@@ -281,6 +282,14 @@ void PluginHost::initialise()
     // Register the master spectral tap (Moshi reactivity) — a pure-measure passthrough
     // appended to the master plugin list, drained at 30 Hz to feed Moshi's body.
     engine.getPluginManager().createBuiltInType<MasterSpectralTapPlugin>();
+    // CAP-AUT-006 — the per-track mute gate. Belt-and-braces: MoshEngine's ctor already
+    // registers it, because it has to be known BEFORE the persisted Edit is loaded there
+    // and PluginHost::initialise only runs later, from the MoshOps ctor.
+    // registerBuiltInType ignores a type it already has, so this is a no-op in the app
+    // and a safety net for any future path that builds a PluginHost on its own engine.
+    // Deliberately NOT in the curated `builtins` table: it must never appear in
+    // list_builtins for a user to load by hand.
+    engine.getPluginManager().createBuiltInType<TrackMutePlugin>();
     engine.getPluginManager().createBuiltInType<MoshAutoTunePlugin>();
     engine.getPluginManager().createBuiltInType<MoshOTTPlugin>();
     engine.getPluginManager().createBuiltInType<MoshXFeedbackPlugin>();
