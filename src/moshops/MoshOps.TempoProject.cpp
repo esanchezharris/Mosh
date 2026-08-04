@@ -64,6 +64,10 @@ juce::var MoshOps::cmdSetTransport (const juce::var& args)
         // is always honored. transport.record() below is what actually consults
         // it (te::Edit::getNumCountInBeats(), via TransportControl).
         applyCountInToEdit();
+        // REC-001 — same re-sync, same reason, for the settings that decide what the take
+        // DOES: a MIDI device plugged in since the preference was set has never seen it,
+        // and the engine reads mergeRecordings/quantisation at landing time.
+        applyRecordOptionsToDevices();
         eng.ensurePlaybackContext();
         transport.record (false);
     }
@@ -356,6 +360,10 @@ juce::var MoshOps::projectSettingsToVar()
     o->setProperty ("timeBase", tb);
     o->setProperty ("key", var (key));
     o->setProperty ("countInBars", countInBars);
+    // REC-001 — how a take behaves, alongside the count-in that precedes it. Nested
+    // rather than flattened so the recording panel binds one object and a sixth setting
+    // later costs no snapshot-shape change.
+    o->setProperty ("recordOptions", recordOptionsToVar());
     // PRJ-FMT — the stamped project format version (0 ⇒ legacy/unsaved). Lets the UI and
     // the selftest observe the on-tree stamp without reading the .tracktionedit directly.
     o->setProperty ("formatVersion", mosh::readFileVersion (eng.edit().state));

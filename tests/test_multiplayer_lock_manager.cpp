@@ -259,6 +259,11 @@ namespace
             // (unlike set_key, which is classified Unguarded in LockManager.cpp), not
             // per-track.
             "set_count_in",
+            // REC-001 — record options sit exactly where set_count_in does: a project-wide
+            // recording preference, not a per-track edit. capture_midi is session-global
+            // for a different reason — with armedOnly:false it can create clips on EVERY
+            // track that has buffered input, so no single track lock could cover it.
+            "set_record_options", "capture_midi",
             // The master bus is not "a track" -- it is the session's one mix bus.
             "set_master_volume", "set_master_pan",
             // Master-bus plugins (limiter, bus EQ, ...) -- same posture as the master

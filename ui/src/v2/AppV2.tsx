@@ -8,6 +8,7 @@ import { useStore } from "../store";
 import { useShell } from "./shellState";
 import { isNative } from "../bridge";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useQwertyMidi } from "../hooks/useQwertyMidi";
 import { formatPeerError } from "../multiplayer/peerErrors";
 import { useFileDrop } from "../hooks/useFileDrop";
 import { TopBar } from "./TopBar";
@@ -39,6 +40,7 @@ export function AppV2() {
   const rightOpen = useShell((s) => s.rightOpen);   // RIGHT push-dock (agent rail)
 
   useKeyboardShortcuts(); // the single keyboard layer + native-menu bridge
+  useQwertyMidi();        // the computer keyboard as a MIDI controller (capture phase, claims its own keys)
   const dragging = useFileDrop(); // drag-and-drop audio import (bytes over the bridge)
 
   // Opened outside a backend (production build, no JUCE WebView + no dev mock).

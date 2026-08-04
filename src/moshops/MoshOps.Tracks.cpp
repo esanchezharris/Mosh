@@ -349,14 +349,26 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     // edit) and arm_track prefers it over first-match.
     track->state.setProperty (ids::moshInputDevice, deviceID, nullptr);
 
-    // Live application: retarget the chosen wave instance to this track. Headless
+    // Live application: retarget the chosen instance to this track. Headless
     // (no playback context) there are no instances -> graceful applied:false.
+    //
+    // The requested device's FAMILY is resolved first, and only instances of that family
+    // are considered. A track can legitimately carry a wave input AND a MIDI input at
+    // once, so "clear the old assignment" has to mean the old assignment of the SAME
+    // family — choosing a controller must not unassign the audio input, or vice versa.
+    // This loop previously skipped every MIDI instance outright, with two consequences:
+    // a MIDI deviceID could never become `chosen`, so the choice was merely stored and
+    // did not take effect until the next arm_track; and switching from controller A to
+    // controller B never released A, leaving both driving the track.
+    auto& dm = eng.engine().getDeviceManager();
+    const bool wantMidi = dm.findMidiInputDeviceForID (deviceID) != nullptr;
+
     bool applied = false;
     bool wasArmed = false;
     te::InputDeviceInstance* chosen = nullptr;
     for (auto* inst : eng.edit().getAllInputDevices())
     {
-        if (inst == nullptr || inst->getInputDevice().isMidi()) continue;
+        if (inst == nullptr || inst->getInputDevice().isMidi() != wantMidi) continue;
         if (te::isOnTargetTrack (*inst, *track, 0))
         {
             wasArmed = inst->isRecordingEnabled (track->itemID);
@@ -389,6 +401,7 @@ juce::var MoshOps::cmdSetTrackInput (const juce::var& args)
     auto* data = new DynamicObject();
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("deviceID", deviceID);
+    data->setProperty ("kind", wantMidi ? "midi" : "wave");
     data->setProperty ("applied", applied);
     if (! applied) data->setProperty ("reason", "no live input instance (choice stored)");
     logLine ("set_track_input", args, true, {}, false);   // preference — not undoable

@@ -59,7 +59,12 @@ describe("piano-roll drag axis independence", () => {
 
   const mount = () => {
     // snap ON — this is the whole point: snapBeat must have teeth for the guard to matter.
-    useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, snapDivision: "1/4", exec });
+    // The editor keeps its OWN grid now — the arrangement's snapDivision no longer reaches
+    // it — so pin the division here. Adaptive off, or the step would follow the zoom.
+    useSettings.getState().set("prGridDivision", "1/4");
+    useSettings.getState().set("prGridAdaptive", false);
+    useSettings.getState().set("prGridTriplet", false);
+    useStore.setState({ snapshot: SNAPSHOT, editingClipId: "c1", snap: true, exec });
     act(() => root.render(React.createElement(PianoRoll)));
   };
 
@@ -188,8 +193,18 @@ describe("piano-roll drag axis independence", () => {
     expect(dragOutAndBack(".pr-note-grip", 3 * BEAT_PX, 0)).toBeUndefined();
   });
 
-  it("dragging a note out and back keeps its off-grid start", () => {
+  it("dragging a note out and back commits nothing", () => {
     mount();
-    expect(dragOutAndBack(".pr-note", 3 * BEAT_PX, 0)?.start).toBe(OFF_GRID_START);
+    // Same abandoned gesture as the resize case above, and now the same answer: neither
+    // axis ended up moved, so nothing is sent at all.
+    //
+    // This assertion used to expect a set_note carrying the note's ORIGINAL start — the
+    // move path wrote the unchanged values back, while the resize path (one test up)
+    // committed nothing. That asymmetry was an artifact of two code paths, not a decision:
+    // both gestures abandon the same way. Committing nothing is the stronger guarantee for
+    // the property this file is about — an untouched axis cannot be rewritten by a command
+    // that was never sent — and it saves a pointless undo step, JSONL line, snapshot
+    // invalidation and UI refresh per abandoned drag.
+    expect(dragOutAndBack(".pr-note", 3 * BEAT_PX, 0)).toBeUndefined();
   });
 });

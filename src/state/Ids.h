@@ -56,6 +56,30 @@ namespace mosh::ids
     // timeBase/musicalTonic).
     MOSH_DECLARE_ID (countInBars)
 
+    // REC-001 — how a live MIDI take BEHAVES. Stored on the same MOSH_PROJECT node as
+    // countInBars, and for the same reason: the engine's own homes for these settings
+    // are unreachable when they are set.
+    //
+    //   recOverdub / recReplaceExisting / recQuantize live on MidiInputDevice
+    //     (mergeRecordings / replaceExistingClips / quantisation), which are PER-DEVICE
+    //     and exist only while an audio device is open. A producer setting "overdub"
+    //     with no interface plugged in would otherwise be writing to nothing, and the
+    //     value could not be proven headless.
+    //   recPunchInOut mirrors te::Edit::recordingPunchInOut, which DOES live in the Edit
+    //     — but is bound with a nullptr UndoManager, so writing it inside a transaction
+    //     makes an empty one (the G14 undo class: the next undo then destroys the
+    //     PREVIOUS edit). Storing intent here keeps one write path for all five.
+    //
+    // MoshOps::applyRecordOptionsToDevices() pushes the stored intent into the live
+    // engine every time it could matter (on set, on record-start, on project load), so
+    // the setting is real rather than merely remembered — the same discipline
+    // applyCountInToEdit uses. NON-undoable preferences, all five.
+    MOSH_DECLARE_ID (recOverdub)          // bool — a new take MERGES into the clip it lands on
+    MOSH_DECLARE_ID (recReplaceExisting)  // bool — a take REPLACES clips under it
+    MOSH_DECLARE_ID (recQuantize)         // double — beats; 0 = off. Same domain as quantize_notes' `division`
+    MOSH_DECLARE_ID (recPunchInOut)       // bool — capture only inside the loop/punch range
+    MOSH_DECLARE_ID (recRetroSeconds)     // double — how much played-but-not-recorded MIDI capture_midi can reach back for
+
     // RTG-001 — the track's CHOSEN input device (a WaveInputDevice deviceID).
     // A plain property on the track's own state tree so the choice saves/reloads
     // with the edit; arm_track prefers it over first-match. NON-undoable
@@ -80,6 +104,34 @@ namespace mosh::ids
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)
     MOSH_DECLARE_ID (drumSolo)
+    // The pad's OWN gain, parked here while the pad is muted, and restored verbatim on
+    // unmute. Lives on te::SamplerPlugin's SOUND child (mosh-prefixed so it cannot
+    // collide with a te::IDs property), and so saves/reloads with the edit.
+    //
+    // It exists because a pad's mute state CANNOT be inferred from its gain. The engine
+    // clamps every gain write to [-48, +48] dB — in SamplerPlugin::setSoundGains and
+    // again in the SamplerSound constructor — so the old scheme (mute by writing -100,
+    // detect mute by reading back <= -99) could never see its own sentinel: the stored
+    // value was always -48. Muting a lane was therefore permanent, and it persisted
+    // through save/reload. Written WITH the undo manager so mute/unmute undoes as one.
+    MOSH_DECLARE_ID (moshPadGainDb)
+    // The pad's CHOKE GROUP (1-16; absent/0 = none). Pads sharing a group cut each other
+    // off — a closed hat silencing an open one. Lives on the SOUND child alongside the
+    // parked gain above.
+    //
+    // This is a MOSH-SIDE property with NO engine backing: te::SamplerPlugin has no choke
+    // concept, its playingNotes list is private, and an open-ended voice ignores note-off
+    // entirely (the only stops it offers kill every voice on the track at once). It is
+    // therefore enforced by exactly two mechanisms, and nothing else:
+    //   - live triggering, where MoshOps owns the injected stream (audition_note); and
+    //   - apply_choke, which BAKES it into note lengths so clip playback and export obey
+    //     it too. During playback the MIDI comes from the engine's own MidiNode, which
+    //     MoshOps is not in the path of, so there is no third way to do this short of a
+    //     custom sampler subclass — rejected for v1 because the plugin type name is
+    //     persisted in every existing edit.
+    MOSH_DECLARE_ID (moshChokeGroup)
+    // The kit a drum track last loaded, so the picker can show what is on it.
+    MOSH_DECLARE_ID (drumKitId)
 
     // MP-001 (multiplayer) — STABLE LOGICAL IDs that survive across two peers'
     // independent engines. Tracktion's own te::EditItemID is allocator-dependent

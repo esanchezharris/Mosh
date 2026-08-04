@@ -80,31 +80,40 @@ export function useAnchoredPanel(
       setOpen(false);
     };
     document.addEventListener("pointerdown", onDown, true);
-    // …but ARM the scroll/resize dismissal one frame late.
+    window.addEventListener("resize", onDismiss);
+
+    // Scroll arms ONE FRAME LATE, and that delay is load-bearing. The click that opens a
+    // panel is itself a scroll source — the browser scrolls a partly-offscreen trigger
+    // into view before dispatching the click — so the resulting scroll lands just AFTER
+    // the panel opens, when an immediately-armed listener would dismiss it. Measured at
+    // 1ms in a captured failure: `|toggle:false->true@1088 |dismiss:scroll@1089`.
     //
-    // The click that opens this panel may itself have scrolled: a trackpad flick keeps
-    // firing scroll events for hundreds of ms after the fingers lift, and the trailing
-    // "Add track" row genuinely needs scrolling into view once the list has grown. Scroll
-    // events are delivered asynchronously, in the rendering step — whereas the click
-    // handler runs setOpen(true), React commits, and this effect fires, all synchronously
-    // inside the click task. Arm synchronously and the panel receives the scroll that
-    // caused its own opening click, and closes the instant it opens.
+    // The trailing add-track row is the worst case (it sits at the END of the lane list,
+    // so it is the trigger most likely to need scrolling to), and it is where this showed
+    // up: main's e2e suite failed intermittently on "the add-track menu reaches drum and
+    // instrument tracks" waiting for a menu item that had already been torn down.
     //
-    // One frame is exactly the right delay, not a magic number: the HTML spec's
-    // update-the-rendering step fires scroll events BEFORE it runs animation-frame
-    // callbacks, so any scroll already queued when the panel opened has been dispatched
-    // by the time this callback registers the listener. A scroll the user makes
-    // afterwards still dismisses, which is the deliberate behaviour (a fixed-position
-    // panel whose trigger has scrolled away is worse than one that closes) — both halves
-    // are pinned by e2e/anchored-panel-scroll-race.spec.ts.
-    const armed = requestAnimationFrame(() => {
+    // NOT a test workaround. A producer clicking a partly-offscreen trigger, or clicking
+    // while a trackpad glide is still settling, sees the menu blink open and vanish;
+    // Playwright merely hits the timing reliably. pointerdown and resize stay immediate —
+    // neither is self-inflicted by the opening click.
+    //
+    // ONE FRAME IS EXACT, not a magic delay. Scroll events are delivered in the HTML
+    // spec's "update the rendering" step, which fires them BEFORE running
+    // animation-frame callbacks — while the click handler's setOpen(true), React's
+    // commit, and this effect all run synchronously inside the click task. So a scroll
+    // queued before the panel existed is delivered before this callback registers the
+    // listener, and a scroll the user makes afterwards still dismisses normally.
+    let scrollArmed = false;
+    const raf = requestAnimationFrame(() => {
+      scrollArmed = true;
       document.addEventListener("scroll", onDismiss, true);
-      window.addEventListener("resize", onDismiss);
     });
+
     return () => {
-      cancelAnimationFrame(armed);
+      cancelAnimationFrame(raf);
       document.removeEventListener("pointerdown", onDown, true);
-      document.removeEventListener("scroll", onDismiss, true);
+      if (scrollArmed) document.removeEventListener("scroll", onDismiss, true);
       window.removeEventListener("resize", onDismiss);
     };
   }, [open]);

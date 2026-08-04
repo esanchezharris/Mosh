@@ -61,6 +61,9 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   file_peaks: "waveform peak arrays for the file browser — meaningless to the model",
   audition_file: "pre-import audition is a listening affordance; the agent can't hear it",
   stop_audition: "pre-import audition is a listening affordance; the agent can't hear it",
+  audition_note: "sounds a note through the track's instrument for the producer to hear — a listening affordance the agent can't hear, and it changes nothing, so there is no result for it to reason about",
+  all_notes_off: "panic-stops whatever the keyboard or piano roll left sounding; a live-performance affordance, not a musical edit",
+  capture_midi: "keeps what the producer just PLAYED but did not record — the model has no performance sitting in the retrospective buffer, so there is nothing for it to capture (set_record_options, which decides how a take behaves, IS agent-callable)",
 
   // ── generative machinery the agent reaches through higher-level commands ──────
   add_render_layer: "the raw Stage-1 layer primitive — the agent uses create_render_layer (auto-bounce + region scoping)",

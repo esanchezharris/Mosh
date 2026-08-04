@@ -454,17 +454,6 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
             NOT undoable by design, matching cmdArmTrack: arming is a transport decision
             like monitor mode, not an edit to the project. */}
         <button
-          className={`r${track.armed ? " on" : ""}`}
-          data-testid="v2-track-arm"
-          aria-label={`Record-arm ${track.name}`}
-          aria-pressed={!!track.armed}
-          disabled={track.hasInput === false}
-          title={track.hasInput === false
-            ? `${track.name} has no input routed — pick one in the Inspector's Mix tab before arming`
-            : `Record-arm ${track.name}`}
-          onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
-        >R</button>
-        <button
           className={`m${track.mute ? " on" : ""}`}
           aria-label="Mute"
           aria-pressed={!!track.mute} title="Mute"
@@ -476,6 +465,28 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
           aria-pressed={!!track.solo} title="Solo"
           onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
         >S</button>
+        {/* REC-002 — record-arm, where every DAW puts it. It is not decoration next to
+            M/S: arming is what routes live MIDI to this track AND what makes a note
+            played on the computer keyboard recordable at all (audition_note only takes
+            the input path on an armed track). Without this the ONLY way to arm was to
+            press Record, which made Capture MIDI — whose whole point is that you were
+            NOT recording — impossible to reach for the QWERTY keyboard. */}
+        <button
+          className={`r${track.armed ? " on" : ""}`}
+          data-testid="v2-track-arm"
+          aria-label={`Record-arm ${track.name}`}
+          aria-pressed={!!track.armed}
+          title={track.armed
+            ? "Armed — live MIDI reaches this track, and what you play can be recorded or captured"
+            // The no-input case APPENDS; it must not replace, or the tooltip stops saying the
+            // one thing a producer cannot learn anywhere else (that arming is what makes the
+            // computer keyboard recordable) exactly when they most need telling.
+            : "Record-arm: route live MIDI here so it can be recorded or captured"
+              + (track.hasInput === false
+                ? ". No audio input is routed yet — pick one in the Inspector's Mix tab; the computer keyboard routes itself the first time you play a note"
+                : "")}
+          onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
+        >R</button>
       </span>
       {/* TRK-REORDER (#550) — move this row up/down. Every one of the four reference DAWs
           reorders tracks by DRAGGING the header, so drag is the 2-of-4 idiom and remains

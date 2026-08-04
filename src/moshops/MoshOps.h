@@ -33,7 +33,8 @@ namespace mosh
       result   = { "ok": bool, "command": string, "data"?: any, "error"?: string }
       snapshot = { schemaVersion, session, tracks[], transport }
       event    = { "type": string, ... }   (pushed on the "mosh_event" channel) */
-class MoshOps : private juce::Timer
+class MoshOps : private juce::Timer,
+                private te::Edit::WastedMidiMessagesListener
 {
 public:
     explicit MoshOps (MoshEngine& engineToUse);
@@ -290,6 +291,11 @@ private:
     juce::var cmdLoadDrumKit    (const juce::var& args);
     juce::var cmdAssignSample   (const juce::var& args);
     juce::var cmdSetDrumLane    (const juce::var& args);
+    // Drum-rack pads: per-pad mixer/identity/choke, and the inverse of assign_sample.
+    juce::var cmdSetDrumPad     (const juce::var& args);
+    juce::var cmdClearDrumPad   (const juce::var& args);
+    juce::var cmdApplyChoke     (const juce::var& args);
+    juce::var cmdListDrumKits   (const juce::var& args);
     juce::var cmdRemovePlugin   (const juce::var& args);
     juce::var cmdReorderPlugin  (const juce::var& args);
     juce::var cmdSetPluginParam (const juce::var& args);
@@ -401,6 +407,16 @@ private:
     // live Edit's real tracktion_engine pre-roll (te::Edit::setCountInMode) so the
     // setting is ENGINE-WIRED, not just stored.
     juce::var cmdSetCountIn (const juce::var& args);
+    // REC-001 — how a live MIDI take behaves (overdub/replace/record-quantise/punch) and
+    // how far Capture can reach back. Same MOSH_PROJECT node + NON-undoable-preference
+    // template as cmdSetCountIn, and for the same reason: three of the five live on
+    // te::MidiInputDevice, which does not exist until an audio device is open.
+    // applyRecordOptionsToDevices() is what makes them real. See MoshOps.Record.cpp.
+    juce::var cmdSetRecordOptions (const juce::var& args);
+    // REC-001 — Ableton's Capture MIDI: turn what you just played, while NOT recording,
+    // into clips (te::EditPlaybackContext::applyRetrospectiveRecord). The one command in
+    // this group that IS an Edit mutation, so unlike its neighbours it is undoable.
+    juce::var cmdCaptureMidi (const juce::var& args);
     // MIX-008 — group (submix) tracks: a te::FolderTrack created asSubmix=true sums
     // its children through a SummingNode + its own plugin chain (engine-proven).
     juce::var cmdCreateGroupTrack (const juce::var& args);   // undoable (one transaction)
@@ -446,6 +462,15 @@ private:
     // save/reload that swapped in a different Edit instance). Cheap + headless-safe
     // (writes engine property storage, no audio device required).
     void applyCountInToEdit();
+    // REC-001 — the resolved { overdub, replaceExisting, quantize, quantizeLabel,
+    // punchInOut, retrospectiveSeconds } block. Every field always present (a UI that
+    // has to tell "false" from "missing" renders a toggle in a third, wrong state).
+    juce::var recordOptionsToVar();
+    // REC-001 — pushes the stored record-option intent into whatever MIDI input devices
+    // exist RIGHT NOW, plus te::Edit::recordingPunchInOut. Called on set, on
+    // record-start and on project load, so a controller plugged in AFTER the setting was
+    // made still honours it. A complete no-op headless (no devices to write to).
+    void applyRecordOptionsToDevices();
 
     // SEC-001 — the MOSH_SECTIONS container as a snapshot array (read-only; never
     // creates the tree). Each entry: { id, name, startBeat, endBeat, color? }.
@@ -605,23 +630,29 @@ private:
     // drumKitDir(): the bundled default kit dir (env MOSH_DRUMKIT_DIR overrides;
     // else Mosh.app/Contents/Resources/drumkits/mosh-kit; else next to the exe).
     juce::File           drumKitDir() const;
+    // The library root (one folder per kit) and a named kit inside it.
+    juce::File           drumKitsRoot() const;
+    juce::File           drumKitDir (const juce::String& kitId) const;
     // True when at least one bundled pad is resolvable — guard mutations that load
     // the kit so a missing/broken kit is a clean no-op, not a partial insert/wipe.
-    bool                 drumKitAvailable() const;
+    bool                 drumKitAvailable (const juce::String& kitId = {}) const;
     // ensureSampler(): the track's existing te::SamplerPlugin, or a fresh one
     // inserted at the front of the chain (instrument-first).
     te::SamplerPlugin*   ensureSampler (te::AudioTrack&);
     // findSampler(): the track's te::SamplerPlugin if present (never creates one).
     te::SamplerPlugin*   findSampler (te::AudioTrack&) const;
-    // applyDrumLaneGains(): silence (gain -100) the sampler pads whose GM pitch is
-    // muted (or, when any lane is soloed, every pad EXCEPT the soloed ones); restore
-    // formerly-muted pads to 0 dB. Only touches pads crossing the mute threshold, so
-    // a non-muted pad's custom gain is left alone. Reads the drumMute/drumSolo props.
+    // applyDrumLaneGains(): silence the sampler pads whose GM pitch is muted (or, when
+    // any lane is soloed, every pad EXCEPT the soloed ones), and restore a formerly-muted
+    // pad to the gain it had before. Only touches pads crossing the mute threshold, so a
+    // non-muted pad's custom gain is left alone. Reads the drumMute/drumSolo props.
+    // A muted pad's own gain is parked on its SOUND tree (ids::moshPadGainDb) and that
+    // property's PRESENCE is the mute flag — mute is never inferred from the gain value,
+    // because the engine clamps gains to [-48,+48] and would swallow any sentinel.
     void                 applyDrumLaneGains (te::AudioTrack&);
     // loadDrumKitInto(): clear + load the 8 bundled pads onto a sampler, each
     // mapped to its GM pitch (keyNote==minNote==maxNote) and open-ended. Pumps the
     // sampler's async file load headless. Returns the number of pads loaded.
-    int                  loadDrumKitInto (te::SamplerPlugin&);
+    int                  loadDrumKitInto (te::SamplerPlugin&, const juce::String& kitId = {});
     // ensureDefaultInstrument(): if the track has no instrument, auto-load the sane
     // default — drum track → sampler+kit; melodic → 4OSC — so MIDI notes are
     // audible immediately. No-op when an instrument is already present.
@@ -731,6 +762,75 @@ private:
     std::unique_ptr<juce::AudioFormatReaderSource> previewReader;
     bool previewWired = false;
     void stopAudition();
+
+    // ── Live note audition (MoshOps.Live.cpp): play a pitch through a track's REAL
+    //    instrument on demand — the piano roll's "hear it as you drag", the drum pad
+    //    preview, and the computer-keyboard MIDI controller all ride this.
+    //
+    //    Transient, exactly like the file audition above: no undo transaction, no JSONL
+    //    line, no snapshot_invalidated. That is load-bearing rather than tidy — a held
+    //    key repeats at ~30 Hz, and logging or invalidating per event would push 30 empty
+    //    undo steps, 30 log lines and 30 full snapshot re-pulls PER SECOND.
+    struct HeldVoice
+    {
+        te::EditItemID track;
+        int    pitch = -1;
+        int    channel = 1;
+        double startedMs = 0.0;
+        // Each voice carries its OWN lifetime, which is what lets a fire-and-forget
+        // "blip" (drag a note to a new pitch, tap a drum pad) be nothing more than a
+        // held voice with a short TTL. The 30 Hz sweep then becomes the single release
+        // path for both kinds, instead of a per-note timer whose destruction mid-flight
+        // would be one more way to leak a stuck note.
+        double ttlMs = 0.0;
+    };
+    std::vector<HeldVoice> heldVoices_;          // message thread only
+    // Every injected message is stamped notMPE ({} == 0), which is what the engine's own
+    // guide-note path passes. A unique id per source only matters for MPE voice tracking.
+    static constexpr te::MPESourceID kLiveSourceID = {};
+
+    // Detects the case where an injected message reaches NOTHING. The engine only wraps a
+    // track in a LiveMidiInjectingNode when that track produced a clips node, so a track
+    // that has an instrument but NO CLIPS silently swallows every injected note. The
+    // engine fires this callback synchronously from inside injectLiveMidiMessage, so
+    // clearing the flag immediately before the call and reading it immediately after turns
+    // "did that actually reach an instrument?" into an exact answer instead of a guess.
+    void warnOfWastedMidiMessages (te::InputDevice*, te::Track*) override { wastedMidiFired_ = true; }
+    bool wastedMidiFired_ = false;
+
+    // REC-002 — the computer keyboard as a REAL MIDI input.
+    //
+    // injectLiveMidiMessage is monitor-only: it reaches a LiveMidiInjectingNode and
+    // nothing else, so nothing played on the QWERTY keyboard could be recorded or reach
+    // the retrospective buffer that Capture reads. A note played through a
+    // te::MidiInputDevice gets all of that for free — timing, record latency, overdub
+    // merge, record-quantise and the Capture buffer are the engine's, not ours.
+    //
+    // So Mosh publishes a virtual MIDI input named below. It shows up in the track input
+    // picker like any other controller, because that is what it is.
+    static constexpr const char* kKeyboardDeviceName = "Mosh Keyboard";
+    /** Creates the virtual input once audio is up; returns it, or nullptr headless.
+        Idempotent and cheap after the first success (the flag short-circuits it). */
+    te::MidiInputDevice* ensureKeyboardInputDevice();
+    bool keyboardDeviceEnsured_ = false;
+    /** The MIDI input device this track is ARMED to, or nullptr. Non-null is what makes
+        an auditioned note recordable — and is the whole fork in cmdAuditionNote. */
+    te::MidiInputDevice* armedMidiInputFor (te::AudioTrack&);
+    /** One held voice's note-off, down whichever road its note-on took. Shared by the
+        explicit release and the TTL sweep so the two cannot diverge. */
+    void releaseOneVoice (te::AudioTrack&, int channel, int pitch);
+
+    juce::var cmdAuditionNote (const juce::var& args);
+    juce::var cmdAllNotesOff  (const juce::var& args);
+    // Releases every held voice on every track (explicit note-offs, then an all-notes-off
+    // per channel, then any sampler's allNotesOff — the only thing that stops an
+    // open-ended one-shot). Called by the command, by the TTL sweep, on UI reload, and
+    // on project swap/teardown.
+    int  releaseAllVoices (te::AudioTrack* onlyThisTrack = nullptr);
+    // Force-releases voices held longer than MOSH_AUDITION_MAX_HOLD_MS. Runs on the
+    // existing 30 Hz timer, so it survives anything the WebView does (crash, freeze,
+    // a dropped note-off) without a watchdog thread of its own.
+    void sweepStuckVoices();
 
     MoshEngine& eng;
     PluginHost  pluginHost;

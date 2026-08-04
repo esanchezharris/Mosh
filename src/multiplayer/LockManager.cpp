@@ -18,7 +18,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
     static const std::set<juce::String> unguarded {
         "list_plugins", "list_builtins", "list_audio_devices", "list_midi_inputs",
         "list_wave_inputs", "list_track_outputs", "list_takes", "list_colors", "list_loras",
-        "list_directory", "list_training_sources", "list_lora_adapters",
+        "list_directory", "list_training_sources", "list_lora_adapters", "list_drum_kits",
         "get_clip_peaks", "file_peaks", "get_command_log", "audition_file", "detect_clip_bpm",
         "list_transform_targets", "list_rave_models", "list_loras", "get_rhymes", "get_lyric_corpus_stats",
         // AGT-MEM (Phase-B memory lane, M1) — pure file I/O (no ValueTree mutation,
@@ -30,6 +30,10 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // Lane A — render-ahead: the clock tick is an internal/transport-like driver (no clip
         // target in its args; run-script/GUI-internal), so it never contends for a track.
         "render_ahead_tick",
+        // Live note audition: transient sound only — it mutates nothing, so two peers
+        // playing notes on the same track can never conflict (nor can a peer's keypress
+        // be blocked by someone else's lock on the track they are auditioning).
+        "audition_note", "all_notes_off",
         "stop_audition", "export_audio", "export_stems", "save", "reload", "save_as", "new_project",
         "open_project", "set_transport", "stop_recording", "undo", "redo",
         "mark_take", "batch_begin", "batch_end",
@@ -66,6 +70,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         "set_plugin_param", "bypass_plugin",
         "add_rave_insert", "set_rave_param", "load_rave_model", "reset_rave",
         "set_track_type", "load_drum_kit", "assign_sample", "set_drum_lane",
+        "set_drum_pad", "clear_drum_pad",
         // DRM-002 — composite: can create a clip AND mutate track instrument/type.
         "add_drum_pattern",
         "add_midi_clip", "paste_clip", "set_track_input", "set_track_output", "add_send",
@@ -97,6 +102,7 @@ LockManager::Scope LockManager::classify (const juce::String& command)
         // CLP-LOOP — clip loop region; carries a clipId like gain/mute/fade.
         "set_clip_loop",
         "duplicate_clip", "add_note", "remove_note", "set_note", "quantize_notes",
+        "apply_choke",
         "transcribe_clip", "add_render_layer", "create_render_layer",
         "set_render_param", "compile_render", "render_layer", "cancel_render",
         "accept_render", "reject_render", "reset_render_layer", "bypass_layer",

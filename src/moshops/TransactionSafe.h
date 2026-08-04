@@ -118,6 +118,10 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "enable_track_meter", "disable_track_meter", "enable_all_meters",
         "agent_memory_write", "agent_memory_delete", "agent_memory_clear",
         "activate_lora_adapter", "import_lora_adapter",
+        // REC-001 — record options are a stored preference pushed into per-device engine
+        // state; nothing about them is in the Edit's undo history, so an undo inside a
+        // skill's transaction would not put them back.
+        "set_record_options",
     };
     if (nonUndoable.count (command) > 0)
     {
@@ -151,6 +155,13 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "new_project", "open_project", "open_recent", "save", "save_as", "reload",
         "recover_session", "discard_recovery", "export_audio", "export_stems",
         "set_transport", "stop_recording", "undo", "redo",
+        // REC-001 — capture_midi IS synchronous and undoable, so it would pass criteria
+        // 1-4 mechanically. It is held out anyway, on the same "deliberately NARROW"
+        // ground as remove_bus above: with armedOnly:false it creates clips on EVERY
+        // track that has buffered input, so a rollback's blast radius is wider than a
+        // manifest naming one command can describe. It is also a PERFORMANCE gesture —
+        // there is no skill that plays a keyboard and then captures it.
+        "capture_midi",
     };
     if (lifecycle.count (command) > 0)
     {
@@ -188,10 +199,16 @@ inline const std::set<juce::String>& readOnlyDuringTransaction()
         "get_clip_peaks", "file_peaks", "get_command_log", "get_plugin_blocklist",
         "list_plugins", "list_builtins", "list_takes", "list_directory",
         "list_audio_devices", "list_midi_inputs", "list_wave_inputs",
-        "list_track_outputs", "list_rave_models", "list_training_sources",
+        "list_track_outputs", "list_rave_models", "list_training_sources", "list_drum_kits",
         "list_lora_adapters", "list_colors", "list_loras", "list_transform_targets",
         "agent_memory_read", "get_lyric_corpus_stats", "get_rhymes",
         "mp_serialize_track", "mp_serialize_project", "mp_sync_locks",
+        // Live note audition — transient sound, no Edit mutation and no beginTxn (the
+        // invariant this set enforces). Listed because a producer must still be able to
+        // play the keyboard, drag a note, or tap a drum pad WHILE an agent skill holds a
+        // transaction open; without it every such keypress would fail
+        // TRANSACTION_IN_PROGRESS.
+        "audition_note", "all_notes_off",
     };
     return reads;
 }

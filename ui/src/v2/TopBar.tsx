@@ -13,6 +13,7 @@ import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, Me
 import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { useTransportControls } from "./useTransportControls";
+import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
 import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, PROJECT_MENU, type ActionId } from "../menuActions";
@@ -104,6 +105,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
               <option value={1}>Count-in: 1 bar</option>
               <option value={2}>Count-in: 2 bars</option>
             </select>
+            {/* REC-001 — next to Count-in on purpose: both answer "what happens when I
+                hit record", and a producer hunting for one will find the other. */}
+            <RecordOptionsChip />
             <span className="v2-snap-controls" role="group" aria-label="Snap controls">
               <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
                 data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
@@ -141,6 +145,9 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
             onClick={() => void transport.stop()}><IconStop size={15} /></button>
           <button className="v2-tbtn rec" data-on={t.recording} data-armed={anyArmed} aria-pressed={t.recording} title="Record" aria-label="Record" data-testid="v2-record"
             onClick={() => void transport.record()}><span className="dot" /></button>
+          {/* Ableton puts Capture in the control bar next to Record, and so do we: it is
+              the one recording control you reach for in a hurry, AFTER the fact. */}
+          <CaptureButton />
         </div>
 
         <div className="v2-readout">

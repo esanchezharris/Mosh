@@ -54,6 +54,9 @@ export type State = {
   projectTransitioning: boolean;
   connected: boolean;
   lastError: string | null;
+  // REC-001 — a named setter for the shared banner, so runAction (which sees only the
+  // ActionStore interface, never the raw Zustand set) can report Capture's outcome.
+  setLastError: (message: string | null) => void;
   // A2 — UI-local: the crash-recovery notice is dismissed for this session (view state, not
   // a command — the prime directive keeps pure view state off the bridge).
   recoveryDismissed: boolean;
@@ -703,6 +706,7 @@ export const useStore = create<State>((set, get, api) => ({
   closePianoRoll: () => set({ editingClipId: null }),
   feltWrongOpen: false,
   setFeltWrongOpen: (open) => set({ feltWrongOpen: open }),
+  setLastError: (message) => set({ lastError: message }),
   automationTrackId: null,
   openAutomation: (trackId) => set({ automationTrackId: trackId }),
   closeAutomation: () => set({ automationTrackId: null }),

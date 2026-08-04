@@ -81,8 +81,12 @@ service/scripts/_sa3_e2e_out/
 *.wav
 *.aiff
 *.aif
-# …but the bundled default drum kit IS a committed app resource (DRM-001).
-!resources/drumkits/mosh-kit/*.wav
+# …but the bundled drum kits ARE committed app resources (DRM-001). A GLOB, not a
+# per-kit exception: this named mosh-kit alone, so adding mosh-808 silently dropped
+# eight samples from `git add -A` — the kit built and ran here, and CI failed with two
+# checks nobody could reproduce locally (the picker had nothing to pick, and a pad-count
+# check cascaded off the skipped block). The next kit is a folder, not a gitignore edit.
+!resources/drumkits/*/*.wav
 # …and the Sketch Phase-0 test fixtures ARE committed (synthesised, not recordings;
 # the build/selftest must not depend on Python to regenerate them).
 !service/sketch/fixtures/*.wav
@@ -102,6 +106,9 @@ midi_rag_database.pkl
 .playwright-mcp/
 test-results/
 mosh-*.png
+# ...but not the README hero logo. gitignore has no inline comments, so this
+# negation must sit on its own line or it silently matches nothing.
+!assets/mosh-icon*.png
 verify-artifacts/
 scripts/compiler-eval/artifacts/
 

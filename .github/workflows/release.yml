@@ -55,10 +55,17 @@ name: Release
 # auto-update hook point this workflow deliberately does NOT wire up yet.
 
 on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch: {}   # manual test run — builds/signs/notarizes/packages, uploads
+  # The automatic tag trigger is intentionally OFF. This file carried an invalid
+  # step-level `if: ${{ secrets.* }}` expression, so GitHub rejected the whole
+  # workflow and every push showed a red X against it. The expression is fixed,
+  # but releases are currently cut by hand (v0.1.1 was), and re-arming the tag
+  # trigger would have CI race that manual process and try to create a Release
+  # that already exists. Run this from the Actions tab when a CI-side release is
+  # wanted, or restore the trigger once the manual path is retired:
+  #   push:
+  #     tags:
+  #       - "v*"
+  workflow_dispatch: {}   # manual run — builds/signs/notarizes/packages and uploads
                           # as workflow artifacts, but NEVER creates a public GitHub
                           # Release (that only ever happens on an actual tag push).
 
@@ -77,12 +84,6 @@ jobs:
     name: build · sign · notarize · package
     runs-on: macos-14
     timeout-minutes: 90
-    # `secrets` is NOT an allowed context in a step-level `if:` — GitHub cannot evaluate the
-    # expression, so the whole workflow file fails to parse and EVERY push fails in ~0s with no
-    # log. It IS allowed in a job-level `env:`, and `env` IS allowed in a step `if:`. So the
-    # presence test is computed once here and the optional step below reads it.
-    env:
-      HAVE_BRAIN_ENV: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -199,11 +200,14 @@ jobs:
 
       # ── optional: bundle proxy configuration ────────────────────────────────
       - name: Bundle brain proxy configuration (optional)
-        if: env.HAVE_BRAIN_ENV == 'true'
         env:
           BRAIN_ENV_BASE64: ${{ secrets.MOSH_RELEASE_BRAIN_ENV_BASE64 }}
         run: |
           set -euo pipefail
+          if [ -z "${BRAIN_ENV_BASE64:-}" ]; then
+            echo "MOSH_RELEASE_BRAIN_ENV_BASE64 not set - skipping"
+            exit 0
+          fi
           printf '%s' "$BRAIN_ENV_BASE64" | base64 --decode > ui/.env.local
           if grep -qE '^[[:space:]]*[A-Z0-9_]+_API_KEY[[:space:]]*=[[:space:]]*.+' ui/.env.local; then
             echo "provider API keys are forbidden in release artifacts" >&2

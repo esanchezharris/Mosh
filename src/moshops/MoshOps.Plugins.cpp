@@ -18,6 +18,7 @@
 #include "ScanProgress.h"
 #include "state/Ids.h"
 #include <cmath>
+#include <limits>
 
 namespace mosh
 {
@@ -129,6 +130,9 @@ namespace
     struct DrumPad { const char* file; const char* name; int pitch; };
     // Row order mirrors DRUM_LANES exactly (so the indices line up 1:1, not just the
     // pitch set); the sampler still maps each pad by pitch, so order is cosmetic here.
+    // The folder name of the bundled kit — also the id list_drum_kits reports.
+    static constexpr const char* kDefaultKitId = "mosh-kit";
+
     static const DrumPad kDefaultKit[] = {
         { "kick.wav",       "Kick",       36 },
         { "snare.wav",      "Snare",      38 },
@@ -260,15 +264,20 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     auto* track = findTrack (args.getProperty ("trackId", var()).toString());
     if (track == nullptr) return errResult ("load_drum_kit", "no track");
 
-    // Validate the kit is present BEFORE opening a transaction / inserting a sampler,
-    // so a missing kit is a clean error with no partial, un-emitted mutation.
-    if (! drumKitAvailable())
+    // Which kit — omit for the bundled default. Validate BEFORE opening a transaction or
+    // inserting a sampler, so an unknown kit is a clean error with no partial mutation.
+    const auto kitId = args.getProperty ("kit", var()).toString();
+    if (kitId.isNotEmpty() && ! drumKitDir (kitId).isDirectory())
+        return errResult ("load_drum_kit", "no kit: " + kitId);
+    if (! drumKitAvailable (kitId))
         return errResult ("load_drum_kit", "no kit samples found (is the kit bundled?)");
 
     beginTxn ("load_drum_kit");
     auto* sampler = ensureSampler (*track);
     if (sampler == nullptr) return errResult ("load_drum_kit", "could not create sampler");
-    const int pads = loadDrumKitInto (*sampler);
+    const int pads = loadDrumKitInto (*sampler, kitId);
+    // Record which kit is on the track so the picker can show it.
+    track->state.setProperty (ids::drumKitId, kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId), &undoManager());
     if (pads == 0) return errResult ("load_drum_kit", "no kit samples found (is the kit bundled?)");
     applyDrumLaneGains (*track);  // re-loaded pads land at 0 dB — re-silence muted lanes
 
@@ -276,9 +285,240 @@ juce::var MoshOps::cmdLoadDrumKit (const juce::var& args)
     data->setProperty ("trackId", track->itemID.toString());
     data->setProperty ("index", track->pluginList.indexOf (sampler));
     data->setProperty ("pads", pads);
+    data->setProperty ("kit", kitId.isNotEmpty() ? kitId : juce::String (kDefaultKitId));
     logLine ("load_drum_kit", args, true, {}, true);
     emitSnapshotInvalidated();
     return okResult ("load_drum_kit", var (data));
+}
+
+// Defined further down, beside applyDrumLaneGains which is its other consumer.
+static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index);
+
+// "The pad at this note" — the NARROWEST sound covering it, or -1.
+//
+// Narrowest, not first, because a sample assigned in melodic mode spans the whole
+// keyboard (min 0, max 127) and would otherwise shadow every pad on the track: a pad
+// command aimed at the snare would silently retune the 808 instead. A melodic sound is a
+// pitched instrument played across the keys, not a pad, so it only ever wins when nothing
+// more specific covers the note.
+static int padIndexForNote (te::SamplerPlugin& sampler, int note)
+{
+    int best = -1, bestSpan = std::numeric_limits<int>::max();
+    for (int i = 0; i < sampler.getNumSounds(); ++i)
+    {
+        const int lo = sampler.getMinKey (i), hi = sampler.getMaxKey (i);
+        if (lo > note || hi < note) continue;
+        const int span = hi - lo;
+        if (span < bestSpan) { bestSpan = span; best = i; }
+    }
+    return best;
+}
+
+// ── Drum pads ────────────────────────────────────────────────────────────────────────
+// Per-pad mixer + identity, so the pad grid can behave like an instrument rather than a
+// row of file paths. Everything here addresses a pad by the NOTE that triggers it, which
+// is the only handle stable across a kit reload — the sampler's own sound index is not.
+juce::var MoshOps::cmdSetDrumPad (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("set_drum_pad", "no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("set_drum_pad", "track has no sampler");
+
+    const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", -1));
+    const int idx = padIndexForNote (*sampler, note);
+    if (idx < 0) return errResult ("set_drum_pad", "no pad at note " + juce::String (note));
+
+    beginTxn ("set_drum_pad");
+    auto sound = soundTreeAt (*sampler, idx);
+
+    if (args.hasProperty ("gainDb") || args.hasProperty ("pan"))
+    {
+        const float gain = (float) (double) args.getProperty ("gainDb", sampler->getSoundGainDb (idx));
+        const float pan  = (float) (double) args.getProperty ("pan",    sampler->getSoundPan (idx));
+        // While a pad is MUTED its live gain is the mute floor and the producer's real
+        // gain is parked (see applyDrumLaneGains). Writing the live gain here would be
+        // overwritten by the next unmute, so the parked copy is the one to update.
+        if (sound.isValid() && sound.hasProperty (ids::moshPadGainDb))
+        {
+            sound.setProperty (ids::moshPadGainDb, gain, &undoManager());
+            sampler->setSoundGains (idx, sampler->getSoundGainDb (idx), pan);
+        }
+        else
+        {
+            sampler->setSoundGains (idx, gain, pan);
+        }
+    }
+    if (args.hasProperty ("name"))
+        sampler->setSoundName (idx, args.getProperty ("name", var()).toString());
+    if (args.hasProperty ("chokeGroup") && sound.isValid())
+    {
+        const int group = juce::jlimit (0, 16, (int) args.getProperty ("chokeGroup", 0));
+        if (group > 0) sound.setProperty (ids::moshChokeGroup, group, &undoManager());
+        else           sound.removeProperty (ids::moshChokeGroup, &undoManager());
+        // A choked pad must be note-GATED, or nothing can ever cut it off: an open-ended
+        // voice ignores note-off by design.
+        sampler->setSoundOpenEnded (idx, group == 0);
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("note", note);
+    data->setProperty ("padIndex", idx);
+    logLine ("set_drum_pad", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());
+    return okResult ("set_drum_pad", var (data));
+}
+
+// The inverse of assign_sample, which can only ever REPLACE a pad. Without this there is
+// no way to empty a slot.
+juce::var MoshOps::cmdClearDrumPad (const juce::var& args)
+{
+    auto* track = findTrack (args.getProperty ("trackId", var()).toString());
+    if (track == nullptr) return errResult ("clear_drum_pad", "no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("clear_drum_pad", "track has no sampler");
+
+    const int note = juce::jlimit (0, 127, (int) args.getProperty ("note", -1));
+    // Exactly ONE pad — the narrowest match. Removing every sound covering the note would
+    // also delete a melodic instrument that merely spans it, which is not what "empty this
+    // pad" means.
+    const int idx = padIndexForNote (*sampler, note);
+    if (idx < 0) return errResult ("clear_drum_pad", "no pad at note " + juce::String (note));
+
+    beginTxn ("clear_drum_pad");
+    sampler->removeSound (idx);
+    const int removed = 1;
+
+    auto* data = new DynamicObject();
+    data->setProperty ("trackId", track->itemID.toString());
+    data->setProperty ("note", note);
+    data->setProperty ("removed", removed);
+    logLine ("clear_drum_pad", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouchTrack (args.getProperty ("trackId", var()).toString());
+    return okResult ("clear_drum_pad", var (data));
+}
+
+// The kit LIBRARY. One folder per kit under drumkits/; a kit is "available" when at least
+// one of its pads actually resolves on disk, so a half-staged bundle shows as unavailable
+// rather than erroring at load time.
+juce::var MoshOps::cmdListDrumKits (const juce::var&)
+{
+    Array<var> kits;
+    auto root = drumKitsRoot();
+    if (root.isDirectory())
+    {
+        for (auto& d : juce::RangedDirectoryIterator (root, false, "*", juce::File::findDirectories))
+        {
+            const auto id = d.getFile().getFileName();
+            int pads = 0;
+            for (auto& pad : kDefaultKit)
+                if (d.getFile().getChildFile (pad.file).existsAsFile()) ++pads;
+            // A kit folder with none of the expected pad files is not a kit — most likely
+            // a stray directory — so it is listed as unavailable rather than hidden, which
+            // would leave a puzzled producer with no explanation.
+            auto* o = new DynamicObject();
+            o->setProperty ("id", id);
+            o->setProperty ("name", id.replaceCharacter ('-', ' '));
+            o->setProperty ("pads", pads);
+            o->setProperty ("path", d.getFile().getFullPathName());
+            o->setProperty ("available", pads > 0);
+            kits.add (var (o));
+        }
+    }
+    auto* data = new DynamicObject();
+    data->setProperty ("kits", kits);
+    data->setProperty ("defaultKit", kDefaultKitId);
+    return okResult ("list_drum_kits", var (data));   // read-only: no txn, no log, no event
+}
+
+// Bake choke groups into a clip's NOTE LENGTHS, so playback and export obey them.
+//
+// This exists because live choke cannot reach clip playback. During playback the MIDI
+// comes from the engine's own MidiNode; MoshOps is not in that path and cannot inject a
+// note-off between two clip notes at render time. Subclassing SamplerPlugin to do it
+// properly was rejected for v1: the plugin type name is persisted in every existing edit,
+// so it would change the on-disk format for every drum track already out there.
+//
+// Baking is the honest alternative rather than a hack: the notes really do get shorter,
+// which means you can SEE it in the piano roll, it survives export because the render path
+// reads the same MIDI, undo puts it back, and it is provable offline. The cost — it is a
+// destructive edit rather than a live setting — is why it is an explicit command with its
+// own undo step, never a silent side effect of adding a note.
+juce::var MoshOps::cmdApplyChoke (const juce::var& args)
+{
+    auto* clip = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
+    if (clip == nullptr) return errResult ("apply_choke", "no midi clip");
+    auto* track = dynamic_cast<te::AudioTrack*> (clip->getTrack());
+    if (track == nullptr) return errResult ("apply_choke", "clip has no track");
+    auto* sampler = findSampler (*track);
+    if (sampler == nullptr) return errResult ("apply_choke", "track has no sampler");
+
+    // pitch → choke group, for every pad that has one.
+    std::map<int, int> groupOfPitch;
+    for (int i = 0; i < sampler->getNumSounds(); ++i)
+    {
+        auto sound = soundTreeAt (*sampler, i);
+        const int g = sound.isValid() ? (int) sound.getProperty (ids::moshChokeGroup, 0) : 0;
+        if (g > 0)
+            for (int n = sampler->getMinKey (i); n <= sampler->getMaxKey (i); ++n)
+                groupOfPitch[n] = g;
+    }
+    if (groupOfPitch.empty())
+        return okResult ("apply_choke", [&] { auto* o = new DynamicObject();
+            o->setProperty ("clipId", clip->itemID.toString());
+            o->setProperty ("truncated", 0); o->setProperty ("groups", 0); return var (o); }());
+
+    auto& seq = clip->getSequence();
+    // Snapshot the pointers BEFORE mutating: setStartAndLength triggers tracktion's
+    // synchronous re-sort of the live MidiList, so walking it live would skip notes that
+    // moved past an already-visited index (the same hazard cmdQuantizeNotes documents).
+    std::vector<te::MidiNote*> notes;
+    for (int i = 0; i < seq.getNumNotes(); ++i)
+        if (auto* n = seq.getNote (i)) notes.push_back (n);
+
+    beginTxn ("apply_choke");
+    int truncated = 0;
+    std::set<int> groupsSeen;
+    for (auto* n : notes)
+    {
+        auto it = groupOfPitch.find (n->getNoteNumber());
+        if (it == groupOfPitch.end()) continue;
+        const int group = it->second;
+        groupsSeen.insert (group);
+
+        // The next note IN THE SAME GROUP that starts after this one — a closed hat cuts
+        // an open hat, but a kick never cuts a snare.
+        const double start = n->getStartBeat().inBeats();
+        double nextStart = std::numeric_limits<double>::max();
+        for (auto* other : notes)
+        {
+            if (other == n) continue;
+            auto o = groupOfPitch.find (other->getNoteNumber());
+            if (o == groupOfPitch.end() || o->second != group) continue;
+            const double os = other->getStartBeat().inBeats();
+            if (os > start && os < nextStart) nextStart = os;
+        }
+        if (nextStart == std::numeric_limits<double>::max()) continue;
+
+        const double length = n->getLengthBeats().inBeats();
+        const double capped = nextStart - start;
+        if (capped >= length || capped <= 0.0) continue;
+        n->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
+                              tracktion::BeatDuration::fromBeats (capped), &undoManager());
+        ++truncated;
+    }
+
+    auto* data = new DynamicObject();
+    data->setProperty ("clipId", clip->itemID.toString());
+    data->setProperty ("truncated", truncated);
+    data->setProperty ("groups", (int) groupsSeen.size());
+    logLine ("apply_choke", args, true, {}, true);
+    emitSnapshotInvalidated();
+    reactiveTouch (args.getProperty ("clipId", var()).toString());
+    return okResult ("apply_choke", var (data));
 }
 
 // DRM-001 — assign a sample file to a single pad/note on a track's sampler. Maps
@@ -1146,11 +1386,18 @@ bool MoshOps::mirrorMasterEditorParameter (te::AutomatableParameter& parameter,
 // lookup: an env override first (tests / dev), then the app-bundle Resources, then
 // next to the executable. Falls back to the bundle path so callers get a sensible
 // (if absent) File to test with existsAsFile().
-juce::File MoshOps::drumKitDir() const
+// The kit LIBRARY root — the directory that holds one folder per kit. CMake already
+// stages the whole `drumkits` tree into the bundle, so adding a kit is dropping a folder
+// in; no build change is needed.
+juce::File MoshOps::drumKitsRoot() const
 {
     using juce::File;
 
-    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKIT_DIR", {});
+    // MOSH_DRUMKITS_DIR (plural) points at the library. The older MOSH_DRUMKIT_DIR
+    // (singular) means "this directory IS the kit" and is handled by drumKitDir below —
+    // both are honoured, because the singular one has live consumers including the
+    // selftest's own resolver.
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKITS_DIR", {});
     if (env.isNotEmpty())
     {
         File d (env);
@@ -1158,17 +1405,35 @@ juce::File MoshOps::drumKitDir() const
     }
 
     auto appFile = File::getSpecialLocation (File::currentApplicationFile);
-    auto bundled = appFile.getChildFile ("Contents/Resources/drumkits/mosh-kit");
+    auto bundled = appFile.getChildFile ("Contents/Resources/drumkits");
     if (bundled.isDirectory()) return bundled;
 
     auto exeDir = File::getSpecialLocation (File::currentExecutableFile)
-                      .getParentDirectory().getChildFile ("drumkits/mosh-kit");
+                      .getParentDirectory().getChildFile ("drumkits");
     if (exeDir.isDirectory()) return exeDir;
 
     return bundled;   // best-effort; callers guard on existsAsFile()
 }
 
-bool MoshOps::drumKitAvailable() const
+juce::File MoshOps::drumKitDir (const juce::String& kitId) const
+{
+    using juce::File;
+
+    // BACKWARD COMPATIBILITY: MOSH_DRUMKIT_DIR (singular) has always meant "this directory
+    // is the kit", and both MoshOps and the selftest's resolver rely on that. Honour it for
+    // the default kit; a caller asking for a NAMED kit means the library.
+    const auto env = juce::SystemStats::getEnvironmentVariable ("MOSH_DRUMKIT_DIR", {});
+    if (env.isNotEmpty() && (kitId.isEmpty() || kitId == kDefaultKitId))
+    {
+        File d (env);
+        if (d.isDirectory()) return d;
+    }
+    return drumKitsRoot().getChildFile (kitId.isEmpty() ? kDefaultKitId : kitId);
+}
+
+juce::File MoshOps::drumKitDir() const { return drumKitDir (kDefaultKitId); }
+
+bool MoshOps::drumKitAvailable (const juce::String& kitId) const
 {
     const auto dir = drumKitDir();
     for (auto& pad : kDefaultKit)
@@ -1210,6 +1475,25 @@ static juce::SortedSet<int> parseLanePitches (const juce::String& s)
     return set;
 }
 
+// The i-th SOUND child of a sampler's state. te::SamplerPlugin::getSound does exactly
+// this walk to resolve a pad index, but it is private — and every pad index in this file
+// comes from that same numbering, so the two must agree.
+static juce::ValueTree soundTreeAt (te::SamplerPlugin& sampler, int index)
+{
+    int n = 0;
+    for (auto v : sampler.state)
+        if (v.hasType (te::IDs::SOUND))
+            if (n++ == index)
+                return v;
+    return {};
+}
+
+// The quietest gain the engine will actually STORE. te::SamplerPlugin clamps every gain
+// write to [-48, +48] dB, in setSoundGains and again in the SamplerSound constructor, so
+// -48 dB is silence as far as this plugin is concerned. Writing -100 does not store -100;
+// it stores -48. (That mattered — see applyDrumLaneGains below.)
+static constexpr float kPadMuteDb = -48.0f;
+
 void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
 {
     auto* sampler = findSampler (track);
@@ -1221,13 +1505,37 @@ void MoshOps::applyDrumLaneGains (te::AudioTrack& track)
 
     for (int i = 0; i < sampler->getNumSounds(); ++i)
     {
-        const int   key = sampler->getKeyNote (i);
-        const bool  eff = soloActive ? ! solo.contains (key) : muted.contains (key);
-        const float cur = sampler->getSoundGainDb (i);
-        // Only touch a pad crossing the mute threshold — a non-muted pad keeps its own
-        // gain; a formerly-muted pad restores to 0 dB.
-        if (eff)                   { if (cur > -99.0f) sampler->setSoundGains (i, -100.0f, sampler->getSoundPan (i)); }
-        else if (cur <= -99.0f)                        sampler->setSoundGains (i,    0.0f, sampler->getSoundPan (i));
+        const int  key        = sampler->getKeyNote (i);
+        const bool shouldMute = soloActive ? ! solo.contains (key) : muted.contains (key);
+
+        auto sound = soundTreeAt (*sampler, i);
+        if (! sound.isValid()) continue;
+
+        // Whether a pad is currently silenced is recorded EXPLICITLY — the presence of the
+        // parked gain is the flag — and never inferred from the gain itself. Inferring it
+        // is precisely what broke this: the old code muted by writing -100 and detected
+        // mute by reading back <= -99, but both values sit outside the engine's clamp, so
+        // the stored gain was always -48, the restore branch never once fired, and a muted
+        // lane stayed 48 dB down forever (persisting through save/reload). The selftest
+        // beside it stayed green the whole time because it only ever asserted that the
+        // muted-pitch SET rode the snapshot; nothing read a pad gain.
+        const bool isMuted = sound.hasProperty (ids::moshPadGainDb);
+        if (shouldMute == isMuted) continue;             // already in the state we want
+
+        if (shouldMute)
+        {
+            // Park the pad's own gain before silencing it. NOTE for any future per-pad
+            // gain control: while a pad is muted this parked copy — not the live gain —
+            // is the user's setting, so a gain edit must be written HERE instead.
+            sound.setProperty (ids::moshPadGainDb, sampler->getSoundGainDb (i), &undoManager());
+            sampler->setSoundGains (i, kPadMuteDb, sampler->getSoundPan (i));
+        }
+        else
+        {
+            const auto parked = (float) (double) sound.getProperty (ids::moshPadGainDb, 0.0);
+            sound.removeProperty (ids::moshPadGainDb, &undoManager());
+            sampler->setSoundGains (i, parked, sampler->getSoundPan (i));
+        }
     }
 }
 
@@ -1270,9 +1578,9 @@ juce::var MoshOps::cmdSetDrumLane (const juce::var& args)
 // DRM-001 — clear a sampler and load the 8 bundled pads, each mapped to its GM
 // pitch at unity (keyNote==minNote==maxNote) and open-ended (a short note rings the
 // whole one-shot). Returns the number of pads actually loaded (0 ⇒ kit not found).
-int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler)
+int MoshOps::loadDrumKitInto (te::SamplerPlugin& sampler, const juce::String& kitId)
 {
-    const auto dir = drumKitDir();
+    const auto dir = drumKitDir (kitId);
 
     // Confirm at least one pad is actually loadable BEFORE destroying the current
     // sounds — a missing/broken kit dir must be a no-op, never a silent wipe.

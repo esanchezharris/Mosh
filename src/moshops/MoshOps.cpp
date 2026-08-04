@@ -203,6 +203,9 @@ MoshOps::MoshOps (MoshEngine& engineToUse)
     initTxnLedger();                          // FS-B2a — surface a crash-orphaned agent transaction
     pluginHost.initialise();                 // formats + curated VST3 scan
     previewFormats.registerBasicFormats();   // audition (file preview) reader formats
+    // Live-note audition: we ARE the wasted-message listener, registered for our whole
+    // lifetime and read around each individual injection (see MoshOps.Live.cpp).
+    eng.edit().addWastedMidiMessagesListener (this);
     startTimerHz (30);                       // telemetry decimated to 30 Hz, never per-block
 
     // MP-001 — the live session. Its background poll loop calls back here (on the
@@ -253,6 +256,12 @@ MoshOps::~MoshOps()
     }
     if (previewWired) adm().removeAudioCallback (&previewPlayer);   // stop audio-thread access first
     stopAudition();
+    // Silence anything the keyboard/piano roll left sounding, then detach the listener.
+    // Order matters: releaseAllVoices injects, which can call back into us, so we must
+    // still be registered while it runs — and must not stay registered on the Edit, which
+    // Main.cpp destroys after this object.
+    releaseAllVoices();
+    eng.edit().removeWastedMidiMessagesListener (this);
 }
 
 void MoshOps::timerCallback()
@@ -264,6 +273,20 @@ void MoshOps::timerCallback()
     if (playing || wasPlaying)
         emit ("transport", transportToVar());
     wasPlaying = playing;
+
+    // Live-note safety net. Force-release any voice past its own TTL — which covers both
+    // a blip's short lifetime and a held note whose note-off never arrived (WebView crash,
+    // frozen page, dropped event). Running it here means it lives in the native process
+    // and survives anything the UI does; it is a no-op when nothing is held.
+    sweepStuckVoices();
+
+    // REC-002 — publish the "Mosh Keyboard" virtual MIDI input as soon as audio comes up,
+    // so it is in the track input picker BEFORE the producer goes looking for it. Doing
+    // this lazily (on the first audition) would mean the picker was empty exactly when
+    // someone was trying to work out how to record their keyboard. Guarded internally, so
+    // this is a bool test on every tick after the first.
+    if (eng.hasAudio())
+        ensureKeyboardInputDevice();
 
     // Lane A — drive the render-ahead scheduler off the transport clock while a Live clip plays.
     // Gated on hasAudio() so headless --selftest (which never arms it) is untouched.
@@ -551,6 +574,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "load_drum_kit")     return cmdLoadDrumKit (args);
     if (name == "assign_sample")     return cmdAssignSample (args);
     if (name == "set_drum_lane")     return cmdSetDrumLane (args);
+    if (name == "set_drum_pad")      return cmdSetDrumPad (args);
+    if (name == "clear_drum_pad")    return cmdClearDrumPad (args);
+    if (name == "apply_choke")       return cmdApplyChoke (args);
+    if (name == "list_drum_kits")    return cmdListDrumKits (args);
     if (name == "remove_plugin")     return cmdRemovePlugin (args);
     if (name == "reorder_plugin")    return cmdReorderPlugin (args);
     if (name == "set_plugin_param")  return cmdSetPluginParam (args);
@@ -612,6 +639,10 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "list_directory")    return cmdListDirectory (args);
     if (name == "audition_file")     return cmdAuditionFile (args);
     if (name == "stop_audition")     return cmdStopAudition (args);
+    // Live note audition (MoshOps.Live.cpp) — transient, like the two above: no
+    // transaction, no log line, no snapshot event. See that file's header for why.
+    if (name == "audition_note")     return cmdAuditionNote (args);
+    if (name == "all_notes_off")     return cmdAllNotesOff (args);
     if (name == "new_project")       return cmdNewProject (args);
     if (name == "open_project")      return cmdOpenProject (args);
     if (name == "open_recent")       return cmdOpenRecent (args);
@@ -619,6 +650,12 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "set_project_settings") return cmdSetProjectSettings (args);
     if (name == "set_key")           return broadcastStructuralIfActive (name, args, cmdSetKey (args));
     if (name == "set_count_in")      return broadcastStructuralIfActive (name, args, cmdSetCountIn (args));
+    // REC-001 — broadcast like set_count_in: record options are project-wide state a
+    // multiplayer peer must see, not a viewer-local preference. capture_midi is NOT
+    // broadcast the same way — it creates clips, so it invalidates the snapshot and
+    // resyncs through the ordinary structural path.
+    if (name == "set_record_options") return broadcastStructuralIfActive (name, args, cmdSetRecordOptions (args));
+    if (name == "capture_midi")      return cmdCaptureMidi (args);
     if (name == "create_group_track") return cmdCreateGroupTrack (args);
     if (name == "mp_serialize_track") return cmdMpSerializeTrack (args);
     if (name == "apply_remote_track") return cmdApplyRemoteTrack (args);
@@ -1937,19 +1974,55 @@ juce::var MoshOps::cmdAddNote (const juce::var& args)
     auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (mc == nullptr) return errResult ("add_note", "no midi clip");
 
-    const int pitch = juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60));
-    const double start = juce::jmax (0.0, (double) args.getProperty ("start", 0.0));
-    const double length = juce::jmax (0.0625, (double) args.getProperty ("length", 1.0));
-    const int vel = juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100));
+    // A `notes` ARRAY may replace the scalar pitch/start/length/velocity, so a chord —
+    // several keys pressed together on the computer MIDI keyboard, or a pasted selection —
+    // lands inside the ONE transaction opened below and undoes as a single step. Same
+    // shape cmdAddMidiClip already accepts. (Deliberately not declared in the agent
+    // catalog: ArgSpec models only string/number/boolean, and the contract test checks
+    // that declared args are read, never the converse — add_midi_clip does the same.)
+    struct NoteSpec { int pitch; double start; double length; int vel; };
+    std::vector<NoteSpec> specs;
+    const auto notesVar = args.getProperty ("notes", var());   // bind: the temporary would die
+    if (auto* arr = notesVar.getArray())
+    {
+        for (auto& n : *arr)
+            specs.push_back ({ juce::jlimit (0, 127, (int) n.getProperty ("pitch", 60)),
+                               juce::jmax (0.0, (double) n.getProperty ("start", 0.0)),
+                               juce::jmax (0.0625, (double) n.getProperty ("length", 1.0)),
+                               juce::jlimit (1, 127, (int) n.getProperty ("velocity", 100)) });
+        if (specs.empty()) return errResult ("add_note", "'notes' is empty");
+    }
+    else
+    {
+        specs.push_back ({ juce::jlimit (0, 127, (int) args.getProperty ("pitch", 60)),
+                           juce::jmax (0.0, (double) args.getProperty ("start", 0.0)),
+                           juce::jmax (0.0625, (double) args.getProperty ("length", 1.0)),
+                           juce::jlimit (1, 127, (int) args.getProperty ("velocity", 100)) });
+    }
 
     beginTxn ("add_note");
-    mc->getSequence().addNote (pitch, tracktion::BeatPosition::fromBeats (start),
-                               tracktion::BeatDuration::fromBeats (length), vel, 0, &undoManager());
+    auto& seq = mc->getSequence();
+    Array<var> added;
+    for (auto& s : specs)
+    {
+        auto* note = seq.addNote (s.pitch, tracktion::BeatPosition::fromBeats (s.start),
+                                  tracktion::BeatDuration::fromBeats (s.length), s.vel, 0, &undoManager());
+        // The index of the note we just made. MidiList keeps its notes sorted, so a new
+        // note is NOT necessarily last — callers that need to address it (step record,
+        // duplicate, "select what I just drew") would otherwise have to re-fetch the whole
+        // snapshot and guess. Resolved by identity against the returned pointer.
+        int idx = -1;
+        for (int i = 0; i < seq.getNumNotes(); ++i)
+            if (seq.getNote (i) == note) { idx = i; break; }
+        added.add (idx);
+    }
     logLine ("add_note", args, true, {}, true);
     emitSnapshotInvalidated();
     reactiveTouch (args.getProperty ("clipId", var()).toString());   // Phase 3 — auto-re-render the live hidden audio
     auto* data = new DynamicObject();
-    data->setProperty ("noteCount", mc->getSequence().getNumNotes());
+    data->setProperty ("noteCount", seq.getNumNotes());
+    data->setProperty ("noteIndex", added.size() == 1 ? added[0] : var (-1));
+    data->setProperty ("noteIndexes", added);
     return okResult ("add_note", var (data));
 }
 
@@ -1974,22 +2047,65 @@ juce::var MoshOps::cmdSetNote (const juce::var& args)
     auto* mc = dynamic_cast<te::MidiClip*> (findClip (args.getProperty ("clipId", var()).toString()));
     if (mc == nullptr) return errResult ("set_note", "no midi clip");
     auto& seq = mc->getSequence();
-    const int idx = (int) args.getProperty ("noteIndex", -1);
-    if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
-    auto* note = seq.getNote (idx);
+
+    // An `edits` ARRAY may replace the scalar noteIndex/pitch/…, so a whole selection —
+    // the piano roll's group drag — moves in ONE command and one undo step.
+    //
+    // It is not merely a convenience. setStartAndLength writes IDs::b, which triggers
+    // tracktion's SYNCHRONOUS re-sort of the live MidiList, so a note can hop to a new
+    // index the moment it is moved. N separate set_note calls therefore address stale
+    // indices as soon as the first one changes a start — a real bug, caught by the
+    // batched-move selftest below. Resolving every note POINTER up front, before any
+    // mutation, is immune to that; it is the same guard cmdQuantizeNotes documents.
+    struct Edit { te::MidiNote* note; juce::var spec; };
+    std::vector<Edit> edits;
+    const auto editsVar = args.getProperty ("edits", var());   // bind: the temporary would die
+    if (auto* arr = editsVar.getArray())
+    {
+        for (auto& e : *arr)
+        {
+            const int i = (int) e.getProperty ("noteIndex", -1);
+            if (i < 0 || i >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
+            edits.push_back ({ seq.getNote (i), e });
+        }
+        if (edits.empty()) return errResult ("set_note", "'edits' is empty");
+    }
+    else
+    {
+        const int idx = (int) args.getProperty ("noteIndex", -1);
+        if (idx < 0 || idx >= seq.getNumNotes()) return errResult ("set_note", "bad noteIndex");
+        edits.push_back ({ seq.getNote (idx), args });
+    }
+
+    // One note's worth of the request. Its parameter is genuinely an args object — the
+    // whole command's for a scalar call, one element of `edits` for a group one — which
+    // is why the field reads below stay on `args` rather than an alias.
+    auto applyOne = [this] (te::MidiNote* note, const juce::var& args)
+    {
+        if (note == nullptr) return;
+        if (args.hasProperty ("pitch"))
+            note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
+        if (args.hasProperty ("start") || args.hasProperty ("length"))
+        {
+            const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
+            const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
+            note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
+                                     tracktion::BeatDuration::fromBeats (length), &undoManager());
+        }
+        if (args.hasProperty ("velocity"))
+            note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
+        // Note DEACTIVATE (Ableton's `0` key) — a muted note keeps its place in the clip
+        // and stays editable, it simply doesn't sound. This is the engine's own
+        // MidiNote::mute field, so it costs nothing and persists with the edit; it is also
+        // why per-note probability is NOT here (MidiNote has no such field, and faking one
+        // would mean intervening in the MIDI playback path).
+        if (args.hasProperty ("mute"))
+            note->setMute ((bool) args.getProperty ("mute", false), &undoManager());
+    };
 
     beginTxn ("set_note");
-    if (args.hasProperty ("pitch"))
-        note->setNoteNumber (juce::jlimit (0, 127, (int) args.getProperty ("pitch", note->getNoteNumber())), &undoManager());
-    if (args.hasProperty ("start") || args.hasProperty ("length"))
-    {
-        const double start  = juce::jmax (0.0, (double) args.getProperty ("start",  note->getStartBeat().inBeats()));
-        const double length = juce::jmax (0.0625, (double) args.getProperty ("length", note->getLengthBeats().inBeats()));
-        note->setStartAndLength (tracktion::BeatPosition::fromBeats (start),
-                                 tracktion::BeatDuration::fromBeats (length), &undoManager());
-    }
-    if (args.hasProperty ("velocity"))
-        note->setVelocity (juce::jlimit (1, 127, (int) args.getProperty ("velocity", note->getVelocity())), &undoManager());
+    for (auto& ed : edits)
+        applyOne (ed.note, ed.spec);
 
     logLine ("set_note", args, true, {}, true);
     emitSnapshotInvalidated();
@@ -2453,6 +2569,43 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
         o->setProperty ("drumMutedPitches", toArr (t.state.getProperty (ids::drumMute, "").toString()));
         o->setProperty ("drumSoloPitches",  toArr (t.state.getProperty (ids::drumSolo, "").toString()));
     }
+    // The sampler's loaded PADS — what a drum track actually holds, rather than the
+    // eight GM lanes the step grid assumes. Emitted only when the track HAS a sampler,
+    // so every other track pays nothing. `gainDb` is the RAW engine gain (what you
+    // would hear), not the pad's parked user gain: mute is applied as a real gain
+    // write, so reading it back is the only honest way to tell a restored pad from a
+    // still-silenced one. minNote/maxNote are carried because assign_sample's melodic
+    // mode maps one sound across the whole keyboard, which is not a pad at all.
+    if (auto* sampler = findSampler (t))
+    {
+        Array<var> pads;
+        for (int i = 0; i < sampler->getNumSounds(); ++i)
+        {
+            auto* p = new DynamicObject();
+            p->setProperty ("index",     i);
+            p->setProperty ("pitch",     sampler->getKeyNote (i));
+            p->setProperty ("minNote",   sampler->getMinKey (i));
+            p->setProperty ("maxNote",   sampler->getMaxKey (i));
+            p->setProperty ("name",      sampler->getSoundName (i));
+            p->setProperty ("file",      sampler->getSoundMedia (i));
+            p->setProperty ("gainDb",    sampler->getSoundGainDb (i));
+            p->setProperty ("pan",       sampler->getSoundPan (i));
+            p->setProperty ("openEnded", sampler->isSoundOpenEnded (i));
+            // Choke group is a Mosh-side property on the SOUND tree (see Ids.h) — the
+            // engine has no such concept, so it can only be read back from where we put it.
+            {
+                int n = 0, group = 0;
+                for (auto v : sampler->state)
+                    if (v.hasType (te::IDs::SOUND))
+                        if (n++ == i) { group = (int) v.getProperty (ids::moshChokeGroup, 0); break; }
+                if (group > 0) p->setProperty ("chokeGroup", group);
+            }
+            pads.add (var (p));
+        }
+        o->setProperty ("drumPads", pads);
+        const auto kit = t.state.getProperty (ids::drumKitId, "").toString();
+        if (kit.isNotEmpty()) o->setProperty ("drumKit", kit);
+    }
     // MIX-008 — a track nested under a group (submix folder) carries its parent's
     // id so the UI can indent it / show membership. Additive: flat consumers see
     // the same array, ungrouped tracks have no parentId.
@@ -2470,7 +2623,14 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             auto& dm = eng.engine().getDeviceManager();
             for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
                 if (auto* wi = dm.getWaveInDevice (i))
-                    if (wi->getDeviceID() == chosenID) { in->setProperty ("name", wi->getName()); break; }
+                    if (wi->getDeviceID() == chosenID)
+                    { in->setProperty ("name", wi->getName()); in->setProperty ("kind", "wave"); break; }
+            // …and the MIDI families too. Without this pass a chosen controller rendered
+            // as a bare deviceID with no name, because only wave devices were scanned —
+            // and there was no way to tell which family the stored choice belonged to.
+            if (! in->hasProperty ("name"))
+                if (auto mi = dm.findMidiInputDeviceForID (chosenID))
+                { in->setProperty ("name", mi->getName()); in->setProperty ("kind", "midi"); }
             o->setProperty ("input", var (in));
         }
     }
@@ -2710,6 +2870,10 @@ juce::var MoshOps::clipToVar (te::Clip& c)
                 no->setProperty ("start", n->getStartBeat().inBeats());     // beats within the clip sequence
                 no->setProperty ("length", n->getLengthBeats().inBeats());
                 no->setProperty ("velocity", n->getVelocity());
+                // Deactivated (Ableton's `0`): still in the clip, still editable, silent.
+                // Emitted only when true so an ordinary clip's payload is byte-identical
+                // to before — notes[] is the largest part of the snapshot.
+                if (n->isMute()) no->setProperty ("mute", true);
                 notes.add (var (no));
             }
         o->setProperty ("notes", notes);

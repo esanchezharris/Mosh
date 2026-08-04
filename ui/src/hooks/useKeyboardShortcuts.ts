@@ -5,6 +5,8 @@ import { runAction, type ActionCtx, type ActionId } from "../menuActions";
 import { EditorAction as EA } from "../interaction/actions";
 import { liveKeymap } from "../interaction/config";
 import { isEditableTarget, resolveKey } from "../interaction/keymap";
+import { unshiftForQwerty } from "../interaction/qwertyMidi";
+import { qwertyState } from "./useQwertyMidi";
 
 const ctx = (): ActionCtx => ({ store: useStore.getState(), pickFiles, pickSaveFile, chat: brainChat });
 
@@ -21,7 +23,17 @@ const dispatch = (id: ActionId) => runAction(id, ctx());
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const action = resolveKey(liveKeymap(), e);
+      const km = liveKeymap();
+      let action = resolveKey(km, e);
+      // While the computer MIDI keyboard is on it CLAIMS its letters (in capture phase, so
+      // an unmodified A never reaches here). Ableton's escape hatch is to add Shift — so a
+      // Shift+<owned key> event, which the instrument deliberately ignores, is retried
+      // here without the Shift. That is what keeps Shift+S meaning solo rather than
+      // meaning nothing at all.
+      if (!action) {
+        const alt = unshiftForQwerty(e, qwertyState.active);
+        if (alt) action = resolveKey(km, alt);
+      }
       if (!action) return;
       // Packaged WKWebView sometimes retargets a focused range input's Arrow keydown
       // to window. The DOM focus owner is still authoritative: inspector controls keep
@@ -71,6 +83,9 @@ export function useKeyboardShortcuts() {
         case EA.TOOL_RANGE: void dispatch("tool_range"); break;
         case EA.SPLIT: prevent(); void dispatch("split"); break;
         case EA.FELT_WRONG: prevent(); void dispatch("felt_wrong"); break;
+        // REC-001 — ⇧⌘C. prevent() matters: the browser's own Copy would otherwise
+        // also fire on the Mod+C half of the chord in some WebKit builds.
+        case EA.CAPTURE_MIDI: prevent(); void dispatch("capture_midi"); break;
         default: break;
       }
     };

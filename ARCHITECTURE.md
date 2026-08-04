@@ -88,15 +88,23 @@ Two claims in this section are **enforced, not remembered**: every agent-catalog
 
 > **⚠️ Read `✅ works` as "the command works", not "a producer can use it."** This table is
 > hand-maintained and grades the *command surface*. It is not the parity scoreboard, and the two
-> disagree — `docs/FEATURE_AUDIT.md` puts **T0 daily-driver capability at 10/28 UI-reachable**.
-> Two structural reasons the gap is invisible to every gate here:
+> disagree — `docs/FEATURE_AUDIT.md` puts **T0 daily-driver capability at 18/28 UI-reachable**
+> (it was 10/28 before the usability programme). Two structural reasons the gap was invisible to
+> every gate here — the first is now partly closed, the second is not:
 > 1. **The reachability guard measures commands.** Selection, marquee, snap, tool choice, zoom and
->    drag are deliberately UI-local and *not* commands (§3, contract 2) — so no gate in this repo
->    can see whether they exist. v2 has no marquee select at all; classic does.
+>    drag are deliberately UI-local and *not* commands (§3, contract 2), so `uiReachability.test.ts`
+>    cannot see whether they exist. `ui/src/v2/gestureReach.test.ts` now covers that class: it
+>    asserts the shipped v2 shell implements what `ui/src/interaction/gestureTables.ts` promises,
+>    across every preset, with `GESTURE_GAPS` at 0. It was RED on its first run with no sabotage
+>    needed. (This is why the sentence that used to sit here — "v2 has no marquee select at all" —
+>    is gone: v2 has one now.)
 > 2. **`ui/src/bridge.mock.ts` coerces argument types exactly as JUCE's `var` does**, so a
 >    type mismatch at the seam reproduces identically in the mock and passes Playwright. That is
 >    how v2's "Quantize 1/16" button shipped sending a *string* where the command declares a
->    *number in beats* — it quantizes to quarter notes.
+>    *number in beats* — it quantized to quarter notes for months. Fixed, and
+>    `ui/src/agent/argTypes.contract.test.ts` now checks every literal call-site argument against
+>    the catalog's declared type. **The underlying seam hazard remains**: the mock is a faithful
+>    liar by design, so any *dynamic* argument it coerces is still beyond every gate's reach.
 >
 > When this table and `docs/FEATURE_AUDIT.md` disagree, **the scoreboard wins** — it is
 > regenerated; this is remembered.
@@ -156,7 +164,7 @@ One codebase, platform-guarded. JUCE + Tracktion + the whole MoshOps/snapshot/ev
 
 The generative adapter contract (`available()`/`backend_name()`/`render(input_wav, output_wav, params) → manifest`) is identical across MLX, CUDA, and the FakeAdapter — the service dispatches MLX-if-present-else-CUDA-else-Fake, so the manifest only differs by its `backend` field.
 
-**Windows specifics:** [`docs/WINDOWS_PARITY.md`](docs/WINDOWS_PARITY.md) is the per-feature decision record (what gets a Windows path now vs. stays macOS-only vs. is asymmetric — SoulX sing, the SFT box, companion mDNS); [`docs/WINDOWS_RUNBOOK.md`](docs/WINDOWS_RUNBOOK.md) is the build → smoke → verify → package command sequence. The full PC gate (native + CUDA + packaging + e2e) ran green on real hardware over SSH on 2026-07-16 (worklog `2026-07-16-full-pc-gate-run-remotely-over-ssh-native-cuda-packaging-e2e.md` — see CLAUDE.md §Working notes for how to read it).
+**Windows specifics:** [`docs/WINDOWS_PARITY.md`](docs/WINDOWS_PARITY.md) is the per-feature decision record (what gets a Windows path now vs. stays macOS-only vs. is asymmetric — SoulX sing, the SFT box, companion mDNS); [`docs/WINDOWS_RUNBOOK.md`](docs/WINDOWS_RUNBOOK.md) is the build → smoke → verify → package command sequence. The full PC gate (native + CUDA + packaging + e2e) ran green on real hardware over SSH on 2026-07-16 ([report](docs/2026-07-16-pc-full-gate-report.md)).
 
 **Linux (x86_64)** is an exploratory CI spike (FIT-011): the headless `MoshTests` target + the Python service build, and both are CI-tracked on `ubuntu-latest` (`.github/workflows/linux-ci.yml`); the GUI app compiles informationally but is **not a supported target**. See `docs/2026-07-07-linux-build-spike.md`.
 
