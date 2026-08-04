@@ -2,8 +2,10 @@
 # lib.sh — shared helpers for the Mosh autonomous deferred-work loop.
 #
 # Sourced by every scripts/auto-loop/*.sh. Provides repo-root resolution, the
-# selftest binary resolver, stray-service / port cleanup (the documented
-# port-8770 orphan trap), unique session/port allocation, and ledger append.
+# selftest binary resolver, service port RESERVATION + owned-only teardown (see the
+# ownership section — a gate run may only kill services it owns, because several
+# worktrees gate concurrently on one machine), unique session allocation, and ledger
+# append. Unit-tested by port-ownership-selftest.sh and deps-freshness-selftest.sh.
 #
 # NOTHING here mutates git or the product. These are read/measure utilities; the
 # only writes are to docs/auto-loop/ (the ledger/state) and to verify-artifacts/.
@@ -72,19 +74,125 @@ resolve_app_bundle() {
   [ -n "$bin" ] && printf '%s\n' "$(cd "$(dirname "$bin")/../.." && pwd)"
 }
 
-# ── service / port cleanup (the orphaned-port-8770 trap) ─────────────────────────
-# Kill any stray Mosh generative service / relay so a gate run never collides with
-# an orphan from a prior aborted run. Safe: only targets THIS repo's processes by
-# command-line signature. Optionally also frees a specific port's listener.
+# ── service port + process OWNERSHIP ─────────────────────────────────────────────
+# Several agent worktrees gate concurrently on this machine, so a gate run may only ever
+# kill a service it OWNS. Ownership has exactly one definition here: a port this run holds
+# a reservation for, occupied by a process that identifies as a Mosh service. Two rules
+# that used to be violated, both of which cost real gate runs:
+#
+#   NOT ownership — a command-line pattern. kill_stray_services() used to open with three
+#   machine-wide `pkill -f` calls (service/server.py, service/run.sh, relay/server.py).
+#   Two of them matched NOTHING: service/run.sh does `cd "$(dirname "$0")"` then
+#   `exec "$PY" server.py`, so the live argv is "<python> server.py" with no path in it —
+#   verified against a service spawned exactly as GenerativeJobManager.cpp spawns one.
+#   So the intended self-cleanup never happened (orphaned services accumulate for days),
+#   while the one pattern that DID match — relay/server.py — could only ever hit someone
+#   else's, since a gate never starts a relay.
+#
+#   NOT ownership — "nothing is listening there yet". unique_port() used to return the
+#   first port in the band with no LISTENER. The generative service does not bind until
+#   the selftest reaches its first generative check, so the window between choosing a port
+#   and occupying it is seconds to minutes, and two concurrent worktrees both saw it free
+#   (observed: three sequential runs in one worktree all chose 8800). The teardown's
+#   `lsof -ti tcp:$port | kill -9` then killed the other worktree's live service mid-run —
+#   which surfaces as a burst of failed checks confined to the generative sections of an
+#   otherwise-passing selftest. `lsof -ti tcp:P` without -sTCP:LISTEN also matches CLIENTS
+#   connected to that port, so it could even kill the Mosh binary under test.
+#
+# A reservation is an atomically-created lock dir stamped with the owning shell's pid.
+# `$$` is the shell's pid even inside `$( )` (bash does not change it in a command
+# substitution), so `PORT="$(unique_port)"` records the CALLER as owner and the filesystem
+# stays the single source of truth — no shell state to lose across a subshell.
+AL_PORT_DIR="$AL_HOME/ports"
+# Blocks, not single ports: service/server.py's _bind_with_fallback() walks up to 10 ports
+# when its requested one is taken, so a drifting service must stay inside ports we own or
+# it lands on a rival's — and our teardown would then miss it (orphan) or hit them (bug).
+AL_PORT_SPAN="${AL_PORT_SPAN:-10}"
+AL_PORT_LO="${AL_PORT_LO:-8800}"     # away from 8770 (GUI default) and 8900+ (installed-app-gate)
+AL_PORT_HI="${AL_PORT_HI:-8899}"
+
+# Is `pid` a live process that identifies as a Mosh generative/relay service? Mirrors the
+# native reaper's identity check (GenerativeJobManager.cpp's isLiveMoshService), so we
+# never -9 an unrelated process that merely holds a port in our band.
+al_is_mosh_service() {
+  [ -n "${1:-}" ] || return 1
+  ps -p "$1" -o command= 2>/dev/null | grep -q 'server\.py'
+}
+
+# Do we hold the reservation for this port?
+al_owns_port() {
+  [ "$(cat "$AL_PORT_DIR/${1}.lock/owner" 2>/dev/null || true)" = "$$" ]
+}
+
+# Claim one port. Atomic via mkdir. A lock whose owner process is gone is stale (a crashed
+# gate) and is reclaimed, so a dead run can never burn a block out of the band forever.
+al_claim_port() {
+  local p="$1" d="$AL_PORT_DIR/${p}.lock" owner
+  mkdir -p "$AL_PORT_DIR" 2>/dev/null || true
+  if mkdir "$d" 2>/dev/null; then printf '%s\n' "$$" > "$d/owner" 2>/dev/null; return 0; fi
+  owner="$(cat "$d/owner" 2>/dev/null || true)"
+  # A LIVE owner: hands off, this block belongs to another run.
+  [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null && return 1
+  # Stale. Two reclaimers can race here; both write, then both re-read, so at most one
+  # sees its own pid and wins. The loser just tries the next block.
+  printf '%s\n' "$$" > "$d/owner" 2>/dev/null || return 1
+  al_owns_port "$p"
+}
+
+# Kill the LISTENER on a port we own, if it is one of ours. -sTCP:LISTEN matters: without
+# it lsof also returns every client connected to that port.
+al_kill_owned_listener() {
+  local p="$1" pid
+  al_owns_port "$p" || return 0
+  for pid in $(lsof -ti tcp:"$p" -sTCP:LISTEN 2>/dev/null || true); do
+    if al_is_mosh_service "$pid"; then kill -9 "$pid" 2>/dev/null || true
+    else al_warn "port $p: listener pid $pid is not a Mosh service — left alone"; fi
+  done
+}
+
+# Release the block based at $1 (killing any of our services still on it).
+al_release_port() {
+  local base="${1:-}" p
+  [ -n "$base" ] || return 0
+  for p in $(seq "$base" $((base + AL_PORT_SPAN - 1))); do
+    al_owns_port "$p" || continue
+    al_kill_owned_listener "$p"
+    rm -rf "$AL_PORT_DIR/${p}.lock" 2>/dev/null || true
+  done
+}
+
+# Release EVERY port this shell holds. For the gate's EXIT trap: whatever the run leaves
+# behind is ours by definition, and nothing else is touched.
+al_release_all_ports() {
+  local d p
+  [ -d "$AL_PORT_DIR" ] || return 0
+  for d in "$AL_PORT_DIR"/*.lock; do
+    [ -d "$d" ] || continue
+    p="$(basename "$d" .lock)"
+    al_owns_port "$p" || continue
+    al_kill_owned_listener "$p"
+    rm -rf "$d" 2>/dev/null || true
+  done
+}
+
+# Kill only the services THIS run owns. With a port: the block based there (so a service
+# that drifted under _bind_with_fallback is still covered). Without: everything we hold.
+# A port we do not own is left strictly alone — that is the whole point.
 kill_stray_services() {
-  local port="${1:-}"
-  pkill -f 'service/server\.py'      2>/dev/null || true
-  pkill -f 'service/run\.sh'         2>/dev/null || true
-  pkill -f 'relay/server\.py'        2>/dev/null || true
-  if [ -n "$port" ]; then
-    local pids; pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
-    [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
+  local port="${1:-}" p
+  if [ -z "$port" ]; then
+    [ -d "$AL_PORT_DIR" ] || return 0
+    for p in "$AL_PORT_DIR"/*.lock; do
+      [ -d "$p" ] || continue
+      al_kill_owned_listener "$(basename "$p" .lock)"
+    done
+    return 0
   fi
+  if ! al_owns_port "$port"; then
+    al_warn "kill_stray_services: port $port is not reserved by this run — refusing to touch it"
+    return 0
+  fi
+  for p in $(seq "$port" $((port + AL_PORT_SPAN - 1))); do al_kill_owned_listener "$p"; done
 }
 
 # ── unique session / port allocation ────────────────────────────────────────────
@@ -109,13 +217,40 @@ unique_session() {
   printf '_harness/session-autoloop-%s-%s\n' "$slug" "$$"
 }
 
-# A free TCP port in the 8800–8899 band (away from the default 8770 the GUI uses).
+# RESERVE a block of TCP ports and echo its base — the port to hand the selftest as
+# MOSH_SERVICE_PORT. The reservation is held until al_release_port / al_release_all_ports,
+# so a concurrent gate cannot pick the same port during the long gap before the service
+# actually binds. See the ownership notes above for why probing was not enough.
+#
+# Callers MUST treat empty output as fatal: al_die exits the `$( )` subshell, not the
+# caller, so an exhausted band otherwise silently yields MOSH_SERVICE_PORT="" (which
+# crashes server.py's int() and fails every generative check).
 unique_port() {
-  local lo="${1:-8800}" hi="${2:-8899}" p
-  for p in $(seq "$lo" "$hi"); do
-    if ! lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then printf '%s\n' "$p"; return 0; fi
+  local lo="${1:-$AL_PORT_LO}" hi="${2:-$AL_PORT_HI}" base p pid claimed usable
+  mkdir -p "$AL_PORT_DIR" 2>/dev/null || true
+  base="$lo"
+  while [ $((base + AL_PORT_SPAN - 1)) -le "$hi" ]; do
+    claimed=true
+    for p in $(seq "$base" $((base + AL_PORT_SPAN - 1))); do
+      al_claim_port "$p" || { claimed=false; break; }
+    done
+    if [ "$claimed" = true ]; then
+      # We hold the locks, so anything still LISTENING here is either an orphan of a dead
+      # run (ours to reap — this is the only sweep that is actually ours to do) or a
+      # foreign process, in which case the block is unusable and we hand it straight back.
+      # One ranged lsof for the whole block: ~10x cheaper than a call per port, and which
+      # port a pid sits on does not change the decision.
+      usable=true
+      for pid in $(lsof -ti tcp:"$base"-$((base + AL_PORT_SPAN - 1)) -sTCP:LISTEN 2>/dev/null || true); do
+        if al_is_mosh_service "$pid"; then kill -9 "$pid" 2>/dev/null || true
+        else usable=false; fi
+      done
+      [ "$usable" = true ] && { printf '%s\n' "$base"; return 0; }
+    fi
+    al_release_port "$base"      # give back a partial/unusable claim so no rival is blocked
+    base=$((base + AL_PORT_SPAN))
   done
-  al_die "no free port in $lo-$hi"
+  al_die "no free ${AL_PORT_SPAN}-port block in $lo-$hi (concurrent gate runs? stale locks in $AL_PORT_DIR?)"
 }
 
 # ── selftest summary parsing ─────────────────────────────────────────────────────
