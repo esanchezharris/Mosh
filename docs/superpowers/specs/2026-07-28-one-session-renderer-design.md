@@ -107,7 +107,7 @@ map, no buses) the diff is exactly two added lines. The rest of the prompt is un
 
 Then **add the parity check that does not exist today.** The docstring's "kept in sync
 by hand" is a claim about two files staying equal with nothing enforcing it — the exact
-shape of assertion this repo's worklog says ages into a lie. The check renders the same
+shape of assertion this repo's record says ages into a lie. The check renders the same
 fixture through both implementations (Python directly, TypeScript via `tsx`) and asserts
 byte-equality, so the next person to touch either renderer is told immediately.
 

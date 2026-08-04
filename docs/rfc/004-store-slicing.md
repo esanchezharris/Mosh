@@ -69,8 +69,8 @@ auto-merge on a green gate + review per the program's routing.
   exceeded its mandate.
 - **RED-proof:** before trusting the "surface unchanged" claim, temporarily rename
   `window.__moshStore` and confirm e2e actually fails (proves the specs really consume it — a
-  guard that cannot fail is this repo's recorded failure mode; see the vacuous-tests
-  post-mortems in [`../worklog/INDEX.md`](../worklog/INDEX.md)).
+  guard that cannot fail is this repo's recorded failure mode; see the vacuous-verification
+  gotcha in [`CLAUDE.md`](../../CLAUDE.md)).
 - **e2e isolation:** run under `ui/playwright.isolated.config.ts` (port 5191) if any other
   session owns `:5173` — a foreign bundle false-fails every spec.
 

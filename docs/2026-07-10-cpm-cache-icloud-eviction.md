@@ -18,8 +18,9 @@ then-current env values `AL_CPM_CACHE=~/Documents/ClaudeMosh/.cpm-cache`,
 lived there was hollowed out by eviction — **4,476 working-tree files carried the
 macOS `dataless` flag** (plus 39 under its `.git`), and its git object store is corrupt
 (`pack-7543ad02… is far too short to be a packfile`). This is the same incident class as
-the 2026-07-09 "iCloud ate the `.git` object store" corruption (see
-[CONSOLIDATION_2026-07-09.md](CONSOLIDATION_2026-07-09.md)).
+the 2026-07-09 "iCloud ate the `.git` object store" corruption (its write-up,
+`CONSOLIDATION_2026-07-09.md`, was pruned in the public-cleanup pass; the surviving
+lesson is the worktree-builds gotcha in [`CLAUDE.md`](../CLAUDE.md)).
 
 The specific kill chain for the CMake error:
 

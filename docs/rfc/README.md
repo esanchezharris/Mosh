@@ -43,5 +43,5 @@ draft -> accepted -> implemented
 Copy [`TEMPLATE.md`](TEMPLATE.md) and fill every section, in order. The Verification section is
 **mandatory and must be concrete** (gate lane, RED-proofs, oracles) — this repo's recorded
 failure mode is verification that cannot fail
-([vacuous-tests post-mortems](../worklog/INDEX.md)), and an RFC without a falsifiable
+([the vacuous-verification gotcha](../../CLAUDE.md)), and an RFC without a falsifiable
 verification plan is not accepted. Add a row to [`INDEX.md`](INDEX.md) in the same PR.

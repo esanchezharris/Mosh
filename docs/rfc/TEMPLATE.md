@@ -5,10 +5,10 @@
 
 ## Problem
 
-What is wrong or missing, with **evidence links** — file paths with line counts/ranges, worklog
-post-mortems, gate output. A problem statement without a link to the code or a
-[`docs/worklog/`](../worklog/INDEX.md) note is an assumption, and this repo's record shows
-written reasons age badly (re-read the source before trusting a claim, including this one).
+What is wrong or missing, with **evidence links** — file paths with line counts/ranges, gate
+output. A problem statement without a link to the code or to gate output is an assumption, and
+this repo's record shows written reasons age badly (re-read the source before trusting a claim,
+including this one).
 
 ## Invariants touched
 
@@ -39,7 +39,7 @@ service/relay `*.py`, scripts/auto-loop/), `native` (anything compiled or finger
 
 **MANDATORY — an RFC without this section filled in concretely is not accepted.** This repo's
 recurring failure mode is vacuous verification: tests that cannot fail look identical to tests
-that pass (see the vacuous-tests post-mortems in [`docs/worklog/`](../worklog/INDEX.md)). State:
+that pass (see the vacuous-verification gotcha in [`CLAUDE.md`](../../CLAUDE.md)). State:
 
 - **Gate lane:** which gate must run per PR (full native gate, cheap gate, e2e, verify.py).
 - **RED-proofs:** which new guards must be proven to fail before they are trusted, and how

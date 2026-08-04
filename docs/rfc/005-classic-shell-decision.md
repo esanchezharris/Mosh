@@ -204,7 +204,7 @@ by a written "won't port" log entry):
     with a recorded ceiling): prove it RED by adding a scratch classic-booted spec —
     the guard must fail naming the new spec — then restore and `grep SABOTAGE` before
     landing. A census that cannot name its violator is the vacuous-test failure mode
-    ([worklog post-mortems](../worklog/INDEX.md)).
+    ([the vacuous-verification gotcha](../../CLAUDE.md)).
   - *The freeze guard* (rule 2): prove it RED with a scratch feature-shaped diff to a
     frozen module (absolute-path sabotage, verify the restore).
   - *Each migrated spec*: before landing, run the v2 twin against a deliberately broken
