@@ -15,7 +15,7 @@ import { readShellCss } from "../v2/cssSource";
 // a quieter key: subtle on near-black ink, heavy grey stripes on cream. And `.pr` set a
 // background with no `color`, so inside v2 it inherited near-white text onto a white panel.
 //
-// The lesson the repo keeps re-learning (see docs/worklog, and the .modal/#44 and
+// The lesson the repo keeps re-learning (see CLAUDE.md "Gotchas", and the .modal/#44 and
 // .pop/AGT-MEM fixes in mosh.css) is that a per-theme value must live in a token that the
 // theme block overrides — never as a literal in the rule. These tests enforce exactly that.
 

@@ -18,7 +18,7 @@ Every claim is traceable: Mosh claims cite `path (lines N–M)` at `f1e5b18c` (t
 
 ## 1. License ledger
 
-Licenses verified from the **LICENSE file in the surveyed artifact** (not repo-page sidebars), on retrieval 2026-07-10. Rights classes follow [`docs/CORPUS_PROVENANCE.md`](../../CORPUS_PROVENANCE.md).
+Licenses verified from the **LICENSE file in the surveyed artifact** (not repo-page sidebars), on retrieval 2026-07-10. Rights classes follow the repo's corpus-provenance convention (`docs/CORPUS_PROVENANCE.md`, pruned in the public-cleanup pass).
 
 | Source | URL | Surveyed artifact | License (verified) | Rights class | Usage in this doc |
 |---|---|---|---|---|---|

@@ -22,7 +22,7 @@
 - [x] **VERIFY before relying:** resolved against the **pinned `tracktion_engine` clone** (`2877b621`); documented file-based fallbacks taken (new-clip landing, render-to-file). See `docs/ENGINE_API_NOTES.md`.
 - [x] **macOS / Apple Silicon (arm64) + MLX is canonical; Windows + NVIDIA/CUDA is an additive port.** Every platform fork is `#if`/`if(WIN32)`-guarded so the macOS path stays behaviour-equivalent (proven: the macOS `--selftest` passes unchanged after the port). The generative tier swaps MLX→PyTorch/CUDA behind the same adapter contract. **Linux (x86_64) is an exploratory spike** (FIT-011): the headless `MoshTests` target + the cross-platform Python service build and are CI-tracked on `ubuntu-latest` (`.github/workflows/linux-ci.yml`); the full GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is compiled informationally in CI but is **not yet a supported target**. This Mac (arm64 macOS) can't build for Linux, so the config is only statically checked here — the first CI run is the real verdict. See `docs/2026-07-07-linux-build-spike.md`.
 - [x] **Gate discipline:** never advanced past a failing gate; reported against concrete gates (all six PASSED).
-- [x] **Always leave an artifact:** a session note + per-gate commits + this manifest kept current. *(`docs/PROGRESS.md` retired 2026-07-28 — history only. `docs/worklog/` was removed from the repo on 2026-08-01 — new notes go to `~/Library/Mosh/audits/<id>/`; see §Working notes for how to read the old ones.)*
+- [x] **Always leave an artifact:** per-gate commits + this manifest kept current, a session note in `~/Library/Mosh/audits/<id>/`, and any trap that cost real time written into **Gotchas that still bite** below. *(The dated `docs/worklog/` journal and `docs/PROGRESS.md` were both pruned in the public-cleanup pass (`1d2bb1e9`) — neither is written to any more; see §Working notes for how to read the old ones.)*
 
 ---
 
@@ -96,7 +96,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 
 ## Gotchas that still bite
 
-*The traps that have actually cost time more than once. Full post-mortems in the worklog.*
+*The traps that have actually cost time more than once. This section is the surviving record — the dated post-mortems it was distilled from went with `docs/worklog/`, so add new traps here.*
 
 - **Worktree builds:** the proven dep-cache recipe is
   `-DCPM_SOURCE_CACHE=$HOME/Library/Mosh/work/cpm-cache -DFETCHCONTENT_SOURCE_DIR_TRACKTION_ENGINE=$HOME/Library/Mosh/work/deps/tracktion_engine-src`.
@@ -207,7 +207,10 @@ git show 1d2bb1e^:docs/worklog/<name>.md                      # read one
 
 References to specific notes elsewhere in this file name the filename rather than linking it, for
 exactly this reason. The vitest guard this section used to cite (`ui/src/docs/worklogIndex.test.ts`)
-went with the directory; `ui/src/docs/` does not exist.
+went with the directory. `ui/src/docs/` now holds a *different* guard —
+`ui/src/docs/docLinks.test.ts`, which walks `CLAUDE.md`/`ARCHITECTURE.md`/`README.md` + `docs/**` and
+fails on any local markdown link that does not resolve. It is why a dead `docs/worklog/...` link
+cannot come back: add one and the cheap gate reds.
 
 **Search that history before assuming a problem is new.** Much of it is post-mortems whose lesson
 is a trap that will bite again.

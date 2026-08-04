@@ -74,10 +74,11 @@ silent). The guards-first PR (RFC 001's A-PR0) already widens that surface to
 - **Gate lane:** full native gate per PR, built from committed source.
 - **RED-proof of the oracle harness itself:** before trusting the transcript-diff script, prove
   it fails on a deliberate one-line transcript perturbation (a test that cannot fail looks
-  identical to one that passes — the repo's recorded failure mode; see the vacuous-tests
-  post-mortems in [`../worklog/INDEX.md`](../worklog/INDEX.md)).
+  identical to one that passes — the repo's recorded failure mode; see the vacuous-verification
+  gotcha in [`CLAUDE.md`](../../CLAUDE.md)).
 - **Session isolation:** runs use `MOSH_SELFTEST_SESSION` isolation (JUCE ignores `$HOME`; two
-  runs sharing a leaf delete each other's artifacts — see the SLF-CONC-001 note in the worklog).
+  runs sharing a leaf delete each other's artifacts — see the `--selftest` sessions gotcha in
+  [`CLAUDE.md`](../../CLAUDE.md)).
 
 ## Status log
 
