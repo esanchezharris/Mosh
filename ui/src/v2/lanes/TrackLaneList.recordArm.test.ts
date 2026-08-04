@@ -56,11 +56,16 @@ describe("v2 TrackLaneHeader — record-arm (REC-002)", () => {
   // would make that check circular (it was, at first — a sabotage that moved the button
   // into the select button passed, because the scoped selector simply never found it).
   const armBtn = (i = 0) =>
-    host.querySelectorAll<HTMLButtonElement>('button[aria-label="Record-arm"]')[i];
+    // PREFIX match, not exact. The merged button labels itself per track
+    // ("Record-arm Bass") so a screen reader on a twelve-lane session can tell the rows
+    // apart; an exact-match selector would only be asserting the old label string. The
+    // criterion this test guards — that the button EXISTS, outside the select button —
+    // is unchanged, and the selector stays un-scoped so it is still non-circular.
+    host.querySelectorAll<HTMLButtonElement>('button[aria-label^="Record-arm"]')[i];
 
   it("every track header offers record-arm", () => {
     render([track({ id: "t1" }), track({ id: "t2", name: "Bass" })]);
-    expect(host.querySelectorAll('.v2-ms button[aria-label="Record-arm"]').length).toBe(2);
+    expect(host.querySelectorAll('.v2-ms button[aria-label^="Record-arm"]').length).toBe(2);
   });
 
   it("arms the track it belongs to — not the selected one", () => {

@@ -15,10 +15,18 @@ import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
-import { midiInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
-import { meterAt, snapStep, tempoMapFrom } from "../../time";
+import { midiInputOptions, waveInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
+import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
 import { ReconciledRange } from "../ReconciledRange";
 import type { Clip, Track } from "../../types";
+
+// Eight track colours. Chosen to stay distinguishable in BOTH themes and against the
+// arrangement's dark lanes, and to survive the common red-green colour blindness (no
+// red/green pair carries meaning on its own — the icon and name still identify a track).
+export const TRACK_COLORS = [
+  "#ff5f5f", "#ff9f43", "#ffd166", "#4ade80",
+  "#38bdf8", "#818cf8", "#c084fc", "#f472b6",
+] as const;
 
 export function Inspector() {
   const snapshot = useStore((s) => s.snapshot);
@@ -102,6 +110,38 @@ function MixTab({ track }: { track: Track }) {
           }}
         />
       </label>
+      {/* TRK-COLOUR (#550) — organisation, not sound. A palette rather than a colour
+          wheel: eight choices a producer picks from in a second beat a picker they have to
+          aim at, and the persisted format is still free hex (Ids.h), so changing this
+          palette later is a UI edit and never a migration. The last swatch clears back to
+          the type default — the command takes "" for exactly that, so "no colour" is a
+          real choice rather than a state you can only reach by undo. */}
+      <div className="v2-field v2-swatches" role="group" aria-label={`Colour for ${track.name}`}>
+        <span>Colour</span>
+        <div className="v2-swatch-row">
+          {TRACK_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`v2-swatch${(track.color ?? "") === c ? " on" : ""}`}
+              style={{ background: c }}
+              data-testid={`v2-track-color-${c.slice(1)}`}
+              aria-label={`Colour ${c}`}
+              aria-pressed={(track.color ?? "") === c}
+              onClick={() => void exec("set_track_color", { trackId: track.id, color: c })}
+            />
+          ))}
+          <button
+            type="button"
+            className={`v2-swatch v2-swatch-none${track.color ? "" : " on"}`}
+            data-testid="v2-track-color-none"
+            aria-label="Default colour"
+            aria-pressed={!track.color}
+            title="Back to the track type's default"
+            onClick={() => void exec("set_track_color", { trackId: track.id, color: "" })}
+          />
+        </div>
+      </div>
       <label className="v2-field">
         <span>Vol</span>
         <ReconciledRange key={`${track.id}:volume`} min={-60} max={6} step={0.5} value={track.volumeDb ?? 0}
@@ -125,7 +165,7 @@ function MixTab({ track }: { track: Track }) {
         <span className="v2-val">{Math.round((track.pan ?? 0) * 100)}</span>
       </label>
       <OutputField track={track} />
-      {track.isInstrument && <MidiInputField track={track} />}
+      {track.isInstrument ? <MidiInputField track={track} /> : <AudioInputField track={track} />}
       <InputMonitorField track={track} />
       <div className="v2-mix-btns">
         <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
@@ -200,6 +240,36 @@ function MidiInputField({ track }: { track: Track }) {
       <span>MIDI in</span>
       <select className="btn ghost" data-testid="v2-midi-input"
         aria-label={`MIDI input for ${track.name}`} value={currentTrackInput(track)}
+        onChange={(e) => void exec("set_track_input", { trackId: track.id, deviceID: e.target.value })}>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// G15 — the per-track AUDIO-input picker, the wave-side twin of MidiInputField above.
+// Its absence was load-bearing, not cosmetic: an audio track's only input choice lived in
+// the GLOBAL Settings panel, so a producer could not route two different sources to two
+// tracks — which is exactly what multi-track recording means, and what the new per-track
+// arm toggle exists to enable. It also made the arm button's own disabled tooltip
+// ("pick one in the Inspector's Mix tab") untrue for audio tracks, which is the kind of
+// almost-right surface this programme exists to remove.
+//
+// Same shape and same command as the MIDI twin: read-only `list_wave_inputs` enumeration
+// (lazy — loadRouting is on-demand, never at init, because execute_command is synchronous
+// on the UI thread and a service-spawning call at startup freezes the shell), routed
+// through the existing `set_track_input`. No new mutation command.
+function AudioInputField({ track }: { track: Track }) {
+  const exec = useStore((s) => s.exec);
+  const waveInputs = useStore((s) => s.waveInputs);
+  const loadRouting = useStore((s) => s.loadRouting);
+  useEffect(() => { void loadRouting(); }, [loadRouting]);
+  const opts = waveInputOptions(waveInputs);
+  return (
+    <label className="v2-field">
+      <span>Audio in</span>
+      <select className="btn ghost" data-testid="v2-track-input"
+        aria-label={`Audio input for ${track.name}`} value={currentTrackInput(track)}
         onChange={(e) => void exec("set_track_input", { trackId: track.id, deviceID: e.target.value })}>
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -495,6 +565,31 @@ function ClipTab({ clip }: { clip: Clip }) {
           <span className="v2-val">s</span>
         </label>
       )}
+      {/* CAP-CLP-016 — the play-start OFFSET: which point in the source the clip starts
+          playing from. `trim_clip{offset}` has always been read by cmdTrimClip and sent
+          by the edge-drag layer, but it was undeclared in the catalog and had no control,
+          so a producer could only reach it by dragging a clip's left edge — which also
+          moves the clip. This slides the audio INSIDE the clip and leaves the clip where
+          it is: the difference between "start this later" and "start it from later in the
+          sample". Length is held constant for the same reason. */}
+      <label className="v2-field">
+        <span>Offset</span>
+        <input
+          type="number"
+          min={0}
+          step={0.01}
+          aria-label="Play-start offset into the source (seconds)"
+          data-testid="v2-clip-offset"
+          value={Number((clip.offset ?? 0).toFixed(3))}
+          onChange={(e) => void exec("trim_clip", {
+            clipId: clip.id,
+            start: clip.start,
+            length: clip.length,
+            offset: Math.max(0, Number(e.target.value)),
+          })}
+        />
+        <span className="v2-val">s</span>
+      </label>
       {isWave && (
         <label className="v2-field">
           <span>Normalize to</span>
@@ -531,13 +626,46 @@ function ClipTab({ clip }: { clip: Clip }) {
 
 function MidiTab({ clip, drum }: { clip: Clip; drum: boolean }) {
   const exec = useStore((s) => s.exec);
+  const session = useStore((s) => s.snapshot?.session);
   const openPianoRoll = useStore((s) => s.openPianoRoll);
+  // Local, not persisted: quantize strength is a per-gesture decision, like the amount
+  // on a nudge — a producer picks it for THIS pass, not for the project.
+  const [strengthPct, setStrengthPct] = useState(100);
+  // `quantize_notes` takes `division` as a NUMBER OF BEATS (1 = 1/4, 0.25 = 1/16), not a
+  // label. This button used to pass the string "1/16" — which JUCE's `var` coerces via
+  // String::getDoubleValue(), parsing the leading numeral to 1.0 — so a button reading
+  // "Quantize 1/16" quantized to WHOLE BEATS, four times coarser than it claimed.
+  // Proven against the real engine with --run-script: notes at 0.30/1.18/2.07/3.42 beats
+  // landed on 0/1/2/3 with the string and on 0.25/1.25/2.0/3.5 with 0.25.
+  // Use the same tempo/meter-aware helper classic's PianoRoll passes, so a compound meter
+  // stays correct instead of assuming 4/4.
+  const sixteenth = snapStepBeats(meterAt(tempoMapFrom(session), clip.start), "1/16");
   return (
     <div className="v2-mix">
       {drum
         ? <button className="v2-btn primary" data-testid="v2-open-drumgrid" onClick={() => useDrumWindow.getState().open(clip.id)}>Open drum grid</button>
         : <button className="v2-btn primary" data-testid="v2-open-pianoroll" onClick={() => openPianoRoll(clip.id)}>Open piano-roll</button>}
-      <button className="v2-btn" onClick={() => void exec("quantize_notes", { clipId: clip.id, division: "1/16", strength: 1 })}>Quantize 1/16</button>
+      {/* #552 — `strength` has been a real cmdQuantizeNotes argument all along and the
+          call site hardcoded 1, so a producer could only have FULL quantize: the one
+          setting that strips a groove entirely. 100% snaps to the grid, lower values
+          move each note a fraction of the way and keep the human timing. No swing
+          control here on purpose — the engine has no swing term, so a swing slider
+          would be a fresh inert surface of exactly the kind this programme removes. */}
+      <label className="v2-field">
+        <span>Strength</span>
+        <input
+          type="range" min={0} max={100} step={5}
+          aria-label="Quantize strength (percent)"
+          data-testid="v2-quantize-strength"
+          value={strengthPct}
+          onChange={(e) => setStrengthPct(Number(e.target.value))}
+        />
+        <span className="v2-val">{strengthPct}%</span>
+      </label>
+      <button className="v2-btn" data-testid="v2-quantize-16"
+        onClick={() => void exec("quantize_notes", { clipId: clip.id, division: sixteenth, strength: strengthPct / 100 })}>
+        Quantize 1/16
+      </button>
     </div>
   );
 }

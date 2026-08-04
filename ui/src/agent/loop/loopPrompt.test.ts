@@ -243,20 +243,62 @@ describe("legacy prompt byte-stability pin", () => {
     // richer sessions also gain the tempo map, buses and per-track pan/sends. The
     // "exactly two added lines" claim is not just prose: the test above pins the
     // fixture's FULL rendered block.
+    // Moved 2026-08-03 — loop-region + play-start-offset args declared.
+    //   set_transport — + N("loopStart") + N("loopEnd"), and the desc gains ", and the
+    //                    loop region". cmdSetTransport has ALWAYS read both
+    //                    (MoshOps.TempoProject.cpp:82-84) and only sets the range when
+    //                    BOTH are present, but neither was declared — so the agent could
+    //                    switch looping on and had no way to say WHERE. "loop the first
+    //                    4 bars" was unreachable. Found by the new arg-type scan, which
+    //                    also reports args a call site passes that the catalog never
+    //                    declares (the UI has always sent these:
+    //                    v2/timeline/TimeRangeBand.tsx:60, menuActions.ts:314).
+    //   trim_clip     — + N("offset"), likewise read by cmdTrimClip and sent by
+    //                    ui/clipDrag.ts:58 but undeclared. It is the play-start offset
+    //                    into the source — the one thing separating "trim the clip" from
+    //                    "slide the audio inside it".
     //
-    // Previous pins (two lineages, merged at 2026-08-03 — neither branch tip's own hash
-    // is reachable from here, which is why both are listed):
+    // Same consumer posture as the builtins move above: NO command was added, removed or
+    // renamed — two commands gained optional args and one desc changed — so the SFT
+    // corpora and GEPA baselines are not invalidated, though a corpus rebuilt after this
+    // commit carries the new text. build_add_note_corrective.py parses AGENT_COMMANDS out
+    // of commands.ts, so it needs no edit.
+    //
+    // Moved 2026-08-03 (second time today) — `set_track_color` added to the catalog.
+    //   set_track_color — the usability programme's first genuinely NEW command rather than
+    //                     a UI for something the engine already had. Track colour is pure
+    //                     organisation (it changes nothing audible), which is exactly why a
+    //                     beat-first producer staring at a dozen lanes wants it. Args
+    //                     {trackId, color:"#rrggbb"|""}; "" clears to the type default.
+    //
+    // This one DOES add a command, so unlike the loop-region move above it is a real
+    // catalog growth: an SFT corpus or GEPA baseline rebuilt after this commit carries a
+    // command the older ones never saw. Not invalidating (nothing was removed or renamed),
+    // but worth knowing before comparing runs across this line.
+    //
+    //   move_track      — added with set_track_color as the second half of #550. Reordering
+    //                     is arrangement state only; it refuses a track inside a group
+    //                     rather than silently reparenting it (which would change routing,
+    //                     i.e. sound, from a command that promises only to change order).
+    //
+    //
+    // Previous pins. TWO LINEAGES, merged here: this branch (the usability programme)
+    // and main (drum rack + MIDI editing) each grew the catalog independently, so
+    // NEITHER side's pin was correct after the merge — the hash below was recomputed,
+    // not picked. Both ancestries are listed because neither tip is reachable from here.
+    // - pre-move-track: 6ad2eb8b3f352b88fbf89375dfe1b52b23aaac981b2d6dc7ddf18111d868ab5d
+    // - pre-set-track-color: 28ba3c381e0891c0777678d2cbe7634e9bfe5d7bc1b4bc80d53dfa20e44a0721
+    // - pre-loop-region-args: a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
+    // - pre-builtins-vocabulary (unified renderer + issue #539 wording): e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
     // - pre-record-options:           d3de1c58e515bd660c0b1214ee0db163a011de9c1326e66e450409587ba6e121
     // - drum-rack branch, pre-merge:  e699bb5c200d27200711dc36b008567cde58e380ad70efb3cff9d8e62743bb2e
-    // - main, pre-merge (builtins):   a8113fe0e571e1e8180aab1e8fc699703e7f8d8da582561c12e1a7612044e37c
     // - pre-kit-library:              0396e079069da25afde5d96dcf0a9019bd6774b2e12d4c44840583d065ab1c39
     // - pre-apply-choke:              78e70a05732a178871f2a66292f7d5ab7f16be9d71fb3420d45147086e9fbde4
-    // - pre-drum-rack / pre-builtins: e0917a62238b7dddb4cc09fcb44e3d9f02c4c121563661d97f614a8547a594e2
     // - pre-unified session renderer: 70f9a562bf8bf352f618c87d3be169c56a10d1c9c527b0bf9d2f84e446a1748e
     // - pre-musical-time contract:    a01b556e336db811631384a3030c340788899c00fc102b14b3062aa8ae2c7b83
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334");
+    expect(hash).toBe("2ee994e58085baafc5ae47f16391e57b635a641cd23a7cdeb306e5a6983f10d2");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

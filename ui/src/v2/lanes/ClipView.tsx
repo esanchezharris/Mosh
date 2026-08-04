@@ -18,9 +18,9 @@ import { beatSeconds } from "../../time";
 import { meterOf } from "../timeline/geom";
 import { EditorAction as EA, type Mods } from "../../interaction/actions";
 import { resolveGesture } from "../../interaction/gestures";
+import { selectSimilarIds } from "./selectSimilar";
 import { classifyClipRegion } from "../../interaction/region";
-import { getGestureTable } from "../../interaction/gestureTables";
-import { liveFeel } from "../../interaction/config";
+import { liveFeel, liveGestureTable } from "../../interaction/config";
 import { passedDragThreshold, isDoubleClick } from "../../interaction/feel";
 import { commitClipDrag, type DragPos } from "../../ui/clipDrag";
 import { pushEscapeHandler } from "../../hooks/escapeStack";
@@ -40,14 +40,31 @@ import { buildDrumPatternCard } from "../../agent/memory/patternCards";
 import { saveDrumPatternCard } from "../../agent/memory/savePatternCard";
 
 const MIN_LEN = 0.05; // shortest clip / trim, seconds
-const TABLE = () => getGestureTable("mosh"); // v2 = single Mosh interaction model
+
+// v2 now honours the user's "Mouse gestures" setting (settings/schema.ts `gestureTable`).
+// It used to hardcode `getGestureTable("mosh")` with the comment "v2 = single Mosh
+// interaction model", which made a user-visible DAW picker do NOTHING in the shipped
+// shell while the sibling `keymap` setting WAS honoured — an asymmetry that read as a
+// defect, not a design. The reason it was hardcoded is that Ableton's and Pro Tools'
+// tables address `clip.header` / `clip.body`, and v2 passed `headerPx: 0` so
+// classifyClipRegion could never return `clip.header`: switching the table alone would
+// have produced a clip whose top strip did nothing. Both halves land together here.
+const TABLE = () => liveGestureTable();
+
+// The draggable title strip, in px — same value the classic shell uses. Only applied
+// when the ACTIVE table actually distinguishes header from body; under Mosh/FL/Logic
+// (whole-clip rules) it stays 0, so those users get no invisible 18px dead zone and no
+// decorative bar that does not change what a drag does.
+const CLIP_HEADER_PX = 18;
+const tableHasHeader = (t: ReturnType<typeof liveGestureTable>) =>
+  t.some((r) => r.region === "clip.header");
 
 const modsOf = (e: { shiftKey?: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }): Mods =>
   ({ shift: !!e.shiftKey, alt: !!e.altKey, meta: !!(e.metaKey || e.ctrlKey) });
 const capturePointer = (el: Element, id: number) => { try { (el as HTMLElement).setPointerCapture(id); } catch { /* no-op */ } };
 const releasePointer = (el: Element, id: number) => { try { (el as HTMLElement).releasePointerCapture(id); } catch { /* no-op */ } };
 
-type DragKind = "move" | "trim-l" | "trim-r" | "stretch";
+type DragKind = "move" | "trim-l" | "trim-r" | "stretch" | "time";
 
 export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType: string; snapshot: Snapshot }) {
   const pxPerSec = useStore((s) => s.pxPerSec);
@@ -78,7 +95,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
 
   // Optimistic preview during a drag; cleared when the committed props arrive.
   const [preview, setPreview] = useState<DragPos | null>(null);
-  const drag = useRef<{ kind: DragKind; startX: number; startY: number; engaged: boolean; orig: DragPos } | null>(null);
+  const drag = useRef<{ kind: DragKind; startX: number; startY: number; engaged: boolean; anchorSec: number; orig: DragPos } | null>(null);
   const lastUp = useRef<number | null>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; time: number; splitLabel: string } | null>(null);
@@ -127,11 +144,17 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   };
   const edgeGrab = liveFeel().edgeGrabPx;
 
+  // 0 unless the ACTIVE table has clip.header rules — see CLIP_HEADER_PX.
+  const headerPx = () => (tableHasHeader(TABLE()) ? CLIP_HEADER_PX : 0);
+
   const regionOf = (e: React.PointerEvent | React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const localX = e.clientX - rect.left, localY = e.clientY - rect.top;
     const edgePx = liveFeel().edgeGrabPx;
-    const region = classifyClipRegion({ x: localX, y: localY, width: rect.width, height: rect.height, edgeGrabPx: edgePx, headerPx: 0 });
+    const region = classifyClipRegion({
+      x: localX, y: localY, width: rect.width, height: rect.height,
+      edgeGrabPx: edgePx, headerPx: headerPx(),
+    });
     return { region, localX, edgePx };
   };
 
@@ -146,6 +169,7 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     else if (clickAction === EA.ADDITIVE_SELECT) selectClip(true);
     let dk: DragKind | null = null;
     if (dragAction === EA.MOVE) dk = "move";
+    else if (dragAction === EA.TIME_SELECT) dk = "time";
     else if (dragAction === EA.TRIM) dk = localX <= edgePx ? "trim-l" : "trim-r";
     // ⌘+edge-drag on a wave clip time-stretches (warp) from the RIGHT edge; the left
     // edge and non-wave clips fall back to trimming (no source audio to stretch).
@@ -153,7 +177,11 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
       dk = clip.type === "wave" && localX > edgePx ? "stretch" : localX <= edgePx ? "trim-l" : "trim-r";
     if (!dk) return;
     capturePointer(e.target as HTMLElement, e.pointerId);
-    drag.current = { kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
+    // A time-selection drag measures from the SECOND the pointer went down, not from the
+    // clip's start: the range a producer draws across a clip body has nothing to do with
+    // where that clip begins.
+    const anchorSec = snapTime(Math.max(0, clip.start + localX / pxPerSec));
+    drag.current = { kind: dk, startX: e.clientX, startY: e.clientY, engaged: false, anchorSec, orig: { start: clip.start, length: clip.length, offset: clip.offset } };
     escDispose.current?.();
     escDispose.current = pushEscapeHandler(cancelDrag);
   };
@@ -163,7 +191,20 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
     const threshold = liveFeel().dragThreshold;
     if (!d.engaged) { if (!passedDragThreshold(dx, dy, threshold)) return; d.engaged = true; }
-    // Every clip-drag kind writes only the TIME axis (a clip cannot be dragged to
+    // TIME SELECTION across the clip body (Ableton / Pro Tools). It paints the shared
+    // range band instead of a clip preview, so it returns before every rule below —
+    // those are all about previewing a moved/trimmed clip, which this gesture never does.
+    // The band lives in shellState, not the classic store: writing to useStore.timeRange
+    // sets a value v2 renders nowhere (the mistake the marquee wave already paid for).
+    if (d.kind === "time") {
+      const cur = (e.altKey ? (x: number) => x : snapTime)(Math.max(0, d.anchorSec + pxToSec(dx)));
+      useShell.getState().setTimeRange({
+        start: Math.min(d.anchorSec, cur),
+        end: Math.max(d.anchorSec, cur),
+      });
+      return;
+    }
+    // Every OTHER clip-drag kind writes only the TIME axis (a clip cannot be dragged to
     // another lane — the commit never sends trackId), so once the gesture has
     // engaged, vertical travel must not move the clip in time. Clearing the preview
     // rather than leaving it unwritten also makes "drag it out and put it back"
@@ -196,6 +237,13 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
     releasePointer(e.target as HTMLElement, e.pointerId);
     if (d && d.engaged) {
       lastUp.current = null;
+      if (d.kind === "time") {
+        // Nothing to commit: a range is UI-local state, and delete/loop act on it from
+        // the band's own toolbar. Drop a zero-width range so a stray drag leaves nothing.
+        const r = useShell.getState().timeRange;
+        if (r && r.end - r.start < 1e-6) useShell.getState().setTimeRange(null);
+        return;
+      }
       commitClipDrag(d.kind, preview, d.orig.start, clip.id, exec, setPreview);
       return;
     }
@@ -254,8 +302,13 @@ export function ClipView({ clip, trackType, snapshot }: { clip: Clip; trackType:
   return (
     <div
       ref={clipRef}
-      className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}`}
-      style={{ left, width }}
+      // `hdr` draws the title strip as a real, visible drag handle. Only when the active
+      // table distinguishes header from body — otherwise it would be a decorative bar
+      // that does not change what a drag does, which is the kind of surface this whole
+      // programme exists to remove. Under Ableton/Pro Tools it is the ONLY place a clip
+      // can be grabbed to move, so it has to be visible.
+      className={`v2-clip ${kind}${selected ? " sel" : ""}${clip.type === "wave" && clip.autoTempo ? " warped" : ""}${headerPx() > 0 ? " hdr" : ""}`}
+      style={{ left, width, "--v2-clip-hdr": `${headerPx()}px` } as React.CSSProperties}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onContextMenu={onContext}
       onKeyDown={onKeyDown}
       role="button" tabIndex={0} aria-label={`${clip.name} ${kind} clip`} aria-pressed={selected}
@@ -351,6 +404,15 @@ function ClipMenu({ clip, x, y, time, splitLabel, onClose, drumClip, beatsPerBar
       data-testid="v2-clip-menu" style={{ left: x, top: y }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={onMenuKeyDown}>
       <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("split_clip", { clipId: clip.id, time }))}>{splitLabel}</button>
       <button role="menuitem" tabIndex={-1} onClick={() => run(() => void exec("duplicate_clip", { clipId: clip.id }))}>Duplicate</button>
+      {/* #554 — select every copy of this loop, project-wide. UI-LOCAL: selection never
+          crosses the seam, so there is no command here and never will be. Keyed on the
+          SOURCE file (name only for MIDI, which has none), matching Reaper and Pro Tools.
+          Lives beside Duplicate because both answer "act on more than just this one". */}
+      <button role="menuitem" tabIndex={-1} data-testid="clip-select-similar"
+        onClick={() => run(() => {
+          const ids = selectSimilarIds(useStore.getState().snapshot, clip.id);
+          useStore.getState().select(ids, false);
+        })}>Select similar</button>
       {drumClip && memoryOn && (
         <button role="menuitem" tabIndex={-1} data-testid="clip-save-pattern" onClick={() => run(() => void savePattern())}>
           Save pattern to memory

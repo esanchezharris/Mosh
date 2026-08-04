@@ -42,6 +42,8 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   // ── tracks ──────────────────────────────────────────────────────────────
   { command: "create_track", desc: "Add a new track — type 'drum' loads a sampler + drum kit so beats are audible immediately", args: [S("name", false, "track name"), S("type", false, '"audio" (default) | "drum"')] },
   { command: "rename_track", desc: "Rename a track", args: [S("trackId"), S("name")] },
+  { command: "set_track_color", desc: "Recolour a track for organisation (changes nothing audible)", args: [S("trackId"), S("color", true, '"#rrggbb" lowercase hex, or "" to clear back to the type default')] },
+  { command: "move_track", desc: "Reorder a track — toIndex is its new position in the arrangement (0 = top). Refuses a track inside a group", args: [S("trackId"), N("toIndex", true, "0-based position among the arrangement's tracks")] },
   { command: "remove_track", desc: "Delete a track and its clips", args: [S("trackId")] },
   // ── song sections (Intro/Verse/Hook/…) — scope handles for "rework the hook" ──
   { command: "create_section", desc: "Add a named song section using quarter-note beat offsets from project start — never seconds (in 4/4, bar 1 to bar 5 is startBeat 0 to endBeat 16)", args: [S("name"), N("startBeat"), N("endBeat"), S("color", false)] },
@@ -59,7 +61,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "import_clip", desc: "Import an audio file onto a track at a given time", args: [S("file"), S("trackId", false), S("name", false), N("startSeconds", false, "seconds on the timeline")] },
   { command: "add_midi_clip", desc: "Add an empty MIDI clip", args: [S("trackId"), N("start", false, "seconds"), N("length", false, "seconds")] },
   { command: "move_clip", desc: "Move a clip to a new start time (and optionally another track)", args: [S("clipId"), S("trackId", false), N("start", true, "seconds")] },
-  { command: "trim_clip", desc: "Set a clip's start and length — ripple:true makes same-track neighbors follow the moved end (close or open the gap)", args: [S("clipId"), N("start"), N("length"), B("ripple", false, "shift later clips on the SAME track by the end delta")] },
+  // `offset` was read by cmdTrimClip (MoshOps.Clips.cpp) and sent by the drag layer
+  // (ui/clipDrag.ts:58), but never declared — so the agent could not express a play-start
+  // offset (which point in the SOURCE the clip starts playing from), the one thing that
+  // distinguishes trimming a clip from sliding its contents.
+  { command: "trim_clip", desc: "Set a clip's start and length — ripple:true makes same-track neighbors follow the moved end (close or open the gap)", args: [S("clipId"), N("start"), N("length"), B("ripple", false, "shift later clips on the SAME track by the end delta"), N("offset", false, "play-start offset into the source, seconds — slides the audio inside the clip without moving the clip")] },
   { command: "split_clip", desc: "Split a clip at a time position", args: [S("clipId"), N("time", true, "seconds")] },
   { command: "duplicate_clip", desc: "Duplicate a clip", args: [S("clipId")] },
   { command: "remove_clip", desc: "Delete a clip", args: [S("clipId")] },
@@ -113,7 +119,11 @@ export const AGENT_COMMANDS: AgentCommand[] = [
   { command: "set_metronome", desc: "Toggle the metronome click", args: [B("enabled")] },
   { command: "set_key", desc: "Set the project musical key", args: [S("tonic", false, "C, C#, D … B"), S("mode", false, "major | minor | dorian | mixolydian | pentatonic | chromatic")] },
   { command: "set_count_in", desc: "Set the count-in / pre-roll before recording (0=off, 1=one bar, 2=two bars) — an audible click plays through the pre-roll before capture starts", args: [N("bars", true, "0, 1, or 2")] },
-  { command: "set_transport", desc: "Transport: play/stop/record/seek", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds")] },
+  // loopStart/loopEnd were read by cmdSetTransport (MoshOps.TempoProject.cpp:82-84) but never
+  // declared, so the agent could switch looping ON and had no way to say WHERE — and the handler
+  // only sets the range when BOTH are present, making "loop the first 4 bars" unreachable. The UI
+  // has always sent them (v2/timeline/TimeRangeBand.tsx:60, menuActions.ts:314).
+  { command: "set_transport", desc: "Transport: play/stop/record/seek, and the loop region", args: [S("action", false, '"play"|"toggle"|"stop"|"record"|"to_start"|"to_end"'), B("loop", false), N("position", false, "seconds"), N("loopStart", false, "loop region start in seconds — send WITH loopEnd"), N("loopEnd", false, "loop region end in seconds — send WITH loopStart")] },
 
   // ── recording / takes ─────────────────────────────────────────────────────
   { command: "arm_track", desc: "Arm/disarm a track's input for recording", args: [S("trackId"), B("armed")] },
@@ -257,6 +267,8 @@ export function describeCommand(command: string, args: Record<string, unknown>):
     case "remember_preference": return `Remembered: "${a.text ?? ""}"`;
     case "create_track": return `Added ${a.type === "drum" ? "drum " : ""}track${a.name ? ` "${a.name}"` : ""}`;
     case "rename_track": return `Renamed track to "${a.name}"`;
+    case "set_track_color": return a.color ? `Recoloured a track ${a.color}` : `Cleared a track's colour`;
+    case "move_track": return `Moved a track to position ${a.toIndex}`;
     case "remove_track": return `Removed a track`;
     case "add_test_tone_clip": return `Added a test tone`;
     case "import_clip": return `Imported audio ${a.file ? String(a.file).split("/").pop() : "clip"}${a.startSeconds ? ` at ${a.startSeconds}s` : ""}`;

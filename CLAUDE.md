@@ -14,7 +14,7 @@
 - [x] **One undo system:** Tracktion's `UndoManager` is the undo *implementation* under MoshOps. No second UndoManager, no shadow model.
 - [x] **Swappable seam:** the frontend couples to the backend **only** via `execute_command(...)` + the **snapshot+events** feed. No Tracktion/audio concepts in the frontend. Pure view state (drawers, zoom, scroll, selection) is UI-local and **not** a command. (Stage 2 swappability proof: rebuilt bundle, byte-identical backend.)
 - [x] **Tier wall:** the generative model runs **only** as a **job via the adapter/service** (Tier B) — never on the audio thread. *(The synthetic Tier-A in-process insert was removed 2026-06-21. **Correction:** this directive used to read "no real-time sidecar" full stop, which the code contradicts — `RaveInsertPlugin` (Route C.2) IS a real-time neural insert, running a RAVE model live via anira+LibTorch. It is legitimate because it is **build-gated OFF by default** (`MOSH_ENABLE_ANIRA`), so the default binary is byte-unaffected and the tier wall holds for every shipped build. The rule is "no real-time model in the default build", not "no real-time model exists".)*
-- [x] **Everything is reachable by mouse:** every command in the agent catalog has a control a mouse-only producer can reach from the **shipped v2 shell** — no keyboard-only, agent-only, or classic-only affordances. Enforced by `ui/src/agent/uiReachability.test.ts`, which walks the module graph from `AppV2.tsx` and now asserts `UI_REACH_GAPS` is **exactly 0** (16 → 0 on 2026-07-26). Two consequences worth knowing before you add a command: the probe is a string search, so a module v2 imports for *helpers* but never renders must be declared in `CLASSIC_ONLY_MODULES` or it makes its whole subtree look reachable (that false positive hid the fact that a v2 user could not delete a track); and an exception with a written reason is still an exception — several long-standing entries turned out to describe an assumption rather than the code. Close-out.
+- [x] **Everything is reachable by mouse:** every command in the agent catalog has a control a mouse-only producer can reach from the **shipped v2 shell** — no keyboard-only, agent-only, or classic-only affordances. Enforced by `ui/src/agent/uiReachability.test.ts`, which walks the module graph from `AppV2.tsx` and now asserts `UI_REACH_GAPS` is **exactly 0** (16 → 0 on 2026-07-26). Two consequences worth knowing before you add a command: the probe is a string search, so a module v2 imports for *helpers* but never renders must be declared in `CLASSIC_ONLY_MODULES` or it makes its whole subtree look reachable (that false positive hid the fact that a v2 user could not delete a track); and an exception with a written reason is still an exception — several long-standing entries turned out to describe an assumption rather than the code. Close-out — worklog `2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md`.
 - [x] **Threading:** model + bridge on the message thread; audio in `applyToBuffer` on RT threads (no alloc); service-I/O on background (`std::thread` + `callAsync`); **audio thread never blocks**; telemetry decimated 30 Hz.
 - [x] **ASTD everywhere, defeatable:** every over-driveable generative param is a 0–100 UI control clamped below quality-collapse; **Lab mode** unlocks the raw range. Implemented in the Tier-B service (`service/colors/runtime.py`). *(The C++ `mosh::astd` impl was removed with the Tier-A insert, 2026-06-21.)*
 - [x] **Cache by full fingerprint:** Tier-B reuse keyed by the complete fingerprint (`05 §5`), never just source+params. (Harness: HIT/MISS verified.)
@@ -22,7 +22,7 @@
 - [x] **VERIFY before relying:** resolved against the **pinned `tracktion_engine` clone** (`2877b621`); documented file-based fallbacks taken (new-clip landing, render-to-file). See `docs/ENGINE_API_NOTES.md`.
 - [x] **macOS / Apple Silicon (arm64) + MLX is canonical; Windows + NVIDIA/CUDA is an additive port.** Every platform fork is `#if`/`if(WIN32)`-guarded so the macOS path stays behaviour-equivalent (proven: the macOS `--selftest` passes unchanged after the port). The generative tier swaps MLX→PyTorch/CUDA behind the same adapter contract. **Linux (x86_64) is an exploratory spike** (FIT-011): the headless `MoshTests` target + the cross-platform Python service build and are CI-tracked on `ubuntu-latest` (`.github/workflows/linux-ci.yml`); the full GUI app (WebKitGTK webview + ALSA audio + JUCE Linux VST3 hosting) is compiled informationally in CI but is **not yet a supported target**. This Mac (arm64 macOS) can't build for Linux, so the config is only statically checked here — the first CI run is the real verdict. See `docs/2026-07-07-linux-build-spike.md`.
 - [x] **Gate discipline:** never advanced past a failing gate; reported against concrete gates (all six PASSED).
-- [x] **Always leave an artifact:** a `docs/worklog/` note + per-gate commits + this manifest kept current. *(`docs/PROGRESS.md` retired 2026-07-28 — history only.)*
+- [x] **Always leave an artifact:** a session note + per-gate commits + this manifest kept current. *(`docs/PROGRESS.md` retired 2026-07-28 — history only. `docs/worklog/` was removed from the repo on 2026-08-01 — new notes go to `~/Library/Mosh/audits/<id>/`; see §Working notes for how to read the old ones.)*
 
 ---
 
@@ -44,7 +44,7 @@
 
 ### Stage 2 — WebView arrangement (`03`) ✅ GATE PASSED (2026-06-08)
 - [x] Conventional layout: track headers (name/remove + mixer M·S·volume), timeline lanes, clips, transport bar, mixer stub (in-header volume/pan/mute/solo).
-- [x] Playhead via **decimated** 30 Hz transport events; waveforms from backend **peak arrays** (`get_clip_peaks` → canvas; no audio on web thread). ~~Real audio level meters deferred to Stage 6 (no public level-tap on `VolumeAndPanPlugin`; playhead decimation path proven).~~ **Corrected:** per-track + master dB metering shipped in **Wave 9** (2026-06-09, `5138628f`; polished `4a77257d`) — `VolumeAndPanPlugin` itself indeed exposes no measurer (that part was true), so `MoshOps::ensureTrackMeter` inserts a dedicated `te::LevelMeterPlugin` **post-fader** per track (hidden from the `plugins` rack array, real index preserved) instead; levels are emitted on the same 30 Hz rail as transport, on a separate `"levels"` event (`{tracks:[{id,l,r}], master:{l,r}}`), and consumed via `store.levels` — deliberately **outside** the snapshot, same discipline as `store.transport`. `Meter`/`MasterMeter` (`ui/src/ui/Meter.tsx`) render it in the classic shell; the v2 shell got its own `TrackMeterBar` + a `RightRail` master-level readout in the METER-001 pass.
+- [x] Playhead via **decimated** 30 Hz transport events; waveforms from backend **peak arrays** (`get_clip_peaks` → canvas; no audio on web thread). ~~Real audio level meters deferred to Stage 6 (no public level-tap on `VolumeAndPanPlugin`; playhead decimation path proven).~~ **Corrected:** per-track + master dB metering shipped in **Wave 9** (2026-06-09, `5138628f`; polished `4a77257d`) — `VolumeAndPanPlugin` itself indeed exposes no measurer (that part was true), so `MoshOps::ensureTrackMeter` inserts a dedicated `te::LevelMeterPlugin` **post-fader** per track (hidden from the `plugins` rack array, real index preserved) instead; levels are emitted on the same 30 Hz rail as transport, on a separate `"levels"` event (`{tracks:[{id,l,r}], master:{l,r}}`), and consumed via `store.levels` — deliberately **outside** the snapshot, same discipline as `store.transport`. `Meter`/`MasterMeter` (`ui/src/ui/Meter.tsx`) render it in the classic shell; the v2 shell got its own `TrackMeterBar` + a `RightRail` master-level readout in the METER-001 pass — worklog `2026-07-18-meter-001-v2-track-master-level-meters-a-real-coverage-bug-f.md`.
 - [x] All mutation via MoshOps; clip drag→`move_clip`, edge-trim→`trim_clip`, split-tool→`split_clip`; mixer→`set_track_volume/pan/mute/solo`. Incremental: static→drag→trim→split→zoom→snap→marquee all implemented.
 - [x] **GATE:** full interactive arrangement built (drag-move w/ optimistic preview, trim handles, split tool, zoom, snap-to-grid, marquee select, ruler seek + shift-drag loop region). **Swappability PROVEN:** rebuilt the React bundle (visible marker) and re-staged into the running app — C++ binary **byte-identical** (sha256 `3e49448f…` before/after), app still works. Command surface proven by `Mosh --selftest` (47/47). (Live drag not synthetically clickable — macOS Accessibility perms — but the UI uses the same verified `executeCommand` path as the live-proven `get_snapshot`/`get_clip_peaks`.)
 
@@ -90,7 +90,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
 - **FakeAdapter before SA3** (Stage 5) — prove orchestration with the stub.
 - The **arrange view** is incremental, not a from-scratch native renderer (it's React over the `02` contract) — lower risk than the prior plan, but still stage it.
 - Optional non-blocking adds once core works: prompt-concision rewriter (`05 §6`), judge-panel quality readout (`05 §7`), `StableAudioOpenSmallAdapter` bring-up rung (`05 §2`).
-- Deferred (do **not** build): B-5/operator behavior + multiplayer/CRDT op-log; on-device SAO-Small + Medium→Small transfer; the **real** on-device LoRA-base training + vector layering (the trainer *scaffold* + fake backend already landed — note); timestep-scheduled steering; full Context-Drawers system; **MRT2 live generative-instrument lane** (more viable now we're Mac-only, but not core v0 — `07`); foleys/cello/Gin/JUMP (only if a later need appears).
+- Deferred (do **not** build): B-5/operator behavior + multiplayer/CRDT op-log; on-device SAO-Small + Medium→Small transfer; the **real** on-device LoRA-base training + vector layering (the trainer *scaffold* + fake backend already landed — note — worklog `2026-06-18-type-beat-lora-trainer-scaffold-landed-post-v0-2026-06-18.md`); timestep-scheduled steering; full Context-Drawers system; **MRT2 live generative-instrument lane** (more viable now we're Mac-only, but not core v0 — `07`); foleys/cello/Gin/JUMP (only if a later need appears).
 
 ---
 
@@ -103,7 +103,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   Do **not** point these into the old `~/Documents/ClaudeMosh` tree.
   Nothing a build reads may live under `~/Documents` — iCloud evicts file *contents* while leaving
   plausible-looking stat sizes, which fails as bizarre cmake errors.
-  
+  (dep-cache eviction — worklog `2026-07-10-seeded-dep-cache-config-healed-icloud-evicted-the-cpm-cache.md`)
 - **Worktree UI step:** the Vite/esbuild step SIGKILLs in a fresh worktree. Symlink
   `ui/node_modules` to the main checkout's (verify the lockfiles match first).
 - **e2e must use the isolated config** (`ui/playwright.isolated.config.ts`, port 5191) whenever
@@ -117,7 +117,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   symlinked, or otherwise unowned paths fall back to a unique safety session. Two runs
   must still use distinct harness leaves.
   `commandLine.contains("--selftest")` is also true for `--selftest-undo`; match undo FIRST.
-  
+  (SLF-CONC-001 — worklog `2026-07-18-slf-conc-001-selftest-made-hermetic-against-a-concurrent-sel.md`)
 - **JUCE ignores `$HOME`** — a harness run always hits the real `~/Library/Mosh`; changing
   `$HOME` is not a sandbox. Use a unique marker-owned `_harness` leaf or unit-test the
   pure helper instead.
@@ -134,10 +134,15 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
      1–3s" — is dead. Runs complete with real durations and real output (on #462's branch: native
      gate 17m50s PASS, cheap gate 7m35s FAIL, linux-x64 5m21s PASS). **Read the log before
      dismissing a failure**; do not wave one through as an outage.
-  Still read durations, just not to that conclusion: `classify change` legitimately passes in ~9s,
-  and the separate `.github/workflows/release.yml` run fails in **0s with no log on every push**
-  (including on `main`) — a long-standing workflow-config fault, not billing, and not a required
-  check. Don't read that one as the outage returning.
+  Still read durations, just not to that conclusion: `classify change` legitimately passes in ~9s.
+  **A 0s run with no log and no jobs is a workflow-file PARSE error — the most fixable red there
+  is, never something to route around.** This file used to tell you to ignore exactly that on
+  `.github/workflows/release.yml`, and so nobody looked for six weeks. The cause was one line:
+  `secrets` is not an allowed context in a step-level `if:`, so GitHub could not parse the file and
+  every push failed in ~0s regardless of the workflow's `on: push: tags: v*` filter. Fixed by
+  computing the presence test in a job-level `env:` (where `secrets` *is* allowed) and testing
+  `env.HAVE_BRAIN_ENV` in the step. If you find yourself writing a note that teaches the next agent
+  to accept a red check, fix the check instead.
 - **Selftest check counts are environment-dependent.** A dev Mac with SA3/RAVE/whisper weights
   reports ~1681; hermetic CI reports 1656; a Release bundle without them reports fewer still.
   Never paste a locally-observed count into `MOSH_SELFTEST_BASELINE` — it reds every CI run.
@@ -160,7 +165,7 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   CWD-relative, so running it from `scripts/verify-hardware/` fails every service-dependent check
   with "generative service unavailable" — including pre-existing ones, which reads as if your
   change broke nine things.
-  
+  (UI-REACH close-out — worklog `2026-07-26-ui-reach-closed-16-to-0-freeze-was-inert-bounce-had-no-surface.md`)
 - **A new MoshOps command needs FOUR registrations, not one.** Dispatch alone builds and passes
   `--selftest`; the drift guards live elsewhere. `test_multiplayer_lock_manager.cpp` (AL-011)
   fails if it has no lock scope — an unclassified command fails **closed** to `SessionGlobal`
@@ -180,14 +185,32 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   not `PluginManager::createNewPlugin`, or `indexOf` fails and it asserts.
 - **A RAVE model can legitimately map out-of-domain input to exact silence.** Never validate a
   streaming model with a single block, and never let a harness bind to one blind-picked model.
-  
+  (diagnosis — worklog `2026-07-16-rave-rack-silent-under-pinned-libtorch-was-one-bad-model-not.md`)
 - **Over `ssh pc`** (PowerShell 5.1) stage `.ps1` files and run `pwsh -NoProfile -File` — nested
   `-Command` quoting corrupts silently. Python goldens need `PYTHONUTF8=1` on Windows.
 
 ---
 
-## Working notes
+## Working notes — out of the repo since 2026-08-01
 
-Dated session notes and per-incident post-mortems were kept in `docs/worklog/` and were
-pruned from the public repo in the cleanup pass. The lessons that still bite are folded
-into the Gotchas section above, which is the one to read before assuming a problem is new.
+`docs/worklog/` (54 dated post-mortems) was **deliberately removed** in `1d2bb1e`
+("public cleanup: prune internal journals and benches"), the same commit that gitignored
+`.claude/`, `.omo/` and `.debug-journal.md`. It is not coming back — but nothing is lost, and the
+notes are still the best source on any trap below.
+
+**To read one:**
+
+```bash
+git log --diff-filter=D --name-only 1d2bb1e -- docs/worklog   # list every note
+git show 1d2bb1e^:docs/worklog/<name>.md                      # read one
+```
+
+References to specific notes elsewhere in this file name the filename rather than linking it, for
+exactly this reason. The vitest guard this section used to cite (`ui/src/docs/worklogIndex.test.ts`)
+went with the directory; `ui/src/docs/` does not exist.
+
+**Search that history before assuming a problem is new.** Much of it is post-mortems whose lesson
+is a trap that will bite again.
+
+**New session notes go to `~/Library/Mosh/audits/<id>/`**, outside the repo, with only a redacted
+summary committed — the convention the production-v2 audit campaign already uses.

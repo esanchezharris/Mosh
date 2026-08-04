@@ -124,7 +124,7 @@ describe("v2 ClipView keyboard access", () => {
     expect(exec).toHaveBeenCalledWith("move_clip", { clipId: "c1", start: 2.5 });
 
     await keyAsync(clip(), "c", { metaKey: true });
-    expect(useStore.getState().clipboard?.clip.id).toBe("c1");
+    expect(useStore.getState().clipboard?.clips.map((c) => c.clip.id)).toEqual(["c1"]);
 
     await keyAsync(clip(), "Delete");
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith("remove_clip", { clipId: "c1" }));

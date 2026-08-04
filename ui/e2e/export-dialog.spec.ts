@@ -1,9 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // L3 reachability (DAW-parity P5): the export surface — range/tail/format via the shared
-// ExportControls, reached in v2 through the Composer "+" (FileOptions). The stems test is
-// a FIXME: export_stems shipped natively (#410) with NO UI affordance (G19) — this spec
-// is that backlog item's definition of done. Ledger: docs/verification/REACHABILITY.md.
+// ExportControls, reached in v2 through the Composer "+" (FileOptions).
+//
+// The G19 stems test below was a FIXME whose comment said export_stems had "NO UI
+// affordance". That was WRONG for weeks: the affordance shipped as a `mixdown | stems`
+// mode select (`export-mode`) with a confirm gate. The fixme pointed at
+// `export-stems-run`, a testid chosen before the work and never reconciled with the one
+// that shipped — so a finished feature read as debt. Ledger:
+// docs/verification/REACHABILITY.md.
 
 async function bootV2(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -43,10 +48,21 @@ test("loop range option exists alongside full/custom", async ({ page }) => {
   expect(options.join(" ").toLowerCase()).toContain("loop");
 });
 
-// G19 — export_stems has no UI affordance. Remove the fixme in the PR that adds the
-// stems action to ExportControls (acceptance in docs/auto-loop/backlog.jsonl).
-test.fixme("stem export runs from the export surface", async ({ page }) => {
+// G19 — the stems mode is reachable; the fixme's selector was the only thing missing.
+test("stem export is reachable from the export surface", async ({ page }) => {
   await openFileOptions(page);
-  await page.getByTestId("export-stems-run").click();
-  await expect(page.getByTestId("export-done")).toBeVisible();
+  await page.getByTestId("export-mode").selectOption("stems");
+  await expect(page.getByTestId("export-run")).toBeVisible();
+});
+
+// #551 — 16-bit renders truncate: Mosh has no dither anywhere in the export path. The
+// harm is not the truncation, it is a producer not knowing, so the note must appear at
+// exactly the depth that does it and nowhere else.
+test("16-bit discloses that there is no dither; 24-bit does not", async ({ page }) => {
+  await openFileOptions(page);
+  await expect(page.getByTestId("export-dither-note")).toHaveCount(0);   // 24-bit default
+  await page.getByTestId("export-depth").selectOption("16");
+  await expect(page.getByTestId("export-dither-note")).toBeVisible();
+  await page.getByTestId("export-depth").selectOption("24");
+  await expect(page.getByTestId("export-dither-note")).toHaveCount(0);
 });

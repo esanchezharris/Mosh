@@ -93,6 +93,13 @@ namespace mosh::ids
     // the undo manager by set_track_type / create_track so undo restores the prior
     // type (and the same transaction's auto-loaded instrument) together.
     MOSH_DECLARE_ID (trackType)
+    // Track colour: "#rrggbb" (lowercase hex), or absent for the type's default. Lives on
+    // the track's own state tree like trackType, so it saves/reloads with the edit and is
+    // written WITH the undo manager — recolouring is an edit a producer expects to undo.
+    // Deliberately a free hex value rather than a palette index: a palette is a UI
+    // decision (v2 offers eight swatches) and baking one into the persisted format would
+    // make every future palette change a migration.
+    MOSH_DECLARE_ID (trackColour)
     // FL drum-lane mute/solo: comma-separated GM pitches whose sampler pad is muted /
     // soloed on a drum track. Persisted on the track; applied as sampler pad gains.
     MOSH_DECLARE_ID (drumMute)

@@ -38,7 +38,26 @@ function PluginCard({ plugin, trackId }: { plugin: Plugin; trackId: string }) {
   const isBuiltin = !!plugin.builtin;
   const isRave = !!plugin.rave;
   return (
-    <div className={`pcard${plugin.enabled ? "" : " bypassed"}${isRave ? " neural" : ""}`} data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}>
+    <div
+      className={`pcard${plugin.enabled ? "" : " bypassed"}${isRave ? " neural" : ""}`}
+      data-testid="plugin-card" data-plugin-index={plugin.index} data-enabled={plugin.enabled}
+      /* CAP-EFX-003 — drag a card to reorder the chain. All four reference DAWs drag
+         inserts, so drag is the 2-of-4 idiom; the ‹/› buttons stay because a drag is not
+         keyboard-reachable and removing them would trade one accessibility gap for
+         another. Signal-chain ORDER is audible (an EQ before a compressor is a different
+         sound), which is why this is worth a gesture rather than two clicks per hop. */
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", String(plugin.index));
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const from = Number(e.dataTransfer.getData("text/plain"));
+        if (!Number.isFinite(from) || from === plugin.index) return;   // a drop on itself is a no-op, not an error
+        void exec("reorder_plugin", { trackId, index: from, toIndex: plugin.index });
+      }}>
       <div className="pcard-head">
         <button className={`pdot${plugin.enabled ? " on" : ""}`} title={plugin.enabled ? "Bypass" : "Enable"}
           aria-pressed={!plugin.enabled}

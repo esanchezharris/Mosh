@@ -15,9 +15,9 @@
 {"id":"G10","title":"Automation depth (write/touch/latch modes)","class":"native","size":"L","status":"done","order":240}
 {"id":"G10b","title":"Automation touch/latch modes + multi-target conflict policy","class":"native","size":"M","status":"ready","order":241}
 {"id":"G12","title":"Comping promote-to-main UX","class":"native","size":"M","status":"done","order":250}
-{"id":"G15","title":"v2 per-track record affordances (arm toggle, input monitor, input picker)","class":"cheap","size":"M","status":"ready","order":260}
+{"id":"G15","title":"v2 per-track record affordances (arm toggle, input monitor, audio-input picker)","class":"cheap","size":"M","status":"done","order":260}
 {"id":"G16","title":"v2 automation surface (write-arm control + lane editing)","class":"cheap","size":"M","status":"ready","order":261}
-{"id":"G17","title":"Ripple-delete UI affordance","class":"cheap","size":"S","status":"ready","order":262}
+{"id":"G17","title":"Ripple-delete UI affordance","class":"cheap","size":"S","status":"done","order":262}
 {"id":"G18","title":"Group/ungroup track UI affordance","class":"cheap","size":"S","status":"ready","order":263}
-{"id":"G19","title":"Stem-export UI affordance in ExportControls","class":"cheap","size":"S","status":"ready","order":264}
-{"id":"G20","title":"stretch_clip fails on a just-reversed clip — it reads the proxy's length, not the source's","class":"native","size":"S","status":"ready","order":918}
+{"id":"G19","title":"Stem-export UI affordance in ExportControls","class":"cheap","size":"S","status":"done","order":264}
+{"id":"G20","title":"stretch_clip fails on a just-reversed clip \u2014 it reads the proxy's length, not the source's","class":"native","size":"S","status":"ready","order":918}

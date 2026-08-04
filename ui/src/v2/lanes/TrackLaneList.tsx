@@ -21,6 +21,8 @@ import { Playhead } from "../timeline/Playhead";
 import { TimeRangeBand } from "../timeline/TimeRangeBand";
 import { ClipView } from "./ClipView";
 import { meterOf, contentSeconds, headW } from "../timeline/geom";
+import { useLaneMarquee } from "./useLaneMarquee";
+import { boundsOf } from "./marqueeHit";
 import { IconDrum, IconLayers, IconPlus, IconWaveform } from "../../ui/icons";
 // Renamed on import: this file already has a `meterOf` (time-signature meter, from
 // ../timeline/geom) — `Meter` here is the UNRELATED Wave 9 audio LEVEL meter widget.
@@ -56,6 +58,8 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
   const sectionZoom = useShell((s) => s.sectionZoom);
   const setSectionZoom = useShell((s) => s.setSectionZoom);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tlRef = useRef<HTMLDivElement>(null);
+  const marquee = useLaneMarquee(tlRef);
   // The navigator is a whole-song OVERVIEW (SongNav) — clicking it seeks and brings that
   // spot into view in the (zoomed) timeline below. Not synced to the timeline's scroll.
   const scrubTo = useCallback((sec: number) => {
@@ -165,7 +169,19 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
         style={{ "--v2-stage-h": `calc(var(--v2-ribbon-h) + var(--v2-tempo-h) + var(--v2-ruler-h) + var(--v2-ann-h) + ${tracks.length + 1} * (var(--v2-lane-h) + 1px) + 16px)` } as React.CSSProperties}
       >
         <div className="v2-tl-scroll" ref={scrollRef} data-testid="v2-timeline">
-          <div className="v2-tl">
+          {/* Empty-lane gestures (marquee / deselect / range) live on the grid rather
+              than per-lane: a lasso legitimately crosses lane boundaries, and pointer
+              capture has to belong to one element for the whole drag. Clips and the
+              ruler/ribbon rows own their own pointerdowns, so this only ever fires on
+              blank lane space — see useLaneMarquee's target test. */}
+          <div
+            className="v2-tl"
+            ref={tlRef}
+            onPointerDown={marquee.onPointerDown}
+            onPointerMove={marquee.onPointerMove}
+            onPointerUp={marquee.onPointerUp}
+            onPointerCancel={marquee.onPointerCancel}
+          >
             {/* Song-structure ribbon — the timeline's top row, above the ruler.
                 NOT the nav strip: PR #183 removed it from there because a ribbon sitting
                 beside the whole-song navigator "was misread as section editing", and
@@ -192,8 +208,8 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>
-                <TrackLaneHeader track={t} />
-                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px` } as React.CSSProperties}>
+                <TrackLaneHeader track={t} index={tracks.indexOf(t)} total={tracks.length} idAt={(i) => tracks[i]?.id} />
+                <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}${t.color ? " coloured" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px`, ...(t.color ? { "--track-col": t.color } : {}) } as React.CSSProperties}>
                   {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
                       gets real positioned lines, because a repeating gradient cannot express
                       an uneven grid and would drift from the ruler above. */}
@@ -210,6 +226,21 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             <div className="v2-lane v2-lane-add" style={{ width: contentW }} aria-hidden />
             <TimeRangeBand />
             <Playhead />
+            {marquee.rect && (() => {
+              const b = boundsOf(marquee.rect);
+              return (
+                <div
+                  className="v2-marquee"
+                  data-testid="v2-marquee"
+                  style={{
+                    left: headW() + b.xMin,
+                    top: b.yMin,
+                    width: b.xMax - b.xMin,
+                    height: b.yMax - b.yMin,
+                  }}
+                />
+              );
+            })()}
           </div>
         </div>
         {dragging && (
@@ -337,7 +368,7 @@ function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: Sec
   );
 }
 
-function TrackLaneHeader({ track }: { track: Track }) {
+function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: number; total: number; idAt: (i: number) => string | undefined }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const clearSelection = useStore((s) => s.clearSelection);
@@ -365,7 +396,26 @@ function TrackLaneHeader({ track }: { track: Track }) {
 
   return (
     <div
-      className={`v2-lhead${sel ? " sel" : ""}`}
+      className={`v2-lhead${sel ? " sel" : ""}${track.color ? " coloured" : ""}`}
+      style={track.color ? ({ "--track-col": track.color } as React.CSSProperties) : undefined}
+      /* TRK-REORDER — drag the header to reorder, the idiom all four reference DAWs use.
+         The ▲▼ buttons stay: a drag is not keyboard-reachable, and dropping them would
+         trade one accessibility gap for another. HTML5 drag rather than pointer capture
+         because the lane grid already owns pointer events for the marquee — a second
+         pointer-capture surface on the same rows is how you get two gestures fighting. */
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", String(index));
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const from = Number(e.dataTransfer.getData("text/plain"));
+        if (!Number.isFinite(from) || from === index) return;  // dropped on itself: a no-op, not an error
+        const id = idAt(from);
+        if (id) void exec("move_track", { trackId: id, toIndex: index });
+      }}
       role="group"
       aria-label={`${track.name} track`}
       data-testid="v2-track-header"
@@ -391,6 +441,18 @@ function TrackLaneHeader({ track }: { track: Track }) {
         <TrackMeterBar trackId={track.id} />
       </button>
       <span className="v2-ms">
+        {/* G15 / CAP-REC-004 — the per-track RECORD ARM. `arm_track` and `stop_recording`
+            have always landed takes on EVERY armed track, but the only way to arm from v2
+            was the transport Record button, which auto-arms the SELECTED track alone. So
+            multi-track simultaneous recording — a whole band, or a vocal and a room mic —
+            was engine-complete and unreachable by mouse.
+
+            Disabled with a reason when the track has no routed input: arming a track that
+            cannot receive audio would record silence and look like a working take. The
+            snapshot already carries `hasInput`, so this is an honest gate, not a guess.
+
+            NOT undoable by design, matching cmdArmTrack: arming is a transport decision
+            like monitor mode, not an edit to the project. */}
         <button
           className={`m${track.mute ? " on" : ""}`}
           aria-label="Mute"
@@ -411,13 +473,46 @@ function TrackLaneHeader({ track }: { track: Track }) {
             NOT recording — impossible to reach for the QWERTY keyboard. */}
         <button
           className={`r${track.armed ? " on" : ""}`}
-          aria-label="Record-arm"
+          data-testid="v2-track-arm"
+          aria-label={`Record-arm ${track.name}`}
           aria-pressed={!!track.armed}
           title={track.armed
             ? "Armed — live MIDI reaches this track, and what you play can be recorded or captured"
-            : "Record-arm: route live MIDI here so it can be recorded or captured"}
+            // The no-input case APPENDS; it must not replace, or the tooltip stops saying the
+            // one thing a producer cannot learn anywhere else (that arming is what makes the
+            // computer keyboard recordable) exactly when they most need telling.
+            : "Record-arm: route live MIDI here so it can be recorded or captured"
+              + (track.hasInput === false
+                ? ". No audio input is routed yet — pick one in the Inspector's Mix tab; the computer keyboard routes itself the first time you play a note"
+                : "")}
           onClick={(e) => { e.stopPropagation(); void exec("arm_track", { trackId: track.id, armed: !track.armed }); }}
-        >●</button>
+        >R</button>
+      </span>
+      {/* TRK-REORDER (#550) — move this row up/down. Every one of the four reference DAWs
+          reorders tracks by DRAGGING the header, so drag is the 2-of-4 idiom and remains
+          the polish this owes; buttons are a real reorder affordance in the meantime
+          (Reaper and Pro Tools both also expose track-move as a command), and unlike a
+          half-wired drag they cannot lie about what they do. Hover/focus-revealed like the
+          remove button beside them, and disabled at the ends rather than silently no-oping
+          — a control that does nothing at the boundary is the small dishonesty this
+          programme keeps removing. */}
+      <span className="v2-lhead-move">
+        <button
+          type="button"
+          data-testid="v2-track-move-up"
+          aria-label={`Move ${track.name} up`}
+          title={`Move ${track.name} up`}
+          disabled={index <= 0}
+          onClick={(e) => { e.stopPropagation(); void exec("move_track", { trackId: track.id, toIndex: index - 1 }); }}
+        >▲</button>
+        <button
+          type="button"
+          data-testid="v2-track-move-down"
+          aria-label={`Move ${track.name} down`}
+          title={`Move ${track.name} down`}
+          disabled={index >= total - 1}
+          onClick={(e) => { e.stopPropagation(); void exec("move_track", { trackId: track.id, toIndex: index + 1 }); }}
+        >▼</button>
       </span>
       <button
         className="v2-lhead-rm"
