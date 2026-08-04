@@ -106,11 +106,55 @@ def _service_port(preferred):
 
 
 # ── WAV analysis ────────────────────────────────────────────────────────────────
+def _load_wav_float(path):
+    """Minimal RIFF walker for the float WAVs stdlib `wave` refuses.
+
+    A 32-bit WAV out of JUCE is WAVE_FORMAT_IEEE_FLOAT (tag 3), not int32 — so until
+    now nothing in this harness could read Mosh's own 32-bit export at all. `wave`
+    raises Error('unknown format: 3') on those, and on WAVE_FORMAT_EXTENSIBLE (0xFFFE)
+    wrapping the same. Returns (float64 samples, samplerate, channels)."""
+    raw = Path(path).read_bytes()
+    if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+        raise ValueError(f"not a RIFF/WAVE file: {path}")
+    pos, fmt, data = 12, None, None
+    while pos + 8 <= len(raw):
+        cid = raw[pos:pos + 4]
+        size = int.from_bytes(raw[pos + 4:pos + 8], "little")
+        body = raw[pos + 8:pos + 8 + size]
+        if cid == b"fmt ":
+            fmt = body
+        elif cid == b"data":
+            data = body
+        pos += 8 + size + (size & 1)          # chunks are word-aligned
+    if fmt is None or data is None:
+        raise ValueError(f"WAV missing fmt/data chunk: {path}")
+
+    tag = int.from_bytes(fmt[0:2], "little")
+    ch = int.from_bytes(fmt[2:4], "little")
+    sr = int.from_bytes(fmt[4:8], "little")
+    bits = int.from_bytes(fmt[14:16], "little")
+    if tag == 0xFFFE and len(fmt) >= 26:      # EXTENSIBLE — the real tag is the SubFormat GUID
+        tag = int.from_bytes(fmt[24:26], "little")
+    if tag != 3:
+        raise ValueError(f"unsupported WAV format tag {tag} in {path}")
+    dt = {32: "<f4", 64: "<f8"}.get(bits)
+    if dt is None:
+        raise ValueError(f"unsupported float width {bits} bits in {path}")
+
+    samples = np.frombuffer(data[:(len(data) // (bits // 8)) * (bits // 8)], dtype=dt).astype(np.float64)
+    if ch > 1:
+        samples = samples[:(samples.size // ch) * ch].reshape(-1, ch)
+    return samples, sr, ch
+
+
 def load_wav(path):
     """Return (samples[ndarray, shape=(frames,) or (frames,ch)], samplerate, channels)."""
-    with wave.open(str(path), "rb") as w:
-        nframes, ch, sr, sw = w.getnframes(), w.getnchannels(), w.getframerate(), w.getsampwidth()
-        raw = w.readframes(nframes)
+    try:
+        with wave.open(str(path), "rb") as w:
+            nframes, ch, sr, sw = w.getnframes(), w.getnchannels(), w.getframerate(), w.getsampwidth()
+            raw = w.readframes(nframes)
+    except wave.Error:
+        return _load_wav_float(path)          # float WAV — the integer path below can't help
     if sw == 2:
         data = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
     elif sw == 3:  # 24-bit little-endian signed
@@ -189,6 +233,152 @@ def wav_features(path):
         "rms": round(float(np.sqrt(np.mean(m ** 2))) if m.size else 0.0, 5),
         "centroid_hz": spectral_centroid(m, sr),
     }
+
+
+# ── spectral analysis (CAP-EXP-001) ─────────────────────────────────────────────
+# Reusable, deliberately generic: every check above this line can only see LEVEL
+# (peak/rms/diff) or one summary number (centroid). None of them can see WHERE the
+# energy sits, so none of them can tell signal-correlated distortion from noise —
+# which is the entire question dither answers. These four helpers are the missing
+# instrument, and the colour/QA lane wants the same thing (a colour that adds grit
+# vs one that adds hum is a floor-shape question, not a level question).
+#
+# Everything is a POWER SPECTRAL DENSITY in dB with an arbitrary but CONSISTENT
+# reference, so only DIFFERENCES between two spectra computed by these helpers are
+# meaningful — which is all any caller here needs.
+def welch_psd_db(x, sr, seg=8192, floor_db=-400.0):
+    """Welch PSD (Hann, 50% overlap) in dB. Returns (freqs, psd_db).
+
+    Averaged rather than one long FFT on purpose: a single periodogram's bins are
+    exponentially distributed (~5.6 dB std), so `max over a band` sits ~8 dB above
+    `median of the band` for pure noise and a harmonic-vs-floor test can't use a tight
+    threshold. ~46 averages over a 4 s take drops that spread to ~2 dB."""
+    x = np.asarray(x, dtype=np.float64)
+    if x.size < seg or not sr:
+        seg = max(64, min(int(x.size), seg))
+    if x.size < seg or seg < 8:
+        return np.zeros(0), np.zeros(0)
+    win = np.hanning(seg)
+    hop = seg // 2
+    starts = range(0, x.size - seg + 1, hop)
+    acc = None
+    n = 0
+    for s in starts:
+        spec = np.fft.rfft(x[s:s + seg] * win)
+        p = (spec.real ** 2 + spec.imag ** 2)
+        acc = p if acc is None else acc + p
+        n += 1
+    if not n:
+        return np.zeros(0), np.zeros(0)
+    psd = acc / n
+    freqs = np.fft.rfftfreq(seg, d=1.0 / sr)
+    return freqs, np.maximum(10.0 * np.log10(np.maximum(psd, 1e-300)), floor_db)
+
+
+def band_peak_db(freqs, psd_db, f_hz, halfwidth_hz=12.0):
+    """Peak PSD (dB) in [f-hw, f+hw]. -inf when the band falls off the axis."""
+    if freqs.size == 0:
+        return float("-inf")
+    sel = (freqs >= f_hz - halfwidth_hz) & (freqs <= f_hz + halfwidth_hz)
+    return float(psd_db[sel].max()) if sel.any() else float("-inf")
+
+
+def noise_floor_db(freqs, psd_db, lo_hz, hi_hz, exclude_hz=(), exclude_halfwidth_hz=60.0):
+    """MEDIAN PSD (dB) over [lo,hi] with the named tonal neighbourhoods notched out.
+
+    Median, not mean: it is the level the *majority* of bins sit at, so a few surviving
+    partials cannot drag it up and disguise themselves as floor."""
+    if freqs.size == 0:
+        return float("-inf")
+    sel = (freqs >= lo_hz) & (freqs <= hi_hz)
+    for f in exclude_hz:
+        sel &= ~((freqs >= f - exclude_halfwidth_hz) & (freqs <= f + exclude_halfwidth_hz))
+    return float(np.median(psd_db[sel])) if sel.any() else float("-inf")
+
+
+def harmonic_excess_db(x, sr, f0, harmonics=(2, 3, 4, 5), seg=8192,
+                       band_lo_hz=200.0, band_hi_hz=15000.0):
+    """How far f0's harmonic partials stand ABOVE this signal's own broadband floor.
+
+    THE dither discriminator. Requantising without dither is a signal-correlated
+    (deterministic) error, so it piles into a line spectrum at k*f0 — a large excess.
+    TPDF dither decorrelates the error from the signal, which converts exactly that
+    energy into a flat, uncorrelated floor — excess collapses to ~0. Note this is
+    self-referential (each signal against its OWN floor), so it is immune to the two
+    signals sitting at different absolute levels.
+
+    Returns {floor_db, fundamental_db, harmonics_db{k}, excess_db} — excess_db is the
+    MEAN over the requested harmonics, so one lucky partial can't carry the verdict."""
+    freqs, psd = welch_psd_db(x, sr, seg=seg)
+    if freqs.size == 0:
+        return {"floor_db": None, "fundamental_db": None, "harmonics_db": {}, "excess_db": None}
+    tonal = [f0 * k for k in (1,) + tuple(harmonics)]
+    floor = noise_floor_db(freqs, psd, band_lo_hz, band_hi_hz, exclude_hz=tonal)
+    hs = {}
+    for k in harmonics:
+        fk = f0 * k
+        if fk < band_hi_hz and fk < sr / 2.0:
+            hs[k] = band_peak_db(freqs, psd, fk)
+    excess = (sum(v - floor for v in hs.values()) / len(hs)) if hs else None
+    return {
+        "floor_db": round(floor, 2),
+        "fundamental_db": round(band_peak_db(freqs, psd, f0), 2),
+        "harmonics_db": {str(k): round(v, 2) for k, v in hs.items()},
+        "excess_db": round(excess, 2) if excess is not None else None,
+    }
+
+
+def dominant_freq_hz(x, sr, lo_hz=100.0, hi_hz=10000.0, seg=8192):
+    """Frequency of the strongest partial in [lo,hi] — used to LOCATE the rendered tone
+    rather than assume it, so a resample/pitch change fails loudly instead of quietly
+    pointing the harmonic probes at empty spectrum.
+
+    Quadratically interpolated across the peak's neighbours, because bare bin resolution
+    is not good enough for what the caller does next: at a ~6 Hz bin, a 1-bin error in f0
+    becomes a 5-bin error at the 5th harmonic and the probe drifts off the partial it is
+    supposed to be measuring."""
+    freqs, psd = welch_psd_db(x, sr, seg=seg)
+    if freqs.size == 0:
+        return 0.0
+    sel = (freqs >= lo_hz) & (freqs <= hi_hz)
+    if not sel.any():
+        return 0.0
+    idx = int(np.argmax(np.where(sel, psd, -np.inf)))
+    if 0 < idx < psd.size - 1:
+        a, b, c = psd[idx - 1], psd[idx], psd[idx + 1]
+        denom = a - 2.0 * b + c
+        if denom != 0:
+            delta = float(np.clip(0.5 * (a - c) / denom, -0.5, 0.5))
+            return float(freqs[idx] + delta * (freqs[1] - freqs[0]))
+    return float(freqs[idx])
+
+
+def write_wav24(path, x, sr):
+    """Write a mono 24-bit WAV. Used to inject an EXACT test signal — a tone Mosh
+    generates itself would couple the measurement to the thing being measured."""
+    q = np.clip(np.rint(np.asarray(x, dtype=np.float64) * 8388608.0), -8388608, 8388607).astype(np.int32)
+    b = np.empty((q.size, 3), dtype=np.uint8)
+    b[:, 0] = (q & 0xFF).astype(np.uint8)
+    b[:, 1] = ((q >> 8) & 0xFF).astype(np.uint8)
+    b[:, 2] = ((q >> 16) & 0xFF).astype(np.uint8)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(3)
+        w.setframerate(int(sr))
+        w.writeframes(b.tobytes())
+
+
+def truncate_to_16bit(x):
+    """Model of the UNDITHERED 16-bit path — ground truth for what Mosh used to emit.
+
+    Not a guess: it is JUCE's arithmetic. AudioFormatWriter::convertFloatsToInts does
+    roundToInt(INT_MAX * sample), and AudioData::Int16::setAsInt32LE then does
+    `(uint16)(v >> 16)` — an arithmetic shift, i.e. FLOOR, not round. So the pre-dither
+    export truncated downward and carried a half-LSB DC offset on top of the harmonic
+    distortion."""
+    i32 = np.rint(np.asarray(x, dtype=np.float64) * 2147483647.0).astype(np.int64)
+    i16 = np.clip(np.floor_divide(i32, 65536), -32768, 32767)
+    return i16.astype(np.float64) / 32768.0
 
 
 # Bit-deterministic offline renders → checksum baselines. Keyed by a stable case name; the
@@ -1443,7 +1633,169 @@ def check_master_chain(ctx):
                {"rms_dry": r_dry, "rms_minus6": r_out, "ratio": round(ratio, 4)})
 
 
-OFFLINE_CHECKS = [check_makes_sound, check_drums, check_transform, check_compile_render,
+# ── CAP-EXP-001: reduced-bit-depth export dither ───────────────────────────────
+# Tone parameters shared by the instrument self-test and the real render check.
+DITHER_TONE_HZ = 997.0          # classic "not a submultiple of anything" probe tone
+DITHER_TONE_DBFS = -87.0        # ≈1.4 × the 16-bit LSB — right down where truncation is brutal
+DITHER_TONE_SR = 48000
+DITHER_TONE_SECONDS = 4.0
+
+
+def _dither_test_tone(seconds=DITHER_TONE_SECONDS, sr=DITHER_TONE_SR,
+                      f0=DITHER_TONE_HZ, dbfs=DITHER_TONE_DBFS, seed=20260803):
+    """A −87 dBFS sine, itself TPDF-dithered at 24 bits so the SOURCE carries no
+    harmonics of its own. Without that the source's own truncation products would be
+    indistinguishable from the ones this check exists to find in Mosh's output."""
+    n = int(round(seconds * sr))
+    t = np.arange(n, dtype=np.float64) / sr
+    rng = np.random.default_rng(seed)
+    lsb24 = 1.0 / 8388608.0
+    tpdf = (rng.random(n) - rng.random(n)) * lsb24
+    return (10.0 ** (dbfs / 20.0)) * np.sin(2.0 * np.pi * f0 * t) + tpdf
+
+
+def _tpdf_quantise_16(x, seed=7):
+    """Reference TPDF requantiser, in numpy. What the shipped C++ must be equivalent to."""
+    rng = np.random.default_rng(seed)
+    lsb = 1.0 / 32768.0
+    d = (rng.random(x.size) - rng.random(x.size)) * lsb
+    return np.clip(np.rint((x + d) / lsb), -32768, 32767) * lsb
+
+
+def check_spectral_helpers(ctx):
+    """The INSTRUMENT's own RED/GREEN — no binary, pure numpy, ~1s.
+
+    A measurement nobody has watched fail is not evidence. This drives the spectral
+    helpers with two signals whose answer is known by construction — the same −87 dBFS
+    tone truncated to 16 bits, and TPDF-dithered to 16 bits — and asserts they come out
+    on opposite sides of the discriminator. If someone breaks welch_psd_db /
+    harmonic_excess_db, THIS fails first and the export check below cannot quietly
+    degrade into a check that passes on anything."""
+    sr, f0 = DITHER_TONE_SR, DITHER_TONE_HZ
+    tone = _dither_test_tone()
+    trunc = truncate_to_16bit(tone)
+    dith = _tpdf_quantise_16(tone)
+
+    a_src = harmonic_excess_db(tone, sr, f0)
+    a_trunc = harmonic_excess_db(trunc, sr, f0)
+    a_dith = harmonic_excess_db(dith, sr, f0)
+
+    # The three laws the instrument must obey on known inputs.
+    sees_truncation = a_trunc["excess_db"] >= 12.0            # distortion is visible
+    sees_dither_clean = a_dith["excess_db"] <= 5.0            # …and its absence is too
+    sees_floor_rise = (a_dith["floor_db"] - a_src["floor_db"]) >= 20.0
+    ok = bool(sees_truncation and sees_dither_clean and sees_floor_rise)
+    return row("Spectral helpers separate truncation from dither (self-test)", ok, {
+        "source_24bit": a_src, "truncated_16bit": a_trunc, "tpdf_dithered_16bit": a_dith,
+        "sees_truncation": sees_truncation, "sees_dither_clean": sees_dither_clean,
+        "sees_floor_rise": sees_floor_rise,
+        "floor_rise_db": round(a_dith["floor_db"] - a_src["floor_db"], 2),
+    })
+
+
+def check_export_dither(ctx):
+    """CAP-EXP-001 — a 16-bit export must DITHER, not truncate.
+
+    Renders one very quiet tone (−87 dBFS, ~1.4 × the 16-bit LSB) three ways from the
+    same session and measures the SHAPE of what came back:
+
+      • 24-bit render = ground truth. Its LSB is 48 dB below the tone, so what it holds
+        is the tone, full stop. Every harmonic seen in the 16-bit render is therefore
+        made BY the 16-bit requantisation — not inherited from the source or the graph.
+      • The undithered baseline is computed FROM that ground truth in numpy
+        (truncate_to_16bit models JUCE's float→int32→`>>16` floor exactly), so the
+        comparison never depends on Mosh's own output being right about anything.
+      • 32-bit render proves the untouched path stayed untouched: no dither noise.
+
+    The assertion is not "the file changed". It is the pair the physics demands:
+    the energy at 2f/3f/4f/5f DROPPED, and the broadband floor ROSE."""
+    src = ART / "20_dither_src.wav"
+    ref24 = ART / "20_dither_24bit.wav"
+    out16 = ART / "20_dither_16bit.wav"
+    out32 = ART / "20_dither_32bit.wav"
+    sr = DITHER_TONE_SR
+    write_wav24(src, _dither_test_tone(), sr)
+
+    cmds = [
+        {"command": "create_track", "args": {"name": "Dither"}, "capture": {"T": "trackId"}},
+        {"command": "import_clip", "args": {"trackId": "${T}", "file": str(src), "name": "quiet-tone"}},
+        # The untouched master sits at −3 dB (see check_master_chain); pin unity so the
+        # rendered tone lands where this check expects it relative to the 16-bit LSB.
+        {"command": "set_master_volume", "args": {"db": 0.0}},
+        {"command": "export_audio", "args": {"file": str(ref24), "bitDepth": 24, "sampleRate": sr}},
+        {"command": "export_audio", "args": {"file": str(out16), "bitDepth": 16, "sampleRate": sr}},
+        {"command": "export_audio", "args": {"file": str(out32), "bitDepth": 32, "sampleRate": sr}},
+    ]
+    results, proc = run_script(ctx.bin, cmds, "verify-export-dither")
+    fails = failed_commands(results)
+    if fails or not all(p.exists() for p in (ref24, out16, out32)):
+        return row("16-bit export dithers (CAP-EXP-001)", False,
+                   {"failed_commands": fails, "stderr": proc.stderr[-400:]})
+
+    def ch0(path):
+        """Left channel of the steady middle of the render — skips any edge ramp/tail."""
+        data, s, _ = load_wav(path)
+        x = data[:, 0] if data.ndim > 1 else data
+        return x[int(0.5 * s):int(3.5 * s)], s
+
+    x24, sr24 = ch0(ref24)
+    x16, _ = ch0(out16)
+    x32, _ = ch0(out32)
+    if min(x24.size, x16.size, x32.size) < DITHER_TONE_SR:
+        return row("16-bit export dithers (CAP-EXP-001)", False,
+                   {"error": "renders too short to analyse",
+                    "frames": [int(x24.size), int(x16.size), int(x32.size)]})
+
+    # Locate the tone in the render rather than assuming it survived at 997 Hz, and
+    # sanity-gate its level: this check is only meaningful while the tone sits within a
+    # couple of LSBs of the 16-bit floor. A routing/gain change that moves it fails HERE,
+    # loudly, instead of silently turning the harmonic probes into a coin flip.
+    f0 = dominant_freq_hz(x24, sr24)
+    tone_dbfs = float(20.0 * np.log10(max(float(np.sqrt(np.mean(x24 ** 2))) * np.sqrt(2.0), 1e-30)))
+    tone_in_window = bool(abs(f0 - DITHER_TONE_HZ) <= 8.0 and -100.0 <= tone_dbfs <= -76.0)
+
+    baseline16 = truncate_to_16bit(x24)          # what main emits today, from ground truth
+    a_ref = harmonic_excess_db(x24, sr24, f0)
+    a_base = harmonic_excess_db(baseline16, sr24, f0)
+    a_dut = harmonic_excess_db(x16, sr24, f0)
+    a_32 = harmonic_excess_db(x32, sr24, f0)
+
+    # WITNESS — the undithered baseline must show the distortion this check hunts. It is
+    # computed in numpy from ground truth, so it exercises the discriminator on EVERY run:
+    # the check cannot pass by measuring nothing.
+    witness = bool(a_base["excess_db"] >= 12.0)
+    harmonics_gone = bool(a_dut["excess_db"] <= 5.0)
+    harmonics_dropped = bool((a_base["excess_db"] - a_dut["excess_db"]) >= 8.0)
+    # …AND the floor rose. Twice over, because the two comparisons say different things:
+    # against the 24-bit reference it says "there is real added noise at the 16-bit LSB",
+    # and against the truncated baseline it says "that noise is where the harmonics USED
+    # to be" — truncation error is a line spectrum, so its INTER-harmonic floor sits well
+    # below a dithered one. The second is the discriminating half: an undithered render
+    # passes the first (its harmonics raise the median too) and fails the second flat.
+    floor_rose_vs_reference = bool((a_dut["floor_db"] - a_ref["floor_db"]) >= 20.0)
+    floor_rose_vs_truncation = bool((a_dut["floor_db"] - a_base["floor_db"]) >= 6.0)
+    float_path_untouched = bool(a_32["floor_db"] <= a_dut["floor_db"] - 30.0)
+
+    ok = bool(tone_in_window and witness and harmonics_gone and harmonics_dropped
+              and floor_rose_vs_reference and floor_rose_vs_truncation
+              and float_path_untouched)
+    return row("16-bit export dithers (CAP-EXP-001)", ok, {
+        "tone_hz": round(f0, 2), "tone_dbfs": round(tone_dbfs, 2), "tone_in_window": tone_in_window,
+        "ref_24bit": a_ref, "undithered_baseline_16bit": a_base,
+        "mosh_16bit": a_dut, "mosh_32bit": a_32,
+        "witness_baseline_shows_distortion": witness,
+        "harmonics_gone": harmonics_gone,
+        "harmonic_drop_db": round(a_base["excess_db"] - a_dut["excess_db"], 2),
+        "floor_rose_vs_reference": floor_rose_vs_reference,
+        "floor_rise_vs_24bit_db": round(a_dut["floor_db"] - a_ref["floor_db"], 2),
+        "floor_rose_vs_truncation": floor_rose_vs_truncation,
+        "floor_rise_vs_truncation_db": round(a_dut["floor_db"] - a_base["floor_db"], 2),
+        "float_path_untouched": float_path_untouched,
+    })
+
+
+OFFLINE_CHECKS = [check_spectral_helpers, check_export_dither,
+                  check_makes_sound, check_drums, check_transform, check_compile_render,
                   check_compile_corrective, check_midi_render,
                   check_midi_reimagine_beneath, check_reactive_rerender,
                   check_freeze_stops_rerender, check_full_loop,

@@ -127,24 +127,16 @@ export function ExportControls({ audioEnabled }: { audioEnabled: boolean }) {
         <label className="pop-row"><span>Bit depth</span>
           <select data-testid="export-depth" value={String(bitDepth)} onChange={(e) => setBitDepth(Number(e.target.value))}>{depths.map((d) => <option key={d} value={d}>{d}-bit</option>)}</select>
         </label>
-        {/* #551 — DISCLOSE, do not fake. There is no dither anywhere in the export path
-            (the only `dither` in the tree is the Moshi character's visual shader), so a
-            16-bit render TRUNCATES. The harm today is not that it truncates — every DAW
-            has to do something at reduced depth — it is that a producer cannot know it
-            does, and quantisation distortion on a quiet fade is the kind of thing you
-            discover after you have sent the file somewhere.
-
-            Implementing TPDF dither is real DSP whose verification burden is its own
-            project: proving it works means proving the NOISE FLOOR changed, which needs a
-            spectral check in verify.py that does not exist yet. Ten lines of honesty now,
-            the DSP when it can be proven. Deliberately not a warning colour — this is a
-            fact about the format, not a mistake the producer made. */}
-        {bitDepth === 16 && (
-          <p className="pop-note" data-testid="export-dither-note">
-            16-bit renders are truncated — Mosh applies no dither yet. For a master, export
-            at 24-bit and let your mastering chain handle the final reduction.
-          </p>
-        )}
+        {/* #551 — the note that used to sit here, warning a 16-bit render was undithered and
+            telling the producer to master from 24-bit instead, is GONE: what it disclosed is
+            fixed. Every export below 32-bit now gets ±1 LSB TPDF dither at the final
+            requantisation (CAP-EXP-001, src/audio/TpdfDither.h). Disclosing a problem you no
+            longer have is its own small lie, and worse than silence — a producer acts on it
+            and avoids a 16-bit master that is now perfectly good. Nothing replaces it: the
+            behaviour is automatic and correct, and a note saying so would be machinery nobody
+            has to think about. The exporter reports `dither: "tpdf" | "none"` on the command
+            result if a surface ever needs to ask. ExportControls.dither.test.ts keeps the old
+            copy from creeping back. */}
         {/* Range and Tail are MIXDOWN-only. export_stems has no such args — it always renders
             the full edit length from a common zero point so the stems re-import aligned — so
             showing them here would be controls that visibly do nothing. */}

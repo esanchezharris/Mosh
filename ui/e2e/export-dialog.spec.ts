@@ -55,14 +55,17 @@ test("stem export is reachable from the export surface", async ({ page }) => {
   await expect(page.getByTestId("export-run")).toBeVisible();
 });
 
-// #551 — 16-bit renders truncate: Mosh has no dither anywhere in the export path. The
-// harm is not the truncation, it is a producer not knowing, so the note must appear at
-// exactly the depth that does it and nowhere else.
-test("16-bit discloses that there is no dither; 24-bit does not", async ({ page }) => {
+// #551 — the spec that used to live here pinned the export dialog's undithered-16-bit
+// warning. It was DELETED deliberately, not lost in a merge: the warning was true until
+// CAP-EXP-001 shipped TPDF dither, and a spec is very good at keeping a false warning alive
+// forever. The depth selector itself is still exercised, below. What replaced it:
+// ui/src/ui/ExportControls.dither.test.ts (the retired copy must not creep back) and
+// check_export_dither in scripts/verify-hardware/verify.py (the dither is real, measured on
+// rendered audio rather than asserted).
+test("bit depth is selectable and the export still runs at 16-bit", async ({ page }) => {
   await openFileOptions(page);
-  await expect(page.getByTestId("export-dither-note")).toHaveCount(0);   // 24-bit default
   await page.getByTestId("export-depth").selectOption("16");
-  await expect(page.getByTestId("export-dither-note")).toBeVisible();
-  await page.getByTestId("export-depth").selectOption("24");
-  await expect(page.getByTestId("export-dither-note")).toHaveCount(0);
+  await expect(page.getByTestId("export-depth")).toHaveValue("16");
+  await page.getByTestId("export-run").click();
+  await expect(page.getByTestId("export-done")).toBeVisible();
 });

@@ -3656,6 +3656,26 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                    "aiff export reports bitDepth 24 (depth arg honored for non-wav)");
         }
 
+        // --- CAP-EXP-001: which depths get TPDF dither ---
+        // This pins the POLICY (the gate decision, reported back to the caller), NOT the
+        // DSP. A headless selftest cannot see a noise floor, and pretending otherwise is
+        // exactly how freeze_layer shipped inert behind a green check. The DSP itself —
+        // harmonics replaced by a flat floor on a real render — is proven by
+        // check_export_dither in scripts/verify-hardware/verify.py.
+        check (expWav["data"].getProperty ("dither", var()).toString() == "tpdf",
+               "16-bit export reports dither tpdf (a word-length reduction)");
+        check (expAiff["data"].getProperty ("dither", var()).toString() == "tpdf",
+               "24-bit export reports dither tpdf (still a reduction from the float bus)");
+        {
+            auto f32 = eng.sessionDir().getChildFile ("exports").getChildFile ("opt-test-32.wav");
+            auto exp32 = cmd (ops, "export_audio", objN ({{ "file", f32.getFullPathName() },
+                                                          { "format", "wav" }, { "bitDepth", 32 }}));
+            check (ok (exp32), "export_audio wav 32-bit ok");
+            check (exp32["data"].getProperty ("dither", var()).toString() == "none",
+                   "32-bit float export reports dither none (not a reduction — stays byte-identical)");
+            f32.deleteFile();
+        }
+
         auto expBadFormat = cmd (ops, "export_audio", objN ({{ "file", wavFile.getFullPathName() },
                                                              { "format", "mp3" }}));
         check (! ok (expBadFormat), "export_audio rejects an unsupported format (mp3)");
