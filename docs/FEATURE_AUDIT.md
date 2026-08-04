@@ -19,8 +19,8 @@ _From `docs/reality-pack/daw_capability_matrix.csv` — the sourced enumeration 
 
 | Tier | capabilities | engine shipped | UI reachable | SHIPPED | PARTIAL | MISSING |
 |---|---|---|---|---|---|---|
-| T0 — daily-driver core | 28 | 20 (71%) | 18 (64%) | 18 | 10 | 0 |
-| T1 — pro | 112 | 35 (31%) | 19 (17%) | 19 | 35 | 58 |
+| T0 — daily-driver core | 28 | 21 (75%) | 18 (64%) | 18 | 10 | 0 |
+| T1 — pro | 111 | 34 (31%) | 18 (16%) | 18 | 35 | 58 |
 | T2 — niche | 55 | 6 (11%) | 7 (13%) | 6 | 11 | 38 |
 | X — rejected (owner-signed) | 2 | 0 (0%) | 0 (0%) | 0 | 0 | 0 |
 

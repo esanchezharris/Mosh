@@ -8,17 +8,17 @@
   "cases": {
     "makes_sound": {
       "kind": "checksum",
-      "pcm_sha256": "5c5ef31fe448a19f8cbbd0fdb338c54fb47d5d51da915c36ab7c2011038e10b7",
+      "pcm_sha256": "cb7af1c0ad4b12b32b82f4eec5d93a0799196d0c5c9e4df7c0c31b3b1f793b70",
       "features": {
         "frames": 88200,
         "peak": 0.17699,
         "rms": 0.12473,
-        "centroid_hz": 220.1
+        "centroid_hz": 220.5
       }
     },
     "drums": {
       "kind": "checksum",
-      "pcm_sha256": "fc200364bc0c80c9d5e0ea2c5b45061a07ead7769d50413030b35fb5d6a568f0",
+      "pcm_sha256": "2e948ad0b505599aa966eaddd6e415507253a00ae3a6412c991024924a14ce10",
       "features": {
         "frames": 176400,
         "peak": 0.9112,
@@ -28,42 +28,42 @@
     },
     "transform_fake": {
       "kind": "checksum",
-      "pcm_sha256": "132196cb3c98071b097fab1430bc8ae42b4175d419d722f8f71c5796ef90df8a",
+      "pcm_sha256": "fb9fe7161cc6a004d82345100d125163209ce84fbb4b775bbf5c28ee0a822adb",
       "features": {
         "frames": 88200,
         "peak": 0.42734,
         "rms": 0.31549,
-        "centroid_hz": 250.8
+        "centroid_hz": 250.9
       }
     },
     "full_loop": {
       "kind": "checksum",
-      "pcm_sha256": "f8d950ff1b17fc660547c607a2fbef0825b9647221d042260158fd6f31be8582",
+      "pcm_sha256": "188b636908b5d30288e2f6476ac67b90c0512da705f35c480f932acf6321512d",
       "features": {
         "frames": 88200,
         "peak": 0.33733,
         "rms": 0.17643,
-        "centroid_hz": 275.1
+        "centroid_hz": 275.2
       }
     },
     "clip_fades": {
       "kind": "checksum",
-      "pcm_sha256": "65aa605e4c991da5e3a5bd0c9ee070801f96a187608d561d6f979a4f6b841f04",
+      "pcm_sha256": "f19fd57901b07c183baaecfee8033d2c4f3e0ea845552befb8e86f423b99e362",
       "features": {
         "frames": 88200,
         "peak": 0.17699,
         "rms": 0.10343,
-        "centroid_hz": 220.3
+        "centroid_hz": 220.4
       }
     },
     "master_gain": {
       "kind": "checksum",
-      "pcm_sha256": "6e92ddcccc86e2a35f327e717ad256d779547448e3e28719f525ee85c3174133",
+      "pcm_sha256": "e7ef5aa18ffc17fc4c7b9f3cdbcf4d29d406ce503992dc9d3d6cc8a78b4fb89e",
       "features": {
         "frames": 88200,
         "peak": 0.1253,
         "rms": 0.0883,
-        "centroid_hz": 220.2
+        "centroid_hz": 220.6
       }
     }
   }

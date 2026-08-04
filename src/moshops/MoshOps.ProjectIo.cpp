@@ -15,6 +15,7 @@
 #include "files/DirectoryListing.h"
 #include "MoshOpsInternal.h"
 #include "AgentMemoryStore.h"
+#include "audio/DitheringAudioFormat.h"
 #include "ExportRange.h"
 #include "RenderSourceWindow.h"
 #include "StemExport.h"
@@ -590,9 +591,29 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
             sampleRate = reqSr;
     }
 
+    // ── CAP-EXP-001 — TPDF dither on the final requantisation ────────────────
+    // The mix bus is 32-bit float; writing 8/16/24-bit throws word length away, and
+    // undithered that loss is signal-CORRELATED — on a quiet tonal passage it lands as
+    // harmonic distortion, not noise. (JUCE narrows via an arithmetic shift, so the
+    // pre-dither path did not even round: AudioData::Int16::setAsInt32LE is `v >> 16`,
+    // a floor, with the half-LSB DC offset that implies.) The decorator hands the
+    // Renderer a writer that adds ±1 LSB triangular dither and snaps to the destination
+    // lattice; see src/audio/TpdfDither.h for why triangular and why not noise-shaped.
+    //
+    // 32-bit is NOT a word-length reduction, so it never enters this branch and its
+    // exports remain byte-identical. MIDI exports have no audio writer at all. Proven on
+    // real renders — not on the flag reaching the function — by
+    // check_export_dither in scripts/verify-hardware/verify.py.
+    //
+    // Declared at function scope: the Renderer holds this pointer until the RenderTask
+    // below is destroyed.
+    mosh::DitheringAudioFormat ditheringFormat (*audioFormat);
+    const bool applyDither = ! file.hasFileExtension (".mid")
+                             && mosh::DitheringAudioFormat::shouldDither (bitDepth);
+
     te::Renderer::Parameters params (edit);
     params.destFile = file;
-    params.audioFormat = audioFormat;
+    params.audioFormat = applyDither ? static_cast<juce::AudioFormat*> (&ditheringFormat) : audioFormat;
     params.bitDepth = bitDepth;
     params.sampleRateForAudio = sampleRate;
     params.blockSizeForAudio = edit.engine.getDeviceManager().getBlockSize();
@@ -673,6 +694,9 @@ juce::var MoshOps::cmdExportAudio (const juce::var& args)
     {
         data->setProperty ("bitDepth", bitDepth);
         data->setProperty ("sampleRate", sampleRate);
+        // Report it rather than leaving the producer to infer it: "was this master
+        // dithered?" is a question about the file that only the exporter can answer.
+        data->setProperty ("dither", applyDither ? "tpdf" : "none");
     }
     data->setProperty ("bytes", (juce::int64) file.getSize());
     data->setProperty ("seconds", len);

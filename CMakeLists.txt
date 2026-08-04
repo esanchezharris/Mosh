@@ -189,6 +189,9 @@ if (MOSH_BUILD_APP)
         src/brain/BrainProxy.cpp
         # RT-safety tripwire (debug-only; compiles to nothing in Release — see MOSH_RT_GUARD)
         src/audio/RealtimeAudioGuard.cpp
+        # CAP-EXP-001 — TPDF dither on the export's final requantisation (offline only;
+        # the pure quantiser in TpdfDither.h is header-only so MoshTests can unit it).
+        src/audio/DitheringAudioFormat.cpp
         # Opt-in, privacy-respecting crash reporting + telemetry (self-contained
         # module; see docs/telemetry/PRIVACY.md). Installed from ONE line at the
         # top of Main.cpp's initialise().

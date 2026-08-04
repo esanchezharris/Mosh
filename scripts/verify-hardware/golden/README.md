@@ -45,3 +45,18 @@ Regenerate on the **canonical macOS arm64 build** (the prime-directive reference
 Exact checksums hold there because the render config is pinned (sample rate, block size,
 bit depth, no wall-clock/Random in the DSP path). A future Windows/CUDA gate should fall back
 to feature-bounds rather than red on cross-platform float noise.
+
+### 2026-08-03 — all six regenerated for export dither (CAP-EXP-001)
+
+Every case here exports at 24-bit, and every export below 32-bit now carries ±1 LSB TPDF
+dither, so all six checksums moved at once. That is the loudest possible version of this
+gate working as designed, and it is worth recording what made the regeneration *checkable*
+rather than a rubber stamp: **`frames`, `peak` and `rms` were byte-for-byte unchanged on all
+six** (identical to 5 dp), and `centroid_hz` moved by at most **0.4 Hz** — the signature of a
+change entirely beneath the least significant bit. A DSP change that altered the audio would
+have moved peak or rms. If you ever regenerate these and the features DO move, that is a
+different change than you think you are making.
+
+Determinism survives: the dither generator is a seeded xorshift64\*, not `rand()`
+(src/audio/TpdfDither.h), precisely so the same session still exports to the same bytes and
+this gate stays a gate.
