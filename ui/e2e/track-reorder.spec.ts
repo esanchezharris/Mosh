@@ -10,10 +10,9 @@
 // reorder, that the arrangement visibly re-orders, and that the controls tell the truth at
 // the boundaries rather than sitting there doing nothing.
 //
-// Honest scope note: all four reference DAWs reorder tracks by DRAGGING the header, so
-// drag is the 2-of-4 idiom and is still owed. Buttons are a real affordance in the
-// meantime (Reaper and Pro Tools also expose track-move as a command) — a missing
-// convenience, not a false surface.
+// Both affordances ship: DRAGGING the header (the idiom all four reference DAWs use) and
+// the ▲▼ buttons. The buttons stay because a drag is not keyboard-reachable, and dropping
+// them would trade one accessibility gap for another.
 
 import { test, expect, type Page } from "@playwright/test";
 import { bootV2 } from "./helpers";
@@ -74,5 +73,28 @@ test.describe("track reorder (#550)", () => {
     await page.getByTestId("v2-track-header").first().hover();
     await page.getByTestId("v2-track-move-down").first().click();
     await expect.poll(ids).toEqual([before[1], before[0], ...before.slice(2)]);
+  });
+
+  test("dragging a header onto another row reorders — the 2-of-4 idiom", async ({ page }) => {
+    await bootV2(page);
+    const before = await names(page);
+    test.skip(before.length < 2, "fixture has fewer than two tracks");
+
+    // dragTo drives the real HTML5 drag sequence (dragstart / dragover / drop), which is
+    // the path the header handlers implement — a synthesised mousedown/move/up would
+    // prove nothing about them.
+    await page.getByTestId("v2-track-header").first()
+      .dragTo(page.getByTestId("v2-track-header").nth(1));
+
+    await expect.poll(() => names(page)).toEqual([before[1], before[0], ...before.slice(2)]);
+  });
+
+  test("dropping a header on ITSELF is a no-op, not an error", async ({ page }) => {
+    await bootV2(page);
+    const before = await names(page);
+    test.skip(before.length < 2, "fixture has fewer than two tracks");
+    const first = page.getByTestId("v2-track-header").first();
+    await first.dragTo(first);
+    await expect.poll(() => names(page)).toEqual(before);
   });
 });

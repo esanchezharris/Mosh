@@ -8,7 +8,8 @@ import type {
 } from "./types";
 import { versionBannerError } from "./types";
 import type { RemoteStatus } from "./bridge";
-import { type SnapDiv, snapTimeMap, tempoMapFrom } from "./time";
+import { type SnapDiv, meterFrom, snapTimeMap, tempoMapFrom } from "./time";
+import { adaptiveDivision } from "./adaptiveGrid";
 import type { ChangeSet } from "./agent/executor";
 // Schema-driven settings (UI-local, localStorage-backed). The store mirrors a few
 // of its values (theme/uiScale/voiceOn/voiceVol) so existing consumers stay reactive
@@ -125,6 +126,10 @@ export type State = {
   setTool: (t: Tool) => void;
   setSnap: (b: boolean) => void;
   setSnapDivision: (d: SnapDiv) => void;
+  snapAuto: boolean;
+  setSnapAuto: (b: boolean) => void;
+  /** snapDivision, or the zoom-derived one when snapAuto. */
+  effectiveSnapDivision: () => SnapDiv;
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   snapTime: (t: number) => number;
@@ -370,6 +375,7 @@ export const useStore = create<State>((set, get, api) => ({
   tool: "move",
   snap: true,
   snapDivision: "1/4",
+  snapAuto: false,
   selection: new Set<string>(),
   peaks: {},
   peaksSourceKey: {},
@@ -559,7 +565,8 @@ export const useStore = create<State>((set, get, api) => ({
   setPianoRollBeatPx: (v) => set({ pianoRollBeatPx: Math.max(12, Math.min(160, v)) }),
   setTool: (t) => set({ tool: t }),
   setSnap: (b) => set({ snap: b }),
-  setSnapDivision: (d) => set({ snapDivision: d }),
+  setSnapDivision: (d) => set({ snapDivision: d, snapAuto: false }),
+  setSnapAuto: (b) => set({ snapAuto: b }),
   select: (ids, additive = false) => {
     set((s) => {
       const next = new Set(additive ? s.selection : []);
@@ -570,9 +577,18 @@ export const useStore = create<State>((set, get, api) => ({
   },
   clearSelection: () => { set({ selection: new Set<string>() }); void get().syncActiveTrack(); },
   setTimeRange: (r) => set({ timeRange: r }),
+  // CAP-CLP-002 — "auto" is a POLICY for choosing a division, not a division, so it lives
+  // as a flag beside snapDivision rather than inside the SnapDiv union (which every
+  // consumer converts to seconds and would need its own fallback for). Everything
+  // downstream keeps receiving a real division.
+  effectiveSnapDivision: () => {
+    const { snapAuto, snapDivision, snapshot, pxPerSec } = get();
+    return snapAuto ? adaptiveDivision(meterFrom(snapshot?.session), pxPerSec) : snapDivision;
+  },
   snapTime: (t) => {
-    const { snap, snapDivision, snapshot } = get();
+    const { snap, snapshot } = get();
     if (!snap) return t;
+    const snapDivision = get().effectiveSnapDivision();
     // SES-001 — snap over the piecewise tempo map (the grid restarts at every
     // tempo/meter change; constant-tempo sessions behave exactly as before).
     return snapTimeMap(tempoMapFrom(snapshot?.session), t, snapDivision);

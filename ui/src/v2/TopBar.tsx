@@ -34,6 +34,8 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const snap = useStore((s) => s.snap);
   const setSnap = useStore((s) => s.setSnap);
   const snapDivision = useStore((s) => s.snapDivision);
+  const snapAuto = useStore((s) => s.snapAuto);
+  const setSnapAuto = useStore((s) => s.setSnapAuto);
   const setSnapDivision = useStore((s) => s.setSnapDivision);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const anyArmed = snapshot.tracks.some((tr) => tr.armed);
@@ -106,9 +108,21 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
               <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
                 data-on={snap} title="Snap edits to the musical grid — hold Option while dragging to bypass"
                 onClick={() => setSnap(!snap)}>Snap</button>
-              <select className="v2-chip v2-chip-sel" aria-label="Snap division" value={snapDivision}
-                title="Musical grid division — hold Option while dragging to bypass"
-                onChange={(e) => setSnapDivision(e.target.value as typeof snapDivision)}>
+              {/* CAP-CLP-002 — "Auto" is the ADAPTIVE grid: the division follows the zoom,
+                  so the grid stays aimable instead of turning into noise when you zoom in
+                  or vanishing when you zoom out. Every reference DAW does this. It sits in
+                  the same control rather than beside it because it is an ALTERNATIVE way
+                  to answer "which grid?", not an extra thing to also decide. */}
+              <select className="v2-chip v2-chip-sel" aria-label="Snap division"
+                data-testid="v2-snap-division"
+                value={snapAuto ? "auto" : snapDivision}
+                title="Musical grid division — Auto follows the zoom. Hold Option while dragging to bypass"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "auto") setSnapAuto(true);
+                  else setSnapDivision(v as typeof snapDivision);   // also clears snapAuto
+                }}>
+                <option value="auto">auto</option>
                 {SNAP_DIVISIONS.map((division) => <option key={division} value={division}>{division}</option>)}
               </select>
             </span>

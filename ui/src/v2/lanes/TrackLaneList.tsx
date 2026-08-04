@@ -208,7 +208,7 @@ export function TrackLaneList({ snapshot, dragging }: { snapshot: Snapshot; drag
             {/* lanes */}
             {tracks.map((t) => (
               <Fragment key={t.id}>
-                <TrackLaneHeader track={t} index={tracks.indexOf(t)} total={tracks.length} />
+                <TrackLaneHeader track={t} index={tracks.indexOf(t)} total={tracks.length} idAt={(i) => tracks[i]?.id} />
                 <div className={`v2-lane${varTempo ? " v2-lane-mapped" : ""}${t.color ? " coloured" : ""}`} data-track-id={t.id} data-testid="v2-lane" style={{ width: contentW, "--beat-px": `${beatPx}px`, ...(t.color ? { "--track-col": t.color } : {}) } as React.CSSProperties}>
                   {/* Constant tempo keeps the CSS gradient (zero extra DOM); a variable map
                       gets real positioned lines, because a repeating gradient cannot express
@@ -368,7 +368,7 @@ function ZoomToggle({ value, onChange }: { value: SectionZoom; onChange: (z: Sec
   );
 }
 
-function TrackLaneHeader({ track, index, total }: { track: Track; index: number; total: number }) {
+function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: number; total: number; idAt: (i: number) => string | undefined }) {
   const exec = useStore((s) => s.exec);
   const selectedTrackId = useStore((s) => s.selectedTrackId);
   const clearSelection = useStore((s) => s.clearSelection);
@@ -398,6 +398,24 @@ function TrackLaneHeader({ track, index, total }: { track: Track; index: number;
     <div
       className={`v2-lhead${sel ? " sel" : ""}${track.color ? " coloured" : ""}`}
       style={track.color ? ({ "--track-col": track.color } as React.CSSProperties) : undefined}
+      /* TRK-REORDER — drag the header to reorder, the idiom all four reference DAWs use.
+         The ▲▼ buttons stay: a drag is not keyboard-reachable, and dropping them would
+         trade one accessibility gap for another. HTML5 drag rather than pointer capture
+         because the lane grid already owns pointer events for the marquee — a second
+         pointer-capture surface on the same rows is how you get two gestures fighting. */
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", String(index));
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const from = Number(e.dataTransfer.getData("text/plain"));
+        if (!Number.isFinite(from) || from === index) return;  // dropped on itself: a no-op, not an error
+        const id = idAt(from);
+        if (id) void exec("move_track", { trackId: id, toIndex: index });
+      }}
       role="group"
       aria-label={`${track.name} track`}
       data-testid="v2-track-header"

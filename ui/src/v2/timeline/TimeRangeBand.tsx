@@ -20,6 +20,7 @@
 
 import { useStore } from "../../store";
 import { useShell } from "../shellState";
+import { cropOps } from "./cropToRange";
 import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 import { headW } from "./geom";
 import { sectionTargetFor } from "./sectionRender";
@@ -50,6 +51,26 @@ export function TimeRangeBand() {
     const { start, end } = r;
     setRange(null); // the span it describes is about to move/vanish — clear eagerly
     await exec("delete_time_range", ripple ? { start, end, ripple: true } : { start, end });
+  };
+
+  // CAP-CLP-005 — crop every clip that overlaps this range down to the part inside it.
+  // Acts on ALL tracks, exactly like the two Delete buttons beside it: consistency with
+  // its neighbours in the same toolbar beats a second, invisible selection rule.
+  // One undo step via runAtomic, because "crop the intro" is one decision, not N.
+  const runCrop = async () => {
+    const snap = useStore.getState().snapshot;
+    if (!snap) return;
+    const clips = snap.tracks.flatMap((t) => t.clips);
+    const ops = cropOps(clips, r.start, r.end);
+    if (ops.length === 0) return;
+    setRange(null);
+    await useStore.getState().runAtomic("crop to range", async (run) => {
+      for (const op of ops) {
+        if (op.kind === "remove") await run("remove_clip", { clipId: op.clipId });
+        else await run("trim_clip", { clipId: op.clipId, start: op.start, length: op.length, offset: op.offset });
+      }
+    });
+    await useStore.getState().refresh();
   };
 
   const loopingThis = transport.looping
@@ -112,6 +133,13 @@ export function TimeRangeBand() {
             onClick={() => void runDelete(true)}
           >
             Delete, close gap
+          </button>
+          <button
+            type="button" data-testid="v2-timerange-crop"
+            title="Keep only what is inside this range — trims overlapping clips and removes the rest"
+            onClick={() => void runCrop()}
+          >
+            Crop
           </button>
           <button
             type="button" className="v2-timerange-clear" data-testid="v2-timerange-clear"

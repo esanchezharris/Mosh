@@ -176,7 +176,9 @@ describe("v2 TopBar tempo / time-sig / metronome controls", () => {
     render(makeSnapshot());
     const division = host.querySelector<HTMLSelectElement>('select[aria-label="Snap division"]');
     expect(division).not.toBeNull();
-    expect([...division!.options].map((option) => option.value)).toEqual(["bar", "1/4", "1/8", "1/16", "1/32"]);
+    // "auto" leads: it is an ALTERNATIVE answer to "which grid?", not an extra decision,
+    // so it belongs in the same control (CAP-CLP-002, the adaptive grid).
+    expect([...division!.options].map((option) => option.value)).toEqual(["auto", "bar", "1/4", "1/8", "1/16", "1/32"]);
     expect(division!.value).toBe("1/4");
 
     act(() => {
@@ -184,5 +186,29 @@ describe("v2 TopBar tempo / time-sig / metronome controls", () => {
       division!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(useStore.getState().snapDivision).toBe("1/16");
+  });
+
+  it("Auto turns the grid adaptive, and picking a division turns it back off", () => {
+    render(makeSnapshot());
+    const division = host.querySelector<HTMLSelectElement>('select[aria-label="Snap division"]')!;
+    expect(useStore.getState().snapAuto).toBe(false);
+
+    act(() => {
+      division.value = "auto";
+      division.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(useStore.getState().snapAuto).toBe(true);
+    // The picker must SHOW auto afterwards — otherwise the mode is on and invisible,
+    // which is worse than not having it.
+    expect(division.value).toBe("auto");
+
+    // Choosing a concrete division is an explicit override: it must clear auto, or the
+    // producer picks 1/8 and silently keeps getting whatever the zoom decides.
+    act(() => {
+      division.value = "1/8";
+      division.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(useStore.getState().snapAuto).toBe(false);
+    expect(useStore.getState().snapDivision).toBe("1/8");
   });
 });
