@@ -18,6 +18,17 @@
 // This spec makes the race DETERMINISTIC rather than 1-in-5: change scroll position and
 // click in the SAME task, so the scroll event is guaranteed to be queued before the panel
 // opens and delivered after. RED before the fix, green after.
+//
+// PROVENANCE. Written on the branch behind PR #607, which found this race independently
+// and concurrently with the fix that actually landed (#615, b2d6d5fa). The two fixes are
+// behaviourally equivalent for scroll, so the spec is adopted here verbatim rather than
+// rewritten — it exercises the real browser path, which the unit pair in
+// useAnchoredPanel.test.ts cannot: that one drives jsdom, where the scroll is dispatched
+// by hand instead of by the browser scrolling a trigger into view.
+//
+// RE-PROVEN against the SHIPPED fix, not just the one it was written for: arming the
+// scroll listener immediately again (i.e. undoing #615) turns the first test RED
+// deterministically, while the second keeps passing.
 
 import { test, expect } from "@playwright/test";
 import { bootV2 } from "./helpers";
