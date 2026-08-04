@@ -197,6 +197,7 @@ set_tempo_curve	SessionGlobal
 set_time_signature	SessionGlobal
 set_track_automation_mode	Track
 set_track_color	Track
+set_track_icon	Track
 set_track_input	Track
 set_track_mute	Track
 set_track_output	Track

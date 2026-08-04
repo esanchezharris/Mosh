@@ -373,6 +373,11 @@ export type Track = {
   automationMode?: "read" | "touch" | "latch" | "write";
   /** "#rrggbb" (lowercase), or absent for the track type's default colour. */
   color?: string;
+  /** Chosen track icon NAME (see ui/src/trackIconNames.ts), or absent for the track
+   *  type's default glyph. Deliberately `string` and not `TrackIconName`: a project saved
+   *  by a newer Mosh can carry a name this build has no glyph for, and the renderer falls
+   *  back to the type icon rather than the type system pretending that cannot happen. */
+  icon?: string;
   armed?: boolean;
   monitor?: "off" | "automatic" | "on";
   hasInput?: boolean;

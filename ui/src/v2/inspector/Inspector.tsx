@@ -18,6 +18,7 @@ import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, waveInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
 import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
 import { ReconciledRange } from "../ReconciledRange";
+import { TRACK_ICONS, TRACK_ICON_GLYPHS, TRACK_ICON_LABELS } from "../trackIcons";
 import type { Clip, Track } from "../../types";
 
 // Eight track colours. Chosen to stay distinguishable in BOTH themes and against the
@@ -140,6 +141,50 @@ function MixTab({ track }: { track: Track }) {
             title="Back to the track type's default"
             onClick={() => void exec("set_track_color", { trackId: track.id, color: "" })}
           />
+        </div>
+      </div>
+      {/* CAP-TRK-002 (#613) — the track's icon. Sits directly under Name because it
+          answers the same question ("what is this row?") and gets used the same way: a
+          producer scanning a dozen lanes finds the drums by shape long before they read a
+          word. A fixed palette rather than free input — ten choices you hit in a second,
+          and the persisted value is still a NAME (Ids.h / TrackIcons.h), so reordering or
+          growing this row later is a UI edit and never a project-file migration.
+          The last button clears back to the track type's default; the command takes ""
+          for exactly that, so "no icon" is a real choice and not a state only undo reaches. */}
+      <div className="v2-field v2-icons" role="group" aria-label={`Icon for ${track.name}`}>
+        <span>Icon</span>
+        <div className="v2-icon-row">
+          {TRACK_ICONS.map((name) => {
+            const Glyph = TRACK_ICON_GLYPHS[name];
+            const on = track.icon === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                className={`v2-icon-pick${on ? " on" : ""}`}
+                data-testid={`v2-track-icon-${name}`}
+                // "Drums icon", not "Drums". These buttons choose a GLYPH, and the bare
+                // instrument word is already the accessible name of other controls on
+                // screen — the piano roll's Drums tab, for one, which a strict-mode
+                // Playwright locator caught the moment this shipped as plain "Drums".
+                // A screen-reader user hearing two identical "Drums" buttons has the same
+                // problem the locator did, so the fix belongs here rather than in a spec.
+                aria-label={`${TRACK_ICON_LABELS[name]} icon`}
+                aria-pressed={on}
+                title={TRACK_ICON_LABELS[name]}
+                onClick={() => void exec("set_track_icon", { trackId: track.id, icon: name })}
+              ><Glyph size={15} /></button>
+            );
+          })}
+          <button
+            type="button"
+            className={`v2-icon-pick v2-icon-none${track.icon ? "" : " on"}`}
+            data-testid="v2-track-icon-none"
+            aria-label="Default icon"
+            aria-pressed={!track.icon}
+            title="Back to the track type's default"
+            onClick={() => void exec("set_track_icon", { trackId: track.id, icon: "" })}
+          >—</button>
         </div>
       </div>
       <label className="v2-field">

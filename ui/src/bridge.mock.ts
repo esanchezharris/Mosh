@@ -17,6 +17,7 @@
 import type { Snapshot, Clip, Track, Transport, CommandResult, RenderLayer, TrainingState, MidiNote, Plugin, PluginParam, MoshFxReadout, LyricSheet, LyricLine } from "./types";
 import { syllablesForWord, countSyllables } from "./lyrics/flowMeter";
 import { parseDrumPattern, normalizeDrumVelocity } from "./ui/drumPatternUtil";
+import { TRACK_ICONS, isTrackIconName } from "./trackIconNames";
 import { stepBeats } from "./ui/drumGrid";
 
 export const MOCK_ENABLED: boolean =
@@ -366,7 +367,7 @@ const mockManifestDigest = (name: string, manifest: readonly unknown[]): string 
 // the mock cannot quietly admit something the engine refuses (or vice versa).
 const MOCK_TXN_SAFE = new Set([
   "set_track_volume", "set_track_pan", "set_track_mute", "set_track_solo",
-  "create_track", "rename_track", "set_track_color", "move_track", "remove_track", "set_track_type",
+  "create_track", "rename_track", "set_track_color", "set_track_icon", "move_track", "remove_track", "set_track_type",
   "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
   "duplicate_clip", "set_clip_mute", "set_clip_gain", "set_clip_fade",
   "set_clip_loop", "set_clip_reverse", "set_clip_crossfade", "normalize_clip",
@@ -1128,6 +1129,22 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       const [moved] = snapshot.tracks.splice(from, 1);
       snapshot.tracks.splice(to, 0, moved);
       snapshot.tracks.forEach((t, i) => (t.index = i));
+      invalidate(); return ok(command);
+    }
+    // CAP-TRK-002 (#613) — mirrors cmdSetTrackIcon's VALIDATION, not just its happy path.
+    // A mock that accepted any string would let a Playwright spec prove an icon picker
+    // works while the real engine refuses the click: the mock reproducing engine behaviour
+    // faithfully is the whole reason it is allowed to stand in for one. Membership comes
+    // from trackIconNames.ts, which trackIcons.test.ts pins against the C++ registry — so
+    // there is one list in TS, not a second copy free to drift on its own.
+    case "set_track_icon": {
+      const t = findTrack(str(args.trackId));
+      if (!t) return err(command, "track not found");
+      const icon = str(args.icon).trim().toLowerCase();
+      if (icon !== "" && !isTrackIconName(icon))
+        return err(command, `unknown icon "${icon}" — expected one of: ${TRACK_ICONS.join(", ")}, or "" to clear`);
+      pushUndo();
+      if (icon === "") delete t.icon; else t.icon = icon;
       invalidate(); return ok(command);
     }
     case "remove_track": {

@@ -455,6 +455,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "create_track")      return cmdCreateTrack (args);
     if (name == "rename_track")      return cmdRenameTrack (args);
     if (name == "set_track_color")   return cmdSetTrackColor (args);
+    if (name == "set_track_icon")    return cmdSetTrackIcon (args);
     if (name == "move_track")        return cmdMoveTrack (args);
     if (name == "create_section")    return cmdCreateSection (args);
     if (name == "rename_section")    return cmdRenameSection (args);
@@ -2737,6 +2738,9 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
             }
         if (const auto col = t.state.getProperty (ids::trackColour, var()).toString(); col.isNotEmpty())
             o->setProperty ("color", col);       // "#rrggbb" — absent means the type default
+        // CAP-TRK-002 (#613) — the chosen icon NAME; absent means the type's default glyph.
+        if (const auto ico = t.state.getProperty (ids::trackIcon, var()).toString(); ico.isNotEmpty())
+            o->setProperty ("icon", ico);
         o->setProperty ("armed",     armed);     // bool
         o->setProperty ("monitor",   monitor);   // "off" | "automatic" | "on"
         o->setProperty ("hasInput",  hasInput);  // bool — false headless; UI can show "no input"
@@ -3151,7 +3155,7 @@ void MoshOps::initRecoveryJournal()
 bool MoshOps::isReplayableCommand (const juce::String& name) const
 {
     static const juce::StringArray replayable {
-        "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "move_track",
+        "create_track", "rename_track", "remove_track", "set_track_type", "set_track_color", "set_track_icon", "move_track",
         "import_clip", "add_test_tone_clip", "add_midi_clip",
         "move_clip", "trim_clip", "split_clip", "remove_clip", "rename_clip",
         "set_clip_mute", "set_clip_gain", "set_clip_fade", "relink_clip", "set_clip_warp",
