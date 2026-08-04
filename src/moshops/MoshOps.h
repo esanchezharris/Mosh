@@ -49,6 +49,18 @@ public:
         The live poll path keeps this in sync; the guard in execute() reads it. */
     LockManager& lockManager() { return lockManager_; }
 
+    /** CAP-AUT-006 — every track whose mute gate carries a curve, with that curve's
+        value AT THE TRANSPORT'S CURRENT POSITION: `{tracks:[{id, muted}]}`. Feeds the
+        30 Hz "mute_automation" rail so the mute button follows its automation instead
+        of showing a stale routing-mute flag.
+
+        Public on purpose: the rail itself is emitted from timerCallback, which needs a
+        message loop a headless run never pumps, so this is the ONLY part of the
+        follow-the-curve path `--selftest` can assert. Pure read — evaluates the curve on
+        the message thread via te::getValueAt and needs no audio device, which is also
+        why the button tracks the playhead while the transport is STOPPED. */
+    juce::var muteAutomationAtPlayhead();
+
     /** The single entry point — bound to the WebView's execute_command. Thin wrapper around
         executeImpl that also feeds the A3 crash-recovery journal. */
     juce::var execute (const juce::var& command);
@@ -956,6 +968,9 @@ private:
     juce::var  cmdRecoverSession (const juce::var& args);
     juce::var  cmdDiscardRecovery (const juce::var& args);
     bool        wasPlaying = false;
+    // CAP-AUT-006 — did last tick's "mute_automation" rail carry anything? Drives the
+    // one falling-edge emit that clears the UI when the last mute curve is deleted.
+    bool        hadMuteAutomation = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────

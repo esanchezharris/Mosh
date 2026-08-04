@@ -7,6 +7,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "../../store";
+import { muteButtonState } from "../../ui/muteState";
 import { useAnchoredPanel } from "../../hooks/useAnchoredPanel";
 import { useShell, type SectionZoom } from "../shellState";
 import { beatSeconds, barSeconds } from "../../time";
@@ -375,6 +376,11 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
   const clearSelection = useStore((s) => s.clearSelection);
   const setSelectedTrack = useStore((s) => s.setSelectedTrack);
   const setSelectedClip = useShell((s) => s.setSelectedClip);
+  // CAP-AUT-006 — subscribe to the 30 Hz mute-automation rail, NOT the snapshot, so a
+  // curve edge repaints this one button instead of the whole tree (same reason the meter
+  // and the playhead live off the snapshot).
+  const muteAutomation = useStore((s) => s.muteAutomation);
+  const mute = muteButtonState(track, muteAutomation, "m");
   // Only show the preset line when it actually says something. It used to fall back to
   // "Drums"/"Audio", which is a third restatement of what the icon already shows — and
   // it cost the name column a line of vertical space to say nothing.
@@ -444,6 +450,23 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
         <TrackMeterBar trackId={track.id} />
       </button>
       <span className="v2-ms">
+        {/* CAP-AUT-006 — lit follows SILENCE, so a mute curve visibly closes and opens
+            this button as the playhead crosses it; aria-pressed keeps following the
+            routing mute, which is what the click toggles. muteButtonState is the one
+            place that rule lives. */}
+        <button
+          className={mute.className}
+          aria-label={mute.label}
+          aria-pressed={mute.pressed} title={mute.label}
+          data-automated={mute.automated ? "true" : undefined}
+          onClick={(e) => { e.stopPropagation(); void exec("set_track_mute", { trackId: track.id, mute: !track.mute }); }}
+        >M</button>
+        <button
+          className={`s${track.solo ? " on" : ""}`}
+          aria-label="Solo"
+          aria-pressed={!!track.solo} title="Solo"
+          onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
+        >S</button>
         {/* G15 / CAP-REC-004 — the per-track RECORD ARM. `arm_track` and `stop_recording`
             have always landed takes on EVERY armed track, but the only way to arm from v2
             was the transport Record button, which auto-arms the SELECTED track alone. So
@@ -456,18 +479,6 @@ function TrackLaneHeader({ track, index, total, idAt }: { track: Track; index: n
 
             NOT undoable by design, matching cmdArmTrack: arming is a transport decision
             like monitor mode, not an edit to the project. */}
-        <button
-          className={`m${track.mute ? " on" : ""}`}
-          aria-label="Mute"
-          aria-pressed={!!track.mute} title="Mute"
-          onClick={(e) => { e.stopPropagation(); void exec("set_track_mute", { trackId: track.id, mute: !track.mute }); }}
-        >M</button>
-        <button
-          className={`s${track.solo ? " on" : ""}`}
-          aria-label="Solo"
-          aria-pressed={!!track.solo} title="Solo"
-          onClick={(e) => { e.stopPropagation(); void exec("set_track_solo", { trackId: track.id, solo: !track.solo }); }}
-        >S</button>
         {/* REC-002 — record-arm, where every DAW puts it. It is not decoration next to
             M/S: arming is what routes live MIDI to this track AND what makes a note
             played on the computer keyboard recordable at all (audition_note only takes

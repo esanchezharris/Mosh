@@ -347,6 +347,25 @@ void MoshOps::timerCallback()
         emit ("levels", var (payload));
     }
 
+    // CAP-AUT-006 — the mute button follows its curve. Same discipline as transport and
+    // levels: a per-track rail OUTSIDE the snapshot, so a mute edge never re-creates the
+    // snapshot object and re-renders the whole tree. Deliberately NOT folded into the
+    // `levels` payload above — that one is gated on metering being enabled, and a
+    // producer who turned meters off would silently get a mute button that stopped
+    // following. Deliberately NOT gated on hasAudio() or on playing either: the curve is
+    // evaluated from the transport position on the message thread, so the button is also
+    // correct while the transport is parked mid-curve.
+    {
+        auto payload = muteAutomationAtPlayhead();
+        const bool any = payload.getProperty ("tracks", var()).size() > 0;
+        // Emit while anything is automated, plus exactly once on the falling edge — the
+        // UI has to be told when the last curve went away, or a button would stay stuck
+        // showing the state the vanished curve left behind.
+        if (any || hadMuteAutomation)
+            emit ("mute_automation", payload);
+        hadMuteAutomation = any;
+    }
+
     // Master spectral feed (Moshi reactivity). Only live with a real playback context
     // (an audio device) — headless / --selftest has none, so the tap is NEVER inserted
     // and the edit state is untouched. One zero on the play→stop edge so Moshi settles.

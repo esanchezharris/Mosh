@@ -631,7 +631,42 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
 export function __mockEmitForTests(type: string, payload?: unknown): void {
   emit(type, payload);
 }
-const invalidate = () => emit("snapshot_invalidated");
+const invalidate = () => { emit("snapshot_invalidated"); emitMuteAutomation(); };
+
+// CAP-AUT-006 — the mute button's follow-the-curve rail, mirroring the native
+// muteAutomationAtPlayhead(): only tracks whose mute gate carries a curve, with that
+// curve read at the CURRENT transport position and thresholded at 0.5 (the two-state
+// parameter's snap point). Emitted from the play tick AND from invalidate(), because
+// native emits at 30 Hz regardless of the transport — the button has to be right while
+// parked mid-curve too, not just while rolling.
+function curveValueAt(points: { t: number; v: number }[], time: number): number {
+  if (points.length === 0) return 0;
+  const pts = points.slice().sort((a, b) => a.t - b.t);
+  if (time <= pts[0].t) return pts[0].v;
+  const last = pts[pts.length - 1];
+  if (time >= last.t) return last.v;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    if (time <= b.t) {
+      const span = b.t - a.t;
+      return span <= 0 ? b.v : a.v + ((time - a.t) / span) * (b.v - a.v);
+    }
+  }
+  return last.v;
+}
+function emitMuteAutomation(): void {
+  const now = snapshot.transport?.position ?? 0;
+  const tracks = snapshot.tracks
+    .map((t) => {
+      const gate = (t.mixerPlugins ?? []).find((p) => p.type === "moshTrackMute");
+      const param = gate?.params?.find((x) => x.index === 0);
+      const points = param?.points ?? [];
+      if (points.length === 0) return null;
+      return { id: t.id, muted: curveValueAt(points, now) >= 0.5 };
+    })
+    .filter((x): x is { id: string; muted: boolean } => x !== null);
+  emit("mute_automation", { tracks });
+}
 
 // ── transport simulation (the 30 Hz decimated playhead feed) ─────────────────
 
@@ -675,6 +710,7 @@ function startPlayback() {
         return { id: t.id, l: db, r: toDb(g * 0.94) };
       });
     emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) } });
+    emitMuteAutomation();
   }, 1000 / 30);
 }
 function stopPlayback() {

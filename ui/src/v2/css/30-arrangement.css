@@ -273,6 +273,14 @@
    names ("stays dark in BOTH themes"). #1a1206 was a bespoke near-black doing the same job. */
 .v2-ms button.on.m { background: var(--mute, #ffb454); color: var(--on-accent); border-color: transparent; }
 .v2-ms button.on.s { background: var(--v2-accent); color: var(--v2-accent-ink); border-color: transparent; }
+/* CAP-AUT-006 — this track's mute is under a curve, so the button moves on its own as
+   the playhead crosses it. A dashed edge says "not yours to hold": pressing it still
+   toggles the routing mute, but the lit state is being driven from somewhere else, and a
+   button that changes under your hand with no visible reason is the thing to avoid. The
+   fill is untouched — lit still means silent, whichever mute is doing it. */
+.v2-ms button.m.automated { border-style: dashed; border-color: var(--mute, #ffb454); }
+.v2-ms button.on.m.automated { border-color: var(--on-accent); }
+
 /* REC-002 / G15 — armed uses the SAME red as the transport's record button
    (--status-rec, itself an alias of --v2-rec), because they mean the same thing: this
    track is the one that captures. A different red here would read as a different state.

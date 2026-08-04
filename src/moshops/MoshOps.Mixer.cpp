@@ -118,6 +118,41 @@ TrackMutePlugin* MoshOps::ensureTrackMuteGate (te::AudioTrack& t)
     return gate;
 }
 
+juce::var MoshOps::muteAutomationAtPlayhead()
+{
+    const auto now = eng.edit().getTransport().getPosition();
+
+    juce::Array<var> tracks;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        auto* gate = findTrackMuteGate (*t);
+        if (gate == nullptr) continue;
+        auto* param = gate->getMuteParameter();
+        // Only tracks the producer has actually automated ride this rail. Presence in
+        // the array IS the "this mute is automated" signal the UI styles on; a track
+        // with no curve is absent, and its button keeps meaning exactly what it always
+        // meant. Emitting every track would make "automated" indistinguishable from
+        // "open", which is the whole thing the button has to tell apart.
+        if (param == nullptr || ! param->hasAutomationPoints()) continue;
+
+        // te::getValueAt falls back to the parameter's base value when the curve is
+        // empty, and reads the curve otherwise — no audio thread, no playback context.
+        // Threshold at 0.5 because that is exactly where the engine's own snapToState
+        // flips this two-state parameter (TrackMutePlugin.cpp's MuteParameter).
+        const bool muted = te::getValueAt (*param, now) >= 0.5f;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("id", t->itemID.toString());
+        o->setProperty ("muted", muted);
+        tracks.add (var (o));
+    }
+
+    auto* payload = new DynamicObject();
+    payload->setProperty ("tracks", tracks);
+    return var (payload);
+}
+
 // Sync the client map to the LIVE meter taps in the edit. Robust against undo/
 // redo/remove destroying a meter plugin: we only ever read our OWN Client (alive),
 // never a stale measurer. A tap whose track no longer has a meter is dropped

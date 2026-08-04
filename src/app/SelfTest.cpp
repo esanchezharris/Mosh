@@ -2408,6 +2408,55 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                "CAP-AUT-006: set_track_mute leaves the mute curve alone");
         cmd (ops, "set_track_mute", objN ({{ "trackId", mt }, { "mute", false }}));
 
+        // ── the mute BUTTON follows the curve ──
+        // The button reads a 30 Hz "mute_automation" rail, and the rail's payload is
+        // muteAutomationAtPlayhead(). The emit itself needs a message loop a headless run
+        // never pumps, so THIS is the seam --selftest can actually assert: seek the
+        // transport across the curve authored above (muted over [0.5, 1.5]) and check the
+        // payload flips. No audio device involved — the curve is read on the message
+        // thread, which is also why the button is right while the transport is parked.
+        {
+            auto muteAutoFor = [&] (const String& trkId) -> var {
+                auto payload = ops.muteAutomationAtPlayhead();
+                auto tracks = payload.getProperty ("tracks", var());
+                if (auto* arr = tracks.getArray())
+                    for (auto& e : *arr)
+                        if (e.getProperty ("id", var()).toString() == trkId) return e;
+                return {};
+            };
+            auto seek = [&] (double t) { cmd (ops, "set_transport", objN ({{ "position", t }})); };
+
+            seek (0.2);
+            check (! (bool) muteAutoFor (mt).getProperty ("muted", true),
+                   "CAP-AUT-006: at 0.2s the curve reports the mute OPEN");
+            seek (1.0);
+            check ((bool) muteAutoFor (mt).getProperty ("muted", false),
+                   "CAP-AUT-006: at 1.0s the curve reports the mute CLOSED");
+            seek (2.0);
+            check (! (bool) muteAutoFor (mt).getProperty ("muted", true),
+                   "CAP-AUT-006: past the curve the mute is OPEN again");
+
+            // Presence IS the "automated" signal the button styles on, so an un-automated
+            // track must be ABSENT — not present-and-false, which would light every
+            // track's button as automated.
+            const auto plain = cmd (ops, "create_track", args1 ("name", "NoCurve"))["data"].getProperty ("trackId", var()).toString();
+            check (! muteAutoFor (plain).isObject(),
+                   "CAP-AUT-006: a track with no mute curve is absent from the rail");
+            check (muteAutoFor (mt).isObject(),
+                   "CAP-AUT-006: …while the automated track is still on it");
+
+            // And it drops off the rail when the curve goes, so the button releases.
+            {
+                const auto gi = (int) mixerPluginVar (mt, "moshTrackMute").getProperty ("index", -1);
+                cmd (ops, "clear_automation", objN ({{ "trackId", mt }, { "pluginIndex", gi }, { "paramIndex", 0 }}));
+                check (! muteAutoFor (mt).isObject(),
+                       "CAP-AUT-006: clearing the curve takes the track off the rail");
+                cmd (ops, "undo");   // put the curve back for the checks below
+                check (muteAutoFor (mt).isObject(), "CAP-AUT-006: undo puts it back on the rail");
+            }
+            seek (0.0);
+        }
+
         // The fader rides the same array once it exists, so its own volume/pan curves
         // become pickable too — they were addressable by command all along but
         // unreachable in AutomationPanel, which only lists `plugins`, and the fader is
