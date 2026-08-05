@@ -1,11 +1,17 @@
 # Production-v2 End-to-End Usability Audit
 
-Status: **IN PROGRESS — not release-certified**
+Status: **TIME-BOXED HANDOFF — not release-certified**
 
 Campaign tracker: [#516](https://github.com/zeke431/Mosh/issues/516)
 
-Pinned trunk: `609bde7d12aca6155bf77dbf1d9aec2093925def`
+Frozen campaign baseline: `609bde7d12aca6155bf77dbf1d9aec2093925def`
+Latest merged audit-fix trunk at handoff: `01adca369f20a1a96e3d34e2d9c6b4aaf2f5a9b9`
 Audit ID: `production-v2-20260730`
+
+Current PR dispositions, the complete future-work queue, and the recommended
+ownership-transfer order live in [`../CURRENT_STATUS.md`](../CURRENT_STATUS.md).
+That rolling status supersedes any “current” wording preserved later in this
+ledger. The frozen baselines and evidence rows below remain historical facts.
 
 This is the durable, reader-safe ledger. Raw screenshots, logs, app copies, and
 audio stay outside the repository under `~/Library/Mosh/audits/production-v2-20260730/`.
@@ -168,7 +174,11 @@ not a finding.
 | Narrow-window coverage unavailable through the black-box adapter | MINOR | Harness limitation, not yet a product defect | — | — | pending |
 | Canonical raw Release fails strict codesign verification | NOTE | Packaging evidence; not yet classified as distribution defect | pending packaging disposition | — | pending |
 
-## Current serial-fix boundary
+## Historical serial-fix boundary (superseded 2026-08-02)
+
+This section records the campaign boundary when #558/#560 were active. It is
+retained for evidence chronology, not current PR status. See
+[`../CURRENT_STATUS.md`](../CURRENT_STATUS.md) before acting.
 
 PRs #519, #520, #522, #526, #528, and #560 are merged. The canonical campaign
 baseline is merge SHA `06dea1c17788ae75a4618ae0a549fe23cca07c97`.
