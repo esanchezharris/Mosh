@@ -188,6 +188,45 @@ Design micro-questions settled by the shipped implementation: `MOSH_RENDERLAYER`
   (diagnosis — worklog `2026-07-16-rave-rack-silent-under-pinned-libtorch-was-one-bad-model-not.md`)
 - **Over `ssh pc`** (PowerShell 5.1) stage `.ps1` files and run `pwsh -NoProfile -File` — nested
   `-Command` quoting corrupts silently. Python goldens need `PYTHONUTF8=1` on Windows.
+- **`git worktree list` reports the GIT DIRECTORY, not the working tree — and here they are
+  different paths.** `--git-common-dir` is `~/Library/Mosh/repo/ClaudeMosh.git`; `--show-toplevel`
+  is `~/Mosh`. The gitdir appears as the first `worktree list` entry (shown at `[main]`), and
+  `~/Mosh` does **not** appear at all. So a cleanup script that protects "the toplevel" or "the
+  path I'm running in" will happily hand `~/Library/Mosh/repo/ClaudeMosh.git` to
+  `git worktree remove --force` — which deletes the entire repository: every branch, every
+  commit, all history not already pushed. This was one assertion away from happening during the
+  2026-08-04 worktree cleanup (147 → 17). Before any bulk `worktree remove`: resolve
+  `--git-common-dir` explicitly, exclude it by exact path, and assert in the delete loop rather
+  than trusting the list. Removing a worktree is otherwise safe — it deletes the directory and
+  the registration, never a branch or a commit — so the only other real risks are uncommitted
+  changes and DETACHED heads whose commit is on no ref (tag those `rescue/wt-<sha>` first;
+  `git branch --all --contains <sha>` finds them).
+- **A long-lived branch's tests decay as `main` moves under it, and its own green gate hides
+  that.** #471 forked 2026-07-27 with a correct, passing safe-mode check; `e274cafa` then added
+  the `_harness/` session prefix (08-01) and #606 renamed projects to `.mosh` (08-04). Its CI
+  stayed green the whole time because CI tests the branch, not the branch *rebased*. The same
+  day, #623's new `session.click` re-exposed the `clickTrackEnabled` flag #617's fixture
+  deliberately masks as `session.metronome`. **Rebase first, then gate** — a pre-rebase green is
+  a statement about a world that no longer exists. And when a check pins a file path, a directory
+  layout, or a snapshot shape, assume main can move it: use the shared helper (`_session_dir()`),
+  resolve by extension/glob rather than a literal filename, and when masking non-undoable state
+  remember it may be exposed under a second name.
+- **The cheap gate runs NEITHER `--selftest` NOR `verify.py` NOR Catch2.** It is typecheck,
+  vitest, e2e, the py suite and the parity checks. So "cheap per PR, native once at the end"
+  defers every interaction of the kind above to the end — and the Catch2 guards with it
+  (`test_multiplayer_lock_manager.cpp` + `tests/golden/lock_scopes.tsv`, the fourth registration
+  a new command needs). Fine as a deliberate trade; just expect to fix things after the batch,
+  and hand-check the four registrations on each rebase.
+- **Generated files must be REGENERATED in a conflict, never hand-merged.** `docs/FEATURE_AUDIT.md`
+  and `docs/reality-pack/daw_capability_matrix.csv` come from
+  `scripts/daw-conformance/scoreboard.py` (deterministic for a given `report.json`);
+  `docs/first-stranger-program/STATUS.md` comes from `scripts/first-stranger/status.sh`. Take
+  main's side (`git checkout --ours`), re-run the generator, commit. Hand-merging writes the
+  branch's stale counts; regenerating yields main's numbers plus the branch's own contribution.
+  This turned four "CONFLICTING" PRs into 0–2 real hunks each on 2026-08-04. Relatedly,
+  `ui/src/agent/loop/loopPrompt.test.ts` is a system-prompt HASH PIN whose own comment states the
+  rule: when both sides add commands, **recompute** from the merged catalog — both sides' pins are
+  wrong. (vitest truncates the assertion message, so print the hash to read it in full.)
 
 ---
 
