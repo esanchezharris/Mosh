@@ -286,3 +286,41 @@
    child of .v2-tl and the "empty" trigger is a flex child of .v2-stage-empty — in both
    cases an intervening div would take over the layout slot. */
 .v2-addtrack { display: contents; }
+
+/* CAP-TB-001 / #633 #634 — the SONG cluster, right of the transport.
+   The left meta row held ten controls and scrolled; the comment on .v2-proj-meta above
+   said so outright and deferred the fix as "a design call". This is that call: the song
+   properties (key, tempo, metre, count-in, record options) and the audio OUTPUT moved
+   into the dead space right of the readout, and the left keeps only the EDITING controls
+   (Snap, snap division, Ripple) that act on the timeline beside them.
+   Still allowed to scroll rather than crush its neighbours — same honest-scrollbar
+   posture as .v2-proj-meta, just over half as many controls. */
+.v2-song-meta {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  margin-right: 4px;
+}
+
+/* The output-device chip. It shows a DEVICE NAME, which is long and variable, so it is
+   the one chip that must be allowed to ellipsise instead of setting the row's width. */
+.v2-outdev { position: relative; flex: 0 1 auto; min-width: 0; }
+.v2-outdev-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 15ch; }
+.v2-outdev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Degraded states read at a glance: no device open is the one worth alarming about,
+   because it means playback and recording are simply off. */
+.v2-outdev-btn[data-audio-off] { color: var(--v2-rec, #e5484d); border-color: currentColor; }
+.v2-outdev-btn[data-error] { color: var(--mute, #ffb454); }
+
+.v2-outdev-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  min-width: 220px; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column; padding: 4px;
+}
+.v2-outdev-item {
+  appearance: none; background: transparent; border: 0; color: var(--v2-ground-fg);
+  font: inherit; text-align: left; padding: 6px 10px; border-radius: var(--v2-radius-sm, 6px);
+  cursor: pointer; white-space: nowrap;
+}
+.v2-outdev-item:hover { background: var(--v2-ground-card); }
+.v2-outdev-item[data-on] { color: var(--v2-accent); font-weight: 600; }
+.v2-outdev-empty { padding: 8px 10px; color: var(--v2-ground-dim); font-size: var(--v2-fs-sm); }

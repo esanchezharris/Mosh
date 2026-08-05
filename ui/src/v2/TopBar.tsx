@@ -9,11 +9,12 @@ import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
-import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
+import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool, SettingsTool } from "../ui/TopbarTools";
 import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { useTransportControls } from "./useTransportControls";
 import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
+import { AudioOutputChip } from "./AudioOutputChip";
 import { MetronomeControls } from "./MetronomePanel";
 import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
@@ -22,7 +23,7 @@ import { projectLabel } from "../projectFile";
 import { RecentProjectList } from "../ui/RecentProjectList";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Snapshot } from "../types";
-import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
+import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSettings, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
 // PRJ-NAME — one shared implementation (projectFile.ts); this bar only picks its own
 // empty-path wording. A generated project reads "untitled - bearcat" here.
@@ -119,47 +120,6 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
                 ? "Ripple edit is ON — dragging or trimming a clip carries every later clip on its track. Click to turn off."
                 : "Ripple edit is off — dragging a clip leaves its neighbours where they are. Click to turn on."}
               onClick={() => setRipple(!ripple)}>{ripple ? "Ripple ON" : "Ripple"}</button>
-            <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
-              onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
-              {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
-            </select>
-            <select className="v2-chip" aria-label="Key mode" value={key.mode}
-              onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
-              {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
-              key={`bpm-${Math.round(snapshot.session.tempo)}`}
-              defaultValue={Math.round(snapshot.session.tempo)}
-              onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            <span className="v2-timesig" title="Time signature">
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
-                key={`ts-num-${meter.num}`}
-                defaultValue={meter.num}
-                onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-              <span className="v2-timesig-slash">/</span>
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
-                key={`ts-den-${meter.den}`}
-                defaultValue={meter.den}
-                onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            </span>
-            {/* CAP-TRN-005 — still a one-click ♩ toggle; the caret beside it opens the
-                click's level/sound/routing. Next to Count-in on purpose: the count-in
-                plays THROUGH this click, so someone who turned it on and heard nothing
-                is looking for the level. */}
-            <MetronomeControls session={snapshot.session} />
-            <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
-              title="Count-in before recording — an audible click plays through the pre-roll"
-              onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
-              <option value={0}>Count-in: Off</option>
-              <option value={1}>Count-in: 1 bar</option>
-              <option value={2}>Count-in: 2 bars</option>
-            </select>
-            {/* REC-001 — next to Count-in on purpose: both answer "what happens when I
-                hit record", and a producer hunting for one will find the other. */}
-            <RecordOptionsChip />
           </div>
         </div>
       </div>
@@ -190,6 +150,59 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       </div>
 
       <div className="v2-top-right">
+        {/* CAP-TB-001 — the SONG properties (key, tempo, metre, count-in, record
+            options) and the audio OUTPUT live right of the transport, in what used to be
+            dead space, next to the bars readout they belong with musically. They were on
+            the left, where ten controls in one row made it SCROLL — 20-topbar.css said so
+            outright ("genuinely crowded at ten controls; thinning it is a design call").
+            This is that call. What stays left is the EDITING behaviour — Snap, snap
+            division, Ripple — because those act on the timeline you are dragging and
+            belong beside it. Split by what the control IS, so it stays learnable. */}
+        <div className="v2-song-meta" role="group" aria-label="Song and output settings">
+          <AudioOutputChip />
+              <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
+                onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
+                {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
+              </select>
+              <select className="v2-chip" aria-label="Key mode" value={key.mode}
+                onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
+                {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
+                key={`bpm-${Math.round(snapshot.session.tempo)}`}
+                defaultValue={Math.round(snapshot.session.tempo)}
+                onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              <span className="v2-timesig" title="Time signature">
+                <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
+                  key={`ts-num-${meter.num}`}
+                  defaultValue={meter.num}
+                  onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                <span className="v2-timesig-slash">/</span>
+                <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
+                  key={`ts-den-${meter.den}`}
+                  defaultValue={meter.den}
+                  onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              </span>
+              {/* CAP-TRN-005 — still a one-click ♩ toggle; the caret beside it opens the
+                  click's level/sound/routing. Next to Count-in on purpose: the count-in
+                  plays THROUGH this click, so someone who turned it on and heard nothing
+                  is looking for the level. */}
+              <MetronomeControls session={snapshot.session} />
+              <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
+                title="Count-in before recording — an audible click plays through the pre-roll"
+                onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+                <option value={0}>Count-in: Off</option>
+                <option value={1}>Count-in: 1 bar</option>
+                <option value={2}>Count-in: 2 bars</option>
+              </select>
+              {/* REC-001 — next to Count-in on purpose: both answer "what happens when I
+                  hit record", and a producer hunting for one will find the other. */}
+              <RecordOptionsChip />
+        </div>
+
         <span className="v2-pill" title="Moshi is in the session">
           <span className={`led${agentBusy ? " busy" : ""}`} />
           AI {agentBusy ? "working" : "active"}
@@ -219,6 +232,7 @@ function OverflowMenu() {
   const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(248, 420, "end");
   const exec = useStore((s) => s.exec);
   const training = useStore((s) => s.snapshot?.training ?? null);
+  const menuSnapshot = useStore((s) => s.snapshot);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const voiceOn = useStore((s) => s.voiceOn);
@@ -241,6 +255,18 @@ function OverflowMenu() {
         <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
           style={{ left: at.left, top: at.top, bottom: at.bottom }}>
           <div className="v2-menu-tools" data-testid="v2-overflow-tools">
+            {/* #634 — FIRST in the row on purpose. Settings used to be reachable only
+                through the "+" inside the Ask Moshi composer, which the owner could not
+                find twice with directions. uiReachability was right that a mouse path
+                existed — a path is not a place anyone looks. The "+" route still works. */}
+            {menuSnapshot && <SettingsTool
+              snapshot={menuSnapshot}
+              label={<IconSettings size={15} />}
+              title="Settings"
+              className="v2-overflow-tool"
+              ariaLabel="Open settings"
+              testId="v2-tool-settings"
+            />}
             <MultiplayerTool
               label={<IconUsers size={15} />}
               title="2-player session"
