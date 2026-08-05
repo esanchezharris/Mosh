@@ -149,6 +149,28 @@ export const SKILL_TRANSACTABILITY: Readonly<Record<string, string | true>> = {
   reimagine_clip:
     "render_layer is asynchronous (jobManager/callAsync) and logs undoable=false — its " +
     "audio can land after the transaction closes, which no rollback could recall",
+
+  // FS-B2 (re-landed 2026-08-04). Three expand entirely into admitted commands; the two
+  // RECORDING skills do not, and for a reason the engine states outright rather than an
+  // oversight — TransactionSafe.h classes transport/recording commands as Lifecycle:
+  // "replaces, persists or transports the project; it is outside any single edit
+  // transaction". A take is captured by moving the transport, and no rollback can un-play
+  // time. Both reasons below name a Lifecycle blocker, not the incidental ones.
+  prepare_drum_track: true,
+  send_to_bus: true,
+  add_builtin_effect: true,
+
+  record_take:
+    "set_transport is Lifecycle in src/moshops/TransactionSafe.h — it transports the " +
+    "project, which is outside any single edit transaction. arm_track and " +
+    "set_input_monitor are also unadmitted, but the transport move is the one that " +
+    "cannot be rolled back: the recording it starts is wall-clock, not an edit.",
+  keep_last_take:
+    "stop_recording is Lifecycle in src/moshops/TransactionSafe.h — it ends a capture and " +
+    "persists the take, which is outside any single edit transaction. keep_take itself is " +
+    "unadmitted too (it appears to meet the header's four criteria, but the registry guard " +
+    "is one-directional and would never flag an omission — worth its own look, and " +
+    "deliberately not widened here as a side effect of re-landing skills).",
 };
 
 /** Skills whose whole manifest the engine registry will admit. */

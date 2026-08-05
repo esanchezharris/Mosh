@@ -211,3 +211,86 @@ FS-B2 remains blocked until all are true:
 
 Only then should the backlog status change and the demo-derived skill list be written. Clearing O2
 alone is not sufficient.
+
+---
+
+# Addendum 2026-07-28 — the skill CONTENT landed; the lane's gate did NOT
+
+*Appended, not replacing the above. The prerequisite in this document is unmet and remains
+binding. An earlier version of this session overwrote this file and flipped the backlog row to
+`done` — both wrong, and the checklist above says exactly why: "Clearing O2 alone is not
+sufficient."*
+
+## What changed above the line
+
+**O2 was withdrawn** (owner, 2026-07-28: "we're not doing a demo anymore"), so checklist item 1
+— *"O2 exists and supplies the actual demo beats"* — can never be satisfied as written. The owner
+chose a replacement source: the mined library as evidence, the shipped catalog as the home.
+Item 2 (FS-B1 merged) is satisfied — it landed as PR #324. **Items 3, 4 and 5 are still open.**
+
+## What was built
+
+Five multi-command workflow skills in `ui/src/agent/skills.ts` (8 → 13), plus 19 behavioural
+tests in `skillsFsB2.test.ts`:
+
+| Skill | Commands | Mined evidence |
+|---|---|---|
+| `prepare_drum_track` | `set_track_type` + `load_drum_kit` | `set-track-type-load-drum-kit`, provenance 23 |
+| `send_to_bus` | `add_send` + `set_send_level` | collapses **6** `create-bus-add-send*` variants |
+| `record_take` | `arm_track` + `set_input_monitor` + `set_transport` | `arm-track-set-transport` |
+| `keep_last_take` | `stop_recording` + `keep_take` | `stop-recording-keep-take` |
+| `add_builtin_effect` | `load_builtin` + `set_plugin_param` | collapses **3** variants |
+
+Selection rule: **≥2 commands that genuinely go together.** Provenance alone is a bad rule — the
+mined library's biggest entry (`assign-sample`, 51 rows) wraps one command 1:1, and 22 of the 36
+mined entries are such wrappers. Per [SKILL_CATALOG_BOUNDARY.md](../SKILL_CATALOG_BOUNDARY.md),
+`library.jsonl` is mined and must not be hand-authored, so it was read as evidence only.
+
+## Why option 1 (mine from real session logs) is impossible
+
+- `mosh-log.jsonl` has **no natural language** — across 2,840 records the key set is exactly
+  `{ts, seq, command, args, ok, undoable, error}`. A skill needs a description and triggers.
+  **Running more sessions would not change this.**
+- `service/skills/mine.py` does not read session logs; it mines
+  `service/sft/a3b-r4-cuda_next_run_examples.rendered.jsonl` (189 SFT rows).
+- Volume fails separately: 79% of the log is 11–13 June 2026 dev traffic, and 61 entries call
+  `add_neural_insert`, deleted 2026-06-21.
+
+The enabler is teaching the JSONL writer to record the utterance; spun off as its own ticket.
+*(Trap: `mine.py --help` ignores the flag and re-runs the miner, overwriting `library.jsonl`.
+Deterministic, so harmless — but a footgun.)*
+
+## Not portable — schema limits, not oversights
+
+- **Anything needing an id returned by an earlier command.** The template language is declarative,
+  so `create_bus` → `add_send(bus: ?)` cannot chain. `send_to_bus` therefore targets an existing
+  bus; `add_builtin_effect` makes the chain `index` an explicit slot both commands read.
+- **`add-note-pattern` / `add-note-from-note-names`** (provenance 20 each) need `list<note>` slots;
+  `SkillSlot` is string/number/boolean only.
+
+## Verification
+
+```
+tsc clean · skills+harness+contract 196 · skillsFsB2 19 · full vitest 2044 passed, 1 skipped
+skillCatalogBoundary.test.ts 12/12 (main's FS-B1a guard, pulled into a scratch copy with the
+  moshops_catalog.py projection fix it validates, then restored — re-run after merge)
+grep SABOTAGE clean
+```
+
+All five preconditions RED-proved. **The contract test earned its keep:** the first
+`add_builtin_effect` template put `set_plugin_param` under a flat `if_present("paramIndex")`,
+leaving optional `value` unguarded — a caller passing only `paramIndex` would have emitted an
+unbound arg. Fixed by nesting.
+
+## Status: still BLOCKED
+
+These five skills are the same shape as the eight that already ship — `arrange_beat` is already
+four commands — so they inherit FS-B1's documented, conservative `rolledBack: false` on ambiguous
+transport loss and make nothing worse. But the gate above ("never partial mutations") is **not**
+met, and the honest reading is:
+
+- item 3 — the native transaction slice is **unmerged** (branch `codex/fs-b2-transaction-prereq`);
+- item 4 — crash-interrupted open transactions are not resolved by T2;
+- item 5 — no real-engine run has proved exact commit and exact rollback.
+
+Backlog row therefore returns to `blocked`, on the transaction prerequisite rather than on O2.
