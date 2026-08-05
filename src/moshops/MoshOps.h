@@ -471,6 +471,13 @@ private:
     // save/reload that swapped in a different Edit instance). Cheap + headless-safe
     // (writes engine property storage, no audio device required).
     void applyCountInToEdit();
+    // CAP-TRN-005 — the resolved click block { enabled, level, levelMin, levelMax,
+    // emphasizeBars, recordingOnly, outputDevice, outputDeviceResolved,
+    // defaultOutputDevice, soundBig, soundSmall, midiNoteBig, midiNoteSmall }, read
+    // straight off tracktion_engine's own click surface. Every field always present.
+    // outputDevice is the RAW stored intent and outputDeviceResolved is what the engine
+    // will really use — they differ whenever the stored device is not currently present.
+    juce::var clickSettingsToVar();
     // REC-001 — the resolved { overdub, replaceExisting, quantize, quantizeLabel,
     // punchInOut, retrospectiveSeconds } block. Every field always present (a UI that
     // has to tell "false" from "missing" renders a toggle in a third, wrong state).

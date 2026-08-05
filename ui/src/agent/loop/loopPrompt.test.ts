@@ -178,7 +178,23 @@ describe("legacy prompt byte-stability pin", () => {
       master: { volumeDb: 0, pan: 0 },
     } as unknown as Snapshot;
     const hash = createHash("sha256").update(systemPrompt(fixture)).digest("hex");
-    // Moved 2026-08-03 (c), consciously: ONE catalog line, set_record_options — how a
+    // Moved 2026-08-03 (d), consciously: ONE catalog line REWORDED, set_metronome
+    // (CAP-TRN-005). No command was added, removed or renamed; the prompt's SHAPE is
+    // unchanged. The line gained three optional args — level, emphasizeBars,
+    // recordingOnly — and `enabled` became optional, because the command turned into a
+    // partial patch. That last part is the behavioural half of the move and the reason
+    // it is worth the tokens: `enabled` used to default to FALSE, so a call that named
+    // any other field would have silently muted the click.
+    //
+    // Deliberately NOT in that move: outputDevice, soundBig, soundSmall, midiNoteBig and
+    // midiNoteSmall, which the same command also accepts. They take device names and WAV
+    // paths that only the producer's own machine knows, and — the structural reason,
+    // same as the builtin-vocabulary case below — StepCommandResult carries no payload,
+    // so the loop can never show the model what list_audio_devices returned. Declaring
+    // them would buy invented paths at real prompt cost. They are reachable by mouse in
+    // the v2 metronome panel, and the exclusion is written down in commands.ts.
+    //
+    // Prior move, 2026-08-03 (c): ONE catalog line, set_record_options — how a
     // live take behaves (overdub vs a fresh clip, record-quantise, punch). It is in the
     // catalog rather than UI-only for consistency with set_count_in, which is already
     // there: both answer "what happens when I hit record", and a producer who can ask
@@ -338,7 +354,24 @@ describe("legacy prompt byte-stability pin", () => {
     // first with set_track_color + move_track (#607), then with set_track_icon (#620). Each
     // time the pin was RECOMPUTED from the merged catalog rather than picked from a side,
     // which is the only correct move when both sides added commands.
-    expect(hash).toBe("f7e286eed2c29f157ae93bebbc3927e112a97f0d990d1238335742b40767ea46");
+    //
+    // Moved again 2026-08-04, CAP-TRN-005 (`set_metronome` — level, sound, route). Third
+    // time in the same campaign, and the same rule applied: main had meanwhile grown
+    // `insert_time` + `move_clip.ripple` (CAP-CLP-017) and `jump_to_history` (CAP-PRJ-005),
+    // while this branch grew `set_metronome`. NEITHER side's pin described the merged
+    // catalog, so the hash below was RECOMPUTED from it — this branch's own
+    // bac517c6… was as wrong post-rebase as main's f7e286ee… was.
+    //
+    // Both pre-merge tips are recorded because neither is reachable from here:
+    // - pre-metronome-settings (this branch's base, same commit as pre-insert-time):
+    //                                 38abcf77a1ee222dd1b60cccb2a5e0791ef79d2c8fa0f3e0b816fec865f81334
+    // - this branch, pre-rebase:      bac517c6717a31d122a8d04ae49cf29da3d8387635b35c963aed70b23092a481
+    // - main @ jump_to_history (#617), pin UNMOVED by that PR:
+    //                                 f7e286eed2c29f157ae93bebbc3927e112a97f0d990d1238335742b40767ea46
+    //
+    // The current pin still includes the shared beat-offset rule and the explicit
+    // create_section/move_section catalog wording from issue #539.
+    expect(hash).toBe("3cbf58897a767ede9e5a1b699bb8a5d35f18124f86c11a9c0c112db130d25a3b");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

@@ -183,6 +183,133 @@ needed, only exposing + persisting the setting:
   branch is gated on `eng.hasAudio()`), same posture as `fam_transport_play` in
   `scripts/daw-conformance/conformance.py`.
 
+## Metronome / click track (CAP-TRN-005 `set_metronome`) — RESOLVED, engine ALREADY had all of it
+
+`tracktion_engine` owns sound, level, emphasis, recording-only and routing already. Mosh
+adds no model of its own — `set_metronome` grew from a one-arg toggle into a partial patch
+over exactly this surface. The split below is the ENGINE's, and it is the thing to know
+before designing args: **five of the settings are per-Edit, four are app-global.**
+
+### Per-Edit — the `CLICKTRACK` child of the Edit's own ValueTree
+
+`Edit::initialiseClickTrack()` (`model/edit/tracktion_Edit.cpp:985`) creates
+`state.getOrCreateChildWithName (IDs::CLICKTRACK, nullptr)` and binds:
+
+| CachedValue | ValueTree property | Notes |
+|---|---|---|
+| `clickTrackEnabled` (`bool`) | `IDs::active` | what `set_metronome` already wrote |
+| `clickTrackGain` (`float`) | `IDs::level` | defaults from `SettingID::lastClickTrackLevel` (0.6) |
+| `clickTrackEmphasiseBars` (`bool`) | `IDs::emphasiseBars` | big click on beat 1; engine default **off** |
+| `clickTrackRecordingOnly` (`bool`) | `IDs::onlyRecording` | consulted in `ClickGenerator::isMutedAtTime` |
+| `clickTrackDevice` (`String`) | `IDs::outputDevice` | **private** — see the read-back trap below |
+
+Because they live in the Edit's tree they **save and reload with the `.tracktionedit`** —
+no `MOSH_PROJECT` mirror is needed (unlike REC-001, whose engine homes are per-device and
+unreachable headless). And every one of those `referTo` calls passes a **`nullptr`
+UndoManager**, which is why `cmdSetMetronome` still takes no Tracktion transaction: one
+here could only ever be an EMPTY transaction, and an empty transaction's undo destroys the
+*previous* real edit (the G14 class).
+
+Accessors (`tracktion_Edit.h:684-722`, `tracktion_Edit.cpp:2450-2496`):
+
+```cpp
+float  Edit::getClickTrackVolume() const noexcept;      // jlimit (0.2f, 1.0f, clickTrackGain)
+void   Edit::setClickTrackVolume (float gain);          // clamps the SAME way, and mirrors
+                                                        //   to SettingID::lastClickTrackLevel
+juce::String Edit::getClickTrackDevice() const;         // NORMALISES — see below
+bool   Edit::isClickTrackDevice (OutputDevice&) const;
+void   Edit::setClickTrackOutput (const juce::String& deviceName);   // + restartPlayback()
+void   Edit::setClickTrackRange (TimeRange) noexcept;   // what the count-in pre-roll uses
+```
+
+- **The level has a FLOOR, and 0 is not silence.** `getClickTrackVolume()` re-clamps to
+  `[0.2, 1.0]` on every *read*, so a 0..1 UI slider would have a dead bottom fifth. Mosh
+  surfaces `levelMin`/`levelMax` in the snapshot so the UI draws the honoured range, and
+  the command returns the *effective* value rather than the requested one.
+- **Read-back trap for routing.** `clickTrackDevice` is a **private** member, and
+  `getClickTrackDevice()` returns `DeviceManager::getDefaultAudioOutDeviceName (false)` for
+  any name `findOutputDeviceWithName` cannot resolve. Headless — no output devices at all —
+  that means *every* stored route reads back as the default, which is indistinguishable
+  from "it never persisted". `clickSettingsToVar()` therefore reads the raw intent straight
+  off the tree (`state.getChildWithName (te::IDs::CLICKTRACK).getProperty (te::IDs::outputDevice)`)
+  and reports it as `outputDevice` alongside the normalised `outputDeviceResolved`.
+- **Routing is by NAME, not deviceID** — the opposite of `set_track_output`.
+  `DeviceManager::findOutputDeviceWithName` (`tracktion_DeviceManager.cpp:1411`) matches
+  wave outs *and* MIDI outs, and resolves two sentinels: `"(default audio output)"` and
+  `"(default MIDI output)"` (`getDefaultAudioOutDeviceName`/`getDefaultMidiOutDeviceName`,
+  both `bool translated` → pass `false` for the storage form).
+- **Where the routing lands:** `createNodeForEdit` (`playback/graph/tracktion_EditNodeBuilder.cpp:1876,1951`)
+  ensures the click's device is in the device map, then sums a `ClickNode` into that
+  device's node. So "click to headphones only" is a real engine capability, not an emulation.
+
+### App-global — `te::PropertyStorage`, via the `Click` free functions
+
+`playback/graph/tracktion_ClickNode.h:15-21`:
+
+```cpp
+namespace Click {
+    int          getMidiClickNote  (Engine&, bool big);                        // 37 / 76 default
+    juce::String getClickWaveFile  (Engine&, bool big);                        // "" ⇒ built-in
+    void         setMidiClickNote  (Engine&, bool big, int noteNum);
+    void         setClickWaveFile  (Engine&, bool big, const juce::String&);
+}
+```
+
+- Backed by `SettingID::clickTrackSampleBig/Small` + `clickTrackMidiNoteBig/Little`. The
+  engine has **no per-Edit home** for these — they are a machine preference like the audio
+  device, and Mosh stores them where the engine does rather than inventing a second truth.
+- Both setters call `TransportControl::restartAllTransports (e, false)`, so a change takes
+  effect on a running transport.
+- **The click loader is WAV-only.** `ClickGenerator::prepareToPlay` reads the file through
+  `juce::WavAudioFormat` *directly* (`loadWavDataIntoMemory`, `tracktion_ClickNode.cpp:17-55`),
+  not the format manager, and falls back to `TracktionBinaryData::bigclick_wav` /
+  `littleclick_wav` when the buffer comes back empty. That fallback is **silent**, so
+  `cmdSetMetronome` refuses a non-`.wav` (or missing) path rather than storing a setting
+  that looks applied and is not.
+- **The MIDI notes only exist on a MIDI route.** `ClickGenerator::processBlock`
+  (`tracktion_ClickNode.cpp:139-161`) reads them in its `midi` branch alone; on an audio out
+  they are inert. The UI reveals them only once a MIDI destination is chosen.
+- **Include trap:** `tracktion_ClickNode.h` is NOT reachable from client code — the module
+  includes it only from `tracktion_engine_playback.cpp`, and it also declares `ClickNode`,
+  which derives from `tracktion::graph::Node` (not in the public include set), so including
+  it by path fails on an incomplete base class. `MoshOps.TempoProject.cpp` re-declares the
+  four `Click` functions verbatim instead; they have external linkage, so this still *calls*
+  the engine's implementation, and a signature change becomes a link error rather than a
+  silent divergence.
+
+### Emphasis, and what "big" means
+
+`ClickGenerator::processBlock` reads `edit.clickTrackEmphasiseBars` and picks `bigClick` vs
+`littleClick` (audio) or `bigClickMidiNote` vs `littleClickMidiNote` (MIDI) on
+`tempoPosition.getBarsBeats().getWholeBeats() == 0`. With emphasis **off** — the engine
+default — every beat is the little click, which is why "accent the downbeat" is a real
+capability gain and not a cosmetic toggle.
+
+### Verification ceiling — and why `verify.py` cannot close it either
+
+Stricter than count-in's, and worth stating precisely because the obvious assumption is
+wrong. **The click is not in an offline render at all.** `makeNode<ClickNode>` appears
+exactly once in the whole engine — `tracktion_EditNodeBuilder.cpp:1954`, inside
+`createNodeForEdit (EditPlaybackContext&, …)`, the **live playback** builder, where it is
+summed into a specific output device's node. The **offline** overload
+`createNodeForEdit (Edit&, const CreateNodeParams&)` (`:1970`) — the one
+`Renderer::renderToFile`/`turnEditIntoRenderJob` call, and therefore the one behind
+`export_audio` and every `scripts/verify-hardware/verify.py` WAV — builds tracks → master
+plugins → master fades → racks and **never adds a ClickNode**. (This is also correct DAW
+behaviour: your bounce should not have the metronome in it.)
+
+So the three lanes are:
+
+| Lane | Proves | Cannot |
+|---|---|---|
+| `Mosh --selftest` | arg validation, refusals, clamping, the snapshot block, save+reload persistence, the write reaching `te::Edit`'s own state, `undoable:false` | any audio — headless has no device |
+| `verify.py` (offline `renderToFile`) | nothing about the click | **the click is not in the graph it renders** |
+| A live session at a real device | the click, its level, its accent, its route | — |
+
+For level, sound and routing there is therefore **no harness that can hear it**: it is an
+owner listen or nothing. Do not report a green `--selftest` (or a green `verify.py`) as
+evidence the click got quieter.
+
 ## Export range/section + delay-tail policy (G1 `export_audio`) — RESOLVED
 
 Verified against the pinned clone (`model/export/tracktion_Renderer.h`):
