@@ -11,6 +11,7 @@
 #include "moshops/AgentTxn.h"
 #include "moshops/TransactionSafe.h"
 #include "plugins/hosting/PluginHost.h"
+#include "plugins/mixer/TrackMutePlugin.h"
 #include "plugins/spectral/MasterSpectralTapPlugin.h"
 #include "generative/GenerativeJobManager.h"
 #include "training/TrainerRegistry.h"
@@ -47,6 +48,18 @@ public:
     /** MP-001 — the multiplayer lock guard's state (mirrors the relay lock table).
         The live poll path keeps this in sync; the guard in execute() reads it. */
     LockManager& lockManager() { return lockManager_; }
+
+    /** CAP-AUT-006 — every track whose mute gate carries a curve, with that curve's
+        value AT THE TRANSPORT'S CURRENT POSITION: `{tracks:[{id, muted}]}`. Feeds the
+        30 Hz "mute_automation" rail so the mute button follows its automation instead
+        of showing a stale routing-mute flag.
+
+        Public on purpose: the rail itself is emitted from timerCallback, which needs a
+        message loop a headless run never pumps, so this is the ONLY part of the
+        follow-the-curve path `--selftest` can assert. Pure read — evaluates the curve on
+        the message thread via te::getValueAt and needs no audio device, which is also
+        why the button tracks the playhead while the transport is STOPPED. */
+    juce::var muteAutomationAtPlayhead();
 
     /** The single entry point — bound to the WebView's execute_command. Thin wrapper around
         executeImpl that also feeds the A3 crash-recovery journal. */
@@ -689,6 +702,14 @@ private:
     struct MeterTap { te::LevelMeterPlugin* plugin = nullptr; te::LevelMeasurer::Client client; };
     te::LevelMeterPlugin* ensureTrackMeter (te::AudioTrack&);
     te::LevelMeterPlugin* findTrackMeter (te::AudioTrack&);
+    // ── CAP-AUT-006: the per-track mute gate ── a hidden mixer element carrying the one
+    // automatable "mute" parameter (a curve needs something to point at; the engine has
+    // no automatable mute — see TrackMutePlugin.h). Materialised alongside the metering
+    // tap and kept immediately UPSTREAM of it, so a curve-muted track reads silent on its
+    // own meter. NOT the routing mute: set_track_mute is untouched by it.
+    TrackMutePlugin* ensureTrackMuteGate (te::AudioTrack&);
+    TrackMutePlugin* findTrackMuteGate (te::AudioTrack&);
+
     void reconcileMeterClients();           // sync client map to live taps (undo/redo-safe)
     void unregisterAllMeterClients();       // removeClient on still-valid measurers, then clear
     std::map<juce::String, std::unique_ptr<MeterTap>> meterClients;
@@ -947,6 +968,9 @@ private:
     juce::var  cmdRecoverSession (const juce::var& args);
     juce::var  cmdDiscardRecovery (const juce::var& args);
     bool        wasPlaying = false;
+    // CAP-AUT-006 — did last tick's "mute_automation" rail carry anything? Drives the
+    // one falling-edge emit that clears the UI when the last mute curve is deleted.
+    bool        hadMuteAutomation = false;
     bool        inBatch    = false;   // true between batch_begin / batch_end (agent batch = one undo step)
 
     // ── FS-B2a — the agent batch-transaction contract ────────────────────────────

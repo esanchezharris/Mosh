@@ -5,13 +5,23 @@
 // inline lanes from the legacy UI are intentionally dropped (keeps the arrangement
 // clean — automation lives only in this modal).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { useEscapeToClose } from "../hooks/useEscapeToClose";
-import type { AutoPoint } from "../types";
+import type { AutoPoint, PluginParam } from "../types";
 
 const H = 220;
 const PAD = 12;
+
+// A DISCRETE parameter (the CAP-AUT-006 mute gate is the first one) has no meaning
+// between its states: the engine runs every applied value through snapToState, so a
+// point drawn at 0.37 is applied as 0. Snap on the way in so the dot sits where the
+// audio actually is, rather than at a value nothing will ever use.
+export function snapParamValue(param: PluginParam | null, v: number): number {
+  const states = param?.discrete ? Math.max(2, param.states ?? 2) : 0;
+  if (!states) return v;
+  return Math.round(v * (states - 1)) / (states - 1);
+}
 
 export function AutomationPanel() {
   const trackId = useStore((s) => s.automationTrackId);
@@ -21,7 +31,15 @@ export function AutomationPanel() {
   const pxPerSec = useStore((s) => s.pxPerSec);
 
   const track = snapshot?.tracks.find((t) => t.id === trackId) ?? null;
-  const plugins = track?.plugins ?? [];
+  // CAP-AUT-006 — the mixer strip's automatable plugins (fader, mute gate) are hidden
+  // from the rack but are ordinary automation targets: same pluginIndex/paramIndex
+  // addressing, so they just join the picker list. They go LAST so a track that has real
+  // plugins still defaults to the first of those, unchanged; a track with none now
+  // defaults to the mixer instead of showing "no plugins" over an empty canvas.
+  const plugins = useMemo(
+    () => [...(track?.plugins ?? []), ...(track?.mixerPlugins ?? [])],
+    [track?.plugins, track?.mixerPlugins],
+  );
 
   const [pluginIndex, setPluginIndex] = useState<number | null>(null);
   const [paramIndex, setParamIndex] = useState(0);
@@ -58,7 +76,11 @@ export function AutomationPanel() {
   const addAt = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.target !== e.currentTarget || !param) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    void exec("add_automation_point", { ...target, time: tOf(e.clientX - rect.left), value: vOf(e.clientY - rect.top) });
+    void exec("add_automation_point", {
+      ...target,
+      time: tOf(e.clientX - rect.left),
+      value: snapParamValue(param, vOf(e.clientY - rect.top)),
+    });
   };
   const onDotDown = (i: number) => (e: React.PointerEvent) => {
     e.stopPropagation();
@@ -68,7 +90,7 @@ export function AutomationPanel() {
   const onMove = (e: React.PointerEvent) => {
     if (dragRef.current == null || e.buttons === 0) return;
     const svg = (e.currentTarget as Element).closest("svg")!.getBoundingClientRect();
-    setPreview({ i: dragRef.current, t: tOf(e.clientX - svg.left), v: vOf(e.clientY - svg.top) });
+    setPreview({ i: dragRef.current, t: tOf(e.clientX - svg.left), v: snapParamValue(param, vOf(e.clientY - svg.top)) });
   };
   const onUp = () => {
     const i = dragRef.current; dragRef.current = null;
@@ -80,7 +102,23 @@ export function AutomationPanel() {
 
   const display = points.map((p, i) => (preview && preview.i === i ? { t: preview.t, v: preview.v } : p));
   const sorted = display.map((p, i) => ({ ...p, i })).sort((a, b) => a.t - b.t);
-  const path = sorted.map((p, k) => `${k === 0 ? "M" : "L"} ${xOf(p.t).toFixed(1)} ${yOf(p.v).toFixed(1)}`).join(" ");
+  // A two-state parameter does not fade between its points — the engine snaps the
+  // interpolated value at 0.5, which a 0->1 segment crosses exactly halfway along. Draw
+  // that: a step at the midpoint is the true applied shape, a diagonal would promise a
+  // fade the audio never performs. (>2 states falls back to the straight line; the mute
+  // gate is the only discrete parameter today and it has exactly two.)
+  const stepped = !!param?.discrete && (param.states ?? 2) === 2;
+  const path = stepped
+    ? sorted
+        .map((p, k) => {
+          const move = `${k === 0 ? "M" : "L"} ${xOf(p.t).toFixed(1)} ${yOf(p.v).toFixed(1)}`;
+          const next = sorted[k + 1];
+          if (!next || next.v === p.v) return move;
+          const midX = xOf((p.t + next.t) / 2).toFixed(1);
+          return `${move} L ${midX} ${yOf(p.v).toFixed(1)} L ${midX} ${yOf(next.v).toFixed(1)}`;
+        })
+        .join(" ")
+    : sorted.map((p, k) => `${k === 0 ? "M" : "L"} ${xOf(p.t).toFixed(1)} ${yOf(p.v).toFixed(1)}`).join(" ");
 
   return (
     <div className="modal-backdrop" onClick={close}>

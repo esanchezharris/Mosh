@@ -347,6 +347,25 @@ void MoshOps::timerCallback()
         emit ("levels", var (payload));
     }
 
+    // CAP-AUT-006 — the mute button follows its curve. Same discipline as transport and
+    // levels: a per-track rail OUTSIDE the snapshot, so a mute edge never re-creates the
+    // snapshot object and re-renders the whole tree. Deliberately NOT folded into the
+    // `levels` payload above — that one is gated on metering being enabled, and a
+    // producer who turned meters off would silently get a mute button that stopped
+    // following. Deliberately NOT gated on hasAudio() or on playing either: the curve is
+    // evaluated from the transport position on the message thread, so the button is also
+    // correct while the transport is parked mid-curve.
+    {
+        auto payload = muteAutomationAtPlayhead();
+        const bool any = payload.getProperty ("tracks", var()).size() > 0;
+        // Emit while anything is automated, plus exactly once on the falling edge — the
+        // UI has to be told when the last curve went away, or a button would stay stuck
+        // showing the state the vanished curve left behind.
+        if (any || hadMuteAutomation)
+            emit ("mute_automation", payload);
+        hadMuteAutomation = any;
+    }
+
     // Master spectral feed (Moshi reactivity). Only live with a real playback context
     // (an audio device) — headless / --selftest has none, so the tap is NEVER inserted
     // and the edit state is untouched. One zero on the play→stop edge so Moshi settles.
@@ -2360,6 +2379,15 @@ juce::var MoshOps::pluginToVar (te::Plugin& p, int index, te::AudioTrack* owner)
         po->setProperty ("index", i);
         po->setProperty ("name", param->getParameterName());
         po->setProperty ("value", param->getCurrentNormalisedValue());
+        // CAP-AUT-006 — a stepped parameter (the mute gate is the first) is applied
+        // through snapToState, so the editor must snap its points to the same states
+        // instead of drawing a value the engine will never use. Only emitted when true,
+        // so every existing continuous parameter's payload is byte-identical.
+        if (param->isDiscrete())
+        {
+            po->setProperty ("discrete", true);
+            po->setProperty ("states", juce::jmax (2, param->getNumberOfStates()));
+        }
         const bool automated = param->hasAutomationPoints();
         po->setProperty ("automated", automated);
         if (automated)
@@ -2805,13 +2833,33 @@ juce::var MoshOps::trackToVar (te::AudioTrack& t, int index)
     // P6 undo matrix caught it leaking into the rack as a bogus "Volume & Pan Plugin"
     // row on any fresh track. (It is not a load_builtin type, so nothing a user loads
     // can be hidden by this.)
+    // The CAP-AUT-006 mute gate is hidden from the rack for the same reason as the other
+    // two: it is a mixer element, not something a user loaded, and a "Mute" row in every
+    // track's chain would be noise. Real index preserved, same as the others.
     juce::Array<var> plugins;
+    juce::Array<var> mixerPlugins;
     auto pl = t.pluginList.getPlugins();
     for (int i = 0; i < pl.size(); ++i)
-        if (pl[i] != nullptr && dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) == nullptr
-                             && dynamic_cast<te::VolumeAndPanPlugin*> (pl[i].get()) == nullptr)
-            plugins.add (pluginToVar (*pl[i], i, &t));
+    {
+        if (pl[i] == nullptr) continue;
+        const bool isFader = dynamic_cast<te::VolumeAndPanPlugin*> (pl[i].get()) != nullptr;
+        const bool isGate  = dynamic_cast<TrackMutePlugin*> (pl[i].get()) != nullptr;
+        if (dynamic_cast<te::LevelMeterPlugin*> (pl[i].get()) != nullptr) continue;   // pure measure, nothing to automate
+        if (isFader || isGate)
+        {
+            // CAP-AUT-006 — hidden from the rack but AUTOMATABLE, so they need a way to
+            // reach the automation picker. Same (pluginIndex, paramIndex) addressing as
+            // any other target: this introduces no second kind of automation target, it
+            // just stops the mixer strip's parameters being unreachable by mouse. Before
+            // this, the fader's own volume/pan curves were addressable by command but
+            // unpickable in AutomationPanel, which only lists `plugins`.
+            mixerPlugins.add (pluginToVar (*pl[i], i, &t));
+            continue;
+        }
+        plugins.add (pluginToVar (*pl[i], i, &t));
+    }
     o->setProperty ("plugins", plugins);
+    o->setProperty ("mixerPlugins", mixerPlugins);
     // DRM-001/CTL-001 — does the track host an instrument (synth or builtin)? Lets the
     // header surface the auto-loaded default and label the track MIDI-armable.
     o->setProperty ("isInstrument", trackHasInstrument (t));

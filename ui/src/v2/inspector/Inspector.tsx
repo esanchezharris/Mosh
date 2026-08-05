@@ -14,6 +14,7 @@ import { GenDrawer } from "../../ui/GenDrawer";
 import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { LyricPanel } from "./LyricPanel";
 import { deriveTakeLanes } from "../../ui/takeLanes";
+import { muteButtonState } from "../../ui/muteState";
 import { useDrumWindow } from "../../ui/dock/useFloatingWindow";
 import { midiInputOptions, waveInputOptions, currentTrackInput, trackOutputOptions, currentTrackOutput, trackOutputPatch } from "../../settings/routing";
 import { meterAt, snapStep, snapStepBeats, tempoMapFrom } from "../../time";
@@ -88,6 +89,9 @@ export function Inspector() {
 
 function MixTab({ track }: { track: Track }) {
   const exec = useStore((s) => s.exec);
+  // CAP-AUT-006 — the 30 Hz mute-automation rail (see ui/muteState.ts), not the snapshot.
+  const muteAutomation = useStore((s) => s.muteAutomation);
+  const mute = muteButtonState(track, muteAutomation);
   return (
     <div className="v2-mix">
       {/* TRK-RENAME — `rename_track` shipped with NO user-facing call site in either
@@ -213,7 +217,11 @@ function MixTab({ track }: { track: Track }) {
       {track.isInstrument ? <MidiInputField track={track} /> : <AudioInputField track={track} />}
       <InputMonitorField track={track} />
       <div className="v2-mix-btns">
-        <button className={track.mute ? "on" : ""} aria-pressed={!!track.mute} onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
+        {/* CAP-AUT-006 — same rule as the lane header: lit follows silence (so a mute
+            curve shows here too), aria-pressed follows the routing mute this toggles. */}
+        <button className={mute.className} aria-pressed={mute.pressed} aria-label={mute.label} title={mute.label}
+          data-automated={mute.automated ? "true" : undefined}
+          onClick={() => void exec("set_track_mute", { trackId: track.id, mute: !track.mute })}>Mute</button>
         <button className={track.solo ? "on" : ""} aria-pressed={!!track.solo} onClick={() => void exec("set_track_solo", { trackId: track.id, solo: !track.solo })}>Solo</button>
       </div>
       <SendsSection track={track} />

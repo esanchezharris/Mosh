@@ -45,6 +45,18 @@ export function onLevels(ev: MoshEvent, set: Set): void {
   set({ levels: { tracks, master: p.master ?? { l: -100, r: -100 } } });
 }
 
+export function onMuteAutomation(ev: MoshEvent, set: Set): void {
+  // CAP-AUT-006 — the mute button's follow-the-curve rail. Targeted set, no snapshot
+  // refetch (same lightweight path as transport/levels). The backend sends the FULL set
+  // of automated tracks every tick and one final empty payload on the falling edge, so
+  // rebuilding the map wholesale is what clears a deleted curve — merging would leave
+  // the last track that had one stuck lit forever.
+  const p = ev.payload as { tracks?: { id: string; muted: boolean }[] };
+  const muteAutomation: Record<string, boolean> = {};
+  for (const t of p.tracks ?? []) muteAutomation[t.id] = !!t.muted;
+  set({ muteAutomation });
+}
+
 export function onSpectrum(ev: MoshEvent, set: Set): void {
   // Master Goertzel feed (Moshi reactivity) — targeted set, no snapshot refetch.
   const p = ev.payload as Partial<Spectrum>;

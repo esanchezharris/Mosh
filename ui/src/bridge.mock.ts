@@ -631,7 +631,42 @@ export function mockOnEvent(eventId: string, fn: Listener): () => void {
 export function __mockEmitForTests(type: string, payload?: unknown): void {
   emit(type, payload);
 }
-const invalidate = () => emit("snapshot_invalidated");
+const invalidate = () => { emit("snapshot_invalidated"); emitMuteAutomation(); };
+
+// CAP-AUT-006 — the mute button's follow-the-curve rail, mirroring the native
+// muteAutomationAtPlayhead(): only tracks whose mute gate carries a curve, with that
+// curve read at the CURRENT transport position and thresholded at 0.5 (the two-state
+// parameter's snap point). Emitted from the play tick AND from invalidate(), because
+// native emits at 30 Hz regardless of the transport — the button has to be right while
+// parked mid-curve too, not just while rolling.
+function curveValueAt(points: { t: number; v: number }[], time: number): number {
+  if (points.length === 0) return 0;
+  const pts = points.slice().sort((a, b) => a.t - b.t);
+  if (time <= pts[0].t) return pts[0].v;
+  const last = pts[pts.length - 1];
+  if (time >= last.t) return last.v;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    if (time <= b.t) {
+      const span = b.t - a.t;
+      return span <= 0 ? b.v : a.v + ((time - a.t) / span) * (b.v - a.v);
+    }
+  }
+  return last.v;
+}
+function emitMuteAutomation(): void {
+  const now = snapshot.transport?.position ?? 0;
+  const tracks = snapshot.tracks
+    .map((t) => {
+      const gate = (t.mixerPlugins ?? []).find((p) => p.type === "moshTrackMute");
+      const param = gate?.params?.find((x) => x.index === 0);
+      const points = param?.points ?? [];
+      if (points.length === 0) return null;
+      return { id: t.id, muted: curveValueAt(points, now) >= 0.5 };
+    })
+    .filter((x): x is { id: string; muted: boolean } => x !== null);
+  emit("mute_automation", { tracks });
+}
 
 // ── transport simulation (the 30 Hz decimated playhead feed) ─────────────────
 
@@ -675,6 +710,7 @@ function startPlayback() {
         return { id: t.id, l: db, r: toDb(g * 0.94) };
       });
     emit("levels", { tracks, master: { l: toDb(level), r: toDb(level * 0.96) } });
+    emitMuteAutomation();
   }, 1000 / 30);
 }
 function stopPlayback() {
@@ -891,6 +927,46 @@ function findPlugin(trackId: string, index: number): { track: Track; idx: number
   if (!t || !t.plugins || index < 0 || index >= t.plugins.length) return null;
   return { track: t, idx: index };
 }
+
+// ── CAP-AUT-006 — the mixer strip's hidden-but-automatable plugins ───────────────────
+// Native carries these as real pluginList members (the fader, and the mute gate sitting
+// immediately upstream of the metering tap) and filters them out of the snapshot's
+// `plugins` array — so their pluginIndex is a REAL index that `plugins` does not
+// contain. The mock has no pluginList to index into, so it parks them at a fixed base
+// above anything `plugins` (renumbered 0..n-1 by reindex) can reach. The seam behaviour
+// that has to survive is the part the UI depends on: a pluginIndex absent from
+// `plugins` still resolves for the automation commands, and the mute parameter carries
+// discrete/states so the editor snaps its points.
+const MIXER_INDEX_BASE = 100;
+function ensureMixerPlugins(t: Track): Plugin[] {
+  if (!t.mixerPlugins) {
+    t.mixerPlugins = [
+      {
+        index: MIXER_INDEX_BASE, name: "Volume & Pan Plugin", type: "volume",
+        enabled: true, external: false, isInstrument: false,
+        params: [{ index: 0, name: "Volume", value: 0.8 }, { index: 1, name: "Pan", value: 0.5 }],
+      },
+      {
+        index: MIXER_INDEX_BASE + 1, name: "Mute", type: "moshTrackMute",
+        enabled: true, external: false, isInstrument: false,
+        params: [{ index: 0, name: "Mute", value: 0, discrete: true, states: 2 }],
+      },
+    ];
+  }
+  return t.mixerPlugins;
+}
+/** Resolve an automation target across BOTH the rack and the mixer strip — the native
+ *  findParam addresses one flat pluginList, so a mock that only looked in `plugins`
+ *  would reject every mute/fader curve the real backend accepts. */
+function findAutomatableParam(trackId: string, pluginIndex: number, paramIndex: number) {
+  const t = findTrack(trackId);
+  if (!t) return null;
+  const rack = t.plugins ?? [];
+  const plugin = (pluginIndex >= 0 && pluginIndex < rack.length)
+    ? rack[pluginIndex]
+    : ensureMixerPlugins(t).find((p) => p.index === pluginIndex);
+  return plugin?.params?.find((x) => x.index === paramIndex) ?? null;
+}
 // Master-bus plugins — mirrors findPlugin/reindex one level up, on snapshot.master.plugins
 // (no owning track). Kept in lockstep with the native findMasterPlugin/pluginToVar shape.
 function masterPlugins(): Plugin[] {
@@ -1067,8 +1143,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       };
       if (type === "drum") ensureInstrument(t, true);
       snapshot.tracks.push(t);
+      // CAP-AUT-006 — hand back the mute gate's pluginIndex, same as native: it is
+      // hidden from `plugins`, so without this a caller would have to go through the
+      // snapshot to write a mute curve.
+      const gate = ensureMixerPlugins(t).find((p) => p.type === "moshTrackMute");
       invalidate();
-      return ok(command, { trackId: t.id, type, isInstrument: !!t.isInstrument });
+      return ok(command, { trackId: t.id, type, isInstrument: !!t.isInstrument, muteGateIndex: gate?.index ?? -1 });
     }
     case "create_group_track": {
       // MIX-008 — wrap the given tracks in a submix (group) track. Dispatched by the
@@ -2721,8 +2801,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
 
     // ── parameter automation (buried editor) ─────────────────────────────────
     case "add_automation_point": case "set_automation_point": case "remove_automation_point": case "clear_automation": {
-      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
-      const p = f?.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex));
+      const p = findAutomatableParam(str(args.trackId), num(args.pluginIndex), num(args.paramIndex));
       if (!p) return err(command, "param not found");
       pushUndo();
       p.points = p.points ?? [];
@@ -2750,8 +2829,7 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     // JSON-encoded string (the agent-catalog form, since ArgType has no array type — same
     // duality add_drum_pattern's `pattern` arg already uses). Validated before mutating.
     case "write_automation_curve": {
-      const f = findPlugin(str(args.trackId), num(args.pluginIndex));
-      const p = f?.track.plugins![f.idx].params?.find((x) => x.index === num(args.paramIndex));
+      const p = findAutomatableParam(str(args.trackId), num(args.pluginIndex), num(args.paramIndex));
       if (!p) return err(command, "param not found");
       const applyMode = str(args.apply, "replace");
       if (applyMode !== "replace" && applyMode !== "merge") return err(command, 'apply must be "replace" or "merge"');
@@ -3593,6 +3671,10 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
   return Promise.resolve(res as unknown as T);
 }
 export function mockSnapshot<T = unknown>(): Promise<T> {
+  // CAP-AUT-006 — mirror the native self-heal (ensureTrackMuteGate runs from
+  // ensureTrackMeter, so every track that has a meter has a mute gate): fill the mixer
+  // strip in for every track, whichever of the mock's many track factories made it.
+  for (const t of snapshot.tracks) ensureMixerPlugins(t);
   return Promise.resolve(clone(snapshot) as unknown as T);
 }
 

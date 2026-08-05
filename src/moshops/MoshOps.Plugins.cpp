@@ -634,6 +634,14 @@ juce::var MoshOps::cmdRemovePlugin (const juce::var& args)
     auto* plugin = findPlugin (args.getProperty ("trackId", var()).toString(),
                                (int) args.getProperty ("index", -1));
     if (plugin == nullptr) return errResult ("remove_plugin", "no plugin");
+    // CAP-AUT-006 — the mute gate is not a rack plugin: it is hidden from `plugins`, so
+    // no mouse can reach this, but an agent addressing raw pluginList indices could
+    // delete it — and with it the track's mute CURVE, which lives on its state. The next
+    // ensureTrackMuteGate would then quietly add a fresh, empty one. Refuse instead.
+    // (Deliberately narrow: the metering tap and the fader have always been removable
+    // this way and neither carries user data that cannot be rebuilt.)
+    if (dynamic_cast<TrackMutePlugin*> (plugin) != nullptr)
+        return errResult ("remove_plugin", "the track's mute gate is a fixed mixer element and cannot be removed");
     pluginHost.closeEditor (*plugin);
     beginTxn ("remove_plugin");
     plugin->deleteFromParent();

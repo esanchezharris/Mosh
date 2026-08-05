@@ -63,12 +63,94 @@ te::LevelMeterPlugin* MoshOps::findTrackMeter (te::AudioTrack& t)
 
 te::LevelMeterPlugin* MoshOps::ensureTrackMeter (te::AudioTrack& t)
 {
+    // CAP-AUT-006 — materialise the mute gate here, BEFORE the early return, so it lands
+    // on legacy tracks that already have a meter as well as on fresh ones. Every path
+    // that gives a track a meter gives it a mute gate; keeping the two together is what
+    // guarantees the gate ends up upstream of the meter (see ensureTrackMuteGate).
+    // Best-effort, exactly like the meter itself: a failure here must not fail the
+    // caller's command.
+    ensureTrackMuteGate (t);
+
     if (auto* lm = findTrackMeter (t)) return lm;
     auto plugin = eng.edit().getPluginCache().createNewPlugin (te::LevelMeterPlugin::xmlTypeName, {});
     if (plugin == nullptr) return nullptr;
     auto* lm = dynamic_cast<te::LevelMeterPlugin*> (plugin.get());
     t.pluginList.insertPlugin (plugin, t.pluginList.getPlugins().size(), nullptr);   // append → post-fader
     return lm;                                                // client is wired by reconcileMeterClients()
+}
+
+// ── CAP-AUT-006: the mute gate (a hidden mixer element, one automatable parameter) ────
+TrackMutePlugin* MoshOps::findTrackMuteGate (te::AudioTrack& t)
+{
+    for (auto* p : t.pluginList.getPlugins())
+        if (auto* g = dynamic_cast<TrackMutePlugin*> (p))
+            return g;
+    return nullptr;
+}
+
+TrackMutePlugin* MoshOps::ensureTrackMuteGate (te::AudioTrack& t)
+{
+    if (auto* g = findTrackMuteGate (t)) return g;
+
+    auto plugin = eng.edit().getPluginCache().createNewPlugin (TrackMutePlugin::xmlTypeName, {});
+    if (plugin == nullptr) return nullptr;
+    auto* gate = dynamic_cast<TrackMutePlugin*> (plugin.get());
+    if (gate == nullptr) return nullptr;
+
+    // Insert immediately BEFORE the level-meter tap when one exists, else append. Two
+    // things follow from that placement, and both are the point:
+    //   - the meter is downstream of the gate, so a track the curve has muted reads
+    //     silent on its own meter — a bouncing meter over a muted track would be exactly
+    //     the kind of convincing lie this repo keeps getting bitten by;
+    //   - the gate is a pure multiply, so it COMMUTES with the fader. It does not matter
+    //     whether ensureVolumePlugin has run yet or where the fader lands relative to it;
+    //     silence × any gain is silence. Only the meter's side of the gate matters.
+    // A plugin the user loads LATER still appends to the end of the chain, i.e.
+    // downstream of the gate — it is fed silence while muted, but can ring its own tail
+    // out. TrackMutePlugin.h states that difference from the routing mute in full.
+    int index = t.pluginList.getPlugins().size();
+    if (auto* lm = findTrackMeter (t))
+    {
+        const int meterIndex = t.pluginList.indexOf (lm);
+        if (meterIndex >= 0) index = meterIndex;
+    }
+    t.pluginList.insertPlugin (plugin, index, nullptr);
+    return gate;
+}
+
+juce::var MoshOps::muteAutomationAtPlayhead()
+{
+    const auto now = eng.edit().getTransport().getPosition();
+
+    juce::Array<var> tracks;
+    for (auto* t : te::getAudioTracks (eng.edit()))
+    {
+        if (t == nullptr) continue;
+        auto* gate = findTrackMuteGate (*t);
+        if (gate == nullptr) continue;
+        auto* param = gate->getMuteParameter();
+        // Only tracks the producer has actually automated ride this rail. Presence in
+        // the array IS the "this mute is automated" signal the UI styles on; a track
+        // with no curve is absent, and its button keeps meaning exactly what it always
+        // meant. Emitting every track would make "automated" indistinguishable from
+        // "open", which is the whole thing the button has to tell apart.
+        if (param == nullptr || ! param->hasAutomationPoints()) continue;
+
+        // te::getValueAt falls back to the parameter's base value when the curve is
+        // empty, and reads the curve otherwise — no audio thread, no playback context.
+        // Threshold at 0.5 because that is exactly where the engine's own snapToState
+        // flips this two-state parameter (TrackMutePlugin.cpp's MuteParameter).
+        const bool muted = te::getValueAt (*param, now) >= 0.5f;
+
+        auto* o = new DynamicObject();
+        o->setProperty ("id", t->itemID.toString());
+        o->setProperty ("muted", muted);
+        tracks.add (var (o));
+    }
+
+    auto* payload = new DynamicObject();
+    payload->setProperty ("tracks", tracks);
+    return var (payload);
 }
 
 // Sync the client map to the LIVE meter taps in the edit. Robust against undo/
