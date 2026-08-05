@@ -967,6 +967,7 @@ private:
     juce::var  substituteRecoveryIds (const juce::var& args, const juce::HashMap<juce::String, juce::String>& idMap);
     juce::var  cmdRecoverSession (const juce::var& args);
     juce::var  cmdDiscardRecovery (const juce::var& args);
+    juce::var  cmdOpenWithoutPlugins (const juce::var& args);   // FS-T2 — plugin-crash safe mode
     bool        wasPlaying = false;
     // CAP-AUT-006 — did last tick's "mute_automation" rail carry anything? Drives the
     // one falling-edge emit that clears the UI when the last mute curve is deleted.

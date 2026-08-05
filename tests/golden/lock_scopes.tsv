@@ -125,6 +125,7 @@ open_master_plugin_editor	Unguarded
 open_plugin_editor	Unguarded
 open_project	Unguarded
 open_recent	SessionGlobal
+open_without_plugins	Unguarded
 paste_clip	Track
 quantize_notes	Clip
 recover_session	SessionGlobal

@@ -14,6 +14,7 @@
 #include "state/Ids.h"
 #include "state/RenderLayer.h"
 #include "state/Migrations.h"
+#include "state/SafeMode.h"
 #include "state/CountIn.h"
 #include "state/Section.h"
 #include "state/Annotation.h"
@@ -536,6 +537,7 @@ juce::var MoshOps::executeImpl (const juce::var& command)
     if (name == "reload")            return cmdReload (args);
     if (name == "recover_session")   return cmdRecoverSession (args);   // A3 — replay the crash tail
     if (name == "discard_recovery")  return cmdDiscardRecovery (args);  // A3 — drop the crash tail
+    if (name == "open_without_plugins") return cmdOpenWithoutPlugins (args);  // FS-T2 — plugin-crash safe mode
     if (name == "add_render_layer")  return cmdAddRenderLayer (args);
     if (name == "move_clip")         return cmdMoveClip (args);
     if (name == "trim_clip")         return cmdTrimClip (args);
@@ -2537,6 +2539,34 @@ juce::var MoshOps::snapshot()
         session->setProperty ("recoveryAvailable", true);
         session->setProperty ("recoverableCount", pendingRecovery_.size());
     }
+    // FS-T2 — the crash happened WHILE loading these third-party plugins, so the normal
+    // recovery offer is not enough: reopening the project re-crashes on the same plugin.
+    // Advertising the suspects lets the UI offer "open without third-party plugins".
+    // Independent of recoveryAvailable on purpose: a load crash can leave nothing to replay
+    // (no unsaved commands) and still need safe mode.
+    // FS-T2 — the live Edit was loaded with third-party plugins scrubbed. READ-ONLY (save()
+    // refuses), so the UI must say so plainly rather than let the producer believe their work
+    // is being auto-saved.
+    if (eng.inSafeMode())
+        session->setProperty ("safeModeActive", true);
+    if (eng.wasPluginCrashSuspected())
+    {
+        // Bind to a NAMED local first. pluginCrashSuspects() returns a StringArray BY VALUE,
+        // so calling it twice for .begin() and .end() takes iterators into two DIFFERENT
+        // temporaries, both already destroyed — the same temporary-lifetime trap as
+        // `if (auto* p = someVarReturningFn().getArray())`. It segfaults in snapshot().
+        const auto suspects = eng.pluginCrashSuspects();
+        juce::Array<juce::var> suspectVars;
+        for (const auto& s : suspects)
+            suspectVars.add (s);
+        session->setProperty ("pluginCrashSuspects", suspectVars);
+        // Non-empty ⇒ taking safe mode will ALSO quarantine this one via block_plugin.
+        // Empty ⇒ several candidates, so we skip them all but blocklist none (a guess
+        // would permanently quarantine plugins the user paid for).
+        session->setProperty ("pluginQuarantineTarget",
+                              mosh::safemode::quarantineTarget (
+                                  std::vector<juce::String> (suspects.begin(), suspects.end())));
+    }
     session->setProperty ("recentProjects", eng.recentProjects());   // Recent list (gap 2)
     // Project container extension, backend-owned (keeps the storage format out of the
     // UI — the file-dialog filter is built from this, not a hard-coded constant).
@@ -3525,12 +3555,67 @@ juce::var MoshOps::cmdRecoverSession (const juce::var& args)
     return okResult ("recover_session", var (d));
 }
 
+// FS-T2 — plugin-crash SAFE MODE. Reopen the current project with every third-party plugin
+// left un-instantiated, and quarantine the suspect when there is exactly one.
+//
+// This is the escape hatch for the one crash autosave cannot help with: a plugin that dies
+// while the project is LOADING re-crashes on every relaunch, so the user never reaches a
+// window from which to save, undo, or remove it. (SPEC §2 puts out-of-process hosting out of
+// the window; this is the in-window mitigation it names.)
+//
+// Sole-mutation-seam: this is a MoshOps command like any other — it does not add a second
+// load path, it calls the engine's one bracketed loader, and quarantine goes through the
+// existing block_plugin command rather than reaching into PluginHost directly.
+juce::var MoshOps::cmdOpenWithoutPlugins (const juce::var& args)
+{
+    // Read the suspects BEFORE the reload clears them.
+    const auto suspects = eng.pluginCrashSuspects();
+    const auto target   = mosh::safemode::quarantineTarget (
+                              std::vector<juce::String> (suspects.begin(), suspects.end()));
+
+    unregisterAllMeterClients();        // old measurers are still valid here; the Edit is about to swap
+    int skipped = 0;
+    if (auto refusal = eng.reloadInSafeMode (&skipped); refusal.isNotEmpty())
+    {
+        logLine ("open_without_plugins", args, false, refusal, false);
+        emitSnapshotInvalidated();
+        return errResult ("open_without_plugins", refusal);
+    }
+
+    // Quarantine the suspect so it is not re-instantiated on the NEXT normal launch either.
+    // Only ever a lone suspect (quarantineTarget); with several candidates we skipped them
+    // all but blocklist none, because a guess would permanently quarantine plugins the user
+    // paid for. A failure here (id not in the catalog) must NOT fail the open — the project
+    // is already safely loaded, which is the point of the command.
+    bool quarantined = false;
+    if (target.isNotEmpty())
+    {
+        auto* a = new DynamicObject();
+        a->setProperty ("pluginId", target);
+        quarantined = (bool) cmdBlockPlugin (var (a)).getProperty ("ok", false);
+    }
+
+    logFile = eng.sessionDir().getChildFile ("mosh-log.jsonl");
+    invalidateCommandLogCache();
+    logLine ("open_without_plugins", args, true, {}, false);   // machine op, not undoable
+    emitSnapshotInvalidated();
+
+    auto* d = new DynamicObject();
+    d->setProperty ("pluginsSkipped", skipped);
+    d->setProperty ("quarantined", quarantined ? target : juce::String());
+    return okResult ("open_without_plugins", var (d));
+}
+
 juce::var MoshOps::cmdDiscardRecovery (const juce::var& args)
 {
     pendingRecovery_.clear();
     recoveryJournalFile.deleteFile();
     // FS-B2a — the tail was dropped, so the last SAVED (pre-transaction) state stands.
     resolveUnresolvedTxns (/*provedPostState=*/false);
+    // FS-T2 — this is the "dismiss the notice" action, and the notice carries the safe-mode
+    // offer too, so drop the stale crash breadcrumb with it. (Reaching this command at all
+    // proves the current launch loaded fine.)
+    eng.clearPluginCrashSuspects();
     logLine ("discard_recovery", args, true, {}, false);
     emitSnapshotInvalidated();
     return okResult ("discard_recovery");

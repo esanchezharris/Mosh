@@ -23,6 +23,7 @@ target_sources(MoshTests PRIVATE
     test_renderlayer.cpp
     test_migrations.cpp
     test_project_name.cpp
+    test_safe_mode.cpp
     test_count_in.cpp
     test_sections.cpp
     test_lyrics.cpp
