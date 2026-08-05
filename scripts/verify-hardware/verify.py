@@ -1243,7 +1243,12 @@ def check_crash_recovery_safe_mode(ctx):
 
     Asserts the whole contract, including that the arrangement survived the scrub."""
     SESSION = "verify-safemode"
-    base = _mosh_session_base() / SESSION
+    # _session_dir, NOT _mosh_session_base()/SESSION: run_script passes the session through
+    # _harness_session(), which prefixes "_harness/" (SLF-CONC-001 — an explicit
+    # MOSH_SELFTEST_SESSION is only honoured under _harness/, so a bare name silently lands
+    # in a DIFFERENT directory from the one the app actually wrote). Every other on-disk
+    # check already goes through this helper; this was the one site that did not.
+    base = _session_dir(SESSION)
     if base.exists():
         shutil.rmtree(base, ignore_errors=True)
     keep = {"MOSH_RUNSCRIPT_KEEP_SESSION": "1"}
@@ -1256,9 +1261,15 @@ def check_crash_recovery_safe_mode(ctx):
     ]
     run_script(ctx.bin, run1, SESSION, extra_env=keep, timeout=120)
 
-    edit_file = base / "session.tracktionedit"
-    if not edit_file.exists():
-        return row("Crash recovery: plugin safe mode", False, {"error": f"no edit file at {edit_file}"})
+    # Resolve the saved project by EXTENSION, never by a hardcoded name. Projects are
+    # ".mosh" as of CAP-PRJ .mosh naming; ".tracktionedit" is still accepted on open and
+    # still re-saved in place for a legacy file, so both are valid things to find here.
+    # The name is not fixed either — a fresh project is named "untitled - <word>".
+    edit_file = next(iter(sorted(base.glob("*.mosh")) + sorted(base.glob("*.tracktionedit"))), None)
+    if edit_file is None:
+        return row("Crash recovery: plugin safe mode", False,
+                   {"error": f"no .mosh/.tracktionedit project in {base}",
+                    "found": sorted(p.name for p in base.glob("*")) if base.exists() else "(no session dir)"})
 
     # (2) Inject a third-party plugin node into the FIRST track, exactly as Tracktion persists
     # one, then strand the breadcrumb that a crash mid-load would leave.
