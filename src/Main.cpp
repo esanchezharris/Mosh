@@ -8,6 +8,7 @@
 #include "engine/MoshEngine.h"
 #include "engine/SessionPaths.h"
 #include "moshops/MoshOps.h"
+#include "state/ProjectName.h"
 #include "remote/RemoteCompanionServer.h"
 #include "brain/BrainProxy.h"
 #include "telemetry/CrashHandler.h"
@@ -542,6 +543,41 @@ public:
     }
 
     void systemRequestedQuit() override { quit(); }
+
+    /** PRJ-NAME — double-clicking a .mosh in Finder.
+
+        macOS routes BOTH "opened while Mosh was closed" (an openFiles event delivered
+        just after applicationDidFinishLaunching) and "opened while it was already
+        running" through this one callback, so handling it here covers both without a
+        separate cold-start path.
+
+        The open goes through MoshOps like every other mutation — never through the
+        engine directly — so it gets the same validation, undo transaction, JSONL line
+        and snapshot_invalidated as File → Open. That last part is what makes the WebView
+        actually redraw the newly-opened project.
+
+        Silently ignored when the arguments name no project (the headless/CLI modes all
+        land here too) or when moshOps does not exist (a plugin-scan child, or a headless
+        run that already quit). */
+    void anotherInstanceStarted (const juce::String& commandLine) override
+    {
+        if (moshOps == nullptr)
+            return;
+
+        const auto path = mosh::projectname::projectPathFromOpenArgs (commandLine);
+        if (path.isEmpty())
+            return;
+
+        auto* args = new juce::DynamicObject();
+        args->setProperty ("command", "open_project");
+        auto* inner = new juce::DynamicObject();
+        inner->setProperty ("file", path);
+        args->setProperty ("args", juce::var (inner));
+        moshOps->execute (juce::var (args));
+
+        if (mainWindow != nullptr)
+            mainWindow->toFront (true);
+    }
 
 private:
     // GUI-only periodic auto-save (gap 1). Lambda-driven juce::Timer; armed after the

@@ -109,12 +109,22 @@ public:
     /** gap 2 — reopen the last project on relaunch. rememberProject persists the
         current project path + a recent list to session/last-project.json on every
         new/open/save-as; startupEditFile() (called by the ctor) resolves the edit to
-        open at launch (the remembered project, or session.tracktionedit when none /
+        open at launch (the remembered project, or defaultSessionEditFile() when none /
         the remembered file is missing); recentProjects() is the existing-file Recent
         list for the UI (newest-first). */
     void       rememberProject (const juce::File& file);
     juce::File startupEditFile() const;
     juce::var  recentProjects() const;
+
+    /** PRJ-NAME — the unnamed default session file: "session.mosh".
+
+        Falls back to a pre-existing "session.tracktionedit" when that legacy file is on
+        disk and session.mosh is not. Without the fallback, renaming the extension would
+        strand every existing session behind a silently-empty cold start — the user's
+        work would still be on disk but the app would open blank, which reads as data
+        loss. The fallback keeps opening it in place; it is never rewritten or migrated.
+        A brand-new session gets session.mosh. */
+    juce::File defaultSessionEditFile() const;
 
     /** Re-point editPath + editFileRetriever to file (after a saveAs that changed
         the Edit's backing file). Does NOT replace the Edit object. */

@@ -9,5 +9,52 @@
   </array>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Mosh transcribes your voice so you can talk to Moshi, your in-app collaborator, instead of typing.</string>
+  <!-- PRJ-NAME — .mosh is a Mosh-owned document type: the Moshi face as the Finder file
+       icon, and double-click opens the project. Mirrored in InjectInfoPlistKeys.cmake,
+       which is the path that actually ships (PLIST_TO_MERGE is honoured only by the
+       Xcode generator). Keep the two in sync. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Mosh Project</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>CFBundleTypeExtensions</key>
+      <array>
+        <string>mosh</string>
+      </array>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>studio.mosh.project</string>
+      </array>
+      <key>CFBundleTypeIconFile</key>
+      <string>MoshDoc</string>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>studio.mosh.project</string>
+      <key>UTTypeDescription</key>
+      <string>Mosh Project</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeIconFile</key>
+      <string>MoshDoc</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>mosh</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>

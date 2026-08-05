@@ -384,11 +384,32 @@ if (MOSH_BUILD_APP)
         # injection-only backstop; MoshRefreshBundleMetadata below performs the final
         # inject + ad-hoc sign after resource staging.
         set(MOSH_INJECT_PLIST_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/InjectInfoPlistKeys.cmake")
+
+        # PRJ-NAME — the .mosh document icon, derived from the SAME PNG as the app icon.
+        # Staged BEFORE every inject (both the POST_BUILD below and MoshFixInfoPlist),
+        # because the inject script now fail-closes on a missing Resources/MoshDoc.icns:
+        # the plist would otherwise claim a document icon the bundle does not carry, and
+        # Finder would silently fall back to a blank page. Mirrors the two-target shape
+        # above for the identical reason — a POST_BUILD alone misses no-relink builds.
+        set(MOSH_DOC_ICON_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/BuildDocumentIcon.cmake")
+        set(MOSH_DOC_ICON_ARGS
+            -DSOURCE_PNG=${CMAKE_SOURCE_DIR}/resources/icon/MoshIcon.png
+            -DOUT_ICNS=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Resources/MoshDoc.icns)
+        add_custom_command(TARGET Mosh POST_BUILD
+            COMMAND ${CMAKE_COMMAND} ${MOSH_DOC_ICON_ARGS} -P "${MOSH_DOC_ICON_SCRIPT}"
+            COMMENT "Building the .mosh document icon (Resources/MoshDoc.icns)"
+            VERBATIM)
+        add_custom_target(MoshStageDocIcon ALL
+            COMMAND ${CMAKE_COMMAND} ${MOSH_DOC_ICON_ARGS} -P "${MOSH_DOC_ICON_SCRIPT}"
+            COMMENT "Building the .mosh document icon (no-relink/deploy-safe backstop)"
+            VERBATIM)
+        add_dependencies(MoshStageDocIcon Mosh)
+
         add_custom_command(TARGET Mosh POST_BUILD
             COMMAND ${CMAKE_COMMAND}
                     -DPLIST=$<TARGET_BUNDLE_DIR:Mosh>/Contents/Info.plist
                     -P "${MOSH_INJECT_PLIST_SCRIPT}"
-            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera)"
+            COMMENT "Re-injecting Info.plist keys PLIST_TO_MERGE drops (speech + Bonjour + camera + doc types)"
             VERBATIM)
         add_custom_target(MoshFixInfoPlist ALL
             COMMAND ${CMAKE_COMMAND}
@@ -396,7 +417,7 @@ if (MOSH_BUILD_APP)
                     -P "${MOSH_INJECT_PLIST_SCRIPT}"
             COMMENT "Re-injecting Info.plist keys into the app (no-relink/deploy-safe backstop)"
             VERBATIM)
-        add_dependencies(MoshFixInfoPlist Mosh)
+        add_dependencies(MoshFixInfoPlist Mosh MoshStageDocIcon)
 
         # DRM-001 — stage the bundled drum kits into the app Resources so the native
         # sampler (MoshOps::drumKitDir) can load them at runtime. run-mosh.sh `deploy`
@@ -457,7 +478,7 @@ if (MOSH_BUILD_APP)
                     -P "${CMAKE_SOURCE_DIR}/cmake/RefreshMacBundleMetadata.cmake"
             COMMENT "Refreshing macOS bundle Info.plist and ad-hoc signature"
             VERBATIM)
-        add_dependencies(MoshRefreshBundleMetadata Mosh MoshFixInfoPlist)
+        add_dependencies(MoshRefreshBundleMetadata Mosh MoshFixInfoPlist MoshStageDocIcon)
         if (TARGET MoshStageUI)
             add_dependencies(MoshRefreshBundleMetadata MoshStageUI)
         endif()

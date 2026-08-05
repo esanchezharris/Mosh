@@ -4,6 +4,7 @@
 #include "SessionPaths.h"
 #include "SourceRef.h"
 #include "state/Migrations.h"
+#include "state/ProjectName.h"
 
 #include <atomic>
 #include <iostream>
@@ -274,7 +275,7 @@ MoshEngine::MoshEngine (bool openAudioDevice, bool freshSession, const juce::Str
     // gap 2 — reopen the last project on relaunch (GUI path). The harness keeps the fixed
     // session file: a freshSession dir is wiped above, so last-project.json never exists
     // there and startupEditFile() would fall back anyway — we short-circuit it explicitly.
-    editPath = freshSession ? session.getChildFile ("session.tracktionedit")
+    editPath = freshSession ? defaultSessionEditFile()
                             : startupEditFile();
 
     if (auto err = openAudioDeviceBounded(); err.isNotEmpty())
@@ -625,9 +626,14 @@ void MoshEngine::rememberProject (const juce::File& file)
     jsonFile.replaceWithText (juce::JSON::toString (juce::var (o)));
 }
 
+juce::File MoshEngine::defaultSessionEditFile() const
+{
+    return projectname::resolveSessionEditFile (session);
+}
+
 juce::File MoshEngine::startupEditFile() const
 {
-    const auto fallback = session.getChildFile ("session.tracktionedit");
+    const auto fallback = defaultSessionEditFile();
     if (auto j = juce::JSON::parse (session.getChildFile ("last-project.json")); j.isObject())
     {
         const auto last = j.getProperty ("last", juce::var()).toString();
