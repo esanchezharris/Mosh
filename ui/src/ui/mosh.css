@@ -989,6 +989,24 @@ input, textarea, select, [contenteditable], [contenteditable] *, .selectable, .s
 .cmdlog-name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdlog-badge { font-size: 8px; color: var(--bone-dim); border: 1px solid var(--ink-line); border-radius: 3px; padding: 0 3px; }
 
+/* CAP-PRJ-005 — the log became a clickable history list. A restore point renders as a
+   <button>, so it needs the row layout reset back out of the UA button styling; the two
+   kinds that offer no restore stay plain <div>s and read as inert.
+   Progressive disclosure: the affordance stays quiet until hover, so the panel still
+   reads as a log at rest rather than a wall of buttons. */
+button.cmdlog-row { background: none; border: 0; color: inherit; font: inherit; text-align: left; width: 100%; cursor: pointer; border-radius: 3px; }
+button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink-line); }
+/* Ran, but opened no undo transaction of its own (a preference write, a transport move,
+   a command inside a batch). Still listed — the log is useful because it shows
+   everything — just visibly not a place you can return to. */
+.cmdlog-no-state-change { opacity: 0.55; }
+/* Was a point once; the live undo timeline can no longer reach it. */
+.cmdlog-unreachable { opacity: 0.4; text-decoration: line-through; text-decoration-thickness: 1px; }
+/* Where the session actually is. Everything above it is ahead of the producer. */
+.cmdlog-current { opacity: 1; }
+.cmdlog-current .cmdlog-name { color: var(--lime); }
+.cmdlog-badge.cmdlog-here { color: var(--lime); border-color: var(--lime); }
+
 /* AGT-MEM (M3) — the memory panel (TopbarTools.tsx MemoryTool/MemoryBody). Reuses the
    shared `pop-` / `cmdlog-` tokens verbatim (same "classic+v2 shared chrome" posture as
    CommandLogBody and Meter.tsx — no v2-only tokens needed; the tokens below already

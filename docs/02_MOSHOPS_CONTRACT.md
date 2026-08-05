@@ -39,6 +39,7 @@ Every command: **validate → begin a Tracktion undo transaction (if undoable) �
 | `add_test_tone_clip` | `{seconds?, freq?, trackId?, name?}` | ✓ | `{clipId, trackId}` | `snapshot_invalidated` |
 | `set_transport` | `{action?: play\|stop\|toggle\|record, position?, loop?, loopStart?, loopEnd?}` | ✗ | `transport` | `transport` |
 | `undo` / `redo` | `{}` | ✗ (drives the manager) | `bool` | `snapshot_invalidated` |
+| `jump_to_history` | `{txn}` | ✗ (drives the manager) | `{txn, undone, redone, from, depth}` | `snapshot_invalidated` |
 | `save` / `reload` | `{}` | ✗ | — | `reload`→`snapshot_invalidated` |
 | `add_render_layer` | `{clipId, adapter?}` | ✓ | `{layerId}` | `snapshot_invalidated` |
 | `freeze_layer` | `{clipId}` | ✓ | — | `snapshot_invalidated` |
@@ -120,14 +121,16 @@ Hosted plugin snapshots/results include external-plugin diagnostics when Trackti
 ## Undo / threading invariants
 
 - **One undo system:** `edit.getUndoManager()` (a `juce::UndoManager`) is the implementation. `beginNewTransaction("<command>")` groups each undoable command. No shadow model.
+- **CAP-PRJ-005 — the log and the undo stack are two different lists, and `jump_to_history` is what reconciles them.** `mosh-log.jsonl` records *every* command including the deliberately non-undoable ones (`set_metronome`, `set_project_settings`, transport moves); the `UndoManager` holds only the transactions that materialised. So "jump to log entry N" can never be "undo N times" — the counts diverge the moment a preference command lands, and they diverge *silently*. Every log line therefore carries a `txn` stamp: `"<per-process token>:<transaction id>"`, the **identity** of the undo point that command left the session at, read off the `UndoManager` rather than off the caller's `undoable` claim (so a command that opened an *empty* transaction — the G14 class — correctly shares the previous point). `jump_to_history {txn}` resolves that identity against the live timeline and calls `undo()`/`redo()` the right number of times; a point that is gone (undone past then overwritten, evicted as the history filled, or stamped by an earlier process) **refuses** rather than landing somewhere else. `get_command_log` publishes `currentTxn` + `restorableTxns` so the UI can render an unreachable row as unreachable *before* it is clicked. Deliberately **not** an index: JUCE reuses indices when a new edit discards the redo tail, and shifts them all down when `dropOldTransactionsIfTooLarge()` evicts the oldest transaction.
 - **Threading:** `execute()`, `snapshot()`, and event emission run on the **message thread** (WebView native callbacks land there). Audio stays on the RT graph. The 30 Hz transport timer is the only periodic emit.
 
 ## JSONL log (`<session>/mosh-log.jsonl`)
 
 One line per executed command — the semantic audit trail / taste-signal flywheel:
 ```jsonc
-{ "ts": 1719…, "seq": 7, "command": "import_clip", "args": {…}, "ok": true, "undoable": true }
+{ "ts": 1719…, "seq": 7, "command": "import_clip", "args": {…}, "ok": true, "undoable": true, "txn": "a1b2c3d4:5" }
 ```
+`txn` (CAP-PRJ-005) is the undo point this command left the session at — see *Undo / threading invariants* above. Absent on lines written before it shipped, which reads as "not a restore point".
 Stage 5 adds `accept_render` / `reject_render` lines as explicit **taste labels**.
 
 *`freeze_layer` / `unfreeze_layer` (2026-07-26): freeze keeps the rendered audio and DISARMS the Phase-3 reactive loop — it sets `ids::reactive=false`, the flag `reactiveTouch` gates on, so edits stop re-rendering the layer. It also writes `status="frozen"`, but that is only a label: a later `set_render_param` overwrites it with `"dirty"` while the layer stays frozen, so the snapshot's `renderLayer.reactive` is the ONLY reliable read of the freeze (a UI keying on `status` loses the badge at the first knob turn). `unfreeze_layer` re-arms the loop and reports `"dirty"` rather than `"ready"` — edits made while frozen deliberately skipped their re-render, so freshness cannot be claimed. Both are undoable, one transaction each. Until this landed, freeze wrote the label and nothing else: nothing read it, no thaw existed, and a "frozen" layer re-rendered on the very next edit.*

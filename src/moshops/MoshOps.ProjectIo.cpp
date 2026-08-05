@@ -1208,11 +1208,21 @@ juce::var MoshOps::cmdGetCommandLog (const juce::var& args)
             recent.add (commandLogRecentEntries_.getReference (i));
     }
 
+    // CAP-PRJ-005 — the viewer becomes clickable, so it needs to know two more things:
+    // where the session is NOW, and which of the stamps it is showing can still be
+    // reached. Both come from the live undo timeline, not from the file — a stamp in the
+    // file is a historical fact, reachability is a property of the present. Syncing here
+    // keeps the answer honest even when the last thing to move the stack was not a
+    // command (Tracktion's own idle transaction close, an eviction).
+    syncUndoMirror();
+
     auto* data = new DynamicObject();
     data->setProperty ("entries", recent);
     data->setProperty ("total", total);
     data->setProperty ("limit", limit);
     data->setProperty ("logBytes", logBytes);
+    data->setProperty ("currentTxn", currentHistoryTxn());
+    data->setProperty ("restorableTxns", restorableHistoryTxns());
     return okResult ("get_command_log", var (data));
 }
 

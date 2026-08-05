@@ -50,6 +50,12 @@ export const UI_ONLY_COMMANDS: Readonly<Record<string, string>> = {
   batch_status: "read-only agent-transaction status — the harness's authority after a lost response, not a producer control",
   batch_rollback: "the harness's exact rollback of its own identified transaction — the producer's affordance is ordinary Undo",
   get_command_log: "read-only log inspector (CommandLog panel + taste distillation), not a musical tool",
+  // CAP-PRJ-005. Its one argument is a history STAMP the model cannot know or invent —
+  // stamps are minted per process by the engine and are only ever read off a log line the
+  // producer is looking at. A catalogued jump_to_history would be a command the model can
+  // name but never call correctly, so the affordance is the click, and the model's history
+  // affordance stays the ordinary undo/redo it already has.
+  jump_to_history: "click-a-history-row restore; its txn stamp is engine-minted and unguessable, so it is a mouse gesture, not a voiced command",
 
   // ── metering — UI-local presentation config ───────────────────────────────────
   enable_all_meters: "metering config is presentation state, self-healed by the engine (METER-001)",

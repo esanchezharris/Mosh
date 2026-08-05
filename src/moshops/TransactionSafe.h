@@ -161,6 +161,11 @@ inline Class classify (const juce::String& command, juce::String& reason)
         "new_project", "open_project", "open_recent", "save", "save_as", "reload",
         "recover_session", "discard_recovery", "export_audio", "export_stems",
         "set_transport", "stop_recording", "undo", "redo",
+        // CAP-PRJ-005 — jump_to_history walks the UndoManager across transaction
+        // boundaries, so by construction it cannot live INSIDE one. It also refuses
+        // itself while inBatch, so this classification and the command's own guard
+        // agree; the classification is what makes the refusal legible.
+        "jump_to_history",
         // REC-001 — capture_midi IS synchronous and undoable, so it would pass criteria
         // 1-4 mechanically. It is held out anyway, on the same "deliberately NARROW"
         // ground as remove_bus above: with armedOnly:false it creates clips on EVERY

@@ -852,6 +852,281 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
         undo.clearUndoHistory();
     }
 
+    // ─── CAP-PRJ-005: jump to a point in undo history ───────────────────────────
+    // THE TRAP THIS SECTION EXISTS FOR: mosh-log.jsonl and the UndoManager are two
+    // different lists and they do not line up. The log records EVERY command, including
+    // the ones that are deliberately not undoable; the UndoManager holds only the
+    // transactions that materialised. So "jump to log entry N" can never be "undo N
+    // times" — and the two counts diverge SILENTLY, landing the producer somewhere they
+    // did not click.
+    //
+    // The fixture therefore puts NON-UNDOABLE COMMANDS IN THE MIDDLE, on purpose, and
+    // asserts the divergence numerically before jumping. Without them every check below
+    // would still pass under a "count the log lines" implementation and would prove
+    // nothing. With them, that implementation overshoots by exactly 2 transactions and
+    // destroys HJ-B, which is asserted directly.
+    //
+    // Placed here, immediately after the AGT-UNDO fixture drained the history, because
+    // it needs a quiet undo stack and a snapshot that no async generative callback is
+    // still mutating. It restores the same post-condition it found (fixture tracks
+    // removed, empty history).
+    section ("CAP-PRJ-005: jump to a point in undo history");
+    {
+        auto& hUndo = eng.edit().getUndoManager();
+        hUndo.clearUndoHistory();
+
+        // The projection the jump is asserted against. TWO deliberate exclusions, both
+        // of which are statements about what a history jump means rather than
+        // conveniences: `transport` is the playhead, which is not edit history and is
+        // not restored by undo either; `session.metronome` is a NON-UNDOABLE preference
+        // and is asserted separately below precisely BECAUSE the jump must not roll it
+        // back. Everything else — tracks, clips, plugins, tempo, sections, master — is
+        // compared verbatim.
+        auto editState = [&ops]() -> juce::String
+        {
+            auto s = ops.snapshot();
+            if (auto* o = s.getDynamicObject())
+            {
+                o->removeProperty ("transport");
+                auto sessVar = o->getProperty ("session");   // bind: the var temporary would die
+                if (auto* sess = sessVar.getDynamicObject())
+                    sess->removeProperty ("metronome");
+            }
+            return juce::JSON::toString (s, true);
+        };
+        auto trackNamed = [&ops] (const juce::String& name) -> bool
+        {
+            auto snap = ops.snapshot();
+            auto tracksVar = snap.getProperty ("tracks", var());   // bind before getArray
+            if (auto* arr = tracksVar.getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("name", var()).toString() == name) return true;
+            return false;
+        };
+        auto metronomeOn = [&ops]() -> bool
+        {
+            auto snap = ops.snapshot();
+            auto sessVar = snap.getProperty ("session", var());
+            return (bool) sessVar.getProperty ("metronome", false);
+        };
+        auto trackIdNamed = [&ops] (const juce::String& name) -> juce::String
+        {
+            auto snap = ops.snapshot();
+            auto tracksVar = snap.getProperty ("tracks", var());
+            if (auto* arr = tracksVar.getArray())
+                for (auto& t : *arr)
+                    if (t.getProperty ("name", var()).toString() == name)
+                        return t.getProperty ("id", var()).toString();
+            return {};
+        };
+
+        check (ok (cmd (ops, "create_track", args1 ("name", "HJ-A"))), "CAP-PRJ-005 create_track HJ-A");
+        check (ok (cmd (ops, "create_track", args1 ("name", "HJ-B"))), "CAP-PRJ-005 create_track HJ-B");
+
+        // ── THE MARK: the point a producer would click to come back to. ──
+        auto markLog = cmd (ops, "get_command_log", args1 ("limit", 1));
+        check (ok (markLog), "CAP-PRJ-005 get_command_log ok at the mark");
+        const auto markTxn = markLog["data"].getProperty ("currentTxn", var()).toString();
+        check (markTxn.isNotEmpty(), "get_command_log reports currentTxn (where the session is now)");
+        juce::int64 markSeq = -1;
+        {
+            auto entriesVar = markLog["data"].getProperty ("entries", var());
+            if (auto* arr = entriesVar.getArray())
+                if (arr->size() > 0)
+                {
+                    markSeq = (juce::int64) arr->getReference (0).getProperty ("seq", var (-1));
+                    check (arr->getReference (0).getProperty ("txn", var()).toString() == markTxn,
+                           "the newest log line's txn stamp IS the session's current point");
+                }
+        }
+        check (markSeq > 0, "captured the mark's log sequence number");
+        const auto markState        = editState();
+        const int  markDepth        = hUndo.getUndoDescriptions().size();
+        const bool metronomeAtMark  = metronomeOn();
+
+        // ── Work past the mark, WITH NON-UNDOABLE COMMANDS INTERLEAVED. ──
+        // set_metronome writes through a nullptr UndoManager (Tracktion binds
+        // clickTrackEnabled with `nullptr` — tracktion_Edit.cpp:994) and set_transport
+        // opens no transaction at all, so each adds a LINE to the log and NOTHING to the
+        // undo stack. That is the divergence, injected deliberately and asserted two
+        // blocks down.
+        check (ok (cmd (ops, "set_metronome", args1 ("enabled", ! metronomeAtMark))),
+               "CAP-PRJ-005 set_metronome (NON-UNDOABLE) ran between the mark and the tip");
+        check (ok (cmd (ops, "create_track", args1 ("name", "HJ-C"))), "CAP-PRJ-005 create_track HJ-C");
+        // The second flavour from the ticket's own list — a transport move. Same property:
+        // a log line, no transaction. (Two flavours, not two of the same, so the fixture
+        // covers both ways a line can exist without a point behind it.)
+        check (ok (cmd (ops, "set_transport", args1 ("action", "stop"))),
+               "CAP-PRJ-005 set_transport stop (NON-UNDOABLE) ran too");
+        const auto hjA = trackIdNamed ("HJ-A");
+        check (hjA.isNotEmpty(), "CAP-PRJ-005 found HJ-A's id");
+        check (ok (cmd (ops, "rename_track", objN ({ { "trackId", hjA }, { "name", "HJ-A2" } }))),
+               "CAP-PRJ-005 rename_track HJ-A -> HJ-A2");
+
+        const auto tipState = editState();
+
+        // ── THE DIVERGENCE, ASSERTED. This is what makes every check below non-vacuous. ──
+        auto tipLog = cmd (ops, "get_command_log", args1 ("limit", 50));
+        const auto tipTxn = tipLog["data"].getProperty ("currentTxn", var()).toString();
+        int linesSinceMark = 0;
+        int distinctTxnsSinceMark = 0;
+        {
+            auto entriesVar = tipLog["data"].getProperty ("entries", var());
+            juce::StringArray seenTxns;
+            if (auto* arr = entriesVar.getArray())
+                for (auto& e : *arr)
+                    if ((juce::int64) e.getProperty ("seq", var (-1)) > markSeq)
+                    {
+                        ++linesSinceMark;
+                        const auto t = e.getProperty ("txn", var()).toString();
+                        if (t != markTxn && ! seenTxns.contains (t)) seenTxns.add (t);
+                    }
+            distinctTxnsSinceMark = seenTxns.size();
+        }
+        check (linesSinceMark == 4,
+               "4 COMMAND-LOG LINES since the mark (set_metronome, create_track, set_transport, rename_track)");
+        check (distinctTxnsSinceMark == 2,
+               "…but only 2 UNDO TRANSACTIONS — the log and the undo stack do not line up");
+        check (hUndo.getUndoDescriptions().size() - markDepth == 2,
+               "the UndoManager itself agrees: 2 transactions, not 4 (counting log lines would overshoot by 2)");
+        check (tipTxn != markTxn, "the tip is a different history point from the mark");
+
+        // ── THE JUMP. ──
+        auto jumped = cmd (ops, "jump_to_history", args1 ("txn", markTxn));
+        check (ok (jumped), "jump_to_history to the marked point ok");
+        check ((int) jumped["data"].getProperty ("undone", -1) == 2,
+               "jump_to_history undid exactly 2 transactions (the log's 4 lines did NOT become 4 undos)");
+        check (jumped["data"].getProperty ("txn", var()).toString() == markTxn,
+               "jump_to_history landed on the point that was asked for, reported back verbatim");
+
+        // ── THE PROOF: the snapshot equals the one captured at that point. ──
+        check (editState() == markState,
+               "the snapshot after the jump EQUALS the snapshot captured at the marked point");
+        // Stated again in pieces, so a failure is diagnosable rather than a wall of JSON —
+        // and so the specific overshoot a line-counting implementation produces is named.
+        check (trackNamed ("HJ-B"),
+               "HJ-B (created BEFORE the mark) survives — undoing 4 log lines would have destroyed it");
+        check (! trackNamed ("HJ-C"), "HJ-C (created after the mark) is gone");
+        check (trackNamed ("HJ-A") && ! trackNamed ("HJ-A2"), "the post-mark rename is undone");
+        // …and the non-undoable command in the middle is deliberately NOT rolled back:
+        // it never entered the undo system, so there is nothing to roll back. Restoring
+        // it would be the same lie in the other direction.
+        check (metronomeOn() == ! metronomeAtMark,
+               "the NON-UNDOABLE set_metronome is deliberately NOT reverted (it never entered the undo system)");
+
+        // ── FORWARD again: until a new edit replaces them, the points ahead are still reachable. ──
+        auto forward = cmd (ops, "jump_to_history", args1 ("txn", tipTxn));
+        check (ok (forward), "jump_to_history forward to the tip ok");
+        check ((int) forward["data"].getProperty ("redone", -1) == 2, "…by redoing exactly 2 transactions");
+        check (editState() == tipState, "jumping forward restores the tip snapshot exactly");
+
+        // ── THE SILENT-DIVERGENCE GUARD: a point that is GONE must REFUSE, not land elsewhere. ──
+        // Go back, then make a new edit. That discards the redo tail (JUCE does this
+        // inside perform()), so the tip is unreachable for good. A design that jumped by
+        // POSITION would happily undo/redo to "two steps forward" and land on the new
+        // edit instead — silently, which is the whole failure mode this ticket names.
+        check (ok (cmd (ops, "jump_to_history", args1 ("txn", markTxn))), "jump back to the mark again");
+        check (ok (cmd (ops, "create_track", args1 ("name", "HJ-D"))),
+               "a NEW edit after jumping back (this discards the redo tail)");
+        const auto afterNewEditState = editState();
+        auto stale = cmd (ops, "jump_to_history", args1 ("txn", tipTxn));
+        check (! ok (stale),
+               "a point overwritten by a later edit REFUSES the jump — it does not silently land elsewhere");
+        check (editState() == afterNewEditState, "the refused jump moved nothing at all");
+        check (trackNamed ("HJ-D") && trackNamed ("HJ-B") && ! trackNamed ("HJ-C"),
+               "…confirmed on the tracks: HJ-D and HJ-B present, HJ-C still gone");
+
+        // The read surface agrees with the refusal, so the UI can grey the row out
+        // BEFORE the producer clicks it rather than only after.
+        auto afterLog = cmd (ops, "get_command_log", args1 ("limit", 50));
+        bool markRestorable = false, tipRestorable = false;
+        {
+            auto restorableVar = afterLog["data"].getProperty ("restorableTxns", var());
+            if (auto* arr = restorableVar.getArray())
+                for (auto& t : *arr)
+                {
+                    if (t.toString() == markTxn) markRestorable = true;
+                    if (t.toString() == tipTxn)  tipRestorable  = true;
+                }
+        }
+        check (markRestorable, "get_command_log lists the still-reachable mark in restorableTxns");
+        check (! tipRestorable, "get_command_log does NOT list the overwritten tip — the UI can grey it before the click");
+
+        // ── Argument validation + cross-session safety. ──
+        check (! ok (cmd (ops, "jump_to_history", var (new DynamicObject()))),
+               "jump_to_history with no txn errors");
+        check (! ok (cmd (ops, "jump_to_history", args1 ("txn", "someotherprocess:3"))),
+               "a stamp minted by a DIFFERENT process refuses (mosh-log.jsonl outlives the UndoManager)");
+        check (! ok (cmd (ops, "jump_to_history", args1 ("txn", markTxn.upToLastOccurrenceOf (":", true, false) + "nonsense"))),
+               "a malformed stamp refuses rather than parsing to 0 and undoing everything");
+        check (ok (cmd (ops, "jump_to_history", args1 ("txn", markTxn))),
+               "…and a live stamp still works after those refusals");
+
+        // The stamp reaches the file, not just the in-memory projection.
+        {
+            const auto raw = eng.sessionDir().getChildFile ("mosh-log.jsonl").loadFileAsString();
+            check (raw.contains ("\"txn\": \"" + markTxn + "\""),
+                   "the history stamp is written to mosh-log.jsonl itself, not just the inspector's projection");
+        }
+
+        // ── SATURATION: the case where the undo DEPTH lies. ──
+        // `Edit` keeps 30 undo levels; once the budget is spent, JUCE's
+        // dropOldTransactionsIfTooLarge() evicts the OLDEST transaction inside the very
+        // perform() that added the new one. Depth unchanged, total unchanged, a brand-new
+        // transaction at the tip — invisible to any amount of counting. A mirror that
+        // missed it would hand the new transaction the previous one's id and restore the
+        // producer somewhere they never clicked. Forced here with a tiny budget rather
+        // than by making 30 real edits, then restored to Tracktion's own default
+        // (tracktion_Edit.cpp:643 — 1000 units per level × getDefaultNumUndoLevels() 30).
+        {
+            hUndo.clearUndoHistory();
+            hUndo.setMaxNumberOfStoredUnits (1, 2);   // keep at most 2 transactions
+
+            check (ok (cmd (ops, "create_track", args1 ("name", "HJ-S1"))), "CAP-PRJ-005 saturation fixture S1");
+            const auto s1Txn = cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                   .getProperty ("currentTxn", var()).toString();
+            check (ok (cmd (ops, "create_track", args1 ("name", "HJ-S2"))), "CAP-PRJ-005 saturation fixture S2");
+            const auto s2Txn = cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                   .getProperty ("currentTxn", var()).toString();
+            check (s1Txn != s2Txn && s1Txn.isNotEmpty(), "the two saturation fixtures have distinct history points");
+
+            const int depthBeforeEvict = hUndo.getUndoDescriptions().size();
+            check (ok (cmd (ops, "create_track", args1 ("name", "HJ-S3"))), "CAP-PRJ-005 saturation fixture S3 (evicts S1)");
+            check (hUndo.getUndoDescriptions().size() == depthBeforeEvict,
+                   "the undo DEPTH did not change across the eviction — counting alone cannot see the new transaction");
+
+            const auto s3Txn = cmd (ops, "get_command_log", args1 ("limit", 1))["data"]
+                                   .getProperty ("currentTxn", var()).toString();
+            check (s3Txn != s2Txn,
+                   "…yet S3 got its OWN history point, not S2's (the eviction did not silently rename a transaction)");
+
+            auto satJump = cmd (ops, "jump_to_history", args1 ("txn", s2Txn));
+            check (ok (satJump), "jumping to the pre-eviction point still works");
+            check ((int) satJump["data"].getProperty ("undone", -1) == 1, "…by undoing exactly 1 transaction");
+            check (trackNamed ("HJ-S2") && ! trackNamed ("HJ-S3"),
+                   "…and lands on S2: HJ-S2 present, HJ-S3 gone");
+            check (! ok (cmd (ops, "jump_to_history", args1 ("txn", s1Txn))),
+                   "the EVICTED point refuses (dropped off the bottom of the history — not restorable, and it says so)");
+
+            for (auto& n : { "HJ-S1", "HJ-S2", "HJ-S3" })
+            {
+                const auto id = trackIdNamed (n);
+                if (id.isNotEmpty()) (void) cmd (ops, "remove_track", args1 ("trackId", id));
+            }
+            hUndo.setMaxNumberOfStoredUnits (1000 * 30, 30);   // Tracktion's own default
+            hUndo.clearUndoHistory();
+        }
+
+        // Restore the post-condition this section found: fixture tracks gone, empty history.
+        for (auto& n : { "HJ-A", "HJ-A2", "HJ-B", "HJ-C", "HJ-D" })
+        {
+            const auto id = trackIdNamed (n);
+            if (id.isNotEmpty()) (void) cmd (ops, "remove_track", args1 ("trackId", id));
+        }
+        (void) cmd (ops, "set_metronome", args1 ("enabled", metronomeAtMark));
+        hUndo.clearUndoHistory();
+    }
+
     // ─── AGT-PROV (FS-B2a): the ASK is recoverable from mosh-log.jsonl ───────────
     // Real-session skill mining needs the natural-language ask, not just the commands
     // it produced. The utterance rides the EXISTING batch_begin marker (no new command,

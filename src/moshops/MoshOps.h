@@ -751,7 +751,17 @@ private:
     {
         eng.markDirty();
         ++editRevision_;
-        if (! inBatch) undoManager().beginNewTransaction (name);
+        if (! inBatch) beginUndoTransaction (name);
+    }
+
+    /** The ONE place a Tracktion undo transaction is opened. Everything beginTxn does not
+        cover (the batch/agent-transaction boundaries, the two composite ownBatch paths)
+        goes through here too, so CAP-PRJ-005's mirror sees every transaction opening —
+        see txnOpenedSinceSync_ for why that matters at saturation. */
+    void beginUndoTransaction (const juce::String& name)
+    {
+        undoManager().beginNewTransaction (name);
+        txnOpenedSinceSync_ = true;
     }
 
     /** The JUCE device manager under Tracktion's wrapper that the device picker drives. */
@@ -858,6 +868,57 @@ private:
     // mutex-guarded) where both callers can share it. See MultiplayerSession.h.
     juce::int64 seq = 0;
     juce::File  logFile;
+
+    // ── CAP-PRJ-005 — the undo-transaction MIRROR ────────────────────────────────
+    // mosh-log.jsonl and the UndoManager are two different lists and they do not line
+    // up: the log records EVERY command (set_metronome, set_project_settings, transport
+    // moves), the UndoManager holds only the transactions that actually materialised.
+    // "Jump to log entry N" can therefore never be "undo N times" — the counts diverge
+    // the moment a preference command lands, and they diverge SILENTLY.
+    //
+    // The fix is identity, not arithmetic. Every log line is stamped with the IDENTITY
+    // of the undo transaction that was the head when it ran, and a jump resolves that
+    // identity back to a stack position at click time. An *index* would not do: JUCE
+    // reuses indices when a new edit discards the redo tail, and shifts them all down
+    // when dropOldTransactionsIfTooLarge() drops the oldest transaction off the bottom.
+    // Both would restore the producer to a different point than the one they clicked —
+    // which is exactly the bug this design exists to make impossible.
+    //
+    // txnIds_ mirrors juce::UndoManager's own representation 1:1: ONE timeline oldest →
+    // newest, plus a cursor (== JUCE's nextIndex == getUndoDescriptions().size()).
+    // Everything at [0, txnCursor_) is undoable; everything at [txnCursor_, size) is
+    // redoable. syncUndoMirror() reconciles it against the UndoManager after every
+    // command, so it cannot silently drift: JUCE is always the authority on the SHAPE,
+    // the mirror only adds identity. Ids are minted per process and never reused, and
+    // the stamp carries a per-process token so a log line from an earlier session can
+    // never be mistaken for a reachable point in this one.
+    juce::String            historyToken_;              // per-process; scopes every stamp
+    juce::int64             nextTxnId_ = 1;
+    std::vector<juce::int64> txnIds_;                   // the whole timeline, oldest → newest
+    int                     txnCursor_ = 0;             // == getUndoDescriptions().size()
+    // Set whenever a transaction is OPENED (beginUndoTransaction), cleared once one is
+    // seen to have materialised. It exists for one case the depths alone cannot resolve:
+    // at saturation (`Edit` keeps 30 undo levels) JUCE adds a transaction at the tip and
+    // evicts the oldest in the same perform(), so the depth is UNCHANGED and "a new
+    // transaction landed" is invisible to counting. `getNumActionsInCurrentTransaction()`
+    // returns 0 while a transaction is merely open and non-zero once an action lands, so
+    // the pair (this flag, that count) resolves it exactly.
+    bool                    txnOpenedSinceSync_ = false;
+
+    /** Reconcile the mirror with the UndoManager. Idempotent; call it after anything
+        that may have moved the undo stack. cmdUndo/cmdRedo move txnCursor_ THEMSELVES
+        before logging, so by the time this runs for them the cursor already agrees with
+        JUCE and no id is minted — which is what stops a redo from being mistaken for a
+        brand-new transaction. */
+    void syncUndoMirror();
+    /** The identity of the current head — the point a log line written now describes.
+        "<token>:0" is the legitimate "before any transaction in this session" point. */
+    juce::String currentHistoryTxn() const;
+    /** Every point a jump could currently reach (undoable + redoable + the base), as
+        stamp strings. Bounded by the Edit's undo depth. */
+    juce::var    restorableHistoryTxns() const;
+    juce::var    cmdJumpToHistory (const juce::var& args);
+
     juce::CriticalSection commandLogCacheLock_;
     juce::Array<juce::var> commandLogRecentEntries_;
     juce::int64            commandLogTotal_ = 0;

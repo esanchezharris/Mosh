@@ -295,6 +295,20 @@ function scheduleMock(callback: () => void, delayMs: number) {
 }
 const history: Snapshot[] = [];
 const future: Snapshot[] = [];
+// CAP-PRJ-005 — the undo-transaction mirror, mirroring MoshOps exactly so a UI wired
+// against the mock behaves the same against the engine. `history` is the mock's undo
+// stack and `future` its redo stack, so the timeline is one list oldest → newest with a
+// cursor at history.length. Ids are minted per module load and never reused; the token
+// scopes them the way the native per-process token does.
+const MOCK_HISTORY_TOKEN = "mockhist";
+let mockTxnIds: number[] = [];
+let mockNextTxnId = 1;
+const mockHistoryTxn = () =>
+  `${MOCK_HISTORY_TOKEN}:${history.length > 0 ? (mockTxnIds[history.length - 1] ?? 0) : 0}`;
+const mockRestorableTxns = () => [
+  `${MOCK_HISTORY_TOKEN}:0`,
+  ...mockTxnIds.map((id) => `${MOCK_HISTORY_TOKEN}:${id}`),
+];
 // Agent batch grouping (mirrors the backend batch_begin/batch_end): while a batch
 // is open, per-command pushUndo() is suppressed so the whole batch is ONE undo step.
 let inBatch = false;
@@ -436,10 +450,10 @@ type Listener = (payload: unknown) => void;
 const listeners = new Map<string, Set<Listener>>();
 
 // Mock command log (drives the CommandLog panel). Read-only commands don't log.
-const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number }[] = [];
+const cmdLog: { command: string; ok: boolean; undoable: boolean; ts: number; txn: string }[] = [];
 const READONLY = new Set(["get_snapshot", "get_clip_peaks", "file_peaks", "audition_file", "stop_audition", "get_command_log", "list_plugins", "list_builtins", "list_colors", "list_loras", "list_rave_models", "list_audio_devices", "list_wave_inputs", "list_midi_inputs", "list_track_outputs", "list_takes", "list_training_sources", "training_job_status", "list_lora_adapters",
   "agent_memory_read"]);   // AGT-MEM — reads are never logged, same posture as get_lyric_corpus_stats/get_rhymes
-const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
+const NON_UNDOABLE = new Set(["set_transport", "arm_track", "stop_recording", "set_input_monitor", "undo", "redo", "jump_to_history", "save", "reload", "new_project", "render_layer", "reset_render_layer", "open_plugin_editor", "set_plugin_param", "export_audio", "mark_take", "import_training_source", "approve_training_source", "build_training_corpus", "submit_training_job", "cancel_training_job", "import_lora_adapter", "activate_lora_adapter", "get_rhymes",
   "complete_lyrics", "fill_lyric_gap", "suggest_next_line", "regenerate_lyric",
   "cancel_lyric_job", "reject_lyric_proposal", "analyze_lyrics", "get_lyric_corpus_stats",
   "agent_memory_write", "agent_memory_delete", "agent_memory_clear"]);  // accept_lyric_proposal IS undoable
@@ -717,7 +731,18 @@ function ensureInstrument(t: Track, drum: boolean): void {
   }
   t.isInstrument = t.plugins.some((p) => p.isInstrument);
 }
-function pushUndo() { if (inBatch) return; history.push(clone(snapshot)); future.length = 0; if (history.length > 100) history.shift(); }
+function pushUndo() {
+  if (inBatch) return;
+  history.push(clone(snapshot)); future.length = 0;
+  // CAP-PRJ-005 — a new transaction discards the redo tail (native: JUCE does this
+  // inside perform()), then takes a fresh never-reused id.
+  mockTxnIds = mockTxnIds.slice(0, history.length - 1);
+  mockTxnIds.push(mockNextTxnId++);
+  // …and the 100-step cap drops from the FRONT, exactly like
+  // UndoManager::dropOldTransactionsIfTooLarge. Dropping the snapshot without dropping
+  // its id would shift every id one place and restore to the wrong point.
+  if (history.length > 100) { history.shift(); mockTxnIds.shift(); }
+}
 
 // RTG-002 — does `track`'s output chain (transitively) already feed into targetId?
 // Mirrors the native TrackOutput::feedsInto cycle guard so set_track_output can
@@ -2148,6 +2173,34 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
       if (!future.length) return ok(command, { redone: false });
       history.push(clone(snapshot)); snapshot = future.pop()!; stopPlayback(); invalidate(); return ok(command, { redone: true });
     }
+    // CAP-PRJ-005 — jump to a point in undo history. Same contract as MoshOps: the
+    // argument is a history STAMP, resolved against the live timeline here rather than a
+    // step count computed by the caller, so a non-undoable command or a batch in the
+    // middle cannot make the landing wrong. Undo/redo above do NOT touch mockTxnIds:
+    // moving the cursor is history.length changing, and the ids stay put.
+    case "jump_to_history": {
+      const target = str(args.txn).trim();
+      if (!target) return err(command, "txn is required (the history stamp of the point to restore)");
+      if (inBatch) return err(command, "a batch is open; end or roll it back before jumping");
+      if (!target.startsWith(`${MOCK_HISTORY_TOKEN}:`))
+        return err(command, "that point belongs to an earlier session and can no longer be restored");
+      const suffix = target.slice(MOCK_HISTORY_TOKEN.length + 1);
+      if (!/^\d+$/.test(suffix)) return err(command, `malformed txn stamp: ${target}`);
+      const wanted = Number(suffix);
+      const found = mockTxnIds.indexOf(wanted);
+      // wanted === 0 is the session's own starting point, always reachable by undoing
+      // everything. Anything else must still be ON the timeline; -1 is a refusal.
+      const destination = wanted === 0 ? 0 : found + 1;
+      if (!Number.isFinite(wanted) || (wanted !== 0 && found < 0))
+        return err(command, "that point is no longer in the undo history (it was undone past and overwritten by a later edit, or dropped as the history filled)");
+      const from = history.length;
+      let undone = 0, redone = 0;
+      while (history.length > destination) { future.push(clone(snapshot)); snapshot = history.pop()!; undone++; }
+      while (history.length < destination && future.length) { history.push(clone(snapshot)); snapshot = future.pop()!; redone++; }
+      if (undone > 0 || redone > 0) stopPlayback();
+      invalidate();
+      return ok(command, { txn: mockHistoryTxn(), undone, redone, from, depth: history.length });
+    }
     // FS-B2a — TWO MODES, mirroring MoshOps exactly: no transactionId ⇒ the legacy
     // id-less batch (unchanged, still what runAgentBatch uses); with one ⇒ the identified,
     // manifest-validated transaction.
@@ -2485,7 +2538,12 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "get_command_log": {
       const limit = Math.max(1, num(args.limit, 50));
-      return ok(command, { entries: cmdLog.slice(-limit).reverse(), total: cmdLog.length });
+      return ok(command, {
+        entries: cmdLog.slice(-limit).reverse(),
+        total: cmdLog.length,
+        currentTxn: mockHistoryTxn(),        // CAP-PRJ-005
+        restorableTxns: mockRestorableTxns(),
+      });
     }
 
     case "load_builtin": {
@@ -3418,7 +3476,11 @@ export function mockExecute<T = unknown>(command: unknown): Promise<T> {
     }
   }
   if (!READONLY.has(c.command))
-    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now() });
+    // CAP-PRJ-005 — stamp AFTER the command ran, like MoshOps::logLine: the line records
+    // the undo point the session is at once the command has landed. A command that
+    // opened no transaction therefore shares the previous line's stamp, which is the
+    // divergence between this log and the undo stack made visible rather than guessed at.
+    cmdLog.push({ command: c.command, ok: res.ok, undoable: !NON_UNDOABLE.has(c.command), ts: Date.now(), txn: mockHistoryTxn() });
   // DAW-parity P5 replay lane: a dev-only FULL trace (args + result ids) on window, so an
   // e2e run can dump the commands its UI gestures emitted and the native lane can replay
   // them through `Mosh --run-script` (scripts/daw-conformance/replay_e2e_log.py rebinds
@@ -3458,6 +3520,8 @@ export function __resetMockForTests(): void {
   mockAgentMemoryTs = 0;
   history.length = 0;
   future.length = 0;
+  mockTxnIds = [];            // CAP-PRJ-005 — the mirror follows the stacks it mirrors
+  mockNextTxnId = 1;
   inBatch = false;
   mockTxn = null;          // FS-B2a — a leaked transaction would refuse the next test's mutations
   mockRevision = 0;

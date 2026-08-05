@@ -12,6 +12,7 @@ import { useSettings } from "../settings/store";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
 import { runAction, FILE_MENU, type ActionId } from "../menuActions";
 import { RecentProjectList } from "./RecentProjectList";
+import { historyRows, historyRowHint } from "./commandLogHistory";
 import type { Snapshot, CommandLog as CommandLogData, TrainingState } from "../types";
 import { SampleBrowser } from "./SampleBrowser";
 import { SettingsPanel } from "../settings/SettingsPanel";
@@ -481,10 +482,15 @@ function CommandLogBody({
   log,
   loading,
   load,
+  jump,
 }: {
   log: CommandLogData | null;
   loading: boolean;
   load: () => void;
+  // CAP-PRJ-005 — restore the session to a row's history point. Null while a jump is in
+  // flight is not modelled: the jump is synchronous from the UI's point of view (one
+  // command, then a reload of the log), so the only state it needs is the error.
+  jump: (txn: string) => void;
 }) {
   useEffect(() => {
     if (!log && !loading) load();
@@ -492,19 +498,45 @@ function CommandLogBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const entries = log?.entries ?? [];
+  const rows = historyRows(log);
   return (
     <>
       <div className="pop-head">Command log <button className="btn icon" title="Refresh" aria-label="Refresh command log" onClick={load}><IconRefresh size={14} /></button></div>
-      <div className="pop-note">{loading ? "Loading…" : `${entries.length} of ${log?.total ?? 0} · newest first`}</div>
+      <div className="pop-note">{loading ? "Loading…" : `${entries.length} of ${log?.total ?? 0} · newest first · click a step to go back to it`}</div>
       <div className="cmdlog-list" data-testid="command-log">
         {entries.length === 0 && !loading ? <div className="rack-empty">no commands yet</div> :
-          entries.map((e, i) => (
-            <div className={`cmdlog-row${e.ok ? "" : " err"}`} key={i}>
-              <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? <IconCheck size={12} /> : <IconX size={12} />}</span>
-              <span className="cmdlog-name tc" title={e.error ?? e.command}>{e.command}</span>
-              {e.undoable && <span className="cmdlog-badge">undo</span>}
-            </div>
-          ))}
+          rows.map((row, i) => {
+            const e = row.entry;
+            const cls = `cmdlog-row${e.ok ? "" : " err"} cmdlog-${row.kind}${row.isCurrent ? " cmdlog-current" : ""}`;
+            const body = (
+              <>
+                <span className={`cmdlog-dot${e.ok ? " ok" : " err"}`}>{e.ok ? <IconCheck size={12} /> : <IconX size={12} />}</span>
+                <span className="cmdlog-name tc" title={e.error ?? e.command}>{e.command}</span>
+                {row.isCurrent && <span className="cmdlog-badge cmdlog-here">here</span>}
+                {!row.isCurrent && e.undoable && <span className="cmdlog-badge">undo</span>}
+              </>
+            );
+            // Only a reachable point you are not already standing on is a control. The
+            // other two kinds stay visible — the log is useful BECAUSE it shows
+            // everything — but they are plain rows, so nothing offers a restore it
+            // cannot deliver.
+            return row.txn && !row.isCurrent ? (
+              <button
+                type="button"
+                className={cls}
+                key={i}
+                data-testid="command-log-restore"
+                title={`${e.error ?? e.command} — ${historyRowHint(row)}`}
+                onClick={() => jump(row.txn!)}
+              >
+                {body}
+              </button>
+            ) : (
+              <div className={cls} key={i} title={`${e.error ?? e.command} — ${historyRowHint(row)}`}>
+                {body}
+              </div>
+            );
+          })}
       </div>
     </>
   );
@@ -515,6 +547,13 @@ export function CommandLogTool({ label, title, className, ariaLabel, testId }: T
   const [log, setLog] = useState<CommandLogData | null>(null);
   const [loading, setLoading] = useState(false);
   const load = async () => { setLoading(true); const r = await exec("get_command_log", { limit: 50 }); if (r.ok && r.data) setLog(r.data as CommandLogData); setLoading(false); };
+  // CAP-PRJ-005 — the click. Reload afterwards either way: on success the "here" marker
+  // and the reachable set both moved, and on refusal (a point overwritten since this
+  // window was fetched) the fresh log is what shows the producer why.
+  const jump = async (txn: string) => {
+    await exec("jump_to_history", { txn });
+    await load();
+  };
   return (
     <Pop
       label={label ?? "☰"}
@@ -523,7 +562,7 @@ export function CommandLogTool({ label, title, className, ariaLabel, testId }: T
       ariaLabel={ariaLabel ?? "Command log"}
       testId={testId}
     >
-      {() => <CommandLogBody log={log} loading={loading} load={() => void load()} />}
+      {() => <CommandLogBody log={log} loading={loading} load={() => void load()} jump={(txn) => void jump(txn)} />}
     </Pop>
   );
 }
