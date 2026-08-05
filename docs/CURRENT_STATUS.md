@@ -190,12 +190,26 @@ e2e, the Python suite and the parity checks — **not** `--selftest`, **not**
   #617's history-jump fixture deliberately masks as `session.metronome`.
 - #471's safe-mode check looked in `~/Library/Mosh/<session>` instead of
   `~/Library/Mosh/_harness/<session>`, so it returned false before reaching a
-  single assertion — **vacuous since the day it was written**, and #606's
-  `.mosh` rename would have broken the next line too.
+  single assertion — and #606's `.mosh` rename would have broken the next line
+  too.
 
-Neither PR was wrong alone. If a batch touches shared state, either run the
-native gate per PR or expect to fix interactions afterwards — and when a check
-guards a *file path* or a *snapshot shape*, assume a sibling PR can move it.
+  **Correction (this file previously called that check "vacuous since the day it
+  was written" — that was wrong, and the truth is more useful.)** The check was
+  correct and PASSING when written: #471's own native gate is green on its
+  pre-rebase head `f19376f1`, verify.py included. It forked 2026-07-27 and then
+  *two* main-side changes moved the ground under it — `e274cafa` "own isolated
+  audit session storage" (2026-08-01) introduced the `_harness/` session prefix,
+  and #606 (2026-08-04) renamed projects to `.mosh`. Neither could have been
+  known to the branch.
+
+Neither PR was wrong alone. The real hazard is **a long-lived branch's correct
+tests decaying as main moves under them** — the branch keeps passing its own
+gate against a world that no longer exists. If a batch touches shared state,
+either run the native gate per PR *after rebasing* or expect to fix
+interactions afterwards. And when a check pins a *file path*, a *directory
+layout*, or a *snapshot shape*, assume main can move it: prefer the shared
+helper (`_session_dir()`) and resolve by extension or glob, never by a literal
+name.
 
 Related: a new MoshOps command needs FOUR registrations, and the golden
 lock-scope ledger (`tests/golden/lock_scopes.tsv`) is enforced by **Catch2** —
