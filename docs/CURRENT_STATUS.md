@@ -1,8 +1,9 @@
 # Mosh current status and ownership handoff
 
-Last refreshed: **2026-08-02 14:04 PDT**
+Last refreshed: **2026-08-04** (PR-backlog alignment pass)
 
-Canonical trunk: `origin/main` at `01adca369f20a1a96e3d34e2d9c6b4aaf2f5a9b9`
+Canonical trunk: `origin/main` at `4e6eaeb1` — #599 (this file) and #606 (`.mosh`
+projects) landed on top of `221cefd7`.
 
 This is the rolling engineering handoff. GitHub remains the source of truth for
 state that can change after the timestamp above. Refresh PR and issue metadata
@@ -38,8 +39,9 @@ draft-state field.
    being resumed.
 3. Keep user-visible mutations on the MoshOps seam and snapshot/event changes
    additive.
-4. Do not merge protected owner-gated drafts #523, #524, #575, or #581 as part
-   of routine cleanup.
+4. Do not merge protected owner-gated drafts #524 or #581 as part of routine
+   cleanup. (#523 and #575 were named here too and were closed on 2026-08-04 by
+   explicit owner decision — see the closure table below.)
 5. Treat physical audio, signing, permissions, repair, and rollback as owner
    gates. Hosted checks or screenshots cannot substitute for them.
 6. The generated First-Stranger board is dated 2026-07-28. Regenerate it from
@@ -47,39 +49,52 @@ draft-state field.
 
 ## Open PR catalog
 
-Complete as of the refresh timestamp: **28 open PRs**. “Ready” below means only
-that the PR is not marked draft on GitHub.
+Complete as of the refresh timestamp: **2 open PRs**, down from 28. The
+2026-08-04 alignment pass merged seven and closed eleven. Both survivors are
+owner-gated drafts that were deliberately preserved, not leftovers.
 
 | PR | GitHub state | Relationship | Transfer disposition |
 |---|---|---|---|
-| [#599](https://github.com/EmilioSzH/Mosh/pull/599) ownership handoff catalog | Draft | Documentation-only; based on `01adca36` | This PR. Merge it first if the handoff catalog is accepted; no build or test suite was run. |
-| [#598](https://github.com/EmilioSzH/Mosh/pull/598) rapid slider intent | Draft | Based on `01adca36`; closes #597 | Active handoff candidate. Cheap and Linux checks passed; focused tests, typecheck, and 2,314 UI tests passed. Native AX retest/native gate were intentionally skipped. Keep draft until the next owner accepts that waiver or supplies the native evidence. |
-| [#581](https://github.com/EmilioSzH/Mosh/pull/581) bounded startup recovery | Draft | Stacked on #524; issue #578 | **Protected owner gate. Do not merge.** Preserve for physical-device review. |
-| [#575](https://github.com/EmilioSzH/Mosh/pull/575) physical recovery gate | Draft | Stacked on #524; issue #574 | **Protected owner gate. Do not merge.** Preserve for physical-device review. |
-| [#524](https://github.com/EmilioSzH/Mosh/pull/524) Moshi + Codex owner cockpit | Draft | Base for #575 and #581 | **Protected owner work. Do not merge during cleanup.** Review the whole stack together. |
-| [#523](https://github.com/EmilioSzH/Mosh/pull/523) Vocal Map program control | Draft | Independent program-control branch | **Protected owner work. Do not merge during cleanup.** |
-| [#515](https://github.com/EmilioSzH/Mosh/pull/515) FMS lyrics bench | Ready | Independent research/evaluation work | Rebase and review as an owner-only lab artifact, or park it. Do not mix it into production-v2 cleanup. |
-| [#514](https://github.com/EmilioSzH/Mosh/pull/514) Graphite shell | Draft | Alternate/older shell direction | Park until an explicit product decision; do not infer that it replaces current production v2. |
-| [#507](https://github.com/EmilioSzH/Mosh/pull/507) selftest scaffold | Ready | Bottom of #507 → #508 → #510 | Re-evaluate the full stack on current main; merge bottom-up or close the stack together. |
-| [#508](https://github.com/EmilioSzH/Mosh/pull/508) selftest chapters 1/2 | Ready | Stacked on #507 | Do not merge independently. |
-| [#510](https://github.com/EmilioSzH/Mosh/pull/510) selftest chapters 2/2 | Ready | Stacked on #508 | Do not merge independently. |
-| [#497](https://github.com/EmilioSzH/Mosh/pull/497) clip renderer extraction | Ready | Bottom of #497 → #500 | Rebase and review the two-PR stack together, or close both if current v2 work supersedes it. |
-| [#500](https://github.com/EmilioSzH/Mosh/pull/500) Arrange reachability ratchet | Ready | Stacked on #497 | Do not merge independently. |
-| [#478](https://github.com/EmilioSzH/Mosh/pull/478) broad ship kit | Ready | Signing, updates, licensing, brain-key scope | Split or re-scope before merge; it overlaps later release and First-Stranger work. |
-| [#475](https://github.com/EmilioSzH/Mosh/pull/475) FS-K4 packaging/BOM gate | Ready | First-Stranger lane | Reconcile against current `DEPENDENCY_BOM.md`, current main, and the live backlog before deciding. |
-| [#473](https://github.com/EmilioSzH/Mosh/pull/473) FS-K3 Sentry | Ready | First-Stranger lane | Reconcile against current consent/privacy/release policy before deciding. |
-| [#471](https://github.com/EmilioSzH/Mosh/pull/471) FS-T2 plugin safe mode | Ready | First-Stranger lane | Reproduce on current main, then rebase or close. |
-| [#472](https://github.com/EmilioSzH/Mosh/pull/472) agent type vocabulary | Ready | Independent agent-quality change | Rebase and rerun its focused evaluation before merge. |
-| [#470](https://github.com/EmilioSzH/Mosh/pull/470) instrument affordance | Ready | Independent v2 UX change | Reproduce against current production v2; rebase or close. |
-| [#468](https://github.com/EmilioSzH/Mosh/pull/468) Actions billing note | Ready | Dated documentation | Close if current documentation already reflects recovered Actions billing; otherwise refresh rather than merging stale prose. |
-| [#466](https://github.com/EmilioSzH/Mosh/pull/466) overflow-menu reachability | Ready | Independent v2 fix | Reproduce on current v2; rebase or close if superseded. |
-| [#465](https://github.com/EmilioSzH/Mosh/pull/465) hermetic lyric-bench test | Ready | FMS lab infrastructure | Keep with the FMS lab; rebase and run only its focused proof before deciding. |
-| [#464](https://github.com/EmilioSzH/Mosh/pull/464) replay-capture guard | Ready | Small e2e test change | Rebase and confirm the commands still exist; merge separately or close. |
-| [#463](https://github.com/EmilioSzH/Mosh/pull/463) packaging usage-key gate | Ready | Packaging | Compare with merged #576/#577 and current release workflow before rebasing; avoid duplicate policy. |
-| [#462](https://github.com/EmilioSzH/Mosh/pull/462) Universal 2 | Ready | Conflicts with the current arm64-only mission | Park or close unless platform scope is deliberately changed. |
-| [#322](https://github.com/EmilioSzH/Mosh/pull/322) Used2/FMS checkpoint | Draft | Bottom of #322 → #358 → #363 | Park as an owner-only research stack; resume and rebase as a unit only after a model/product decision. |
-| [#358](https://github.com/EmilioSzH/Mosh/pull/358) FMS mechanism verification | Draft | Stacked on #322 | Do not merge independently. |
-| [#363](https://github.com/EmilioSzH/Mosh/pull/363) FMS ground-truth bench | Draft | Stacked on #358 | Do not merge independently. |
+| [#524](https://github.com/esanchezharris/Mosh/pull/524) Moshi + Codex owner cockpit | Draft | Base for #581 | **Protected owner work. Parked, not closed.** Review the stack together. |
+| [#581](https://github.com/esanchezharris/Mosh/pull/581) bounded startup recovery | Draft | Stacked on #524; issue #578 | **Protected owner gate. Parked, not closed.** Needs physical-device review; hosted checks cannot substitute. |
+
+### Merged in the 2026-08-04 alignment pass
+
+Landed in this order — serially, because all seven touch `src/app/SelfTest.cpp`
+and each merge invalidated the next one's rebase.
+
+| PR | Merge SHA | Result |
+|---|---|---|
+| #599 | `ab902921` | This handoff catalog |
+| #606 | `4e6eaeb1` | `.mosh` projects, Finder icon, `untitled - bearcat` naming |
+| #617 | `776dc780` | `jump_to_history` — undo-history jump by transaction identity |
+| #623 | `9a4c972c` | `set_metronome` — metronome level, sound and route |
+| #619 | `842a9664` | `quantize` + swing (closes #552) |
+| #618 | `b7d075a7` | Track-mute automation (CAP-AUT-006) |
+| #471 | `7c3a45ee` | FS-T2 plugin-crash safe mode |
+
+T0 daily-driver parity moved **21 → 24 of 28 engine-shipped** (75% → 86%) and
+**18 → 21 UI-reachable** across the batch; command-surface coverage went
+**195/223 → 197/225**. Those figures are regenerated by `scoreboard.py`, not
+hand-written — see the hazard note below.
+
+### Closed in the 2026-08-04 alignment pass
+
+Closed, not deleted — every branch is preserved and recoverable by name.
+
+| PR | Branch | Why |
+|---|---|---|
+| #507, #508, #510 | `claude/auto-wave2-selftest-*` | Selftest chapter split, 154 commits behind. Main took 22 commits to `src/app/SelfTest.cpp` alone since the fork (9,248 lines there vs 12,385 on main), and every feature PR appends to that file — the stack re-conflicted on each merge. Mechanical and re-derivable; intent recorded in `docs/rfc/002-selftest-chapter-split.md`. |
+| #322, #358, #363 | `claude/used2-*`, `claude/fms-*` | Used2/FMS research stack: drafts, 395 commits behind, not app code. |
+| #515 | `claude/fms-lyric-pilot-harness-e1820f` | **Shares no commit history with main** — its own root commit, no merge base. Mergeable only via `--allow-unrelated-histories`, which would graft a foreign root into the repo permanently. |
+| #523 | `codex/vocal-map-program-control` | Draft, 50 commits behind, conflicting in shared infrastructure (`AGENTS.md`, `CLAUDE.md`, `gate.sh`). |
+| #575 | `codex/playtest-574-…` | Superseded by #581, which carries the same fix plus a main merge and #577. |
+| #478 | `claude/ai-agent-mosh-integration-077b2f` | Ship kit, 216 commits behind. Its signing/BOM/licence half landed independently and evolved past it (#405, #475, #626). What survives — **Sparkle 2 auto-update** (`3b2da0c5`) and **FS-B2 agent skills** (`2b30832f`, `037e9fe9`) — is being re-landed fresh off current main. |
+| #462 | `claude/mosh-intel-mac-compat-033c91` | Universal 2. Closed on **product scope, not quality**, per this file's own prior disposition: scope stays arm64-only. MLX is Apple-Silicon-only, so an x86_64 slice would ship an app with no SA3 generative tier. |
+
+Rule 4 above named #523 and #575 as protected. Both were closed in this pass on
+an explicit owner decision, which supersedes that rule; #524 and #581 remain
+protected and parked.
 
 ## Recent production-v2 campaign merges
 
@@ -138,16 +153,75 @@ Complete as of the refresh timestamp: **18 open issues**.
 
 ## Recommended transfer order
 
-1. Decide #598: keep draft, merge with an explicit native-test waiver, or run
-   only the missing native AX proof before merging.
-2. Fix or retire the invalid release workflow (#563), then resolve the physical
-   audio/recovery cluster with the owner on real hardware.
-3. Triage the 22 older open PRs by stack. Close superseded work before rebasing
-   anything; never merge the middle of a stack.
+Steps 1–3 of the previous list are **done**; what remains is renumbered here.
+
+- ~~Decide #598~~ — merged 2026-08-03.
+- ~~Fix or retire the invalid release workflow (#563)~~ — fixed and closed. The
+  workflow now parses; its `push: tags: v*` trigger is deliberately commented
+  out and only `workflow_dispatch` is armed, so pushes correctly produce no
+  release run. (The 0-second `event=push` failures in the Actions history are
+  all dated on or before 2026-08-03 19:48 — pre-fix. Nothing since.)
+- ~~Triage the older open PRs by stack~~ — done in the 2026-08-04 alignment
+  pass: ten closed, two merged, 28 open → 7.
+
+Remaining:
+
+1. ~~Land the feature PRs~~ — done; all seven merged. Follow-up #627 fixes the
+   two cross-PR check interactions the batch's native gate caught.
+2. Re-land the two salvaged halves of the closed #478: **Sparkle 2 auto-update**
+   (cherry-pick `3b2da0c5`) and **FS-B2 agent skills** (`2b30832f`, `037e9fe9`),
+   each as its own PR off current main.
+3. Resolve the physical audio/recovery cluster (#524 + #581) with the owner on
+   real hardware. Still owner-gated; hosted checks cannot substitute.
 4. Choose one demo/product slice. Pull in only the minor issues or T0 gaps that
    block that slice.
 5. Run a final exact-SHA production audit only if release certification is still
    a goal. Do not rerun the entire campaign merely to clean up the queue.
+
+### Standing hazard: the cheap gate does not run the selftest or verify.py
+
+The batch above used "cheap gate per PR, one native gate at the end". It worked,
+but it deferred a real class of failure: the cheap gate runs typecheck, vitest,
+e2e, the Python suite and the parity checks — **not** `--selftest`, **not**
+`verify.py`, and **not** Catch2. Two cross-PR interactions therefore reached
+`main` before anything caught them (fixed in #627):
+
+- #623 added `session.click`, which re-exposed the `clickTrackEnabled` flag that
+  #617's history-jump fixture deliberately masks as `session.metronome`.
+- #471's safe-mode check looked in `~/Library/Mosh/<session>` instead of
+  `~/Library/Mosh/_harness/<session>`, so it returned false before reaching a
+  single assertion — **vacuous since the day it was written**, and #606's
+  `.mosh` rename would have broken the next line too.
+
+Neither PR was wrong alone. If a batch touches shared state, either run the
+native gate per PR or expect to fix interactions afterwards — and when a check
+guards a *file path* or a *snapshot shape*, assume a sibling PR can move it.
+
+Related: a new MoshOps command needs FOUR registrations, and the golden
+lock-scope ledger (`tests/golden/lock_scopes.tsv`) is enforced by **Catch2** —
+also invisible to the cheap gate. #471 forked before that ledger existed, so its
+`open_without_plugins` row was missing; it was caught by hand during the rebase
+and added before merge, but no cheap gate would have stopped it.
+
+### Standing hazard: the shared append-only files
+
+The alignment pass found the structural cause of the backlog. Every parallel
+feature branch edits the same registration surfaces, so N branches in flight
+means N-way conflicts on all of them:
+
+| File | nature |
+|---|---|
+| `src/app/SelfTest.cpp` | append-only check registration |
+| `ui/src/bridge.mock.ts` | append-only mock surface |
+| `src/moshops/MoshOps.cpp` | dispatch table |
+| `scripts/verify-hardware/verify.py` | append-only check list |
+| `docs/FEATURE_AUDIT.md` | **generated** — `scripts/daw-conformance/scoreboard.py` |
+| `docs/reality-pack/daw_capability_matrix.csv` | **generated** |
+
+**Never hand-merge the last two.** Take main's side, then run
+`python3 scripts/daw-conformance/scoreboard.py` and commit the result;
+`scoreboard.py` is deterministic for a given `report.json`, and the cheap gate's
+`parity_scoreboard` step fails on a stale or hand-edited file.
 
 ## Status sources
 
