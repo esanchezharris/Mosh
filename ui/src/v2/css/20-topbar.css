@@ -324,3 +324,8 @@
 .v2-outdev-item:hover { background: var(--v2-ground-card); }
 .v2-outdev-item[data-on] { color: var(--v2-accent); font-weight: 600; }
 .v2-outdev-empty { padding: 8px 10px; color: var(--v2-ground-dim); font-size: var(--v2-fs-sm); }
+/* #632 — the drift dot: you are not on your Mac's default output. Deliberately a DOT and
+   not a warning colour: keeping your chosen device is correct behaviour, so this is a
+   notice, not a fault. The accessible name carries the same fact in words. */
+.v2-outdev-drift { color: var(--v2-accent); line-height: 0; }
+.v2-outdev-default { border-bottom: 1px solid var(--v2-ground-line); margin-bottom: 4px; color: var(--v2-accent); }

@@ -35,6 +35,7 @@ export function AudioOutputChip() {
 
   const name = snapshot?.session?.audioDeviceName ?? "";
   const error = snapshot?.session?.audioDeviceError ?? "";
+  const sysDefault = snapshot?.session?.audioDeviceSystemDefault ?? "";
   const audioOff = snapshot?.session?.audioEnabled === false;
 
   useEffect(() => {
@@ -74,6 +75,14 @@ export function AudioOutputChip() {
   const label = audioOff ? "No audio" : (name || DEFAULT_SENTINEL);
   const outputs = devices?.types?.flatMap((t) => t.outputs) ?? [];
 
+  // #632 — the hint. Mosh RESTORES your last-chosen device rather than following the
+  // system, which is correct and matches other DAWs. This is the part that was missing:
+  // saying so, when the two have drifted apart. Suppressed when the default is unknown
+  // (nothing has enumerated yet) or when we are already on it — a hint that fires on the
+  // happy path is noise, and noise gets ignored right when it finally matters.
+  const driftedFromDefault =
+    !audioOff && !!name && !!sysDefault && name !== sysDefault;
+
   return (
     <div className="v2-outdev" ref={ref}>
       <button
@@ -81,20 +90,31 @@ export function AudioOutputChip() {
         data-testid="v2-output-device"
         data-audio-off={audioOff || undefined}
         data-error={error ? true : undefined}
+        data-drifted={driftedFromDefault || undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Audio output: ${label}. Click to change.`}
+        aria-label={driftedFromDefault
+          ? `Audio output: ${label}. Your Mac's default is ${sysDefault}. Click to change.`
+          : `Audio output: ${label}. Click to change.`}
         title={error
           ? `Audio output: ${label} — ${error}`
           : audioOff
             ? "No audio device is open — playback and recording are off. Click to choose one."
-            : `Audio output: ${label}. Click to change.`}
+            : driftedFromDefault
+              ? `Audio output: ${label}. Your Mac's default is "${sysDefault}" — Mosh keeps the device you last chose. Click to switch.`
+              : `Audio output: ${label}. Click to change.`}
         onClick={() => void openList()}
       >
         <span className="v2-outdev-name">{label}</span>
+        {driftedFromDefault && <span className="v2-outdev-drift" aria-hidden="true">•</span>}
       </button>
       {open && (
         <div className="pop v2-outdev-pop" role="listbox" aria-label="Audio output device">
+          {driftedFromDefault && (
+            <button className="v2-outdev-item v2-outdev-default" onClick={() => void pick(sysDefault)}>
+              Use your Mac's default — {sysDefault}
+            </button>
+          )}
           {busy && <div className="v2-outdev-empty">Finding devices…</div>}
           {!busy && outputs.length === 0 && (
             <div className="v2-outdev-empty">No output devices found.</div>
