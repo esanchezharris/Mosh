@@ -298,6 +298,25 @@ describe("legacy prompt byte-stability pin", () => {
     //                     i.e. sound, from a command that promises only to change order).
     //
     //
+    // Moved 2026-08-03 — quantize swing declared (CAP-MID-004, closes #552).
+    //   quantize_notes — + N("swing"), and the desc gains ", optionally with swing".
+    //                    Unlike set_track_color/move_track above this adds NO command,
+    //                    only an argument: the catalog line goes from
+    //                    `quantize_notes(clipId, division?, strength?)` to
+    //                    `quantize_notes(clipId, division?, strength?, swing?)`. The
+    //                    arg's own long description (the 0-100 / MPC-75 mapping) does
+    //                    NOT reach the prompt — commandCatalogPrompt renders arg NAMES
+    //                    and the command desc only — which is exactly why the desc had
+    //                    to change too: without it the model can see the argument but
+    //                    not learn what a value means, and would never emit one.
+    //                    cmdQuantizeNotes had NO swing term before this commit, so the
+    //                    argument is genuinely new capability, not a late declaration of
+    //                    something the engine already read (contrast trim_clip{offset}).
+    //                    SFT corpora / GEPA baselines are not invalidated (nothing was
+    //                    removed or renamed); a corpus rebuilt after this commit carries
+    //                    the extra arg, and build_add_note_corrective.py needs no edit
+    //                    because it parses AGENT_COMMANDS rather than hand-copying it.
+    //
     // Previous pins. TWO LINEAGES, merged here: this branch (the usability programme)
     // and main (drum rack + MIDI editing) each grew the catalog independently, so
     // NEITHER side's pin was correct after the merge — the hash below was recomputed,
@@ -369,9 +388,19 @@ describe("legacy prompt byte-stability pin", () => {
     // - main @ jump_to_history (#617), pin UNMOVED by that PR:
     //                                 f7e286eed2c29f157ae93bebbc3927e112a97f0d990d1238335742b40767ea46
     //
+    //
+    // Moved again 2026-08-04, #552 (`quantize` + swing). FOURTH move in this campaign;
+    // same rule, same reason: main had grown set_metronome (CAP-TRN-005) while this
+    // branch grew the quantize command, so neither side's pin described the merged
+    // catalog and the hash below was RECOMPUTED from it.
+    // - pre-quantize-swing (this branch's base):
+    //                                 2ee994e58085baafc5ae47f16391e57b635a641cd23a7cdeb306e5a6983f10d2
+    // - this branch, pre-rebase:      3f0426b029a49f5c142047e24f2f0187b0dc26379803243eedac062da0fc63d8
+    // - main @ set_metronome (#623):  3cbf58897a767ede9e5a1b699bb8a5d35f18124f86c11a9c0c112db130d25a3b
+    //
     // The current pin still includes the shared beat-offset rule and the explicit
     // create_section/move_section catalog wording from issue #539.
-    expect(hash).toBe("3cbf58897a767ede9e5a1b699bb8a5d35f18124f86c11a9c0c112db130d25a3b");
+    expect(hash).toBe("46f92aaf7eeb4fd4d3d1b7aa436f28cb957cc194b4d35b95937d128daa62b7cc");
   });
 
   // M2 extension: the pin above already proves the OMITTED-memory call is unmoved

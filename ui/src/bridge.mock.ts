@@ -3248,8 +3248,26 @@ function dispatch(command: string, args: Record<string, unknown>): CommandResult
     }
     case "quantize_notes": {
       const f = findClip(str(args.clipId)); if (!f?.clip.notes) return err(command, "not a midi clip");
-      const div = num(args.division, 1); if (div > 0) { pushUndo(); for (const n of f.clip.notes) n.start = Math.round(n.start / div) * div; invalidate(); }
-      return ok(command);
+      // Mirrors cmdQuantizeNotes exactly, clamps included — this mock's whole job is to
+      // coerce like JUCE's `var` so a seam bug reproduces here instead of only in the app.
+      // `swing` (CAP-MID-004) is 0..100, 0 = straight, and DELAYS every second subdivision
+      // of the grid while leaving the on-beats put; 100 is the MPC 75% ceiling (half a
+      // subdivision), so an off-beat can never collide with the next on-beat.
+      const div = Math.max(0.03125, num(args.division, 1));
+      const strength = Math.min(1, Math.max(0, num(args.strength, 1)));
+      const swing = Math.min(100, Math.max(0, num(args.swing, 0)));
+      const swingOffset = (swing / 100) * (div * 0.5);
+      pushUndo();
+      let moved = 0, swung = 0;
+      for (const n of f.clip.notes) {
+        const slot = Math.round(n.start / div);
+        const offbeat = slot % 2 !== 0;
+        const target = swingOffset > 0 && offbeat ? slot * div + swingOffset : slot * div;
+        const next = n.start + (target - n.start) * strength;
+        if (Math.abs(next - n.start) > 1e-6) { n.start = Math.max(0, next); moved++; if (swingOffset > 0 && offbeat) swung++; }
+      }
+      invalidate();
+      return ok(command, { moved, swung });
     }
 
     // ── content browser (read-only directory listing) ────────────────────────

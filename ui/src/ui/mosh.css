@@ -1086,6 +1086,15 @@ button.cmdlog-row:hover, button.cmdlog-row:focus-visible { background: var(--ink
 .pr-lasso { position: absolute; background: var(--pr-lasso); border: 1px solid var(--pr-lasso-edge); pointer-events: none; }
 .pr-foot { padding: 7px 14px; border-top: 1px solid var(--pr-line-bar); font-size: 10px; color: var(--pr-text-dim); }
 .pr-zoom .btn { min-width: 26px; font-family: var(--font-mono); }
+/* Quantize swing (#552). The readout is mono and fixed-width so the toolbar doesn't
+   reflow — and stepping the slider next to a button whose position keeps shifting is
+   exactly the kind of aim-tax this shell exists to remove. */
+.pr-swing-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.pr-swing-ctl input[type="range"] { width: 72px; }
+.pr-swing-val {
+  min-width: 66px; text-align: right; font-family: var(--font-mono);
+  font-size: 10px; color: var(--pr-text-dim);
+}
 
 /* Playhead. Position comes from ONE custom property written by a rAF loop (never React
    state — the transport rail is 30Hz and would re-render the whole note tree). Parked
