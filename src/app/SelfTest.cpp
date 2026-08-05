@@ -891,7 +891,18 @@ int runSelfTest (MoshEngine& eng, MoshOps& ops)
                 o->removeProperty ("transport");
                 auto sessVar = o->getProperty ("session");   // bind: the var temporary would die
                 if (auto* sess = sessVar.getDynamicObject())
+                {
                     sess->removeProperty ("metronome");
+                    // …and `click`, which CAP-TRN-005 added as the full click block. It
+                    // carries `enabled` off the SAME te::Edit::clickTrackEnabled flag that
+                    // `metronome` reports, so masking only `metronome` leaves the identical
+                    // state visible under a second name — and this fixture flips the
+                    // metronome DELIBERATELY, precisely because that write is non-undoable.
+                    // Without this the equality check below can never hold: the jump
+                    // correctly restores every undoable thing, and the one thing it is
+                    // supposed to leave alone shows through and fails the comparison.
+                    sess->removeProperty ("click");
+                }
             }
             return juce::JSON::toString (s, true);
         };
