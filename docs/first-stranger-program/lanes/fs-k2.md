@@ -2,7 +2,15 @@
 
 **Lane:** K (Ship kit) · **Registered bucket:** owner-merge (backlog `files:["cmake/","resources/"]`)
 · **Status: DONE 2026-07-27** — unblocked by the same O1 (Apple Developer enrollment)
-that cleared [FS-K1](fs-k1.md), and gated the same day.
+that cleared FS-K1 (signing + notarization), and gated the same day.
+
+> **Note added on re-land (2026-08-04).** This lane note originally linked to a sibling
+> `fs-k1.md`. That file never reached `main`: FS-K1 shipped through #405/#475/#626 rather
+> than through the broad ship-kit PR (#478) this document arrived in, and #478 was closed
+> on 2026-08-04 with only its Sparkle half salvaged (branch
+> `claude/ai-agent-mosh-integration-077b2f`, commit `3b2da0c5`, preserved). FS-K1's actual
+> surviving documentation is the signing runbook:
+> [`docs/release/SIGNING_RUNBOOK.md`](../../release/SIGNING_RUNBOOK.md).
 
 ## §0 gap evidence (checked 2026-07-27, before building)
 
