@@ -15,7 +15,15 @@
 .v2-brand { justify-self: stretch; display: flex; align-items: center; gap: 11px; min-width: 0; }
 .v2-mark { flex: 0 0 auto; display: block; }
 .v2-center { justify-self: center; display: flex; align-items: center; gap: 12px; }
-.v2-top-right { justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* max-width: 100% is load-bearing, not tidiness. `justify-self: end` anchors this
+   cluster to the RIGHT edge of its track, so when its contents exceed the track it
+   overflows LEFTWARD — straight over the centred transport. Adding the song cluster
+   (CAP-TB-001) made that reachable at ordinary widths and the output chip landed on
+   top of the play button: e2e caught it as "v2-output-device … intercepts pointer
+   events", a literally unclickable Play. The ceiling makes the flex children shrink
+   and scroll inside the track instead, which is the same answer .v2-proj-meta already
+   gives on the left. */
+.v2-top-right { justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
 .v2-proj { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .v2-proj-name {
   font-family: var(--font-display);
