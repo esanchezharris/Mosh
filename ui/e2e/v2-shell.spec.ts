@@ -157,8 +157,13 @@ test("top-right primary controls stay visible and secondary tools move into over
     const viewport = page.viewportSize();
     if (!viewport) throw new Error("missing viewport");
 
+    // `.v2-pill` (the AI ACTIVE light) was the first entry until it was deleted on
+    // 2026-08-05. `.v2-song-meta` replaces it deliberately rather than dropping the slot:
+    // it is now the LEFTMOST thing in the right cluster, so it is the one that gets
+    // crushed or pushed under the centred transport first — exactly the failure this
+    // test exists to catch.
     const controls = [
-      page.locator(".v2-pill").first(),
+      page.locator(".v2-song-meta").first(),
       page.getByTestId("v2-share"),
       page.getByTestId("v2-overflow"),
     ];

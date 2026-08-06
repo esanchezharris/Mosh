@@ -23,7 +23,10 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 // selector -> why this one may still glow.
 const GLOW_ALLOWED: Record<string, string> = {
-  ".v2-pill .led": "the topbar AI ACTIVE indicator — the one place a soft halo means 'a model is running'",
+  // ".v2-pill .led" — the topbar AI ACTIVE indicator, and the sheet's last real glow. It
+  // left with the pill on 2026-08-05 (owner's call: ~107px of a full bar to say "active").
+  // The shell now has ZERO blurred coloured shadows, which is the end state this pass was
+  // aiming at — so the allowlist below is a standing permission, not a description.
   ".v2-shell .agent-input.listening": "the push-to-talk ring while the recognizer is live (a 1px ring, kept for completeness)",
 };
 
@@ -71,10 +74,28 @@ describe("glow reservation — the scan is real", () => {
     expect(rules.length, "rule scan collapsed — every assertion below would pass on nothing").toBeGreaterThan(200);
   });
 
-  it("the glow detector still matches something", () => {
-    // If GLOW ever stops matching, "no unauthorised glow" becomes trivially true.
-    const hits = rules.filter((r) => isGlow(r.body));
-    expect(hits.length, "the glow detector matched nothing at all — it has drifted from the CSS").toBeGreaterThan(0);
+  // The detector is proven against FIXTURES, not against the live sheet.
+  //
+  // It used to assert `rules.filter(isGlow).length > 0` — "the detector still matches
+  // something" — which was a fine vacuity guard only while the sheet was guaranteed to
+  // contain a glow. It no longer is: deleting the topbar AI pill removed the last blurred
+  // coloured shadow in the shell, and that assertion would now fail for the RIGHT outcome.
+  // Worse, it conflated two claims: "the regex works" and "the CSS still glows somewhere".
+  // Only the first keeps "no unauthorised glow" from passing on nothing, and a fixture
+  // proves it without hostage-taking the stylesheet. Zero glow is a legal end state.
+  it("the glow detector recognises a glow", () => {
+    expect(isGlow("box-shadow: 0 0 8px var(--v2-accent);"), "missed a plainly blurred coloured shadow").toBe(true);
+    expect(isGlow("box-shadow: inset 0 0 38px color-mix(in srgb, var(--accent) 40%, transparent);"), "missed an inset coloured blur").toBe(true);
+    expect(isGlow("box-shadow: 0 0 calc(var(--lvl) * 22px) var(--accent);"), "missed a level-driven blur").toBe(true);
+  });
+
+  it("the glow detector does NOT flag rings, elevation or nothing", () => {
+    // Each of these is a real pattern in the sheet; a detector that flagged them would
+    // make the offenders list noise and the reservation unenforceable.
+    expect(isGlow("box-shadow: 0 0 0 1px var(--v2-accent-soft);"), "flagged a hairline ring").toBe(false);
+    expect(isGlow("box-shadow: inset 3px 0 0 var(--track-col);"), "flagged an inset edge").toBe(false);
+    expect(isGlow("box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);"), "flagged a neutral drop shadow").toBe(false);
+    expect(isGlow("border: 1px solid var(--v2-line);"), "flagged a rule with no box-shadow").toBe(false);
   });
 });
 
@@ -100,15 +121,14 @@ describe("glow reservation — the ground does not bloom", () => {
 describe("glow reservation — only agentic surfaces may glow", () => {
   it("every blurred shadow is on the allowlist", () => {
     const offenders: string[] = [];
-    let allowed = 0;
     for (const r of rules) {
       if (!isGlow(r.body)) continue;
       for (const sel of selectorsOf(r)) {
-        if (GLOW_ALLOWED[sel]) allowed++;
-        else offenders.push(`${sel}  ->  ${r.body.trim().slice(0, 80)}`);
+        if (!GLOW_ALLOWED[sel]) offenders.push(`${sel}  ->  ${r.body.trim().slice(0, 80)}`);
       }
     }
-    expect(allowed, "no allowlisted glow matched — the allowlist or the regex has drifted").toBeGreaterThanOrEqual(1);
+    // No `allowed >= 1` scaffold here any more — the sheet legitimately contains zero
+    // glow now, and the detector's liveness is proven by fixture above instead.
     expect(
       offenders,
       `these selectors glow without being on the allowlist. Glow is reserved for surfaces ` +

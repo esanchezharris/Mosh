@@ -748,6 +748,10 @@ export type Snapshot = {
     roundTripLatencyMs?: number;
     roundTripLatencySamples?: number;
     audioDeviceName?: string;
+    /** The SYSTEM default output right now — may differ from audioDeviceName,
+     *  because Mosh restores the device you last chose rather than following the
+     *  system. Empty when nothing has enumerated devices yet (an honest unknown). */
+    audioDeviceSystemDefault?: string;
     audioDeviceError?: string;
     // PRJ-008 — per-project format / time-base intent (the export/format default +
     // timeline display base). Generic media-format values, persisted with the project;

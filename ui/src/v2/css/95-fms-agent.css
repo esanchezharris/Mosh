@@ -145,7 +145,6 @@
    ══════════════════════════════════════════════════════════════════════════════ */
 .v2-shell .v2-mosh-stage,          /* Moshi himself — all moods, hands-free, the GL mount */
 .v2-shell .v2-mosh-status,         /* his status wave + narration line */
-.v2-shell .v2-pill,                /* the topbar "AI ACTIVE" pill (its only user) */
 .v2-shell .agent-input.listening,  /* push-to-talk recognizer is live */
 .v2-shell .agent-send,             /* the "Ask Moshi" submit */
 .v2-shell .v2-agent-drawer,        /* drawer title while .live, step chips, the spinner */

@@ -33,7 +33,6 @@
   .v2-shell .v2-tbtn, .v2-shell .v2-btn { transition: none; }
   /* neutralize the hover lift too — transition:none still left the 1px jump */
   .v2-shell .v2-tbtn:hover, .v2-shell .v2-btn:hover { transform: none; }
-  .v2-shell .v2-pill .led.busy { animation: none; }
   /* in-flight clip badge (transcribing…/lyrics…/flow…) shares the v2-blink keyframe;
      freeze it too — v2-blink is opacity:1 at 0%/100% so the badge stays fully visible. */
   .v2-clip-badge.working { animation: none; }
