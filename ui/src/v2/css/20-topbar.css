@@ -23,7 +23,17 @@
    events", a literally unclickable Play. The ceiling makes the flex children shrink
    and scroll inside the track instead, which is the same answer .v2-proj-meta already
    gives on the left. */
-.v2-top-right { justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+/* STRETCH, not `end`. Anchoring the cluster to the right edge of its track left every
+   spare pixel in ONE hole between the centred time card and the first control — 93px of
+   it at 1440px, which read as the bar being broken rather than as spacing. Stretched, the
+   cluster owns its whole track and `margin-right: auto` on .v2-song-meta decides where the
+   slack goes: the transport settings hug the readout they belong with, and the
+   collaborator/account controls keep hugging the window edge.
+   `min-width: 0` still does the job the old `max-width: 100%` did — the cluster can never
+   exceed its track, so it can no longer overflow LEFTWARD over the centred transport
+   (e2e once caught that as "v2-output-device … intercepts pointer events", a literally
+   unclickable Play). Over budget, the children shrink and .v2-song-meta scrolls. */
+.v2-top-right { justify-self: stretch; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .v2-proj { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .v2-proj-name {
   font-family: var(--font-display);
@@ -38,8 +48,13 @@
    clickable at all. Overflow in a grid item is silent by default, which is why it survived.
    `min-width: 0` lets the row shrink to its column and `overflow-x: auto` gives it an
    honest scrollbar — the same answer `.v2-shell` already gives one level up (#52: "an
-   honest scrollbar instead of self-destruction"). The row is genuinely crowded at ten
-   controls; thinning it is a design call, not this change. */
+   honest scrollbar instead of self-destruction").
+   That scrollbar is now a SAFETY NET rather than the everyday state: moving the output
+   chip up to .v2-proj-title freed 134px, and the row measures 415px in a ~526px track at
+   1440 and 415 in 446 at 1280 — it only scrolls below the shell's 1120px floor, where
+   everything scrolls by design. Keep it that way: measure scrollWidth vs clientWidth
+   before adding a control, because overflow in a grid item is silent and the last chip
+   in the row (Record options) spent a release invisibly cut in half. */
 .v2-proj-meta {
   display: flex; align-items: center; gap: 8px;
   font-size: var(--v2-fs-sm); color: var(--v2-ground-dim);
@@ -103,13 +118,13 @@
 .v2-loop-on { color: var(--v2-accent); }
 
 .v2-spacer { flex: 1 1 auto; }
-.v2-pill {
-  display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: var(--v2-radius-pill);
-  background: var(--v2-ground-card); border: 1px solid var(--v2-ground-line); font-size: var(--v2-fs-sm); color: var(--v2-ground-dim);
-  letter-spacing: 0.06em; text-transform: uppercase;
-}
-.v2-pill .led { width: 7px; height: 7px; border-radius: 50%; background: var(--v2-accent); box-shadow: 0 0 8px var(--v2-accent); }
-.v2-pill .led.busy { animation: v2-blink 1s infinite; }
+/* `.v2-pill` — the topbar "AI ACTIVE" status light — was deleted at the owner's call. It
+   spent ~107px of a full bar to report a state that read "active" almost all the time,
+   and the busy half is already carried where the work is: the composer swaps to
+   "thinking…" and disables send, and the Moshi card narrates the task. Its space bought
+   the count-in and record options a place beside the metronome again.
+   v2-blink stays — the in-flight clip badge and the sample browser's "sketching…" pill
+   both drive it (see 70-notices.css, which freezes them under reduced-motion). */
 @keyframes v2-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .v2-btn {
@@ -295,39 +310,72 @@
    cases an intervening div would take over the layout slot. */
 .v2-addtrack { display: contents; }
 
-/* CAP-TB-001 / #633 #634 — the SONG cluster, right of the transport.
-   The left meta row held ten controls and scrolled; the comment on .v2-proj-meta above
-   said so outright and deferred the fix as "a design call". This is that call: the song
-   properties (key, tempo, metre, count-in, record options) and the audio OUTPUT moved
-   into the dead space right of the readout, and the left keeps only the EDITING controls
-   (Snap, snap division, Ripple) that act on the timeline beside them.
-   Still allowed to scroll rather than crush its neighbours — same honest-scrollbar
-   posture as .v2-proj-meta, just over half as many controls. */
+/* CAP-TB-001 / #633 #634 — the TIMING cluster, right of the transport: tempo, metre and
+   the metronome, sitting with the bars/loop readout they describe.
+   Scope is deliberately narrow, and it took two passes to land there. The first moved ALL
+   nine song controls right and merely swapped the problem — the right cluster overlapped
+   the transport while the left sat half-empty. The second moved them all back and put the
+   left row into overflow again. What actually fits at 1440 is a ~526px track per side, and
+   the right already owes 237px of it to the AI pill, Invite and the overflow button; three
+   timing controls (196px) is what the remainder holds without scrolling.
+   Still allowed to scroll rather than crush its neighbours — same honest-scrollbar posture
+   as .v2-proj-meta. Adding a fourth control here means taking one off, not hoping. */
 .v2-song-meta {
   display: flex; align-items: center; gap: 8px;
-  min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
-  margin-right: 4px;
+  flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  /* auto, not 4px: this is what parks the cluster's spare width BETWEEN the transport
+     settings and the collaborator/account controls, instead of leaving it as a hole
+     between the time card and the first control. */
+  margin-right: auto;
 }
 
 /* The output-device chip. It shows a DEVICE NAME, which is long and variable, so it is
    the one chip that must be allowed to ellipsise instead of setting the row's width. */
 .v2-outdev { position: relative; flex: 0 1 auto; min-width: 0; }
-.v2-outdev-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 15ch; }
+/* A FLOOR as well as a ceiling. Allowed to shrink (the title row is the roomy one, but a
+   long device name must not push the row past its track), never below something readable
+   — an earlier pass let it collapse to "MacB", and a device name you cannot read defeats
+   the whole reason the chip exists. Past the floor the name ellipsises instead. */
+.v2-outdev-btn { display: inline-flex; align-items: center; gap: 6px;
+  min-width: 11ch; max-width: 22ch; }
 .v2-outdev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Degraded states read at a glance: no device open is the one worth alarming about,
    because it means playback and recording are simply off. */
 .v2-outdev-btn[data-audio-off] { color: var(--v2-rec, #e5484d); border-color: currentColor; }
 .v2-outdev-btn[data-error] { color: var(--mute, #ffb454); }
 
-.v2-outdev-pop {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
-  min-width: 220px; max-height: 320px; overflow-y: auto;
+/* FIXED, placed against the trigger's client rect by useAnchoredPanel — not absolute.
+   The chip sits inside .v2-proj-meta, which keeps `overflow-x: auto` as its floor safety
+   net, and an absolutely-positioned descendant of an overflow ancestor is CLIPPED: the
+   chip would look inert while opening into a hidden box. `top`/`right: auto` clear
+   `.pop`'s own anchoring from mosh.css so the inline left + top/bottom win; without the
+   `top: auto` a flipped-up panel (which supplies `bottom`) would still inherit a `top`
+   and fight it. Width is PINNED and MUST match kPanelWidth in AudioOutputChip.tsx — the
+   hook clamps against that number, so a panel wider than it declares is placed wrong on a
+   narrow window (the bug .v2-rec-panel and .v2-click-panel each hit first). */
+/* COMPOUND `.pop.v2-outdev-pop`, not `.v2-outdev-pop` — and this is the whole reason the
+   rule works. The element carries both classes; mosh.css's `.pop { position: absolute;
+   right: 0 }` has the SAME specificity (0,1,0) and is imported LATER, so it silently won
+   every property the two rules shared. That was invisible while both said `absolute`: the
+   chip's own `left`/`right` overrides never applied either, and a "fix" to them measured
+   as working for unrelated reasons. Compound (0,2,0) beats it wherever the element sits —
+   the same answer `.v2-overflow-tool.training-pop` above already had to reach for.
+   `top`/`right: auto` clear .pop's anchoring so the inline left + top/bottom from
+   useAnchoredPanel are the only things positioning this panel.
+   Width is PINNED and MUST match kPanelWidth in AudioOutputChip.tsx — the hook clamps
+   against that number, so a panel wider than it declares lands wrong on a narrow window
+   (the bug .v2-rec-panel and .v2-click-panel each hit first). */
+.pop.v2-outdev-pop {
+  position: fixed; top: auto; right: auto; z-index: 40;
+  width: 260px; max-height: 320px; overflow-y: auto;
   display: flex; flex-direction: column; padding: 4px;
 }
+/* The panel width is pinned, so a long device name must ellipsise rather than run past the
+   edge of a fixed-width list. Each row carries the full name in its `title`. */
 .v2-outdev-item {
   appearance: none; background: transparent; border: 0; color: var(--v2-ground-fg);
   font: inherit; text-align: left; padding: 6px 10px; border-radius: var(--v2-radius-sm, 6px);
-  cursor: pointer; white-space: nowrap;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .v2-outdev-item:hover { background: var(--v2-ground-card); }
 .v2-outdev-item[data-on] { color: var(--v2-accent); font-weight: 600; }

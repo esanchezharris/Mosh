@@ -18,43 +18,43 @@
 // load-bearing: execute_command is synchronous on the UI thread, so an enumeration issued
 // during render would stall the shell on every launch. Fetching on open costs one frame
 // the user asked for.
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { AudioDevices, Snapshot } from "../types";
 import { useStore } from "../store";
+import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 
 /** The engine's sentinel for "whatever the system hands us" — not a real device name. */
 const DEFAULT_SENTINEL = "(default audio output)";
 
+/** MUST match the `width` pinned on .v2-outdev-pop — useAnchoredPanel clamps against this
+ *  number, so a panel that renders wider than it declares gets placed wrong on a narrow
+ *  window. Same contract (and same past bug) as .v2-rec-panel and .v2-click-panel. */
+const kPanelWidth = 260;
+
 export function AudioOutputChip() {
   const snapshot = useStore((s) => s.snapshot) as Snapshot | null;
   const exec = useStore((s) => s.exec);
-  const [open, setOpen] = useState(false);
   const [devices, setDevices] = useState<AudioDevices | null>(null);
   const [busy, setBusy] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+
+  // The list is rendered `position: fixed` against the trigger's client rect rather than
+  // absolutely inside the chip, and that is load-bearing rather than tidiness: the chip
+  // sits in `.v2-proj-meta`, which is `overflow-x: auto` as its floor safety net, and an
+  // absolutely-positioned child of an overflow ancestor is CLIPPED — the chip would look
+  // inert while opening into a hidden box. Fixed + viewport-clamped is the answer the
+  // overflow, add-track and record panels already use. It also brings Escape handling,
+  // capture-phase outside-dismiss and the one-frame-late scroll arming for free, all of
+  // which this component previously hand-rolled (and the scroll one it lacked entirely).
+  const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(kPanelWidth, 320, "start");
 
   const name = snapshot?.session?.audioDeviceName ?? "";
   const error = snapshot?.session?.audioDeviceError ?? "";
   const sysDefault = snapshot?.session?.audioDeviceSystemDefault ?? "";
   const audioOff = snapshot?.session?.audioEnabled === false;
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   // Lazily, on open — see the note at the top about the synchronous bridge.
   const openList = async () => {
-    setOpen((v) => !v);
+    toggle();
     if (devices || busy) return;
     setBusy(true);
     try {
@@ -66,7 +66,7 @@ export function AudioOutputChip() {
   };
 
   const pick = async (outputName: string) => {
-    setOpen(false);
+    close();
     await exec("set_audio_device", { outputDevice: outputName });
   };
 
@@ -84,8 +84,9 @@ export function AudioOutputChip() {
     !audioOff && !!name && !!sysDefault && name !== sysDefault;
 
   return (
-    <div className="v2-outdev" ref={ref}>
+    <div className="v2-outdev">
       <button
+        ref={anchorRef}
         className="v2-chip v2-outdev-btn"
         data-testid="v2-output-device"
         data-audio-off={audioOff || undefined}
@@ -108,8 +109,12 @@ export function AudioOutputChip() {
         <span className="v2-outdev-name">{label}</span>
         {driftedFromDefault && <span className="v2-outdev-drift" aria-hidden="true">•</span>}
       </button>
-      {open && (
-        <div className="pop v2-outdev-pop" role="listbox" aria-label="Audio output device">
+      {/* `at` gates the render: the panel is fixed-position and its CSS clears top/right,
+          so the inline style MUST supply left + one of top/bottom or it falls to static
+          position. Same contract as the overflow and add-track menus. */}
+      {open && at && (
+        <div ref={panelRef} className="pop v2-outdev-pop" role="listbox" aria-label="Audio output device"
+          style={{ left: at.left, top: at.top, bottom: at.bottom }}>
           {driftedFromDefault && (
             <button className="v2-outdev-item v2-outdev-default" onClick={() => void pick(sysDefault)}>
               Use your Mac's default — {sysDefault}
@@ -126,6 +131,7 @@ export function AudioOutputChip() {
               aria-selected={o === name}
               className="v2-outdev-item"
               data-on={o === name || undefined}
+              title={o}
               onClick={() => void pick(o)}
             >
               {o}
