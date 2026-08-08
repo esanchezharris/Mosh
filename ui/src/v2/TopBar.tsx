@@ -9,11 +9,12 @@ import { useStore } from "../store";
 import { useSettings } from "../settings/store";
 import { tempoMapFrom, secondsToBBSMap, meterFrom, barSeconds, SNAP_DIVISIONS } from "../time";
 import { TONICS, MODES, DEFAULT_KEY } from "../musicalKey";
-import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool } from "../ui/TopbarTools";
+import { TrainingTool, CommandLogTool, RemoteTool, MultiplayerTool, HelpTool, MemoryTool, SettingsTool } from "../ui/TopbarTools";
 import { useAnchoredPanel } from "../hooks/useAnchoredPanel";
 import { MultiplayerLauncher } from "./MultiplayerLauncher";
 import { useTransportControls } from "./useTransportControls";
 import { RecordOptionsChip, CaptureButton } from "./RecordPanel";
+import { AudioOutputChip } from "./AudioOutputChip";
 import { MetronomeControls } from "./MetronomePanel";
 import { AvatarCluster } from "./AvatarCluster";
 import { pickFiles, pickSaveFile, brainChat } from "../bridge";
@@ -22,7 +23,7 @@ import { projectLabel } from "../projectFile";
 import { RecentProjectList } from "../ui/RecentProjectList";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Snapshot } from "../types";
-import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
+import { IconHelp, IconList, IconMore, IconPause, IconPlay, IconPhone, IconSettings, IconSkipStart, IconSpark, IconStar, IconStop, IconUsers } from "../ui/icons";
 
 // PRJ-NAME — one shared implementation (projectFile.ts); this bar only picks its own
 // empty-path wording. A generated project reads "untitled - bearcat" here.
@@ -31,7 +32,6 @@ const projectName = (editFile: string): string => projectLabel(editFile) || "Unt
 export function TopBar({ snapshot }: { snapshot: Snapshot }) {
   const exec = useStore((s) => s.exec);
   const t = useStore((s) => s.transport);
-  const agentBusy = useStore((s) => s.agentBusy);
   const mpActive = useStore((s) => s.mp.active);
   const snap = useStore((s) => s.snap);
   const setSnap = useStore((s) => s.setSnap);
@@ -71,18 +71,18 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       <div className="v2-brand">
         <div className="v2-proj">
           <span className="v2-proj-name" title={snapshot.session.editFile}>{projectName(snapshot.session.editFile)}</span>
-          {/* The EDIT MODES lead this row, and that ordering is load-bearing rather than
-              cosmetic. The meta row's content has outgrown its grid column (measured: 534px
-              of chips in a 446px track BEFORE this change, so `Snap` and its division select
-              were already sitting behind the centred transport pill and could not be
-              clicked at all). It now scrolls inside its column instead of overflowing under
-              the pill — see 20-topbar.css — which means whatever sits at the END of the row
-              is off-screen until you scroll. Snap and Ripple change what the NEXT DRAG DOES;
-              a mode you cannot see is the exact failure this feature exists to avoid. The
-              settings that follow (key, tempo, meter, metronome, count-in, record options)
-              are set-and-forget values, so they are the right things to push into the
-              scroll. The row is genuinely over budget at ten controls; thinning it is a
-              design call, not this change. */}
+          {/* The EDIT MODES lead this row, and that ordering is still load-bearing. The row
+              no longer overflows — moving the output-device chip up to the title row gave
+              back 134px and it now measures 415px in a ~526px track at 1440 (and 415 in 446
+              at 1280), so nothing is clipped and the scrollbar never appears. But the row is
+              only one control away from over budget again, and it still scrolls rather than
+              overflow under the transport pill (see 20-topbar.css), which means whatever
+              sits at the END is the first thing to go off-screen. Snap and Ripple change
+              what the NEXT DRAG DOES; a mode you cannot see is the exact failure this
+              feature exists to avoid. The settings after them (key, count-in, record
+              options) are set-and-forget, so they stay the right things to lose first.
+              Before adding a control here, MEASURE — scrollWidth vs clientWidth on
+              .v2-proj-meta — rather than trusting that it looks fine at your window size. */}
           <div className="v2-proj-meta">
             <span className="v2-snap-controls" role="group" aria-label="Snap controls">
               <button className="v2-chip v2-chip-toggle" aria-label="Snap to grid" aria-pressed={snap}
@@ -119,47 +119,39 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
                 ? "Ripple edit is ON — dragging or trimming a clip carries every later clip on its track. Click to turn off."
                 : "Ripple edit is off — dragging a clip leaves its neighbours where they are. Click to turn on."}
               onClick={() => setRipple(!ripple)}>{ripple ? "Ripple ON" : "Ripple"}</button>
-            <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
-              onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
-              {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
-            </select>
-            <select className="v2-chip" aria-label="Key mode" value={key.mode}
-              onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
-              {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
-              key={`bpm-${Math.round(snapshot.session.tempo)}`}
-              defaultValue={Math.round(snapshot.session.tempo)}
-              onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            <span className="v2-timesig" title="Time signature">
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
-                key={`ts-num-${meter.num}`}
-                defaultValue={meter.num}
-                onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-              <span className="v2-timesig-slash">/</span>
-              <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
-                key={`ts-den-${meter.den}`}
-                defaultValue={meter.den}
-                onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            </span>
-            {/* CAP-TRN-005 — still a one-click ♩ toggle; the caret beside it opens the
-                click's level/sound/routing. Next to Count-in on purpose: the count-in
-                plays THROUGH this click, so someone who turned it on and heard nothing
-                is looking for the level. */}
-            <MetronomeControls session={snapshot.session} />
-            <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
-              title="Count-in before recording — an audible click plays through the pre-roll"
-              onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
-              <option value={0}>Count-in: Off</option>
-              <option value={1}>Count-in: 1 bar</option>
-              <option value={2}>Count-in: 2 bars</option>
-            </select>
-            {/* REC-001 — next to Count-in on purpose: both answer "what happens when I
-                hit record", and a producer hunting for one will find the other. */}
-            <RecordOptionsChip />
+            {/* KEY stays left with the project it describes. It is the one song property
+                you set once and read, rather than something you reach for while the
+                transport is rolling — that distinction is what splits this row from the
+                cluster on the right. */}
+              <select className="v2-chip" aria-label="Key tonic" value={key.tonic}
+                onChange={(e) => void exec("set_key", { tonic: e.target.value, mode: key.mode })}>
+                {TONICS.map((tn) => <option key={tn} value={tn}>{tn}</option>)}
+              </select>
+              <select className="v2-chip" aria-label="Key mode" value={key.mode}
+                onChange={(e) => void exec("set_key", { tonic: key.tonic, mode: e.target.value })}>
+                {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              {/* REC-001 — the take-behaviour panel (punch, retrospective buffer). It sits
+                  LEFT, away from the count-in it used to pair with, and that is a space
+                  decision made honestly rather than a taste one. At 1280 the right cluster
+                  owes 140px to Invite and the overflow button, leaving 306px for controls
+                  that wanted 335 — so the last chip in that row was clipped, which is the
+                  exact defect this whole pass set out to remove, just moved to the other
+                  side. Rec options is the only chip small enough to rebalance it (45px
+                  with its gap: right 475→430, left 395→440, both inside 446), and of the
+                  two it is the better one to move: punch and buffer settings are chosen
+                  once, while the count-in is AUDIBLE THROUGH the metronome and belongs
+                  beside it. Move anything bigger and the left overflows instead. */}
+              <RecordOptionsChip />
+              {/* The OUTPUT DEVICE ends the row. It is on this line, not floating beside
+                  it, because that is what put it out of alignment before: as a sibling of
+                  .v2-proj it was centred against BOTH rows and sat 11px above the chips it
+                  reads as belonging to. As a flex item here it is simply in line.
+                  This row can hold it now — the count-in and record options moved right
+                  when the AI pill was deleted, which took the row from 415px to 395px in a
+                  ~526px track. Its list opens fixed-position (see AudioOutputChip), so the
+                  row's overflow safety net cannot clip it. */}
+              <AudioOutputChip />
           </div>
         </div>
       </div>
@@ -190,11 +182,57 @@ export function TopBar({ snapshot }: { snapshot: Snapshot }) {
       </div>
 
       <div className="v2-top-right">
-        <span className="v2-pill" title="Moshi is in the session">
-          <span className={`led${agentBusy ? " busy" : ""}`} />
-          AI {agentBusy ? "working" : "active"}
-        </span>
+        {/* CAP-TB-001 — the things that govern WHAT YOU HEAR WHEN THE TRANSPORT ROLLS:
+            tempo, metre, the click and the count-in. Beside the bars readout they describe
+            and the Record button they act on; the set-and-forget project properties (key,
+            snap, ripple, take behaviour, output) stay left.
+            The count-in and the metronome are together again, which is the grouping both of
+            their own comments ask for — the count-in is AUDIBLE THROUGH this click, so
+            someone who turned it on and heard nothing is hunting for this level. An earlier
+            pass had them on opposite sides of the window purely for want of space; deleting
+            the AI-status pill is what paid for putting them back.
+            This row is FULL at 1280 (335px of chips in a 306px track before Rec options
+            moved out). Adding a fifth control means taking one away — measure scrollWidth
+            vs clientWidth at 1280, not just at your own window size. */}
+        <div className="v2-song-meta" role="group" aria-label="Transport and click settings">
+              <input className="v2-chip v2-chip-num" type="number" aria-label="Tempo" min={20} max={300}
+                key={`bpm-${Math.round(snapshot.session.tempo)}`}
+                defaultValue={Math.round(snapshot.session.tempo)}
+                onBlur={(e) => void exec("set_tempo", { bpm: Number(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              <span className="v2-timesig" title="Time signature">
+                <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature numerator" min={1} max={32}
+                  key={`ts-num-${meter.num}`}
+                  defaultValue={meter.num}
+                  onBlur={(e) => void exec("set_time_signature", { numerator: Number(e.target.value), denominator: meter.den })}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                <span className="v2-timesig-slash">/</span>
+                <input className="v2-chip v2-chip-num" type="number" aria-label="Time signature denominator" min={1} max={32}
+                  key={`ts-den-${meter.den}`}
+                  defaultValue={meter.den}
+                  onBlur={(e) => void exec("set_time_signature", { numerator: meter.num, denominator: Number(e.target.value) })}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              </span>
+              {/* CAP-TRN-005 — still a one-click ♩ toggle; the caret beside it opens the
+                  click's level/sound/routing. Next to Count-in on purpose: the count-in
+                  plays THROUGH this click, so someone who turned it on and heard nothing
+                  is looking for the level. */}
+              <MetronomeControls session={snapshot.session} />
+              <select className="v2-chip" aria-label="Count-in" value={snapshot.session.countInBars ?? 0}
+                title="Count-in before recording — an audible click plays through the pre-roll"
+                onChange={(e) => void exec("set_count_in", { bars: Number(e.target.value) })}>
+                <option value={0}>Count-in: Off</option>
+                <option value={1}>Count-in: 1 bar</option>
+                <option value={2}>Count-in: 2 bars</option>
+              </select>
+        </div>
 
+        {/* The "AI ACTIVE" pill was here. Removed at the owner's call — it was a status
+            light that spent ~107px of a full bar to say "active", which is what it read
+            almost all of the time. The busy state it carried is not lost: the composer
+            swaps its placeholder to "thinking…" and disables send, and the Moshi card in
+            the right rail narrates what the agent is actually doing. Its space paid for
+            the count-in and record options moving back beside the metronome. */}
         <AvatarCluster />
 
         <MultiplayerLauncher
@@ -219,6 +257,7 @@ function OverflowMenu() {
   const { open, at, anchorRef, panelRef, toggle, close } = useAnchoredPanel(248, 420, "end");
   const exec = useStore((s) => s.exec);
   const training = useStore((s) => s.snapshot?.training ?? null);
+  const menuSnapshot = useStore((s) => s.snapshot);
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
   const voiceOn = useStore((s) => s.voiceOn);
@@ -241,6 +280,18 @@ function OverflowMenu() {
         <div ref={panelRef} className="v2-menu-panel v2-menu-panel-fixed"
           style={{ left: at.left, top: at.top, bottom: at.bottom }}>
           <div className="v2-menu-tools" data-testid="v2-overflow-tools">
+            {/* #634 — FIRST in the row on purpose. Settings used to be reachable only
+                through the "+" inside the Ask Moshi composer, which the owner could not
+                find twice with directions. uiReachability was right that a mouse path
+                existed — a path is not a place anyone looks. The "+" route still works. */}
+            {menuSnapshot && <SettingsTool
+              snapshot={menuSnapshot}
+              label={<IconSettings size={15} />}
+              title="Settings"
+              className="v2-overflow-tool"
+              ariaLabel="Open settings"
+              testId="v2-tool-settings"
+            />}
             <MultiplayerTool
               label={<IconUsers size={15} />}
               title="2-player session"

@@ -426,6 +426,21 @@ export function TrainingTool({
 // Keyboard-shortcut help — the keyboard bindings now live in ONE place (the keymap
 // + useKeyboardShortcuts); the ruler/clip pointer gestures live in Arrange. Surfaced
 // here so they're discoverable (and mirrored by the File/Edit menus).
+// #634 — Settings as a first-class overflow tool, so the v2 shell can put it where a
+// producer actually looks. It was reachable only through the "+" inside the Ask Moshi
+// composer; the owner could not find it twice, with directions. Same <Pop> + SettingsPanel
+// the classic topbar has always used — this only gives it a second, findable home.
+export function SettingsTool({ snapshot, label, title, className, ariaLabel, testId }:
+  ToolChromeProps & { snapshot: Snapshot }) {
+  return (
+    <Pop label={label ?? <ToolTrigger icon={<IconSettings size={15} />} label="Settings" />}
+      title={title ?? "Settings"} className={`settings-pop${className ? " " + className : ""}`}
+      buttonClassName="icon" ariaLabel={ariaLabel} testId={testId}>
+      {() => <SettingsPanel snapshot={snapshot} />}
+    </Pop>
+  );
+}
+
 export function HelpTool({ label, title, className, ariaLabel, testId }: ToolChromeProps = {}) {
   const SHORTCUTS: [string, string][] = [
     ["⌘N · ⌘O", "New · Open project"],

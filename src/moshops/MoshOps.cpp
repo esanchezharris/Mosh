@@ -2963,6 +2963,30 @@ juce::var MoshOps::snapshot()
             ? dm.deviceManager.getCurrentAudioDevice()->getName() : String());
     session->setProperty ("audioDeviceError", eng.audioDeviceError());
 
+    // #632/#633 — the SYSTEM default output, so the transport chip can say "you are on
+    // X, but your Mac's default is Y" instead of leaving the producer to guess. Mosh
+    // deliberately RESTORES the device you last chose rather than following the system
+    // (every DAW does, so an interface dropping out mid-mix cannot silently move your
+    // monitoring to laptop speakers) — the failure on 2026-08-05 was not that policy, it
+    // was that nothing ever said which device was in use or that a different one was
+    // default.
+    //
+    // NO scanForDevices() here. getDeviceNames() returns the list from the last scan and
+    // is cheap; scanForDevices() enumerates the HAL and is not, and snapshot() runs on
+    // the message thread on every invalidation. An enumeration on that path is exactly
+    // the synchronous-bridge stall this codebase has been bitten by before. If nothing
+    // has scanned yet the list is empty and this reports "" — an honest unknown, which
+    // the UI renders as no hint rather than a wrong one.
+    juce::String systemDefaultOut;
+    if (auto* type = dm.deviceManager.getCurrentDeviceTypeObject())
+    {
+        const auto outNames = type->getDeviceNames (false);
+        const int  defIdx   = type->getDefaultDeviceIndex (false);
+        if (defIdx >= 0 && defIdx < outNames.size())
+            systemDefaultOut = outNames[defIdx];
+    }
+    session->setProperty ("audioDeviceSystemDefault", systemDefaultOut);
+
     // PRJ-008 — per-project format / time-base INTENT (the export/format default +
     // timeline display base). Read from the MOSH_PROJECT child of the Edit tree,
     // falling back to the live device readout where unset (device = live truth,
